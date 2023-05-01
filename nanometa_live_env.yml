@@ -1,0 +1,23 @@
+# The main conda environment for Nanometa Live.
+# Installation instructions in readme on github.
+
+name: nanometa_live_env
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+channel_priority: strict
+dependencies:
+  - python >= 3.11.0
+  - dash >= 2.8.1
+  - dash-daq >= 0.5.0
+  - dash-bootstrap-components >= 1.3.1
+  - plotly >= 5.13.0
+  - numpy >= 1.24.1
+  - pandas >= 1.5.3
+  - pyyaml >= 6.0
+  - pytest >= 7.2.1
+  - snakemake >= 7.20.0
+  - setuptools >= 67.6.0
+  - pip >= 23.0.1
+  - blast >= 2.13.0

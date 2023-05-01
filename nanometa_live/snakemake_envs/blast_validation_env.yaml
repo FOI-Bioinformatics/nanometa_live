@@ -1,0 +1,9 @@
+# The snakemake conda environment for the run_blast rule.
+
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+channel_priority: strict
+dependencies:
+  - blast >= 2.13.0

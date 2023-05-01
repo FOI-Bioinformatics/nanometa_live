@@ -1,0 +1,146 @@
+# CONFIG FILE FOR NANOMETA LIVE
+
+# Settings and parameters for each project are customized here.
+# To check which project this config belongs to, see the final entry, "main_dir".
+
+---
+
+########## GUI CONFIG #######################################################
+
+
+## PROJECT NAME ##
+
+# Appears as a tilte at the top of the GUI.
+analysis_name: "Metagenomic analysis"
+
+
+## SPECIES OF INTEREST ##
+
+# The NCBI or GTDB IDs of the species of interest.
+# For instructions, see readme.
+# Any number of species can be listed.
+species_of_interest:
+  - 5061
+  - 13373
+  - 852
+  - 321
+
+
+## WARNING LIMITS ##
+
+# Ths coloring scheme for the abundance of the species of interest.
+# Can be modified, but this might affect the appearance of the gauge graph,
+# since it uses 10-logs of the reads for coloring.
+  
+# Species of interest with more reads than this show up as yellow.
+warning_lower_limit: 10
+
+# Species of interest with more reads than this show up as red. 
+danger_lower_limit: 100
+
+
+## TAXONOMY LEVELS ##
+  
+# The letters used by Kraken2 to designate the taxonomic hierarchies.
+# Also used in the GUI to sort and filter the results.
+# If there are levels on the low end specified here, for example S2, S3 etc,
+# that are not present in the Kraken database used, it will result in a lot
+# of empty nodes in the Sankey plot. This can be trimmed in the GUI, but
+# it is recommended to only include the taxonomy levels that are present 
+# in your database.
+taxonomic_hierarchy_letters: ['D','P','C','O','F','G','S']
+
+# Taxonomy levels displayed by default in the Sankey plot.
+# This is modifiable in the GUI as well, and mainly a question 
+# of aestethics.
+default_hierarchy_letters: ['D','C','G','S']
+
+# Default number of entries per taxonomy level to include in the Sankey
+# plot. This is modifiable in the GUI as well.
+default_reads_per_level: 10
+
+
+## GUI UPDATE FREQUENCY ##
+
+# How often the GUI updates (in seconds).
+update_interval_seconds: 30
+
+
+## GUI PORT ##
+
+# Specify the port that the GUI runs on.
+# 8050 is a typical localhost port, meaning that the GUI is run
+# locally on a standard web browser.
+gui_port: "8050"
+
+
+########## SNAKEMAKE WORKFLOW CONFIG #############################################
+
+
+## NANOPORE OUTPUT DIRECTORY ##
+
+# Absolute path to the output directory where the nanopore produces its batch files.
+nanopore_output_directory: "/home/bioinf/nanopore_out"
+
+
+## REMOVE TEMP FILES ##
+
+# Removes temporary files upon workflow exit by default.
+# If you wish to keep temp files, change the string to "no".
+remove_temp_files: "yes" 
+
+
+## WORKLFOW FREQUENCY ##
+
+# The execution frequency of the file-processing pipeline (in seconds).
+check_intervals_seconds: 15
+
+
+## CORES ##
+
+# Number of cores assigned to the snakemake workflow.
+snakemake_cores: 1
+
+# Number of cores assigned to Kraken2 classification.
+kraken_cores: 1
+
+# Number of cores assigned to KrakenTools for filtering out sequences for validation.
+validation_cores: 1
+
+# Number of cores assigned to BLAST.
+blast_cores: 1
+
+
+## KRAKEN 2 DATABASE ##
+
+# Absolute path to the Kraken2 database.
+kraken_db: "/home/bioinf/kraken2.gtdb_bac120_4Gb"
+
+
+## KRAKEN 2 HIGH RAM REQUIREMENTS ##
+
+# Turn the Kraken2 RAM requirements on or off with the --memory-mapping argument.
+# To deactivate memory-mapping, simply leave the argument as an empty string: "".
+# To activate, use string: "--memory-mapping".
+kraken_memory_mapping: "--memory-mapping" 
+
+
+## BLAST VALIDATION ##
+
+# Turn validation on/off:
+# on: True, off: False
+blast_validation: True
+
+
+## BLAST CUTOFFS ##
+
+# Define the minimum percent identity and E-value cutoffs for which 
+# sequences to include as validated. 
+min_perc_identity: 90
+e_val_cutoff: 0.01
+
+
+## PROJECT MAIN DIRECTORY ##
+
+# Automatically added when creating a new project.
+# Must be an absolute path.

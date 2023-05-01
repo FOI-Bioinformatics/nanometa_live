@@ -1,0 +1,11 @@
+# The snakemake conda environment for the extract_validation rule.
+
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+channel_priority: strict
+dependencies:
+  - python >= 3.11.0
+  - gzip >= 1.10
+  - biopython >= 1.80 

@@ -1,0 +1,226 @@
+# This workflow handles the file processing from gzipped nanopore batch 
+# files to a number of cumulative files used for the visualization.
+
+# Specifies the config file.
+configfile: "config.yaml"
+
+import os
+import pkg_resources
+import time
+
+# A first check to see if there are any batch files, before the workflow is run.
+# Some rules were difficult to handle if there are no files yet produced,
+# and this is a way of dealing with that.
+while not os.path.isdir(config["nanopore_output_directory"]):
+	print(str(config["nanopore_output_directory"]) + " not found. Waiting...")
+	time.sleep(config["check_intervals_seconds"])
+while len(os.listdir(config["nanopore_output_directory"])) == 0:
+	print("No files found in " + str(config["nanopore_output_directory"]) + ". Waiting...")
+	time.sleep(config["check_intervals_seconds"]) 
+
+print("Files found in " + str(config["nanopore_output_directory"]) + ". Starting workflow...")
+
+# This function creates placeholder files for each of the 
+# species of interest specified in the config file.
+# This is a fulkod solution that hacks the snakemake default input/output process.
+def create_validation_placeholders():
+	path1 = os.path.join(config["main_dir"], "validation_fastas") 
+	path2 = os.path.join(config["main_dir"], "validation_fastas/placeholders")
+	# for some reason, the full path could not be created in one go
+	if not os.path.isdir(path1):
+		os.mkdir(path1)
+		print(path1 + ' - CREATED')
+	if not os.path.isdir(path2):
+		os.mkdir(path2)
+		print(path2 + ' - CREATED')
+	for species_id in config["species_of_interest"]:
+		file_name = str(species_id)
+		file_path = os.path.join(path2, file_name) 
+		if not os.path.isfile(file_path):
+			with open(file_path, 'w') as f:
+				f.write("placeholder file")
+				print(file_path + ' - CREATED')
+	return path2
+
+# Path used to create a list for validation using wildcards.
+if config["blast_validation"] == True: # skips if validation=False
+	valid_path = create_validation_placeholders()
+
+# Creates a list of all files in the nanopore output folder, 
+# to be used as list of input files for the workflow with the expand() function.
+# The .file at the end is critical for some reason and the global wildcards
+# will not work without it.
+files = glob_wildcards(os.path.join(config["nanopore_output_directory"], "{file}.fastq.gz")).file
+
+# Another similar list for the species of interest IDs.
+if config["blast_validation"] == True: # skips if validation=False
+	ids = glob_wildcards(os.path.join(valid_path, "{id}")).id
+
+# "Rule all" specifies a rule that will be the default snake target.
+# The final files that need to be produced by the workflow are
+# input files of this rule, making snakemake find the rules with these
+# files as output, and proceed from there.  
+rule all:
+	input:
+		os.path.join(config["main_dir"], "kraken_cumul/kraken_cumul_txt.kraken2"),	# cumulative kraken txt file, used for validation
+		os.path.join(config["main_dir"], "kraken_cumul/kraken_cumul_report.kreport2"),	# cumulative kraken report file, used in GUI
+		os.path.join(config["main_dir"], "qc_data/cumul_qc.txt"),			# cumulative csv file containing qc data, used in GUI
+		# fulkod hack to force the validation step. Skipped if validation=False:
+		os.path.join(config["main_dir"], "validation_fastas/force_validation.txt") if config["blast_validation"] else [],
+		# similar hack to force blast. Skipped if validation=False:
+		os.path.join(config["main_dir"], "blast_result_files/force_blast.txt") if config["blast_validation"] else []
+
+# Extracts qc data:
+# Uses a py script to get the time of when the nanopore file was created, 
+# and gets info on nr of seqs and bp from the file.	
+rule extract_qc_info:
+	input:
+		os.path.join(config["nanopore_output_directory"], "{fileName}.fastq.gz")	
+	output:
+		os.path.join(config["main_dir"], "qc_data/{fileName}.txt")
+	conda:
+		pkg_resources.resource_filename('nanometa_live', 'snakemake_envs/qc_env.yaml')
+	shell:
+		"python " + pkg_resources.resource_filename('nanometa_live', 'snakemake_scripts/qc_file_creator.py') + " {input} {output}"
+
+# Combines all the individual qc files to one cumulative file.
+# expand() function needed when output is a single file.
+rule combine_qc:
+	input:
+		expand(os.path.join(config["main_dir"], "qc_data/{fileName}.txt"), fileName = files) 
+	output:
+		os.path.join(config["main_dir"], "qc_data/cumul_qc.txt")
+	shell:
+		"cat {input} > {output}"
+
+# Filters the fastq files before Kraken classification. 
+# I have not tweaked the filtering at all at the moment, i am using default everything.
+# "dev/null" is a temporary workaround to discard the reports until I figure something out.
+# This sends the reports into Linux limbo: dev/null.
+rule fastp_filtering:
+	input:
+		os.path.join(config["nanopore_output_directory"], "{fileName}.fastq.gz")
+	output:
+		os.path.join(config["main_dir"], "fastp_filtered/{fileName}.fastq.gz")
+	conda:
+		pkg_resources.resource_filename('nanometa_live', 'snakemake_envs/fastp_env.yaml')
+	shell:
+		"fastp -i {input} -o {output} --json /dev/null --html /dev/null"
+			
+# Kraken classification of filtered fastq files.
+# Produces a txt file and a kraken report for each fastq.
+# Argument --memory-mapping disables the kraken database being read into RAM. Slower, but less resource intense.
+# Still uses lots of RAM..
+# Also removes the fastP filtered fastq file when done to save space.
+rule run_kraken:
+	input:
+		os.path.join(config["main_dir"], "fastp_filtered/{fileName}.fastq.gz")
+	output:
+		txt = os.path.join(config["main_dir"], "kraken_results/{fileName}.kraken2"),
+		report = os.path.join(config["main_dir"], "kraken_results/{fileName}.kreport2")
+	threads: config["kraken_cores"] # more cores = faster analysis
+	conda:
+		pkg_resources.resource_filename('nanometa_live', 'snakemake_envs/kraken2_env.yaml')
+	shell:
+		"kraken2 --db " + config["kraken_db"] + " " + config["kraken_memory_mapping"] + " --gzip-compressed --report {output.report} {input} > {output.txt} && rm {input}"
+
+# Concats all Kraken txt files into one long list, containing all results.
+# The cumulative txt file is used for extracting the validation sequences.
+rule append_kraken_cumul:
+	input:
+		expand(os.path.join(config["main_dir"], "kraken_results/{fileName}.kraken2"), fileName = files)
+	output: 
+		os.path.join(config["main_dir"], "kraken_cumul/kraken_cumul_txt.kraken2")
+	shell:
+		"cat {input} > {output}"
+
+# Uses combine_kreports.py script from KrakenTools to combine all individual
+# kreports to one.
+# Arguments: "no-headers" & "only-combined" should make the cumulative kreport identical to 
+# a standard kreport.
+# This step will hang the workflow if there are no files in the nanopore output folder,
+# hence the while loop at the beginning of the script.
+rule combine_kreports:
+	input: 
+		expand(os.path.join(config["main_dir"], "kraken_results/{fileName}.kreport2"), fileName = files)
+	output:
+		os.path.join(config["main_dir"], "kraken_cumul/kraken_cumul_report.kreport2")
+	conda:
+		pkg_resources.resource_filename('nanometa_live', 'snakemake_envs/combine_kreports_env.yaml')
+	shell:
+		"python " +  pkg_resources.resource_filename('nanometa_live', 'snakemake_scripts/combine_kreports.py') + " --no-headers --only-combined -r {input} -o {output}" 
+
+# Rule that combines all fastqs into one for validation.
+rule concat_fastqs:
+	input:
+		expand(os.path.join(config["nanopore_output_directory"], "{fileName}.fastq.gz"), fileName = files)
+	output:
+		os.path.join(config["main_dir"], "validation_fastas/combined_fastqs.fastq.gz")
+	shell:
+		"cat {input} > {output}"
+				
+# KrakenTools extracts seqs belonging to each species of interest for validation.
+# The shell command contains a fulkod hack that transforms the placeholder
+# file names into species IDs to input into krakentools. 
+rule extract_validation_seqs:
+	input:
+		kraken_txt = os.path.join(config["main_dir"], "kraken_cumul/kraken_cumul_txt.kraken2"),
+		fastqs = os.path.join(config["main_dir"], "validation_fastas/combined_fastqs.fastq.gz"),
+		valids = os.path.join(config["main_dir"], "validation_fastas/placeholders/{ID}")
+	output:
+		os.path.join(config["main_dir"], "validation_fastas/valid_seqs_{ID}.fasta")
+	threads: config["validation_cores"]
+	conda:
+		pkg_resources.resource_filename('nanometa_live', 'snakemake_envs/extract_validation_env.yaml')
+	shell:
+		"python " + pkg_resources.resource_filename('nanometa_live', 'snakemake_scripts/extract_kraken_reads.py') + " -k {input.kraken_txt} -s {input.fastqs} -o {output} --taxid $(basename {input.valids})"
+		
+# Fulkod to force extract_validation to work.
+# This part creates a useless file which sole purpose is to 
+# force snakemake to iterate through the placeholder files representing
+# the species of interest IDs.
+# Also removes the concatenated fastq file to save space.
+rule force_validation:
+	input:	# ID variable needs to be skipped if validation=False
+		id_names = expand(os.path.join(config["main_dir"], "validation_fastas/valid_seqs_{ID}.fasta"), ID = ids) if config["blast_validation"] else [],
+		fastq = os.path.join(config["main_dir"], "validation_fastas/combined_fastqs.fastq.gz")
+	output:
+		os.path.join(config["main_dir"], "validation_fastas/force_validation.txt")
+	shell:
+		"""
+		for file in {input.id_names};
+		do
+		echo $(basename "$file") >> {output};
+		done
+		rm -f {input.fastq}
+		"""
+
+# BLASTS all sequences belonging to each species of interest against their
+# reference genome.
+# Contains some fulkod when specifying the BLAST database using the file names created by
+# the build_blast_db.py script.
+rule run_blast:
+	input:
+		id_fasta = os.path.join(config["main_dir"], "validation_fastas/valid_seqs_{ID}.fasta"),
+		database = os.path.join(config["main_dir"], "blast_databases/{ID}.fasta.nsq")
+	output:
+		os.path.join(config["main_dir"], "blast_result_files/{ID}.txt")
+	threads: config["blast_cores"]
+	conda:
+		pkg_resources.resource_filename('nanometa_live', 'snakemake_envs/blast_validation_env.yaml')
+	shell:
+		"blastn -db $(dirname {input.database})/$(basename {input.database} .nsq) -query {input.id_fasta} -out {output} -outfmt 6 -perc_identity " + str(config["min_perc_identity"]) + " -evalue " + str(config["e_val_cutoff"])
+
+# Another fulhack to force BLAST to iterate over each ID.
+rule force_blast:
+	input:	# ID variable needs to be skipped if validation=False
+		id_names = expand(os.path.join(config["main_dir"], "blast_result_files/{ID}.txt"), ID = ids) if config["blast_validation"] else []
+	output:
+		os.path.join(config["main_dir"], "blast_result_files/force_blast.txt")
+	shell:
+		"""
+		for file in {input.id_names};
+		do
+		echo $(basename "$file") >> {output};
+		done
+		"""

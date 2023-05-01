@@ -1,0 +1,9 @@
+# The snakemake conda environment for the run_kraken rule.
+
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+channel_priority: strict
+dependencies:
+  - kraken2 >= 2.1.2

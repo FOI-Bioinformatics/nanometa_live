@@ -1,0 +1,11 @@
+# The snakemake conda environment for the extract_qc_info rule.
+
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+channel_priority: strict
+dependencies:
+  - python >= 3.11.0
+  - biopython >= 1.80 
+  - gzip >= 1.10

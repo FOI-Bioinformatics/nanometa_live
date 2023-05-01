@@ -1,0 +1,9 @@
+# The snakemake conda environment for the combine_kreports rule.
+
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+channel_priority: strict
+dependencies:
+  - python >= 3.11.0
