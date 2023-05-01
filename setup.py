@@ -16,7 +16,7 @@ setup(
       packages = ['nanometa_live', 
                   'nanometa_live.gui_scripts'],
       # All non-pyscript files need to be specified here to be installed 
-      # properly. (Exept config for some reason.)
+      # properly.
       package_data={'nanometa_live': ['Snakefile',
                                       'config.yaml',
                                       'snakemake_envs/*.yaml',
