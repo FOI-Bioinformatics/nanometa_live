@@ -72,9 +72,9 @@ The program is now installed and can be accessed from any directory using the co
 
 ## USE
 
-**Tutorial files**
+**Tutorial**
 
-To get familiar with the program, there is a tutorial included in these instructions. If you wish to follow along with the tutorial, the files needed can be downloaded from XXXX
+To get familiar with the program, there is a tutorial included in these instructions. If you wish to follow along with the tutorial, the files needed can be downloaded from XXXX. The sections are divided into general instructions followed by a tutorial part. If you're not following the tutorial, you can skip these parts.
 
 To use the program, follow these steps:
 
@@ -86,7 +86,7 @@ To use the program, follow these steps:
 
 Use the *nanometa-new* command to create the directory for your new project. THIS MUST BE AN ABSOLUTE PATH or the later functions will not find the directory. In this directory, a config file will be created where you can specify the parameters for your project.
 
-**Tutorial example**:
+**Tutorial:**
 
 &emsp;&emsp;*nanometa-new --path /home/bioinf/metagenomic_project*
 
@@ -152,11 +152,35 @@ The -o folder is the simulated Nanopore output, and needs to be the same as spec
 
 ### 6. Start the backend
 
+Standing in your project folder, run the *nanometa-pipe* command in a separate terminal to start the backend pipeline. This can be done before the sequencing starts as well, and the workflow will simply wait until there are files in the designated nanopore output directory. When running the workflow for the first time, the required programs will be installed so it might take a while before the processing starts. To exit the pipeline, press *ctrl+C*. It may need to be pressed repeatedly, since the first time will exit any ongoing snakmake run and the second one will exit the python script that controls it.
+
+**Tutorial:**
+
+Start a separate terminal, make sure you are in the project directory */home/bioinf/metagenomic_project* and run:
+
+&emsp;&emsp;*nanometa-pipe*
+
+### 7. Start the GUI
+
+Standing in your project folder, run *nanometa* in a separate terminal to start the GUI. You might need to hold *ctrl* and press the port link that is displayed. This can be done before the sequencing and pipeline are started as well, then the GUI will simply display empty plots until data is produced. To exit the GUI, press *ctrl+C* in this terminal. The browser window can be closed as a regular window.
+
+**Tutorial:**
+
+Start a separate terminal, make sure you are in the project directory and run:
+
+&emsp;&emsp;*nanometa*
+
+Hold *ctrl* and click the port link if the GUI does not open by itself.
+
+## NCBI/GTDB IDs
+
 
 
 ## CONFIG
 
-## NCBI/GTDB IDs
+
+## GUI
+
 
 
 
