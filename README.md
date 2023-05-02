@@ -2,6 +2,8 @@
 
 Version beta 0.0.1
 
+To quick start, go to INSTALL and then USE and follow the tutorial.
+
 ## INTRODUCTION
 
 Nanometa Live is a tool for performing real-time analysis of metagenomic samples sequenced with an Oxford Nanopore. The program consists of a  backend pipeline that processes the files and a frontend graphical user interface (GUI) that displays the data. The analysis can commence as soon as the Nanopore basecaller starts producing batch files, and there is no need to wait for the sequencing to finish. The GUI displays an overview of the total species composition of the sample, as well as the prescence/abundance of a set of pre-defined species (pathogens), which are determined by the user. Both the backend and the GUI updates at user-set intervals, allowing data to be displayed in real-time as it is produced by the Nanopore. 
@@ -40,9 +42,13 @@ Builds the BLAST databases used for validation. Specifications on files that sho
 
 &emsp;&emsp;Runs the backend. User needs to be in the folder containing the config file for the project.
 
+&emsp;&emsp;&emsp;&emsp;*$ nanometa-pipe*
+
 **nanometa** 
 
 &emsp;&emsp;Runs the GUI. User needs to be in the folder containing the config file for the project.
+
+&emsp;&emsp;&emsp;&emsp;*$ nanometa*
 
 **nanometa-sim** 
 
@@ -80,7 +86,7 @@ To install the program, follow these instructions (Linux).
 
 &emsp;&emsp;&emsp;&emsp;*$ pip install .*
 
-The program is now installed and can be accessed from any directory using the commands listed below.
+The program is now installed and can be accessed from any directory using the commands explained below.
 
 ## USE
 
@@ -262,10 +268,28 @@ This is the directory created by the *nanometa-new* command. It is automatically
 
 ## GUI
 
+Explanations of the plots and functions in the GUI. The entire app can be zoomed in and out of using *ctrl* + mouse wheel as any web page.
 
+**Header**
 
+The main header at the top of the GUI displays the title of the project and contains the on/off toggle for the live updates. When the updates are turned on, the GUI checks for new data, produced by the pipeline from the nanopore batch files, on the interval set in the config file. Every time an update happens, any zooming of the sunburst and icicle charts will be reset. The settings below all the plots and lists will remain however, for example domains, taxonomic levels and read cutoffs. If the updates are paused, the GUI will no longer check for new data until the updates are turned on again, and the plots can be explored undisturbed. The time for the latest update is displayed under the toggle.
 
+**MAIN tab**
 
+The fist tab contains a **Sankey plot**, which resembles a phylogenetic tree. The lineage of the most abundant taxa in the sample can be overviewed here. Snapshots of the graph can be taken using the icons at the top right of the graph. There are some zoom functions here as well, that are automatically added by Dash but are not too useful in this context. The settings below the graph lets the user determine how many entries should be displayed at each taxonomic level. For examlpe, if the number is set to 5, the 5 taxa with the highest number of reads at each level will be included in the graph. There might be more than 5 entires in some levels, since the lineage of the lowest levels are completed automatically. The domains to include in the graph can also be chosen and the taxonomic levels to display. If some entries do not have lineages that go all the way to the lowest chosen level, the graph will automatically place empty nodes at the end of these entries to make the plot easier to understand. This might cause the plot to be very busy, and the user will have to experiment to see what combination of read filtering and taxonomy levels displays what is wanted. Filters are applied at each update or at the click of the button in the GUI. When hovering over the plot, the number of reads belonging to each node can be seen, as well as how many edges enter and exit that node. The nodes can be moved around and placed anywhere, for snapshots and the like. These re-arrangements will be reset upon each update however, so it is best to pause the live updating before creating the layouts that you want. There are some problems with line-crossing and overlap of labels in the graph that have yet not been solved.
 
+Below the sankey plot, there are two tables. The **top list** simply lists the taxa with the highest number of reads in the sample. The results can be filtered by chosing the number of entries in the list, the domains and the taxonomic levels to include. Filters are applied with the button or automatically on every update. The **pathogen table** displays the species of interest that have been found in the data. If the species is not found, it will not appear in this list. The rows are colored according to the limits set in the config file. The gauge follows the same coloring scheme, and shows a very simple and straightforward general level of pathogenicity in the sample, the assumption being that the species of interest are pathogens. If the validaion option is selected, an additional column will apear showing the number of the reads for each species of interest that have been validated by BLAST. This requires the BLAST databases to have been created correctly, see step 4 in the RUN section and the NCBI/GTDB IDs section. There is sometimes a bit of lag in the updating of this table, so if the validated numbers are higher that the reads found, just wait until the next update and it should correct itself. The gauge graph sometimes changes size haphazardly, but this is only a question of aestethics, and a result of the autolayout acting up.
 
+**EXPLORE tab**
 
+This tab contains a sunburst plot and an icicle chart. These are good ways of exploring the data in a broader fashion. The **suburst plot** has the root node in the center and lineages extending out to the outer edge of the plot. The **icicle chart** is a "straightened out" sunburst plot, with the root node to the right and lineages extending to the right. Both plots follow the same coloring scheme, with the column to the right showing the color scale used to display abundance in the form of number of reads. Both plots can be filtered by chosing the minimum number of reads a taxon needs to have to be included in the plot. Which domains to include can also be set. The icicle chart also has the option to chance the height of the graph. The filters are applied with the button or automatically on each update. Both plots can be clicked on to zoom in and out in the results. You zoom out again in the suburst plot by clickin in the center, and in the icicle graph  by clickn on the smaller row at the top of the graph. You can take snapshots of the graphs using the camera icon at the top right corner. Any zooming is reset upon updating so it is best to pause the updates while exploring these graphs.
+
+**QC tab**
+
+This tab contains some simple QC data from the sequencing run. At the top, the number of processed sequences are shown, and the proportion of successfully classified ones. This number is post-filtering, so it will not correspond to the numbers in the plots below, which are pre-filtering: simply how many reads/bp the sequencer has produced.  There is also information here on how many nanopore batch files are still waiting to be processed and how many that have been processsed. Less than optimally, a file is considered processed when it has entered the processing pipeline. Best case scenario would be that the file is only counted when processing is complete but this will have to do for now. 
+
+Below this info are 2 plots showing the **cumulative** reads and bp produced by the nanopore over time. The time parameter is taken from the timestamp of the batch files, so if the files have been modified after creation the timestamp will be wrong. There are also 2 plots showing the **non-cumulative** reads and bp, simply plotting the number of reads and bp in each batch and the time of creation for those batches.
+
+## FINAL NOTES
+
+If you try out this program, let me know how it works, write some feedback & issues, or feel free to modify the code if you need to.
