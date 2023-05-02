@@ -80,7 +80,7 @@ gui_port: "8050"
 ## NANOPORE OUTPUT DIRECTORY ##
 
 # Absolute path to the output directory where the nanopore produces its batch files.
-nanopore_output_directory: "/home/bioinf/nanopore_out"
+nanopore_output_directory: "/home/user/nanopore_out"
 
 
 ## REMOVE TEMP FILES ##
@@ -114,7 +114,7 @@ blast_cores: 1
 ## KRAKEN 2 DATABASE ##
 
 # Absolute path to the Kraken2 database.
-kraken_db: "/home/bioinf/kraken2.gtdb_bac120_4Gb"
+kraken_db: "/home/user/kraken2.gtdb_bac120_4Gb"
 
 
 ## KRAKEN 2 HIGH RAM REQUIREMENTS ##
