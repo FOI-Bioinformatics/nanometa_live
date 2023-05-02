@@ -74,7 +74,7 @@ The program is now installed and can be accessed from any directory using the co
 
 **Tutorial**
 
-To get familiar with the program, there is a tutorial included in these instructions. If you wish to follow along with the tutorial, the files needed can be downloaded from XXXX. The sections are divided into general instructions followed by a tutorial part. If you're not following the tutorial, you can skip these parts.
+To get familiar with the program, there is a tutorial included in these instructions. If you wish to follow along with the tutorial, the files needed can be downloaded at https://www.mediafire.com/folder/ndg9150i2070n/nanometa_tutorial_files. The sections are divided into general instructions followed by a tutorial part. If you're not following the tutorial, you can skip these parts.
 
 To use the program, follow these steps:
 
