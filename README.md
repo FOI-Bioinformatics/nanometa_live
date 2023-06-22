@@ -86,18 +86,7 @@ To exit the GUI, press *ctrl+C* in this terminal. The browser window can be clos
 
 There are tooltips in the GUI for most of the settings. Hover over an object to display the tooltips. There are thorough descriptions of the plots in the [wiki](https://github.com/FOI-Bioinformatics/nanometa_live/wiki). 
 
-The tutorial species of interest have been chosen to display all the possible abundance visualizations in the GUI:
-
-&emsp;**ID 5061** - *Clostridium_H novyi* - **0 reads** in test data - corresponding NCBI taxID: 386415 - refseq accession: GCF_000014125.1
-
-&emsp;**ID 13373** - *Faecalibacterium prausnitzii_M* - **3 reads** in test data - corresponding NCBI taxID: 853 - refseq accession: GCF_000154385.1
-
-&emsp;**ID 852** - *Bacteroides fragilis_A* - **48 reads** in test data - corresponding NCBI taxID: 817 - refseq accession: GCF_002849695.1
-
-&emsp;**ID 321** - *Bifidobacterium adolescentis* - **552 reads** in test data - corresponding NCBI taxID: 367928 - refseq accession: GCF_000010425.1
-
-With the default settings, species with a read count higher than 10 will appear as yellow, and species with a read count higher than 100 will appear as red.
-
+The tutorial species of interest have been chosen to display all the possible abundance visualizations in the GUI. With the default settings, species with a read count higher than 10 will appear as yellow, and species with a read count higher than 100 will appear as red.
 
 ## Contact and community guidelines
 Contact regarding Nanometa Live: Kristoffer, **kristoffersandas@yahoo.se**
