@@ -1,5 +1,7 @@
 # Nanometa Live
-Short introduction. Pictures here.
+Nanometa Live is a workflow and graphical user interface (GUI) that displays real-time results from metagenomic sequencing with the Oxford Nanopore MinION and Flongle flow cells. The backend workflow uses Kraken2 for classification and BLAST for validation of sequences. The GUI consists of three tabs containing various plots.
+
+
 
 For more information, see the [wiki](https://github.com/FOI-Bioinformatics/nanometa_live/wiki).
 
