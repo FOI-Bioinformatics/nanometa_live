@@ -1,7 +1,7 @@
 # Nanometa Live
 Nanometa Live is a workflow and graphical user interface (GUI) that displays real-time results from metagenomic sequencing with the Oxford Nanopore MinION and Flongle flow cells. The backend workflow uses Kraken2 for classification and BLAST for validation of sequences. The GUI consists of three tabs containing various plots.
 
-<img src="https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/main%20pic.png" alt="main view" width="900" height="500">
+<img src="https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/main%20pic2.png" alt="main view" width="900" height="500">
 
 A Sankey plot displays the most abundant taxa in the sample and their lineage. The plot can be modified and filtered by domain, taxonomic levels and abundance. At the top of the app is a toggle to pause or resume live updates of the plots. When turned on, the plots are automatically updated with the latest results from the workflow on a set time interval.
 
