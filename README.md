@@ -75,7 +75,7 @@ For the tutorial, we will use the Nanopore simulator that comes with the program
 
 The -o folder is the simulated Nanopore output, and needs to be the same as specified in the config under **Nanopore output directory**. The simulator automatically copies a file from the nanometa_test_data directory every 1-2 minutes until all the files are copied, to mimic the Nanopore batches. 
 
-#### 6. Start the backend
+#### 6. Start the backend pieline
 Start a separate terminal, make sure you are in the project directory */home/user/metagenomic_project* and run:
 
 &emsp;&emsp;*$ nanometa-pipe*
