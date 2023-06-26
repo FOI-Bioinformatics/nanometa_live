@@ -17,7 +17,7 @@ analysis_name: "Metagenomic analysis"
 ## SPECIES OF INTEREST ##
 
 # The NCBI or GTDB IDs of the species of interest.
-# For instructions, see readme.
+# For instructions, see readme/wiki.
 # Any number of species can be listed.
 species_of_interest:
   - 5061
@@ -28,7 +28,7 @@ species_of_interest:
 
 ## WARNING LIMITS ##
 
-# Ths coloring scheme for the abundance of the species of interest.
+# The coloring scheme for the abundance of the species of interest.
 # Can be modified, but this might affect the appearance of the gauge graph,
 # since it uses 10-logs of the reads for coloring.
   
