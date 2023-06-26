@@ -1,21 +1,21 @@
-"""
-Creates the data in the format needed for plotly sunsickle charts.
-Data format for sunburst and icicle is identical.
-
-"""
-
-# nanometa_live. needs to be added in front of each import for packagin - added
 from nanometa_live.gui_scripts.domain_filtering import domain_filtering
 from nanometa_live.gui_scripts.icicle_sunburst_matrix import icicle_sunburst_matrix
 from nanometa_live.gui_scripts.get_icicle_data import get_icicle_data
 import yaml
 
 def icicle_sunburst_data(raw_df, domains, count = 10):
+    """
+    Creates the data in the format needed for plotly sunsickle charts.
+    Data format for sunburst and icicle is identical.
+    """
+    
     # Load config file variables.
     with open('config.yaml', 'r') as cf:
         config_contents = yaml.safe_load(cf)
+        
     # Gets the tax letters from the config file.
     config_letters = config_contents['taxonomic_hierarchy_letters']
+    
     # Filters by domain.
     d_filt_df = domain_filtering(raw_df, domains)
     # Filters by lowest count to be kept.
