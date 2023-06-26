@@ -1,13 +1,11 @@
-"""
-Creates a dataframe from the cumulative qc file (qc_data/cumul_qc.txt).
-If no qc file has been produced, it returns a placeholder.
-
-"""
-
 import os
 import pandas as pd
 
 def get_qc_df(qc_file):
+    """
+    Creates a dataframe from the cumulative qc file (qc_data/cumul_qc.txt).
+    If no qc file has been produced, it returns a placeholder.
+    """
     # checks if the data has been created
     if os.path.isfile(qc_file): 
         # creates the df
