@@ -1,15 +1,16 @@
-"""
-This script is used to create a new Nanometa project.
-It can be called as a bash command after installation.
-Instructions in readme.
-"""
-
 import argparse
 import os
 import shutil
 import pkg_resources
 
 def create_new():
+    """
+    This script is used to create a new Nanometa project.
+    A project directory is created with a config file specific
+    for the project.
+    The script is called as a bash command after installation.
+    User instructions in readme.
+    """
     # Creates the object that stores the arguments given to the bash command.
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--path', help="The path to the project directory.")
