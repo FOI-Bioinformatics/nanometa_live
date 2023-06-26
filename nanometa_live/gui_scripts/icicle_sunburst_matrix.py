@@ -1,12 +1,11 @@
-"""
-Creates a reversed matrix for sunsickle organizing.
-A reversed matrix makes parsing easier since the kreport is
-structured in a tree-like hierachical fashion.
-
-"""
 import numpy as np
 
 def icicle_sunburst_matrix(c_filt_df): 
+    """
+    Creates a reversed matrix for sunsickle organizing.
+    A reversed matrix makes parsing easier since the kreport is
+    structured in a tree-like hierachical fashion.
+    """
     rev_df = c_filt_df.iloc[::-1] # reverses the df
     # adds the data needed
     names = rev_df[rev_df.columns[5]].values.tolist()
