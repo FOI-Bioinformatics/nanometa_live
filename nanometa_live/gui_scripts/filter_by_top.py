@@ -1,14 +1,3 @@
-
-"""
-Filters the edge df by top entries, determined by nr of reads.
-Organizes the data as nodes and egdes for sankey plotting.
-Adds the correct parents to each node depending on the user specified
-tax levels.
-Adds "ghost nodes" to the end of clades which do not have complete
-lineage ending at the lowest specified tax level.
-
-"""
-
 import pandas as pd
 #from collections import Counter
 
@@ -18,6 +7,14 @@ def filter_by_top(top,
                   tax_letters,
                   rev_tax_letters
                   ):
+    """
+    Filters the edge df by top entries, determined by nr of reads.
+    Organizes the data as nodes and egdes for sankey plotting.
+    Adds the correct parents to each node depending on the user specified
+    tax levels.
+    Adds "ghost nodes" to the end of clades which do not have complete
+    lineage ending at the lowest specified tax level.
+    """                
     
     ##### this part determines the node IDs of the domains
     
@@ -46,7 +43,7 @@ def filter_by_top(top,
     #ghost_nr = 0
     for letter in rev_tax_letters:
         #print('\nCURRENT LETTER: '+letter)
-        # creates a temporary df (this can be improved)
+        # creates a temporary df 
         # this df needs to be nullified for every letter
         temp_df = pd.DataFrame(columns = ['source', 'target', 'value','rank'])
         # parses through edges df
@@ -125,7 +122,7 @@ def filter_by_top(top,
     ghost_nodes = 0
     # where the numbering of new ghost nodes should begin
     ghost_id_nr = result_matrix.shape[0]
-    #print(ghost_id_start, type(ghost_id_start), '!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+    #print(ghost_id_start, type(ghost_id_start), '!!!!!!!!!!!!!')
     # temp df for ghost nodes
     ghost_temp = pd.DataFrame(columns = ['source', 'target', 'value','rank'])
     # parse through top df
