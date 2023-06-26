@@ -1,22 +1,22 @@
-"""
-This scripts asks the user for a path to a folder containing the refseqs 
-to be used for validating the species of interest.
-It then creates BLAST databases in a specific folder for the pipeline to use.
-
-The files in the input folder should be formatted as: "ID_name.fasta"
-For example, for a species with ID nr 1381124, the corresponding file should
-be named simply "1381124.fasta".
-The file should contain the reference genome that the user has chosen for 
-that species.
-"""
 import argparse
 import os
 import yaml
 
 def build_blast():
+    """
+    This scripts asks the user for a path to a folder containing the refseqs 
+    to be used for validating the species of interest.
+    It then creates BLAST databases in a specific folder for the pipeline to use.
+    
+    The files in the input folder should be formatted as: "ID_name.fasta"
+    For example, for a species with ID nr 1381124, the corresponding file should
+    be named simply "1381124.fasta".
+    The file should contain the reference genome(s) that the user has chosen for 
+    that species.
+    """
     # Creates the object that contains the arguments passed to the shell command.
     parser = argparse.ArgumentParser()
-    parser.add_argument('-i', '--input_folder', help="The folder where the reference fastas are stored. See readme for formats.")
+    parser.add_argument('-i', '--input_folder', help="The folder where the reference fastas are stored. See wiki for formats.")
     args = parser.parse_args()
     # Variables:
     input_folder = args.input_folder
