@@ -1,14 +1,12 @@
-"""
-Finds the blast results for each species of interes ID found in the kreport.
-Adds the results from the files to a list that is then made a column
-in the pathogen df.
-
-"""
-
 import os
 import pandas as pd
 
 def validation_col(validation_list, blast_dir):
+    """
+    Finds the blast results for each species of interes ID found in the kreport.
+    Adds the results from the files to a list that is then made a column
+    in the pathogen df.
+    """
     validated_col = []
     # validation_list = the subset of species of interest actually found in the data
     for i in validation_list:
