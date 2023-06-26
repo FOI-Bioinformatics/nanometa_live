@@ -1,11 +1,9 @@
-"""
-Creates placeholder sankey data to display before kraken data starts coming in.
-
-"""
-
 import plotly.graph_objects as go
 
 def sankey_placeholder():
+    """
+    Creates placeholder sankey data to display before kraken data starts coming in.
+    """
     # the values 
     placeholder_link = dict(source = [0], 
                             target = [1],
