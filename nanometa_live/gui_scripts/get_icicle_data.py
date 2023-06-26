@@ -1,13 +1,11 @@
-"""
-Organizes the data in the format needed for sunsickle charts.
-Organizes the taxon lineages by assigning parents to 
-each taxon depending on which tax levels are included by the user.
-
-"""
-
 import numpy as np
 
 def get_icicle_data(filt_rev_matrix, config_letters):
+    """
+    Organizes the data in the format needed for sunsickle charts.
+    Organizes the taxon lineages by assigning parents to 
+    each taxon depending on which tax levels are included by the user.
+    """
     Taxon = []
     Tax_ID = []
     Parent = []
@@ -23,9 +21,10 @@ def get_icicle_data(filt_rev_matrix, config_letters):
         scoring_dict[letter] = score
         score += 1
     #print(scoring_dict)
-    # lazy updating of changed variable name instead of changing in script below
+    
+    # updating of changed variable name instead of changing in script below
     rev_matrix = filt_rev_matrix
-   #print(rev_matrix)
+    #print(rev_matrix)
     # filter the reversed matrix to only keep the desigated levels
     mask = np.isin(rev_matrix[:, 2], rev_config_letters)
     filt_rev_matrix = rev_matrix[mask]
