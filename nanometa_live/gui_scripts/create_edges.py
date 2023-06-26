@@ -1,18 +1,15 @@
-
-"""
-Creates edges between all nodes. 
-Returns it as a pandas df.
-
-Only user designated tax levels are kept.
-Each lower clade is assigned to its corresponding closest parent clade
-to make the lineage work with any possible combination of tax levels.
-
-"""
-
 import pandas as pd
 import numpy as np
 
 def create_edges(rev_matrix, id_dict, rev_letters):
+    '''
+    Creates edges between all nodes.
+    Returns it as a pandas df.
+
+    Only user designated tax levels are kept.
+    Each lower clade is assigned to its corresponding closest parent clade
+    to make the lineage work with any possible combination of tax levels.    
+    '''
         
     # create a scoring dictionary for the tax letters
     scoring_dict = {}
