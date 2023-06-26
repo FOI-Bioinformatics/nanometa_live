@@ -1,15 +1,3 @@
-
-"""
-A real-time nanopore simulator made to be used with test data. 
-The test data should be in the form of nanopore/guppy fastq.gz batch files.
-The fastq.gz files are copied one at a time at a specific time interval 
-to a simulated output folder to mimic the sequential output of batch 
-files from areal nanopore run.
-
-A file is copied every t seconds (min_delay =< t =< max_delay).
-
-"""
-
 import os
 import random
 import time
@@ -18,6 +6,16 @@ import sys
 import argparse
 
 def nano_sim():
+    """
+    A real-time nanopore simulator made to be used with test data. 
+    The test data should be in the form of nanopore/guppy fastq.gz batch files.
+    The fastq.gz files are copied one at a time at a specific time interval 
+    to a simulated output folder to mimic the sequential output of batch 
+    files from areal nanopore run.
+    
+    A file is copied every t seconds (min_delay =< t =< max_delay).
+    """
+    
     # Creates the object that contains the arguments passed to the shell command.
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--input_folder', help="The folder where the test fastq.gz files are stored.")
@@ -66,7 +64,6 @@ def nano_sim():
             shutil.rmtree(output_folder)
 
 # Enables the function + args to be called from terminal.
-# This way, the user can specify directories and intervals.
 if __name__ == '__main__':
     globals()[sys.argv[1]](sys.argv[2], 
                            sys.argv[3], 
