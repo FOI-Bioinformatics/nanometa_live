@@ -1,11 +1,3 @@
-
-
-"""
-organizes the data to plotly sankey plot format
-
-
-"""
-
 import plotly.graph_objects as go
 
 def format_sankey(top_df,
@@ -13,7 +5,9 @@ def format_sankey(top_df,
                   pad=25,
                   thickness=10
                   ):
-    
+    """
+    Organizes the data to plotly sankey plot format
+    """
     link = dict(source = top_df[top_df.columns[0]].values.tolist(),
                 target = top_df[top_df.columns[1]].values.tolist(), 
                 value = top_df[top_df.columns[2]].values.tolist())
