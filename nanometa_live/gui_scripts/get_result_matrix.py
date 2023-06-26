@@ -1,17 +1,14 @@
-
-"""
-Uses the domain filtered kraken df and selected tax letters to 
-create a matrix and a dictionary to be used in further data processing.
-The node IDs need to be created here, before the entries are filtered,
-since the nodes are all ordered by tax hierarchy in this matrix.
-This way the label parameter of the sankey plot will have the correct
-order of node numberings.
-
-"""
-
 import numpy as np
 
 def get_result_matrix(d_filt_df, tax_letters):
+    """
+    Uses the domain filtered kraken df and selected tax letters to 
+    create a matrix and a dictionary to be used in further data processing.
+    The node IDs need to be created here, before the entries are filtered,
+    since the nodes are all ordered by tax hierarchy in this matrix.
+    This way the label parameter of the sankey plot will have the correct
+    order of node numberings.
+    """
     # a counter to number the nodes
     node_nr = 0 
     # list for node names; taxon names. Will become 'label' parameter
