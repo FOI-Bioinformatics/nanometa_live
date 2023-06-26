@@ -1,22 +1,21 @@
-"""
-Creates a top list of taxa with the most reads.
-Domains and clades can be filtered.
-Info comes from the callback: user settings.
-
-"""
-
 import sys 
 import os
 
-# make sure the custom packages are found !!!!!!!!!!!!! -done
+# make sure the custom packages are found
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from nanometa_live.gui_scripts.domain_filtering import domain_filtering
 import pandas as pd
 
 def create_top_list(raw_df, domains, keep_letters, top = 15):
+    """
+    Creates a top list of taxa with the most reads.
+    Domains and clades can be filtered.
+    Info comes from the callback: user settings.
+    """
     # Disables the SettingWithCopyWarning from pandas
     pd.options.mode.chained_assignment = None
+    
     # Filter raw df by domains.
     d_filt_df2 = domain_filtering(raw_df, domains)
     # Taxonomy/clade filtering. Simply keep the user specified ones.
