@@ -1,14 +1,13 @@
-
-"""
-Filters the raw kreport df by user chosen domains.
-
-"""
-
 import pandas as pd
 
 def domain_filtering(raw_df, # full data
                      selected_domains # by domain name: Bacteria etc
                      ): 
+    
+    """
+    Filters the raw kreport df by user chosen domains.    
+    """     
+                       
     # adding col names for ease of parsing
     raw_df.columns = ['%',
                       'cuml_reads',
