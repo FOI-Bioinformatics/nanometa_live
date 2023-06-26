@@ -8,14 +8,11 @@ since there has not been time yet to work them into external scipts.
 Initial variables, such as paths and placeholders for the layout, are
 specified in the beginning of the script.
 
-The section defining the layout could be cleaner, but it works well.
 There are some inconsistencies in how the layout is structured using 
-dash, daq and dbc objects where it seemed most convenient, without
-a pre-determined plan. Cleanup will be done in a future version.
+dash, daq and dbc objects where it seemed most convenient.
 
 The callback functions mostly call external funcions, but here as well
-some smaller functions remain in the callbacks themselves, which will 
-optimally be changed in future versions.
+some smaller functions remain in the callbacks themselves.
 '''
 
 ########## DASH PACKAGES ######################################################
@@ -39,8 +36,6 @@ import sys
 # Makes sure the custom scripts are found after install.
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# nanometa_live. needs to be added in front of every import 
-# to make it work with packaging !!!!!!!!!!!!!!!!!! - added
 from nanometa_live.gui_scripts.get_time import get_time
 from nanometa_live.gui_scripts.sankey_placeholder import sankey_placeholder
 from nanometa_live.gui_scripts.kreport2_df import kreport2_df
@@ -62,11 +57,12 @@ from nanometa_live.gui_scripts.validation_col import validation_col
 ########## VARIOUS FUNCTIONS ##################################################
 
 # Some functions that are, for different reasons, not suitable to 
-# be external scripts. A lot of it is fulkod, and will be improved
-# in the future. Ideally, these should all be imported scripts.
+# be external scripts.
 
-# Defines layout for the sankey plot.
 def sankey_fig_layout():
+    '''
+    Defines layout for the sankey plot.
+    '''
     sankey_fig.update_traces(selector=dict(type='sankey'),
                              orientation='h', # horizontal plot
                              arrangement='freeform', # nodes moveable by user
@@ -79,20 +75,27 @@ def sankey_fig_layout():
                              margin=dict(t=20, l=20, b=20, r=50)
                              )
     
-# Defines layout for the pathogen danger gauge.
-# Still problems remaining with autolayout..
 def gauge_layout():
+    '''
+    Defines layout for the pathogen danger gauge.
+    Some problems still remain with the autolayout here,
+    because the graph is displayed in a container where 
+    the size is determined by the other objects in the container.
+    '''
     gauge_fig.update_layout({'autosize': False}, # autolayout off!
                             width=400,
                             height=300,
                             margin=dict(t=10, l=10, b=10, r=10)
                             )
-
-# Main script for sankey data processing and raw data updating.
-# (The raw data updating should ideally be made a separate function that
-# all the plots and things call, but it cant since it needs to be
-# linked to a callback to be interval triggered.)   
+ 
 def create_sankey_data(selected_domains, clade_list, top_filter = 5):
+    '''
+    Main script for sankey data processing and raw data updating.
+    (The raw data updating should ideally be made a separate function that
+    all the plots and things call, but it can't since it needs to be
+    linked to a callback to be interval triggered.)  
+    '''
+    
     # Updates the global variable for use in other functions.
     # raw_df is the imported cumulative kreport file.
     global raw_df 
@@ -130,9 +133,8 @@ def create_sankey_data(selected_domains, clade_list, top_filter = 5):
                            edges_df,
                            result_matrix,
                            tax_letters,
-                           rev_tax_letters)
-    
-    # I dont know why this is needed to be honest.
+                           rev_tax_letters)    
+   
     top_df = top_df.sort_values('target', ascending=False)
     
     # Label names for sankey.
@@ -145,12 +147,12 @@ def create_sankey_data(selected_domains, clade_list, top_filter = 5):
     sankey_data = format_sankey(top_df, label, pad=30)
     return sankey_data
 
-# Creates a colored table of specified pathogens.
-# Ranges for coloring specifyable in config file.
-# (The callback functions sends the variables 'data' and 'columns' here,
-# it seems like they are processed again in this function.
-# This is fulkod for now. A better solution will have to wait.)
 def create_pathogen_table():
+    '''
+    Creates a colored table of specified pathogens.
+    Ranges for coloring specifyable in config file.
+    The callback functions send the variables 'data' and 'columns' here.
+    '''
     # The lower read limit for when an entry is colored yellow.
     wll = str(config_contents["warning_lower_limit"])
     # The lower read limit for when an entry is colored red.
@@ -174,10 +176,11 @@ def create_pathogen_table():
         )
     
     return path_tabl
-
-# Creates the toplist table in the layout.
-# (Yes, there must be a better way of doing this.)    
+   
 def create_top_table():
+    '''
+    Creates the toplist table in the layout.
+    '''
     top_tabl = dash_table.DataTable(
         data = top_df.to_dict('records'),
         columns = [{"name": i, "id": i} for i in top_df.columns],
@@ -185,8 +188,10 @@ def create_top_table():
         fill_width=False)
     return top_tabl
 
-# Creates the icicle plot fig.
 def create_icicle(ice_sun_data, height = 800):
+    '''
+    Creates the icicle plot fig.
+    '''
     icicle_fig =px.icicle(ice_sun_data,
                           names='Taxon',
                           parents='Parent',
@@ -195,7 +200,7 @@ def create_icicle(ice_sun_data, height = 800):
                           color_continuous_scale='Jet'
                           )
     icicle_fig.update_traces(selector=dict(type='icicle'),
-                             hovertemplate='<b>%{label} </b> <br> Reads: %{value}'
+                             hovertemplate='<b>%{label} </b> <br> Reads: %{value}' # define hover data
                              )
     icicle_fig.update_layout({'autosize': False}, # autolayout off!
                              height = height,
@@ -204,8 +209,10 @@ def create_icicle(ice_sun_data, height = 800):
                              )
     return icicle_fig
 
-# Creates the sunburst plot fig.
 def create_sunburst(ice_sun_data):
+    '''
+    Creates the sunburst plot fig.
+    '''
     sunburst_fig =px.sunburst(ice_sun_data,
                               names='Taxon',
                               parents='Parent',
@@ -214,7 +221,7 @@ def create_sunburst(ice_sun_data):
                               color_continuous_scale='Jet'
                               )
     sunburst_fig.update_traces(selector=dict(type='sunburst'),
-                               hovertemplate='<b>%{label} </b> <br> Reads: %{value}'
+                               hovertemplate='<b>%{label} </b> <br> Reads: %{value}' # define hover data
                                )
     sunburst_fig.update_layout({'autosize': False},# autolayout off!
                                height = 900,
@@ -270,7 +277,6 @@ zero_data = np.zeros((2,6))
 raw_df = pd.DataFrame(zero_data, columns=None) 
 
 # Initial empty pathogen list.
-# (may not be needed)
 df_to_print = pd.DataFrame(columns= ['Name', 'Tax ID', 'Reads'])
 
 # Initial empty top list.
@@ -287,7 +293,6 @@ sankey_fig = go.Figure(placeholder_data)
 sankey_fig_layout()
 
 # Initial tax level list before first update.
-# (may not be needed?)
 clade_list = config_contents['taxonomic_hierarchy_letters']
 
 # Initial sunburst and icicle figs.
@@ -404,7 +409,7 @@ choose_hierarchy = html.Div(children=[
     html.Label('Taxonomic levels to include in the Sankey plot:',
                style={'padding-right': '10px'}),
     dcc.Checklist(config_contents['taxonomic_hierarchy_letters'],
-                  config_contents['default_hierarchy_letters'],
+                  config_contents['default_hierarchy_letters'], # selected upon start
                   id='clades',
                   style={'display': 'inline-flex', 'flex-wrap': 'wrap'},
                   labelStyle={'padding-right': '10px'}
@@ -452,7 +457,7 @@ gauge_tooltip = dbc.Tooltip('The value of this meter is the 10-logarithm of the 
                                     placement='top',
                                     delay={'show': 1000})
 
-# Colored table. Fulkod solution for now. 
+# Colored table. 
 pathogen_table = dbc.Container([dbc.Label('Pathogens/species of interest'),  
                                 create_pathogen_table()])
 
@@ -470,7 +475,7 @@ validation_tooltip = dbc.Tooltip('Adds an additional column with the number of r
                                     placement='top',
                                     delay={'show': 1000})
 
-# The toplist. In fulkod for now.
+# The toplist.
 toplist_head = html.H2('Top reads') # headline
 top_list = dbc.Container([dbc.Label('Taxa with the highest number of reads.'),  
                                 create_top_table()])
@@ -569,8 +574,8 @@ pathogens_top = html.Div(
 ###############################################################################
 ##### QC, tab 3 ###############################################################
 
-# QC stuff:
-qc_head = html.H2('Technical QC') # headline
+# QC headline:
+qc_head = html.H2('Technical QC')
 
 # Initial placeholder values for the qc text info.
 qc_total_reads = html.Div('Total reads (after filtering):', id='qc_total_reads')
@@ -910,7 +915,7 @@ def live_update(toggle_value):
               State('domains', 'value'),
               State('clades', 'value')) # all the filters are states until click
 def update_sankey(interval_trigger, filter_click, filter_value, domains, clades):
-    global sankey_fig # why does this need to be global? probably superfluous
+    global sankey_fig
     real_list = config_contents['taxonomic_hierarchy_letters']
     # The clade list will reorder itself when manipulated by user.
     # This function makes sure everything is set back to the right order.
@@ -980,7 +985,7 @@ def pathogen_update(interval_trigger, val_state):
             validated_col = validation_col(validation_list, blast_dir)
             # add to table
             df_to_print['Validated reads'] = validated_col
-    # dash handling, fulkod for now
+    # dash handling
     data = df_to_print.to_dict('records') 
     columns = [{"name": i, "id": i} for i in df_to_print.columns]
     gauge_layout() # layout for the danger meter
@@ -1084,6 +1089,5 @@ def run_app():
     # Debug=True means it updates as you make changes in this script.
     app.run(debug=False, port=int(config_contents['gui_port']))
 if __name__ == "__main__":
-    # The run_app is an experiment to make it run as an entry point (bash command).
-    # So far it seems to work.
+    # The run_app makes it run as an entry point (bash command).
     run_app() 
