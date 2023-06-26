@@ -1,9 +1,9 @@
-"""
-Orders the list coming in from the user settings tax letter checkboxes,
-using the correct order from the config file.
-"""
 
 def fix_list_order(real_list, wrong_list):
+    """
+    Orders the list coming in from the user settings tax letter checkboxes,
+    using the correct order from the config file.
+    """
     # this will be the proper list
     fixed_list = []
     # parses through each letter in the config list
