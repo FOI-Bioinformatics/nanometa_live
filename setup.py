@@ -1,5 +1,8 @@
 '''
 Setup file for Nanometa Live.
+Specifies python packages and additional files. Creates the bash commands used
+to run the program and maps to the functions they execute.
+
 Installation instructions can be found in the readme file on github.
 
 '''
@@ -11,12 +14,10 @@ setup(
       name = "Nanometa_Live",
       version = "0.0.1",
       description = "Real-time metagenomic analysis.",
-      # Seems to work best when not using the find_packages function,
-      # instead specifying manually.
+      # Specifying python packages.
       packages = ['nanometa_live', 
                   'nanometa_live.gui_scripts'],
-      # All non-pyscript files need to be specified here to be installed 
-      # properly.
+      # Specifying non-pyscript files and snakemake scripts.
       package_data={'nanometa_live': ['Snakefile',
                                       'config.yaml',
                                       'snakemake_envs/*.yaml',
@@ -24,7 +25,7 @@ setup(
                     },
       # These are the bash commands and the functions they map to.
       # "run_app" is a solution to make the main gui script into a command,
-      # since a function needs to be specified. Seems to work ok.
+      # since a function needs to be specified.
       entry_points = {'console_scripts': 
                       ['nanometa-sim = nanometa_live.nanopore_simulator:nano_sim', # nanopore simulator
                        'nanometa-new = nanometa_live.create_new_project:create_new', # create new project
@@ -33,8 +34,7 @@ setup(
                        'nanometa = nanometa_live.nanometa_gui:run_app' # run gui
                        ]
                       },
-      # Not so sure why this is needed, but the files were not found 
-      # in the install location without it.
+      # Makes sure the files are found after install.
       data_files=[('nanometa_live/',['nanometa_live/config.yaml']),
                   ('nanometa_live/snakemake_envs', 
                    ['nanometa_live/snakemake_envs/' + f for f in os.listdir('nanometa_live/snakemake_envs') if f.endswith('.yaml')])]
