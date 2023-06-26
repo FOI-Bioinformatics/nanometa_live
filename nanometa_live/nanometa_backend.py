@@ -1,15 +1,3 @@
-'''
-A script that runs in the background, executing the snakemake 
-workflow at a set time interval.
-
-The time interval and nr of cores can be set in the config.yaml file.
-
-Also removes unecessary temp files upon used exit with ctrl+C.
-Ctrl+C might need to be pressed twice or more, since it will first disrupt the 
-snakemake workflow while this script will continue to run unless ctrl+C
-is pressed again.
-'''
-
 import time
 import os
 import yaml
@@ -17,8 +5,19 @@ import pkg_resources
 import shutil
 
 def timed_senser():
-    # This need to be filddled with for packaging !!!!!!!!!!!!!!!! -fiddled
-    # This makes the system find the proper snakefile after installation.
+    '''
+    A script that runs in the background, executing the snakemake 
+    workflow at a set time interval.
+    
+    The time interval and nr of cores can be set in the config.yaml file.
+    
+    Also removes unecessary temp files upon used exit with ctrl+C.
+    Ctrl+C might need to be pressed twice or more, since it will first disrupt the 
+    snakemake workflow while this script will continue to run unless ctrl+C
+    is pressed again.
+    '''
+
+    # Makes the system find the proper snakefile after installation.
     snakefile_path = pkg_resources.resource_filename('nanometa_live', 'Snakefile')
     # Load variables from config file.
     with open('config.yaml', 'r') as cf:
@@ -37,20 +36,18 @@ def timed_senser():
     force_valid_file = os.path.join(config_contents["main_dir"], 'validation_fastas/force_validation.txt')
     force_blast_file = os.path.join(config_contents["main_dir"], 'blast_result_files/force_blast.txt')
     
-    while True: # endless loop
+    while True: # endless loop until ctrl+c
         try:
             # time delay
             time.sleep(t)
             print("\n----- running -----")
             print("current interval:", str(t), "seconds.")
-            # rememeber to change this when packaging !!!!!!!!!!!!! -changed
             # The command that this script will send to the shell.
-            # rerun-incomplete parameter important:
+            # rerun-incomplete parameter
             # makes snakemake rerun half-processed files from interrupted runs.
             system_cmd = "snakemake --cores " + str(snakemake_cores) + " --rerun-incomplete --use-conda --snakefile " + str(snakefile_path)
             print('shell command: ' + system_cmd)
             # Run the snakeflow as a system process.
-            # This should probably be a popen, but will do for now.
             os.system(system_cmd)
             print("\n----- run completed -----")
         
@@ -81,6 +78,5 @@ def timed_senser():
                 print('\ndone')
             
             break
-
-# comment out when packaging !!!!!!!!!!!!!!! -done    
+    
 #timed_senser()
