@@ -12,7 +12,7 @@ import os
 
 setup(
       name = "Nanometa_Live",
-      version = "0.0.1",
+      version = "0.1.0",
       description = "Real-time metagenomic analysis.",
       # Specifying python packages.
       packages = ['nanometa_live', 
