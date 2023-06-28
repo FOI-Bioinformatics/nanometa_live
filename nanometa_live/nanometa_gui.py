@@ -1085,9 +1085,18 @@ def update_waiting_files(interval_trigger):
 
 # This is how the app runs.
 def run_app():
-    # A unique port specifiable in config. 
-    # Debug=True means it updates as you make changes in this script.
-    app.run(debug=False, port=int(config_contents['gui_port']))
+    # Parses command-line arguments, enables help arg
+    parser = argparse.ArgumentParser(description='Runs the Nanometa Live GUI.')
+    parser.add_argument('-help', action='store_true', help='Displays help message')
+
+    args = parser.parse_args()
+
+    if args.help:
+        parser.print_help()
+    else:
+        # A unique port specifiable in config.
+        # Debug=True means it updates as you make changes in this script.
+        app.run(debug=False, port=int(config_contents['gui_port']))
 if __name__ == "__main__":
     # The run_app makes it run as an entry point (bash command).
     run_app() 
