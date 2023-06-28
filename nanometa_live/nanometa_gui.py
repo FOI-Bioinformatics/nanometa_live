@@ -238,7 +238,7 @@ def create_sunburst(ice_sun_data):
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 # Current version of the program.
-version = 'beta 0.0.1'
+version = '0.1.0'
 
 # Load config file variables.
 with open('config.yaml', 'r') as cf:
