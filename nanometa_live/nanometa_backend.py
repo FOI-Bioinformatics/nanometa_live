@@ -3,6 +3,7 @@ import os
 import yaml
 import pkg_resources
 import shutil
+import argparse
 
 def timed_senser():
     '''
@@ -78,5 +79,15 @@ def timed_senser():
                 print('\ndone')
             
             break
-    
+            
+def check_help():
+    parser = argparse.ArgumentParser(description='A script that runs the snakemake workflow at a set time interval.')
+    parser.add_argument('-help', action='store_true', help='Display help message')
+
+    args = parser.parse_args()
+
+    if args.help:
+        parser.print_help()
+    else:
+        timed_senser()    
 #timed_senser()

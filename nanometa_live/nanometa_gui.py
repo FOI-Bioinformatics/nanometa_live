@@ -15,6 +15,9 @@ The callback functions mostly call external funcions, but here as well
 some smaller functions remain in the callbacks themselves.
 '''
 
+# global version variable
+__version__ = "0.1.0"
+
 ########## DASH PACKAGES ######################################################
 from dash import Dash, html, dcc, Output, Input, State, dash_table
 import dash_daq as daq
@@ -30,6 +33,7 @@ import pandas as pd
 import os
 import yaml
 import sys
+import argparse
 
 ########## CUSTOM SCRIPTS #####################################################
 
@@ -53,6 +57,20 @@ from nanometa_live.gui_scripts.fix_list_order import fix_list_order
 from nanometa_live.gui_scripts.create_top_list import create_top_list
 from nanometa_live.gui_scripts.icicle_sunburst_data import icicle_sunburst_data
 from nanometa_live.gui_scripts.validation_col import validation_col
+
+########## --help argument ####################################################
+# Checks if the user has added the --help argument to the command and 
+# displays the help info if that is the case. Otherwise, script proceeds
+# as normal.
+
+# Parses command-line arguments
+parser = argparse.ArgumentParser(description='Runs the Nanometa Live GUI.')
+parser.add_argument('-help', action='store_true', help='Displays help message')
+
+args = parser.parse_args()
+
+if args.help:
+    parser.print_help()
 
 ########## VARIOUS FUNCTIONS ##################################################
 
@@ -1083,9 +1101,11 @@ def update_waiting_files(interval_trigger):
 ###############################################################################
 ###############################################################################
 
-# This is how the app runs.
 def run_app():
-    # A unique port specifiable in config. 
+    '''
+    This is how the app runs.
+    '''
+    # A unique port specifiable in config.
     # Debug=True means it updates as you make changes in this script.
     app.run(debug=False, port=int(config_contents['gui_port']))
 if __name__ == "__main__":
