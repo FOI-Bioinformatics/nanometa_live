@@ -30,7 +30,7 @@ setup(
                       ['nanometa-sim = nanometa_live.nanopore_simulator:nano_sim', # nanopore simulator
                        'nanometa-new = nanometa_live.create_new_project:create_new', # create new project
                        'nanometa-blastdb = nanometa_live.build_blast_db:build_blast', # create blast validation databases
-                       'nanometa-pipe = nanometa_live.nanometa_backend:timed_senser', # run backend pipeline
+                       'nanometa-pipe = nanometa_live.nanometa_backend:check_help', # run backend pipeline
                        'nanometa = nanometa_live.nanometa_gui:run_app' # run gui
                        ]
                       },
