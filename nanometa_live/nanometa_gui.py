@@ -15,6 +15,9 @@ The callback functions mostly call external funcions, but here as well
 some smaller functions remain in the callbacks themselves.
 '''
 
+# global version variable
+__version__ = "0.1.0"
+
 ########## DASH PACKAGES ######################################################
 from dash import Dash, html, dcc, Output, Input, State, dash_table
 import dash_daq as daq
