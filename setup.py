@@ -8,12 +8,11 @@ Installation instructions can be found in the readme file on github.
 '''
 
 from setuptools import setup
-from nanometa_live.nanometa_gui import __version__
 import os
 
 setup(
       name = "Nanometa_Live",
-      version = __version__,
+      version = "0.1.1",
       description = "Real-time metagenomic analysis.",
       # Specifying python packages.
       packages = ['nanometa_live', 
