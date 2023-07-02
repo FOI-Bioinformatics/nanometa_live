@@ -15,7 +15,7 @@ For more information, see the [wiki](https://github.com/FOI-Bioinformatics/nanom
 ## INSTALL
 The program uses a conda environment, so conda or mamba will need to be installed for it to work. Mambaforge is recommended.
 
-**Install with conda/mamba**
+**Install with conda/mamba (recommended):**
 
 Create a new conda environment, for example:
 
@@ -29,7 +29,7 @@ Install with conda or mamba, for example:
 
 &emsp;&emsp;&emsp;&emsp;*$ mamba install nanometa-live*
 
-**Install from source**
+**Install from source:**
 
 &emsp;&emsp;**1.** Clone or download the files from GitHub, for example:
 
