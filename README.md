@@ -13,50 +13,61 @@ Included in the app are also sunburst and icicle charts in the Explore tab, basi
 For more information, see the [wiki](https://github.com/FOI-Bioinformatics/nanometa_live/wiki).
 
 ## INSTALL
-The program uses a conda environment, so conda or mamba will need to be installed for it to work. Mambaforge is recommended.
+The program uses a conda environment, so conda or mamba will need to be installed for it to work. [Mambaforge](https://github.com/conda-forge/miniforge#mambaforge) is recommended.
 
 **Install with conda/mamba (recommended):**
 
-Create a new conda environment, for example:
+Create a new conda environment and install nanometa-live, for example:
 
-&emsp;&emsp;&emsp;&emsp;*$ mamba create --name nanometa_live_env*
+```
+mamba create --name nanometa_live_env nanometa-live
+```
 
 Activate the environment:
 
-&emsp;&emsp;&emsp;&emsp;*$ conda activate nanometa_live_env*
-
-Install with conda or mamba, for example:
-
-&emsp;&emsp;&emsp;&emsp;*$ mamba install nanometa-live*
+```
+mamba activate nanometa_live_env
+```
 
 **Install from source:**
 
-&emsp;&emsp;**1.** Clone or download the files from GitHub, for example:
+Clone or download the files from GitHub, for example:
 
-&emsp;&emsp;&emsp;&emsp;*$ git clone https://github.com/FOI-Bioinformatics/nanometa_live*
+```
+git clone https://github.com/FOI-Bioinformatics/nanometa_live
+```
 
-&emsp;&emsp;**2.** From the main folder, containing **nanometa_live_env.yml**, create a conda/mamba environment from the yml file, for example:
+From the main folder, containing **nanometa_live_env.yml**, create a conda/mamba environment from the yml file, for example:
 
-&emsp;&emsp;&emsp;&emsp;*$ mamba env create -f nanometa_live_env.yml*
+```
+mamba env create -f nanometa_live_env.yml
+```
 
-&emsp;&emsp;**3.** Activate the environment:
+Activate the environment:
 
-&emsp;&emsp;&emsp;&emsp;*$ conda activate nanometa_live_env*
+```
+mamba activate nanometa_live_env
+```
 
-&emsp;&emsp;**4.** Install the program in the environment. While standing in the directory containing **setup.py**:
+Install the program in the environment. While standing in the directory containing **setup.py**:
 
-&emsp;&emsp;&emsp;&emsp;*$ pip install .*
-
+```
+pip install .
+```
 The program is now installed and can be accessed from any directory using the instructions below.
 
 ## QUICK USE TUTORIAL
 The tutorial files can be downloaded at https://drive.google.com/drive/folders/1fjAihcPw409Pw8C3z_YPQnBnRMuoDE4u?usp=sharing. We will use the built-in nanopore simulator to do a test run using a GTDB database for Kraken2.
 
 #### 1. Make sure the environment is activated:
-&emsp;&emsp;*$ conda activate nanometa_live_env*
+```
+mamba activate nanometa_live_env
+```
 
 #### 2. Create a new project
-&emsp;&emsp;*$ nanometa-new --path /home/user/metagenomic_project*
+```
+nanometa-new --path /home/user/metagenomic_project
+```
 
 #### 3. Modify the config file
 Go into the newly created directory and open the config file.  
@@ -74,28 +85,36 @@ The example refseqs from the tutorial files should be placed in a directory, for
 
 Standing in your project directory (*/home/user/metagenomic_project*), run the command with the example_refseqs directory in as input:
 
-&emsp;&emsp;*$ nanometa-blastdb -i /home/user/example_refseqs*
+```
+nanometa-blastdb -i /home/user/example_refseqs*
+```
 
 The folder *blast_databases* should be created in your project directory, containing 8 database files for each ID, with different endings: "idnumber.fasta.xxx".
 
 #### 5. Start Nanopore sequencing
 For the tutorial, we will use the Nanopore simulator that comes with the program. Put the 8 tutorial test batch files, ending in fastq.gz, in a folder called */home/user/nanometa_test_data*, and from a separate terminal run:
 
-&emsp;&emsp;*$ nanometa-sim -i /home/user/nanometa_test_data -o /home/user/nanopore_out*
+```
+nanometa-sim -i /home/user/nanometa_test_data -o /home/user/nanopore_out*
+```
 
 The -o folder is the simulated Nanopore output, and needs to be the same as specified in the config under **Nanopore output directory**. The simulator automatically copies a file from the nanometa_test_data directory every 1-2 minutes until all the files are copied, to mimic the Nanopore batches. 
 
 #### 6. Start the backend pipeline
 Start a separate terminal, make sure you are in the project directory */home/user/metagenomic_project* and run:
 
-&emsp;&emsp;*$ nanometa-pipe*
+```
+nanometa-pipe
+```
 
 To exit the pipeline, press *ctrl+C*. Might have to be pressed several times.
 
 #### 7. Start the GUI
 Start a separate terminal, make sure you are in the project directory and run:
 
-&emsp;&emsp;*$ nanometa*
+```
+nanometa
+```
 
 Hold *ctrl* and click the port link if the GUI does not open by itself.
 
