@@ -86,7 +86,7 @@ The example refseqs from the tutorial files should be placed in a directory, for
 Standing in your project directory (*/home/user/metagenomic_project*), run the command with the example_refseqs directory in as input:
 
 ```
-nanometa-blastdb -i /home/user/example_refseqs*
+nanometa-blastdb -i /home/user/example_refseqs
 ```
 
 The folder *blast_databases* should be created in your project directory, containing 8 database files for each ID, with different endings: "idnumber.fasta.xxx".
@@ -95,7 +95,7 @@ The folder *blast_databases* should be created in your project directory, contai
 For the tutorial, we will use the Nanopore simulator that comes with the program. Put the 8 tutorial test batch files, ending in fastq.gz, in a folder called */home/user/nanometa_test_data*, and from a separate terminal run:
 
 ```
-nanometa-sim -i /home/user/nanometa_test_data -o /home/user/nanopore_out*
+nanometa-sim -i /home/user/nanometa_test_data -o /home/user/nanopore_out
 ```
 
 The -o folder is the simulated Nanopore output, and needs to be the same as specified in the config under **Nanopore output directory**. The simulator automatically copies a file from the nanometa_test_data directory every 1-2 minutes until all the files are copied, to mimic the Nanopore batches. 
