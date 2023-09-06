@@ -1,6 +1,9 @@
 # Nanometa Live
 Nanometa Live is a workflow and graphical user interface (GUI) that displays real-time results from metagenomic sequencing with the Oxford Nanopore MinION and Flongle flow cells. The backend workflow uses Kraken2 for classification and BLAST for validation of sequences. The GUI consists of three tabs containing various plots.
 
+Nanometa Live uniquely offers offline capabilities and custom database support, making it a versatile tool in the field of metagenomic data analysis.
+
+
 <img src="https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/main%20pic2.png" alt="main view" width="900" height="500">
 
 A Sankey plot displays the most abundant taxa in the sample and their lineage. The plot can be modified and filtered by domain, taxonomic levels and abundance. At the top of the app is a toggle to pause or resume live updates of the plots. When turned on, the plots are automatically updated with the latest results from the workflow on a set time interval.
@@ -14,6 +17,8 @@ For more information, see the [wiki](https://github.com/FOI-Bioinformatics/nanom
 
 ## INSTALL
 The program uses a conda environment, so conda or mamba will need to be installed for it to work. [Mambaforge](https://github.com/conda-forge/miniforge#mambaforge) is recommended.
+
+
 
 **Install with conda/mamba (recommended):**
 
@@ -59,6 +64,7 @@ The program is now installed and can be accessed from any directory using the in
 ## QUICK USE TUTORIAL
 The tutorial files can be downloaded at https://drive.google.com/drive/folders/1fjAihcPw409Pw8C3z_YPQnBnRMuoDE4u?usp=sharing. We will use the built-in nanopore simulator to do a test run using a GTDB database for Kraken2.
 
+
 #### 1. Make sure the environment is activated:
 ```
 mamba activate nanometa_live_env
@@ -78,8 +84,12 @@ Set the **Kraken 2 database** directory to wherever you put your database from t
 
 Remember to save your config file after modification.
 
+#### Optional: Custom Kraken2 Database
+Set your custom Kraken2 database directory in the config file if you have one.
+
+
 #### 4. Build BLAST databases for validation
-The *nanometa-blastdb* command constructs the needed files for validating the sequences that Kraken 2 finds.
+The *nanometa-blastdb* command constructs the needed files for validating the sequences that Kraken 2 finds. This process will soon be automated for enhanced user-friendliness.
 
 The example refseqs from the tutorial files should be placed in a directory, for example */home/user/example_refseqs*. This directory should contain the following files: "321.fasta", "852.fasta", "5061.fasta", "13373.fasta".
 
