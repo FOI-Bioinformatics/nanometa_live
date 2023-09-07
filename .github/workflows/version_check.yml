@@ -22,9 +22,15 @@ jobs:
       run: |
         pip install -r requirements.txt 
 
+    - name: Install nanometa
+      run: |
+        pip install .
+
     - name: Check nanometa-sim version
       run: nanometa-sim --version  
 
     - name: Check nanometa-new version
       run: nanometa-new --version 
 
+    - name: Check nanometa-pipe version
+      run: nanometa-pipe --version 
