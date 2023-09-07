@@ -139,4 +139,4 @@ The tutorial species of interest have been chosen to display all the possible ab
 ## Contact and community guidelines
 Contact regarding Nanometa Live: Kristoffer, **kristoffersandas@yahoo.se**
 
-For problems, comments or support, post an issue.  
+For problems, comments or support, post an issue.
