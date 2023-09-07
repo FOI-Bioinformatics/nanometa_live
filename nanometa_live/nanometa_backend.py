@@ -25,20 +25,32 @@ def load_config(config_file):
     with open(config_file, 'r') as cf:
         return yaml.safe_load(cf)
 
-def execute_snakemake(snakefile_path, snakemake_cores):
+def execute_snakemake(snakefile_path, snakemake_cores, log_file_path="snakemake_output.log"):
     """
-    Execute the Snakemake workflow with the specified number of cores.
+    Execute the Snakemake workflow with the specified number of cores and log the output.
 
     Parameters:
         snakefile_path (str): Path to the Snakefile.
         snakemake_cores (int): Number of cores to use for Snakemake.
+        log_file_path (str): Path to the log file where Snakemake output will be stored.
     """
     logging.info(f"Executing Snakemake workflow with {snakemake_cores} cores")
-    log_file_path = "snakemake_output.log"  # Change this to your desired log file path
+    
+    # Build the Snakemake command
+    snakemake_cmd = [
+        "snakemake",
+        "--cores", str(snakemake_cores),
+        "--rerun-incomplete",
+        "--use-conda",
+        "--snakefile", snakefile_path
+    ]
+    
+    logging.info(f'Executing shell command: {" ".join(snakemake_cmd)}')
+    
+    # Execute the command and log the output
     with open(log_file_path, "a") as log_file:
-        system_cmd = f"snakemake --cores {snakemake_cores} --rerun-incomplete --use-conda --snakefile {snakefile_path}"
-        logging.info(f'Executing shell command: {system_cmd}')
-        subprocess.run(system_cmd, shell=True, stdout=log_file, stderr=subprocess.STDOUT)
+        subprocess.run(snakemake_cmd, stdout=log_file, stderr=subprocess.STDOUT)
+
 
 def remove_temp_files(config_contents):
     """
