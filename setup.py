@@ -1,18 +1,37 @@
-'''
-Setup file for Nanometa Live.
-Specifies python packages and additional files. Creates the bash commands used
-to run the program and maps to the functions they execute.
+"""
+Setup file for the Nanometa Live project.
 
-Installation instructions can be found in the readme file on github.
+This script specifies the Python packages, additional files, and entry points needed for the project.
+It also creates the bash commands used to run the program and maps them to the corresponding Python functions.
 
-'''
+Installation instructions:
+- Detailed installation instructions can be found in the README file on GitHub.
+
+Structure:
+- `name`: Specifies the package name.
+- `version`: Specifies the package version, imported from __init__.py.
+- `description`: Brief description of the package.
+- `packages`: Lists the Python packages included in the project.
+- `package_data`: Specifies additional non-Python files and Snakemake scripts.
+- `entry_points`: Defines the bash commands and maps them to Python functions.
+- `data_files`: Ensures that specified files are found after installation.
+- `install_requires`: Lists the package dependencies, read from requirements.txt.
+
+"""
 
 from setuptools import setup
 import os
 
+# Import the version number
+from nanometa_live import __version__
+
+# Read requirements.txt and store its content in a list
+with open("requirements.txt", "r") as f:
+    requirements = f.read().splitlines()
+
 setup(
       name = "Nanometa_Live",
-      version = "0.1.1",
+      version = __version__,
       description = "Real-time metagenomic analysis.",
       # Specifying python packages.
       packages = ['nanometa_live', 
@@ -38,16 +57,5 @@ setup(
       data_files=[('nanometa_live/',['nanometa_live/config.yaml']),
                   ('nanometa_live/snakemake_envs', 
                    ['nanometa_live/snakemake_envs/' + f for f in os.listdir('nanometa_live/snakemake_envs') if f.endswith('.yaml')])],
-      install_requires=[
-            'setuptools>=67.6.0',
-            'pyyaml>=6.0',
-            'dash>=2.8.1',
-            'dash-daq>=0.5.0',
-            'dash-bootstrap-components>=1.3.1',
-            'plotly>=5.13.0',
-            'numpy>=1.24.1',
-            'pandas>=1.5.3',
-            'pytest>=7.2.1',
-            'biopython>=1.80'            
-    ]          
+      install_requires=requirements  # Read from requirements.txt
       )
