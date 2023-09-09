@@ -89,7 +89,7 @@ def sankey_fig_layout():
     # The sizes might need to be adjusted depending on platform/screen size.
     sankey_fig.update_layout({'autosize': False}, # autolayout off!
                              width=1700,
-                             height=800,
+                             height=900,
                              margin=dict(t=20, l=20, b=20, r=50)
                              )
     
@@ -381,6 +381,9 @@ timestamp = html.Div(id='timestamp',
 ###############################################################################
 ##### sankey plot with options, in tab 1 ######################################
 
+# Sankey headline
+sankey_head = html.H2('Sankey plot of bla bla bla', className="bg-light border")
+
 # Sankey plot object.
 sankey_plot = dcc.Graph(id='sankey_plot',
                         figure=sankey_fig,
@@ -456,6 +459,7 @@ sankey_filtering = html.Div(
     ], className="hstack gap-3"
 )
 
+sankey_info = html.Div('Explanations of this tab bla bla. Add size adjustment and font size', className="bg-light border")
 
 ###############################################################################
 ##### pathogen detection and toplist, tab 1 ###################################
@@ -537,7 +541,7 @@ toplist_hierarchy = html.Div(children=[
     html.Label('Taxonomic levels to include:',
                style={'padding-right': '10px'}),
     dcc.Checklist(config_contents['taxonomic_hierarchy_letters'],
-                  config_contents['taxonomic_hierarchy_letters'],
+                  ['S'],
                   id='toplist_clades',
                   style={'display': 'inline-flex', 'flex-wrap': 'wrap'},
                   labelStyle={'padding-right': '10px'}
@@ -556,26 +560,40 @@ toplist_button_tooltip = dbc.Tooltip('Apply your filters. Filters will also be a
                                     placement='top',
                                     delay={'show': 1000})
 
+topreads_explanation = html.Label('Some text to explain the top reads and how everything works.')
+
 # Organization of toplist filtering into one layout object.
 toplist_filtering = html.Div(
     [   
-        html.Div([toplist_filter_head, top_filter_val, top_list_tooltip], className="bg-light border"),        
+        html.Div([toplist_filter_head, top_filter_val, top_list_tooltip]),        
         html.Div(toplist_domains, className="bg-light border"),
         html.Div(toplist_hierarchy, className="bg-light border"),
-        html.Div([toplist_submit, toplist_button_tooltip], className="bg-light border")
+        html.Div([toplist_submit, toplist_button_tooltip]),
+        html.Br(),
+        html.Hr(),
+        html.Div(topreads_explanation)
     ], className="vstack gap-3"
 )
 
 
-# Main layout for pathogen and top lists section.
-pathogens_top = html.Div(
+
+toplist_col_1 = html.Div([toplist_head,
+                          top_list
+                          ],
+                          className="bg-light border")
+
+toplist_col_2 = html.Div([toplist_filtering
+                          ],
+                          className="bg-light border")
+
+toplist_together = html.Div([toplist_col_1,
+                             toplist_col_2
+                          ],
+                          className="hstack gap-3")
+
+
+pathogen_section = html.Div(
     [   
-        html.Div([toplist_head,
-                  top_list,
-                  html.Br(),
-                  toplist_filtering
-                  ],
-                 className="bg-light border"),
         html.Div([pathogen_head,
                   pathogen_gauge,
                   gauge_tooltip,
@@ -583,6 +601,21 @@ pathogens_top = html.Div(
                   html.Br(),
                   validate_option, 
                   validation_tooltip
+                  ],
+                 className="bg-light border"),
+        html.Div(['Explanations of everything'
+                  ],
+                 className="bg-light border")
+    ], className="hstack gap-3"
+)
+
+# Main layout for pathogen and top lists section.
+pathogens_top = html.Div(
+    [   
+        html.Div([toplist_together
+                  ],
+                 className="bg-light border"),
+        html.Div([pathogen_section
                   ],
                  className="bg-light border")
     ], className="hstack gap-3"
@@ -593,14 +626,14 @@ pathogens_top = html.Div(
 ##### QC, tab 3 ###############################################################
 
 # QC headline:
-qc_head = html.H2('Technical QC')
+qc_head = html.H2('Technical QC',className="bg-light border")
 
 # Initial placeholder values for the qc text info.
-qc_total_reads = html.Div('Total reads (after filtering):', id='qc_total_reads')
-qc_classified_reads = html.Div('Classified reads:', id='qc_classified_reads')
-qc_unclassified_reads = html.Div('Unclassified reads:', id='qc_unclassified_reads')
-waiting_files = html.Div('Files awaiting processing:', id='waiting_files')
-processed_files = html.Div('Files processed:', id='processed_files')
+qc_total_reads = html.Div('Total reads (after filtering):', style={'padding-right': '10px'}, id='qc_total_reads')
+qc_classified_reads = html.Div('Classified reads:', style={'padding-right': '10px'}, id='qc_classified_reads')
+qc_unclassified_reads = html.Div('Unclassified reads:', style={'padding-right': '10px'}, id='qc_unclassified_reads')
+waiting_files = html.Div('Files awaiting processing:', style={'padding-right': '10px'}, id='waiting_files')
+processed_files = html.Div('Files processed:', style={'padding-right': '10px'}, id='processed_files')
 
 # Tooltip for the total reads.
 total_reads_tooltip = dbc.Tooltip('The total reads are displayed here after quality filtering, hence the numbers will differ from the ones in the plots, which are the total reads produced (pre-filtering).', 
@@ -611,11 +644,11 @@ total_reads_tooltip = dbc.Tooltip('The total reads are displayed here after qual
 # Initial empty placeholder plots (plotly express).
 cumul_reads_fig = px.line(qc_df, x='Time', y="Cumulative reads")
 cumul_bp_fig = px.line(qc_df, x='Time', y="Cumulative bp")
-reads_fig = px.line(qc_df, x='Time', y="Reads")
-bp_fig = px.line(qc_df, x='Time', y="Bp")
+reads_fig = px.bar(qc_df, x='Time', y="Reads")
+bp_fig = px.bar(qc_df, x='Time', y="Bp")
 
 # QC plot layout: division into cols and rows, one plot each place.
-qc_col_1 = html.Div(
+qc_row_3 = html.Div(
     [   
         html.Div(dcc.Graph(id='cumul_reads_graph',
                            figure=cumul_reads_fig), 
@@ -626,7 +659,7 @@ qc_col_1 = html.Div(
     ], className="hstack gap-3"
 )
 
-qc_col_2 = html.Div(
+qc_row_4 = html.Div(
     [   
         html.Div(dcc.Graph(id='reads_graph',
                            figure=reads_fig), 
@@ -637,12 +670,32 @@ qc_col_2 = html.Div(
     ], className="hstack gap-3"
 )
 
-qc_rows = html.Div(
-    [   
-        html.Div(qc_col_1, className="bg-light border"),
-        html.Div(qc_col_2)
-    ], className="vstack gap-3"    
+qc_column_2 = html.Div(
+    [qc_row_3,
+     qc_row_4
+    ], 
+    className="vstack gap-3"
 )
+
+qc_row_13= html.Div(
+    [   
+        html.Div([qc_total_reads,
+                  qc_classified_reads,
+                  qc_unclassified_reads,
+                  html.Br(),
+                  waiting_files,
+                  processed_files,
+                  ]),
+        html.Div('more info')],
+        className="hstack gap-3"
+)
+
+# qc_cols123 = html.Div(
+#     [   
+#         html.Div(qc_row_1),
+#         html.Div(qc_row_2, className="bg-light border")
+#     ], className="vstack gap-3"    
+# )
 
 # Tooltips for QC charts.
 cumul_reads_graph_tooltip = dbc.Tooltip('This graph displays the reads produced by the sequencer cumulatively over time.', 
@@ -666,26 +719,64 @@ bp_graph_tooltip = dbc.Tooltip('This graph displays the base pairs produced in e
                                     delay={'show': 1000})
 
 # Main layout for QC tab.
-qc_layout = html.Div([qc_head,
-                      qc_total_reads,
-                      qc_classified_reads,
-                      qc_unclassified_reads,
-                      html.Br(),
-                      waiting_files,
-                      processed_files,
-                      html.Hr(),
-                      dbc.Container(qc_rows), # adding a container here centers the plots in the layout
-                      cumul_reads_graph_tooltip,
-                      cumul_bp_graph_tooltip,
-                      reads_graph_tooltip,
-                      bp_graph_tooltip,
-                      total_reads_tooltip],
-                     className="bg-light border"
+# qc_layout = html.Div([qc_head,
+#                       html.Hr(),
+#                       dbc.Container(qc_cols), # adding a container here centers the plots in the layout
+#                       cumul_reads_graph_tooltip,
+#                       cumul_bp_graph_tooltip,
+#                       reads_graph_tooltip,
+#                       bp_graph_tooltip,
+#                       total_reads_tooltip],
+#                      className="bg-light border"
+#                      )
+qc_row_1 = html.Div([qc_head,
+                     html.Hr()]
                      )
 
+qc_row_2 = html.Div(
+    [   
+        html.Div('col1', className="bg-light border"),
+        html.Div('col2', className="bg-light border")
+    ], className="hstack gap-3"    
+)
+
+
+qc_layout2 = html.Div([qc_row_1, 
+                      #qc_row_2,
+                      qc_row_3,
+                      qc_row_4
+                    ],
+                      className="vstack gap-3"
+                      )
+
+qc_info_section = html.Div('Info about the tab', className="bg-light border")
+
+qc_row_all = html.Div(
+    [   
+        html.Div(html.Div([qc_total_reads,
+                  qc_classified_reads,
+                  qc_unclassified_reads,
+                  html.Br(),
+                  waiting_files,
+                  processed_files,
+                  html.Br(),
+                  html.Hr(),
+                  qc_info_section
+                  ]), className="bg-light border"),
+        html.Div(qc_column_2, className="bg-light border")
+    ], className="hstack gap-3"    
+)
+
+qc_layout = html.Div([html.Br(),
+                      qc_head,
+                      html.Br(),
+                      qc_row_all])
 
 ###############################################################################
 ##### sunburst and icicle charts, tab 2 #######################################
+
+# Sunburst header
+sunburst_head = html.H2('Sunburst chart bla bla', className="bg-light border")
 
 # Sunburst plot figure.
 sunburst_chart = dcc.Graph(id='sunburst_chart',
@@ -754,14 +845,29 @@ sunburst_button_tooltip = dbc.Tooltip('Apply your filters. Filters will also be 
                                     placement='top',
                                     delay={'show': 1000})
 
+sunburst_info = html.Div('Explanations of this tab. Add size adjustment and font size to filtering options')
+
 # Layout for sunburst filtering.
 sun_filtering = html.Div(
     [   
         html.Div([sun_filter_head, sun_filter_val, sunburst_filter_tooltip], className="bg-light border"),        
         html.Div(sun_domains, className="bg-light border"),
-        html.Div([sun_submit, sunburst_button_tooltip], className="bg-light border")
+        html.Div([sun_submit, sunburst_button_tooltip]),
+        html.Br(),
+        html.Hr(),
+        html.Br(),
+        html.Div(sunburst_info, className="bg-light border")
     ], 
-    className="hstack gap-3"    
+    className="vstack gap-3"    
+)
+
+sunburst_complete = html.Div(
+    [   
+        html.Div(sunburst_chart, 
+                 className="bg-light border"),
+        html.Div(sun_filtering)
+    ], 
+    className="hstack gap-3"
 )
 
 # Icicle filtering.
@@ -855,43 +961,111 @@ interval_component = dcc.Interval(id='interval_component',
 main_tabs = html.Div([
     dcc.Tabs([
         dcc.Tab(label='Main', children=[
-            sankey_plot,
-            dbc.Container(sankey_filtering),
-            html.Br(),
-            html.Hr(),
-            html.Br(),
             dbc.Container(pathogens_top),
-            html.Br()
-        ]),
-        dcc.Tab(label='Explore', children=[
-            dbc.Container(sunburst_chart),
-            sunburst_tooltip,
-            dbc.Container(sun_filtering),
-            html.Br(),
-            html.Hr(),
-            html.Br(),
-            icicle_chart,
-            icicle_tooltip,
-            dbc.Container(ice_filtering),
             html.Br()
         ]),
         dcc.Tab(label='QC', children=[
             qc_layout,
             html.Br()
         ]),
+        dcc.Tab(label='Sankey plot', children=[
+            html.Br(),
+            sankey_head,
+            sankey_plot,
+            dbc.Container(sankey_filtering),
+            html.Br(),
+            sankey_info,
+            html.Br()
+        ]),
+        dcc.Tab(label='Sunburst chart', children=[
+            html.Br(),
+            sunburst_head,
+            sunburst_complete,
+            sunburst_tooltip,
+            html.Br()
+        ]),
+        
     ])
 ])
+
+################# NEW LAYOUT #############
+main_row_1 = html.Div(
+    [   
+        html.Div(qc_layout, 
+                 className="bg-light border"),
+        html.Div(dbc.Container(pathogens_top))
+    ], 
+    className="hstack gap-3"
+)
+
+# html.Div(dbc.Container(pathogens_top))
+
+main_row_2 = html.Div(
+    [
+        html.Div([sankey_plot,
+                  dbc.Container(sankey_filtering)
+                ], 
+                className="bg-light border")        
+    ],
+    className="vstack gap-3"
+)
+
+main_cols = html.Div(
+    [   
+        html.Div(main_row_1),
+        html.Div(main_row_2)
+    ], className="hstack gap-2"    
+)
+
+# pathogens_top = html.Div(
+#     [   
+#         html.Div([toplist_head,
+#                   top_list,
+#                   html.Br(),
+#                   toplist_filtering
+#                   ],
+#                  className="bg-light border"),
+#         html.Div([pathogen_head,
+#                   pathogen_gauge,
+#                   gauge_tooltip,
+#                   pathogen_table,
+#                   html.Br(),
+#                   validate_option, 
+#                   validation_tooltip
+#                   ],
+#                  className="bg-light border")
+#     ], className="hstack gap-3"
+# )
+
+main_layout_column = html.Div(
+    [   
+        html.Div(main_row_1),
+        html.Div(main_row_2)
+    ], className="vstack gap-3"    
+)
+
+upper_gui_layout = html.Div(
+    [   
+        html.Div(dbc.Container([main_title,
+                  subtext]),
+                  style={"margin-right": "100px"}
+                  ),
+        html.Div(dbc.Container([update_toggle,
+                  update_toggle_tooltip,
+                  update_status,
+                  timestamp])
+                  )
+    ], className="hstack gap-3",
+    style={"display": "flex"}   
+)
 
 
 # Highest level of layout organization. This defines the order of the
 # headline, info, update toggle and tabs.
-app.layout= html.Div([main_title,
-                      subtext,
-                      update_toggle,
-                      update_toggle_tooltip,
-                      update_status,
-                      timestamp,
+app.layout= html.Div([upper_gui_layout,
                       html.Br(),
+                    #   html.Hr(),
+                    #   html.Br(),
                       main_tabs,
                       interval_component
                       ])
@@ -1004,6 +1178,7 @@ def pathogen_update(interval_trigger, val_state):
             # add to table
             df_to_print['Validated reads'] = validated_col
     # dash handling
+    #print(df_to_print)
     data = df_to_print.to_dict('records') 
     columns = [{"name": i, "id": i} for i in df_to_print.columns]
     gauge_layout() # layout for the danger meter
@@ -1040,11 +1215,45 @@ def update_qc_plots(interval_trigger):
     # creates df from qc file
     # qc file path specified at the start of this script
     qc_df = get_qc_df(qc_file) 
+    #print(type(qc_df))
+    #print(qc_df['Time'])
     # defines data for the 4 plots
     cumul_reads_fig = px.line(qc_df, x='Time', y="Cumulative reads")
     cumul_bp_fig = px.line(qc_df, x='Time', y="Cumulative bp")
-    reads_fig = px.line(qc_df, x='Time', y="Reads")
-    bp_fig = px.line(qc_df, x='Time', y="Bp")       
+    time_for_barplots = pd.to_datetime(qc_df["Time"]).dt.strftime("%H:%M:%S")
+    #print(time_for_barplots)
+    reads_fig = px.bar(qc_df, x=time_for_barplots, y="Reads")
+    bp_fig = px.bar(qc_df, x=time_for_barplots, y="Bp")
+    reads_fig.update_xaxes(title_text="Time")
+    bp_fig.update_xaxes(title_text="Time")
+    standard_width = 650
+    standard_height = 350
+    b_marg = 10
+    l_marg = 10
+    t_marg = 35
+    r_marg = 10
+    reads_fig.update_xaxes(type='category')
+    bp_fig.update_xaxes(type='category')
+    cumul_reads_fig.update_layout(width=standard_width,
+                                  height=standard_height,
+                                  margin=dict(l=l_marg, r=r_marg, t=t_marg, b=b_marg),
+                                  title='Cumulative reads'
+                                  )
+    cumul_bp_fig.update_layout(width=standard_width,
+                               height=standard_height,
+                               margin=dict(l=l_marg, r=r_marg, t=t_marg, b=b_marg),
+                               title='Cumulative bp'
+                               )
+    reads_fig.update_layout(width=standard_width,
+                            height=standard_height,
+                            margin=dict(l=l_marg, r=r_marg, t=t_marg, b=b_marg),
+                            title='Reads'
+                            )
+    bp_fig.update_layout(width=standard_width,
+                         height=standard_height,
+                         margin=dict(l=l_marg, r=r_marg, t=t_marg, b=b_marg),
+                         title='Bp'
+                         )
     return cumul_reads_fig, cumul_bp_fig, reads_fig, bp_fig
 
 # Displays classified, unclassified and total reads from Kraken.
@@ -1107,7 +1316,7 @@ def run_app():
     '''
     # A unique port specifiable in config.
     # Debug=True means it updates as you make changes in this script.
-    app.run(debug=False, port=int(config_contents['gui_port']))
+    app.run(debug=True, port=int(config_contents['gui_port']))
 if __name__ == "__main__":
     # The run_app makes it run as an entry point (bash command).
     run_app() 
