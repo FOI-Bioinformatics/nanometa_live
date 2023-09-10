@@ -32,5 +32,11 @@ jobs:
     - name: Check nanometa-new version
       run: nanometa-new --version 
 
-    - name: Check nanometa-pipe version
-      run: nanometa-pipe --version 
+    - name: Check nanometa-backend version
+      run: nanometa-backend --version
+
+    - name: Check nanometa-gui version
+      run: nanometa-gui--version
+
+    - name: Check nanometa-live version
+      run: nanometa-live --version
