@@ -15,8 +15,6 @@ The callback functions mostly call external funcions, but here as well
 some smaller functions remain in the callbacks themselves.
 '''
 
-# global version variable
-__version__ = "0.1.0"
 
 ########## DASH PACKAGES ######################################################
 from dash import Dash, html, dcc, Output, Input, State, dash_table
@@ -58,6 +56,8 @@ from nanometa_live.gui_scripts.create_top_list import create_top_list
 from nanometa_live.gui_scripts.icicle_sunburst_data import icicle_sunburst_data
 from nanometa_live.gui_scripts.validation_col import validation_col
 
+from nanometa_live import __version__  # Import the version number
+
 ########## --help argument ####################################################
 # Checks if the user has added the --help argument to the command and 
 # displays the help info if that is the case. Otherwise, script proceeds
@@ -65,12 +65,13 @@ from nanometa_live.gui_scripts.validation_col import validation_col
 
 # Parses command-line arguments
 parser = argparse.ArgumentParser(description='Runs the Nanometa Live GUI.')
-parser.add_argument('-help', action='store_true', help='Displays help message')
+parser.add_argument('--config', default='config.yaml', help='Path to the configuration file. Default is config.yaml.')
+parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}',
+                    help="Show the current version of the script.")
+parser.add_argument('-p', '--path', default='', help="The path to the project directory.")
 
 args = parser.parse_args()
 
-if args.help:
-    parser.print_help()
 
 ########## VARIOUS FUNCTIONS ##################################################
 
@@ -256,11 +257,23 @@ def create_sunburst(ice_sun_data):
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 # Current version of the program.
-version = '0.1.0'
+version = __version__
+config_file_path = os.path.join(args.path, args.config) if args.path else args.config
 
 # Load config file variables.
-with open('config.yaml', 'r') as cf:
-    config_contents = yaml.safe_load(cf)
+# Check if the config file exists.
+if not os.path.exists(config_file_path):
+    print(f"Error: Config file '{config_file_path}' not found.")
+    exit(1)
+
+# Load config file variables.
+try:
+    with open(config_file_path, 'r') as cf:
+        config_contents = yaml.safe_load(cf)
+except Exception as e:
+    print(f"Error: An issue occurred while reading the config file. Details: {e}")
+    exit(1)
+
 # Create interval frequency variable.
 interval_freq = config_contents['update_interval_seconds']
     
@@ -301,7 +314,7 @@ df_to_print = pd.DataFrame(columns= ['Name', 'Tax ID', 'Reads'])
 top_df = pd.DataFrame(columns= ['Name', 'Tax ID', 'Reads'])
 
 # Initial pathogen gauge while waiting for data.
-gauge_fig = create_gauge()
+gauge_fig = create_gauge(config_file_path=config_file_path)
 gauge_layout()
 
 # An empty dataframe for sankey as a placeholder until the first data is produced.
@@ -318,13 +331,13 @@ sunburst_fig = create_sunburst(icicle_sunburst_data(raw_df,
                                                     ['Bacteria', 
                                                      'Archaea', 
                                                      'Eukaryota', 
-                                                     'Viruses'], 10)
+                                                     'Viruses'], 10, config_file_path=config_file_path)
                                )
 icicle_fig = create_icicle(icicle_sunburst_data(raw_df,
                                                 ['Bacteria', 
                                                  'Archaea', 
                                                  'Eukaryota', 
-                                                 'Viruses'], 10)
+                                                 'Viruses'], 10, config_file_path=config_file_path)
                                )
 
 
@@ -953,7 +966,7 @@ def update_sankey(interval_trigger, filter_click, filter_value, domains, clades)
               State('sun_filter_val', 'value'),
               State('sun_domains', 'value')) # all the filters are states until click
 def update_sunburst(interval_trigger, filter_click, filter_value, domains):
-    data = icicle_sunburst_data(raw_df, domains, int(filter_value))
+    data = icicle_sunburst_data(raw_df, domains, int(filter_value), config_file_path=config_file_path)
     sunburst_fig = create_sunburst(data)
     return sunburst_fig
 
@@ -965,7 +978,7 @@ def update_sunburst(interval_trigger, filter_click, filter_value, domains):
               State('ice_filter_val', 'value'),
               State('ice_domains', 'value')) # all the filters are states until click
 def update_icicle(interval_trigger, filter_click, height_value, filter_value, domains):
-    data = icicle_sunburst_data(raw_df, domains, int(filter_value))
+    data = icicle_sunburst_data(raw_df, domains, int(filter_value), config_file_path=config_file_path)
     icicle_fig = create_icicle(data, int(height_value))
     return icicle_fig
 
