@@ -36,7 +36,7 @@ jobs:
       run: nanometa-backend --version
 
     - name: Check nanometa-gui version
-      run: nanometa-gui--version
+      run: nanometa-gui --version
 
     - name: Check nanometa-live version
       run: nanometa-live --version
