@@ -57,6 +57,7 @@ from nanometa_live.gui_scripts.fix_list_order import fix_list_order
 from nanometa_live.gui_scripts.create_top_list import create_top_list
 from nanometa_live.gui_scripts.icicle_sunburst_data import icicle_sunburst_data
 from nanometa_live.gui_scripts.validation_col import validation_col
+#from gui_scripts.validation_col import validation_col
 
 ########## --help argument ####################################################
 # Checks if the user has added the --help argument to the command and 
@@ -172,7 +173,7 @@ def create_pathogen_table():
     The callback functions send the variables 'data' and 'columns' here.
     '''
     # The lower read limit for when an entry is colored yellow.
-    wll = str(config_contents["warning_lower_limit"])
+    #wll = str(config_contents["warning_lower_limit"])
     # The lower read limit for when an entry is colored red.
     dll = str(config_contents["danger_lower_limit"])
     # Creates the table.
@@ -182,10 +183,10 @@ def create_pathogen_table():
         id='pathogen_table',
         fill_width=False,
         style_data_conditional=[
-            {'if': {
-                'filter_query': '{Reads} >' + wll
-                },
-                'backgroundColor': '#fafa05'}, # yellow
+            # {'if': {
+            #     'filter_query': '{Reads} >' + wll
+            #     },
+            #     'backgroundColor': '#fafa05'}, # yellow
             {'if': {
                 'filter_query': '{Reads} >' + dll
                 },
@@ -507,7 +508,7 @@ toplist_filter_head = html.Label('Number of taxa to include:',
                                  style={'padding-right': '10px'}) # headline
 
 top_filter_val = dcc.Input(id='top_filter_val', # filter value
-                         value='15',
+                         value='20',
                          type='number'
                          )
 
@@ -1159,24 +1160,69 @@ def update_icicle(interval_trigger, filter_click, height_value, filter_value, do
               )
 def pathogen_update(interval_trigger, val_state):
     # get the data, using the species list from config and the raw df
-    pathogen_info = pathogen_df(config_contents['species_of_interest'], raw_df) 
+    pathogen_list = config_contents['species_of_interest']
+    pathogen_info = pathogen_df(pathogen_list, raw_df)
+    dll = int(config_contents["danger_lower_limit"])
+    #print('---------------------------------------------------------------------')
+    #print(config_contents['species_of_interest'])
+    #print(raw_df) 
+    #print(pathogen_info)
+    #print(pathogen_info.iloc[0,1], type(pathogen_info.iloc[0,1]))
+    #print(pathogen_list[0], type(pathogen_list[0]))
+    
+    # add any entry from the pathogen list that was not included in the df, 
+    # setting nr of reads to 0
+    for entry in pathogen_list:
+        #print(entry)
+        if entry not in pathogen_info['Tax ID'].values:
+            #print('NEW FUNCT TEST- found missing entry: ', entry)
+            pathogen_info.loc[len(pathogen_info.index)] = ['not found in DB', # add pathogen name 
+                                                            entry, # add pathogen taxID
+                                                            0, # add pathogen nr of reads
+                                                            0.0, # add percent reads for pathogens
+                                                            0]
+    #print(pathogen_info)
+
+    pathogen_info['Color'] = pathogen_info['Reads'].apply(lambda x: 'Green' if x < dll else 'Red')
+
     # log10 data column for danger meter
     graph_col = pathogen_info['log10(Reads)'] 
+
+    pathogen_barchart_fig = fig = px.bar(pathogen_info, 
+                                         x='Name', 
+                                         y='Reads', 
+                                         color='Color',
+                                         labels={'Reads': 'Number of Reads', 
+                                                 'Name': 'Species'},
+                                         title='Number of reads per species',
+                                         color_discrete_map={'Red': 'red', 'Green': 'green'})
+    
     # extract the pathogen with the highest nr of reads(log10)
     # display log10 reads in danger meter
     gauge_fig = create_gauge(graph_col.max()) 
+    gauge_fig = pathogen_barchart_fig
+    gauge_fig.update_layout(width=600, height=400)
+    gauge_fig.update_traces(width=0.4)
+    gauge_fig.update_traces(showlegend=False)
+    #gauge_fig.update_layout(barmode='group', bargap=0.010,bargroupgap=0.0) 
     # create a df with the pathogen cols to be displayed
     df_to_print = pathogen_info[['Name', 'Tax ID', 'Reads']].copy()
+    #print(df_to_print)
     # needed since the val_state object in "none" before first click
     if val_state:
         # if validation is on
         if len(val_state) == 1: 
             # get the IDs to be validated; the ones found in the data
             validation_list = list(df_to_print.iloc[:,1])
+            read_nr_list = list(df_to_print.iloc[:,2])
+            #print(validation_list)
+            #print(type(read_nr_list[3]))
             # get the validation data on the IDs
-            validated_col = validation_col(validation_list, blast_dir)
+            validated_col = validation_col(validation_list, blast_dir, read_nr_list)
+            #print(validated_col)
             # add to table
             df_to_print['Validated reads'] = validated_col
+            #print(df_to_print)
     # dash handling
     #print(df_to_print)
     data = df_to_print.to_dict('records') 
