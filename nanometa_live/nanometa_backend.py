@@ -25,7 +25,7 @@ def load_config(config_file):
     with open(config_file, 'r') as cf:
         return yaml.safe_load(cf)
 
-def execute_snakemake(snakefile_path, snakemake_cores):
+def execute_snakemake(snakefile_path, snakemake_cores, log_file_path="snakemake_output.log", conda_frontend='mamba'):
     """
     Execute the Snakemake workflow with the specified number of cores.
 
@@ -34,11 +34,22 @@ def execute_snakemake(snakefile_path, snakemake_cores):
         snakemake_cores (int): Number of cores to use for Snakemake.
     """
     logging.info(f"Executing Snakemake workflow with {snakemake_cores} cores")
-    log_file_path = "snakemake_output.log"  # Change this to your desired log file path
+
+    # Build the Snakemake command
+    snakemake_cmd = [
+        "snakemake",
+        "--cores", str(snakemake_cores),
+        "--rerun-incomplete",
+        "--use-conda",
+        "--conda-frontend", conda_frontend,
+        "--snakefile", snakefile_path
+    ]
+
+    logging.info(f'Executing shell command: {" ".join(snakemake_cmd)}')
+
+    # Execute the command and log the output
     with open(log_file_path, "a") as log_file:
-        system_cmd = f"snakemake --cores {snakemake_cores} --rerun-incomplete --use-conda --snakefile {snakefile_path}"
-        logging.info(f'Executing shell command: {system_cmd}')
-        subprocess.run(system_cmd, shell=True, stdout=log_file, stderr=subprocess.STDOUT)
+        subprocess.run(snakemake_cmd, stdout=log_file, stderr=subprocess.STDOUT)
 
 def remove_temp_files(config_contents):
     """
@@ -88,7 +99,7 @@ def remove_temp_files(config_contents):
     logging.info('Cleanup done.')
 
 
-def timed_senser(config_file):
+def timed_senser(config_file, conda_frontend='mamba'):
     """
     Continuously execute the Snakemake workflow at a set time interval.
 
@@ -101,11 +112,12 @@ def timed_senser(config_file):
     snakemake_cores = config_contents['snakemake_cores']
     snakefile_path = pkg_resources.resource_filename('nanometa_live', 'Snakefile')
 
+
     while True:
         try:
             time.sleep(t)
             logging.info(f"Current interval: {t} seconds.")
-            execute_snakemake(snakefile_path, snakemake_cores)
+            execute_snakemake(snakefile_path, snakemake_cores, conda_frontend=conda_frontend)
             logging.info("Run completed.")
         except KeyboardInterrupt:
             logging.info("Interrupted by user.")
@@ -123,6 +135,7 @@ def main():
     parser.add_argument('--config', default='config.yaml', help='Path to the configuration file. Default is config.yaml.')
     parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}', help="Show the current version of the script.")
     parser.add_argument('-p', '--path', default='', help="The path to the project directory.")
+    parser.add_argument('--conda-frontend', default='mamba', choices=['mamba', 'conda'], help="Conda frontend to use. Default is mamba.")
     args = parser.parse_args()
 
 
