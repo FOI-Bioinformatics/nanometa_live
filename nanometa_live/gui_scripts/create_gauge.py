@@ -1,16 +1,28 @@
 import plotly.graph_objects as go
 import yaml
 import math
+import os
 
-def create_gauge(value = 0): # value = highest log10 reads
+def create_gauge(value = 0, config_file_path='config.yaml'): # value = highest log10 reads
     """
     Creates a plotly gauge from a float; a species of interests log10 read value.
     Coloring: yellow = warning, red = danger.
     Ranges adjustable in config file.
     """
-    # load config file contents
-    with open('config.yaml', 'r')as cf:
-        config_content = yaml.safe_load(cf)
+
+    # Check if the config file exists
+    if not os.path.exists(config_file_path):
+        print(f"Error: Config file '{config_file_path}' not found.")
+        return None
+
+    # Load config file variables
+    try:
+        with open(config_file_path, 'r') as cf:
+            config_content = yaml.safe_load(cf)
+    except Exception as e:
+        print(f"Error: An issue occurred while reading the config file. Details: {e}")
+        return None
+
         
     # defining color ranges of the graph:
     # if any species have reads above Warning Lower Limit: yellow

@@ -2,17 +2,27 @@ from nanometa_live.gui_scripts.domain_filtering import domain_filtering
 from nanometa_live.gui_scripts.icicle_sunburst_matrix import icicle_sunburst_matrix
 from nanometa_live.gui_scripts.get_icicle_data import get_icicle_data
 import yaml
+import os
 
-def icicle_sunburst_data(raw_df, domains, count = 10):
+def icicle_sunburst_data(raw_df, domains, count = 10, config_file_path='config.yaml'):
     """
     Creates the data in the format needed for plotly sunsickle charts.
     Data format for sunburst and icicle is identical.
     """
     
-    # Load config file variables.
-    with open('config.yaml', 'r') as cf:
-        config_contents = yaml.safe_load(cf)
-        
+    # Check if the config file exists
+    if not os.path.exists(config_file_path):
+        print(f"Error: Config file '{config_file_path}' not found.")
+        return None
+
+    # Load config file variables
+    try:
+        with open(config_file_path, 'r') as cf:
+            config_contents = yaml.safe_load(cf)
+    except Exception as e:
+        print(f"Error: An issue occurred while reading the config file. Details: {e}")
+        return None
+
     # Gets the tax letters from the config file.
     config_letters = config_contents['taxonomic_hierarchy_letters']
     
