@@ -129,7 +129,6 @@ def main():
     """
     Main function that parses command-line arguments and executes the timed_senser function.
     """
-    logging.info("nanometa_live backend started")
 
     parser = argparse.ArgumentParser(description='A script that runs the Snakemake workflow at a set time interval.')
     parser.add_argument('--config', default='config.yaml', help='Path to the configuration file. Default is config.yaml.')
@@ -138,6 +137,11 @@ def main():
     parser.add_argument('--conda-frontend', default='mamba', choices=['mamba', 'conda'], help="Conda frontend to use. Default is mamba.")
     args = parser.parse_args()
 
+
+    if '--version' not in sys.argv:
+        # Initialize logging only if '--version' is not in the argument list
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+        logging.info("nanometa_live backend started")
 
     # Check if any arguments were provided
     if not any(vars(args).values()):
