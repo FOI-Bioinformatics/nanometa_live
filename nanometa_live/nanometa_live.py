@@ -16,14 +16,25 @@ def parse_arguments():
     parser.add_argument('-p', '--path', default='', help="The path to the project directory.")
     return parser.parse_args()
 
+
 def start_processes(commands, args):
     processes = []
     for cmd in commands:
-        cmd_with_args = f"{cmd} --config {args.config} -p {args.path}"
-        logging.info(f"Starting process: {cmd_with_args}")
-        process = subprocess.Popen(cmd_with_args, shell=True)
+        cmd_with_args = [cmd]
+
+        if args.config:
+            cmd_with_args.extend(["--config", args.config])
+
+        if args.path:
+            cmd_with_args.extend(["-p", args.path])
+
+        logging.info(f"Starting process: {' '.join(cmd_with_args)}")
+
+        process = subprocess.Popen(cmd_with_args)  # Note: removed shell=True for better security
         processes.append(process)
+
     return processes
+
 
 def terminate_processes(processes):
     for process in processes:
