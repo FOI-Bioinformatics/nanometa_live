@@ -6,6 +6,7 @@ import shutil
 import argparse
 import logging
 import subprocess
+import sys
 from nanometa_live import __version__  # Import the version number
 
 # Initialize logging
