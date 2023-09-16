@@ -58,7 +58,7 @@ from nanometa_live.gui_scripts.create_top_list import create_top_list
 from nanometa_live.gui_scripts.icicle_sunburst_data import icicle_sunburst_data
 from nanometa_live.gui_scripts.validation_col import validation_col
 #from nanometa_live.gui_scripts.get_filter_settings import get_filter_settings
-from gui_scripts.get_filter_settings import get_filter_settings
+#from gui_scripts.get_filter_settings import get_filter_settings
 
 from nanometa_live import __version__  # Import the version number
 
@@ -713,7 +713,11 @@ qc_head = html.H2('Technical QC',className="bg-light border")
 qc_unfiltered_reads = html.Div('Total reads (pre filtering):', style={'padding-right': '10px'}, id='qc_unfiltered_reads')
 qc_total_reads = html.Div('Total reads (post filtering):', style={'padding-right': '10px'}, id='qc_total_reads')
 qc_filtered_proportion = html.Div('Reads that passed filtering:', style={'padding-right': '10px'}, id='qc_filtered_proportion')
-qc_filtering_parameters = html.Div('Filter settings:', style={'padding-right': '10px'}, id='qc_filter_settings')
+qc_filter_settings = html.Div('FILTER SETTINGS', style={'padding-right': '10px'}, id='qc_filter_settings')
+qc_filter_quality = html.Div('Quality filter:', style={'padding-right': '10px'}, id='qc_filter_quality')
+qc_filter_length = html.Div('Length filter:', style={'padding-right': '10px'}, id='qc_filter_length')
+qc_filter_lowc = html.Div('Low complexity filter:', style={'padding-right': '10px'}, id='qc_filter_lowc')
+qc_filter_adapter = html.Div('Adapter trimming:', style={'padding-right': '10px'}, id='qc_filter_adapter')
 
 qc_classified_reads = html.Div('Classified reads:', style={'padding-right': '10px'}, id='qc_classified_reads')
 qc_unclassified_reads = html.Div('Unclassified reads:', style={'padding-right': '10px'}, id='qc_unclassified_reads')
@@ -769,6 +773,8 @@ qc_row_13= html.Div(
         html.Div([qc_unfiltered_reads,
                   qc_total_reads,
                   qc_filtered_proportion,
+                  html.Br(),
+                  qc_filter_settings,
                   html.Br(),
                   qc_classified_reads,
                   qc_unclassified_reads,
@@ -852,6 +858,12 @@ qc_row_all = html.Div(
         html.Div(html.Div([qc_unfiltered_reads,
                            qc_total_reads,
                            qc_filtered_proportion,
+                           html.Br(),
+                           qc_filter_settings,
+                           qc_filter_quality,
+                           qc_filter_length,
+                           qc_filter_lowc,
+                           qc_filter_adapter,
                            html.Br(),
                   qc_classified_reads,
                   qc_unclassified_reads,
@@ -1436,7 +1448,10 @@ def update_qc_plots(interval_trigger):
               Output('qc_unclassified_reads', 'children'),
               Output('qc_unfiltered_reads', 'children'),
               Output('qc_filtered_proportion', 'children'),
-              Output('qc_filter_settings', 'children'), 
+              Output('qc_filter_quality', 'children'),
+              Output('qc_filter_length', 'children'), 
+              Output('qc_filter_lowc', 'children'),
+              Output('qc_filter_adapter', 'children'),
               Input('interval_component', 'n_intervals') # interval input
               )
 def update_qc_text(interval_trigger):  
@@ -1458,26 +1473,30 @@ def update_qc_text(interval_trigger):
     l_filt = config_contents['l_filt']
     lc_filt = config_contents['lc_filt']
     a_trim = config_contents['a_trim']
-    if q_filt:
+    
+    if q_filt == "-Q":
         q_f = 'Off'
     else:
         q_f = 'On'
-    if l_filt:
+    if l_filt == '-L':
         l_f = 'Off'
     else:
-        l_f: = 'On' 
-    if lc_filt:
+        l_f = 'On' 
+    if lc_filt == '':
         lc_f = 'Off'
     else:
         lc_f = 'On'
-    if a_trim:
-        a_t = 'On'
+    if a_trim == '-A':
+        a_t = 'Off'
     else:
-        a_t = 'Off'   
+        a_t = 'On'   
 
-    filter_settings = "Filter settings\nQuality filter: ", q_f, "\nLength filter: ", l_f, "\nLow complexity filter: ", lc_f, "\nAdapter trimming: ", a_t
+    q = 'Quality filter: ', q_f
+    l = 'Length filter: ', l_f
+    lc = 'Low complexity filter: ', lc_f
+    a = 'Adapter trimming: ', a_t
 
-    return total_reads, classified_reads, unclassified_reads, unfiltered_reads, filtered_proportion, filter_settings
+    return total_reads, classified_reads, unclassified_reads, unfiltered_reads, filtered_proportion, q, l, lc, a
 
 # Displays the current nr of nanopore files waiting to be processed,
 # and the number of processed files.
