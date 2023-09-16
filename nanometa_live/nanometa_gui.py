@@ -1454,10 +1454,29 @@ def update_qc_text(interval_trigger):
     tot_reads_pre_filt = qc_df_b['Cumulative reads'].iloc[-1]
     unfiltered_reads = 'Total reads (pre filtering): ' + str(tot_reads_pre_filt)
     filtered_proportion = 'Reads that passed filtering: ' + str(float(round((t*100)/tot_reads_pre_filt, 1))) + ' %'
-    filter_settings = get_filter_settings(config_contents['q_filt'],
-                                          config_contents['l_filt'],
-                                          config_contents['lc_filt'],
-                                          config_contents['a_trim'])
+    q_filt = config_contents['q_filt']
+    l_filt = config_contents['l_filt']
+    lc_filt = config_contents['lc_filt']
+    a_trim = config_contents['a_trim']
+    if q_filt:
+        q_f = 'Off'
+    else:
+        q_f = 'On'
+    if l_filt:
+        l_f = 'Off'
+    else:
+        l_f: = 'On' 
+    if lc_filt:
+        lc_f = 'Off'
+    else:
+        lc_f = 'On'
+    if a_trim:
+        a_t = 'On'
+    else:
+        a_t = 'Off'   
+
+    filter_settings = "Filter settings\nQuality filter: ", q_f, "\nLength filter: ", l_f, "\nLow complexity filter: ", lc_f, "\nAdapter trimming: ", a_t
+
     return total_reads, classified_reads, unclassified_reads, unfiltered_reads, filtered_proportion, filter_settings
 
 # Displays the current nr of nanopore files waiting to be processed,
