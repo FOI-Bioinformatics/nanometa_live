@@ -57,7 +57,8 @@ from nanometa_live.gui_scripts.fix_list_order import fix_list_order
 from nanometa_live.gui_scripts.create_top_list import create_top_list
 from nanometa_live.gui_scripts.icicle_sunburst_data import icicle_sunburst_data
 from nanometa_live.gui_scripts.validation_col import validation_col
-#from gui_scripts.validation_col import validation_col
+#from nanometa_live.gui_scripts.get_filter_settings import get_filter_settings
+#from gui_scripts.get_filter_settings import get_filter_settings
 
 from nanometa_live import __version__  # Import the version number
 
@@ -260,7 +261,7 @@ def create_sunburst(ice_sun_data):
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 # Current version of the program.
-version = __version__
+version = __version__ 
 config_file_path = os.path.join(args.path, args.config) if args.path else args.config
 
 # Load config file variables.
@@ -709,14 +710,20 @@ pathogens_top = html.Div(
 qc_head = html.H2('Technical QC',className="bg-light border")
 
 # Initial placeholder values for the qc text info.
+qc_unfiltered_reads = html.Div('Total reads (pre filtering):', style={'padding-right': '10px'}, id='qc_unfiltered_reads')
 qc_total_reads = html.Div('Total reads (post filtering):', style={'padding-right': '10px'}, id='qc_total_reads')
+qc_filtered_proportion = html.Div('Reads that passed filtering:', style={'padding-right': '10px'}, id='qc_filtered_proportion')
+qc_filter_settings = html.Div('FILTER SETTINGS', style={'padding-right': '10px'}, id='qc_filter_settings')
+qc_filter_quality = html.Div('Quality filter:', style={'padding-right': '10px'}, id='qc_filter_quality')
+qc_filter_length = html.Div('Length filter:', style={'padding-right': '10px'}, id='qc_filter_length')
+qc_filter_lowc = html.Div('Low complexity filter:', style={'padding-right': '10px'}, id='qc_filter_lowc')
+qc_filter_adapter = html.Div('Adapter trimming:', style={'padding-right': '10px'}, id='qc_filter_adapter')
+
 qc_classified_reads = html.Div('Classified reads:', style={'padding-right': '10px'}, id='qc_classified_reads')
 qc_unclassified_reads = html.Div('Unclassified reads:', style={'padding-right': '10px'}, id='qc_unclassified_reads')
+
 waiting_files = html.Div('Files awaiting processing:', style={'padding-right': '10px'}, id='waiting_files')
 processed_files = html.Div('Files processed:', style={'padding-right': '10px'}, id='processed_files')
-qc_unfiltered_reads = html.Div('Total reads (pre filtering):', style={'padding-right': '10px'}, id='qc_unfiltered_reads')
-qc_filtered_proportion = html.Div('Reads that passed filtering:', style={'padding-right': '10px'}, id='qc_filtered_proportion')
-
 
 
 # Tooltip for the total reads.
@@ -766,6 +773,8 @@ qc_row_13= html.Div(
         html.Div([qc_unfiltered_reads,
                   qc_total_reads,
                   qc_filtered_proportion,
+                  html.Br(),
+                  qc_filter_settings,
                   html.Br(),
                   qc_classified_reads,
                   qc_unclassified_reads,
@@ -849,6 +858,12 @@ qc_row_all = html.Div(
         html.Div(html.Div([qc_unfiltered_reads,
                            qc_total_reads,
                            qc_filtered_proportion,
+                           html.Br(),
+                           qc_filter_settings,
+                           qc_filter_quality,
+                           qc_filter_length,
+                           qc_filter_lowc,
+                           qc_filter_adapter,
                            html.Br(),
                   qc_classified_reads,
                   qc_unclassified_reads,
@@ -1432,7 +1447,11 @@ def update_qc_plots(interval_trigger):
               Output('qc_classified_reads', 'children'),
               Output('qc_unclassified_reads', 'children'),
               Output('qc_unfiltered_reads', 'children'),
-              Output('qc_filtered_proportion', 'children'), 
+              Output('qc_filtered_proportion', 'children'),
+              Output('qc_filter_quality', 'children'),
+              Output('qc_filter_length', 'children'), 
+              Output('qc_filter_lowc', 'children'),
+              Output('qc_filter_adapter', 'children'),
               Input('interval_component', 'n_intervals') # interval input
               )
 def update_qc_text(interval_trigger):  
@@ -1450,7 +1469,34 @@ def update_qc_text(interval_trigger):
     tot_reads_pre_filt = qc_df_b['Cumulative reads'].iloc[-1]
     unfiltered_reads = 'Total reads (pre filtering): ' + str(tot_reads_pre_filt)
     filtered_proportion = 'Reads that passed filtering: ' + str(float(round((t*100)/tot_reads_pre_filt, 1))) + ' %'
-    return total_reads, classified_reads, unclassified_reads, unfiltered_reads, filtered_proportion
+    q_filt = config_contents['q_filt']
+    l_filt = config_contents['l_filt']
+    lc_filt = config_contents['lc_filt']
+    a_trim = config_contents['a_trim']
+    
+    if q_filt == "-Q":
+        q_f = 'Off'
+    else:
+        q_f = 'On'
+    if l_filt == '-L':
+        l_f = 'Off'
+    else:
+        l_f = 'On' 
+    if lc_filt == '':
+        lc_f = 'Off'
+    else:
+        lc_f = 'On'
+    if a_trim == '-A':
+        a_t = 'Off'
+    else:
+        a_t = 'On'   
+
+    q = 'Quality filter: ', q_f
+    l = 'Length filter: ', l_f
+    lc = 'Low complexity filter: ', lc_f
+    a = 'Adapter trimming: ', a_t
+
+    return total_reads, classified_reads, unclassified_reads, unfiltered_reads, filtered_proportion, q, l, lc, a
 
 # Displays the current nr of nanopore files waiting to be processed,
 # and the number of processed files.
