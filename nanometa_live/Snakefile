@@ -95,9 +95,9 @@ rule combine_qc:
 
 rule fastp_filtering:
 	# Filters the fastq files before Kraken classification. 
-	# The filtering settings are per fastP defaults.
-	# "dev/null" is a workaround to discard the reports.
-	# This sends the reports into Linux limbo: dev/null.
+	# The filtering settings are per fastP defaults. !!!!!!!!!
+	# "dev/null" is a workaround to discard the reports. !!!!!
+	# This sends the reports into Linux limbo: dev/null. !!!!!!
 	input:
 		os.path.join(config["nanopore_output_directory"], "{fileName}.fastq.gz")
 	output:
@@ -105,7 +105,7 @@ rule fastp_filtering:
 	conda:
 		pkg_resources.resource_filename('nanometa_live', 'snakemake_envs/fastp_env.yaml')
 	shell:
-		"fastp -i {input} -o {output} --json /dev/null --html /dev/null"
+		"fastp -i {input} -o {output} --json /dev/null --html /dev/null" + config["q_filt"] + config["l_filt"] + config["lc_filt"] + config["a_trim"]
 			
 rule run_kraken:
 	# Kraken classification of filtered fastq files.
