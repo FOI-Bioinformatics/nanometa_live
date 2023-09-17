@@ -526,11 +526,15 @@ pathogen_explanation_text = html.Div([info_string,
                                       pathogen_info_text_string],
                                       className="bg-light border")
 
+# Pahogen barchart.
+pathogen_fig_obj = dcc.Graph(id='pathogen_fig',
+                           figure=pathogen_fig)
+
 # Entire pathogen section in one object.
 pathogen_section = html.Div(
     [   
         html.Div([pathogen_head,
-                  pathogen_fig,
+                  pathogen_fig_obj,
                   pathogen_table,
                   html.Br(),
                   validate_option, 
