@@ -18,7 +18,7 @@ some smaller functions remain in the callbacks themselves.
 
 ########## DASH PACKAGES ######################################################
 import dash
-from dash import Dash, html, dcc, Output, Input, State, dash_table, callback
+from dash import Dash, html, dcc, Output, Input, State, dash_table
 import dash_daq as daq
 import dash_bootstrap_components as dbc
 
@@ -50,15 +50,12 @@ from nanometa_live.gui_scripts.create_edges import create_edges
 from nanometa_live.gui_scripts.filter_by_top import filter_by_top
 from nanometa_live.gui_scripts.format_sankey import format_sankey
 from nanometa_live.gui_scripts.pathogen_df import pathogen_df
-from nanometa_live.gui_scripts.create_gauge import create_gauge
 from nanometa_live.gui_scripts.domain_filtering import domain_filtering
 from nanometa_live.gui_scripts.get_qc_df import get_qc_df
 from nanometa_live.gui_scripts.fix_list_order import fix_list_order
 from nanometa_live.gui_scripts.create_top_list import create_top_list
 from nanometa_live.gui_scripts.icicle_sunburst_data import icicle_sunburst_data
 from nanometa_live.gui_scripts.validation_col import validation_col
-#from nanometa_live.gui_scripts.get_filter_settings import get_filter_settings
-#from gui_scripts.get_filter_settings import get_filter_settings
 
 from nanometa_live import __version__  # Import the version number
 
@@ -75,7 +72,6 @@ parser.add_argument('--version', action='version', version=f'%(prog)s {__version
 parser.add_argument('-p', '--path', default='', help="The path to the project directory.")
 
 args = parser.parse_args()
-
 
 ########## VARIOUS FUNCTIONS ##################################################
 
@@ -98,19 +94,6 @@ def sankey_fig_layout():
                              margin=dict(t=20, l=20, b=20, r=50)
                              )
     
-def gauge_layout():
-    '''
-    Defines layout for the pathogen danger gauge.
-    Some problems still remain with the autolayout here,
-    because the graph is displayed in a container where 
-    the size is determined by the other objects in the container.
-    '''
-    gauge_fig.update_layout({'autosize': False}, # autolayout off!
-                            width=400,
-                            height=300,
-                            margin=dict(t=10, l=10, b=10, r=10)
-                            )
- 
 def create_sankey_data(selected_domains, clade_list, top_filter = 5):
     '''
     Main script for sankey data processing and raw data updating.
@@ -118,7 +101,6 @@ def create_sankey_data(selected_domains, clade_list, top_filter = 5):
     all the plots and things call, but it can't since it needs to be
     linked to a callback to be interval triggered.)  
     '''
-    
     # Updates the global variable for use in other functions.
     # raw_df is the imported cumulative kreport file.
     global raw_df 
@@ -176,8 +158,6 @@ def create_pathogen_table():
     Ranges for coloring specifyable in config file.
     The callback functions send the variables 'data' and 'columns' here.
     '''
-    # The lower read limit for when an entry is colored yellow.
-    #wll = str(config_contents["warning_lower_limit"])
     # The lower read limit for when an entry is colored red.
     dll = str(config_contents["danger_lower_limit"])
     # Creates the table.
@@ -187,10 +167,6 @@ def create_pathogen_table():
         id='pathogen_table',
         fill_width=False,
         style_data_conditional=[
-            # {'if': {
-            #     'filter_query': '{Reads} >' + wll
-            #     },
-            #     'backgroundColor': '#fafa05'}, # yellow
             {'if': {
                 'filter_query': '{Reads} >' + dll
                 },
@@ -210,27 +186,6 @@ def create_top_table():
         id='top_table',
         fill_width=False)
     return top_tabl
-
-def create_icicle(ice_sun_data, height = 800):
-    '''
-    Creates the icicle plot fig.
-    '''
-    icicle_fig =px.icicle(ice_sun_data,
-                          names='Taxon',
-                          parents='Parent',
-                          values='Reads',
-                          color='Reads', 
-                          color_continuous_scale='Jet'
-                          )
-    icicle_fig.update_traces(selector=dict(type='icicle'),
-                             hovertemplate='<b>%{label} </b> <br> Reads: %{value}' # define hover data
-                             )
-    icicle_fig.update_layout({'autosize': False}, # autolayout off!
-                             height = height,
-                             width=1700,
-                             margin = dict(t=50, l=25, r=25, b=25)
-                             )
-    return icicle_fig
 
 def create_sunburst(ice_sun_data):
     '''
@@ -253,7 +208,6 @@ def create_sunburst(ice_sun_data):
                                )
     return sunburst_fig
 
-
 ########## STARTUP VARIABLES ##################################################
 
 # Main definition of the app, needed by Dash.
@@ -262,9 +216,9 @@ app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 # Current version of the program.
 version = __version__ 
+
 config_file_path = os.path.join(args.path, args.config) if args.path else args.config
 
-# Load config file variables.
 # Check if the config file exists.
 if not os.path.exists(config_file_path):
     print(f"Error: Config file '{config_file_path}' not found.")
@@ -280,7 +234,8 @@ except Exception as e:
 
 # Create interval frequency variable.
 interval_freq = config_contents['update_interval_seconds']
-# craete variable for pathogen coloring cutoff
+# Create variable for pathogen coloring cutoff. 
+# Used in pathogen info section.
 dll_2 = str(config_contents["danger_lower_limit"])
     
 # Path to cumulative kraken report.
@@ -316,12 +271,11 @@ raw_df = pd.DataFrame(zero_data, columns=None)
 # Initial empty pathogen list.
 df_to_print = pd.DataFrame(columns= ['Name', 'Tax ID', 'Reads'])
 
+# Initial placeholder pathogen barchart.
+pathogen_fig = px.bar(qc_df, x='Time', y="Reads")
+
 # Initial empty top list.
 top_df = pd.DataFrame(columns= ['Name', 'Tax ID', 'Reads'])
-
-# Initial pathogen gauge while waiting for data.
-gauge_fig = create_gauge(config_file_path=config_file_path)
-gauge_layout()
 
 # An empty dataframe for sankey as a placeholder until the first data is produced.
 placeholder_data = sankey_placeholder()
@@ -332,36 +286,27 @@ sankey_fig_layout()
 # Initial tax level list before first update.
 clade_list = config_contents['taxonomic_hierarchy_letters']
 
-# Initial sunburst and icicle figs.
+# Initial sunburst fig.
 sunburst_fig = create_sunburst(icicle_sunburst_data(raw_df,
                                                     ['Bacteria', 
                                                      'Archaea', 
                                                      'Eukaryota', 
                                                      'Viruses'], 10, config_file_path=config_file_path)
                                )
-icicle_fig = create_icicle(icicle_sunburst_data(raw_df,
-                                                ['Bacteria', 
-                                                 'Archaea', 
-                                                 'Eukaryota', 
-                                                 'Viruses'], 10, config_file_path=config_file_path)
-                               )
-
 
 ########## LAYOUT OBJECTS #####################################################
-# The layout is organized into a header section and three tabs with 
+# The layout is organized into a header section and 4 tabs with 
 # the various information. First, the contents of the tabs is specified
 # and sub-organized when needed. Then the main tabs are organized into one 
 # division. Finally, the highest level of layout is defined, including the 
 # tabs as one object.
-
 
 ###############################################################################
 ##### main title and info + live toggle, always at the top of GUI #############
 
 # Main headline at the top of the page.
 # Specifiable from config.
-main_title = html.H2(config_contents["analysis_name"]
-                     )
+main_title = html.H2(config_contents["analysis_name"])
 
 # Program description and version.
 subtext = html.Div(['NANOMETA LIVE',
@@ -380,7 +325,8 @@ update_toggle = daq.ToggleSwitch(id='update_toggle',
                                 )
 
 # Tooltip for toggle button.
-update_toggle_tooltip = dbc.Tooltip('Pause/unpause the real-time updating of the interface. The data processing pipeline will still be active in the background.', 
+update_toggle_tooltip = dbc.Tooltip('Pause/unpause the real-time updating of the interface. \
+                                    The data processing pipeline will still be active in the background.', 
                                     target='update_toggle',
                                     placement='top',
                                     delay={'show': 1000})
@@ -410,8 +356,26 @@ quit_button = html.Div([
     html.Div(id='output-message'),
 ])
 
+# Head section in one layout object.
+upper_gui_layout = html.Div(
+    [   
+        html.Div(dbc.Container([main_title,
+                  subtext]),
+                  style={"margin-right": "100px"}
+                  ),
+        html.Div(dbc.Container([update_toggle,
+                  update_toggle_tooltip,
+                  update_status,
+                  timestamp]),
+                  style={"margin-right": "300px"}
+                  ),
+        html.Div(dbc.Container(quit_button))
+    ], className="hstack gap-3",
+    style={"display": "flex"}   
+)
+
 ###############################################################################
-##### sankey plot with options, in tab 1 ######################################
+##### sankey plot with options, in tab 3 ######################################
 
 # Sankey headline
 sankey_head = html.H2('Sankey plot', className="bg-light border")
@@ -462,7 +426,7 @@ choose_hierarchy = html.Div(children=[
     html.Label('Taxonomic levels to include:',
                style={'padding-right': '10px'}),
     dcc.Checklist(config_contents['taxonomic_hierarchy_letters'],
-                  config_contents['default_hierarchy_letters'], # selected upon start
+                  config_contents['default_hierarchy_letters'], # ticked upon start
                   id='clades',
                   style={'display': 'inline-flex', 'flex-wrap': 'wrap'},
                   labelStyle={'padding-right': '10px'}
@@ -481,7 +445,7 @@ sankey_button_tooltip = dbc.Tooltip('Apply your filters. Filters will also be ap
                                     placement='top',
                                     delay={'show': 1000})
 
-# Organization of sankey filtering into one layout object.
+# Organization of sankey *filtering* into one layout object.
 sankey_filtering = html.Div(
     [   
         html.Div([filter_headline, filter_input, sankey_top_tooltip], className="bg-light border"),        
@@ -491,7 +455,7 @@ sankey_filtering = html.Div(
     ], className="hstack gap-3"
 )
 
-info_label_sankey = html.Div('INFO:')
+info_label_sankey = html.Div('INFO:') # headline for info box
 sankey_info_string = html.Div('This plot shows the most abundand taxa in a hierarchical way. \
                               The highest taxonomic level is at the leftmost node, and the lineage \
                               can be traced through the plot to the lowest selected taxonomic level at \
@@ -509,9 +473,7 @@ sankey_info_string = html.Div('This plot shows the most abundand taxa in a hiera
                               of reads belonging to that node, i.e. including the number of reads total in all sub-categories \
                               below that node. The number of incoming and outgoing edges is also shown.')
 
-# main_page_margins = {'margin': '20px'}
-# pathogens_top_with_margin = html.Div(pathogens_top, style=main_page_margins)
-
+# Info section made into one object.
 sankey_info = html.Div([info_label_sankey, 
                         html.Br(),
                         sankey_info_string], 
@@ -523,18 +485,8 @@ sankey_info = html.Div([info_label_sankey,
 
 # Tab section divided into pathogen list and top list.
 
-# Pathogen stuff.
+########## Pathogen stuff ##########
 pathogen_head = html.H2('Pathogen detection') # main headline
-
-pathogen_gauge = dcc.Graph(id='pathogen_gauge', # danger meter
-                            figure=gauge_fig
-                            )
-
-# Tooltip for pathogen gauge danger meter.
-gauge_tooltip = dbc.Tooltip('The value of this meter is the 10-logarithm of the reads of the most abundant species of interest. The coloring of the meter and the list below is: yellow for warning and red for danger.', 
-                                    target='pathogen_gauge',
-                                    placement='top',
-                                    delay={'show': 1000})
 
 # Colored table. 
 pathogen_table = dbc.Container([dbc.Label('Pathogens/species of interest:'),  
@@ -549,12 +501,47 @@ validate_option = html.Div(children=[
     ])
 
 # Tooltip for validation checkbox.
-validation_tooltip = dbc.Tooltip('Adds an additional column with the number of reads validated by BLAST, using a minimum percent identity of '+str(config_contents["min_perc_identity"])+' and an e-value cutoff of '+str(config_contents["e_val_cutoff"])+'. Will be added on the next update.', 
+validation_tooltip = dbc.Tooltip('Adds an additional column with the number of reads validated by BLAST, \
+                                 using a minimum percent identity of '+str(config_contents["min_perc_identity"])+' and\
+                                 an e-value cutoff of '+str(config_contents["e_val_cutoff"])+'. Will be added on the next update.', 
                                     target='validate_box',
                                     placement='top',
                                     delay={'show': 1000})
 
-# The toplist.
+info_string = 'INFO:' # "headline"
+
+pathogen_info_text_string = 'This section shows the abundance of all specified pathogens/species \
+of interest. The barchart and list are colored, so that species with more than ' + str(dll_2) + ' reads \
+show up as red. The "Tax ID" column contains the taxonomic IDs from the databased used. "Reads" is the \
+number of reads assigned to the species. If "BLAST validation" is turned on, an additional column will be \
+added on the next update, containing the number of reads validated by BLAST, using a minimum percent \
+identity of ' + str(config_contents["min_perc_identity"]) + ' and an e-value cutoff  \
+of ' + str(config_contents["e_val_cutoff"]) + '. There are zooming options at the top right of the chart \
+, using the small icons, as well as the possibility to save the chart as a png file. '
+
+# Compiling "headline" and info into one object.
+pathogen_explanation_text = html.Div([info_string,
+                                      html.Br(),
+                                      html.Br(),
+                                      pathogen_info_text_string],
+                                      className="bg-light border")
+
+# Entire pathogen section in one object.
+pathogen_section = html.Div(
+    [   
+        html.Div([pathogen_head,
+                  pathogen_fig,
+                  pathogen_table,
+                  html.Br(),
+                  validate_option, 
+                  validation_tooltip
+                  ],
+                 className="bg-light border"),
+        pathogen_explanation_text
+    ], className="hstack gap-3"
+)
+
+########## Toplist stuff ##########
 toplist_head = html.H2('Most abundand taxa') # headline
 top_list = dbc.Container([dbc.Label('Taxa with the highest number of reads.'),  
                                 create_top_table()])
@@ -574,7 +561,7 @@ top_list_tooltip = dbc.Tooltip('The number of entries to include in the list, i.
                                     placement='top',
                                     delay={'show': 1000})
 
-# Chackboxes for Toplist domain filtering.
+# Checkboxes for Toplist domain filtering.
 toplist_domains = html.Div(children=[
     html.Label('Domains to include:',
                style={'padding-right': '10px'}),
@@ -592,13 +579,13 @@ toplist_domains = html.Div(children=[
                   )
     ])
 
-# checkboxes for Toplist filtering tax hierarchy.
+# Checkboxes for Toplist filtering tax hierarchy.
 # Created from the config file values.
 toplist_hierarchy = html.Div(children=[
     html.Label('Taxonomic levels to include:',
                style={'padding-right': '10px'}),
     dcc.Checklist(config_contents['taxonomic_hierarchy_letters'],
-                  ['S'],
+                  ['S'], # provided there is an S!
                   id='toplist_clades',
                   style={'display': 'inline-flex', 'flex-wrap': 'wrap'},
                   labelStyle={'padding-right': '10px'}
@@ -634,15 +621,13 @@ toplist_filtering = html.Div(
         html.Div(toplist_domains, className="bg-light border"),
         html.Div(toplist_hierarchy, className="bg-light border"),
         html.Div([toplist_submit, toplist_button_tooltip]),
-        #html.Br(),
         html.Hr(),
         html.Div('INFO:'),
         html.Div(topreads_explanation)
     ], className="vstack gap-3"
 )
 
-
-
+# Organizing toplist section into rows and columns.
 toplist_col_1 = html.Div([toplist_head,
                           top_list
                           ],
@@ -652,45 +637,13 @@ toplist_col_2 = html.Div([toplist_filtering
                           ],
                           className="bg-light border")
 
+# This object contains all of the toplist section.
 toplist_together = html.Div([toplist_col_1,
                              toplist_col_2
                           ],
                           className="hstack gap-3")
 
-info_string = 'INFO:'
-
-pathogen_info_text_string = 'This section shows the abundance of all specified pathogens/species \
-of interest. The barchart and list are colored, so that species with more than ' + str(dll_2) + ' reads \
-show up as red. The "Tax ID" column contains the taxonomic IDs from the databased used. "Reads" is the \
-number of reads assigned to the species. If "BLAST validation" is turned on, an additional column will be \
-added on the next update, containing the number of reads validated by BLAST, using a minimum percent \
-identity of ' + str(config_contents["min_perc_identity"]) + ' and an e-value cutoff  \
-of ' + str(config_contents["e_val_cutoff"]) + '. There are zooming options at the top right of the chart \
-, using the small icons, as well as the possibility to save the chart as a png file. '
-
-
-pathogen_explanation_text = html.Div([info_string,
-                                      html.Br(),
-                                      html.Br(),
-                                      pathogen_info_text_string],
-                                      className="bg-light border")
-
-pathogen_section = html.Div(
-    [   
-        html.Div([pathogen_head,
-                  pathogen_gauge,
-                  #gauge_tooltip,
-                  pathogen_table,
-                  html.Br(),
-                  validate_option, 
-                  validation_tooltip
-                  ],
-                 className="bg-light border"),
-        pathogen_explanation_text
-    ], className="hstack gap-3"
-)
-
-# Main layout for pathogen and top lists section.
+# Main layout for pathogen AND top lists section.
 pathogens_top = html.Div(
     [   
         html.Div([toplist_together
@@ -702,9 +655,12 @@ pathogens_top = html.Div(
     ], className="hstack gap-3"
 )
 
+# Adding margins to improve layout.
+main_page_margins = {'margin': '20px'}
+pathogens_top_with_margin = html.Div(pathogens_top, style=main_page_margins)
 
 ###############################################################################
-##### QC, tab 3 ###############################################################
+##### QC, tab 2 ###############################################################
 
 # QC headline:
 qc_head = html.H2('Technical QC',className="bg-light border")
@@ -718,19 +674,18 @@ qc_filter_quality = html.Div('Quality filter:', style={'padding-right': '10px'},
 qc_filter_length = html.Div('Length filter:', style={'padding-right': '10px'}, id='qc_filter_length')
 qc_filter_lowc = html.Div('Low complexity filter:', style={'padding-right': '10px'}, id='qc_filter_lowc')
 qc_filter_adapter = html.Div('Adapter trimming:', style={'padding-right': '10px'}, id='qc_filter_adapter')
-
 qc_classified_reads = html.Div('Classified reads:', style={'padding-right': '10px'}, id='qc_classified_reads')
 qc_unclassified_reads = html.Div('Unclassified reads:', style={'padding-right': '10px'}, id='qc_unclassified_reads')
-
 waiting_files = html.Div('Files awaiting processing:', style={'padding-right': '10px'}, id='waiting_files')
 processed_files = html.Div('Files processed:', style={'padding-right': '10px'}, id='processed_files')
 
-
-# Tooltip for the total reads.
-total_reads_tooltip = dbc.Tooltip('The total reads are displayed here after quality filtering, hence the numbers will differ from the ones in the plots, which are the total reads produced (pre-filtering).', 
-                                    target='qc_total_reads',
-                                    placement='top',
-                                    delay={'show': 1000})
+qc_info_section = html.Div('The two upper graphs show the cumulative reads and base pairs produced by the sequencer \
+                           over time, using the pre-filtered data, i.e. the raw data from the sequencer. \
+                           The lower two plots show the number of reads and base pairs produced in each batch, also\
+                           using the unfiltered sequencer data. The info above displays the total number of sequences\
+                           produced, the number of post-filtering sequences, and the proportion of the filtered\
+                           sequences that were successfully classified. The number of batch files that have been \
+                           processed and the number that still remain is also shown.')
 
 # Initial empty placeholder plots (plotly express).
 cumul_reads_fig = px.line(qc_df, x='Time', y="Cumulative reads")
@@ -739,7 +694,7 @@ reads_fig = px.bar(qc_df, x='Time', y="Reads")
 bp_fig = px.bar(qc_df, x='Time', y="Bp")
 
 # QC plot layout: division into cols and rows, one plot each place.
-qc_row_3 = html.Div(
+qc_row_1 = html.Div(
     [   
         html.Div(dcc.Graph(id='cumul_reads_graph',
                            figure=cumul_reads_fig), 
@@ -750,7 +705,7 @@ qc_row_3 = html.Div(
     ], className="hstack gap-3"
 )
 
-qc_row_4 = html.Div(
+qc_row_2 = html.Div(
     [   
         html.Div(dcc.Graph(id='reads_graph',
                            figure=reads_fig), 
@@ -761,98 +716,15 @@ qc_row_4 = html.Div(
     ], className="hstack gap-3"
 )
 
-qc_column_2 = html.Div(
-    [qc_row_3,
-     qc_row_4
+# All QC figs ordered in one object.
+qc_column = html.Div(
+    [qc_row_1,
+     qc_row_2
     ], 
     className="vstack gap-3"
 )
 
-qc_row_13= html.Div(
-    [   
-        html.Div([qc_unfiltered_reads,
-                  qc_total_reads,
-                  qc_filtered_proportion,
-                  html.Br(),
-                  qc_filter_settings,
-                  html.Br(),
-                  qc_classified_reads,
-                  qc_unclassified_reads,
-                  html.Br(),
-                  waiting_files,
-                  processed_files,
-                  ]),
-        html.Div('more info')],
-        className="hstack gap-3"
-)
-
-# qc_cols123 = html.Div(
-#     [   
-#         html.Div(qc_row_1),
-#         html.Div(qc_row_2, className="bg-light border")
-#     ], className="vstack gap-3"    
-# )
-
-# Tooltips for QC charts.
-cumul_reads_graph_tooltip = dbc.Tooltip('This graph displays the reads produced by the sequencer cumulatively over time.', 
-                                    target='cumul_reads_graph',
-                                    placement='top',
-                                    delay={'show': 1000})
-
-cumul_bp_graph_tooltip = dbc.Tooltip('This graph displays the base pairs produced by the sequencer cumulatively over time.', 
-                                    target='cumul_bp_graph',
-                                    placement='top',
-                                    delay={'show': 1000})
-
-reads_graph_tooltip = dbc.Tooltip('This graph displays the reads produced in each batch by the sequencer.', 
-                                    target='reads_graph',
-                                    placement='top',
-                                    delay={'show': 1000})
-
-bp_graph_tooltip = dbc.Tooltip('This graph displays the base pairs produced in each batch by the sequencer.', 
-                                    target='bp_graph',
-                                    placement='top',
-                                    delay={'show': 1000})
-
-# Main layout for QC tab.
-# qc_layout = html.Div([qc_head,
-#                       html.Hr(),
-#                       dbc.Container(qc_cols), # adding a container here centers the plots in the layout
-#                       cumul_reads_graph_tooltip,
-#                       cumul_bp_graph_tooltip,
-#                       reads_graph_tooltip,
-#                       bp_graph_tooltip,
-#                       total_reads_tooltip],
-#                      className="bg-light border"
-#                      )
-qc_row_1 = html.Div([qc_head,
-                     html.Hr()]
-                     )
-
-qc_row_2 = html.Div(
-    [   
-        html.Div('col1', className="bg-light border"),
-        html.Div('col2', className="bg-light border")
-    ], className="hstack gap-3"    
-)
-
-
-qc_layout2 = html.Div([qc_row_1, 
-                      #qc_row_2,
-                      qc_row_3,
-                      qc_row_4
-                    ],
-                      className="vstack gap-3"
-                      )
-
-qc_info_section = html.Div('The two upper graphs show the cumulative reads and base pairs produced by the sequencer \
-                           over time, using the pre-filtered data, i.e. the raw data from the sequencer. \
-                           The lower two plots show the number of reads and base pairs produced in each batch, also\
-                           using the unfiltered sequencer data. The info above displays the total number of sequences\
-                           produced, the number of post-filtering sequences, and the proportion of the filtered\
-                           sequences that were successfully classified. The number of batch files that have been \
-                           processed and the number that still remain is also shown.')
-
+# Everything exept headline in one object.
 qc_row_all = html.Div(
     [   
         html.Div(html.Div([qc_unfiltered_reads,
@@ -872,21 +744,26 @@ qc_row_all = html.Div(
                   processed_files,
                   html.Br(),
                   html.Hr(),
-                  html.Div('INFO:'),
+                  html.Div('INFO:'), # cheating
                   html.Br(),
                   qc_info_section
                   ]), className="bg-light border"),
-        html.Div(qc_column_2, className="bg-light border")
+        html.Div(qc_column, className="bg-light border")
     ], className="hstack gap-3"    
 )
 
+# Complete QC layout in one object.
 qc_layout = html.Div([html.Br(),
                       qc_head,
                       html.Br(),
                       qc_row_all])
 
+# Adding margins for better layout.
+qc_page_margins = {'margin': '20px'}
+qc_with_margin = html.Div(qc_layout, style=qc_page_margins)
+
 ###############################################################################
-##### sunburst and icicle charts, tab 2 #######################################
+##### sunburst chart, tab 4 #######################################
 
 # Sunburst header
 sunburst_head = html.H2('Sunburst chart', className="bg-light border")
@@ -895,23 +772,6 @@ sunburst_head = html.H2('Sunburst chart', className="bg-light border")
 sunburst_chart = dcc.Graph(id='sunburst_chart',
                         figure=sunburst_fig
                         )
-
-# Tooltip for sunburst fig.
-sunburst_tooltip = dbc.Tooltip('The side bar displays the coloring used to represent abundance by number of reads for each taxon', 
-                                    target='sunburst_chart',
-                                    placement='top',
-                                    delay={'show': 1000})
-
-# Icicle chart plot figure.
-icicle_chart = dcc.Graph(id='icicle_chart',
-                        figure=icicle_fig
-                        )
-
-# Tooltip for icicle fig.
-icicle_tooltip = dbc.Tooltip('The side bar displays the coloring used to represent abundance by number of reads for each taxon', 
-                                    target='icicle_chart',
-                                    placement='top',
-                                    delay={'show': 1000})
 
 # Sunburst filtering.
 sun_filter_head = html.Label('Filter by minimum reads:',
@@ -969,7 +829,7 @@ sunburst_info = html.Div('''The sunburst chart shows a hierarchical view of the 
                          chart. In the right upper corner of the plot is a button to save the chart as a png file.
                          ''')
 
-# Layout for sunburst filtering.
+# Layout sunburst filtering plus info, one object.
 sun_filtering = html.Div(
     [   
         html.Div([sun_filter_head, sun_filter_val, sunburst_filter_tooltip], className="bg-light border"),        
@@ -987,6 +847,7 @@ sun_filtering = html.Div(
     className="vstack gap-3"    
 )
 
+# All sunburst stuff in one object.
 sunburst_complete = html.Div(
     [   
         html.Div(sunburst_chart, 
@@ -995,82 +856,6 @@ sunburst_complete = html.Div(
     ], 
     className="hstack gap-3"
 )
-
-# Icicle filtering.
-ice_filter_head = html.Label('Filter by min reads:',
-                             style={'padding-right': '10px'})
-
-ice_filter_val = dcc.Input(id='ice_filter_val',
-                         value='10',
-                         type='number'
-                         )
-
-# Tooltip for icicle filtering.
-icicle_filter_tooltip = dbc.Tooltip('Include only taxa with this minimum number of reads in the icicle chart.', 
-                                    target='ice_filter_val',
-                                    placement='top',
-                                    delay={'show': 1000})
-
-# Icicle height adjustment.
-ice_height_head = html.Label('Height of graph:',
-                             style={'padding-right': '10px'})
-
-ice_height = dcc.Input(id='ice_height',
-                         value='800',
-                         type='number'
-                         )
-
-# Tooltip for icicle height.
-icicle_height_tooltip = dbc.Tooltip('Change the height of the icicle graph.', 
-                                    target='ice_height',
-                                    placement='top',
-                                    delay={'show': 1000})
-
-# Icicle chart domains checkboxes.
-ice_domains = html.Div(children=[
-    html.Label('Domains to include in the icicle chart:',
-               style={'padding-right': '10px'}),
-    dcc.Checklist(['Bacteria', 
-                   'Archaea', 
-                   'Eukaryota',
-                   'Viruses'],
-                  ['Bacteria',
-                   'Archaea', 
-                   'Eukaryota',
-                   'Viruses'],
-                  id='ice_domains',
-                  style={'display': 'inline-flex', 'flex-wrap': 'wrap'},
-                  labelStyle={'padding-right': '10px'}
-                  )
-    ])
-
-# Submit button for icicle parameters.
-ice_submit = html.Button(id='ice_submit', 
-                            n_clicks=0, 
-                            children='Filter'
-                            )
-
-# Tooltip for icicle submit button.
-icicle_button_tooltip = dbc.Tooltip('Apply your filters. Filters will also be applied automatically at each update.', 
-                                    target='ice_submit',
-                                    placement='top',
-                                    delay={'show': 1000})
-
-# Icicle filtering layout.
-ice_filtering = html.Div(
-    [   
-        html.Div([ice_filter_head, ice_filter_val, icicle_filter_tooltip], className="bg-light border"),        
-        html.Div(ice_domains, className="bg-light border"),
-        html.Div([ice_height_head, ice_height, icicle_height_tooltip], className="bg-light border"),
-        html.Div([ice_submit, icicle_button_tooltip], className="bg-light border")
-    ], className="hstack gap-3"
-)
-
-main_page_margins = {'margin': '20px'}
-pathogens_top_with_margin = html.Div(pathogens_top, style=main_page_margins)
-
-qc_page_margins = {'margin': '20px'}
-qc_with_margin = html.Div(qc_layout, style=qc_page_margins)
 
 ########## INTERVAL COMPONENT #################################################
 
@@ -1084,11 +869,10 @@ interval_component = dcc.Interval(id='interval_component',
                                   disabled = False
                                   )
 
-
 ########## LAYOUT ORGANIZATION ################################################
 
-# Organization of layout into three tabs. 
-# Wrapping things in dbc.Containers centers them and makes the layout better.
+# Organization of layout into four tabs. 
+# Wrapping things in dbc.Containers centers them and makes the layout better(?)
 main_tabs = html.Div([
     dcc.Tabs([
         dcc.Tab(label='Main', children=[
@@ -1122,90 +906,13 @@ main_tabs = html.Div([
     ])
 ])
 
-################# NEW LAYOUT #############
-main_row_1 = html.Div(
-    [   
-        html.Div(qc_layout, 
-                 className="bg-light border"),
-        html.Div(dbc.Container(pathogens_top))
-    ], 
-    className="hstack gap-3"
-)
-
-# html.Div(dbc.Container(pathogens_top))
-
-main_row_2 = html.Div(
-    [
-        html.Div([sankey_plot,
-                  dbc.Container(sankey_filtering)
-                ], 
-                className="bg-light border")        
-    ],
-    className="vstack gap-3"
-)
-
-main_cols = html.Div(
-    [   
-        html.Div(main_row_1),
-        html.Div(main_row_2)
-    ], className="hstack gap-2"    
-)
-
-# pathogens_top = html.Div(
-#     [   
-#         html.Div([toplist_head,
-#                   top_list,
-#                   html.Br(),
-#                   toplist_filtering
-#                   ],
-#                  className="bg-light border"),
-#         html.Div([pathogen_head,
-#                   pathogen_gauge,
-#                   gauge_tooltip,
-#                   pathogen_table,
-#                   html.Br(),
-#                   validate_option, 
-#                   validation_tooltip
-#                   ],
-#                  className="bg-light border")
-#     ], className="hstack gap-3"
-# )
-
-main_layout_column = html.Div(
-    [   
-        html.Div(main_row_1),
-        html.Div(main_row_2)
-    ], className="vstack gap-3"    
-)
-
-upper_gui_layout = html.Div(
-    [   
-        html.Div(dbc.Container([main_title,
-                  subtext]),
-                  style={"margin-right": "100px"}
-                  ),
-        html.Div(dbc.Container([update_toggle,
-                  update_toggle_tooltip,
-                  update_status,
-                  timestamp]),
-                  style={"margin-right": "300px"}
-                  ),
-        html.Div(dbc.Container(quit_button))
-    ], className="hstack gap-3",
-    style={"display": "flex"}   
-)
-
-
-# Highest level of layout organization. This defines the order of the
+# Base level of layout organization. This defines the order of the
 # headline, info, update toggle and tabs.
 app.layout= html.Div([upper_gui_layout,
                       html.Br(),
-                    #   html.Hr(),
-                    #   html.Br(),
                       main_tabs,
                       interval_component
                       ])
-
 
 ########## CALLBACKS FOR LIVE UPDATE ##########################################
 # Callback functions define what happens in the layout objects.
@@ -1232,7 +939,6 @@ def live_update(toggle_value):
         status_var = 'off'
     return status_var, update_disabled
 
-
 ########## CALLBACKS FOR SANKEY PLOT ##########################################
 
 # Creates the sankey plot and updates it live. 
@@ -1253,8 +959,7 @@ def update_sankey(interval_trigger, filter_click, filter_value, domains, clades)
     sankey_fig_layout()
     return sankey_fig
 
-
-########## CALLBACKS FOR SUNSICKLE ############################################
+########## CALLBACKS FOR SUNBURST ############################################
 
 # Creates the sunburst plot and updates it live 
 @app.callback(Output(component_id='sunburst_chart', component_property='figure'),
@@ -1267,27 +972,13 @@ def update_sunburst(interval_trigger, filter_click, filter_value, domains):
     sunburst_fig = create_sunburst(data)
     return sunburst_fig
 
-# creates the icicle plot and updates it live 
-@app.callback(Output(component_id='icicle_chart', component_property='figure'),
-              Input('interval_component', 'n_intervals'), # updates with interval
-              Input('ice_submit', 'n_clicks'), # or with button click
-              State('ice_height', 'value'),
-              State('ice_filter_val', 'value'),
-              State('ice_domains', 'value')) # all the filters are states until click
-def update_icicle(interval_trigger, filter_click, height_value, filter_value, domains):
-    data = icicle_sunburst_data(raw_df, domains, int(filter_value), config_file_path=config_file_path)
-    icicle_fig = create_icicle(data, int(height_value))
-    return icicle_fig
-
-
 ########## CALLBACKS FOR PATHOGEN INFO ########################################
 
 # Pathogen detection callback: produces a colored list of 
 # pre-defined species and nr of reads for them.
-# Also displays a general danger meter based on the highest
-# log10 value of the specified pathogens.
+# Also displays a colored barchart.
 # If interval is disabled, it should keep the latest values.
-@app.callback(Output('pathogen_gauge', 'figure'), # danger meter
+@app.callback(Output('pathogen_fig', 'figure'), # barchart
               Output('pathogen_table', 'data'), # row data for table
               Output('pathogen_table', 'columns'), # specify table cols
               Input('interval_component', 'n_intervals'), # interval update
@@ -1297,33 +988,22 @@ def pathogen_update(interval_trigger, val_state):
     # get the data, using the species list from config and the raw df
     pathogen_list = config_contents['species_of_interest']
     pathogen_info = pathogen_df(pathogen_list, raw_df)
+    # Cutoff for coloring.
     dll = int(config_contents["danger_lower_limit"])
-    #print('---------------------------------------------------------------------')
-    #print(config_contents['species_of_interest'])
-    #print(raw_df) 
-    #print(pathogen_info)
-    #print(pathogen_info.iloc[0,1], type(pathogen_info.iloc[0,1]))
-    #print(pathogen_list[0], type(pathogen_list[0]))
-    
-    # add any entry from the pathogen list that was not included in the df, 
-    # setting nr of reads to 0
+    # Deals with species of interest not present in kreport.
     for entry in pathogen_list:
-        #print(entry)
         if entry not in pathogen_info['Tax ID'].values:
-            #print('NEW FUNCT TEST- found missing entry: ', entry)
-            pathogen_info.loc[len(pathogen_info.index)] = ['not found in DB', # add pathogen name 
+            pathogen_info.loc[len(pathogen_info.index)] = ['not found in DB', # add pathogen name PLACEHOLDER! 
                                                             entry, # add pathogen taxID
                                                             0, # add pathogen nr of reads
                                                             0.0, # add percent reads for pathogens
-                                                            0]
-    #print(pathogen_info)
+                                                            0] # not needed anymore, remove later
 
+    # Adding a column for the coloring sceme.
     pathogen_info['Color'] = pathogen_info['Reads'].apply(lambda x: 'Green' if x < dll else 'Red')
-
-    # log10 data column for danger meter
-    graph_col = pathogen_info['log10(Reads)'] 
-
-    pathogen_barchart_fig = fig = px.bar(pathogen_info, 
+    
+    # Create the barchart from the pathogen_info table.
+    pathogen_barchart_fig = px.bar(pathogen_info, 
                                          x='Name', 
                                          y='Reads', 
                                          color='Color',
@@ -1331,22 +1011,19 @@ def pathogen_update(interval_trigger, val_state):
                                                  'Name': 'Species'},
                                          title='Number of reads per species',
                                          color_discrete_map={'Red': 'red', 'Green': 'green'})
-    
-    # extract the pathogen with the highest nr of reads(log10)
-    # display log10 reads in danger meter
-    gauge_fig = create_gauge(graph_col.max()) 
-    gauge_fig = pathogen_barchart_fig
-    gauge_fig.update_layout(width=700, height=400)
-    gauge_fig.update_traces(width=0.4)
-    
-    gauge_fig.update_traces(hovertemplate='<b>%{x}</b><br>Number of Reads: %{y}',
+     
+    # Change size of graph.
+    pathogen_barchart_fig.update_layout(width=700, height=400)
+    # Change width of columns.
+    pathogen_barchart_fig.update_traces(width=0.4)
+    # Change hover info.
+    pathogen_barchart_fig.update_traces(hovertemplate='<b>%{x}</b><br>Number of Reads: %{y}',
                             hoverinfo='x+y')
-    
-    gauge_fig.update_traces(showlegend=False)
-    #gauge_fig.update_layout(barmode='group', bargap=0.010,bargroupgap=0.0) 
+    # Remove unnecessary legend. 
+    pathogen_barchart_fig.update_traces(showlegend=False)
+     
     # create a df with the pathogen cols to be displayed
     df_to_print = pathogen_info[['Name', 'Tax ID', 'Reads']].copy()
-    #print(df_to_print)
     # needed since the val_state object in "none" before first click
     if val_state:
         # if validation is on
@@ -1354,21 +1031,17 @@ def pathogen_update(interval_trigger, val_state):
             # get the IDs to be validated; the ones found in the data
             validation_list = list(df_to_print.iloc[:,1])
             read_nr_list = list(df_to_print.iloc[:,2])
-            #print(validation_list)
-            #print(type(read_nr_list[3]))
             # get the validation data on the IDs
             validated_col = validation_col(validation_list, blast_dir, read_nr_list)
-            #print(validated_col)
             # add to table
             df_to_print['Validated reads'] = validated_col
-            #print(df_to_print)
+    # Sort according to read number.
+    df_to_print = df_to_print.sort_values(by='Reads', ascending=False)
+    df_to_print = df_to_print.reset_index(drop=True)
     # dash handling
-    #print(df_to_print)
     data = df_to_print.to_dict('records') 
     columns = [{"name": i, "id": i} for i in df_to_print.columns]
-    gauge_layout() # layout for the danger meter
-    return gauge_fig, data, columns
-
+    return pathogen_barchart_fig, data, columns
 
 ########## CALLBACKS FOR TOP TABLE ############################################
 
@@ -1386,7 +1059,6 @@ def toplist_update(interval_trigger, click, domains, clades, top):
     columns = [{"name": i, "id": i} for i in top_df.columns]
     return data, columns
 
-
 ########## QC CALLBACKS #######################################################
 
 # Displays 4 qc plots on read data over time.
@@ -1400,25 +1072,27 @@ def update_qc_plots(interval_trigger):
     # creates df from qc file
     # qc file path specified at the start of this script
     qc_df = get_qc_df(qc_file) 
-    #print(type(qc_df))
-    #print(qc_df['Time'])
     # defines data for the 4 plots
     cumul_reads_fig = px.line(qc_df, x='Time', y="Cumulative reads")
     cumul_bp_fig = px.line(qc_df, x='Time', y="Cumulative bp")
+    # Modify time points for batches, use in barplots.
     time_for_barplots = pd.to_datetime(qc_df["Time"]).dt.strftime("%H:%M:%S")
-    #print(time_for_barplots)
     reads_fig = px.bar(qc_df, x=time_for_barplots, y="Reads")
     bp_fig = px.bar(qc_df, x=time_for_barplots, y="Bp")
+    # Update x axis label for barcharts.
     reads_fig.update_xaxes(title_text="Batch timestamp")
     bp_fig.update_xaxes(title_text="Batch timestamp")
+    # Make barcharts discrete instead of continous.
+    reads_fig.update_xaxes(type='category')
+    bp_fig.update_xaxes(type='category')
+    # Define some size parameters.
     standard_width = 650
     standard_height = 350
     b_marg = 10
     l_marg = 10
     t_marg = 35
     r_marg = 10
-    reads_fig.update_xaxes(type='category')
-    bp_fig.update_xaxes(type='category')
+    # Update the layout of all charts. Should be a separate script.
     cumul_reads_fig.update_layout(width=standard_width,
                                   height=standard_height,
                                   margin=dict(l=l_marg, r=r_marg, t=t_marg, b=b_marg),
@@ -1442,6 +1116,7 @@ def update_qc_plots(interval_trigger):
     return cumul_reads_fig, cumul_bp_fig, reads_fig, bp_fig
 
 # Displays classified, unclassified and total reads from Kraken.
+# Also displays filter info.
 # If interval is disabled, it should keep the latest values.
 @app.callback(Output('qc_total_reads', 'children'), # text outputs
               Output('qc_classified_reads', 'children'),
@@ -1460,15 +1135,18 @@ def update_qc_text(interval_trigger):
     u = int(raw_df.iloc[0,1]) # nr of unclassified reads
     t = c+u # total nr of processed reads
     pc = float(round(raw_df.iloc[1,0],1)) # percent classified
-    pu = float(round(raw_df.iloc[0,0],1)) # percent unclassified    
-    total_reads = 'Total reads (post filtering): ' + str(t)
+    pu = float(round(raw_df.iloc[0,0],1)) # percent unclassified  
+    # Define the classified info objects.  
     classified_reads = 'Classified reads: ' + str(c) + ' (' + str(pc) + ' %)'
     unclassified_reads = 'Unclassified reads: ' + str(u) + ' (' + str(pu) + ' %)'
+    # Needed to extract the number of pre-filter reads etc.
     qc_df_b = get_qc_df(qc_file)
-    #print(qc_df_b['Cumulative reads'].iloc[-1])
+    # Define the filter info objects.
     tot_reads_pre_filt = qc_df_b['Cumulative reads'].iloc[-1]
     unfiltered_reads = 'Total reads (pre filtering): ' + str(tot_reads_pre_filt)
+    total_reads = 'Total reads (post filtering): ' + str(t)
     filtered_proportion = 'Reads that passed filtering: ' + str(float(round((t*100)/tot_reads_pre_filt, 1))) + ' %'
+    # Define the fillter setting objects. This needs work.
     q_filt = config_contents['q_filt']
     l_filt = config_contents['l_filt']
     lc_filt = config_contents['lc_filt']
@@ -1530,7 +1208,7 @@ def update_waiting_files(interval_trigger):
         processed_message = "Files processed: "
     return waiting_message, processed_message
 
-########## SHUTDOWN CALLBACKS #################################################
+########## SHUTDOWN CALLBACK #################################################
 
 # At click of shutdown button.
 @app.callback(

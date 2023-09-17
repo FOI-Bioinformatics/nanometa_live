@@ -26,15 +26,9 @@ species_of_interest:
   - 321
 
 
-## WARNING LIMITS ##
+## DANGER CUTOFF ##
 
 # The coloring scheme for the abundance of the species of interest.
-# Can be modified, but this might affect the appearance of the gauge graph,
-# since it uses 10-logs of the reads for coloring.
-  
-# Species of interest with more reads than this show up as yellow.
-warning_lower_limit: 10
-
 # Species of interest with more reads than this show up as red. 
 danger_lower_limit: 100
 
@@ -138,6 +132,7 @@ blast_validation: True
 # sequences to include as validated. 
 min_perc_identity: 90
 e_val_cutoff: 0.01
+
 
 ## FASTP FILTER OPTIONS ##
 
