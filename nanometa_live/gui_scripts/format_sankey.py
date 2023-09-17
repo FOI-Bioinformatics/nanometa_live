@@ -12,7 +12,7 @@ def format_sankey(top_df,
                 target = top_df[top_df.columns[1]].values.tolist(), 
                 value = top_df[top_df.columns[2]].values.tolist())
     
-    node = dict(label = label, pad=25, thickness=10)  
+    node = dict(label = label, pad=25, thickness=10, color="blue")  
     
     sankey_data = go.Sankey(link = link, node=node)
     return sankey_data
