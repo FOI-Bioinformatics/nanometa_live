@@ -2,7 +2,9 @@ import argparse
 import os
 import shutil
 import logging
-import pkg_resources
+#import pkg_resources
+from importlib_resources import files
+from ruamel.yaml import YAML
 __version__="0.2.1"
 
 
@@ -78,6 +80,40 @@ def append_project_path_to_config(project_path, config_file_name):
     return True
 
 
+def read_species_from_file(filename):
+    try:
+        with open(filename, 'r') as f:
+            species_list = [line.strip() for line in f]
+        if species_list:
+            logging.info(f"Read {len(species_list)} species from {filename}.")
+            for i, species in enumerate(species_list, 1):
+                logging.info(f"  {i}. {species}")
+        else:
+            logging.warning(f"No species found in {filename}.")
+        return species_list
+    except FileNotFoundError:
+        logging.error(f"File not found: {filename}")
+        return []
+    except PermissionError:
+        logging.error(f"Permission denied: {filename}")
+        return []
+
+def update_config_file_with_comments(project_path, config_file_name, variable, new_value):
+    config_file_path = os.path.join(project_path, config_file_name)
+    try:
+        yaml = YAML()
+        yaml.preserve_quotes = True
+        with open(config_file_path, 'r') as f:
+            config_data = yaml.load(f)
+        config_data[variable] = new_value
+        with open(config_file_path, 'w') as f:
+            yaml.dump(config_data, f)
+        logging.info(f"Updated {variable} in config file to {new_value}.")
+        return True
+    except Exception as e:
+        logging.error(f"Failed to update config file: {e}")
+        return False
+
 def create_new():
     """
     Create a new Nanometa project by setting up the project directory and copying the config file.
@@ -86,8 +122,14 @@ def create_new():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--path', help="The path to the project directory.")
-    parser.add_argument('-c', '--config', default="config.yaml",
-                        help="The name of the config file. Default is 'config.yaml'.")
+    parser.add_argument('-c', '--config', default="config.yaml", help="The name of the config file. Default is 'config.yaml'.")
+    parser.add_argument('--analysis_name', type=str, help="Name of the analysis.")
+    parser.add_argument('--species_of_interest', type=str, help="File containing species of interest.")
+    parser.add_argument('--warning_lower_limit', type=int, help="Warning lower limit.")
+    parser.add_argument('--danger_lower_limit', type=int, help="Danger lower limit.")
+    parser.add_argument('--nanopore_output_directory', type=str, help="Nanopore output directory.")
+    parser.add_argument('--kraken_db', type=str, help="Kraken database.")
+    parser.add_argument('--kraken_taxonomy', type=str, help="Kraken taxonomy.")
     parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}', help="Show the current version of the script.")
     args = parser.parse_args()
     project_path = args.path
@@ -98,7 +140,7 @@ def create_new():
         return
 
     config_file_name = args.config  # Get the custom config file name
-    project_path = args.path
+    project_path = os.path.abspath(args.path)
 
     # Show help message if no arguments are provided
     if not any(vars(args).values()) or project_path is None:
@@ -106,13 +148,41 @@ def create_new():
         return
 
     logging.info("Starting new Nanometa project creation.")
-    config_path = pkg_resources.resource_filename(__name__, "config.yaml")
+    #config_path = pkg_resources.resource_filename(__name__, "config.yaml")
+    config_path = files('nanometa_live').joinpath('config.yaml')
 
     create_new_project_directory(project_path)
     backup_config_file(project_path, config_file_name)
     copy_config_file(config_path, project_path, config_file_name)
-    append_project_path_to_config(project_path, config_file_name)
-    logging.info("Nanometa project created successfully.")
+    #append_project_path_to_config(project_path, config_file_name)
+
+    update_config_file_with_comments(args.path, args.config, 'main_dir', project_path)
+
+    if args.analysis_name:
+        update_config_file_with_comments(args.path, args.config, 'analysis_name', args.analysis_name)
+
+    if args.species_of_interest:
+        species_list = read_species_from_file(args.species_of_interest)
+        if species_list:
+            update_config_file_with_comments(args.path, args.config, 'species_of_interest', species_list)
+
+    if args.warning_lower_limit is not None:
+        update_config_file_with_comments(args.path, args.config, 'warning_lower_limit', args.warning_lower_limit)
+
+    if args.danger_lower_limit is not None:
+        update_config_file_with_comments(args.path, args.config, 'danger_lower_limit', args.danger_lower_limit)
+
+    if args.nanopore_output_directory:
+        update_config_file_with_comments(args.path, args.config, 'nanopore_output_directory',
+                                         args.nanopore_output_directory)
+
+    if args.kraken_db:
+        update_config_file_with_comments(args.path, args.config, 'kraken_db', args.kraken_db)
+
+    if args.kraken_taxonomy:
+        update_config_file_with_comments(args.path, args.config, 'kraken_taxonomy', args.kraken_taxonomy)
+
+    logging.info(f"Nanometa project ({args.analysis_name}) created successfully.")
 
 def main():
     """
