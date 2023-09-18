@@ -23,7 +23,7 @@ from setuptools import setup
 import os
 
 # Import the version number
-from nanometa_live import __version__
+__version__="0.2.1"
 
 # Read requirements.txt and store its content in a list
 with open("requirements.txt", "r") as f:
@@ -34,7 +34,7 @@ setup(
       version = __version__,
       description = "Real-time metagenomic analysis.",
       # Specifying python packages.
-      packages = ['nanometa_live', 
+      packages = ['nanometa_live',
                   'nanometa_live.gui_scripts'],
       # Specifying non-pyscript files and snakemake scripts.
       package_data={'nanometa_live': ['Snakefile',
@@ -45,7 +45,7 @@ setup(
       # These are the bash commands and the functions they map to.
       # "run_app" is a solution to make the main gui script into a command,
       # since a function needs to be specified.
-      entry_points = {'console_scripts': 
+      entry_points = {'console_scripts':
                       ['nanometa-sim = nanometa_live.nanopore_simulator:nano_sim', # nanopore simulator
                        'nanometa-new = nanometa_live.create_new_project:create_new', # create new project
                        'nanometa-blastdb = nanometa_live.build_blast_db:build_blast', # create blast validation databases
@@ -56,7 +56,7 @@ setup(
                       },
       # Makes sure the files are found after install.
       data_files=[('nanometa_live/',['nanometa_live/config.yaml']),
-                  ('nanometa_live/snakemake_envs', 
+                  ('nanometa_live/snakemake_envs',
                    ['nanometa_live/snakemake_envs/' + f for f in os.listdir('nanometa_live/snakemake_envs') if f.endswith('.yaml')])],
       install_requires=requirements  # Read from requirements.txt
       )
