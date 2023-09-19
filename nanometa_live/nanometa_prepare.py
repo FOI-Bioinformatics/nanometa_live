@@ -9,14 +9,14 @@ import zipfile
 import os
 from ruamel.yaml import YAML
 import shutil
-from typing import List, Dict, Union
+from typing import List, Dict, Union, NoReturn
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 __version__="0.2.1"
 
-def load_config(config_file):
+def load_config(config_file: str) -> Union[Dict, None]:
     """
     Load configuration settings from a YAML file using ruamel.yaml.
 
@@ -24,15 +24,25 @@ def load_config(config_file):
         config_file (str): Path to the YAML configuration file.
 
     Returns:
-        dict: Dictionary containing the configuration settings.
+        Union[Dict, None]: Dictionary containing the configuration settings, or None if an error occurs.
     """
-    logging.info(f"Loading configuration from {config_file}")
-    yaml = YAML(typ='safe')
-    with open(config_file, 'r') as cf:
-        return yaml.load(cf)
+    logging.info(f"Attempting to load configuration from {config_file}")
 
+    try:
+        yaml = YAML(typ='safe')
+        with open(config_file, 'r') as cf:
+            config_data = yaml.load(cf)
+        logging.info(f"Successfully loaded configuration from {config_file}")
+        return config_data
+    except FileNotFoundError:
+        logging.error(f"Configuration file {config_file} not found")
+    except PermissionError:
+        logging.error(f"Permission denied: Cannot read {config_file}")
+    except Exception as e:
+        logging.error(f"Failed to load configuration from {config_file}. Exception: {e}")
+    return None
 
-def build_blast_databases(workdir):
+def build_blast_databases(workdir: str) -> NoReturn:
     """
     Build BLAST databases for each reference sequence in the genomes folder
     located in the working directory.
@@ -45,7 +55,20 @@ def build_blast_databases(workdir):
     """
     try:
         input_folder = os.path.join(workdir, "genomes")
-        for file in os.listdir(input_folder):
+
+        if not os.path.exists(input_folder):
+            logging.error(f"Input folder {input_folder} does not exist. Exiting.")
+            return
+
+        files_to_process = os.listdir(input_folder)
+
+        if not files_to_process:
+            logging.warning(f"No files found in {input_folder}. Nothing to process.")
+            return
+
+        logging.info(f"Found {len(files_to_process)} files to process.")
+
+        for file in files_to_process:
             file_path = os.path.join(input_folder, file)
             logging.info(f"Processing file: {file_path}")
 
@@ -58,35 +81,12 @@ def build_blast_databases(workdir):
 
         logging.info('All databases built successfully.')
 
-    except Exception as e:
-        logging.error(f"An error occurred: {e}")
+    except subprocess.CalledProcessError as cpe:
+        logging.error(f"Command failed: {cpe}. Command was {' '.join(cpe.cmd)}.")
         raise
-
-
-def read_species_from_config(config_file):
-    try:
-        config_data = load_config(config_file)
-        species_list = config_data.get('species_of_interest', [])
-
-        if species_list:
-            logging.info(f"Read {len(species_list)} species from {config_file}.")
-            for i, species in enumerate(species_list, 1):
-                logging.info(f"  {i}. {species}")
-        else:
-            logging.warning(f"No species found in {config_file}.")
-
-        return species_list
-    except FileNotFoundError:
-        logging.error(f"File not found: {config_file}")
-        return []
-    except PermissionError:
-        logging.error(f"Permission denied: {config_file}")
-        return []
-    except yaml.YAMLError:
-        logging.error(f"Error reading YAML file: {config_file}")
-        return []
-
-
+    except Exception as e:
+        logging.error(f"An unexpected error occurred: {e}")
+        raise
 
 
 
@@ -140,7 +140,7 @@ def fetch_species_data(search_str: str, db: str, page: int = 1, itemsPerPage: in
         return []
 
 
-def filter_exact_match(rows, search_str, db):
+def filter_exact_match(rows: list, search_str: str, db: str) -> list:
     """
     Filters the rows for exact matches in a given taxonomy field, depending on the database.
 
@@ -152,6 +152,7 @@ def filter_exact_match(rows, search_str, db):
     Returns:
         list of dict: The filtered rows.
     """
+
     logging.info(f"Filtering rows for exact match with search string: {search_str} using database: {db}")
 
     field = 'gtdbTaxonomy' if db == 'gtdb' else 'ncbiTaxonomy'
@@ -167,6 +168,10 @@ def filter_exact_match(rows, search_str, db):
 
     if len(filtered_rows) == 0:
         logging.warning(f"No rows found that match the search string: {search_str}. Unfiltered rows: {rows}")
+
+    if len(filtered_rows) != 1:
+        logging.error(f"Filtered rows count is not 1. Stopping the program.")
+        sys.exit(1)  # You can replace this with a raise Exception("Filtered rows count is not 1.") if you prefer
 
     # Additional filtering for NCBI
     if db == 'ncbi' and len(filtered_rows) > 1:
@@ -262,7 +267,7 @@ def update_results_with_taxid_dict(results: dict, species_taxid_dict: dict) -> d
 
         # Update the dictionary
         if tax_id is not None:
-            logging.info(f"Found tax ID {tax_id} for species {species_name}. Updating results.")
+            logging.info(f"Found tax ID {tax_id} in kraken2 inspect file for species {species_name}. Updating results.")
             results[species_name]['tax_id'] = tax_id
         else:
             logging.warning(f"Tax ID not found for species {species_name}. Setting it to 'N/A'.")
