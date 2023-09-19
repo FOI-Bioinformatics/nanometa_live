@@ -56,6 +56,7 @@ from nanometa_live.gui_scripts.fix_list_order import fix_list_order
 from nanometa_live.gui_scripts.create_top_list import create_top_list
 from nanometa_live.gui_scripts.icicle_sunburst_data import icicle_sunburst_data
 from nanometa_live.gui_scripts.validation_col import validation_col
+from nanometa_live.gui_scripts.get_fastp_df import get_fastp_df
 
 __version__="0.2.1"
 
@@ -256,6 +257,11 @@ blast_dir = os.path.join(config_contents["main_dir"], 'blast_result_files')
 qc_file = os.path.join(config_contents["main_dir"], 'qc_data/cumul_qc.txt')
 # Initial qc data, if no data: creates placeholder df.
 qc_df = get_qc_df(qc_file)
+
+# Path to file that stores cumulative fastp data.
+fastp_file = os.path.join(config_contents["main_dir"], 'fastp_reports/compiled_fastp.txt')
+# Initial fastp data, if no data: creates placeholder df.
+fastp_df = get_fastp_df(fastp_file)
 
 # Returns the current time for initial display.
 # Used by update_timestamp callback.
@@ -673,11 +679,11 @@ qc_head = html.H2('Technical QC',className="bg-light border")
 qc_unfiltered_reads = html.Div('Total reads (pre filtering):', style={'padding-right': '10px'}, id='qc_unfiltered_reads')
 qc_total_reads = html.Div('Total reads (post filtering):', style={'padding-right': '10px'}, id='qc_total_reads')
 qc_filtered_proportion = html.Div('Reads that passed filtering:', style={'padding-right': '10px'}, id='qc_filtered_proportion')
-qc_filter_settings = html.Div('FILTER SETTINGS', style={'padding-right': '10px'}, id='qc_filter_settings')
-qc_filter_quality = html.Div('Quality filter:', style={'padding-right': '10px'}, id='qc_filter_quality')
-qc_filter_length = html.Div('Length filter:', style={'padding-right': '10px'}, id='qc_filter_length')
-qc_filter_lowc = html.Div('Low complexity filter:', style={'padding-right': '10px'}, id='qc_filter_lowc')
-qc_filter_adapter = html.Div('Adapter trimming:', style={'padding-right': '10px'}, id='qc_filter_adapter')
+qc_filter_settings = html.Div('FILTER SPECIFICS', style={'padding-right': '10px'}, id='qc_filter_settings')
+qc_filter_quality = html.Div('Total reads passed:', style={'padding-right': '10px'}, id='qc_filter_quality')
+qc_filter_length = html.Div('Too low quality:', style={'padding-right': '10px'}, id='qc_filter_length')
+qc_filter_lowc = html.Div('Too short:', style={'padding-right': '10px'}, id='qc_filter_lowc')
+qc_filter_adapter = html.Div('Too low complexity:', style={'padding-right': '10px'}, id='qc_filter_adapter')
 qc_classified_reads = html.Div('Classified reads:', style={'padding-right': '10px'}, id='qc_classified_reads')
 qc_unclassified_reads = html.Div('Unclassified reads:', style={'padding-right': '10px'}, id='qc_unclassified_reads')
 waiting_files = html.Div('Files awaiting processing:', style={'padding-right': '10px'}, id='waiting_files')
@@ -1150,33 +1156,40 @@ def update_qc_text(interval_trigger):
     unfiltered_reads = 'Total reads (pre filtering): ' + str(tot_reads_pre_filt)
     total_reads = 'Total reads (post filtering): ' + str(t)
     filtered_proportion = 'Reads that passed filtering: ' + str(float(round((t*100)/tot_reads_pre_filt, 1))) + ' %'
-    # Define the fillter setting objects. This needs work.
-    q_filt = config_contents['q_filt']
-    l_filt = config_contents['l_filt']
-    lc_filt = config_contents['lc_filt']
-    a_trim = config_contents['a_trim']
+    # Define the filter setting objects. This needs work.
+    fastp_df = get_fastp_df(fastp_file)
+    print(fastp_df)
+    tot_passed_reads = fastp_df['cum_passed_filter_reads'].iloc[-1]
+    tot_low_quality_reads = fastp_df['cum_low_quality_reads'].iloc[-1]
+    tot_too_many_N_reads = fastp_df['cum_too_many_N_reads'].iloc[-1]
+    tot_too_short_reads = fastp_df['cum_too_short_reads'].iloc[-1]
 
-    if q_filt == "-Q":
-        q_f = 'Off'
-    else:
-        q_f = 'On'
-    if l_filt == '-L':
-        l_f = 'Off'
-    else:
-        l_f = 'On'
-    if lc_filt == '':
-        lc_f = 'Off'
-    else:
-        lc_f = 'On'
-    if a_trim == '-A':
-        a_t = 'Off'
-    else:
-        a_t = 'On'
+    # q_filt = config_contents['q_filt']
+    # l_filt = config_contents['l_filt']
+    # lc_filt = config_contents['lc_filt']
+    # a_trim = config_contents['a_trim']
 
-    q = 'Quality filter: ', q_f
-    l = 'Length filter: ', l_f
-    lc = 'Low complexity filter: ', lc_f
-    a = 'Adapter trimming: ', a_t
+    # if q_filt == "-Q":
+    #     q_f = 'Off'
+    # else:
+    #     q_f = 'On'
+    # if l_filt == '-L':
+    #     l_f = 'Off'
+    # else:
+    #     l_f = 'On'
+    # if lc_filt == '':
+    #     lc_f = 'Off'
+    # else:
+    #     lc_f = 'On'
+    # if a_trim == '-A':
+    #     a_t = 'Off'
+    # else:
+    #     a_t = 'On'
+
+    q = 'Total reads passed: ', tot_passed_reads
+    l = 'Too low quality: ', tot_low_quality_reads
+    lc = 'Too short: ', tot_too_many_N_reads
+    a = 'Too low complexity: ', tot_too_short_reads
 
     return total_reads, classified_reads, unclassified_reads, unfiltered_reads, filtered_proportion, q, l, lc, a
 
