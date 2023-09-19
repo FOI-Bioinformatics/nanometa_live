@@ -80,6 +80,8 @@ def remove_temp_files(config_contents):
     validation_placeholders = os.path.join(config_contents["main_dir"], 'validation_fastas/placeholders')
     force_valid_file = os.path.join(config_contents["main_dir"], 'validation_fastas/force_validation.txt')
     force_blast_file = os.path.join(config_contents["main_dir"], 'blast_result_files/force_blast.txt')
+    fastp_dir = os.path.join(config_contents["main_dir"], 'fastp_reports/')
+    fastp_file_to_keep = os.path.join(config_contents["main_dir"], 'compiled_fastp/.txt')
 
     # Remove Kraken results directory
     if os.path.exists(kraken_results_dir):
@@ -93,6 +95,14 @@ def remove_temp_files(config_contents):
             if file_path != qc_file_to_keep and os.path.isfile(file_path):
                 os.remove(file_path)
         logging.info('QC files removed. Cumulative file kept.')
+
+    # Remove fastP reports, but keep the compiled file
+    if os.path.exists(fastp_dir):
+        for filename in os.listdir(fastp_dir):
+            file_path = os.path.join(fastp_dir, filename)
+            if file_path != fastp_file_to_keep and os.path.isfile(file_path):
+                os.remove(file_path)
+        logging.info('fastP reports removed. Compiled file kept.')
 
     # Remove validation placeholders
     if os.path.exists(validation_placeholders):
