@@ -31,6 +31,7 @@ def load_config(config_file):
     with open(config_file, 'r') as cf:
         return yaml.load(cf)
 
+
 def build_blast_databases(workdir):
     """
     Build BLAST databases for each reference sequence in the genomes folder
@@ -53,8 +54,10 @@ def build_blast_databases(workdir):
 
             # Create a database for the reference sequence using BLAST
             logging.info(f"Running command: {' '.join(system_cmd)}")
-            subprocess.run(system_cmd, check=True)
-        logging.info('Database built successfully.')
+            subprocess.run(system_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+
+        logging.info('All databases built successfully.')
+
     except Exception as e:
         logging.error(f"An error occurred: {e}")
         raise
@@ -101,7 +104,7 @@ def read_species_from_config(config_contents):
     return species_list
 
 
-def fetch_species_data(search_str: str, db: str, page: int = 1, itemsPerPage: int = 100) -> List[Dict[str, Union[str, int]]]:
+def fetch_species_data(search_str: str, db: str, page: int = 1, itemsPerPage: int = 1000) -> List[Dict[str, Union[str, int]]]:
     base_url = 'https://gtdb-api.ecogenomic.org/search/gtdb'
     params = {
         'search': search_str,
@@ -149,6 +152,8 @@ def filter_exact_match(rows, search_str, db):
     Returns:
         list of dict: The filtered rows.
     """
+    logging.info(f"Filtering rows for exact match with search string: {search_str} using database: {db}")
+
     field = 'gtdbTaxonomy' if db == 'gtdb' else 'ncbiTaxonomy'
     rep_field = 'isGtdbSpeciesRep' if db == 'gtdb' else 'isNcbiTypeMaterial'
 
@@ -158,9 +163,17 @@ def filter_exact_match(rows, search_str, db):
         if row[field].split(';')[-1].strip() == search_str and row[rep_field] is True
     ]
 
+    logging.info(f"Number of rows after standard filtering: {len(filtered_rows)}")
+
+    if len(filtered_rows) == 0:
+        logging.warning(f"No rows found that match the search string: {search_str}. Unfiltered rows: {rows}")
+
     # Additional filtering for NCBI
     if db == 'ncbi' and len(filtered_rows) > 1:
         gtdb_rep_rows = [row for row in filtered_rows if row['isGtdbSpeciesRep'] is True]
+
+        logging.info(f"Number of rows matching 'isGtdbSpeciesRep' after NCBI-specific filtering: {len(gtdb_rep_rows)}")
+
         if len(gtdb_rep_rows) == 1:
             return gtdb_rep_rows
         else:
@@ -245,23 +258,48 @@ def update_results_with_taxid_dict(results, species_taxid_dict):
 
     return results
 
-def parse_to_table_with_taxid(data, db):
+
+
+def create_row_dict(species, species_info, row):
+    return {
+        'Species': species,
+        'Tax_ID': species_info.get('tax_id', 'N/A'),
+        'SearchQuery': f"s__{species}",
+        'GID': row.get('gid', 'N/A'),
+        'Accession': row.get('accession', 'N/A'),
+        'NCBI_OrgName': row.get('ncbiOrgName', 'N/A'),
+        'NCBI_Taxonomy': row.get('ncbiTaxonomy', 'N/A'),
+        'GTDB_Taxonomy': row.get('gtdbTaxonomy', 'N/A'),
+        'Is_GTDB_Species_Rep': row.get('isGtdbSpeciesRep', 'N/A'),
+        'Is_NCBI_Type_Material': row.get('isNcbiTypeMaterial', 'N/A'),
+    }
+
+def parse_to_table_with_taxid(filtered_data):
     parsed_data = []
-    for species, species_info in data.items():
-        for row in filter_exact_match(species_info['rows'], f"s__{species}", db):
-            parsed_data.append({
-                'Species': species,
-                'Tax_ID': species_info.get('tax_id', 'N/A'),  # Retrieve tax ID from species_info
-                'SearchQuery': f"s__{species}",
-                'GID': row.get('gid', 'N/A'),
-                'Accession': row.get('accession', 'N/A'),
-                'NCBI_OrgName': row.get('ncbiOrgName', 'N/A'),
-                'NCBI_Taxonomy': row.get('ncbiTaxonomy', 'N/A'),
-                'GTDB_Taxonomy': row.get('gtdbTaxonomy', 'N/A'),
-                'Is_GTDB_Species_Rep': row.get('isGtdbSpeciesRep', 'N/A'),
-                'Is_NCBI_Type_Material': row.get('isNcbiTypeMaterial', 'N/A'),
-            })
+
+    for species, species_info in filtered_data.items():
+        for row in species_info['rows']:
+            row_dict = create_row_dict(species, species_info, row)
+            parsed_data.append(row_dict)
+
     return pd.DataFrame(parsed_data)
+
+
+
+def filter_data_by_exact_match(data, db):
+    filtered_data = {}
+
+    for species, species_info in data.items():
+        filtered_rows = filter_exact_match(species_info['rows'], f"s__{species}", db)
+        filtered_data[species] = {
+            'rows': filtered_rows,
+            'tax_id': species_info.get('tax_id', 'N/A')
+        }
+
+    return filtered_data
+
+
+
 def write_accessions_to_file(accessions, filename):
     try:
         with open(filename, 'w') as f:
@@ -270,86 +308,106 @@ def write_accessions_to_file(accessions, filename):
     except Exception as e:
         logging.error(f"Failed to write to file: {e}")
 
-def download_genomes_from_ncbi(workdir, prefix, accession_filename='ncbi_acc_download_list.txt'):
+
+def download_genomes_from_ncbi(workdir: str, prefix: str, accession_filename: str = 'ncbi_acc_download_list.txt'):
+    # Define the subfolder and create it if it doesn't exist
+    subfolder = os.path.join(workdir, 'data-files')
+    if not os.path.exists(subfolder):
+        os.makedirs(subfolder)
+        logging.info(f"Created subfolder: {subfolder}")
+
+    # Define the output filename and its full path
     output_filename = f"{prefix}_ncbi_download.zip"
+    output_filepath = os.path.join(subfolder, output_filename)
+
+    # Prepare the command for subprocess
     ncbi_datasets_cmd = [
         'datasets', 'download', 'genome', 'accession',
-        '--inputfile', f"{workdir}/{accession_filename}",
-        '--filename', f"{workdir}/{output_filename}"
+        '--inputfile', os.path.join(workdir, accession_filename),
+        '--filename', output_filepath
     ]
+
     try:
         ncbi_datasets_process = subprocess.Popen(ncbi_datasets_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
         while ncbi_datasets_process.poll() is None:
             line = ncbi_datasets_process.stdout.readline().decode().strip()
             if line:
                 logging.info(f'[NCBI-DATASETS] {line}')
+
     except Exception as e:
         logging.error(f'Failed to download from NCBI using "datasets" software. Exception: {e}')
         logging.info('You can try to run the command manually:')
         logging.info(' '.join(ncbi_datasets_cmd))
-
 
 def decompress_zip(zip_filename, workingdir):
     try:
         # Construct the full paths using workingdir as the parent directory
         zip_filepath = os.path.join(workingdir, zip_filename)
 
+        logging.info(f"Attempting to decompress {zip_filepath} into {workingdir}")
+
         with zipfile.ZipFile(zip_filepath, 'r') as zip_ref:
             zip_ref.extractall(workingdir)
-        print(f"Successfully decompressed {zip_filename} to workingdir")
 
+        logging.info(f"Successfully decompressed {zip_filepath} into {workingdir}")
+
+    except FileNotFoundError:
+        logging.error(f"File not found: {zip_filepath}")
+    except zipfile.BadZipFile:
+        logging.error(f"Invalid ZIP file: {zip_filepath}")
+    except PermissionError:
+        logging.error(f"Permission denied: {zip_filepath}")
     except Exception as e:
-        print(f"Error while decompressing {zip_filename}: {e}")
+        logging.error(f"An unexpected error occurred while decompressing {zip_filepath}: {e}")
 
 
-def rename_files(df, workingdir):
+def rename_files(df: pd.DataFrame, workingdir: str):
     try:
         genomes_dir = os.path.join(workingdir, 'genomes')
 
         # Create the 'genomes' directory if it doesn't exist
         if not os.path.exists(genomes_dir):
             os.makedirs(genomes_dir)
+            logging.info(f"Created directory: {genomes_dir}")
 
-        # Get a list of subdirectories inside the 'data' folder
         data_dir = os.path.join(workingdir, 'ncbi_dataset', 'data')
         subdirectories = [d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))]
 
-        # Iterate through subdirectories
         for subdirectory in subdirectories:
             subdirectory_path = os.path.join(data_dir, subdirectory)
-            if not os.path.isdir(subdirectory_path):
-                continue
 
-            # Find the corresponding species name
             accession = subdirectory
             species_name = accession  # Default to using the accession as the species name
 
-            # Check if the accession exists in the DataFrame
             if not df.empty and 'GID' in df.columns:
                 matching_species = df[df['GID'] == accession]
-                if not matching_species.empty:
-                    # Extract the 'tax_id' from the matching_species DataFrame
-                    tax_id = matching_species.iloc[0].get('Tax_ID', 'N/A')  # Use 'N/A' if 'tax_id' is missing
 
-                    # List all files in the subdirectory
+                if not matching_species.empty:
+                    tax_id = matching_species.iloc[0].get('Tax_ID', 'N/A')
                     files_in_dir = os.listdir(subdirectory_path)
 
-                    # Iterate through the files and find the one ending with '.fna'
                     for filename in files_in_dir:
                         if filename.endswith('.fna'):
-                            # Rename the .fna file to {tax_id}.fna
                             source_file = os.path.join(subdirectory_path, filename)
                             target_file = os.path.join(genomes_dir, f'{tax_id}.fna')
+
                             os.rename(source_file, target_file)
-                            print(f"Renamed {source_file} to {target_file}")
-                            break  # Exit the loop after renaming the first matching file
+                            logging.info(f"Renamed {source_file} to {target_file}")
+                            break
 
                 else:
-                    print(f"Accession {accession} not found in df. Using default name.")
+                    logging.warning(f"Accession {accession} not found in DataFrame. Using default name.")
 
+            else:
+                logging.warning("DataFrame is empty or does not contain 'GID' column. Skipping renaming.")
+
+    except FileNotFoundError:
+        logging.error("Specified directory or file not found.")
+    except PermissionError:
+        logging.error("Permission denied while accessing directory or file.")
     except Exception as e:
-        print(f"Error while renaming files: {e}")
-
+        logging.error(f"An unexpected error occurred while renaming files: {e}")
 
 def decompress_and_rename_zip(zip_filename, species_data, workingdir):
     decompress_zip(zip_filename, workingdir)
@@ -409,6 +467,7 @@ def main():
         inspect_file_name = os.path.join(args.path, generate_inspect_filename(kraken_db))
         success = run_kraken2_inspect(kraken_db, inspect_file_name)
         species_taxid_dict = parse_kraken2_inspect(inspect_file_name)
+
         logging.info(f"Extracted species and tax IDs: {list(species_taxid_dict.items())[:10]}")  # Displaying first 10 for example
 
         #Would need a function to update results to include tax ids using species_taxid_dict
@@ -416,7 +475,10 @@ def main():
 
 
         #Converting to data frame
-        df = parse_to_table_with_taxid(results, kraken_taxonomy)
+        filtered_results = filter_data_by_exact_match(results, kraken_taxonomy)
+
+        df = parse_to_table_with_taxid(filtered_results)
+        #df = parse_to_table_with_taxid(results, kraken_taxonomy)
         output_file =  os.path.join(args.path, f"{args.prefix}_{kraken_taxonomy}.csv")
         logging.info(f"Parsed data saved to {output_file}")
         df.to_csv(output_file, index=False)

@@ -11,6 +11,21 @@ __version__="0.2.1"
 # Initialize logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+def load_config(config_file):
+    """
+    Load configuration settings from a YAML file using ruamel.yaml.
+
+    Parameters:
+        config_file (str): Path to the YAML configuration file.
+
+    Returns:
+        dict: Dictionary containing the configuration settings.
+    """
+    logging.info(f"Loading configuration from {config_file}")
+    yaml = YAML(typ='safe')
+    with open(config_file, 'r') as cf:
+        return yaml.load(cf)
+
 def create_new_project_directory(project_path):
     """
     Create a new directory for the Nanometa project if it doesn't exist.
@@ -83,14 +98,17 @@ def append_project_path_to_config(project_path, config_file_name):
 def read_species_from_file(filename):
     try:
         with open(filename, 'r') as f:
-            species_list = [line.strip() for line in f]
+            species_list = [line.strip() for line in f if line.strip()]
+
         if species_list:
             logging.info(f"Read {len(species_list)} species from {filename}.")
             for i, species in enumerate(species_list, 1):
                 logging.info(f"  {i}. {species}")
         else:
             logging.warning(f"No species found in {filename}.")
+
         return species_list
+
     except FileNotFoundError:
         logging.error(f"File not found: {filename}")
         return []
@@ -141,6 +159,8 @@ def create_new():
 
     config_file_name = args.config  # Get the custom config file name
     project_path = os.path.abspath(args.path)
+    config_file_path = os.path.join(args.path, args.config)
+    config_contents = load_config(config_file_path)
 
 
     # Show help message if no arguments are provided
@@ -149,13 +169,12 @@ def create_new():
         return
 
     logging.info("Starting new Nanometa project creation.")
-    #config_path = pkg_resources.resource_filename(__name__, "config.yaml")
     config_path = files('nanometa_live').joinpath('config.yaml')
 
     create_new_project_directory(project_path)
     backup_config_file(project_path, config_file_name)
     copy_config_file(config_path, project_path, config_file_name)
-    #append_project_path_to_config(project_path, config_file_name)
+
 
     update_config_file_with_comments(args.path, args.config, 'main_dir', project_path)
 
@@ -185,10 +204,15 @@ def create_new():
     if args.kraken_taxonomy:
         update_config_file_with_comments(args.path, args.config, 'kraken_taxonomy', args.kraken_taxonomy)
 
-    logging.info(f"Nanometa project ({args.analysis_name}) created successfully.")
+    if not args.analysis_name:
+        analysis_name=config_contents["analysis_name"]
+    else:
+        analysis_name=args.analysis_name
+    logging.info(f"Nanometa project ({analysis_name}) created successfully.")
 
 def main():
     """
+
     Main function to execute the create_new function.
     """
     create_new()
