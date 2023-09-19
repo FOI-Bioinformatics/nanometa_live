@@ -208,7 +208,7 @@ def run_kraken2_inspect(kraken2_db_path, output_path):
         logging.error(f"Error in running Kraken2 inspect: {e}")
         return False
 
-def parse_kraken2_inspect(output_path):
+def parse_kraken2_inspect(output_path: str) -> dict:
     """
     Parse the Kraken2 inspect output file to extract tax IDs and species strings.
 
@@ -219,22 +219,28 @@ def parse_kraken2_inspect(output_path):
         dict: Dictionary with species strings as keys and tax IDs as values.
     """
     try:
+        logging.info(f"Attempting to read Kraken2 inspect file from: {output_path}")
+
         # Read the file into a DataFrame, ignoring comment lines
         df = pd.read_csv(output_path, sep='\t', comment="#", header=None)
+        logging.info(f"Successfully read the file into a DataFrame.")
 
         # Strip leading spaces from the species string column
         df.iloc[:, -1] = df.iloc[:, -1].str.strip()
+        logging.info("Stripped leading spaces from species strings.")
 
         # Create a dictionary of species and tax IDs
         species_taxid_dict = df.set_index(df.columns[-1])[df.columns[-2]].to_dict()
+        logging.info("Successfully created species to tax ID dictionary.")
 
         return species_taxid_dict
+
     except Exception as e:
         logging.error(f"Error in parsing Kraken2 inspect file: {e}")
         return None
 
 
-def update_results_with_taxid_dict(results, species_taxid_dict):
+def update_results_with_taxid_dict(results: dict, species_taxid_dict: dict) -> dict:
     """
     Update the results dictionary with taxonomic IDs.
 
@@ -245,16 +251,24 @@ def update_results_with_taxid_dict(results, species_taxid_dict):
     Returns:
     - dict: Updated results dictionary.
     """
+    logging.info("Starting the update of results with taxonomic IDs.")
+
     # Loop through the dictionary keys and update tax IDs
     for species_name in results.keys():
+        logging.debug(f"Processing species: {species_name}")
+
         # Look up the tax ID
         tax_id = species_taxid_dict.get(species_name, None)
 
         # Update the dictionary
         if tax_id is not None:
+            logging.info(f"Found tax ID {tax_id} for species {species_name}. Updating results.")
             results[species_name]['tax_id'] = tax_id
         else:
+            logging.warning(f"Tax ID not found for species {species_name}. Setting it to 'N/A'.")
             results[species_name]['tax_id'] = 'N/A'  # If the tax ID is not found, set it to 'N/A'
+
+    logging.info("Finished updating results with taxonomic IDs.")
 
     return results
 
@@ -274,15 +288,44 @@ def create_row_dict(species, species_info, row):
         'Is_NCBI_Type_Material': row.get('isNcbiTypeMaterial', 'N/A'),
     }
 
-def parse_to_table_with_taxid(filtered_data):
+
+def parse_to_table_with_taxid(filtered_data: dict) -> pd.DataFrame:
+    """
+    Parse filtered data into a DataFrame.
+
+    Parameters:
+    - filtered_data (dict): Filtered data containing species and their information.
+
+    Returns:
+    - pd.DataFrame: DataFrame containing parsed data.
+    """
+    logging.info("Starting the parsing of filtered data into a DataFrame.")
+
+    # Initialize an empty list to hold the parsed data.
     parsed_data = []
 
+    # Loop through each species and its corresponding information.
     for species, species_info in filtered_data.items():
+        logging.debug(f"Parsing information for species: {species}")
+
+        # Loop through each row of species_info.
         for row in species_info['rows']:
+            logging.debug(f"Parsing row for species {species}")
+
+            # Create a row dictionary.
             row_dict = create_row_dict(species, species_info, row)
+
+            # Append the row dictionary to parsed_data.
             parsed_data.append(row_dict)
 
-    return pd.DataFrame(parsed_data)
+        logging.debug(f"Finished parsing information for species: {species}")
+
+    # Create a DataFrame from the parsed data.
+    parsed_df = pd.DataFrame(parsed_data)
+
+    logging.info(f"Finished parsing filtered data into a DataFrame with {len(parsed_df)} rows.")
+
+    return parsed_df
 
 
 
@@ -299,17 +342,45 @@ def filter_data_by_exact_match(data, db):
     return filtered_data
 
 
-
 def write_accessions_to_file(accessions, filename):
+    """
+    Writes a list of accessions to a file.
+
+    Parameters:
+    - accessions (list): The list of accession numbers to write.
+    - filename (str): The name of the file where accessions will be written.
+
+    """
+    logging.info(f"Attempting to write {len(accessions)} accessions to {filename}.")
+
     try:
+        # Open the file in write mode
         with open(filename, 'w') as f:
+            # Write each accession to the file, separated by a newline
             f.write('\n'.join(accessions) + '\n')
+
         logging.info(f"Successfully wrote {len(accessions)} accessions to {filename}.")
+    except FileNotFoundError:
+        logging.error(f"File not found: {filename}")
+    except PermissionError:
+        logging.error(f"Permission denied: Cannot write to {filename}")
     except Exception as e:
-        logging.error(f"Failed to write to file: {e}")
+        logging.error(f"An unexpected error occurred while writing to {filename}: {e}")
 
 
 def download_genomes_from_ncbi(workdir: str, prefix: str, accession_filename: str = 'ncbi_acc_download_list.txt'):
+    """
+    Download genomes from NCBI and save them to a specific directory.
+
+    Parameters:
+    - workdir (str): The working directory where files will be saved.
+    - prefix (str): The prefix for the output filename.
+    - accession_filename (str): The name of the file containing accession numbers. Default is 'ncbi_acc_download_list.txt'.
+    """
+
+    # Logging the start of the download process
+    logging.info(f"Starting download of genomes with prefix: {prefix}")
+
     # Define the subfolder and create it if it doesn't exist
     subfolder = os.path.join(workdir, 'data-files')
     if not os.path.exists(subfolder):
@@ -319,6 +390,7 @@ def download_genomes_from_ncbi(workdir: str, prefix: str, accession_filename: st
     # Define the output filename and its full path
     output_filename = f"{prefix}_ncbi_download.zip"
     output_filepath = os.path.join(subfolder, output_filename)
+    logging.info(f"Output will be saved as: {output_filepath}")
 
     # Prepare the command for subprocess
     ncbi_datasets_cmd = [
@@ -326,6 +398,8 @@ def download_genomes_from_ncbi(workdir: str, prefix: str, accession_filename: st
         '--inputfile', os.path.join(workdir, accession_filename),
         '--filename', output_filepath
     ]
+
+    logging.info(f"Running command: {' '.join(ncbi_datasets_cmd)}")
 
     try:
         ncbi_datasets_process = subprocess.Popen(ncbi_datasets_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -335,11 +409,14 @@ def download_genomes_from_ncbi(workdir: str, prefix: str, accession_filename: st
             if line:
                 logging.info(f'[NCBI-DATASETS] {line}')
 
+    except FileNotFoundError:
+        logging.error(f"Command not found: {ncbi_datasets_cmd[0]}")
+    except PermissionError:
+        logging.error(f"Permission denied: Cannot execute command")
     except Exception as e:
         logging.error(f'Failed to download from NCBI using "datasets" software. Exception: {e}')
         logging.info('You can try to run the command manually:')
         logging.info(' '.join(ncbi_datasets_cmd))
-
 def decompress_zip(zip_filename, workingdir):
     try:
         # Construct the full paths using workingdir as the parent directory
@@ -468,7 +545,7 @@ def main():
         success = run_kraken2_inspect(kraken_db, inspect_file_name)
         species_taxid_dict = parse_kraken2_inspect(inspect_file_name)
 
-        logging.info(f"Extracted species and tax IDs: {list(species_taxid_dict.items())[:10]}")  # Displaying first 10 for example
+        #logging.info(f"Extracted species and tax IDs: {list(species_taxid_dict.items())[:10]}")  # Displaying first 10 for example
 
         #Would need a function to update results to include tax ids using species_taxid_dict
         results = update_results_with_taxid_dict(results, species_taxid_dict)
