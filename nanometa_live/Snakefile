@@ -65,6 +65,7 @@ rule all:
 		os.path.join(config["main_dir"], "kraken_cumul/kraken_cumul_txt.kraken2"),	# cumulative kraken txt file, used for validation
 		os.path.join(config["main_dir"], "kraken_cumul/kraken_cumul_report.kreport2"),	# cumulative kraken report file, used in GUI
 		os.path.join(config["main_dir"], "qc_data/cumul_qc.txt"),			# cumulative csv file containing qc data, used in GUI
+		os.path.join(config["main_dir"], "fastp_reports/compiled_fastp.txt"),	# cumulative csv file with filter data for GUI
 		# Target for the validation step, skipped if validation=False:
 		os.path.join(config["main_dir"], "validation_fastas/force_validation.txt") if config["blast_validation"] else [],
 		# Similar target for blast, skipped if validation=False:
@@ -101,12 +102,32 @@ rule fastp_filtering:
 	input:
 		os.path.join(config["nanopore_output_directory"], "{fileName}.fastq.gz")
 	output:
-		os.path.join(config["main_dir"], "fastp_filtered/{fileName}.fastq.gz")
+		fastqs = os.path.join(config["main_dir"], "fastp_filtered/{fileName}.fastq.gz"),
+		report = os.path.join(config["main_dir"], "fastp_reports/{fileName}.json")
 	conda:
 		pkg_resources.resource_filename('nanometa_live', 'snakemake_envs/fastp_env.yaml')
 	shell:
-		"fastp -i {input} -o {output} --json /dev/null --html /dev/null" + config["q_filt"] + config["l_filt"] + config["lc_filt"] + config["a_trim"]
-			
+		"fastp -i {input} -o {output.fastqs} -y --json {output.report} --html /dev/null"# + config["q_filt"] + config["l_filt"] + config["lc_filt"] + config["a_trim"]
+
+rule extract_fastp_info:
+	# Parses the json files to extract the needed info
+	# Creates a txt/csv file with one line containing all info for the batch
+	input:
+		os.path.join(config["main_dir"], "fastp_reports/{fileName}.json")
+	output:
+		os.path.join(config["main_dir"], "fastp_reports/{fileName}.txt")
+	shell:
+		"python " + pkg_resources.resource_filename('nanometa_live', 'snakemake_scripts/fastp_report_parser.py') + " {input} {output}"
+
+rule combine_fastp:
+	# Compiles all the data into one file
+	input:
+		expand(os.path.join(config["main_dir"], "fastp_reports/{fileName}.txt"), fileName = files)
+	output:
+		os.path.join(config["main_dir"], "fastp_reports/compiled_fastp.txt")
+	shell:
+		"cat {input} > {output}"
+
 rule run_kraken:
 	# Kraken classification of filtered fastq files.
 	# Produces a txt file and a kraken report for each fastq.
