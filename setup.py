@@ -47,11 +47,12 @@ setup(
       # since a function needs to be specified.
       entry_points = {'console_scripts':
                       ['nanometa-sim = nanometa_live.nanopore_simulator:nano_sim', # nanopore simulator
-                       'nanometa-new = nanometa_live.create_new_project:create_new', # create new project
+                       'nanometa-new = nanometa_live.nanometa_new:main', # create new project
                        'nanometa-blastdb = nanometa_live.build_blast_db:build_blast', # create blast validation databases
                        'nanometa-backend = nanometa_live.nanometa_backend:main', # run backend pipeline
                        'nanometa-gui = nanometa_live.nanometa_gui:run_app', # run gui
-                       'nanometa-live = nanometa_live.nanometa_live:main'
+                       'nanometa-live = nanometa_live.nanometa_live:main',  # wrapper to run both backend and GUI.
+                       'nanometa-prepare = nanometa_live.nanometa_prepare:main'  # Autmatically download genomes and create blast databases
                        ]
                       },
       # Makes sure the files are found after install.

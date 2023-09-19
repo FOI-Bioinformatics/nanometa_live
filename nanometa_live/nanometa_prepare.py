@@ -7,26 +7,18 @@ import sys
 import subprocess
 import zipfile
 import os
-import yaml
+from ruamel.yaml import YAML
 import shutil
+from typing import List, Dict, Union
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 __version__="0.2.1"
 
-# Command line arguments
-parser = argparse.ArgumentParser(description='Fetch and filter species data.')
-parser.add_argument('-x', '--prefix', default='parsed_species_data', help='Prefix for the output CSV file.')
-parser.add_argument('--config', default='config.yaml', help='Path to the configuration file. Default is config.yaml.')
-parser.add_argument('-p', '--path', default='', help="The path to the project directory.")
-parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}',
-                    help="Show the current version of the script.")
-args = parser.parse_args()
-
 def load_config(config_file):
     """
-    Load configuration settings from a YAML file.
+    Load configuration settings from a YAML file using ruamel.yaml.
 
     Parameters:
         config_file (str): Path to the YAML configuration file.
@@ -35,8 +27,9 @@ def load_config(config_file):
         dict: Dictionary containing the configuration settings.
     """
     logging.info(f"Loading configuration from {config_file}")
+    yaml = YAML(typ='safe')
     with open(config_file, 'r') as cf:
-        return yaml.safe_load(cf)
+        return yaml.load(cf)
 
 def build_blast_databases(workdir):
     """
@@ -71,14 +64,14 @@ def read_species_from_config(config_file):
     try:
         config_data = load_config(config_file)
         species_list = config_data.get('species_of_interest', [])
-        
+
         if species_list:
             logging.info(f"Read {len(species_list)} species from {config_file}.")
             for i, species in enumerate(species_list, 1):
                 logging.info(f"  {i}. {species}")
         else:
             logging.warning(f"No species found in {config_file}.")
-        
+
         return species_list
     except FileNotFoundError:
         logging.error(f"File not found: {config_file}")
@@ -97,18 +90,18 @@ def read_species_from_config(config_file):
 # Updated function to read species from config.yaml
 def read_species_from_config(config_contents):
     species_list = config_contents.get('species_of_interest', [])
-    
+
     if species_list:
         logging.info(f"Read {len(species_list)} species from preloaded config.")
         for i, species in enumerate(species_list, 1):
             logging.info(f"  {i}. {species}")
     else:
         logging.warning("No species found in preloaded config.")
-    
+
     return species_list
 
 
-def fetch_species_data(search_str, db, page=1, itemsPerPage=100):
+def fetch_species_data(search_str: str, db: str, page: int = 1, itemsPerPage: int = 100) -> List[Dict[str, Union[str, int]]]:
     base_url = 'https://gtdb-api.ecogenomic.org/search/gtdb'
     params = {
         'search': search_str,
@@ -121,14 +114,29 @@ def fetch_species_data(search_str, db, page=1, itemsPerPage=100):
     try:
         response = requests.get(base_url, params=params, headers={'accept': 'application/json'})
         if response.status_code == 200:
-            logging.info(f"Successfully fetched data for {search_str} from {db}.")
-            return json.loads(response.text)['rows']
+            rows = json.loads(response.text)['rows']
+            num_rows = len(rows)  # Get the number of rows
+
+            # Log number of fetched rows and success
+            logging.info(f"Successfully fetched {num_rows} rows for {search_str} from {db}.")
+
+
+            # Log details of fetched data for debugging
+            for row in rows:
+                ncbiorgname = row.get('ncbiOrgName', 'N/A')
+                gid = row.get('gid', 'N/A')
+                gtdb_rep = row.get('isGtdbSpeciesRep', 'N/A')
+                ncbi_type = row.get('isGtdbSpeciesRep', 'N/A')
+                #logging.info(f"Seatch string: {search_str}, Fetched row details: NCBI organism: {ncbiorgname}, GID: {gid}, GTDB reprentative: {gtdb_rep}, NCBI type strain: {ncbi_type}")
+            return rows
         else:
             logging.warning(f"Failed to get data for {search_str} from {db}. HTTP Status Code: {response.status_code}")
             return []
     except Exception as e:
         logging.error(f"An error occurred while fetching data: {e}")
         return []
+
+
 def filter_exact_match(rows, search_str, db):
     """
     Filters the rows for exact matches in a given taxonomy field, depending on the database.
@@ -163,15 +171,20 @@ def filter_exact_match(rows, search_str, db):
 
 def run_kraken2_inspect(kraken2_db_path, output_path):
     """
-    Run the Kraken2 inspect command to generate a report.
+    Run the Kraken2 inspect command to generate a report if the output file doesn't exist.
 
     Parameters:
         kraken2_db_path (str): The path to the Kraken2 database.
         output_path (str): The path where the Kraken2 inspect output will be saved.
 
     Returns:
-        bool: True if the command was successful, False otherwise.
+        bool: True if the command was successful or if the output file already exists, False otherwise.
     """
+    if os.path.exists(output_path):
+        logging.info(f"kraken2 inspect file already exists at {output_path}.")
+        logging.info(f"Skipping running Kraken2 inspect.")
+        return True
+
     try:
         logging.info(f"Running Kraken2 inspect on database: {kraken2_db_path}")
         # Run the Kraken2 inspect command
@@ -296,7 +309,7 @@ def rename_files(df, workingdir):
         # Create the 'genomes' directory if it doesn't exist
         if not os.path.exists(genomes_dir):
             os.makedirs(genomes_dir)
-            
+
         # Get a list of subdirectories inside the 'data' folder
         data_dir = os.path.join(workingdir, 'ncbi_dataset', 'data')
         subdirectories = [d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))]
@@ -363,7 +376,17 @@ def generate_inspect_filename(file_path):
 
     return inspect_file_name
 
-if __name__ == '__main__':
+
+def main():
+    # Command line arguments
+    parser = argparse.ArgumentParser(description='Fetch and filter species data.')
+    parser.add_argument('-x', '--prefix', default='parsed_species_data', help='Prefix for the output CSV file.')
+    parser.add_argument('--config', default='config.yaml', help='Path to the configuration file. Default is config.yaml.')
+    parser.add_argument('-p', '--path', default='', help="The path to the project directory.")
+    parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}',
+                        help="Show the current version of the script.")
+    args = parser.parse_args()
+
     config_file_path = os.path.join(args.path, args.config) if args.path else args.config
     config_contents = load_config(config_file_path)
 
@@ -411,9 +434,11 @@ if __name__ == '__main__':
         # Download genomes
         download_genomes_from_ncbi(args.path, args.prefix, f"{args.prefix}_{kraken_taxonomy}_accessions.txt")
         decompress_and_rename_zip(f"{args.prefix}_ncbi_download.zip", df, args.path)
-        
+
         build_blast_databases(args.path)
-        
 
     else:
         logging.warning("No data found for any species.")
+
+if __name__ == '__main__':
+    main()

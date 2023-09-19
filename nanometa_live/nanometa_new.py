@@ -142,6 +142,7 @@ def create_new():
     config_file_name = args.config  # Get the custom config file name
     project_path = os.path.abspath(args.path)
 
+
     # Show help message if no arguments are provided
     if not any(vars(args).values()) or project_path is None:
         parser.print_help()
@@ -173,11 +174,13 @@ def create_new():
         update_config_file_with_comments(args.path, args.config, 'danger_lower_limit', args.danger_lower_limit)
 
     if args.nanopore_output_directory:
+        nanopore_output_directory = os.path.abspath(args.nanopore_output_directory)
         update_config_file_with_comments(args.path, args.config, 'nanopore_output_directory',
-                                         args.nanopore_output_directory)
+                                         nanopore_output_directory)
 
     if args.kraken_db:
-        update_config_file_with_comments(args.path, args.config, 'kraken_db', args.kraken_db)
+        kraken_db = os.path.abspath(args.kraken_db)
+        update_config_file_with_comments(args.path, args.config, 'kraken_db', kraken_db)
 
     if args.kraken_taxonomy:
         update_config_file_with_comments(args.path, args.config, 'kraken_taxonomy', args.kraken_taxonomy)
