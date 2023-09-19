@@ -5,7 +5,7 @@
 ## PROJECT NAME ##
 
 # Appears as a tilte at the top of the GUI.
-analysis_name: "Metagenomic testing"
+analysis_name: "Metagenomic analysis"
 
 
 ## SPECIES OF INTEREST ##
@@ -121,7 +121,7 @@ kraken_memory_mapping: "--memory-mapping"
 
 # Turn validation on/off:
 # on: True, off: False
-blast_validation: true
+blast_validation: True
 
 
 ## BLAST CUTOFFS ##
