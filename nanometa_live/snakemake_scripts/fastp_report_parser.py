@@ -2,6 +2,9 @@
 import json
 import sys
 
+# Parses out the needed info from each fastP json report and 
+# creates a one line txt/csv file that can be concatenated into a list.
+
 # Reading in the file names from the terminal argunments.
 in_file = sys.argv[1]
 out_file = sys.argv[2]

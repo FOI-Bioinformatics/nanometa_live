@@ -96,9 +96,9 @@ rule combine_qc:
 
 rule fastp_filtering:
 	# Filters the fastq files before Kraken classification. 
-	# The filtering settings are per fastP defaults. !!!!!!!!!
-	# "dev/null" is a workaround to discard the reports. !!!!!
-	# This sends the reports into Linux limbo: dev/null. !!!!!!
+	# The filtering settings are per fastP defaults plus added low complexity filter.
+	# "dev/null" is a workaround to discard the html report.
+	# This sends the report into Linux limbo: dev/null.
 	input:
 		os.path.join(config["nanopore_output_directory"], "{fileName}.fastq.gz")
 	output:
@@ -107,11 +107,11 @@ rule fastp_filtering:
 	conda:
 		pkg_resources.resource_filename('nanometa_live', 'snakemake_envs/fastp_env.yaml')
 	shell:
-		"fastp -i {input} -o {output.fastqs} -y --json {output.report} --html /dev/null"# + config["q_filt"] + config["l_filt"] + config["lc_filt"] + config["a_trim"]
+		"fastp -i {input} -o {output.fastqs} -y --json {output.report} --html /dev/null"
 
 rule extract_fastp_info:
-	# Parses the json files to extract the needed info
-	# Creates a txt/csv file with one line containing all info for the batch
+	# Parses the json fastP report files to extract the needed info.
+	# Creates a txt/csv file with one line containing all info for the batch.
 	input:
 		os.path.join(config["main_dir"], "fastp_reports/{fileName}.json")
 	output:
@@ -120,7 +120,7 @@ rule extract_fastp_info:
 		"python " + pkg_resources.resource_filename('nanometa_live', 'snakemake_scripts/fastp_report_parser.py') + " {input} {output}"
 
 rule combine_fastp:
-	# Compiles all the data into one file
+	# Compiles all the filtering data into one file for the GUI.
 	input:
 		expand(os.path.join(config["main_dir"], "fastp_reports/{fileName}.txt"), fileName = files)
 	output:

@@ -141,37 +141,6 @@ min_perc_identity: 90
 e_val_cutoff: 0.01
 
 
-## FASTP FILTER OPTIONS ##
-
-# Options for filtering the raw sequences from the nanopore before classification.
-# Everything can be left as it is unless there are specific requirements.
-# For detailed explanations and options, see fastP documentation.
-
-# QUALITY FILTER
-# Removes sequences with too many unqualified bases.
-# Bases with phred quality <15 are unqualified.
-# Sequences with more than 40% unqualified bases are discarded.
-# On by default, can be turned off by changing this parameter to "-Q"
-q_filt: ""
-
-# LENGTH FILTER
-# Removes sequences that are shorter than 15 bp.
-# On by default, can be turned off by changing this parameter to "-L"
-l_filt: ""
-
-# LOW COMPLEXITY FILTER
-# Filters by the percentage of bases that are different from its next base.
-# This way, sequences with long stretches of the same nucleotide are
-# filtered out. By default, at least 30% compelxity is required.
-# Disabled by default, can be enabled by changing this parameter to "-y"
-lc_filt: ""
-
-# ADAPTER TRIMMING
-# Adapters are automatically detected.
-# Enabled by default, can be disabled by changing this parameter to "-A"
-a_trim: ""
-
-
 ## PROJECT MAIN DIRECTORY ##
 
 # Automatically added when creating a new project.
