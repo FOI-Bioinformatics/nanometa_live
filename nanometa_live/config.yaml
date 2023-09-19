@@ -1,3 +1,7 @@
+# CONFIG FILE FOR NANOMETA LIVE
+
+# Settings and parameters for each project are customized here.
+# To check which project this config belongs to, see the final entry, "main_dir".
 
 ########## GUI CONFIG #######################################################
 
