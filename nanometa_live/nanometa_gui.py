@@ -253,12 +253,13 @@ nanopore_dir = config_contents['nanopore_output_directory']
 blast_dir = os.path.join(config_contents["main_dir"], 'blast_result_files')
 
 # Path to file that stores cumulative QC data.
-# Used by update_qc_plots callback and update_waiting_files.
+# Used by update_qc_plots, update_waiting_files and update_qc_text callbacks.
 qc_file = os.path.join(config_contents["main_dir"], 'qc_data/cumul_qc.txt')
 # Initial qc data, if no data: creates placeholder df.
 qc_df = get_qc_df(qc_file)
 
 # Path to file that stores cumulative fastp data.
+# Used by update_qc_text callback.
 fastp_file = os.path.join(config_contents["main_dir"], 'fastp_reports/compiled_fastp.txt')
 # Initial fastp data, if no data: creates placeholder df.
 fastp_df = get_fastp_df(fastp_file)
@@ -676,26 +677,42 @@ pathogens_top_with_margin = html.Div(pathogens_top, style=main_page_margins)
 qc_head = html.H2('Technical QC',className="bg-light border")
 
 # Initial placeholder values for the qc text info.
-qc_unfiltered_reads = html.Div('Total reads (pre filtering):', style={'padding-right': '10px'}, id='qc_unfiltered_reads')
-qc_total_reads = html.Div('Total reads (post filtering):', style={'padding-right': '10px'}, id='qc_total_reads')
-qc_filtered_proportion = html.Div('Reads that passed filtering:', style={'padding-right': '10px'}, id='qc_filtered_proportion')
-qc_filter_settings = html.Div('FILTER SPECIFICS', style={'padding-right': '10px'}, id='qc_filter_settings')
-qc_filter_quality = html.Div('Total reads passed:', style={'padding-right': '10px'}, id='qc_filter_quality')
-qc_filter_length = html.Div('Too low quality:', style={'padding-right': '10px'}, id='qc_filter_length')
-qc_filter_lowc = html.Div('Too short:', style={'padding-right': '10px'}, id='qc_filter_lowc')
-qc_filter_adapter = html.Div('Too low complexity:', style={'padding-right': '10px'}, id='qc_filter_adapter')
+qc_filtering_headline = html.Div('FILTERING', style={'padding-right': '10px'}, id='qc_filtering_headline')
+qc_reads_pre_filtering = html.Div('Total reads pre filtering:', style={'padding-right': '10px'}, id='qc_reads_pre_filtering')
+
+qc_reads_passed = html.Div('Reads that passed filtering:', style={'padding-right': '10px'}, id='qc_reads_passed')
+qc_reads_removed = html.Div('Total reads removed:', style={'padding-right': '10px'}, id='qc_reads_removed')
+
+qc_remove_reason = html.Div('REASONS FOR REMOVAL', style={'padding-right': '10px'}, id='qc_remove_reason')
+qc_proportions_info = html.Div('(percentages of total removed reads)', style={'padding-right': '10px'}, id='qc_proportions_info')
+qc_low_quality = html.Div('Too low quality:', style={'padding-right': '10px'}, id='qc_low_quality')
+qc_too_short = html.Div('Too short:', style={'padding-right': '10px'}, id='qc_too_short')
+qc_low_complexity = html.Div('Too low complexity:', style={'padding-right': '10px'}, id='qc_low_complexity')
+
+qc_classification_headline = html.Div('CLASSIFICATION', style={'padding-right': '10px'}, id='qc_classification_headline')
 qc_classified_reads = html.Div('Classified reads:', style={'padding-right': '10px'}, id='qc_classified_reads')
 qc_unclassified_reads = html.Div('Unclassified reads:', style={'padding-right': '10px'}, id='qc_unclassified_reads')
+
+qc_processing_headline = html.Div('FILE PROCESSING', style={'padding-right': '10px'}, id='qc_processing_headline')
 waiting_files = html.Div('Files awaiting processing:', style={'padding-right': '10px'}, id='waiting_files')
 processed_files = html.Div('Files processed:', style={'padding-right': '10px'}, id='processed_files')
 
 qc_info_section = html.Div('The two upper graphs show the cumulative reads and base pairs produced by the sequencer \
                            over time, using the pre-filtered data, i.e. the raw data from the sequencer. \
                            The lower two plots show the number of reads and base pairs produced in each batch, also\
-                           using the unfiltered sequencer data. The info above displays the total number of sequences\
-                           produced, the number of post-filtering sequences, and the proportion of the filtered\
-                           sequences that were successfully classified. The number of batch files that have been \
-                           processed and the number that still remain is also shown.')
+                           using the unfiltered sequencer data. The plots can be saved as png files using the icon \
+                           in the top right corner of each plot. \
+                           The FILTERING info displays the total number of sequences\
+                           produced, the number of passed and removed sequences, and the reasons for removal.\
+                           The filter parameters are the following: "Too low quality": removes sequences with\
+                           too many unqualified bases. Bases with phred quality <15 are unqualified. Sequences \
+                           with more than 40% unqualified bases are discarded. "Too short": removes sequences \
+                           that are shorter than 15 bp. "Too low complexity": filters by the percentage of bases\
+                           that are different from its next base. This way, sequences with long stretches of the\
+                           same nucleotide are filtered out. At least 30% compelxity is required. The filtering \
+                           also automatically removes adapters. CLASSIFICATION shows the number of reads that\
+                           were successfully classified. FILE PROCESSING shows the number of batch files that have been \
+                           processed and the number that still remain.')
 
 # Initial empty placeholder plots (plotly express).
 cumul_reads_fig = px.line(qc_df, x='Time', y="Cumulative reads")
@@ -737,21 +754,25 @@ qc_column = html.Div(
 # Everything exept headline in one object.
 qc_row_all = html.Div(
     [
-        html.Div(html.Div([qc_unfiltered_reads,
-                           qc_total_reads,
-                           qc_filtered_proportion,
+        html.Div(html.Div([qc_filtering_headline,
+                           qc_reads_pre_filtering,
+                           qc_reads_passed,
+                           qc_reads_removed,
                            html.Br(),
-                           qc_filter_settings,
-                           qc_filter_quality,
-                           qc_filter_length,
-                           qc_filter_lowc,
-                           qc_filter_adapter,
+                           qc_remove_reason,
+                           qc_low_quality,
+                           qc_too_short,
+                           qc_low_complexity,
                            html.Br(),
+                           qc_proportions_info,
+                           html.Hr(),
+                           qc_classification_headline,
                   qc_classified_reads,
                   qc_unclassified_reads,
-                  html.Br(),
-                  waiting_files,
+                  html.Hr(),
+                  qc_processing_headline,
                   processed_files,
+                  waiting_files,                  
                   html.Br(),
                   html.Hr(),
                   html.Div('INFO:'), # cheating
@@ -1128,15 +1149,14 @@ def update_qc_plots(interval_trigger):
 # Displays classified, unclassified and total reads from Kraken.
 # Also displays filter info.
 # If interval is disabled, it should keep the latest values.
-@app.callback(Output('qc_total_reads', 'children'), # text outputs
-              Output('qc_classified_reads', 'children'),
+@app.callback(Output('qc_classified_reads', 'children'), # text outputs
               Output('qc_unclassified_reads', 'children'),
-              Output('qc_unfiltered_reads', 'children'),
-              Output('qc_filtered_proportion', 'children'),
-              Output('qc_filter_quality', 'children'),
-              Output('qc_filter_length', 'children'),
-              Output('qc_filter_lowc', 'children'),
-              Output('qc_filter_adapter', 'children'),
+              Output('qc_reads_pre_filtering', 'children'),
+              Output('qc_reads_passed', 'children'),
+              Output('qc_low_quality', 'children'),
+              Output('qc_too_short', 'children'),
+              Output('qc_low_complexity', 'children'),
+              Output('qc_reads_removed', 'children'),
               Input('interval_component', 'n_intervals') # interval input
               )
 def update_qc_text(interval_trigger):
@@ -1147,51 +1167,42 @@ def update_qc_text(interval_trigger):
     pc = float(round(raw_df.iloc[1,0],1)) # percent classified
     pu = float(round(raw_df.iloc[0,0],1)) # percent unclassified
     # Define the classified info objects.
-    classified_reads = 'Classified reads: ' + str(c) + ' (' + str(pc) + ' %)'
-    unclassified_reads = 'Unclassified reads: ' + str(u) + ' (' + str(pu) + ' %)'
+    classified_reads = 'Classified reads: ' + str(c) + ' (' + str(pc) + '%)'
+    unclassified_reads = 'Unclassified reads: ' + str(u) + ' (' + str(pu) + '%)'
     # Needed to extract the number of pre-filter reads etc.
     qc_df_b = get_qc_df(qc_file)
     # Define the filter info objects.
-    tot_reads_pre_filt = qc_df_b['Cumulative reads'].iloc[-1]
-    unfiltered_reads = 'Total reads (pre filtering): ' + str(tot_reads_pre_filt)
-    total_reads = 'Total reads (post filtering): ' + str(t)
-    filtered_proportion = 'Reads that passed filtering: ' + str(float(round((t*100)/tot_reads_pre_filt, 1))) + ' %'
-    # Define the filter setting objects. This needs work.
+    tot_reads_pre_filt = int(qc_df_b['Cumulative reads'].iloc[-1])
+    unfiltered_reads = 'Total reads pre filtering: ' + str(tot_reads_pre_filt)
+    #total_reads = 'Total reads post filtering: ' + str(t)
+    #filtered_proportion = 'Reads that passed filtering: ' + str(float(round((t*100)/tot_reads_pre_filt, 1))) + ' %'
+    # Define the filter setting objects.
+    # Load the latest cumulative fastP info file.
     fastp_df = get_fastp_df(fastp_file)
-    print(fastp_df)
-    tot_passed_reads = fastp_df['cum_passed_filter_reads'].iloc[-1]
-    tot_low_quality_reads = fastp_df['cum_low_quality_reads'].iloc[-1]
-    tot_too_many_N_reads = fastp_df['cum_too_many_N_reads'].iloc[-1]
-    tot_too_short_reads = fastp_df['cum_too_short_reads'].iloc[-1]
+    # Create info variables.
+    tot_passed_reads = int(fastp_df['cum_passed_filter_reads'].iloc[-1])
+    tot_low_quality_reads = int(fastp_df['cum_low_quality_reads'].iloc[-1])
+    tot_too_many_N_reads = int(fastp_df['cum_too_many_N_reads'].iloc[-1])
+    tot_too_short_reads = int(fastp_df['cum_too_short_reads'].iloc[-1])
 
-    # q_filt = config_contents['q_filt']
-    # l_filt = config_contents['l_filt']
-    # lc_filt = config_contents['lc_filt']
-    # a_trim = config_contents['a_trim']
+    tot_removed_reads = tot_low_quality_reads + tot_too_many_N_reads + tot_too_short_reads
 
-    # if q_filt == "-Q":
-    #     q_f = 'Off'
-    # else:
-    #     q_f = 'On'
-    # if l_filt == '-L':
-    #     l_f = 'Off'
-    # else:
-    #     l_f = 'On'
-    # if lc_filt == '':
-    #     lc_f = 'Off'
-    # else:
-    #     lc_f = 'On'
-    # if a_trim == '-A':
-    #     a_t = 'Off'
-    # else:
-    #     a_t = 'On'
+    percentage_passed_reads = float(round((tot_passed_reads*100)/tot_reads_pre_filt, 1))
+    percentage_reads_removed = float(round((tot_removed_reads*100)/tot_reads_pre_filt, 1))
 
-    q = 'Total reads passed: ', tot_passed_reads
-    l = 'Too low quality: ', tot_low_quality_reads
-    lc = 'Too short: ', tot_too_many_N_reads
-    a = 'Too low complexity: ', tot_too_short_reads
+    percentage_low_quality = float(round((tot_low_quality_reads*100)/tot_removed_reads, 1))
+    percentage_low_complexity = float(round((tot_too_many_N_reads*100)/tot_removed_reads, 1))
+    percentage_too_short = float(round((tot_too_short_reads*100)/tot_removed_reads, 1))
 
-    return total_reads, classified_reads, unclassified_reads, unfiltered_reads, filtered_proportion, q, l, lc, a
+    # Create layout objects.
+    trp = 'Total reads passed: ' + str(tot_passed_reads) + ' (' + str(percentage_passed_reads) + '%)'
+    tlq = 'Too low quality: ', str(tot_low_quality_reads) + ' (' + str(percentage_low_quality) + '%)'
+    ts = 'Too short: ', str(tot_too_short_reads) + ' (' + str(percentage_too_short) + '%)'
+    tlc = 'Too low complexity: ', str(tot_too_many_N_reads) + ' (' + str(percentage_low_complexity) + '%)'
+
+    trr = 'Total reads removed: ' + str(tot_removed_reads) + ' (' + str(percentage_reads_removed) + '%)'
+
+    return classified_reads, unclassified_reads, unfiltered_reads, trp, tlq, ts, tlc, trr
 
 # Displays the current nr of nanopore files waiting to be processed,
 # and the number of processed files.
@@ -1218,8 +1229,8 @@ def update_waiting_files(interval_trigger):
         # this happens if/when there are old unremoved files hanging around
         if delta < 0:
             delta = 0
-        waiting_message = "Files awaiting processing: " + str(delta)
-        processed_message = "Files processed: " + str(files_processed)
+        waiting_message = "Batch files awaiting processing: " + str(delta)
+        processed_message = "Batch files processed: " + str(files_processed)
     else: # if directory does not exist
         waiting_message = "Files awaiting processing: "
         processed_message = "Files processed: "
