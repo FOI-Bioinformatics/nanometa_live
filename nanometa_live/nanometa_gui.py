@@ -393,6 +393,56 @@ sankey_plot = dcc.Graph(id='sankey_plot',
                         style={'width': '1700px', 'height': '900px', 'margin': '5px'}
                         )
 
+sankey_info_line1 = 'This plot shows the most abundand taxa in a hierarchical way. \
+                              The highest taxonomic level is at the leftmost node, and the lineage \
+                              can be traced through the plot to the lowest selected taxonomic level at \
+                              the rightmost node.'
+
+sankey_info_line2 = 'The plot can be filtered by how many taxa will show up at \
+                              each level: if set to 5, the 5 taxa with the highest number of reads will \
+                              be displayed at each level. Since the plot automatically fills in the lineage, \
+                              some levels may contain more taxa than this.'
+
+sankey_info_line3 = 'The abundance of the taxa is \
+                              shown by the thickness of the edges.'
+
+sankey_info_line4 = 'Hovering over the plot will display some icons in the top right corner of the plot. \
+                              Here, the plot can be saved as a png file. The box- and lasso-select icons \
+                              can be used to collapse nodes into groups. The nodes can be moved \
+                              around manually if the autolayout makes the plot messy. Any modification of the nodes \
+                              will be cancelled upon every update so it is best to pause the automatic updates \
+                              while exploring the plot.'
+
+sankey_info_line5 = 'Hovering over the nodes or edges will show the cumulative number \
+                              of reads belonging to that node, i.e. including the number of reads total in all sub-categories \
+                              below that node. The number of incoming and outgoing edges is also shown.'
+
+sankey_info = html.Div([
+    html.Div(sankey_info_line1, style={'margin-bottom': '10px'}),
+    html.Div(sankey_info_line2, style={'margin-bottom': '10px'}),
+    html.Div(sankey_info_line3, style={'margin-bottom': '10px'}),
+    html.Div(sankey_info_line4, style={'margin-bottom': '10px'}),
+    html.Div(sankey_info_line5, style={'margin-bottom': '10px'}),
+])
+
+sankey_modal = html.Div([
+    html.Button('INFO/HELP', id='sankey-open-button', n_clicks=0),
+    
+    # Modal for displaying text
+    dbc.Modal(
+        [
+            dbc.ModalHeader("Sankey plot"),
+            dbc.ModalBody(sankey_info),
+            dbc.ModalFooter(
+                dbc.Button("Close", id="sankey-close-button", className="ml-auto")
+            ),
+        ],
+        id="sankey-modal",
+        size="lg",
+        backdrop="static",
+    ),
+])
+
 # Sankey plot filtering function headline.
 filter_headline = html.Label('Filter by top reads at each taxonomic level:',
                              style={'padding-right': '10px'})
@@ -455,37 +505,13 @@ sankey_button_tooltip = dbc.Tooltip('Apply your filters. Filters will also be ap
 # Organization of sankey *filtering* into one layout object.
 sankey_filtering = html.Div(
     [
+        html.Div(sankey_modal),
         html.Div([filter_headline, filter_input, sankey_top_tooltip], className="bg-light border"),
         html.Div(choose_domains, className="bg-light border"),
         html.Div(choose_hierarchy, className="bg-light border"),
         html.Div([filter_submit, sankey_button_tooltip], className="bg-light border")
     ], className="hstack gap-3"
 )
-
-info_label_sankey = html.Div('INFO:') # headline for info box
-sankey_info_string = html.Div('This plot shows the most abundand taxa in a hierarchical way. \
-                              The highest taxonomic level is at the leftmost node, and the lineage \
-                              can be traced through the plot to the lowest selected taxonomic level at \
-                              the rightmost node. The plot can be filtered by how many taxa will show up at \
-                              each level: if set to 5, the 5 taxa with the highest number of reads will \
-                              be displayed at each level. Since the plot automatically fills in the lineage, \
-                              some levels may contain more taxa than this.  The abundance of the taxa is \
-                              shown by the thickness of the edges. The coloring is arbitrary and only \
-                              enables an easier overview. In the top right corner of the plot \
-                              is an icon that enables saving the plot as a png file. The box- and lasso-select icons \
-                              can be used to collapse nodes into groups. The nodes can be moved \
-                              around manually if the autolayout makes the plot messy. Any modification of the nodes \
-                              will be cancelled upon every update so it is best to pause the automatic updates \
-                              while exploring the plot. Hovering over the nodes or edges will show the cumulative number \
-                              of reads belonging to that node, i.e. including the number of reads total in all sub-categories \
-                              below that node. The number of incoming and outgoing edges is also shown.')
-
-# Info section made into one object.
-sankey_info = html.Div([info_label_sankey,
-                        html.Br(),
-                        sankey_info_string],
-                        style = {'margin': '20px'},
-                        className="bg-light border")
 
 ###############################################################################
 ##### pathogen detection and toplist, tab 1 ###################################
@@ -515,27 +541,61 @@ validation_tooltip = dbc.Tooltip('Adds an additional column with the number of r
                                     placement='top',
                                     delay={'show': 1000})
 
-info_string = 'INFO:' # "headline"
-
-pathogen_info_text_string = 'This section shows the abundance of all specified pathogens/species \
-of interest. The barchart and list are colored, so that species with more than ' + str(dll_2) + ' reads \
-show up as red. The "Tax ID" column contains the taxonomic IDs from the databased used. "Reads" is the \
-number of reads assigned to the species. If "BLAST validation" is turned on, an additional column will be \
-added on the next update, containing the number of reads validated by BLAST, using a minimum percent \
-identity of ' + str(config_contents["min_perc_identity"]) + ' and an e-value cutoff  \
-of ' + str(config_contents["e_val_cutoff"]) + '. There are zooming options at the top right of the chart \
-, using the small icons, as well as the possibility to save the chart as a png file. '
-
-# Compiling "headline" and info into one object.
-pathogen_explanation_text = html.Div([info_string,
-                                      html.Br(),
-                                      html.Br(),
-                                      pathogen_info_text_string],
-                                      className="bg-light border")
-
 # Pahogen barchart.
 pathogen_fig_obj = dcc.Graph(id='pathogen_fig',
                            figure=pathogen_fig)
+
+pathogen_info_line1 = 'This section shows the abundance of all specified pathogens/species \
+of interest.'
+
+pathogen_info_line2 = 'The barchart and list are colored, so that species with more than ' + str(dll_2) + ' reads \
+show up as red.'
+
+pathogen_info_line3 = 'The "Tax ID" column contains the taxonomic IDs from the databased used.'
+
+pathogen_info_line4 = '"Reads" is the \
+number of reads assigned to the species.'
+
+pathogen_info_line5 = 'If "BLAST validation" is turned on, an additional column will be \
+added on the next update, containing the number of reads validated by BLAST, using the following parameters:'
+
+pathogen_info_line6 = 'Minimum percent \
+identity: ' + str(config_contents["min_perc_identity"])
+
+pathogen_info_line7 = 'e-value cutoff  \
+: ' + str(config_contents["e_val_cutoff"])
+
+pathogen_info_line8 = 'When hovering over the plot, zooming options appear at the top right of the chart \
+ using the small icons, as well as the possibility to save the chart as a png file.'
+
+pathogen_info = html.Div([
+    html.Div(pathogen_info_line1, style={'margin-bottom': '10px'}),
+    html.Div(pathogen_info_line2, style={'margin-bottom': '10px'}),
+    html.Div(pathogen_info_line3, style={'margin-bottom': '10px'}),
+    html.Div(pathogen_info_line4, style={'margin-bottom': '10px'}),
+    html.Div(pathogen_info_line5, style={'margin-bottom': '10px'}),
+    html.Div(pathogen_info_line6, style={'margin-bottom': '10px'}),
+    html.Div(pathogen_info_line7, style={'margin-bottom': '10px'}),
+    html.Div(pathogen_info_line8, style={'margin-bottom': '10px'}),
+])
+
+pathogen_modal = html.Div([
+    html.Button('INFO/HELP', id='pathogen-open-button', n_clicks=0),
+    
+    # Modal for displaying text
+    dbc.Modal(
+        [
+            dbc.ModalHeader("Pathogen detection"),
+            dbc.ModalBody(pathogen_info),
+            dbc.ModalFooter(
+                dbc.Button("Close", id="pathogen-close-button", className="ml-auto")
+            ),
+        ],
+        id="pathogen-modal",
+        size="lg",
+        backdrop="static",
+    ),
+])
 
 # Entire pathogen section in one object.
 pathogen_section = html.Div(
@@ -545,10 +605,11 @@ pathogen_section = html.Div(
                   pathogen_table,
                   html.Br(),
                   validate_option,
-                  validation_tooltip
+                  validation_tooltip,
+                  html.Br(),
+                  pathogen_modal
                   ],
                  className="bg-light border"),
-        pathogen_explanation_text
     ], className="hstack gap-3"
 )
 
@@ -615,26 +676,53 @@ toplist_button_tooltip = dbc.Tooltip('Apply your filters. Filters will also be a
                                     placement='top',
                                     delay={'show': 1000})
 
-topreads_explanation = html.Div('''
-                                  This section displays the taxa with the highest number of reads assigned by
-                                  the classifier. The column "Tax ID" contains the taxonomic IDs from the
-                                  database used. "Tax Rank" shows the category the taxa belong to: S - species,
-                                  G - genus etc. The "Reads" column contains the reads assigned specifically
-                                  to the taxon, i.e. not cumulatively counting all reads in sub-categories.
-                                  Using the filters, domains and taxonomic levels can be modified. The lenght of
-                                  the list can also be set.
-                                  ''')
+toplist_info_line1 = 'This section displays the taxa with the highest number of reads assigned by the classifier.'
+
+toplist_info_line2 = 'The column "Tax ID" contains the taxonomic IDs from the database used.'
+
+toplist_info_line3 = '"Tax Rank" shows the category the taxa belong to: S - species, G - genus, etc.'
+
+toplist_info_line4 = 'The "Reads" column contains the reads assigned specifically \
+                                  to the taxon, i.e. not cumulatively counting all reads in sub-categories.'
+
+toplist_info_line5 = 'Using the filters, domains and taxonomic levels can be modified. The lenght of\
+                                  the list can also be set.'
+
+toplist_info = html.Div([
+    html.Div(toplist_info_line1, style={'margin-bottom': '10px'}),
+    html.Div(toplist_info_line2, style={'margin-bottom': '10px'}),
+    html.Div(toplist_info_line3, style={'margin-bottom': '10px'}),
+    html.Div(toplist_info_line4, style={'margin-bottom': '10px'}),
+    html.Div(toplist_info_line5, style={'margin-bottom': '10px'}),
+])
+
+toplist_modal = html.Div([
+    html.Button('INFO/HELP', id='toplist-open-button', n_clicks=0),
+    
+    # Modal for displaying text
+    dbc.Modal(
+        [
+            dbc.ModalHeader("Most abundant taxa"),
+            dbc.ModalBody(toplist_info),
+            dbc.ModalFooter(
+                dbc.Button("Close", id="toplist-close-button", className="ml-auto")
+            ),
+        ],
+        id="toplist-modal",
+        size="lg",
+        backdrop="static",
+    ),
+])
 
 # Organization of toplist filtering into one layout object.
 toplist_filtering = html.Div(
     [
-        html.Div([toplist_filter_head, top_filter_val, top_list_tooltip]),
+        html.Div([toplist_filter_head, top_filter_val, top_list_tooltip], className="bg-light border"),
         html.Div(toplist_domains, className="bg-light border"),
         html.Div(toplist_hierarchy, className="bg-light border"),
         html.Div([toplist_submit, toplist_button_tooltip]),
         html.Hr(),
-        html.Div('INFO:'),
-        html.Div(topreads_explanation)
+        html.Div(toplist_modal)
     ], className="vstack gap-3"
 )
 
@@ -645,8 +733,7 @@ toplist_col_1 = html.Div([toplist_head,
                           className="bg-light border")
 
 toplist_col_2 = html.Div([toplist_filtering
-                          ],
-                          className="bg-light border")
+                          ])
 
 # This object contains all of the toplist section.
 toplist_together = html.Div([toplist_col_1,
@@ -697,22 +784,71 @@ qc_processing_headline = html.Div('FILE PROCESSING', style={'padding-right': '10
 waiting_files = html.Div('Files awaiting processing:', style={'padding-right': '10px'}, id='waiting_files')
 processed_files = html.Div('Files processed:', style={'padding-right': '10px'}, id='processed_files')
 
-qc_info_section = html.Div('The two upper graphs show the cumulative reads and base pairs produced by the sequencer \
-                           over time, using the pre-filtered data, i.e. the raw data from the sequencer. \
-                           The lower two plots show the number of reads and base pairs produced in each batch, also\
-                           using the unfiltered sequencer data. The plots can be saved as png files using the icon \
-                           in the top right corner of each plot. \
-                           The FILTERING info displays the total number of sequences\
-                           produced, the number of passed and removed sequences, and the reasons for removal.\
-                           The filter parameters are the following: "Too low quality": removes sequences with\
+qc_info_line1 = 'The two upper graphs show the cumulative reads and base pairs produced by the sequencer \
+                           over time, using the pre-filtered data, i.e. the raw data from the sequencer.'
+
+qc_info_line2 = 'The lower two plots show the number of reads and base pairs produced in each batch, also\
+                           using the unfiltered sequencer data.'
+
+qc_info_line3 = 'The plots can be saved as png files using the icon \
+                           in the top right corner of each plot that appears when hovering over the plot.'
+
+qc_info_line4 = 'The FILTERING info displays the total number of sequences\
+                           produced, the number of passed and removed sequences, and the reasons for removal.'
+
+qc_info_line5 = 'The filter parameters are the following:'
+
+qc_info_line6 = '"Too low quality": removes sequences with\
                            too many unqualified bases. Bases with phred quality <15 are unqualified. Sequences \
-                           with more than 40% unqualified bases are discarded. "Too short": removes sequences \
-                           that are shorter than 15 bp. "Too low complexity": filters by the percentage of bases\
+                           with more than 40% unqualified bases are discarded.'
+
+qc_info_line7 = '"Too short": removes sequences \
+                           that are shorter than 15 bp. '
+
+qc_info_line8 = '"Too low complexity": filters by the percentage of bases\
                            that are different from its next base. This way, sequences with long stretches of the\
-                           same nucleotide are filtered out. At least 30% compelxity is required. The filtering \
-                           also automatically removes adapters. CLASSIFICATION shows the number of reads that\
-                           were successfully classified. FILE PROCESSING shows the number of batch files that have been \
-                           processed and the number that still remain.')
+                           same nucleotide are filtered out. At least 30% complexity is required.'
+
+qc_info_line9 = 'The filtering \
+                           also automatically removes adapters. '
+
+qc_info_line10 = 'CLASSIFICATION shows the number of reads that\
+                           were successfully classified.'
+
+qc_info_line11 = 'FILE PROCESSING shows the number of batch files that have been \
+                           processed and the number that still remain.'
+
+qc_info = html.Div([
+    html.Div(qc_info_line1, style={'margin-bottom': '10px'}),
+    html.Div(qc_info_line2, style={'margin-bottom': '10px'}),
+    html.Div(qc_info_line3, style={'margin-bottom': '10px'}),
+    html.Div(qc_info_line4, style={'margin-bottom': '10px'}),
+    html.Div(qc_info_line5, style={'margin-bottom': '10px'}),
+    html.Div(qc_info_line6, style={'margin-bottom': '10px'}),
+    html.Div(qc_info_line7, style={'margin-bottom': '10px'}),
+    html.Div(qc_info_line8, style={'margin-bottom': '10px'}),
+    html.Div(qc_info_line9, style={'margin-bottom': '10px'}),
+    html.Div(qc_info_line10, style={'margin-bottom': '10px'}),
+    html.Div(qc_info_line11, style={'margin-bottom': '10px'}),
+])
+
+qc_modal = html.Div([
+    html.Button('INFO/HELP', id='qc-open-button', n_clicks=0),
+    
+    # Modal for displaying text
+    dbc.Modal(
+        [
+            dbc.ModalHeader("Technical quality control"),
+            dbc.ModalBody(qc_info),
+            dbc.ModalFooter(
+                dbc.Button("Close", id="qc-close-button", className="ml-auto")
+            ),
+        ],
+        id="qc-modal",
+        size="lg",
+        backdrop="static",
+    ),
+])
 
 # Initial empty placeholder plots (plotly express).
 cumul_reads_fig = px.line(qc_df, x='Time', y="Cumulative reads")
@@ -775,9 +911,7 @@ qc_row_all = html.Div(
                   waiting_files,                  
                   html.Br(),
                   html.Hr(),
-                  html.Div('INFO:'), # cheating
-                  html.Br(),
-                  qc_info_section
+                  qc_modal
                   ]), className="bg-light border"),
         html.Div(qc_column, className="bg-light border")
     ], className="hstack gap-3"
@@ -849,16 +983,53 @@ sunburst_button_tooltip = dbc.Tooltip('Apply your filters. Filters will also be 
                                     placement='top',
                                     delay={'show': 1000})
 
-info_label_sunburst = html.Div('INFO:')
-sunburst_info = html.Div('''The sunburst chart shows a hierarchical view of the taxa. The highest
+sunburst_info_line1 = '''The sunburst chart shows a hierarchical view of the taxa. The highest
                          taxonomic level is in the center, with sub-categories extending outward.
-                         The sections in the chart can be clicked to zoom in on that category.
+                         '''
+
+sunburst_info_line2 = '''The sections in the chart can be clicked to zoom in on that category.
                          At every update, the chart is returned to the standard view, so it is best to
-                         pause the live updates when exploring this chart. The bar on the right side
-                         shows abundance by number of reads through a coloring scheme. The chart can be filtered
+                         pause the live updates when exploring this chart.
+                         '''
+
+sunburst_info_line3 = '''The bar on the right side
+                         shows abundance by number of reads through a coloring scheme.
+                         '''
+
+sunburst_info_line4 = '''The chart can be filtered
                          by minimum reads, i.e. the number of reads required for a taxon to appear in the
-                         chart. In the right upper corner of the plot is a button to save the chart as a png file.
-                         ''')
+                         chart.
+                         '''
+
+sunburst_info_line5 = '''Hovering over the chart will display an icon in the right upper corner 
+                         that enables saving the chart as a png file.
+                         '''
+
+sunburst_info = html.Div([
+    html.Div(sunburst_info_line1, style={'margin-bottom': '10px'}),
+    html.Div(sunburst_info_line2, style={'margin-bottom': '10px'}),
+    html.Div(sunburst_info_line3, style={'margin-bottom': '10px'}),
+    html.Div(sunburst_info_line4, style={'margin-bottom': '10px'}),
+    html.Div(sunburst_info_line5, style={'margin-bottom': '10px'}),
+])
+
+sunburst_modal = html.Div([
+    html.Button('INFO/HELP', id='sunburst-open-button', n_clicks=0),
+    
+    # Modal for displaying text
+    dbc.Modal(
+        [
+            dbc.ModalHeader("Sunburst chart"),
+            dbc.ModalBody(sunburst_info),
+            dbc.ModalFooter(
+                dbc.Button("Close", id="sunburst-close-button", className="ml-auto")
+            ),
+        ],
+        id="sunburst-modal",
+        size="lg",
+        backdrop="static",
+    ),
+])
 
 # Layout sunburst filtering plus info, one object.
 sun_filtering = html.Div(
@@ -869,11 +1040,7 @@ sun_filtering = html.Div(
         html.Br(),
         html.Hr(),
         html.Br(),
-        html.Div([info_label_sunburst,
-                  html.Br(),
-                  sunburst_info],
-                  style = {'margin': '10px'},
-                  className="bg-light border")
+        html.Div([sunburst_modal])
     ],
     className="vstack gap-3"
 )
@@ -921,8 +1088,6 @@ main_tabs = html.Div([
             sankey_head,
             sankey_plot,
             dbc.Container(sankey_filtering),
-            html.Br(),
-            sankey_info,
             html.Br(),
             html.Br(),
             html.Br()
@@ -1269,6 +1434,68 @@ def show_confirmation_modal(shutdown_clicks, no_clicks, yes_clicks, is_open):
                 return False, 'Shutting down program...'
             else:
                 return is_open, ''
+
+########## INFO BUTTON MODALS #################################################
+
+# Sunburst chart info modal.
+@app.callback(
+    Output("sunburst-modal", "is_open"),
+    Input("sunburst-open-button", "n_clicks"),
+    Input("sunburst-close-button", "n_clicks"),
+    State("sunburst-modal", "is_open"),
+)
+def toggle_modal(open_clicks, close_clicks, is_open):
+    if open_clicks or close_clicks:
+        return not is_open
+    return is_open
+
+# Sankey plot info modal.
+@app.callback(
+    Output("sankey-modal", "is_open"),
+    Input("sankey-open-button", "n_clicks"),
+    Input("sankey-close-button", "n_clicks"),
+    State("sankey-modal", "is_open"),
+)
+def toggle_modal(open_clicks, close_clicks, is_open):
+    if open_clicks or close_clicks:
+        return not is_open
+    return is_open
+
+# QC info modal.
+@app.callback(
+    Output("qc-modal", "is_open"),
+    Input("qc-open-button", "n_clicks"),
+    Input("qc-close-button", "n_clicks"),
+    State("qc-modal", "is_open"),
+)
+def toggle_modal(open_clicks, close_clicks, is_open):
+    if open_clicks or close_clicks:
+        return not is_open
+    return is_open
+
+# Pathogen info modal.
+@app.callback(
+    Output("pathogen-modal", "is_open"),
+    Input("pathogen-open-button", "n_clicks"),
+    Input("pathogen-close-button", "n_clicks"),
+    State("pathogen-modal", "is_open"),
+)
+def toggle_modal(open_clicks, close_clicks, is_open):
+    if open_clicks or close_clicks:
+        return not is_open
+    return is_open
+
+# Toplist info modal.
+@app.callback(
+    Output("toplist-modal", "is_open"),
+    Input("toplist-open-button", "n_clicks"),
+    Input("toplist-close-button", "n_clicks"),
+    State("toplist-modal", "is_open"),
+)
+def toggle_modal(open_clicks, close_clicks, is_open):
+    if open_clicks or close_clicks:
+        return not is_open
+    return is_open
 
 ###############################################################################
 ###############################################################################
