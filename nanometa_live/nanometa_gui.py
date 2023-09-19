@@ -1156,7 +1156,7 @@ def update_qc_text(interval_trigger):
     unfiltered_reads = 'Total reads (pre filtering): ' + str(tot_reads_pre_filt)
     total_reads = 'Total reads (post filtering): ' + str(t)
     filtered_proportion = 'Reads that passed filtering: ' + str(float(round((t*100)/tot_reads_pre_filt, 1))) + ' %'
-    # Define the fillter setting objects. This needs work.
+    # Define the filter setting objects. This needs work.
     fastp_df = get_fastp_df(fastp_file)
     print(fastp_df)
     tot_passed_reads = fastp_df['cum_passed_filter_reads'].iloc[-1]

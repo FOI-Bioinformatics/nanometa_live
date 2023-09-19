@@ -4,7 +4,7 @@ import time
 import shutil
 import argparse
 import logging
-from nanometa_live import __version__  # Import the version number
+__version__="0.2.1"
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

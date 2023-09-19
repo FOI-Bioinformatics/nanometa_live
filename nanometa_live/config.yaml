@@ -29,23 +29,23 @@ species_of_interest:
 ## DANGER CUTOFF ##
 
 # The coloring scheme for the abundance of the species of interest.
-# Species of interest with more reads than this show up as red. 
+# Species of interest with more reads than this show up as red.
 danger_lower_limit: 100
 
 
 ## TAXONOMY LEVELS ##
-  
+
 # The letters used by Kraken2 to designate the taxonomic hierarchies.
 # Also used in the GUI to sort and filter the results.
 # If there are levels on the low end specified here, for example S2, S3 etc,
 # that are not present in the Kraken database used, it will result in a lot
 # of empty nodes in the Sankey plot. This can be trimmed in the GUI, but
-# it is recommended to only include the taxonomy levels that are present 
+# it is recommended to only include the taxonomy levels that are present
 # in your database.
 taxonomic_hierarchy_letters: ['D','P','C','O','F','G','S']
 
 # Taxonomy levels displayed by default in the Sankey plot.
-# This is modifiable in the GUI as well, and mainly a question 
+# This is modifiable in the GUI as well, and mainly a question
 # of aestethics.
 default_hierarchy_letters: ['D','C','G','S']
 
@@ -71,17 +71,24 @@ gui_port: "8050"
 ########## SNAKEMAKE WORKFLOW CONFIG #############################################
 
 
+## GENERIC SNAKEMAKE SETTINGS
+# Setting how snakemake should handles dependencies.
+# Current options are None (assumes all applications are installed) or "conda" (snakemake create local environment during run.)
+local_package_management: None
+
+# For conda it is possible to select conda_frontend between "mamba" and "conda".
+conda_frontend: "mamba"
+
 ## NANOPORE OUTPUT DIRECTORY ##
 
 # Absolute path to the output directory where the nanopore produces its batch files.
 nanopore_output_directory: "/home/user/nanopore_out"
 
-
 ## REMOVE TEMP FILES ##
 
 # Removes temporary files upon workflow exit by default.
 # If you wish to keep temp files, change the string to "no".
-remove_temp_files: "yes" 
+remove_temp_files: "yes"
 
 
 ## WORKLFOW FREQUENCY ##
@@ -116,7 +123,7 @@ kraken_db: "/home/user/kraken2.gtdb_bac120_4Gb"
 # Turn the Kraken2 RAM requirements on or off with the --memory-mapping argument.
 # To deactivate memory-mapping, simply leave the argument as an empty string: "".
 # To activate, use string: "--memory-mapping".
-kraken_memory_mapping: "--memory-mapping" 
+kraken_memory_mapping: "--memory-mapping"
 
 
 ## BLAST VALIDATION ##
@@ -128,8 +135,8 @@ blast_validation: True
 
 ## BLAST CUTOFFS ##
 
-# Define the minimum percent identity and E-value cutoffs for which 
-# sequences to include as validated. 
+# Define the minimum percent identity and E-value cutoffs for which
+# sequences to include as validated.
 min_perc_identity: 90
 e_val_cutoff: 0.01
 
@@ -154,7 +161,7 @@ l_filt: ""
 
 # LOW COMPLEXITY FILTER
 # Filters by the percentage of bases that are different from its next base.
-# This way, sequences with long stretches of the same nucleotide are 
+# This way, sequences with long stretches of the same nucleotide are
 # filtered out. By default, at least 30% compelxity is required.
 # Disabled by default, can be enabled by changing this parameter to "-y"
 lc_filt: ""

@@ -3,7 +3,7 @@ import os
 import shutil
 import logging
 import pkg_resources
-from nanometa_live import __version__  # Import the version number
+__version__="0.2.1"
 
 
 # Initialize logging
