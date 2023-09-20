@@ -176,7 +176,7 @@ def create_new():
 
     config_file_path = os.path.join(args.path, args.config)
     config_contents = load_config(config_file_path)
-    
+
     update_config_file_with_comments(args.path, args.config, 'main_dir', project_path)
 
     if args.analysis_name:

@@ -387,7 +387,7 @@ def download_genomes_from_ncbi(workdir: str, prefix: str, accession_filename: st
     logging.info(f"Starting download of genomes with prefix: {prefix}")
 
     # Define the subfolder and create it if it doesn't exist
-    subfolder = os.path.join(workdir, 'data-files')
+    subfolder = os.path.join(workdir, 'ncbi_dataset')
     if not os.path.exists(subfolder):
         os.makedirs(subfolder)
         logging.info(f"Created subfolder: {subfolder}")
@@ -537,6 +537,7 @@ def main():
 
     kraken_taxonomy = config_contents["kraken_taxonomy"]
     results = {}
+
     for species in species_list:
         search_query = f"s__{species}"
         species_data = fetch_species_data(search_query, kraken_taxonomy)
@@ -544,9 +545,13 @@ def main():
             results[species] = {'rows': species_data}
 
     if results:
+        data_files_folder = os.path.join(args.path, 'data-files')
+        if not os.path.exists(data_files_folder):
+            os.makedirs(data_files_folder)
+
         #Extracting information from kraken2 db: Getting relation between species and tax id.
         kraken_db = config_contents["kraken_db"]
-        inspect_file_name = os.path.join(args.path, generate_inspect_filename(kraken_db))
+        inspect_file_name = os.path.join(data_files_folder, generate_inspect_filename(kraken_db))
         success = run_kraken2_inspect(kraken_db, inspect_file_name)
         species_taxid_dict = parse_kraken2_inspect(inspect_file_name)
 
@@ -561,7 +566,7 @@ def main():
 
         df = parse_to_table_with_taxid(filtered_results)
         #df = parse_to_table_with_taxid(results, kraken_taxonomy)
-        output_file =  os.path.join(args.path, f"{args.prefix}_{kraken_taxonomy}.csv")
+        output_file =  os.path.join(data_files_folder, f"{args.prefix}_{kraken_taxonomy}.csv")
         logging.info(f"Parsed data saved to {output_file}")
         df.to_csv(output_file, index=False)
 
@@ -572,14 +577,14 @@ def main():
         logging.info(f"Extracted assembly accessions for download: {accessions_to_download}")
 
         # Write the accessions to a file
-        accession_file = os.path.join(args.path, f"{args.prefix}_{kraken_taxonomy}_accessions.txt")
+        accession_file = os.path.join(data_files_folder, f"{args.prefix}_{kraken_taxonomy}_accessions.txt")
         write_accessions_to_file(accessions_to_download, accession_file)
 
         # Download genomes
-        download_genomes_from_ncbi(args.path, args.prefix, f"{args.prefix}_{kraken_taxonomy}_accessions.txt")
-        decompress_and_rename_zip(f"{args.prefix}_ncbi_download.zip", df, args.path)
+        download_genomes_from_ncbi(data_files_folder, args.prefix, f"{args.prefix}_{kraken_taxonomy}_accessions.txt")
+        decompress_and_rename_zip( f"{args.prefix}_ncbi_download.zip", df, data_files_folder)
 
-        build_blast_databases(args.path)
+        build_blast_databases(data_files_folder)
 
     else:
         logging.warning("No data found for any species.")
