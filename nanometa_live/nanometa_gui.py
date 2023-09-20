@@ -559,11 +559,16 @@ number of reads assigned to the species.'
 pathogen_info_line5 = 'If "BLAST validation" is turned on, an additional column will be \
 added on the next update, containing the number of reads validated by BLAST, using the following parameters:'
 
-pathogen_info_line6 = 'Minimum percent \
-identity: ' + str(config_contents["min_perc_identity"])
+pathogen_info_line6 = 'Minimum percent identity: ' + str(config_contents["min_perc_identity"])
 
-pathogen_info_line7 = 'e-value cutoff  \
-: ' + str(config_contents["e_val_cutoff"])
+pathogen_info_line7 = 'E-value cutoff : ' + str(config_contents["e_val_cutoff"])
+
+pathogen_info_line7b = 'Minimum percent identity: a read must match the reference sequence to at least this percentage to \
+    be considered validated.'
+
+pathogen_info_line7c = 'E-value cutoff: only reads with an e-vaule below this will be considered validated. \
+    The e-value is the number of expected hits of similar quality that could be be found just by chance \
+        in a given database.'
 
 pathogen_info_line8 = 'When hovering over the plot, zooming options appear at the top right of the chart \
  using the small icons, as well as the possibility to save the chart as a png file.'
@@ -576,6 +581,8 @@ pathogen_info = html.Div([
     html.Div(pathogen_info_line5, style={'margin-bottom': '10px'}),
     html.Div(pathogen_info_line6, style={'margin-bottom': '10px'}),
     html.Div(pathogen_info_line7, style={'margin-bottom': '10px'}),
+    html.Div(pathogen_info_line7b, style={'margin-bottom': '10px'}),
+    html.Div(pathogen_info_line7c, style={'margin-bottom': '10px'}),
     html.Div(pathogen_info_line8, style={'margin-bottom': '10px'}),
 ])
 
