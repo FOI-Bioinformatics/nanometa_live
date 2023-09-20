@@ -159,8 +159,7 @@ def create_new():
 
     config_file_name = args.config  # Get the custom config file name
     project_path = os.path.abspath(args.path)
-    config_file_path = os.path.join(args.path, args.config)
-    config_contents = load_config(config_file_path)
+
 
 
     # Show help message if no arguments are provided
@@ -175,7 +174,9 @@ def create_new():
     backup_config_file(project_path, config_file_name)
     copy_config_file(config_path, project_path, config_file_name)
 
-
+    config_file_path = os.path.join(args.path, args.config)
+    config_contents = load_config(config_file_path)
+    
     update_config_file_with_comments(args.path, args.config, 'main_dir', project_path)
 
     if args.analysis_name:
