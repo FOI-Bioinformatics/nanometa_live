@@ -1436,6 +1436,18 @@ def show_confirmation_modal(shutdown_clicks, no_clicks, yes_clicks, is_open):
             if is_open:
                 try:
                     subprocess.Popen(["echo", "This is where the shutdown script should be."])
+                    # get process ID of main process
+                    with open('.runtime','r') as f:
+                        import signal
+                        pid = int(f.readline())
+                        
+                        # send custom signal to trigger KeyboardInterrupt in wrapper main script
+                        try:
+                            os.kill(pid,signal.SIGUSR1)
+                        except Exception as e:
+                            print(f'Kill error: {e}')
+                        #/
+                    #/
                 except Exception as e:
                     return is_open, f'Error: {str(e)}'
                 return False, 'Shutting down program...'
