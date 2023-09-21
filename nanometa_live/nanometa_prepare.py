@@ -195,9 +195,18 @@ def run_kraken2_inspect(kraken2_db_path, output_path):
         kraken2_db_path (str): The path to the Kraken2 database.
         output_path (str): The path where the Kraken2 inspect output will be saved.
 
+    Raises:
+        FileNotFoundError: If the Kraken2 database path does not exist.
+
     Returns:
         bool: True if the command was successful or if the output file already exists, False otherwise.
     """
+    # Check if the Kraken2 database path exists
+    if not os.path.exists(kraken2_db_path):
+        logging.error(f"Kraken2 database path {kraken2_db_path} does not exist.")
+        raise FileNotFoundError(f"Kraken2 database path {kraken2_db_path} does not exist.")
+
+    # Check if the output file already exists
     if os.path.exists(output_path):
         logging.info(f"kraken2 inspect file already exists at {output_path}.")
         logging.info(f"Skipping running Kraken2 inspect.")
@@ -373,6 +382,48 @@ def write_accessions_to_file(accessions, filename):
         logging.error(f"An unexpected error occurred while writing to {filename}: {e}")
 
 
+def save_species_and_taxid_to_txt(df: pd.DataFrame, workdir: str, filename: str = "species_taxid.txt"):
+    """
+    Save the "Species" and "Tax_ID" columns from a DataFrame to a text file.
+
+    Parameters:
+        df (pd.DataFrame): DataFrame containing parsed data.
+        workdir (str): The working directory where the text file will be saved.
+        filename (str, optional): The name of the text file. Defaults to "species_taxid.txt".
+
+    Returns:
+        str: The path to the saved text file.
+    """
+    logging.info("Starting the process to save 'Species' and 'Tax_ID' columns to a text file.")
+
+    # Check if workdir exists, if not, create it
+    if not os.path.exists(workdir):
+        logging.info(f"Working directory {workdir} does not exist. Creating it.")
+        os.makedirs(workdir)
+    else:
+        logging.info(f"Working directory {workdir} already exists. Proceeding.")
+
+    output_path = os.path.join(workdir, filename)
+
+    logging.debug(f"Target file path for saving is {output_path}.")
+
+    # Check if DataFrame contains "Species" and "Tax_ID" columns
+    if "Species" not in df.columns or "Tax_ID" not in df.columns:
+        logging.error("DataFrame is missing either 'Species' or 'Tax_ID' columns. Aborting.")
+        raise ValueError("DataFrame is missing either 'Species' or 'Tax_ID' columns.")
+
+    logging.info(f"Found 'Species' and 'Tax_ID' columns in the DataFrame. Proceeding to save.")
+
+    # Save to text file
+    try:
+        df[["Species", "Tax_ID"]].to_csv(output_path, sep='\t', index=False)
+        logging.info(f"Successfully saved 'Species' and 'Tax_ID' columns to {output_path}.")
+    except Exception as e:
+        logging.error(f"An error occurred while saving the DataFrame to text: {e}")
+        raise
+
+    return output_path
+
 def download_genomes_from_ncbi(workdir: str, prefix: str, accession_filename: str = 'ncbi_acc_download_list.txt'):
     """
     Download genomes from NCBI and save them to a specific directory.
@@ -386,15 +437,10 @@ def download_genomes_from_ncbi(workdir: str, prefix: str, accession_filename: st
     # Logging the start of the download process
     logging.info(f"Starting download of genomes with prefix: {prefix}")
 
-    # Define the subfolder and create it if it doesn't exist
-    subfolder = os.path.join(workdir, 'ncbi_dataset')
-    if not os.path.exists(subfolder):
-        os.makedirs(subfolder)
-        logging.info(f"Created subfolder: {subfolder}")
 
     # Define the output filename and its full path
     output_filename = f"{prefix}_ncbi_download.zip"
-    output_filepath = os.path.join(subfolder, output_filename)
+    output_filepath = os.path.join(workdir, output_filename)
     logging.info(f"Output will be saved as: {output_filepath}")
 
     # Prepare the command for subprocess
@@ -566,6 +612,9 @@ def main():
 
         df = parse_to_table_with_taxid(filtered_results)
         #df = parse_to_table_with_taxid(results, kraken_taxonomy)
+
+        save_species_and_taxid_to_txt(df, data_files_folder)
+
         output_file =  os.path.join(data_files_folder, f"{args.prefix}_{kraken_taxonomy}.csv")
         logging.info(f"Parsed data saved to {output_file}")
         df.to_csv(output_file, index=False)
