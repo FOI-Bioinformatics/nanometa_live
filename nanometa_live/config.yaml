@@ -3,8 +3,6 @@
 # Settings and parameters for each project are customized here.
 # To check which project this config belongs to, see the final entry, "main_dir".
 
----
-
 ########## GUI CONFIG #######################################################
 
 
@@ -20,10 +18,6 @@ analysis_name: "Metagenomic analysis"
 # For instructions, see readme/wiki.
 # Any number of species can be listed.
 species_of_interest:
-  - 5061
-  - 13373
-  - 852
-  - 321
 
 
 ## DANGER CUTOFF ##
@@ -42,12 +36,12 @@ danger_lower_limit: 100
 # of empty nodes in the Sankey plot. This can be trimmed in the GUI, but
 # it is recommended to only include the taxonomy levels that are present
 # in your database.
-taxonomic_hierarchy_letters: ['D','P','C','O','F','G','S']
+taxonomic_hierarchy_letters: ['D', 'P', 'C', 'O', 'F', 'G', 'S']
 
 # Taxonomy levels displayed by default in the Sankey plot.
 # This is modifiable in the GUI as well, and mainly a question
 # of aestethics.
-default_hierarchy_letters: ['D','C','G','S']
+default_hierarchy_letters: ['D', 'C', 'G', 'S']
 
 # Default number of entries per taxonomy level to include in the Sankey
 # plot. This is modifiable in the GUI as well.
@@ -117,6 +111,8 @@ blast_cores: 1
 # Absolute path to the Kraken2 database.
 kraken_db: "/home/user/kraken2.gtdb_bac120_4Gb"
 
+# Indicate typy of taxonomy used for the kraken database. Currently "gtdb" and "ncbi" are supported.
+kraken_taxonomy: "gtdb"
 
 ## KRAKEN 2 HIGH RAM REQUIREMENTS ##
 
@@ -124,7 +120,6 @@ kraken_db: "/home/user/kraken2.gtdb_bac120_4Gb"
 # To deactivate memory-mapping, simply leave the argument as an empty string: "".
 # To activate, use string: "--memory-mapping".
 kraken_memory_mapping: "--memory-mapping"
-
 
 ## BLAST VALIDATION ##
 
