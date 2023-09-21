@@ -1435,7 +1435,7 @@ def show_confirmation_modal(shutdown_clicks, no_clicks, yes_clicks, is_open):
         if button_id == 'confirm-yes-button':
             if is_open:
                 try:
-                    subprocess.Popen(["echo", "This is where the shutdown script should be."])
+                    # subprocess.Popen(["echo", "User shutdown sucessful."])
                     # get process ID of main process
                     with open('.runtime','r') as f:
                         import signal
