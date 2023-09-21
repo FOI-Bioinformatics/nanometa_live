@@ -2,8 +2,7 @@ import argparse
 import os
 import shutil
 import logging
-#import pkg_resources
-from importlib_resources import files
+from importlib.resources import files
 from ruamel.yaml import YAML
 __version__="0.2.1"
 
