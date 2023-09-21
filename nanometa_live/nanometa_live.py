@@ -2,6 +2,9 @@ import argparse
 import subprocess
 import time
 import logging
+import os
+import signal
+
 __version__="0.2.1"
 
 def setup_logging():
@@ -42,14 +45,24 @@ def terminate_processes(processes):
         process.terminate()
         process.wait()
 
+# define custom trigger and integrate it
+def trigger_keyboard_interrupt(signum,frame):
+    raise KeyboardInterrupt()
+signal.signal(signal.SIGUSR1, trigger_keyboard_interrupt)
+#/
+
 def main():
     setup_logging()
     args = parse_arguments()
     commands = ['nanometa-backend', 'nanometa-gui']
-
     try:
         processes = start_processes(commands, args)
-
+        
+        # write ID of main process
+        with open('.runtime','w') as nf:
+            nf.write(str(os.getpid()))
+        #/
+        
         while True:
             time.sleep(0.1)
 
