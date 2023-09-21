@@ -32,6 +32,9 @@ jobs:
     - name: Check nanometa-new version
       run: nanometa-new --version 
 
+    - name: Check nanometa-prepare version
+      run: nanometa-prepare --version
+
     - name: Check nanometa-backend version
       run: nanometa-backend --version
 
