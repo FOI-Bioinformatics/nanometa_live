@@ -115,6 +115,13 @@ def read_species_from_file(filename):
         logging.error(f"Permission denied: {filename}")
         return []
 
+# Update nested keys in a dictionary
+def update_nested_dict(d, keys, value):
+    for key in keys[:-1]:
+        d = d.setdefault(key, {})
+    d[keys[-1]] = value
+
+# Update variables in the config file
 def update_config_file_with_comments(project_path, config_file_name, variable, new_value):
     config_file_path = os.path.join(project_path, config_file_name)
     try:
@@ -122,14 +129,25 @@ def update_config_file_with_comments(project_path, config_file_name, variable, n
         yaml.preserve_quotes = True
         with open(config_file_path, 'r') as f:
             config_data = yaml.load(f)
-        config_data[variable] = new_value
+
+        update_nested_dict(config_data, variable.split('.'), new_value)
+
         with open(config_file_path, 'w') as f:
             yaml.dump(config_data, f)
+
         logging.info(f"Updated {variable} in config file to {new_value}.")
         return True
     except Exception as e:
         logging.error(f"Failed to update config file: {e}")
         return False
+
+def update_species_of_interest(project_path, config_file_name, species_list):
+    if species_list:
+        species_data = [{"name": species, "taxid": ""} for species in species_list]
+        return update_config_file_with_comments(project_path, config_file_name, "species_of_interest", species_data)
+    else:
+        return False
+
 
 def create_new():
     """
@@ -184,7 +202,7 @@ def create_new():
     if args.species_of_interest:
         species_list = read_species_from_file(args.species_of_interest)
         if species_list:
-            update_config_file_with_comments(args.path, args.config, 'species_of_interest', species_list)
+            update_species_of_interest(project_path, config_file_name, species_list)
 
     if args.warning_lower_limit is not None:
         update_config_file_with_comments(args.path, args.config, 'warning_lower_limit', args.warning_lower_limit)
