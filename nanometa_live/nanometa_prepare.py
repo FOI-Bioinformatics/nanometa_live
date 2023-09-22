@@ -92,12 +92,16 @@ def build_blast_databases(workdir: str) -> NoReturn:
 
 # Updated function to read species from config.yaml
 def read_species_from_config(config_contents):
-    species_list = config_contents.get('species_of_interest', [])
+    raw_species_list = config_contents.get('species_of_interest', [])
+    species_list = []
 
-    if species_list:
-        logging.info(f"Read {len(species_list)} species from preloaded config.")
-        for i, species in enumerate(species_list, 1):
-            logging.info(f"  {i}. {species}")
+    if raw_species_list:
+        logging.info(f"Read {len(raw_species_list)} species from preloaded config.")
+        for i, species_entry in enumerate(raw_species_list, 1):
+            species_name = species_entry.get('name', 'Unknown')
+            logging.info(f"  {i}. s__{species_name}")
+
+            species_list.append(species_name)
     else:
         logging.warning("No species found in preloaded config.")
 
@@ -424,6 +428,53 @@ def save_species_and_taxid_to_txt(df: pd.DataFrame, workdir: str, filename: str 
 
     return output_path
 
+def update_yaml_config_with_taxid(df: pd.DataFrame, yaml_config_path: str):
+    logging.info("Starting the process to update YAML config file with taxid.")
+
+    if "Species" not in df.columns or "Tax_ID" not in df.columns:
+        logging.error("DataFrame is missing either 'Species' or 'Tax_ID' columns. Aborting.")
+        raise ValueError("DataFrame is missing either 'Species' or 'Tax_ID' columns.")
+
+    species_taxid_dict = dict(zip(df['Species'], df['Tax_ID']))
+
+    yaml = YAML()
+
+    try:
+        with open(yaml_config_path, 'r') as stream:
+            yaml_data = yaml.load(stream)
+    except Exception as e:
+        logging.error(f"An error occurred while reading the YAML file: {e}")
+        raise
+
+    # Directly targeting the 'species_of_interest' section
+    species_of_interest = yaml_data.get('species_of_interest', [])
+
+    try:
+        for entry in species_of_interest:
+            species_name = entry.get('name', '')
+            if species_name in species_taxid_dict:
+                entry['taxid'] = species_taxid_dict[species_name]
+    except Exception as e:
+        logging.error(f"An error occurred while updating the YAML data: {e}")
+        raise
+
+    try:
+        with open(yaml_config_path, 'w') as stream:
+            yaml.dump(yaml_data, stream)
+    except Exception as e:
+        logging.error(f"An error occurred while writing the updated YAML data: {e}")
+        raise
+
+    logging.info(f"Successfully updated YAML config file at {yaml_config_path} with taxid.")
+
+# Example usage
+df = pd.DataFrame({
+    'Species': ['Francisella tularensis', 'Escherichia coli', 'Coxiella burnetii'],
+    'Tax_ID': [123, 456, 789]
+})
+
+
+
 def download_genomes_from_ncbi(workdir: str, prefix: str, accession_filename: str = 'ncbi_acc_download_list.txt'):
     """
     Download genomes from NCBI and save them to a specific directory.
@@ -614,6 +665,7 @@ def main():
         #df = parse_to_table_with_taxid(results, kraken_taxonomy)
 
         save_species_and_taxid_to_txt(df, data_files_folder)
+        update_yaml_config_with_taxid(df, config_file_path)
 
         output_file =  os.path.join(data_files_folder, f"{args.prefix}_{kraken_taxonomy}.csv")
         logging.info(f"Parsed data saved to {output_file}")
