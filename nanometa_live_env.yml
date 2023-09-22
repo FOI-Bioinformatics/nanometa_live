@@ -21,3 +21,8 @@ dependencies:
   - setuptools >= 67.6.0
   - pip >= 23.0.1
   - blast >= 2.13.0
+  - biopython >= 1.80
+  - gzip >= 1.10
+  - kraken2 >= 2.1.
+  - fastp >= 0.23.2
+  - ruamel.yaml >=0.17.32  
