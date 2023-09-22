@@ -92,12 +92,16 @@ def build_blast_databases(workdir: str) -> NoReturn:
 
 # Updated function to read species from config.yaml
 def read_species_from_config(config_contents):
-    species_list = config_contents.get('species_of_interest', [])
+    raw_species_list = config_contents.get('species_of_interest', [])
+    species_list = []
 
-    if species_list:
-        logging.info(f"Read {len(species_list)} species from preloaded config.")
-        for i, species in enumerate(species_list, 1):
-            logging.info(f"  {i}. {species}")
+    if raw_species_list:
+        logging.info(f"Read {len(raw_species_list)} species from preloaded config.")
+        for i, species_entry in enumerate(raw_species_list, 1):
+            species_name = species_entry.get('name', 'Unknown')
+            logging.info(f"  {i}. s__{species_name}")
+
+            species_list.append(species_name)
     else:
         logging.warning("No species found in preloaded config.")
 
