@@ -124,9 +124,12 @@ def fetch_species_data(search_str: str, db: str, page: int = 1, itemsPerPage: in
             rows = json.loads(response.text)['rows']
             num_rows = len(rows)  # Get the number of rows
 
-            # Log number of fetched rows and success
-            logging.info(f"Successfully fetched {num_rows} rows for {search_str} from {db}.")
+            # Stop if no rows are returned
+            if num_rows == 0:
+                logging.warning(f"No data fetched for {search_str} from {db}. Stopping function.")
+                sys.exit("Terminating the program due to zero fetched rows.")  # Terminate the program
 
+            logging.info(f"Successfully fetched {num_rows} rows for {search_str} from {db}.")
 
             # Log details of fetched data for debugging
             for row in rows:
@@ -134,14 +137,15 @@ def fetch_species_data(search_str: str, db: str, page: int = 1, itemsPerPage: in
                 gid = row.get('gid', 'N/A')
                 gtdb_rep = row.get('isGtdbSpeciesRep', 'N/A')
                 ncbi_type = row.get('isGtdbSpeciesRep', 'N/A')
-                #logging.info(f"Seatch string: {search_str}, Fetched row details: NCBI organism: {ncbiorgname}, GID: {gid}, GTDB reprentative: {gtdb_rep}, NCBI type strain: {ncbi_type}")
+                #logging.info(f"Search string: {search_str}, Fetched row details: NCBI organism: {ncbiorgname}, GID: {gid}, GTDB representative: {gtdb_rep}, NCBI type strain: {ncbi_type}")
             return rows
         else:
             logging.warning(f"Failed to get data for {search_str} from {db}. HTTP Status Code: {response.status_code}")
             return []
     except Exception as e:
         logging.error(f"An error occurred while fetching data: {e}")
-        return []
+        sys.exit(f"Terminating the program due to an error: {e}")  # Terminate the program
+
 
 
 def filter_exact_match(rows: list, search_str: str, db: str) -> list:
