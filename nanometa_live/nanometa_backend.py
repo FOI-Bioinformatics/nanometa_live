@@ -81,7 +81,7 @@ def remove_temp_files(config_contents):
     force_valid_file = os.path.join(config_contents["main_dir"], 'validation_fastas/force_validation.txt')
     force_blast_file = os.path.join(config_contents["main_dir"], 'blast_result_files/force_blast.txt')
     fastp_dir = os.path.join(config_contents["main_dir"], 'fastp_reports/')
-    fastp_file_to_keep = os.path.join(config_contents["main_dir"], 'compiled_fastp/.txt')
+    fastp_file_to_keep = os.path.join(config_contents["main_dir"], 'fastp_reports/compiled_fastp.txt')
 
     # Remove Kraken results directory
     if os.path.exists(kraken_results_dir):
