@@ -573,7 +573,7 @@ def rename_files(df: pd.DataFrame, workingdir: str):
                     for filename in files_in_dir:
                         if filename.endswith('.fna'):
                             source_file = os.path.join(subdirectory_path, filename)
-                            target_file = os.path.join(genomes_dir, f'{tax_id}.fna')
+                            target_file = os.path.join(genomes_dir, f'{tax_id}.fasta')
 
                             os.rename(source_file, target_file)
                             logging.info(f"Renamed {source_file} to {target_file}")
