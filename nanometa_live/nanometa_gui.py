@@ -1188,19 +1188,25 @@ def update_sunburst(interval_trigger, filter_click, filter_value, domains):
               State('validate_box', 'value') # valiaditon option
               )
 def pathogen_update(interval_trigger, val_state):
-    # get the data, using the species list from config and the raw df
-    pathogen_list = config_contents['species_of_interest']
+    # Create a dictionary to keep track of name and taxid pairs
+    species_dict = {entry["taxid"]: entry["name"] for entry in config_contents['species_of_interest']}
+
+    # Extract taxids to create the pathogen list
+    pathogen_list = list(species_dict.keys())
+
     pathogen_info = pathogen_df(pathogen_list, raw_df)
     # Cutoff for coloring.
     dll = int(config_contents["danger_lower_limit"])
     # Deals with species of interest not present in kreport.
-    for entry in pathogen_list:
-        if entry not in pathogen_info['Tax ID'].values:
-            pathogen_info.loc[len(pathogen_info.index)] = ['not found in DB', # add pathogen name PLACEHOLDER!
-                                                            entry, # add pathogen taxID
-                                                            0, # add pathogen nr of reads
-                                                            0.0, # add percent reads for pathogens
-                                                            0] # not needed anymore, remove later
+    for taxid in pathogen_list:
+        if taxid not in pathogen_info['Tax ID'].values:
+            # Use the species name from species_dict instead of 'not found in DB'
+            species_name = species_dict[taxid]
+            pathogen_info.loc[len(pathogen_info.index)] = [species_name,  # add pathogen name
+                                                           taxid, # add pathogen taxID
+                                                           0,# add pathogen nr of reads
+                                                           0.0, # add percent reads for pathogens
+                                                           0] # not needed anymore, remove later
 
     # Adding a column for the coloring sceme.
     pathogen_info['Color'] = pathogen_info['Reads'].apply(lambda x: 'Green' if x < dll else 'Red')
