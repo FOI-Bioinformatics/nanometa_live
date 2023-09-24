@@ -26,7 +26,7 @@ def load_config(config_file):
     with open(config_file, 'r') as cf:
         return yaml.safe_load(cf)
 
-def execute_snakemake(snakefile_path, snakemake_cores, log_file_path="snakemake_output.log", config_contents=None):
+def execute_snakemake(snakefile_path, configfile_path, snakemake_cores, log_file_path="snakemake_output.log", config_contents=None):
     """
     Execute the Snakemake workflow with the specified number of cores and package management settings.
 
@@ -47,7 +47,8 @@ def execute_snakemake(snakefile_path, snakemake_cores, log_file_path="snakemake_
         "snakemake",
         "--cores", str(snakemake_cores),
         "--rerun-incomplete",
-        "--snakefile", snakefile_path
+        "--snakefile", snakefile_path,
+        "--configfile", configfile_path
     ]
 
     # Add conda-related options if local_package_management is 'conda'
@@ -140,7 +141,7 @@ def timed_senser(config_file):
         try:
             time.sleep(t)
             logging.info(f"Current interval: {t} seconds.")
-            execute_snakemake(snakefile_path, snakemake_cores, config_contents=config_contents)
+            execute_snakemake(snakefile_path, config_file, snakemake_cores, config_contents=config_contents)
             logging.info("Run completed.")
         except KeyboardInterrupt:
             logging.info("Interrupted by user.")

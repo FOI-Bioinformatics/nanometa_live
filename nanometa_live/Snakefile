@@ -1,7 +1,7 @@
 # This workflow handles the file processing from gzipped nanopore batch 
 # files to a number of cumulative files used for the visualization.
 
-configfile: "config.yaml"
+#configfile: "config.yaml"
 
 import os
 import pkg_resources
@@ -10,16 +10,35 @@ import time
 # A check to see if there are any input files, before the workflow is run.
 # Some rules hang the workflow if there are no files yet produced.
 # First checks if the input dir exists:
-while not os.path.isdir(config["nanopore_output_directory"]):
-	print(str(config["nanopore_output_directory"]) + " not found. Waiting...")
-	time.sleep(config["check_intervals_seconds"])
-# Then checks if there are files in the dir:
-while len(os.listdir(config["nanopore_output_directory"])) == 0:
-	print("No files found in " + str(config["nanopore_output_directory"]) + ". Waiting...")
-	time.sleep(config["check_intervals_seconds"]) 
+# Function to pause execution until a condition is met
+def wait_until_condition_met(condition_func, message, interval):
+    while not condition_func():
+        print(f"{message}. Waiting...")
+        time.sleep(interval)
 
-# As soon as there are files in the dir:
-print("Files found in " + str(config["nanopore_output_directory"]) + ". Starting workflow...")
+# Define condition functions
+is_dir_exists = lambda: os.path.isdir(config["nanopore_output_directory"])
+is_files_exist = lambda: len(os.listdir(config["nanopore_output_directory"])) > 0
+
+# Configuration
+interval_seconds = config["check_intervals_seconds"]
+
+# Wait until the output directory exists
+wait_until_condition_met(
+    is_dir_exists,
+    f"{config['nanopore_output_directory']} not found",
+    interval_seconds
+)
+
+# Wait until there are files in the output directory
+wait_until_condition_met(
+    is_files_exist,
+    f"No files found in {config['nanopore_output_directory']}",
+    interval_seconds
+)
+
+# As soon as there are files in the directory, proceed
+print(f"Files found in {config['nanopore_output_directory']}. Starting workflow...")
 
 def create_validation_placeholders():
     """
