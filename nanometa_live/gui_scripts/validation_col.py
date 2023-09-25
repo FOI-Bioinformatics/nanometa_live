@@ -19,7 +19,7 @@ def validation_col(validation_list, blast_dir, read_nr_list):
             validated_col.append(0)
             #print('the value 0 has been added to entry',  i)
             counter += 1
-            break
+            continue
         #print('entry', i, 'has', read_nr_list[counter], 'nr of reads')
         file_name = str(i) + '.txt'
         path = os.path.join(blast_dir, file_name)
