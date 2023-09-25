@@ -1,19 +1,19 @@
-# Nanometa Live
-Nanometa Live is a workflow and graphical user interface (GUI) that displays real-time results from metagenomic sequencing with the Oxford Nanopore MinION and Flongle flow cells. The backend workflow uses Kraken2 for classification and BLAST for validation of sequences. The GUI consists of three tabs containing various plots.
+# Nanometa Live: Real-time Metagenomic Analysis
 
-Nanometa Live uniquely offers offline capabilities and custom database support, making it a versatile tool in the field of metagenomic data analysis.
+Nanometa Live is a comprehensive workflow equipped with a graphical user interface (GUI) for real-time metagenomic sequencing analysis. It's designed for the Oxford Nanopore MinION and Flongle flow cells. Utilizing Kraken2 for classification and BLAST for sequence validation, it offers a dynamic, offline-capable solution with custom database support.
 
 
 <img src="https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/main%20pic2.png" alt="main view" width="900" height="500">
 
-A Sankey plot displays the most abundant taxa in the sample and their lineage. The plot can be modified and filtered by domain, taxonomic levels and abundance. At the top of the app is a toggle to pause or resume live updates of the plots. When turned on, the plots are automatically updated with the latest results from the workflow on a set time interval.
+## Features
 
-<img src="https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/pathogen%20pic.png" alt="pathogen table" width="400" height="390">
+- 📊 **Real-time Visualization**: Dynamic Sankey plots, sunburst charts, and more.
+- 🌐 **Offline Support**: Operate without internet connectivity.
+- 🛠️ **Custom Database Support**: Tailor the tool to your specific needs.
+- 🔍 **Quality Control**: Inbuilt QC tab for basic data quality checks.
+  
+For further details, visit our [Wiki](https://github.com/FOI-Bioinformatics/nanometa_live/wiki).
 
-The user can select certain species of interest or pathogens that are displayed in a colored list along with a gauge to show abundance and potential threat level.
-Included in the app are also sunburst and icicle charts in the Explore tab, basic quality control data in the QC tab, and a list of most abundant taxa.
-
-For more information, see the [wiki](https://github.com/FOI-Bioinformatics/nanometa_live/wiki).
 
 ## Installation Guide
 This section provides detailed instructions on how to install Nanometa Live. We recommend using [Mambaforge](https://github.com/conda-forge/miniforge#mambaforge) for a seamless installation experience.
