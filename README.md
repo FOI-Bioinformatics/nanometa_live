@@ -15,51 +15,70 @@ Included in the app are also sunburst and icicle charts in the Explore tab, basi
 
 For more information, see the [wiki](https://github.com/FOI-Bioinformatics/nanometa_live/wiki).
 
-## INSTALL
-The program uses a conda environment, so conda or mamba will need to be installed for it to work. [Mambaforge](https://github.com/conda-forge/miniforge#mambaforge) is recommended.
+## Installation Guide
+This section provides detailed instructions on how to install Nanometa Live. We recommend using [Mambaforge](https://github.com/conda-forge/miniforge#mambaforge) for a seamless installation experience.
 
+### Option 1: Install with Conda/Mamba (Recommended)
 
+1. **Create a New Environment:**
 
-**Install with conda/mamba (recommended):**
+    Create a new Conda or Mamba environment and install Nanometa Live. Run the following command in your terminal:
 
-Create a new conda environment and install nanometa-live, for example:
+    ```bash
+    mamba create --name nanometa_live_env nanometa-live
+    ```
 
-```
-mamba create --name nanometa_live_env nanometa-live
-```
+2. **Activate the Environment:**
 
-Activate the environment:
+    After the environment is created, activate it using the following command:
 
-```
-mamba activate nanometa_live_env
-```
+    ```bash
+    mamba activate nanometa_live_env
+    ```
 
-**Install from source:**
+    You should now see the environment name in your command prompt.
 
-Clone or download the files from GitHub, for example:
+### Option 2: Install from Source Code
 
-```
-git clone https://github.com/FOI-Bioinformatics/nanometa_live
-```
+1. **Clone the Repository:**
 
-From the main folder, containing **nanometa_live_env.yml**, create a conda/mamba environment from the yml file, for example:
+    First, clone the Nanometa Live repository from GitHub to your local machine:
 
-```
-mamba env create -f nanometa_live_env.yml
-```
+    ```bash
+    git clone https://github.com/FOI-Bioinformatics/nanometa_live
+    ```
 
-Activate the environment:
+2. **Navigate to the Project Directory:**
 
-```
-mamba activate nanometa_live_env
-```
+    Move to the directory where the cloned repository is located. The directory should contain a file named `nanometa_live_env.yml`.
 
-Install the program in the environment. While standing in the directory containing **setup.py**:
+3. **Create the Environment from the YML File:**
 
-```
-pip install .
-```
-The program is now installed and can be accessed from any directory using the instructions below.
+    Run the following command to create a new environment based on the `nanometa_live_env.yml` file:
+
+    ```bash
+    mamba env create -f nanometa_live_env.yml
+    ```
+
+4. **Activate the Environment:**
+
+    Activate the newly created environment:
+
+    ```bash
+    mamba activate nanometa_live_env
+    ```
+
+5. **Install the Program:**
+
+    While in the directory that contains the `setup.py` file, execute the following command to install the program:
+
+    ```bash
+    pip install .
+    ```
+
+### Post-Installation
+
+Once the program is installed, you can access it from any directory by following the usage instructions below.
 
 ## QUICK USE TUTORIAL
 The tutorial files can be downloaded at https://drive.google.com/drive/folders/1fjAihcPw409Pw8C3z_YPQnBnRMuoDE4u?usp=sharing. We will use the built-in nanopore simulator to do a test run using a GTDB database for Kraken2.
