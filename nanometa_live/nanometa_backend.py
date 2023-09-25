@@ -1,30 +1,43 @@
 import time
 import os
-import yaml
+from ruamel.yaml import YAML
 import pkg_resources
 import shutil
 import argparse
 import logging
 import subprocess
 import sys
+from typing import List, Dict, Union, NoReturn
 __version__="0.2.1"
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def load_config(config_file):
+def load_config(config_file: str) -> Union[Dict, None]:
     """
-    Load configuration settings from a YAML file.
+    Load configuration settings from a YAML file using ruamel.yaml.
 
     Parameters:
         config_file (str): Path to the YAML configuration file.
 
     Returns:
-        dict: Dictionary containing the configuration settings.
+        Union[Dict, None]: Dictionary containing the configuration settings, or None if an error occurs.
     """
-    logging.info(f"Loading configuration from {config_file}")
-    with open(config_file, 'r') as cf:
-        return yaml.safe_load(cf)
+    logging.info(f"Attempting to load configuration from {config_file}")
+
+    try:
+        yaml = YAML(typ='safe')
+        with open(config_file, 'r') as cf:
+            config_data = yaml.load(cf)
+        logging.info(f"Successfully loaded configuration from {config_file}")
+        return config_data
+    except FileNotFoundError:
+        logging.error(f"Configuration file {config_file} not found")
+    except PermissionError:
+        logging.error(f"Permission denied: Cannot read {config_file}")
+    except Exception as e:
+        logging.error(f"Failed to load configuration from {config_file}. Exception: {e}")
+    return None
 
 def execute_snakemake(snakefile_path, configfile_path, snakemake_cores, log_file_path="snakemake_output.log", config_contents=None):
     """
