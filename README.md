@@ -80,80 +80,76 @@ This section provides detailed instructions on how to install Nanometa Live. We 
 
 Once the program is installed, you can access it from any directory by following the usage instructions below.
 
-## QUICK USE TUTORIAL
-The tutorial files can be downloaded at https://drive.google.com/drive/folders/1fjAihcPw409Pw8C3z_YPQnBnRMuoDE4u?usp=sharing. We will use the built-in nanopore simulator to do a test run using a GTDB database for Kraken2.
+## Quick Start Tutorial
+
+This guide will walk you through a simulated analysis using a GTDB database for Kraken2. To get started, download the required tutorial files from [Google Drive](https://drive.google.com/drive/folders/1fjAihcPw409Pw8C3z_YPQnBnRMuoDE4u?usp=sharing).
 
 
-#### 1. Make sure the environment is activated:
-```
+
+### Step 1: Activate the Conda Environment
+Ensure your Conda/Mamba environment is active by running:
+
+```bash
 mamba activate nanometa_live_env
 ```
 
-#### 2. Create a new project
-```
-nanometa-new --path /home/user/metagenomic_project
-```
+### Step 2: Initialize a New Project
+Initialize your project by specifying various parameters. Replace the placeholders in the example command below with the appropriate paths.
 
-#### 3. Modify the config file
-Go into the newly created directory and open the config file.  
+```bash
+working_dir=YOUR_PATH/metagenomic_project
+species_file=PATH_TO/species.txt
+kraken_folder=PATH_TO/kraken_db
+fastq_folder=PATH_TO/fastq
+kraken_tax=gtdb
 
-Change the **Nanopore output directory** */home/user/nanopore_out* to your user name (or other desired path).
-
-Set the **Kraken 2 database** directory to wherever you put your database from the tutorial files, for example */home/user/kraken2.gtdb_bac120_4Gb*. Naturally you need to unpack it. 
-
-Remember to save your config file after modification.
-
-#### Optional: Custom Kraken2 Database
-Set your custom Kraken2 database directory in the config file if you have one.
-
-
-#### 4. Build BLAST databases for validation
-The *nanometa-blastdb* command constructs the needed files for validating the sequences that Kraken 2 finds. This process will soon be automated for enhanced user-friendliness.
-
-The example refseqs from the tutorial files should be placed in a directory, for example */home/user/example_refseqs*. This directory should contain the following files: "321.fasta", "852.fasta", "5061.fasta", "13373.fasta".
-
-Standing in your project directory (*/home/user/metagenomic_project*), run the command with the example_refseqs directory in as input:
-
-```
-nanometa-blastdb -i /home/user/example_refseqs
+nanometa-new --path ${working_dir} --species_of_interest ${species_file} --nanopore_output_directory  ${fastq_folder} --kraken_db ${kraken_folder} --kraken_taxonomy ${kraken_tax}
 ```
 
-The folder *blast_databases* should be created in your project directory, containing 8 database files for each ID, with different endings: "idnumber.fasta.xxx".
+For a complete list of arguments, run: `nanometa-new --help`.
 
-#### 5. Start Nanopore sequencing
-For the tutorial, we will use the Nanopore simulator that comes with the program. Put the 8 tutorial test batch files, ending in fastq.gz, in a folder called */home/user/nanometa_test_data*, and from a separate terminal run:
 
-```
-nanometa-sim -i /home/user/nanometa_test_data -o /home/user/nanopore_out
-```
+### Step 3: Optional Configuration
+Navigate to your newly created project directory and open the `config.yaml` file.
 
-The -o folder is the simulated Nanopore output, and needs to be the same as specified in the config under **Nanopore output directory**. The simulator automatically copies a file from the nanometa_test_data directory every 1-2 minutes until all the files are copied, to mimic the Nanopore batches. 
+- Verify the **Nanopore Output Directory**.
+- Verify the **Kraken 2 Database** directory.
 
-#### 6. Start the backend pipeline
-Start a separate terminal, make sure you are in the project directory */home/user/metagenomic_project* and run:
+📝 **Note**: Save your changes.
 
-```
-nanometa-pipe
-```
 
-To exit the pipeline, press *ctrl+C*. Might have to be pressed several times.
+### Step 4: Automatic Data Preparation
+Execute the `nanometa-prepare` command to automatically download and create files needed for analysis.
 
-#### 7. Start the GUI
-Start a separate terminal, make sure you are in the project directory and run:
-
-```
-nanometa
+```bash
+nanometa-prepare --path ${working_dir} 
 ```
 
-Hold *ctrl* and click the port link if the GUI does not open by itself.
+### Step 5: Simulate Nanopore Sequencing
+Place the tutorial batch files (ending in `.fastq.gz`) in a directory, e.g., `/home/user/nanometa_test_data`. Then run:
 
-To exit the GUI, press *ctrl+C* in this terminal. The browser window can be closed as a regular window.
+```bash
+nanometa-sim -i /SOMEPATH/nanometa_test_data -o  ${fastq_folder}
+```
 
-#### 8. Navigating the GUI
+Ensure the `-o` flag's value matches the **Nanopore Output Directory** in your `config.yaml` file.
 
-There are tooltips in the GUI for most of the settings. Hover over an object to display the tooltips. There are thorough descriptions of the plots in the [wiki](https://github.com/FOI-Bioinformatics/nanometa_live/wiki). 
 
-The tutorial species of interest have been chosen to display all the possible abundance visualizations in the GUI. With the default settings, species with a read count higher than 10 will appear as yellow, and species with a read count higher than 100 will appear as red.
+### Step 6: Start Live Analysis
+Execute the following command in another terminal to begin live analysis:
+
+```bash
+nanometa-live -p ${working_dir}
+```
+
+To terminate the process, press `Ctrl+C` multiple times if needed.
+
+### Step 7: Explore the GUI
+- Tooltips: Hover over GUI elements to view helpful tooltips.
+- Wiki: For detailed descriptions, visit the [project wiki](https://github.com/FOI-Bioinformatics/nanometa_live/wiki).
+- Visual cues: In the GUI, species with a read count >100 will appear in red.
+
+
 
 ## Contact and community guidelines
 Contact regarding Nanometa Live: Kristoffer, **kristoffersandas@yahoo.se**
