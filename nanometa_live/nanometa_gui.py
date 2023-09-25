@@ -1364,13 +1364,23 @@ def update_qc_text(interval_trigger):
     tot_too_short_reads = int(fastp_df['cum_too_short_reads'].iloc[-1])
 
     tot_removed_reads = tot_low_quality_reads + tot_too_many_N_reads + tot_too_short_reads
+    
+    # avoid div by zero error
+    if tot_reads_pre_filt == 0:
+        percentage_passed_reads = 0.0
+        percentage_reads_removed = 0.0
+    else:
+        percentage_passed_reads = float(round((tot_passed_reads*100)/tot_reads_pre_filt, 1))
+        percentage_reads_removed = float(round((tot_removed_reads*100)/tot_reads_pre_filt, 1))
 
-    percentage_passed_reads = float(round((tot_passed_reads*100)/tot_reads_pre_filt, 1))
-    percentage_reads_removed = float(round((tot_removed_reads*100)/tot_reads_pre_filt, 1))
-
-    percentage_low_quality = float(round((tot_low_quality_reads*100)/tot_removed_reads, 1))
-    percentage_low_complexity = float(round((tot_too_many_N_reads*100)/tot_removed_reads, 1))
-    percentage_too_short = float(round((tot_too_short_reads*100)/tot_removed_reads, 1))
+    if tot_removed_reads == 0:
+        percentage_low_quality = 0.0
+        percentage_low_complexity = 0.0
+        percentage_too_short = 0.0
+    else:
+        percentage_low_quality = float(round((tot_low_quality_reads*100)/tot_removed_reads, 1))
+        percentage_low_complexity = float(round((tot_too_many_N_reads*100)/tot_removed_reads, 1))
+        percentage_too_short = float(round((tot_too_short_reads*100)/tot_removed_reads, 1))
 
     # Create layout objects.
     trp = 'Total reads passed: ' + str(tot_passed_reads) + ' (' + str(percentage_passed_reads) + '%)'
