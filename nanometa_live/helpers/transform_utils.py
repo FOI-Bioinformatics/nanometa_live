@@ -1,6 +1,6 @@
 import logging
 import pandas as pd
-from typing import List, Dict, Union, NoReturn
+from typing import Any, List, Dict, Union, NoReturn, List
 
 def update_results_with_taxid_dict(results: dict, species_taxid_dict: dict) -> dict:
     """
@@ -34,19 +34,23 @@ def update_results_with_taxid_dict(results: dict, species_taxid_dict: dict) -> d
 
     return results
 
-def create_row_dict(species, species_info, row):
-    return {
+def create_row_dict(species: str, species_info: Dict[str, Any], row: Dict[str, Any]) -> Dict[str, Any]:
+    keys = [
+        ('gid', 'GID'),
+        ('accession', 'Accession'),
+        ('ncbiOrgName', 'NCBI_OrgName'),
+        ('ncbiTaxonomy', 'NCBI_Taxonomy'),
+        ('gtdbTaxonomy', 'GTDB_Taxonomy'),
+        ('isGtdbSpeciesRep', 'Is_GTDB_Species_Rep'),
+        ('isNcbiTypeMaterial', 'Is_NCBI_Type_Material')
+    ]
+    row_dict = {
         'Species': species,
         'Tax_ID': species_info.get('tax_id', 'N/A'),
-        'SearchQuery': f"s__{species}",
-        'GID': row.get('gid', 'N/A'),
-        'Accession': row.get('accession', 'N/A'),
-        'NCBI_OrgName': row.get('ncbiOrgName', 'N/A'),
-        'NCBI_Taxonomy': row.get('ncbiTaxonomy', 'N/A'),
-        'GTDB_Taxonomy': row.get('gtdbTaxonomy', 'N/A'),
-        'Is_GTDB_Species_Rep': row.get('isGtdbSpeciesRep', 'N/A'),
-        'Is_NCBI_Type_Material': row.get('isNcbiTypeMaterial', 'N/A'),
+        'SearchQuery': f"s__{species}"
     }
+    row_dict.update({new_key: row.get(old_key, 'N/A') for old_key, new_key in keys})
+    return row_dict
 
 def parse_to_table_with_taxid(filtered_data: dict) -> pd.DataFrame:
     """

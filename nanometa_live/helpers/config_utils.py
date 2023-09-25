@@ -2,7 +2,7 @@ import os
 import logging
 import subprocess
 import shutil
-from typing import List, Dict, Union, NoReturn
+from typing import Any, List, Dict, Union, NoReturn, List
 from ruamel.yaml import YAML
 import pandas as pd
 
@@ -32,7 +32,8 @@ def load_config(config_file: str) -> Union[Dict, None]:
         logging.error(f"Failed to load configuration from {config_file}. Exception: {e}")
     return None
 
-def create_new_project_directory(project_path):
+
+def create_new_project_directory(project_path: str) -> Union[bool, None]:
     """
     Create a new directory for the Nanometa project if it doesn't exist.
 
@@ -42,20 +43,27 @@ def create_new_project_directory(project_path):
     Returns:
         bool: True if the directory exists or was successfully created, False otherwise.
     """
-    logging.info(f"Creating project directory at {project_path}")
-    if not os.path.exists(project_path):
-        os.mkdir(project_path)
-        logging.info(f"Project directory created at {project_path}")
-    else:
-        logging.info(f"Project directory already exists at {project_path}")
-    return os.path.exists(project_path)
+    try:
+        logging.info(f"Creating project directory at {project_path}")
 
-def backup_config_file(project_path, config_file_name):
+        if not os.path.exists(project_path):
+            os.mkdir(project_path)
+            logging.info(f"Project directory created at {project_path}")
+        else:
+            logging.info(f"Project directory already exists at {project_path}")
+
+        return True
+    except Exception as e:
+        logging.error(f"Failed to create project directory: {e}")
+        return False
+
+def backup_config_file(project_path: str, config_file_name: str) -> bool:
     """
     Backup the existing config file by renaming it with a .bak extension.
 
     Parameters:
         project_path (str): The path to the project directory where the config file is located.
+        config_file_name (str): The name of the config file to back up.
 
     Returns:
         bool: True if the backup is successful or if there is no existing config file to backup; False otherwise.
@@ -64,43 +72,72 @@ def backup_config_file(project_path, config_file_name):
     backup_file_path = os.path.join(project_path, f"{config_file_name}.bak")
 
     if os.path.exists(config_file_path):
-        shutil.move(config_file_path, backup_file_path)
-        logging.info(f"Existing config file backed up as {config_file_name}.bak")
-    return True
+        try:
+            shutil.move(config_file_path, backup_file_path)
+            logging.info(f"Existing config file backed up as {config_file_name}.bak")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to back up existing config file due to: {e}")
+            return False
+    else:
+        logging.info(f"No existing config file found. No need to back up.")
+        return True
 
-def copy_config_file(config_path, project_path, config_file_name):
+def copy_config_file(config_path: str, project_path: str, config_file_name: str) -> bool:
     """
     Copy the general config file to the specified project directory.
 
     Parameters:
         config_path (str): The path to the general config file.
         project_path (str): The path to the project directory.
+        config_file_name (str): The name of the config file to copy.
 
     Returns:
         bool: True if the config file was successfully copied, False otherwise.
     """
-    logging.info(f"Copying config file from {config_path} to {project_path}")
-    shutil.copy(config_path, os.path.join(project_path, config_file_name))
-    logging.info("Config file copied successfully.")
-    return os.path.exists(os.path.join(project_path, config_file_name))
+    try:
+        logging.info(f"Copying config file from {config_path} to {project_path}")
+        shutil.copy(config_path, os.path.join(project_path, config_file_name))
+        logging.info("Config file copied successfully.")
+        return os.path.exists(os.path.join(project_path, config_file_name))
+    except Exception as e:
+        logging.error(f"Failed to copy config file due to: {e}")
+        return False
 
-def append_project_path_to_config(project_path, config_file_name):
+def append_project_path_to_config(project_path: str, config_file_name: str) -> bool:
     """
     Append the project path to the config file. This helps other scripts find the correct paths.
 
     Parameters:
         project_path (str): The path to the project directory.
+        config_file_name (str): The name of the config file to append to.
 
     Returns:
         bool: True if the project path was successfully appended, False otherwise.
     """
-    logging.info(f"Appending project path {project_path} to config file")
-    with open(os.path.join(project_path, config_file_name), 'a') as f:
-        f.write('\n# Path to the main project folder.\nmain_dir: "' + project_path + '"')
-    logging.info("Project path appended to config file successfully.")
-    return True
+    try:
+        logging.info(f"Appending project path {project_path} to config file")
+        with open(os.path.join(project_path, config_file_name), 'a') as f:
+            f.write(f'\n# Path to the main project folder.\nmain_dir: "{project_path}"')
+        logging.info("Project path appended to config file successfully.")
+        return True
+    except Exception as e:
+        logging.error(f"Failed to append project path to config file due to: {e}")
+        return False
 
-def update_config_file_with_comments(project_path, config_file_name, variable, new_value):
+def update_config_file_with_comments(project_path: str, config_file_name: str, variable: str, new_value: Any) -> bool:
+    """
+    Update a specific variable in the config file.
+
+    Parameters:
+        project_path (str): The path to the project directory.
+        config_file_name (str): The name of the config file to update.
+        variable (str): The variable to update in the config file.
+        new_value (Any): The new value to set for the variable.
+
+    Returns:
+        bool: True if the update was successful, False otherwise.
+    """
     config_file_path = os.path.join(project_path, config_file_name)
     try:
         yaml = YAML()
@@ -119,7 +156,18 @@ def update_config_file_with_comments(project_path, config_file_name, variable, n
         logging.error(f"Failed to update config file: {e}")
         return False
 
-def update_species_of_interest(project_path, config_file_name, species_list):
+def update_species_of_interest(project_path: str, config_file_name: str, species_list: List[str]) -> bool:
+    """
+    Update the species of interest in the config file.
+
+    Parameters:
+        project_path (str): The path to the project directory.
+        config_file_name (str): The name of the config file to update.
+        species_list (List[str]): The list of species to set as species of interest.
+
+    Returns:
+        bool: True if the update was successful, False otherwise.
+    """
     if species_list:
         species_data = [{"name": species, "taxid": ""} for species in species_list]
         return update_config_file_with_comments(project_path, config_file_name, "species_of_interest", species_data)

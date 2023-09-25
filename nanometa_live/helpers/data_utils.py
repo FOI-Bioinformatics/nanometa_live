@@ -2,22 +2,29 @@ import os
 import logging
 import subprocess
 import shutil
-from typing import List, Dict, Union, NoReturn
+from typing import Any, List, Dict, Union, NoReturn, List
 from ruamel.yaml import YAML
 import pandas as pd
 import requests
 import json
 import sys
 
-def read_species_from_file(filename):
+def read_species_from_file(filename: str) -> Union[List[str], None]:
+    """
+    Read the list of species from a file.
+
+    Parameters:
+        filename (str): The name of the file containing the species list.
+
+    Returns:
+        List[str]: A list of species read from the file, or None if an error occurs.
+    """
     try:
         with open(filename, 'r') as f:
             species_list = [line.strip() for line in f if line.strip()]
 
         if species_list:
             logging.info(f"Read {len(species_list)} species from {filename}.")
-            for i, species in enumerate(species_list, 1):
-                logging.info(f"  {i}. {species}")
         else:
             logging.warning(f"No species found in {filename}.")
 
@@ -25,17 +32,31 @@ def read_species_from_file(filename):
 
     except FileNotFoundError:
         logging.error(f"File not found: {filename}")
-        return []
+        return None
     except PermissionError:
         logging.error(f"Permission denied: {filename}")
-        return []
+        return None
+    except Exception as e:
+        logging.error(f"An unexpected error occurred: {e}")
+        return None
 
-def read_species_from_config(config_contents):
+
+def read_species_from_config(config_contents: Dict[str, Any]) -> List[str]:
+    """
+    Read the list of species from preloaded config contents.
+
+    Parameters:
+        config_contents (Dict[str, Any]): The dictionary containing the config data.
+
+    Returns:
+        List[str]: A list of species read from the config contents.
+    """
     raw_species_list = config_contents.get('species_of_interest', [])
     species_list = []
 
     if raw_species_list:
         logging.info(f"Read {len(raw_species_list)} species from preloaded config.")
+
         for i, species_entry in enumerate(raw_species_list, 1):
             species_name = species_entry.get('name', 'Unknown')
             logging.info(f"  {i}. s__{species_name}")
@@ -133,7 +154,17 @@ def filter_exact_match(rows: list, search_str: str, db: str) -> list:
 
     return filtered_rows
 
-def filter_data_by_exact_match(data, db):
+def filter_data_by_exact_match(data: Dict[str, Dict[str, Any]], db: Any) -> Dict[str, Dict[str, Any]]:
+    """
+    Filter data by exact species match from a given database.
+
+    Parameters:
+        data (Dict[str, Dict[str, Any]]): The data dictionary containing species information.
+        db (Any): The database to search for exact matches.
+
+    Returns:
+        Dict[str, Dict[str, Any]]: A dictionary containing filtered data.
+    """
     filtered_data = {}
 
     for species, species_info in data.items():
