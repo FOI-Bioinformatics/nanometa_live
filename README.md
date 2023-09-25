@@ -151,7 +151,8 @@ To terminate the process, press `Ctrl+C` multiple times if needed.
 
 
 
-## Contact and community guidelines
-Contact regarding Nanometa Live: Kristoffer, **kristoffersandas@yahoo.se**
+## Community & Support
 
-For problems, comments or support, post an issue.  
+- **Contact**: Kristoffer Sandås, [kristoffersandas@yahoo.se](mailto:kristoffersandas@yahoo.se)
+- **Issues**: For bug reports, feature requests, or any other queries, please [open an issue](https://github.com/FOI-Bioinformatics/nanometa_live/issues).
+
