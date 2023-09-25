@@ -12,7 +12,7 @@ def get_fastp_df(fastp_file):
         fastp_df = pd.read_csv(fastp_file, names=['passed_filter_reads', 'low_quality_reads', 'too_many_N_reads', 'too_short_reads'])  
     else: # if no data: creates empty placeholder df
         fastp_df = pd.DataFrame(columns=['passed_filter_reads', 'low_quality_reads', 'too_many_N_reads', 'too_short_reads'])
-        fastp_df.loc[len(fastp_df.index)] = [0,0,0,0] 
+        fastp_df.loc[len(fastp_df.index)] = [1,1,1,1] 
     
     # create cumulative columns
     fastp_df['cum_passed_filter_reads'] = fastp_df['passed_filter_reads'].cumsum()

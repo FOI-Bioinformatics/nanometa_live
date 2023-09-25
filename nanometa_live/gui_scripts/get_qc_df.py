@@ -14,7 +14,7 @@ def get_qc_df(qc_file):
         qc_df = qc_df.sort_values(by=['Time'], ascending=True) 
     else: # if no data: creates empty placeholder df
         qc_df = pd.DataFrame(columns=['Time', 'Reads', 'Bp'])
-        qc_df.loc[len(qc_df.index)] = ['0.0',0,0] 
+        qc_df.loc[len(qc_df.index)] = ['2023-09-25 00:00:00.0',0,0]
     
     # create cumulative reads
     qc_df['Cumulative reads'] = qc_df['Reads'].cumsum() 
@@ -22,3 +22,4 @@ def get_qc_df(qc_file):
     qc_df['Cumulative bp'] = qc_df['Bp'].cumsum() 
     
     return qc_df
+
