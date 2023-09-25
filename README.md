@@ -3,7 +3,9 @@
 Nanometa Live is a comprehensive workflow equipped with a graphical user interface (GUI) for real-time metagenomic sequencing analysis. It's designed for the Oxford Nanopore MinION and Flongle flow cells. Utilizing Kraken2 for classification and BLAST for sequence validation, it offers a dynamic, offline-capable solution with custom database support.
 
 
-<img src="https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/main%20pic2.png" alt="main view" width="900" height="500">
+<img src="https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/screenshots/main_tab.png" alt="main view" width="900" height="450">
+
+<img src="https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/screenshots/sankey_plot.png" alt="main view" width="900" height="450">
 
 ## Features
 
