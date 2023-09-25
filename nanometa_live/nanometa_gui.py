@@ -393,7 +393,7 @@ sankey_plot = dcc.Graph(id='sankey_plot',
                         style={'width': '1700px', 'height': '900px', 'margin': '5px'}
                         )
 
-sankey_info_line1 = 'This plot shows the most abundand taxa in a hierarchical way. \
+sankey_info_line1 = 'This plot shows the most abundand hits in a hierarchical way. \
                               The highest taxonomic level is at the leftmost node, and the lineage \
                               can be traced through the plot to the lowest selected taxonomic level at \
                               the rightmost node.'
@@ -519,10 +519,10 @@ sankey_filtering = html.Div(
 # Tab section divided into pathogen list and top list.
 
 ########## Pathogen stuff ##########
-pathogen_head = html.H2('Pathogen detection') # main headline
+pathogen_head = html.H2('Species of Interest') # main headline
 
 # Colored table.
-pathogen_table = dbc.Container([dbc.Label('Pathogens/species of interest:'),
+pathogen_table = dbc.Container([dbc.Label('Species of interest:'),
                                 create_pathogen_table()])
 
 # Validation option checkbox.
@@ -621,8 +621,8 @@ pathogen_section = html.Div(
 )
 
 ########## Toplist stuff ##########
-toplist_head = html.H2('Most abundand taxa') # headline
-top_list = dbc.Container([dbc.Label('Taxa with the highest number of reads.'),
+toplist_head = html.H2('Most Abundant Hits') # headline
+top_list = dbc.Container([dbc.Label('This section provides a quick overview of the most abundant hits, offering you an immediate glimpse into the microbial diversity and prevalence.'),
                                 create_top_table()])
 
 # Filtering functions for the toplist.
@@ -709,7 +709,7 @@ toplist_modal = html.Div([
     # Modal for displaying text
     dbc.Modal(
         [
-            dbc.ModalHeader("Most abundant taxa"),
+            dbc.ModalHeader("Most Abundant Hits"),
             dbc.ModalBody(toplist_info),
             dbc.ModalFooter(
                 dbc.Button("Close", id="toplist-close-button", className="ml-auto")
@@ -1218,7 +1218,7 @@ def pathogen_update(interval_trigger, val_state):
                                          color='Color',
                                          labels={'Reads': 'Number of Reads',
                                                  'Name': 'Species'},
-                                         title='Number of reads per species',
+                                         title='Number of reads per species of interest',
                                          color_discrete_map={'Red': 'red', 'Green': 'green'})
 
     # Change size of graph.
