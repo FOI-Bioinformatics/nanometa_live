@@ -19,7 +19,7 @@ Structure:
 
 """
 
-from setuptools import setup
+from setuptools import setup, find_packages
 import os
 
 # Import the version number
@@ -34,8 +34,7 @@ setup(
       version = __version__,
       description = "Real-time metagenomic analysis.",
       # Specifying python packages.
-      packages = ['nanometa_live',
-                  'nanometa_live.gui_scripts'],
+      packages = find_packages(),
       # Specifying non-pyscript files and snakemake scripts.
       package_data={'nanometa_live': ['Snakefile',
                                       'config.yaml',
