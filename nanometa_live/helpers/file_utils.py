@@ -2,7 +2,7 @@ import os
 import logging
 import subprocess
 import shutil
-from typing import List, Dict, Union, NoReturn
+from typing import Any, List, Dict, Union, NoReturn, List
 import zipfile
 import pandas as pd
 import sys
@@ -65,17 +65,27 @@ def remove_temp_files(config_contents):
 
     logging.info('Cleanup done.')
 
-def decompress_zip(zip_filename, workingdir):
-    try:
-        # Construct the full paths using workingdir as the parent directory
-        zip_filepath = os.path.join(workingdir, zip_filename)
+def decompress_zip(zip_filename: str, workingdir: str) -> Union[bool, None]:
+    """
+    Decompress a ZIP file into a specified working directory.
 
+    Parameters:
+        zip_filename (str): The name of the ZIP file.
+        workingdir (str): The directory where the ZIP file is located and will be extracted.
+
+    Returns:
+        bool: True if successful, False if failed, None if an exception is caught.
+    """
+    zip_filepath = os.path.join(workingdir, zip_filename)
+
+    try:
         logging.info(f"Attempting to decompress {zip_filepath} into {workingdir}")
 
         with zipfile.ZipFile(zip_filepath, 'r') as zip_ref:
             zip_ref.extractall(workingdir)
 
         logging.info(f"Successfully decompressed {zip_filepath} into {workingdir}")
+        return True
 
     except FileNotFoundError:
         logging.error(f"File not found: {zip_filepath}")
@@ -86,6 +96,7 @@ def decompress_zip(zip_filename, workingdir):
     except Exception as e:
         logging.error(f"An unexpected error occurred while decompressing {zip_filepath}: {e}")
 
+    return False
 
 
 def rename_files(df: pd.DataFrame, workingdir: str):
@@ -136,11 +147,34 @@ def rename_files(df: pd.DataFrame, workingdir: str):
         logging.error(f"An unexpected error occurred while renaming files: {e}")
 
 
-def decompress_and_rename_zip(zip_filename, species_data, workingdir):
-    decompress_zip(zip_filename, workingdir)
-    rename_files(species_data, workingdir)
+def decompress_and_rename_zip(
+        zip_filename: str,
+        species_data: Dict[str, Union[str, int]],
+        workingdir: str
+    ) -> bool:
+    """
+    Decompress a ZIP file and rename its contents based on the provided species data.
 
-def generate_inspect_filename(file_path):
+    Parameters:
+        zip_filename (str): The name of the ZIP file.
+        species_data (Dict[str, Union[str, int]]): A dictionary containing species data.
+        workingdir (str): The directory where the ZIP file is located and will be extracted.
+
+    Returns:
+        bool: True if both tasks are successful, False otherwise.
+    """
+    # Step 1: Decompress the ZIP file
+    if not decompress_zip(zip_filename, workingdir):
+        return False  # Stop execution if decompression failed
+
+    # Step 2: Rename files based on species data
+    if not rename_files(species_data, workingdir):
+        return False  # Stop execution if renaming failed
+
+    return True
+
+
+def generate_inspect_filename(file_path: str) -> str:
     """
     Generate the name for the inspect file based on the original file path.
 
@@ -157,7 +191,6 @@ def generate_inspect_filename(file_path):
     inspect_file_name = f"{base_name}-inspect.txt"
 
     return inspect_file_name
-
 
 def save_species_and_taxid_to_txt(df: pd.DataFrame, workdir: str, filename: str = "species_taxid.txt"):
     """
@@ -248,12 +281,12 @@ def download_genomes_from_ncbi(workdir: str, prefix: str, accession_filename: st
         logging.info(' '.join(ncbi_datasets_cmd))
 
 
-def write_accessions_to_file(accessions, filename):
+def write_accessions_to_file(accessions: List[str], filename: str) -> None:
     """
     Writes a list of accessions to a file.
 
     Parameters:
-    - accessions (list): The list of accession numbers to write.
+    - accessions (List[str]): The list of accession numbers to write.
     - filename (str): The name of the file where accessions will be written.
 
     """
@@ -272,4 +305,3 @@ def write_accessions_to_file(accessions, filename):
         logging.error(f"Permission denied: Cannot write to {filename}")
     except Exception as e:
         logging.error(f"An unexpected error occurred while writing to {filename}: {e}")
-

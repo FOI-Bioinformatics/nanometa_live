@@ -4,7 +4,7 @@ import subprocess
 import shutil
 import pkg_resources
 import time
-from typing import List, Dict, Union, NoReturn
+from typing import  Any, List, Dict, Union, NoReturn, List
 
 from nanometa_live.helpers.config_utils import load_config
 
@@ -47,7 +47,7 @@ def execute_snakemake(snakefile_path, configfile_path, snakemake_cores, log_file
         subprocess.run(snakemake_cmd, stdout=log_file, stderr=subprocess.STDOUT)
 
 
-def timed_senser(config_file):
+def timed_senser(config_file: str) -> None:
     """
     Continuously execute the Snakemake workflow at a set time interval.
 
@@ -56,19 +56,19 @@ def timed_senser(config_file):
     """
     logging.info("Starting timed Snakemake workflow")
     config_contents = load_config(config_file)
-    t = config_contents['check_intervals_seconds']
+    check_interval = config_contents['check_intervals_seconds']
     snakemake_cores = config_contents['snakemake_cores']
     snakefile_path = pkg_resources.resource_filename('nanometa_live', 'Snakefile')
+    should_remove_temp = config_contents.get('remove_temp_files') == "yes"
 
-
-    while True:
-        try:
-            time.sleep(t)
-            logging.info(f"Current interval: {t} seconds.")
+    try:
+        while True:
+            logging.info(f"Current interval: {check_interval} seconds.")
             execute_snakemake(snakefile_path, config_file, snakemake_cores, config_contents=config_contents)
             logging.info("Run completed.")
-        except KeyboardInterrupt:
-            logging.info("Interrupted by user.")
-            if config_contents.get('remove_temp_files') == "yes":
-                remove_temp_files(config_contents)
-            break
+            time.sleep(check_interval)
+
+    except KeyboardInterrupt:
+        logging.info("Interrupted by user.")
+        if should_remove_temp:
+            remove_temp_files(config_contents)

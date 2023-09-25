@@ -1,7 +1,7 @@
 import os
 import logging
 import subprocess
-from typing import List, Dict, Union, NoReturn
+from typing import Any, List, Dict, Union, NoReturn, List
 
 def build_blast_databases(workdir: str) -> NoReturn:
     """
