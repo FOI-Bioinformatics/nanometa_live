@@ -14,7 +14,7 @@ analysis_name: "Metagenomic analysis"
 
 ## SPECIES OF INTEREST ##
 
-# The NCBI or GTDB IDs of the species of interest.
+# A list of the species of interest.
 # For instructions, see readme/wiki.
 # Any number of species can be listed.
 species_of_interest:
