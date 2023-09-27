@@ -146,6 +146,8 @@ Execute the following command in another terminal to begin live analysis:
 nanometa-live -p ${working_dir}
 ```
 
+You might need to click or `ctrl` + click the port link that appears in your terminal to open the GUI.
+
 To terminate the process, use the `Shut down program` button in the interface, or press `Ctrl+C` in the terminal multiple times if needed.
 
 ### Step 7: Explore the GUI
