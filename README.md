@@ -127,6 +127,8 @@ Execute the `nanometa-prepare` command to automatically download and create file
 nanometa-prepare --path ${working_dir} 
 ```
 
+After this step, Nanometa Live will not need an internet connection.
+
 ### Step 5: Simulate Nanopore Sequencing
 Place the tutorial batch files (ending in `.fastq.gz`) in a directory, e.g., `/home/user/nanometa_test_data`. Then run:
 
