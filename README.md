@@ -144,12 +144,13 @@ Execute the following command in another terminal to begin live analysis:
 nanometa-live -p ${working_dir}
 ```
 
-To terminate the process, press `Ctrl+C` multiple times if needed.
+To terminate the process, use the `Shut down program` button in the interface, or press `Ctrl+C` in the terminal multiple times if needed.
 
 ### Step 7: Explore the GUI
+- Use the `INFO/HELP` buttons for info about the different sections.
 - Tooltips: Hover over GUI elements to view helpful tooltips.
 - Wiki: For detailed descriptions, visit the [project wiki](https://github.com/FOI-Bioinformatics/nanometa_live/wiki).
-- Visual cues: In the GUI, species with a read count >100 will appear in red.
+- Visual cues: In the "Species of interest" section in the GUI, species with a read count >100 will appear in red by default.
 
 
 
