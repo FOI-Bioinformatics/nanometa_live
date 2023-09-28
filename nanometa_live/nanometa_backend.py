@@ -41,13 +41,15 @@ def main():
     # Check if any arguments were provided
     if not any(vars(args).values()):
         print("No arguments provided. Using default values.")
-        timed_senser('config.yaml')
+        onfig_contents = load_config('config.yaml')
+        timed_senser('config.yaml', config_contents)
     else:
         if hasattr(args, 'version') and args.version:
             parser.print_version()
         else:
             config_file_path = os.path.join(args.path, args.config) if args.path else args.config
-            timed_senser(config_file_path)
+            config_contents = load_config(config_file_path)
+            timed_senser(config_file_path, config_contents)
 
 if __name__ == "__main__":
     main()

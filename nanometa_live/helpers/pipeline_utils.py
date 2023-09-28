@@ -6,7 +6,7 @@ import pkg_resources
 import time
 from typing import  Any, List, Dict, Union, NoReturn, List
 
-from nanometa_live.helpers.config_utils import load_config
+
 
 def execute_snakemake(snakefile_path, configfile_path, snakemake_cores, log_file_path="snakemake_output.log", config_contents=None):
     """
@@ -47,15 +47,15 @@ def execute_snakemake(snakefile_path, configfile_path, snakemake_cores, log_file
         subprocess.run(snakemake_cmd, stdout=log_file, stderr=subprocess.STDOUT)
 
 
-def timed_senser(config_file: str) -> None:
+def timed_senser(config_file_path: str, config_contents: dict) -> None:
     """
     Continuously execute the Snakemake workflow at a set time interval.
 
     Parameters:
-        config_file (str): Path to the YAML configuration file.
+        config_file_path (str): Path to the YAML configuration file.
+        config_contents (dict): Loaded configuration content.
     """
     logging.info("Starting timed Snakemake workflow")
-    config_contents = load_config(config_file)
     check_interval = config_contents['check_intervals_seconds']
     snakemake_cores = config_contents['snakemake_cores']
     snakefile_path = pkg_resources.resource_filename('nanometa_live', 'Snakefile')
@@ -64,7 +64,7 @@ def timed_senser(config_file: str) -> None:
     try:
         while True:
             logging.info(f"Current interval: {check_interval} seconds.")
-            execute_snakemake(snakefile_path, config_file, snakemake_cores, config_contents=config_contents)
+            execute_snakemake(snakefile_path, config_file_path, snakemake_cores, config_contents=config_contents)
             logging.info("Run completed.")
             time.sleep(check_interval)
 
