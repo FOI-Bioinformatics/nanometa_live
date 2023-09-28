@@ -156,10 +156,25 @@ To terminate the process, use the `Shut down program` button in the interface, o
 - Wiki: For detailed descriptions, visit the [project wiki](https://github.com/FOI-Bioinformatics/nanometa_live/wiki).
 - Visual cues: In the "Species of interest" section in the GUI, species with a read count >100 will appear in red by default.
 
-
+---
 
 ## Community & Support
 
 - **Contact**: Kristoffer Sandås, [kristoffersandas@yahoo.se](mailto:kristoffersandas@yahoo.se)
 - **Issues**: For bug reports, feature requests, or any other queries, please [open an issue](https://github.com/FOI-Bioinformatics/nanometa_live/issues).
+
+Certainly! Below is a draft section about licensing that you can include in your README. It provides a brief explanation and directs the reader to the full license text.
+
+---
+
+## License
+
+`Nanometa Live` is licensed under the GNU General Public License v3.0. This license allows you the freedom to do almost anything you want with the project, provided that you include the original copyright and license notice in any copy of the software/source. This includes (but is not limited to) the freedom to use, modify, and distribute the software in both source and binary form.
+
+For the full license text, please refer to the [LICENSE](LICENSE.txt) file in the repository.
+
+This license was chosen to promote freedom in the use of the software and ensure that derivative works are shared with the community.
+
+---
+
 
