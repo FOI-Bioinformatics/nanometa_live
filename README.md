@@ -1,6 +1,6 @@
 # Nanometa Live: Real-time Metagenomic Analysis
 
-Nanometa Live is a comprehensive workflow equipped with a graphical user interface (GUI) for real-time metagenomic sequencing analysis. It's designed for the Oxford Nanopore MinION and Flongle flow cells. Utilizing Kraken2 for classification and BLAST for sequence validation, it offers a dynamic, offline-capable solution with custom database support.
+Nanometa Live is a comprehensive workflow equipped with a graphical user interface (GUI) for real-time metagenomic sequencing analysis. It is designed for Oxford Nanopore MinION and Flongle flow cells and utilizes Kraken2 for classification and BLAST for sequence validation. The tool offers a dynamic, offline-capable solution with custom database support.
 
 
 <img src="https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/screenshots/main_tab.png" alt="main view" width="900" height="450">
@@ -9,10 +9,10 @@ Nanometa Live is a comprehensive workflow equipped with a graphical user interfa
 
 ## Features
 
-- 📊 **Real-time Visualization**: Dynamic Sankey plots, sunburst charts, and more.
-- 🌐 **Offline Support**: Operate without internet connectivity.
+- 📊 **Real-time Visualization**: Offers dynamic Sankey plots, sunburst charts, and more.
+- 🌐 **Offline Support**: Operates without internet connectivity.
 - 🛠️ **Custom Database Support**: Tailor the tool to your specific needs.
-- 🔍 **Quality Control**: Inbuilt QC tab for basic data quality checks.
+- 🔍 **Quality Control**: Features an inbuilt QC tab for basic data quality checks.
   
 For further details, visit our [Wiki](https://github.com/FOI-Bioinformatics/nanometa_live/wiki).
 
@@ -38,9 +38,9 @@ Before you begin with the installation of `Nanometa Live`, make sure your system
 - [NCBI Datasets](https://www.ncbi.nlm.nih.gov/datasets/docs/v2/reference-docs/command-line/datasets/) if not using the bundled version
 
 ### Network Requirements
-- Internet access is required for initial setup and optional updates. The tool supports offline usage after initial setup.
+- Internet access is required for initial setup and optional updates. The tool supports offline usage after the initial setup.
 
-Please ensure all of these prerequisites are met to avoid any installation issues and to ensure smooth operation of `Nanometa Live`.
+Make sure to meet all these prerequisites to avoid installation issues and to ensure smooth operation of `Nanometa Live`.
 
 
 ## Installation Guide
@@ -106,7 +106,7 @@ This section provides detailed instructions on how to install Nanometa Live. We 
 
 ### Post-Installation
 
-Once the program is installed, you can access it from any directory by following the usage instructions below.
+After installation, you can access the program from any directory by following the usage instructions below.
 
 ## Quick Start Tutorial
 
@@ -138,10 +138,7 @@ For a complete list of arguments, run: `nanometa-new --help`.
 
 
 ### Step 3: Optional Configuration
-Navigate to your newly created project directory and open the `config.yaml` file.
-
-- Verify the **Nanopore Output Directory**.
-- Verify the **Kraken 2 Database** directory.
+Navigate to your newly-created project directory and open the `config.yaml` file. Verify the **Nanopore Output Directory** and the **Kraken 2 Database** directory.
 
 📝 **Note**: Save your changes.
 
@@ -195,11 +192,9 @@ Certainly! Below is a draft section about licensing that you can include in your
 
 ## License
 
-`Nanometa Live` is licensed under the GNU General Public License v3.0. This license allows you the freedom to do almost anything you want with the project, provided that you include the original copyright and license notice in any copy of the software/source. This includes (but is not limited to) the freedom to use, modify, and distribute the software in both source and binary form.
+`Nanometa Live` is licensed under the GNU General Public License v3.0. This license grants you the freedom to use, modify, and distribute the software in both source and binary form, provided that you include the original copyright and license notice in any copy of the software or source code.
 
-For the full license text, please refer to the [LICENSE](LICENSE.txt) file in the repository.
-
-This license was chosen to promote freedom in the use of the software and ensure that derivative works are shared with the community.
+For the full license text, please refer to the [LICENSE](LICENSE.txt) file in the repository. This license was chosen to promote freedom in using the software and to ensure that derivative works are shared with the community.
 
 ---
 
