@@ -17,6 +17,32 @@ Nanometa Live is a comprehensive workflow equipped with a graphical user interfa
 For further details, visit our [Wiki](https://github.com/FOI-Bioinformatics/nanometa_live/wiki).
 
 
+## Prerequisites
+
+Before you begin with the installation of `Nanometa Live`, make sure your system meets the following prerequisites:
+
+### System Requirements
+- Operating System: Linux/Unix or macOS
+- Processor: Intel Core i5 or equivalent
+- RAM: 8GB minimum, 16GB recommended
+- Disk Space: At least 10GB of free space
+
+### Software Dependencies
+- [Python](https://www.python.org/downloads/): Version 3.9 or higher
+- [Mambaforge](https://github.com/conda-forge/miniforge#mambaforge) or [Conda](https://docs.conda.io/en/latest/miniconda.html)
+- [Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git) for cloning the repository
+
+### Optional
+- [Kraken2](https://github.com/DerrickWood/kraken2) if not using the bundled version
+- [BLAST](https://blast.ncbi.nlm.nih.gov/Blast.cgi?CMD=Web&PAGE_TYPE=BlastDocs&DOC_TYPE=Download) if not using the bundled version
+- [NCBI Datasets](https://www.ncbi.nlm.nih.gov/datasets/docs/v2/reference-docs/command-line/datasets/) if not using the bundled version
+
+### Network Requirements
+- Internet access is required for initial setup and optional updates. The tool supports offline usage after initial setup.
+
+Please ensure all of these prerequisites are met to avoid any installation issues and to ensure smooth operation of `Nanometa Live`.
+
+
 ## Installation Guide
 This section provides detailed instructions on how to install Nanometa Live. We recommend using [Mambaforge](https://github.com/conda-forge/miniforge#mambaforge) for a seamless installation experience.
 
