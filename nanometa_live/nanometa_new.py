@@ -20,8 +20,7 @@ from nanometa_live.helpers.config_utils import (
 from nanometa_live.helpers.data_utils import read_species_from_file
 
 
-
-__version__="0.2.1"
+from nanometa_live import __version__
 
 
 # Initialize logging

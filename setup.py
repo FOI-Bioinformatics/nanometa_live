@@ -23,7 +23,7 @@ from setuptools import setup, find_packages
 import os
 
 # Import the version number
-__version__="0.2.1"
+from nanometa_live import __version__
 
 # Read requirements.txt and store its content in a list
 with open("requirements.txt", "r") as f:

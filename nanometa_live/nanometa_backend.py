@@ -15,7 +15,7 @@ from nanometa_live.helpers.pipeline_utils import execute_snakemake, timed_senser
 from nanometa_live.helpers.file_utils import remove_temp_files
 
 
-__version__="0.2.1"
+from nanometa_live import __version__
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
