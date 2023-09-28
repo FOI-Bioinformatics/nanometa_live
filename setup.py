@@ -50,7 +50,7 @@ setup(
                        'nanometa-blastdb = nanometa_live.build_blast_db:build_blast', # create blast validation databases
                        'nanometa-backend = nanometa_live.nanometa_backend:main', # run backend pipeline
                        'nanometa-gui = nanometa_live.nanometa_gui:run_app', # run gui
-                       'nanometa-live = nanometa_live.nanometa_live:main',  # wrapper to run both backend and GUI.
+                       'nanometa-live = nanometa_live.nanometa_runner:main',  # wrapper to run both backend and GUI.
                        'nanometa-prepare = nanometa_live.nanometa_prepare:main'  # Autmatically download genomes and create blast databases
                        ]
                       },
