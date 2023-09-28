@@ -35,8 +35,7 @@ from nanometa_live.helpers.file_utils import (
     generate_inspect_filename
 )
 
-__version__="0.2.1"
-
+from nanometa_live import __version__
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

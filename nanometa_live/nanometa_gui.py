@@ -58,7 +58,7 @@ from nanometa_live.gui_scripts.icicle_sunburst_data import icicle_sunburst_data
 from nanometa_live.gui_scripts.validation_col import validation_col
 from nanometa_live.gui_scripts.get_fastp_df import get_fastp_df
 
-__version__="0.2.1"
+from nanometa_live import __version__
 
 ########## --help argument ####################################################
 # Checks if the user has added the --help argument to the command and
@@ -427,7 +427,7 @@ sankey_info = html.Div([
 
 sankey_modal = html.Div([
     html.Button('INFO/HELP', id='sankey-open-button', n_clicks=0),
-    
+
     # Modal for displaying text
     dbc.Modal(
         [
@@ -588,7 +588,7 @@ pathogen_info = html.Div([
 
 pathogen_modal = html.Div([
     html.Button('INFO/HELP', id='pathogen-open-button', n_clicks=0),
-    
+
     # Modal for displaying text
     dbc.Modal(
         [
@@ -705,7 +705,7 @@ toplist_info = html.Div([
 
 toplist_modal = html.Div([
     html.Button('INFO/HELP', id='toplist-open-button', n_clicks=0),
-    
+
     # Modal for displaying text
     dbc.Modal(
         [
@@ -841,7 +841,7 @@ qc_info = html.Div([
 
 qc_modal = html.Div([
     html.Button('INFO/HELP', id='qc-open-button', n_clicks=0),
-    
+
     # Modal for displaying text
     dbc.Modal(
         [
@@ -915,7 +915,7 @@ qc_row_all = html.Div(
                   html.Hr(),
                   qc_processing_headline,
                   processed_files,
-                  waiting_files,                  
+                  waiting_files,
                   html.Br(),
                   html.Hr(),
                   qc_modal
@@ -1008,7 +1008,7 @@ sunburst_info_line4 = '''The chart can be filtered
                          chart.
                          '''
 
-sunburst_info_line5 = '''Hovering over the chart will display an icon in the right upper corner 
+sunburst_info_line5 = '''Hovering over the chart will display an icon in the right upper corner
                          that enables saving the chart as a png file.
                          '''
 
@@ -1022,7 +1022,7 @@ sunburst_info = html.Div([
 
 sunburst_modal = html.Div([
     html.Button('INFO/HELP', id='sunburst-open-button', n_clicks=0),
-    
+
     # Modal for displaying text
     dbc.Modal(
         [
@@ -1364,7 +1364,7 @@ def update_qc_text(interval_trigger):
     tot_too_short_reads = int(fastp_df['cum_too_short_reads'].iloc[-1])
 
     tot_removed_reads = tot_low_quality_reads + tot_too_many_N_reads + tot_too_short_reads
-    
+
     # avoid div by zero error
     if tot_reads_pre_filt == 0:
         percentage_passed_reads = 0.0
@@ -1456,7 +1456,7 @@ def show_confirmation_modal(shutdown_clicks, no_clicks, yes_clicks, is_open):
                     with open('.runtime','r') as f:
                         import signal
                         pid = int(f.readline())
-                        
+
                         # send custom signal to trigger KeyboardInterrupt in wrapper main script
                         try:
                             os.kill(pid,signal.SIGUSR1)

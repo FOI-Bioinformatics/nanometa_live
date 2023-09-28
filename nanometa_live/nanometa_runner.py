@@ -9,7 +9,7 @@ import signal
 from nanometa_live.helpers.file_utils import remove_temp_files
 from nanometa_live.helpers.config_utils import load_config
 
-__version__="0.2.1"
+from nanometa_live import __version__
 
 def setup_logging():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -48,7 +48,7 @@ def terminate_processes(processes,config_contents):
         logging.info(f'Terminating processes: {process}')
         process.terminate()
         process.wait()
-    
+
     # clear temporary files
     if config_contents.get('remove_temp_files') == "yes":
         remove_temp_files(config_contents)
@@ -63,14 +63,14 @@ signal.signal(signal.SIGUSR1, trigger_keyboard_interrupt)
 def main():
     setup_logging()
     args = parse_arguments()
-    
+
     # parse config-file (confirm that it exists for downstream scripts)
     config_file_path = ''
     if args.path:       config_file_path = args.path + '/'
     config_file_path = config_file_path + args.config
     try:
         config_contents = load_config(config_file_path)
-        
+
         if config_contents == None:
             raise Exception # if no content parsed, raise error.
     except:
@@ -78,19 +78,19 @@ def main():
             logging.error('Could not locate config-file at specified path! Terminating...')
         else:
             logging.error('Config file parsing error. Please make sure that the config-file is properly formatted! Terminating...')
-            
+
         sys.exit()
     #/
 
     commands = ['nanometa-backend', 'nanometa-gui']
     try:
         processes = start_processes(commands, args)
-        
+
         # write ID of main process
         with open('.runtime','w') as nf:
             nf.write(str(os.getpid()))
         #/
-        
+
         while True:
             time.sleep(0.1)
 
