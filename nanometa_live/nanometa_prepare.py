@@ -11,7 +11,7 @@ from ruamel.yaml import YAML
 import shutil
 from typing import List, Dict, Union, NoReturn
 
-from nanometa_live.helpers.blast_utils import build_blast_databases
+from nanometa_live.helpers.blast_utils import build_blast_databases, check_blast_dbs_exist
 from nanometa_live.helpers.config_utils import update_yaml_config_with_taxid, load_config
 from nanometa_live.helpers.data_utils import (
     read_species_from_config,
@@ -113,7 +113,15 @@ def main():
         download_genomes_from_ncbi(data_files_folder, args.prefix, f"{args.prefix}_{kraken_taxonomy}_accessions.txt")
         decompress_and_rename_zip( f"{args.prefix}_ncbi_download.zip", df, data_files_folder)
 
-        build_blast_databases(data_files_folder)
+        # Assuming df contains the mapping from species names to tax IDs
+        species_to_taxid = dict(zip(df['Species'], df['Tax_ID']))
+
+        # Check for missing BLAST databases
+        missing_dbs = check_blast_dbs_exist(species_to_taxid, data_files_folder)
+
+        # Build only the missing BLAST databases
+        build_blast_databases(data_files_folder, missing_databases=missing_dbs)
+
 
     else:
         logging.warning("No data found for any species.")
