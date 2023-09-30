@@ -23,6 +23,10 @@ def build_blast_databases(workdir: str, missing_databases: List[str] = None) -> 
         if not os.path.exists(input_folder):
             logging.error(f"Input folder {input_folder} does not exist. Exiting.")
             return
+        
+        if not os.path.exists(blast_db_folder):
+            logging.info(f"Creating BLAST database folder at {blast_db_folder}")
+            os.makedirs(blast_db_folder)
 
         files_to_process = os.listdir(input_folder)
 
@@ -76,6 +80,10 @@ def check_blast_dbs_exist(species_to_taxid: Dict[str, int], data_files_folder: s
 
     logging.info("Starting to check existence of BLAST databases.")
     data_files_folder = os.path.join(data_files_folder, "blast")
+
+    if not os.path.exists(data_files_folder):
+        logging.info(f"Creating BLAST database folder at {data_files_folder}")
+        os.makedirs(data_files_folder)
 
     missing_dbs = []
 
