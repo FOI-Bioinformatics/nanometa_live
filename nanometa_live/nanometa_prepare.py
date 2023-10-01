@@ -19,12 +19,17 @@ from nanometa_live.helpers.data_utils import (
     filter_exact_match,
     filter_data_by_exact_match
 )
-from nanometa_live.helpers.file_utils import write_accessions_to_file, process_local_files
+from nanometa_live.helpers.file_utils import (write_accessions_to_file,
+    process_local_files,
+    read_and_process_gtdb_metadata,
+    download_gtdb_metadata
+    )
 from nanometa_live.helpers.kraken_utils import run_kraken2_inspect, parse_kraken2_inspect
 from nanometa_live.helpers.transform_utils import (
     update_results_with_taxid_dict,
     create_row_dict,
-    parse_to_table_with_taxid
+    parse_to_table_with_taxid,
+    add_taxid_to_results
 )
 from nanometa_live.helpers.file_utils import (
     save_species_and_taxid_to_txt,
@@ -54,9 +59,9 @@ def main():
                         help="Show the current version of the script.")
     args = parser.parse_args()
 
-    if args.mode in ['gtdb-file']:
-        logging.error(f"The selected mode '{args.mode}' is not implemented yet.")
-        sys.exit(1)  # Exit if the mode is not implemented
+    #if args.mode in ['gtdb-file']:
+    #    logging.error(f"The selected mode '{args.mode}' is not implemented yet.")
+    #    sys.exit(1)  # Exit if the mode is not implemented
 
     # Determine the full path of the configuration file. If a path argument is provided, join it with the config filename.
     config_file_path = os.path.join(args.path, args.config) if args.path else args.config
@@ -137,7 +142,42 @@ def main():
         logging.info(f"Extracted assembly accessions for download: {accessions_to_download}")
 
     elif args.mode == 'gtdb-file':
-        logging.error(f"Not yet implemented mode: {accessions_to_download}")
+        # Prepare the folder where data files will be stored.
+        data_files_folder = os.path.join(args.path, 'data-files')
+        metadata_folder = os.path.join(data_files_folder, 'metadata')
+
+        if not os.path.exists(metadata_folder):
+            os.makedirs(metadata_folder)
+            logging.info(f"Created metadata directory at {metadata_folder}.")
+
+        gtdb_metadata_file = os.path.join(metadata_folder, 'bac120_metadata.tsv.gz')
+
+        # Download the file if it doesn't exist
+        if not os.path.exists(gtdb_metadata_file):
+            logging.info("GTDB metadata file not found. Downloading now.")
+            download_gtdb_metadata(metadata_folder)
+
+        # Read and process the GTDB metadata
+        filtered_results = read_and_process_gtdb_metadata(gtdb_metadata_file, kraken_taxonomy, species_list)
+        df = add_taxid_to_results(filtered_results, species_taxid_dict)
+
+        # Save the species and their corresponding tax IDs to a text file.
+        save_species_and_taxid_to_txt(df, data_files_folder)
+
+        # Update the YAML config file with the species and tax IDs.
+        update_yaml_config_with_taxid(df, config_file_path)
+
+        # Save the DataFrame to a CSV file.
+        output_file =  os.path.join(data_files_folder, f"{args.prefix}_{kraken_taxonomy}.csv")
+        logging.info(f"Parsed data saved to {output_file}")
+        df.to_csv(output_file, index=False)
+
+        # Extract the Genome IDs (GID) from the DataFrame and store them in a list.
+        accessions_to_download = df['GID'].tolist()
+        logging.info(f"Extracted assembly accessions for download: {accessions_to_download}")
+
+
+
 
     elif args.mode == 'local-species':
         # Process local species fasta files

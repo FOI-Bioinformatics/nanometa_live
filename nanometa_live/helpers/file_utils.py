@@ -6,6 +6,8 @@ from typing import Any, List, Dict, Union, NoReturn, List
 import zipfile
 import pandas as pd
 import sys
+import urllib.request
+import gzip
 
 
 def remove_temp_files(config_contents):
@@ -355,3 +357,88 @@ def process_local_files(indata_folder: str, workdir: str, id_dict: Dict[str, Uni
 
     logging.info(f"Successfully processed all local {id_type} files.")
     return True
+
+
+def download_gtdb_metadata(workdir: str) -> str:
+    """
+    Downloads the GTDB metadata file and saves it in the metadata folder.
+
+    Parameters:
+        workdir (str): The working directory where data-files are stored.
+
+    Returns:
+        str: Path to the downloaded metadata file.
+    """
+    logging.info("Initiating GTDB metadata download.")
+
+    # Correcting this line to ensure the folder structure is correct
+    metadata_dir = os.path.join(workdir)
+
+    if not os.path.exists(metadata_dir):
+        os.makedirs(metadata_dir)
+        logging.info(f"Created metadata directory at {metadata_dir}.")
+
+    file_url = "https://data.gtdb.ecogenomic.org/releases/latest/bac120_metadata.tsv.gz"
+
+    # This should now correctly place the file
+    file_path = os.path.join(metadata_dir, "bac120_metadata.tsv.gz")
+
+    if not os.path.exists(file_path):
+        logging.info(f"Downloading GTDB metadata from {file_url} to {file_path}.")
+        urllib.request.urlretrieve(file_url, file_path)
+    else:
+        logging.info("GTDB metadata already exists. Skipping download.")
+
+    return file_path
+
+
+def read_and_process_gtdb_metadata(file_path: str, kraken_taxonomy: str, species_list: List[str]) -> pd.DataFrame:
+    """
+    Reads the GTDB metadata file and filters and transforms the necessary columns.
+
+    Parameters:
+        file_path (str): Path to the GTDB metadata file.
+        kraken_taxonomy (str): The taxonomy database used by Kraken2 ('gtdb' or 'ncbi').
+        species_list (List[str]): List of species to filter by.
+
+    Returns:
+        pd.DataFrame: Processed DataFrame.
+    """
+    logging.info(f"Reading GTDB metadata from {file_path}.")
+
+    # Pandas can read compressed .gz files directly
+    df = pd.read_csv(file_path, sep='\t', compression='gzip')
+
+    initial_row_count = len(df)
+    logging.info(f"Initial number of rows: {initial_row_count}")
+
+    # Keep only necessary columns
+    logging.info("Filtering necessary columns.")
+    df = df[['accession', 'gtdb_taxonomy', 'gtdb_representative', 'ncbi_taxonomy',
+             'ncbi_type_material_designation', 'gtdb_type_designation_ncbi_taxa']]
+
+    # Rename 'accession' to 'GID' and remove 'RS_' prefix
+    df.rename(columns={'accession': 'GID'}, inplace=True)
+    df['GID'] = df['GID'].str.lstrip('RS_')
+
+    # Transform 'gtdb_taxonomy' and 'ncbi_taxonomy' to keep only species and remove 's__'
+    logging.info("Transforming taxonomy columns to keep only species information.")
+    df['gtdb_taxonomy'] = df['gtdb_taxonomy'].apply(lambda x: x.split(';')[-1][3:]).str.lstrip('s__')
+    df['ncbi_taxonomy'] = df['ncbi_taxonomy'].apply(lambda x: x.split(';')[-1][3:]).str.lstrip('s__')
+
+    # Filter based on Kraken2 taxonomy database and species list
+    if kraken_taxonomy == 'gtdb':
+        logging.info("Filtering rows based on GTDB taxonomy and representative status.")
+        df = df[df['gtdb_taxonomy'].isin(species_list) & (df['gtdb_representative'] == 't')]
+        df['Species'] = df['gtdb_taxonomy']
+    elif kraken_taxonomy == 'ncbi':
+        logging.info("Filtering rows based on NCBI taxonomy and type material designation.")
+        df = df[df['ncbi_taxonomy'].isin(species_list) & (df['ncbi_type_material_designation'] != 'none')]
+        df['Species'] = df['ncbi_taxonomy']
+
+    final_row_count = len(df)
+    logging.info(f"Final number of rows after filtering: {final_row_count}")
+
+    logging.info("Successfully processed GTDB metadata.")
+    return df
+

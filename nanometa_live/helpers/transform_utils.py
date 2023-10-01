@@ -91,3 +91,27 @@ def parse_to_table_with_taxid(filtered_data: dict) -> pd.DataFrame:
     return parsed_df
 
 
+def add_taxid_to_results(filtered_results: pd.DataFrame, species_taxid_dict: Dict[str, int]) -> pd.DataFrame:
+    """
+    Adds tax IDs to the filtered_results DataFrame based on the species names.
+
+    Parameters:
+        filtered_results (pd.DataFrame): The DataFrame containing the filtered results.
+        species_taxid_dict (Dict[str, int]): Dictionary mapping species names to tax IDs.
+
+    Returns:
+        pd.DataFrame: DataFrame with a new 'Tax_ID' column.
+    """
+    logging.info("Adding tax IDs to filtered results.")
+
+    # Create a new column 'Tax_ID' by mapping species names to tax IDs
+    filtered_results['Tax_ID'] = filtered_results['Species'].map(species_taxid_dict)
+
+    # Check if all species have corresponding tax IDs
+    missing_taxids = filtered_results[filtered_results['Tax_ID'].isnull()]['Species'].unique()
+    if len(missing_taxids) > 0:
+        logging.error(f"Could not find tax IDs for the following species: {', '.join(missing_taxids)}. Aborting.")
+        raise ValueError("Missing tax IDs for some species.")
+
+    logging.info("Successfully added tax IDs to filtered results.")
+    return filtered_results
