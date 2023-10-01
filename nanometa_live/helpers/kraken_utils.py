@@ -36,13 +36,14 @@ def run_kraken2_inspect(kraken2_db_path: str, output_path: str) -> bool:
     except subprocess.CalledProcessError as e:
         logging.error(f"Error in running Kraken2 inspect: {e}")
         return False
-
-def parse_kraken2_inspect(output_path: str) -> dict:
+def parse_kraken2_inspect(output_path: str, species_list: List[str] = None) -> dict:
     """
     Parse the Kraken2 inspect output file to extract tax IDs and species strings.
+    Only returns species that are in the provided list.
 
     Parameters:
         output_path (str): The path where the Kraken2 inspect output is saved.
+        species_list (List[str]): List of species to keep in the output. If None, keeps all species.
 
     Returns:
         dict: Dictionary with species strings as keys and tax IDs as values.
@@ -58,6 +59,11 @@ def parse_kraken2_inspect(output_path: str) -> dict:
         df.iloc[:, -1] = df.iloc[:, -1].str.strip()
         logging.info("Stripped leading spaces from species strings.")
 
+        # If a species list is provided, filter the DataFrame
+        if species_list:
+            df = df[df.iloc[:, -1].isin(species_list)]
+            logging.info(f"Filtered DataFrame based on provided species list. {len(df)} species remain.")
+
         # Create a dictionary of species and tax IDs
         species_taxid_dict = df.set_index(df.columns[-1])[df.columns[-2]].to_dict()
         logging.info("Successfully created species to tax ID dictionary.")
@@ -67,4 +73,3 @@ def parse_kraken2_inspect(output_path: str) -> dict:
     except Exception as e:
         logging.error(f"Error in parsing Kraken2 inspect file: {e}")
         return None
-

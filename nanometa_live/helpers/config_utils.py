@@ -181,14 +181,19 @@ def update_nested_dict(d, keys, value):
     d[keys[-1]] = value
 
 
-def update_yaml_config_with_taxid(df: pd.DataFrame, yaml_config_path: str):
+def update_yaml_config_with_taxid(data: Union[pd.DataFrame, dict], yaml_config_path: str):
     logging.info("Starting the process to update YAML config file with taxid.")
 
-    if "Species" not in df.columns or "Tax_ID" not in df.columns:
-        logging.error("DataFrame is missing either 'Species' or 'Tax_ID' columns. Aborting.")
-        raise ValueError("DataFrame is missing either 'Species' or 'Tax_ID' columns.")
-
-    species_taxid_dict = dict(zip(df['Species'], df['Tax_ID']))
+    if isinstance(data, pd.DataFrame):
+        if "Species" not in data.columns or "Tax_ID" not in data.columns:
+            logging.error("DataFrame is missing either 'Species' or 'Tax_ID' columns. Aborting.")
+            raise ValueError("DataFrame is missing either 'Species' or 'Tax_ID' columns.")
+        species_taxid_dict = dict(zip(data['Species'], data['Tax_ID']))
+    elif isinstance(data, dict):
+        species_taxid_dict = data
+    else:
+        logging.error("The input data must be either a DataFrame or a dictionary.")
+        raise ValueError("Invalid data type for input data.")
 
     yaml = YAML()
 
