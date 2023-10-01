@@ -305,3 +305,53 @@ def write_accessions_to_file(accessions: List[str], filename: str) -> None:
         logging.error(f"Permission denied: Cannot write to {filename}")
     except Exception as e:
         logging.error(f"An unexpected error occurred while writing to {filename}: {e}")
+
+
+def process_local_files(indata_folder: str, workdir: str, id_dict: Dict[str, Union[str, int]],
+                        id_type: str = 'species') -> bool:
+    """
+    Checks for the existence of {id}.fasta files in the indata-folder.
+    Copies them to {workdir}/genomes and renames them if necessary.
+
+    Parameters:
+        indata_folder (str): The directory to look for input {id}.fasta files.
+        workdir (str): The working directory where the genomes will be copied.
+        id_dict (Dict[str, Union[str, int]]): Dictionary mapping original ID to new ID for renaming.
+        id_type (str): The type of ID being processed ('species' or 'taxid').
+
+    Returns:
+        bool: True if all operations are successful, False otherwise.
+    """
+
+    logging.info(f"Initiating process to handle local {id_type} files.")
+
+    # Create the genomes directory if it does not exist
+    genomes_dir = os.path.join(workdir, 'data-files', 'genomes')
+    if not os.path.exists(genomes_dir):
+        os.makedirs(genomes_dir)
+        logging.info(f"Created genomes directory at {genomes_dir}.")
+
+    # Check for existence of each {id}.fasta file
+    missing_files = []
+    for original_id, new_id in id_dict.items():
+        filename = f"{original_id}.fasta" if id_type == 'species' else f"{new_id}.fasta"
+        original_file_path = os.path.join(indata_folder, filename)
+
+        if not os.path.exists(original_file_path):
+            missing_files.append(original_file_path)
+
+    if missing_files:
+        logging.error(f"Missing files: {', '.join(missing_files)}. Aborting process.")
+        return False
+
+    # If all files exist, copy and rename them
+    for original_id, new_id in id_dict.items():
+        filename = f"{original_id}.fasta" if id_type == 'species' else f"{new_id}.fasta"
+        original_file_path = os.path.join(indata_folder, filename)
+
+        dest_file_path = os.path.join(genomes_dir, f"{new_id}.fasta")
+        shutil.copy(original_file_path, dest_file_path)
+        logging.info(f"Copied and renamed {original_file_path} to {dest_file_path}.")
+
+    logging.info(f"Successfully processed all local {id_type} files.")
+    return True
