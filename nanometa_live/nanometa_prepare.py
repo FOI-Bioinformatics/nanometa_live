@@ -19,7 +19,7 @@ from nanometa_live.helpers.data_utils import (
     filter_exact_match,
     filter_data_by_exact_match
 )
-from nanometa_live.helpers.file_utils import write_accessions_to_file
+from nanometa_live.helpers.file_utils import write_accessions_to_file, process_local_files
 from nanometa_live.helpers.kraken_utils import run_kraken2_inspect, parse_kraken2_inspect
 from nanometa_live.helpers.transform_utils import (
     update_results_with_taxid_dict,
@@ -54,7 +54,7 @@ def main():
                         help="Show the current version of the script.")
     args = parser.parse_args()
 
-    if args.mode in ['gtdb-file', 'local-species', 'local-taxid']:
+    if args.mode in ['gtdb-file']:
         logging.error(f"The selected mode '{args.mode}' is not implemented yet.")
         sys.exit(1)  # Exit if the mode is not implemented
 
@@ -119,7 +119,7 @@ def main():
         df = parse_to_table_with_taxid(filtered_results)
 
         # Create a dictionary that maps species names to tax IDs, based on the DataFrame (only species in config).
-        species_to_taxid = dict(zip(df['Species'], df['Tax_ID']))
+        #species_to_taxid = dict(zip(df['Species'], df['Tax_ID']))
 
         # Save the species and their corresponding tax IDs to a text file.
         save_species_and_taxid_to_txt(df, data_files_folder)
@@ -140,10 +140,19 @@ def main():
         logging.error(f"Not yet implemented mode: {accessions_to_download}")
 
     elif args.mode == 'local-species':
-        logging.error(f"Not yet implemented mode: {accessions_to_download}")
-
+        # Process local species fasta files
+        indata_folder = os.path.join(args.path, 'indata')
+        success = process_local_files(indata_folder, args.path, species_taxid_dict, id_type='species')
+        if not success:
+            logging.error("Failed to process local species files.")
+            sys.exit(1)
     elif args.mode == 'local-taxid':
-        logging.error(f"Not yet implemented mode: {accessions_to_download}")
+        # Process local taxid fasta files
+        indata_folder = os.path.join(args.path, 'indata')
+        success = process_local_files(indata_folder, args.path, species_taxid_dict, id_type='taxid')
+        if not success:
+            logging.error("Failed to process local taxid files.")
+            sys.exit(1)
 
 
 ##############################################################################################################
@@ -163,7 +172,7 @@ def main():
     # SECTION: Build BLAST databases.
 
     # Check for any missing BLAST databases based on the tax IDs.
-    missing_dbs = check_blast_dbs_exist(species_to_taxid, data_files_folder)
+    missing_dbs = check_blast_dbs_exist(species_taxid_dict, data_files_folder)
 
     # Build BLAST databases, but only for the missing ones.
     build_blast_databases(data_files_folder, missing_databases=missing_dbs)
