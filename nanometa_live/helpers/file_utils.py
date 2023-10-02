@@ -442,3 +442,30 @@ def read_and_process_gtdb_metadata(file_path: str, kraken_taxonomy: str, species
     logging.info("Successfully processed GTDB metadata.")
     return df
 
+def check_genome_files_existence(workdir: str, species_taxid_dict: dict) -> List[str]:
+    """
+    Check if genome files already exist in the workdir/data-files/genomes directory.
+
+    Parameters:
+        workdir (str): The working directory where data-files are stored.
+        species_taxid_dict (dict): Dictionary of species names and their corresponding tax IDs.
+
+    Returns:
+        List[str]: List of species names for which genome files are missing.
+    """
+    genomes_dir = os.path.join(workdir, 'genomes')
+
+    missing_species = []
+    for species, taxid in species_taxid_dict.items():
+        genome_file_path = os.path.join(genomes_dir, f"{taxid}.fasta")
+
+        if not os.path.exists(genome_file_path):
+            missing_species.append(species)
+
+    if missing_species:
+        logging.warning(f"Genome files for the following species are missing: {', '.join(missing_species)}")
+
+    else:
+        logging.info("All genome files already exist!")
+
+    return missing_species
