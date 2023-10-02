@@ -22,7 +22,8 @@ from nanometa_live.helpers.data_utils import (
 from nanometa_live.helpers.file_utils import (write_accessions_to_file,
     process_local_files,
     read_and_process_gtdb_metadata,
-    download_gtdb_metadata
+    download_gtdb_metadata,
+    check_genome_files_existence
     )
 from nanometa_live.helpers.kraken_utils import run_kraken2_inspect, parse_kraken2_inspect
 from nanometa_live.helpers.transform_utils import (
@@ -98,115 +99,118 @@ def main():
     # Parse the generated file from Kraken2's inspect command to get a dictionary mapping species to tax IDs.
     species_taxid_dict = parse_kraken2_inspect(inspect_file_name, species_list)
 
+    missing_genomefiles = check_genome_files_existence(data_files_folder, species_taxid_dict)
+
 
 ##############################################################################################################
     # SECTION: Fetch species data from GTDB.
+    if missing_genomefiles:
+        species_list = list(set(species_list) & set(missing_genomefiles))
+        if args.mode in ['gtdb-api']:
+            # Initialize an empty dictionary to store results.
+            results = {}
 
-    if args.mode in ['gtdb-api']:
-        # Initialize an empty dictionary to store results.
-        results = {}
+            # Loop through the list of species and fetch their data from GTDB.
+            for species in species_list:
+                # Prepare the query string for GTDB.
+                search_query = f"s__{species}"
+                # Fetch data for the current species from GTDB.
+                species_data = fetch_species_data(search_query, kraken_taxonomy)
+                # If data is found for the species, add it to the results dictionary.
+                if species_data:
+                    results[species] = {'rows': species_data}
 
-        # Loop through the list of species and fetch their data from GTDB.
-        for species in species_list:
-            # Prepare the query string for GTDB.
-            search_query = f"s__{species}"
-            # Fetch data for the current species from GTDB.
-            species_data = fetch_species_data(search_query, kraken_taxonomy)
-            # If data is found for the species, add it to the results dictionary.
-            if species_data:
-                results[species] = {'rows': species_data}
+            # Update the results dictionary to include tax IDs using the mapping from species to tax IDs.
+            results = update_results_with_taxid_dict(results, species_taxid_dict)
 
-        # Update the results dictionary to include tax IDs using the mapping from species to tax IDs.
-        results = update_results_with_taxid_dict(results, species_taxid_dict)
+            # Filter the results to include only exact matches and convert it to a DataFrame.
+            filtered_results = filter_data_by_exact_match(results, kraken_taxonomy)
+            df = parse_to_table_with_taxid(filtered_results)
 
-        # Filter the results to include only exact matches and convert it to a DataFrame.
-        filtered_results = filter_data_by_exact_match(results, kraken_taxonomy)
-        df = parse_to_table_with_taxid(filtered_results)
+            # Create a dictionary that maps species names to tax IDs, based on the DataFrame (only species in config).
+            #species_to_taxid = dict(zip(df['Species'], df['Tax_ID']))
 
-        # Create a dictionary that maps species names to tax IDs, based on the DataFrame (only species in config).
-        #species_to_taxid = dict(zip(df['Species'], df['Tax_ID']))
+            # Save the species and their corresponding tax IDs to a text file.
+            save_species_and_taxid_to_txt(df, data_files_folder)
 
-        # Save the species and their corresponding tax IDs to a text file.
-        save_species_and_taxid_to_txt(df, data_files_folder)
+            # Update the YAML config file with the species and tax IDs.
+            update_yaml_config_with_taxid(df, config_file_path)
 
-        # Update the YAML config file with the species and tax IDs.
-        update_yaml_config_with_taxid(df, config_file_path)
+            # Save the DataFrame to a CSV file.
+            output_file =  os.path.join(data_files_folder, f"{args.prefix}_{kraken_taxonomy}.csv")
+            logging.info(f"Parsed data saved to {output_file}")
+            df.to_csv(output_file, index=False)
 
-        # Save the DataFrame to a CSV file.
-        output_file =  os.path.join(data_files_folder, f"{args.prefix}_{kraken_taxonomy}.csv")
-        logging.info(f"Parsed data saved to {output_file}")
-        df.to_csv(output_file, index=False)
+            # Extract the Genome IDs (GID) from the DataFrame and store them in a list.
+            accessions_to_download = df['GID'].tolist()
+            logging.info(f"Extracted assembly accessions for download: {accessions_to_download}")
 
-        # Extract the Genome IDs (GID) from the DataFrame and store them in a list.
-        accessions_to_download = df['GID'].tolist()
-        logging.info(f"Extracted assembly accessions for download: {accessions_to_download}")
+        elif args.mode == 'gtdb-file':
+            # Prepare the folder where data files will be stored.
+            data_files_folder = os.path.join(args.path, 'data-files')
+            metadata_folder = os.path.join(data_files_folder, 'metadata')
 
-    elif args.mode == 'gtdb-file':
-        # Prepare the folder where data files will be stored.
-        data_files_folder = os.path.join(args.path, 'data-files')
-        metadata_folder = os.path.join(data_files_folder, 'metadata')
+            if not os.path.exists(metadata_folder):
+                os.makedirs(metadata_folder)
+                logging.info(f"Created metadata directory at {metadata_folder}.")
 
-        if not os.path.exists(metadata_folder):
-            os.makedirs(metadata_folder)
-            logging.info(f"Created metadata directory at {metadata_folder}.")
+            gtdb_metadata_file = os.path.join(metadata_folder, 'bac120_metadata.tsv.gz')
 
-        gtdb_metadata_file = os.path.join(metadata_folder, 'bac120_metadata.tsv.gz')
+            # Download the file if it doesn't exist
+            if not os.path.exists(gtdb_metadata_file):
+                logging.info("GTDB metadata file not found. Downloading now.")
+                download_gtdb_metadata(metadata_folder)
 
-        # Download the file if it doesn't exist
-        if not os.path.exists(gtdb_metadata_file):
-            logging.info("GTDB metadata file not found. Downloading now.")
-            download_gtdb_metadata(metadata_folder)
+            # Read and process the GTDB metadata
+            filtered_results = read_and_process_gtdb_metadata(gtdb_metadata_file, kraken_taxonomy, species_list)
+            df = add_taxid_to_results(filtered_results, species_taxid_dict)
 
-        # Read and process the GTDB metadata
-        filtered_results = read_and_process_gtdb_metadata(gtdb_metadata_file, kraken_taxonomy, species_list)
-        df = add_taxid_to_results(filtered_results, species_taxid_dict)
+            # Save the species and their corresponding tax IDs to a text file.
+            save_species_and_taxid_to_txt(df, data_files_folder)
 
-        # Save the species and their corresponding tax IDs to a text file.
-        save_species_and_taxid_to_txt(df, data_files_folder)
+            # Update the YAML config file with the species and tax IDs.
+            update_yaml_config_with_taxid(df, config_file_path)
 
-        # Update the YAML config file with the species and tax IDs.
-        update_yaml_config_with_taxid(df, config_file_path)
+            # Save the DataFrame to a CSV file.
+            output_file =  os.path.join(data_files_folder, f"{args.prefix}_{kraken_taxonomy}.csv")
+            logging.info(f"Parsed data saved to {output_file}")
+            df.to_csv(output_file, index=False)
 
-        # Save the DataFrame to a CSV file.
-        output_file =  os.path.join(data_files_folder, f"{args.prefix}_{kraken_taxonomy}.csv")
-        logging.info(f"Parsed data saved to {output_file}")
-        df.to_csv(output_file, index=False)
-
-        # Extract the Genome IDs (GID) from the DataFrame and store them in a list.
-        accessions_to_download = df['GID'].tolist()
-        logging.info(f"Extracted assembly accessions for download: {accessions_to_download}")
-
-
-
-
-    elif args.mode == 'local-species':
-        # Process local species fasta files
-        indata_folder = os.path.join(args.path, 'indata')
-        success = process_local_files(indata_folder, args.path, species_taxid_dict, id_type='species')
-        if not success:
-            logging.error("Failed to process local species files.")
-            sys.exit(1)
-    elif args.mode == 'local-taxid':
-        # Process local taxid fasta files
-        indata_folder = os.path.join(args.path, 'indata')
-        success = process_local_files(indata_folder, args.path, species_taxid_dict, id_type='taxid')
-        if not success:
-            logging.error("Failed to process local taxid files.")
-            sys.exit(1)
+            # Extract the Genome IDs (GID) from the DataFrame and store them in a list.
+            accessions_to_download = df['GID'].tolist()
+            logging.info(f"Extracted assembly accessions for download: {accessions_to_download}")
 
 
-##############################################################################################################
-    # SECTION: Download genomes from NCBI using accession numbers.
-    if args.mode in ['gtdb-api', 'gtdb-file']:
-        # Write the list of Genome IDs to a text file for later use in downloading.
-        accession_file = os.path.join(data_files_folder, f"{args.prefix}_{kraken_taxonomy}_accessions.txt")
-        write_accessions_to_file(accessions_to_download, accession_file)
 
-        # Download genomes from NCBI based on the list of Genome IDs.
-        download_genomes_from_ncbi(data_files_folder, args.prefix, f"{args.prefix}_{kraken_taxonomy}_accessions.txt")
 
-        # Decompress the downloaded ZIP file and rename the genomes.
-        decompress_and_rename_zip( f"{args.prefix}_ncbi_download.zip", df, data_files_folder)
+        elif args.mode == 'local-species':
+            # Process local species fasta files
+            indata_folder = os.path.join(args.path, 'indata')
+            success = process_local_files(indata_folder, args.path, species_taxid_dict, id_type='species')
+            if not success:
+                logging.error("Failed to process local species files.")
+                sys.exit(1)
+        elif args.mode == 'local-taxid':
+            # Process local taxid fasta files
+            indata_folder = os.path.join(args.path, 'indata')
+            success = process_local_files(indata_folder, args.path, species_taxid_dict, id_type='taxid')
+            if not success:
+                logging.error("Failed to process local taxid files.")
+                sys.exit(1)
+
+
+    ##############################################################################################################
+        # SECTION: Download genomes from NCBI using accession numbers.
+        if args.mode in ['gtdb-api', 'gtdb-file']:
+            # Write the list of Genome IDs to a text file for later use in downloading.
+            accession_file = os.path.join(data_files_folder, f"{args.prefix}_{kraken_taxonomy}_accessions.txt")
+            write_accessions_to_file(accessions_to_download, accession_file)
+
+            # Download genomes from NCBI based on the list of Genome IDs.
+            download_genomes_from_ncbi(data_files_folder, args.prefix, f"{args.prefix}_{kraken_taxonomy}_accessions.txt")
+
+            # Decompress the downloaded ZIP file and rename the genomes.
+            decompress_and_rename_zip( f"{args.prefix}_ncbi_download.zip", df, data_files_folder)
 
 ##############################################################################################################
     # SECTION: Build BLAST databases.
