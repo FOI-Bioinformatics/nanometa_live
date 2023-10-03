@@ -8,7 +8,7 @@ import pandas as pd
 import sys
 import urllib.request
 import gzip
-
+import requests
 
 def remove_temp_files(config_contents):
     """
@@ -136,7 +136,7 @@ def rename_files(df: pd.DataFrame, workingdir: str):
                             break
 
                 else:
-                    logging.warning(f"Accession {accession} not found in DataFrame. Using default name.")
+                    logging.info(f"Accession {accession} is already copied and renamed.")
 
             else:
                 logging.warning("DataFrame is empty or does not contain 'GID' column. Skipping renaming.")
@@ -469,3 +469,35 @@ def check_genome_files_existence(workdir: str, species_taxid_dict: dict) -> List
         logging.info("All genome files already exist!")
 
     return missing_species
+
+
+def download_figshare_files(figshare_id: str, file_names: List[str], download_dir: str = "./downloads") -> None:
+    # Get the article metadata from the Figshare API
+    response = requests.get(f"https://api.figshare.com/v2/articles/{figshare_id}")
+    response.raise_for_status()  # Check for any HTTP errors
+    article_metadata = response.json()
+
+    # Build a dictionary to map file names to download URLs
+    download_urls = {file['name']: file['download_url'] for file in article_metadata['files']}
+
+    os.makedirs(download_dir, exist_ok=True)
+
+    def download_file(url: str, file_path: str) -> None:
+        response = requests.get(url, stream=True)
+        response.raise_for_status()  # Check for any HTTP errors
+        with open(file_path, 'wb') as file:
+            for chunk in response.iter_content(chunk_size=8192):
+                file.write(chunk)
+
+    # Iterate through each file name to download the files
+    for file_name in file_names:
+        file_url = download_urls.get(file_name)
+        if file_url:
+            file_path = os.path.join(download_dir, file_name)
+            try:
+                download_file(file_url, file_path)
+                logging.info(f"Successfully downloaded {file_name} to {file_path}")
+            except requests.RequestException as e:
+                logging.error(f"Failed to download {file_name} due to {str(e)}")
+        else:
+            logging.error(f"No download URL found for {file_name}")

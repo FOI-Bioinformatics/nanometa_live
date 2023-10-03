@@ -51,7 +51,8 @@ setup(
                        'nanometa-backend = nanometa_live.nanometa_backend:main', # run backend pipeline
                        'nanometa-gui = nanometa_live.nanometa_gui:run_app', # run gui
                        'nanometa-live = nanometa_live.nanometa_runner:main',  # wrapper to run both backend and GUI.
-                       'nanometa-prepare = nanometa_live.nanometa_prepare:main'  # Autmatically download genomes and create blast databases
+                       'nanometa-prepare = nanometa_live.nanometa_prepare:main',  # Autmatically download genomes and create blast databases
+                       'nanometa-demo = nanometa_live.nanometa_demo:main'  # Automatically download demo files
                        ]
                       },
       # Makes sure the files are found after install.
