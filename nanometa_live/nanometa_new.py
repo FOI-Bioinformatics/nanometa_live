@@ -34,7 +34,7 @@ def main():
 
     parser = argparse.ArgumentParser()
     # Main config
-    parser.add_argument('-p', '--path', help="The path to the project directory.")
+    parser.add_argument('-p', '--path', required=True, help="The path to the project directory.")
     parser.add_argument('-c', '--config', default="config.yaml", help="The name of the config file. Default is 'config.yaml'.")
 
     # GUI Config
