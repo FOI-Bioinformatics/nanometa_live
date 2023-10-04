@@ -8,4 +8,5 @@ numpy>=1.24.1
 pandas>=1.5.3
 pytest>=7.2.1
 biopython>=1.80
+tqdm>=4.62.3
 ruamel.yaml>=0.17.32
