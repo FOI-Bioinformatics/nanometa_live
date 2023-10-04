@@ -110,18 +110,40 @@ After installation, you can access the program from any directory by following t
 
 ## Quick Start Tutorial
 
-This guide will walk you through a simulated analysis using a GTDB database for Kraken2. To get started, download the required tutorial files from [Google Drive](https://drive.google.com/drive/folders/1fjAihcPw409Pw8C3z_YPQnBnRMuoDE4u?usp=sharing).
+This guide will walk you through two options for getting started with Nanometa Live. Option A runs `nanometa-demo` to automatically download tutorial data and initiate the workflow. Option B guides you through a more manual setup process. To get started with the manual option , download the required tutorial files from [Figshare](https://figshare.com/articles/dataset/Nanometa_Live_tutorial_files/24233020).
 
+### Option 1: Quick Start with Automated Demo
 
+1. **Activate the Conda Environment**
 
-### Step 1: Activate the Conda Environment
+```bash
+mamba activate nanometa_live_env
+```
+
+2. **Run Automated Demo**
+
+This step will automatically download the tutorial data from [Figshare](https://figshare.com/articles/dataset/Nanometa_Live_tutorial_files/24233020). Following the download, the `nanometa-demo` script will execute `nanometa-new` and `nanometa-prepare` to set up and configure your project for analysis. Lastly, it will automatically launch `nanometa-live` to initiate both the backend analysis and the graphical user interface (GUI).
+
+```bash
+nanometa-demo --path YOUR_DEMO_PATH
+```
+
+You might need to click or ctrl + click the port link that appears in your terminal to open the GUI.
+
+To terminate the process, use the Shut down program button in the interface, or press Ctrl+C in the terminal multiple times if needed.
+
+### Option 2: Manual Setup
+
+For a manual project setup, please follow the detailed steps outlined below.
+
+#### Step 1: Activate the Conda Environment
 Ensure your Conda/Mamba environment is active by running:
 
 ```bash
 mamba activate nanometa_live_env
 ```
 
-### Step 2: Initialize a New Project
+#### Step 2: Initialize a New Project
 Initialize your project by specifying various parameters. Replace the placeholders in the example command below with the appropriate paths.
 
 ```bash
@@ -137,13 +159,13 @@ nanometa-new --path ${working_dir} --species_of_interest ${species_file} --nanop
 For a complete list of arguments, run: `nanometa-new --help`.
 
 
-### Step 3: Optional Configuration
+#### Step 3: Optional Configuration
 Navigate to your newly-created project directory and open the `config.yaml` file. Verify the **Nanopore Output Directory** and the **Kraken 2 Database** directory.
 
 📝 **Note**: Save your changes.
 
 
-### Step 4: Automatic Data Preparation
+#### Step 4: Automatic Data Preparation
 Execute the `nanometa-prepare` command to automatically download and create files needed for analysis.
 
 ```bash
@@ -152,7 +174,7 @@ nanometa-prepare --path ${working_dir}
 
 After this step, Nanometa Live will not need an internet connection.
 
-### Step 5: Simulate Nanopore Sequencing
+#### Step 5: Simulate Nanopore Sequencing
 Place the tutorial batch files (ending in `.fastq.gz`) in a directory, e.g., `/home/user/nanometa_test_data`. Then run:
 
 ```bash
@@ -162,7 +184,7 @@ nanometa-sim -i /SOMEPATH/nanometa_test_data -o  ${fastq_folder}
 Ensure the `-o` flag's value matches the **Nanopore Output Directory** in your `config.yaml` file.
 
 
-### Step 6: Start Live Analysis
+#### Step 6: Start Live Analysis
 Execute the following command in another terminal to begin live analysis:
 
 ```bash
@@ -173,7 +195,7 @@ You might need to click or `ctrl` + click the port link that appears in your ter
 
 To terminate the process, use the `Shut down program` button in the interface, or press `Ctrl+C` in the terminal multiple times if needed.
 
-### Step 7: Explore the GUI
+#### Step 7: Explore the GUI
 - Use the `INFO/HELP` buttons for info about the different sections.
 - Tooltips: Hover over GUI elements to view helpful tooltips.
 - Wiki: For detailed descriptions, visit the [project wiki](https://github.com/FOI-Bioinformatics/nanometa_live/wiki).
