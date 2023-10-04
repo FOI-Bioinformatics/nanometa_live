@@ -31,8 +31,6 @@ Before you begin with the installation of `Nanometa Live`, make sure your system
 - [Python](https://www.python.org/downloads/): Version 3.9 or higher
 - [Mambaforge](https://github.com/conda-forge/miniforge#mambaforge) or [Conda](https://docs.conda.io/en/latest/miniconda.html)
 - [Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git) for cloning the repository
-
-### Optional
 - [Kraken2](https://github.com/DerrickWood/kraken2) if not using the bundled version
 - [BLAST](https://blast.ncbi.nlm.nih.gov/Blast.cgi?CMD=Web&PAGE_TYPE=BlastDocs&DOC_TYPE=Download) if not using the bundled version
 - [NCBI Datasets](https://www.ncbi.nlm.nih.gov/datasets/docs/v2/reference-docs/command-line/datasets/) if not using the bundled version
