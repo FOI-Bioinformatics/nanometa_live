@@ -8,6 +8,11 @@ import pandas as pd
 import sys
 import urllib.request
 import gzip
+import requests
+import hashlib
+from tqdm import tqdm
+import zipfile
+import tarfile
 
 
 def remove_temp_files(config_contents):
@@ -136,7 +141,7 @@ def rename_files(df: pd.DataFrame, workingdir: str):
                             break
 
                 else:
-                    logging.warning(f"Accession {accession} not found in DataFrame. Using default name.")
+                    logging.info(f"Accession {accession} is already copied and renamed.")
 
             else:
                 logging.warning("DataFrame is empty or does not contain 'GID' column. Skipping renaming.")
@@ -469,3 +474,126 @@ def check_genome_files_existence(workdir: str, species_taxid_dict: dict) -> List
         logging.info("All genome files already exist!")
 
     return missing_species
+
+
+def download_from_figshare(figshare_article_id: int, workdir: str) -> None:
+    """
+    Downloads all files associated with a given Figshare article ID.
+
+    Parameters:
+        figshare_article_id (int): The Figshare article ID.
+        workdir (str): The directory where files will be saved.
+
+    Returns:
+        None
+    """
+    # Create workdir if it doesn't exist
+    if not os.path.exists(workdir):
+        os.makedirs(workdir)
+        logging.info(f"Created working directory at {workdir}")
+
+    # Define the URL based on the provided Figshare article ID
+    url = f'https://api.figshare.com/v2/articles/{figshare_article_id}'
+
+    logging.info(f"Initiating Figshare API request for article ID: {figshare_article_id}")
+
+    # Send a GET request to the URL
+    response = requests.get(url)
+    response.raise_for_status()
+
+    # Parse the JSON response to get the files information
+    article_info: Any = response.json()
+    files_info = article_info['files']
+
+    logging.info(f"Found {len(files_info)} file(s) for article ID: {figshare_article_id}")
+
+    # Loop through each file and download it
+    for file_info in files_info:
+        file_url = file_info['download_url']
+        file_name = file_info['name']
+        file_size = int(file_info['size'])
+        checksum = file_info['computed_md5']
+
+        file_path = os.path.join(workdir, file_name)
+
+        # Verify checksum if the file already exists
+        if os.path.exists(file_path):
+            with open(file_path, "rb") as f:
+                file_hash = hashlib.md5()
+                while chunk := f.read(8192):
+                    file_hash.update(chunk)
+            if file_hash.hexdigest() == checksum:
+                logging.info(f"{file_name} already exists and checksum is verified. Skipping download.")
+                continue
+            else:
+                logging.info(f"{file_name} exists but checksum is different. Re-downloading.")
+
+        logging.info(f"Downloading {file_name} (Size: {file_size} bytes)...")
+
+        response = requests.get(file_url, stream=True)
+        response.raise_for_status()
+
+        # Initialize the progress bar
+        with tqdm(total=file_size, unit='B', unit_scale=True, desc=file_name) as pbar:
+            # Save the file to the workdir
+            with open(file_path, 'wb') as file:
+                for chunk in response.iter_content(chunk_size=8192):
+                    file.write(chunk)
+                    pbar.update(len(chunk))
+
+        logging.info(f"{file_name} downloaded successfully to {file_path}.")
+
+
+
+def unzip_files(workdir: str) -> None:
+    """
+    Unzips all .zip, .gz, and .tar.gz files in the specified working directory.
+
+    Parameters:
+        workdir (str): The directory where zip, gz, and tar.gz files are located.
+
+    Returns:
+        None
+    """
+    if not os.path.exists(workdir):
+        logging.warning(f"The specified directory {workdir} does not exist.")
+        return
+
+    filenames = os.listdir(workdir)
+
+    for filename in filenames:
+        file_path = os.path.join(workdir, filename)
+
+        # Unzip .zip files
+        if filename.endswith('.zip'):
+            logging.info(f"Unzipping {filename}...")
+            with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                zip_ref.extractall(workdir)
+            logging.info(f"{filename} has been unzipped.")
+
+        # Unzip .gz files that are not .tar.gz
+        elif filename.endswith('.gz') and not filename.endswith('.tar.gz'):
+            unzipped_file = os.path.join(workdir, filename[:-3])
+            if os.path.exists(unzipped_file):
+                logging.info(f"{filename} appears to be already unzipped. Skipping.")
+                continue
+            logging.info(f"Unzipping {filename}...")
+            with gzip.open(file_path, 'rb') as f_in:
+                with open(unzipped_file, 'wb') as f_out:
+                    f_out.write(f_in.read())
+            logging.info(f"{filename} has been unzipped.")
+
+        # Unzip .tar.gz files
+        elif filename.endswith('.tar.gz'):
+            with tarfile.open(file_path, 'r:gz') as tar:
+                all_files_exist = all(
+                    os.path.exists(os.path.join(workdir, member.name)) for member in tar.getmembers()
+                )
+            if all_files_exist:
+                logging.info(f"{filename} appears to be already unzipped. Skipping.")
+                continue
+
+            logging.info(f"Unzipping {filename}...")
+            with tarfile.open(file_path, 'r:gz') as tar:
+                tar.extractall(path=workdir)
+            logging.info(f"{filename} has been unzipped.")

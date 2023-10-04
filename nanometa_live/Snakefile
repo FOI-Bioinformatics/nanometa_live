@@ -6,15 +6,33 @@
 import os
 import pkg_resources
 import time
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 # A check to see if there are any input files, before the workflow is run.
 # Some rules hang the workflow if there are no files yet produced.
 # First checks if the input dir exists:
 # Function to pause execution until a condition is met
 def wait_until_condition_met(condition_func, message, interval):
+    """
+    Waits until a specified condition is met, logging status at regular intervals.
+
+    Parameters:
+        condition_func (callable): A function that returns a boolean.
+        message (str): The message to display while waiting.
+        interval (int or float): The time in seconds to wait between checks.
+
+    Returns:
+        None
+    """
     while not condition_func():
-        print(f"{message}. Waiting...")
+        logging.warning(f"{message}. Waiting for {interval} seconds...")
         time.sleep(interval)
+    logging.info(f"Condition met: {message}")
+
 
 # Define condition functions
 is_dir_exists = lambda: os.path.isdir(config["nanopore_output_directory"])
@@ -22,6 +40,7 @@ is_files_exist = lambda: len(os.listdir(config["nanopore_output_directory"])) > 
 
 # Configuration
 interval_seconds = config["check_intervals_seconds"]
+
 
 # Wait until the output directory exists
 wait_until_condition_met(
@@ -38,7 +57,7 @@ wait_until_condition_met(
 )
 
 # As soon as there are files in the directory, proceed
-print(f"Files found in {config['nanopore_output_directory']}. Starting workflow...")
+logging.info(f"Files found in {config['nanopore_output_directory']}. Starting workflow...")
 
 def create_validation_placeholders():
     """
