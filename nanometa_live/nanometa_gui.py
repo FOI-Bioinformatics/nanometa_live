@@ -60,6 +60,8 @@ from nanometa_live.gui_scripts.get_fastp_df import get_fastp_df
 
 from nanometa_live import __version__
 
+from nanometa_live.helpers.config_utils import load_config
+
 ########## --help argument ####################################################
 # Checks if the user has added the --help argument to the command and
 # displays the help info if that is the case. Otherwise, script proceeds
@@ -226,12 +228,7 @@ if not os.path.exists(config_file_path):
     exit(1)
 
 # Load config file variables.
-try:
-    with open(config_file_path, 'r') as cf:
-        config_contents = yaml.safe_load(cf)
-except Exception as e:
-    print(f"Error: An issue occurred while reading the config file. Details: {e}")
-    exit(1)
+config_contents = load_config(config_file_path)
 
 # Create interval frequency variable.
 interval_freq = config_contents['update_interval_seconds']
@@ -332,8 +329,8 @@ update_toggle = daq.ToggleSwitch(id='update_toggle',
                                 )
 
 # Tooltip for toggle button.
-update_toggle_tooltip = dbc.Tooltip('Pause/unpause the real-time updating of the interface. \
-                                    The data processing pipeline will still be active in the background.',
+update_toggle_tooltip = dbc.Tooltip('Toggle real-time interface updates on/off. \
+                                    The data processing pipeline will remain active in the background.',
                                     target='update_toggle',
                                     placement='top',
                                     delay={'show': 1000})
