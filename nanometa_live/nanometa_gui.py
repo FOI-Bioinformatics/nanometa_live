@@ -671,7 +671,7 @@ toplist_filter_head = html.Label('Number of taxa to include:',
                                  style={'padding-right': '10px'}) # headline
 
 top_filter_val = dcc.Input(id='top_filter_val', # filter value
-                         value='20',
+                         value='60',
                          type='number'
                          )
 
@@ -782,7 +782,8 @@ export_toplist_button = html.Div([
 
 # Organization of toplist filtering into one layout object.
 toplist_filtering = html.Div(
-    [
+    [   
+        html.Br(),
         html.Div([toplist_filter_head, top_filter_val, top_list_tooltip], className="bg-light border"),
         html.Div(toplist_domains, className="bg-light border"),
         html.Div(toplist_hierarchy, className="bg-light border"),
@@ -804,21 +805,24 @@ toplist_col_2 = html.Div([toplist_filtering
                           ])
 
 # This object contains all of the toplist section.
-toplist_together = html.Div([toplist_col_1,
-                             toplist_col_2
-                          ],
-                          className="hstack gap-3")
+toplist_together = html.Div([
+    html.Div(toplist_col_1, style={"align-self": "flex-start"}),
+    html.Div(toplist_col_2, style={"align-self": "flex-start"})
+], className="hstack gap-3")
 
 # Main layout for pathogen AND top lists section.
 pathogens_top = html.Div(
     [
         html.Div([toplist_together
                   ],
-                 className="bg-light border"),
+                 className="bg-light border",
+                 style={"align-self": "flex-start"}),
         html.Div([pathogen_section
                   ],
-                 className="bg-light border")
-    ], className="hstack gap-3"
+                 className="bg-light border",
+                 style={"align-self": "flex-start"})
+    ], className="hstack gap-3",
+    style={"align-self": "flex-start"}
 )
 
 # Adding margins to improve layout.
