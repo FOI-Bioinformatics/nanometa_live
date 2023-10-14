@@ -34,6 +34,7 @@ import yaml
 import sys
 import argparse
 import subprocess
+import shutil
 
 ########## CUSTOM SCRIPTS #####################################################
 
@@ -360,6 +361,24 @@ quit_button = html.Div([
     html.Div(id='output-message'),
 ])
 
+# Export kraken classification button
+export_classificaion_button = html.Div([
+    html.Button("Export classification report", id="export-button-1"),
+    dbc.Modal([
+        dbc.ModalHeader('Export classification report'),
+        dbc.ModalBody([            
+            dcc.Input(id='filename-input-1', type='text', placeholder='Enter a file name or path'),
+            html.Div('The file will be saved as a ".kreport2" file.'),
+            html.Div('If only a file name is specified, the report will be saved in "PROJECT_DIRECTORY/reports/" by default.'),
+        ]),
+        dbc.ModalFooter([
+            dbc.Button('Save', id='save-button-1', color='success'),
+        ]),
+    ], id='modal-2', is_open=False),
+    html.Div(id='output-message-1'),
+])
+
+
 # Head section in one layout object.
 upper_gui_layout = html.Div(
     [
@@ -373,7 +392,8 @@ upper_gui_layout = html.Div(
                   timestamp]),
                   style={"margin-right": "300px"}
                   ),
-        html.Div(dbc.Container(quit_button))
+        html.Div(dbc.Container(quit_button)),
+        html.Div(dbc.Container(export_classificaion_button))
     ], className="hstack gap-3",
     style={"display": "flex"}
 )
@@ -601,6 +621,30 @@ pathogen_modal = html.Div([
     ),
 ])
 
+# Export pathogens button
+export_pathogens_button = html.Div([
+    html.Button("Export list", id="export-button-3"),
+    dbc.Modal([
+        dbc.ModalHeader('Export species of interest list'),
+        dbc.ModalBody([            
+            dcc.Input(id='filename-input-3', type='text', placeholder='Enter a file name or path'),
+            html.Div('The file will be saved as a ".csv" file.'),
+            html.Div('If only a file name is specified, the list will be saved in "PROJECT_DIRECTORY/reports/" by default.'),
+        ]),
+        dbc.ModalFooter([
+            dbc.Button('Save', id='save-button-3', color='success'),
+        ]),
+    ], id='modal-4', is_open=False),
+    html.Div(id='output-message-3'),
+])
+
+# Placing the INFO button and Export list button horizontally
+pathogen_buttons = html.Div([pathogen_modal,
+                  export_pathogens_button
+                  ], className="hstack gap-3"
+                  )
+
+
 # Entire pathogen section in one object.
 pathogen_section = html.Div(
     [
@@ -611,7 +655,7 @@ pathogen_section = html.Div(
                   validate_option,
                   validation_tooltip,
                   html.Br(),
-                  pathogen_modal
+                  pathogen_buttons
                   ],
                  className="bg-light border"),
     ], className="hstack gap-3"
@@ -718,6 +762,24 @@ toplist_modal = html.Div([
     ),
 ])
 
+# Export toplist button
+export_toplist_button = html.Div([
+    html.Button("Export list", id="export-button-2"),
+    dbc.Modal([
+        dbc.ModalHeader('Export current list'),
+        dbc.ModalBody([            
+            dcc.Input(id='filename-input-2', type='text', placeholder='Enter a file name or path'),
+            html.Div('The file will be saved as a ".csv" file.'),
+            html.Div('If only a file name is specified, the list will be saved in "PROJECT_DIRECTORY/reports/" by default.'),
+        ]),
+        dbc.ModalFooter([
+            dbc.Button('Save', id='save-button-2', color='success'),
+        ]),
+    ], id='modal-3', is_open=False),
+    html.Div(id='output-message-2'),
+])
+
+
 # Organization of toplist filtering into one layout object.
 toplist_filtering = html.Div(
     [
@@ -726,7 +788,9 @@ toplist_filtering = html.Div(
         html.Div(toplist_hierarchy, className="bg-light border"),
         html.Div([toplist_submit, toplist_button_tooltip]),
         html.Hr(),
-        html.Div(toplist_modal)
+        html.Div(toplist_modal),
+        html.Br(),
+        html.Div(export_toplist_button)
     ], className="vstack gap-3"
 )
 
@@ -1185,6 +1249,7 @@ def update_sunburst(interval_trigger, filter_click, filter_value, domains):
               State('validate_box', 'value') # valiaditon option
               )
 def pathogen_update(interval_trigger, val_state):
+    global df_to_print
     # Create a dictionary to keep track of name and taxid pairs
     species_dict = {entry["taxid"]: entry["name"] for entry in config_contents['species_of_interest']}
 
@@ -1260,6 +1325,7 @@ def pathogen_update(interval_trigger, val_state):
               State('toplist_clades', 'value'),
               State('top_filter_val', 'value'))
 def toplist_update(interval_trigger, click, domains, clades, top):
+    global top_df
     top_df =  create_top_list(raw_df, domains, clades, int(top))
     data = top_df.to_dict('records')
     columns = [{"name": i, "id": i} for i in top_df.columns]
@@ -1528,6 +1594,136 @@ def toggle_modal(open_clicks, close_clicks, is_open):
     if open_clicks or close_clicks:
         return not is_open
     return is_open
+
+########## EXPORT CLASSIFICATION ##############################################
+
+@app.callback(
+    Output('modal-2', 'is_open'),
+    Output('output-message-1', 'children'),
+    Input('export-button-1', 'n_clicks'),
+    Input('save-button-1', 'n_clicks'),
+    State('modal-2', 'is_open'),
+    State('filename-input-1', 'value'),
+    prevent_initial_call=True
+)
+def toggle_modal(export_clicks, save_clicks, is_open, filename):
+    ctx = dash.callback_context
+
+    if not ctx.triggered:
+        return False, None
+
+    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+
+    if button_id == 'export-button-1':
+        return True, None
+
+    if button_id == 'save-button-1':
+        if not filename:
+            return True, 'Enter a file name of path'
+
+        try:
+            project_directory = config_contents["main_dir"]
+            reports_directory = os.path.join(project_directory, 'reports')
+            os.makedirs(reports_directory, exist_ok=True)
+
+            if os.path.isabs(filename):
+                file_path = f'{filename}.kreport2'  # User specified an absolute path
+            else:
+                file_path = os.path.join(reports_directory, f'{filename}.kreport2') # User specified only a file name
+
+            # Copy the content of kreport_file to the specified file
+            shutil.copyfile(kreport_file, file_path)
+
+            return False, f'Report saved as {file_path}'
+        except Exception as e:
+            return True, f'Error: {str(e)}'
+        
+
+########## EXPORT TOPLIST #####################################################
+
+@app.callback(
+    Output('modal-3', 'is_open'),
+    Output('output-message-2', 'children'),
+    Input('export-button-2', 'n_clicks'),
+    Input('save-button-2', 'n_clicks'),
+    State('modal-3', 'is_open'),
+    State('filename-input-2', 'value'),
+    prevent_initial_call=True
+)
+def toggle_modal(export_clicks, save_clicks, is_open, filename):
+    ctx = dash.callback_context
+
+    if not ctx.triggered:
+        return False, None
+
+    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+
+    if button_id == 'export-button-2':
+        return True, None
+
+    if button_id == 'save-button-2':
+        if not filename:
+            return True, 'Enter a file name of path'
+
+        try:
+            project_directory = config_contents["main_dir"]
+            reports_directory = os.path.join(project_directory, 'reports')
+            os.makedirs(reports_directory, exist_ok=True)
+
+            if os.path.isabs(filename):
+                file_path = f'{filename}.csv'  # User specified an absolute path
+            else:
+                file_path = os.path.join(reports_directory, f'{filename}.csv') # User specified only a file name
+
+            # Export the current toplist to a csv file 
+            top_df.to_csv(file_path, index=False)
+
+            return False, f'List saved as {file_path}'
+        except Exception as e:
+            return True, f'Error: {str(e)}'
+        
+########## EXPORT PATHOGENS #####################################################
+
+@app.callback(
+    Output('modal-4', 'is_open'),
+    Output('output-message-3', 'children'),
+    Input('export-button-3', 'n_clicks'),
+    Input('save-button-3', 'n_clicks'),
+    State('modal-4', 'is_open'),
+    State('filename-input-3', 'value'),
+    prevent_initial_call=True
+)
+def toggle_modal(export_clicks, save_clicks, is_open, filename):
+    ctx = dash.callback_context
+
+    if not ctx.triggered:
+        return False, None
+
+    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+
+    if button_id == 'export-button-3':
+        return True, None
+
+    if button_id == 'save-button-3':
+        if not filename:
+            return True, 'Enter a file name of path'
+
+        try:
+            project_directory = config_contents["main_dir"]
+            reports_directory = os.path.join(project_directory, 'reports')
+            os.makedirs(reports_directory, exist_ok=True)
+
+            if os.path.isabs(filename):
+                file_path = f'{filename}.csv'  # User specified an absolute path
+            else:
+                file_path = os.path.join(reports_directory, f'{filename}.csv') # User specified only a file name
+
+            # Export the current toplist to a csv file 
+            df_to_print.to_csv(file_path, index=True)
+
+            return False, f'List saved as {file_path}'
+        except Exception as e:
+            return True, f'Error: {str(e)}'
 
 ###############################################################################
 ###############################################################################
