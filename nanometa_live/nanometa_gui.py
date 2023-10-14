@@ -671,7 +671,7 @@ toplist_filter_head = html.Label('Number of taxa to include:',
                                  style={'padding-right': '10px'}) # headline
 
 top_filter_val = dcc.Input(id='top_filter_val', # filter value
-                         value='60',
+                         value='20',
                          type='number'
                          )
 
