@@ -1,0 +1,78 @@
+kraken2_databases:
+  Viral:
+    description: "Refeq viral"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_viral_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/viral_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  MinusB:
+    description: "Refeq archaea, viral, plasmid, human, UniVec_Core"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_minusb_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/minusb_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  Standard:
+    description: "Refeq archaea, bacteria, viral, plasmid, human1, UniVec_Core"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_standard_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/standard_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  Standard-8:
+    description: "Standard with DB capped at 8 GB"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_standard_08gb_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/standard_08gb_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  Standard-16:
+    description: "Standard with DB capped at 16 GB"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_standard_16gb_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/standard_16gb_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  PlusPF:
+    description: "Standard plus Refeq protozoa & fungi"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspf_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/pluspf_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  PlusPF-8:
+    description: "PlusPF with DB capped at 8 GB"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspf_08gb_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/pluspf_08gb_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  PlusPF-16:
+    description: "PlusPF with DB capped at 16 GB"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspf_16gb_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/pluspf_16gb_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  PlusPFP:
+    description: "Standard plus Refeq protozoa, fungi & plant"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspfp_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/pluspfp_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  PlusPFP-8:
+    description: "PlusPFP with DB capped at 8 GB"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspfp_08gb_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/pluspfp_08gb_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  PlusPFP-16:
+    description: "PlusPFP with DB capped at 16 GB"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspfp_16gb_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/pluspfp_16gb_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  nt Database:
+    description: "Very large collection, inclusive of GenBank, RefSeq, TPA and PDB"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_nt_20230502.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/nt_20230502/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  EuPathDB:
+    description: "Eukaryotic pathogen genomes with contaminants removed"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_eupathdb48_20230407.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_eupathdb48_20230407/kraken2inspect_output.txt"
+    kraken_taxonomy: "ncbi"
