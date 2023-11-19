@@ -2,7 +2,80 @@ from typing import Any, List, Dict, Union, NoReturn, List
 import os
 import subprocess
 import pandas as pd
+import requests
+import tarfile
+import shutil
 import logging
+
+
+def download_database(url: str, dest_file_path: str) -> bool:
+    """
+    Downloads a file from the given URL to the specified destination path.
+
+    :param url: URL of the file to download.
+    :param dest_file_path: Destination file path.
+    :return: True if download is successful, False otherwise.
+    """
+    logging.info(f"Starting download from {url}")
+
+    try:
+        response = requests.get(url, stream=True)
+        if response.status_code == 200:
+            with open(dest_file_path, 'wb') as f:
+                shutil.copyfileobj(response.raw, f)
+            logging.info(f"Successfully downloaded and saved file to {dest_file_path}")
+            return True
+        else:
+            logging.error(f"Failed to download file from {url}. HTTP status code: {response.status_code}")
+            return False
+    except Exception as e:
+        logging.error(f"Error during file download from {url}: {e}")
+        return False
+
+
+def decompress_database(tar_file_path: str, extract_to_folder: str) -> bool:
+    """
+    Decompresses a tar.gz file to the specified folder.
+
+    :param tar_file_path: Path to the tar.gz file.
+    :param extract_to_folder: Folder where the contents should be extracted.
+    :return: True if decompression is successful, False otherwise.
+    """
+    logging.info(f"Starting decompression of '{tar_file_path}' into '{extract_to_folder}'")
+    try:
+        with tarfile.open(tar_file_path, "r:gz") as tar:
+            tar.extractall(path=extract_to_folder)
+        logging.info(f"Successfully unpacked '{tar_file_path}' into '{extract_to_folder}'")
+        return True
+    except tarfile.TarError as e:
+        logging.error(f"Error unpacking '{tar_file_path}' into '{extract_to_folder}': {e}")
+        return False
+
+
+def copy_inspect_file(source_folder: str, destination_folder: str, new_filename: str = "kraken2_databases-inspect.txt") -> bool:
+    """
+    Copies the inspect.txt file from the source folder to the destination folder with a new filename.
+
+    :param source_folder: Folder where the original inspect.txt file is located.
+    :param destination_folder: Folder where the file should be copied to.
+    :param new_filename: New filename for the copied file. Default is 'kraken2_databases-inspect.txt'.
+    :return: True if the copy is successful, False otherwise.
+    """
+    source_file_path = os.path.join(source_folder, "inspect.txt")
+    destination_file_path = os.path.join(destination_folder, new_filename)
+
+    if not os.path.exists(source_file_path):
+        logging.error(f"Source file '{source_file_path}' not found.")
+        return False
+
+    try:
+        shutil.copyfile(source_file_path, destination_file_path)
+        logging.info(f"Copied '{source_file_path}' to '{destination_file_path}'")
+        return True
+    except Exception as e:
+        logging.error(f"Failed to copy file: {e}")
+        return False
+
 
 def run_kraken2_inspect(kraken2_db_path: str, output_path: str) -> bool:
     """

@@ -8,11 +8,12 @@ import subprocess
 import zipfile
 import os
 from ruamel.yaml import YAML
-import shutil
+
 from typing import List, Dict, Union, NoReturn
 
+
 from nanometa_live.helpers.blast_utils import build_blast_databases, check_blast_dbs_exist
-from nanometa_live.helpers.config_utils import update_yaml_config_with_taxid, load_config
+from nanometa_live.helpers.config_utils import update_yaml_config_with_taxid, load_config, update_config_file_with_comments
 from nanometa_live.helpers.data_utils import (
     read_species_from_config,
     fetch_species_data,
@@ -25,7 +26,7 @@ from nanometa_live.helpers.file_utils import (write_accessions_to_file,
     download_gtdb_metadata,
     check_genome_files_existence
     )
-from nanometa_live.helpers.kraken_utils import run_kraken2_inspect, parse_kraken2_inspect
+from nanometa_live.helpers.kraken_utils import run_kraken2_inspect, parse_kraken2_inspect, download_database, decompress_database, copy_inspect_file
 from nanometa_live.helpers.transform_utils import (
     update_results_with_taxid_dict,
     create_row_dict,
@@ -47,7 +48,6 @@ from nanometa_live import __version__
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-
 def main():
     # Command line arguments
     parser = argparse.ArgumentParser(description='Fetch and filter species data.')
@@ -56,13 +56,11 @@ def main():
     parser.add_argument('-p', '--path', default='', help="The path to the project directory.")
     parser.add_argument('--mode', default='gtdb-api', choices=['gtdb-api', 'gtdb-file', 'local-species', 'local-taxid'],
                         help="The mode of operation handling genome files. Can be 'gtdb-api', 'gtdb-file', 'local-species', or 'local-taxid'. Default is 'gtdb-api'.")
+    parser.add_argument('--dry-run', action='store_true', help="Perform a dry run without making any changes.")
     parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}',
                         help="Show the current version of the script.")
     args = parser.parse_args()
 
-    #if args.mode in ['gtdb-file']:
-    #    logging.error(f"The selected mode '{args.mode}' is not implemented yet.")
-    #    sys.exit(1)  # Exit if the mode is not implemented
 
     # Determine the full path of the configuration file. If a path argument is provided, join it with the config filename.
     config_file_path = os.path.join(args.path, args.config) if args.path else args.config
@@ -89,7 +87,68 @@ def main():
     if not os.path.exists(data_files_folder):
         os.makedirs(data_files_folder)
 
-##############################################################################################################
+    ##############################################################################################################
+    # SECTION: Download External Kraken2 Database if specified in config.
+
+    # Check if an external Kraken2 database is specified in the config file.
+    external_db_key = config_contents.get("external_kraken2_db", "").strip()
+    external_db_info = config_contents.get("external_kraken2_info", {})
+
+
+    if external_db_key and external_db_key in external_db_info:
+
+        db_details = external_db_info[external_db_key]
+        db_url = db_details["database_url"]
+        external_kraken_taxonomy = db_details["kraken_taxonomy"]
+        kraken_db_folder = os.path.join(args.path, 'kraken2_databases')
+        db_extract_folder = os.path.join(kraken_db_folder, external_db_key)  # Folder to extract the database
+        kraken_db = os.path.abspath(db_extract_folder)
+        update_config_file_with_comments(args.path, args.config, 'kraken_db', kraken_db)
+        update_config_file_with_comments(args.path, args.config, 'kraken_taxonomy', external_kraken_taxonomy)
+
+        if args.dry_run:
+            logging.info(f"[DRY RUN] Would download Kraken2 database '{external_db_key}' from {db_url}")
+            sys.exit(0)
+
+        db_file_name = os.path.join(kraken_db_folder, f"{external_db_key}.tar.gz")
+        db_extract_folder = os.path.join(kraken_db_folder, external_db_key)
+        hash_file_path = os.path.join(db_extract_folder, "hash.k2d")
+
+        if not os.path.exists(db_file_name):
+            if not args.dry_run:
+                download_success = download_database(db_url, db_file_name)
+                if not download_success:
+                    sys.exit(1)
+            else:
+                logging.info(f"[DRY RUN] Would download Kraken2 database '{external_db_key}' from {db_url}")
+        else:
+            logging.info(f"Database file '{db_file_name}' already exists. Skipping download.")
+
+        if not os.path.exists(db_extract_folder):
+            os.makedirs(db_extract_folder)
+
+        if not args.dry_run:
+            # Check if the extract folder doesn't exist or hash.k2d file doesn't exist in the extract folder
+            if not os.path.exists(db_extract_folder) or not os.path.exists(hash_file_path):
+                if not os.path.exists(db_extract_folder):
+                    os.makedirs(db_extract_folder)
+
+                decompress_success = decompress_database(db_file_name, db_extract_folder)
+                if not decompress_success:
+                    sys.exit(1)
+
+            else:
+                logging.info(f"Database '{external_db_key}' is already decompressed. Skipping decompression.")
+
+
+
+    else:
+        if external_db_key:
+            logging.info("External Kraken2 database key not set or invalid selection.")
+        else:
+            logging.info("No external Kraken2 database selected.")
+
+    ##############################################################################################################
     # SECTION: Extract taxid from kraken2 database.
 
     # Run Kraken2's inspect command to generate a file that contains species to taxid mapping.
