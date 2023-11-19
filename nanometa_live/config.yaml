@@ -3,140 +3,240 @@
 # Settings and parameters for each project are customized here.
 # To check which project this config belongs to, see the final entry, "main_dir".
 
-########## GUI CONFIG #######################################################
-
+########## General Project Settings ##########################################
 
 ## PROJECT NAME ##
+# Description: The title of the analysis displayed at the top of the GUI.
+# Data type: String
+# Restrictions: No special characters. Max length: 50 characters.
+# Example: "Metagenomic Analysis of Soil Samples"
 
-# Appears as a tilte at the top of the GUI.
 analysis_name: "Metagenomic analysis"
 
 
-## SPECIES OF INTEREST ##
+## NANOPORE FASTQ OUTPUT DIRECTORY ##
+# Description: Path to the directory where the nanopore produces its basecalled fastq files.
+# Note: If the path is invalid, the system will prompt for a correct path.
+# Default: "/home/user/nanopore_out" (Replace with your directory path)
 
-# A list of the species of interest.
+nanopore_output_directory: "/home/user/nanopore_out"
+
+
+## SPECIES OF INTEREST ##
+# Description: List of species to highlight in the GUI.
 # For instructions, see readme/wiki.
 # Any number of species can be listed.
 species_of_interest:
 
 
-## DANGER CUTOFF ##
+########## GUI Configuration #################################################
 
-# The coloring scheme for the abundance of the species of interest.
-# Species of interest with more reads than this show up as red.
+# Description: Interval at which the GUI refreshes to show updated results.
+# Data type: Integer (seconds)
+# Note: Lower intervals may increase CPU usage.
+# Default: 30 seconds
+update_interval_seconds: 30
+
+## GUI PORT ##
+# Description: The port number on which the GUI runs.
+# Data type: String
+# Note: If port 8050 is in use, choose an alternate port number.
+# Default: "8050"
+gui_port: "8050"
+
+## DANGER CUTOFF ##
+# Description: Threshold for highlighting species based on their abundance.
+# Data type: Integer
+# Guidance: Set lower for sensitive analyses; higher for broader overview.
+# Default: 100
 danger_lower_limit: 100
 
+########## Taxonomic Analysis Settings #######################################
 
 ## TAXONOMY LEVELS ##
-
-# The letters used by Kraken2 to designate the taxonomic hierarchies.
-# Also used in the GUI to sort and filter the results.
-# If there are levels on the low end specified here, for example S2, S3 etc,
-# that are not present in the Kraken database used, it will result in a lot
-# of empty nodes in the Sankey plot. This can be trimmed in the GUI, but
-# it is recommended to only include the taxonomy levels that are present
-# in your database.
+# Description: Letters representing taxonomic hierarchies used by Kraken2.
+# Format: List of characters ['D', 'P', 'C', 'O', 'F', 'G', 'S']
+# Note: Including more levels may slow down the analysis.
+# D: Domain, P: Phylum, C: Class, O: Order, F: Family, G: Genus, S: Species
 taxonomic_hierarchy_letters: ['D', 'P', 'C', 'O', 'F', 'G', 'S']
 
-# Taxonomy levels displayed by default in the Sankey plot.
-# This is modifiable in the GUI as well, and mainly a question
-# of aestethics.
+
+## Default Taxonomy Levels in Sankey Plot ##
+# Description: Taxonomy levels displayed by default in the Sankey plot.
+# Format: List of characters ['D', 'C', 'G', 'S']
+# Note: Choose levels that best represent your analysis focus.
+# Default: ['D', 'C', 'G', 'S'] (Domain, Class, Genus, Species)
 default_hierarchy_letters: ['D', 'C', 'G', 'S']
 
-# Default number of entries per taxonomy level to include in the Sankey
-# plot. This is modifiable in the GUI as well.
+## Default Reads Per Taxonomy Level ##
+# Description: Number of entries per taxonomy level in the Sankey plot.
+# Data type: Integer
+# Note: Adjust based on the desired detail and complexity of the plot.
+# Default: 10
 default_reads_per_level: 10
 
 
-## GUI UPDATE FREQUENCY ##
+########## Workflow Management ###############################################
 
-# How often the GUI updates (in seconds).
-update_interval_seconds: 30
-
-
-## GUI PORT ##
-
-# Specify the port that the GUI runs on.
-# 8050 is a typical localhost port, meaning that the GUI is run
-# locally on a standard web browser.
-gui_port: "8050"
-
-
-########## SNAKEMAKE WORKFLOW CONFIG #############################################
-
-
-## GENERIC SNAKEMAKE SETTINGS
-# Setting how snakemake should handles dependencies.
-# Current options are None (assumes all applications are installed) or "conda" (snakemake create local environment during run.)
-local_package_management: None
-
-# For conda it is possible to select conda_frontend between "mamba" and "conda".
-conda_frontend: "mamba"
-
-## NANOPORE OUTPUT DIRECTORY ##
-
-# Absolute path to the output directory where the nanopore produces its batch files.
-nanopore_output_directory: "/home/user/nanopore_out"
-
-## REMOVE TEMP FILES ##
-
-# Removes temporary files upon workflow exit by default.
-# If you wish to keep temp files, change the string to "no".
-remove_temp_files: "yes"
-
-
-## WORKLFOW FREQUENCY ##
-
-# The execution frequency of the file-processing pipeline (in seconds).
-check_intervals_seconds: 15
-
-
-## CORES ##
-
-# Number of cores assigned to the snakemake workflow.
+## Core Allocation for Workflow Components ##
+# Description: Number of CPU cores assigned to different components of the workflow.
+# Note: Assign more cores for faster processing if your system allows.
+# Example: If you have a 4-core CPU, assigning 2 cores to snakemake_cores may optimize performance.
 snakemake_cores: 1
-
-# Number of cores assigned to Kraken2 classification.
 kraken_cores: 1
-
-# Number of cores assigned to KrakenTools for filtering out sequences for validation.
 validation_cores: 1
-
-# Number of cores assigned to BLAST.
 blast_cores: 1
 
 
+## Workflow Execution Frequency ##
+# Description: Frequency at which the file-processing pipeline executes.
+# Data type: Integer (seconds)
+# Note: Shorter intervals lead to more real-time data processing but require more system resources.
+# Default: 15 seconds
+check_intervals_seconds: 15
+
+
+########## Database and Tools Configuration ##################################
+
+
 ## KRAKEN 2 DATABASE ##
-
-# Absolute path to the Kraken2 database.
+# Description: Path to the Kraken2 database used for classification.
+# Note: Ensure the database is updated regularly for accurate classification.
+# Supported Taxonomies: "gtdb" and "ncbi"
+# Example Path: "/path/to/kraken2/database"
 kraken_db: "/home/user/kraken2.gtdb_bac120_4Gb"
-
-# Indicate typy of taxonomy used for the kraken database. Currently "gtdb" and "ncbi" are supported.
 kraken_taxonomy: "gtdb"
 
-## KRAKEN 2 HIGH RAM REQUIREMENTS ##
 
-# Turn the Kraken2 RAM requirements on or off with the --memory-mapping argument.
-# To deactivate memory-mapping, simply leave the argument as an empty string: "".
-# To activate, use string: "--memory-mapping".
+## KRAKEN 2 HIGH RAM REQUIREMENTS ##
+# Description: Toggle for memory-mapping in Kraken2 to manage RAM usage.
+# Note: Enable this on systems with ample RAM for better performance.
+# Usage: Use "--memory-mapping" to enable or leave empty to disable.
 kraken_memory_mapping: "--memory-mapping"
 
-## BLAST VALIDATION ##
 
-# Turn validation on/off:
-# on: True, off: False
+## External Kraken2 Databases ##
+# Description: Pre-configured Kraken2 databases available for download.
+# Instructions: Specify the key (e.g., 'Viral', 'Standard') of the desired database in the 'external_kraken2_db' field to use it.
+# Note: Ensure your system has sufficient storage and network capacity for downloading and storing these databases.
+
+external_kraken2_db:
+
+external_kraken2_info:
+  MinusB:
+    description: "Refeq archaea, viral, plasmid, human, UniVec_Core"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_minusb_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/minusb_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  Standard:
+    description: "Refeq archaea, bacteria, viral, plasmid, human1, UniVec_Core"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_standard_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/standard_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  Standard-8:
+    description: "Standard with DB capped at 8 GB"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_standard_08gb_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/standard_08gb_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  Standard-16:
+    description: "Standard with DB capped at 16 GB"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_standard_16gb_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/standard_16gb_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  PlusPF:
+    description: "Standard plus Refeq protozoa & fungi"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspf_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/pluspf_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  PlusPF-8:
+    description: "PlusPF with DB capped at 8 GB"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspf_08gb_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/pluspf_08gb_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  PlusPF-16:
+    description: "PlusPF with DB capped at 16 GB"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspf_16gb_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/pluspf_16gb_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  PlusPFP:
+    description: "Standard plus Refeq protozoa, fungi & plant"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspfp_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/pluspfp_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  PlusPFP-8:
+    description: "PlusPFP with DB capped at 8 GB"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspfp_08gb_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/pluspfp_08gb_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  PlusPFP-16:
+    description: "PlusPFP with DB capped at 16 GB"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspfp_16gb_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/pluspfp_16gb_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  nt Database:
+    description: "Very large collection, inclusive of GenBank, RefSeq, TPA and PDB"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_nt_20230502.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/nt_20230502/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  EuPathDB:
+    description: "Eukaryotic pathogen genomes with contaminants removed"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_eupathdb48_20230407.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_eupathdb48_20230407/kraken2inspect_output.txt"
+    kraken_taxonomy: "ncbi"
+
+  Viral:
+    description: "Refeq viral"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_viral_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/viral_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+########## Quality and Validation Settings ###################################
+
+## BLAST VALIDATION ##
+# Description: Controls the activation of sequence validation using BLAST.
+# Note: Enabling validation enhances accuracy but may increase processing time.
+# Options: True (enable validation), False (disable validation)
 blast_validation: True
 
 
 ## BLAST CUTOFFS ##
-
-# Define the minimum percent identity and E-value cutoffs for which
-# sequences to include as validated.
+# Description: Criteria for sequence validation in BLAST (percent identity and E-value).
+# Note: Adjust these values based on the stringency required for your analysis.
+# Typical Identity Cutoff: 90-95% for stringent analysis.
+# Typical E-value Cutoff: 0.01 or lower for high confidence.
 min_perc_identity: 90
 e_val_cutoff: 0.01
 
+########## Advanced/Optional Settings ########################################
+
+## GENERIC SNAKEMAKE SETTINGS ##
+# Description: Settings for managing Snakemake dependencies.
+# Options for local_package_management:
+# - None (assumes all applications are installed)
+# - "conda" (Snakemake creates a local environment during runtime)
+# Choosing "conda" with "mamba" as the frontend can speed up environment creation.
+local_package_management: None
+conda_frontend: "mamba"
+
+## REMOVE TEMP FILES ##
+# Description: Option to remove temporary files created during workflow execution.
+# Note: Keeping temporary files can be useful for debugging but may consume significant disk space.
+# Options: "yes" (remove files), "no" (keep files)
+remove_temp_files: "yes"
 
 ## PROJECT MAIN DIRECTORY ##
-
-# Automatically added when creating a new project.
-# Must be an absolute path.
+# Description: The primary directory for the project, automatically set during project creation.
+# Note: Changing this path after project creation can lead to data misplacement or loss.
+# Typically set as an absolute path.
+# Example: "/path/to/project/main_directory"

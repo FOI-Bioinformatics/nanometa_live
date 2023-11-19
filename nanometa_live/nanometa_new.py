@@ -58,6 +58,7 @@ def main():
     parser.add_argument('--validation_cores', type=int, help="Number of cores for KrakenTools")
     parser.add_argument('--blast_cores', type=int, help="Number of cores for BLAST")
     parser.add_argument('--kraken_db', type=str, help="Path to Kraken2 database")
+    parser.add_argument('--external_kraken2_db', type=str, help="Key for external Kraken2 database to use")
     parser.add_argument('--kraken_taxonomy', type=str, help="Type of taxonomy for Kraken (gtdb/ncbi)")
     parser.add_argument('--kraken_memory_mapping', type=str, help="Memory mapping for Kraken2")
     parser.add_argument('--blast_validation', type=bool, help="Turn BLAST validation on/off")
@@ -176,6 +177,10 @@ def main():
 
     if args.e_val_cutoff is not None:
         update_config_file_with_comments(args.path, args.config, 'e_val_cutoff', args.e_val_cutoff)
+
+    if args.external_kraken2_db:
+        update_config_file_with_comments(args.path, args.config, 'external_kraken2_db', args.external_kraken2_db)
+
 
     if not args.analysis_name:
         analysis_name=config_contents["analysis_name"]
