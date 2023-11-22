@@ -120,7 +120,7 @@ kraken_memory_mapping: "--memory-mapping"
 # Instructions: Specify the key (e.g., 'Viral', 'Standard') of the desired database in the 'external_kraken2_db' field to use it.
 # Note: Ensure your system has sufficient storage and network capacity for downloading and storing these databases.
 
-external_kraken2_db:
+external_kraken2_db: ""
 
 external_kraken2_info:
   MinusB:

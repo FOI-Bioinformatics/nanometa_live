@@ -137,9 +137,6 @@ def filter_exact_match(rows: list, search_str: str, db: str) -> list:
     if len(filtered_rows) == 0:
         logging.warning(f"No rows found that match the search string: {search_str}. Unfiltered rows: {rows}")
 
-    if len(filtered_rows) != 1:
-        logging.error(f"Filtered rows count is not 1. Stopping the program.")
-        sys.exit(1)  # You can replace this with a raise Exception("Filtered rows count is not 1.") if you prefer
 
     # Additional filtering for NCBI
     if db == 'ncbi' and len(filtered_rows) > 1:
@@ -153,6 +150,11 @@ def filter_exact_match(rows: list, search_str: str, db: str) -> list:
             return [filtered_rows[0]]
 
     return filtered_rows
+
+    if len(filtered_rows) != 1:
+        logging.error(f"Filtered rows count is not 1. Stopping the program.")
+        sys.exit(1)  # You can replace this with a raise Exception("Filtered rows count is not 1.") if you prefer
+
 
 def filter_data_by_exact_match(data: Dict[str, Dict[str, Any]], db: Any) -> Dict[str, Dict[str, Any]]:
     """
