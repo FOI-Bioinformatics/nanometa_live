@@ -91,7 +91,7 @@ def main():
     # SECTION: Download External Kraken2 Database if specified in config.
 
     # Check if an external Kraken2 database is specified in the config file.
-    external_db_key = config_contents.get("external_kraken2_db", "").strip()
+    external_db_key = (config_contents.get("external_kraken2_db") or "").strip()
     external_db_info = config_contents.get("external_kraken2_info", {})
 
 
@@ -101,6 +101,8 @@ def main():
         db_url = db_details["database_url"]
         external_kraken_taxonomy = db_details["kraken_taxonomy"]
         kraken_db_folder = os.path.join(args.path, 'kraken2_databases')
+        if not os.path.exists(kraken_db_folder):
+            os.makedirs(kraken_db_folder)
         db_extract_folder = os.path.join(kraken_db_folder, external_db_key)  # Folder to extract the database
         kraken_db = os.path.abspath(db_extract_folder)
         update_config_file_with_comments(args.path, args.config, 'kraken_db', kraken_db)
