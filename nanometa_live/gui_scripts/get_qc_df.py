@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+from datetime import datetime
 
 def get_qc_df(qc_file):
     """
@@ -10,6 +11,22 @@ def get_qc_df(qc_file):
     if os.path.isfile(qc_file): 
         # creates the df
         qc_df = pd.read_csv(qc_file, names=['Time', 'Reads', 'Bp']) 
+
+        # check and reformat the time strings
+        # To avoid pandas timestamp errors
+        def format_time(time_str):
+            try:
+                # Attempt to parse the time string as a datetime with microseconds
+                time_obj = datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S.%f')
+            except ValueError:
+                # If it's not in the expected format, add placeholder milliseconds
+                time_str += ".111111"
+                time_obj = datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S.%f')
+            return time_obj.strftime('%Y-%m-%d %H:%M:%S.%f')
+
+        # apply format_time function to the "Time" column
+        qc_df['Time'] = qc_df['Time'].apply(format_time)
+        
         # sorts the df by time
         qc_df = qc_df.sort_values(by=['Time'], ascending=True) 
     else: # if no data: creates empty placeholder df
