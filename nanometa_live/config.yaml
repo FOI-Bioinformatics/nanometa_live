@@ -123,12 +123,6 @@ kraken_memory_mapping: "--memory-mapping"
 external_kraken2_db:
 
 external_kraken2_info:
-  MinusB:
-    description: "Refeq archaea, viral, plasmid, human, UniVec_Core"
-    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_minusb_20231009.tar.gz"
-    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/minusb_20231009/inspect.txt"
-    kraken_taxonomy: "ncbi"
-
   Standard:
     description: "Refeq archaea, bacteria, viral, plasmid, human1, UniVec_Core"
     database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_standard_20231009.tar.gz"
@@ -189,17 +183,23 @@ external_kraken2_info:
     inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/nt_20230502/inspect.txt"
     kraken_taxonomy: "ncbi"
 
-  EuPathDB:
-    description: "Eukaryotic pathogen genomes with contaminants removed"
-    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_eupathdb48_20230407.tar.gz"
-    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_eupathdb48_20230407/kraken2inspect_output.txt"
-    kraken_taxonomy: "ncbi"
-
-  Viral:
-    description: "Refeq viral"
-    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_viral_20231009.tar.gz"
-    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/viral_20231009/inspect.txt"
-    kraken_taxonomy: "ncbi"
+  # EuPathDB:
+  #   description: "Eukaryotic pathogen genomes with contaminants removed"
+  #   database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_eupathdb48_20230407.tar.gz"
+  #   inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_eupathdb48_20230407/kraken2inspect_output.txt"
+  #   kraken_taxonomy: "ncbi"
+  #
+  # Viral:
+  #   description: "Refeq viral"
+  #   database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_viral_20231009.tar.gz"
+  #   inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/viral_20231009/inspect.txt"
+  #   kraken_taxonomy: "ncbi"
+  #
+  # MinusB:
+  #   description: "Refeq archaea, viral, plasmid, human, UniVec_Core"
+  #   database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_minusb_20231009.tar.gz"
+  #   inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/minusb_20231009/inspect.txt"
+  #   kraken_taxonomy: "ncbi"
 
 ########## Quality and Validation Settings ###################################
 
