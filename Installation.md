@@ -90,24 +90,24 @@ Docker provides a convenient and consistent platform for running software in con
    Pull the official Nanometa Live image from Docker Hub using this command:
 
    ```bash
-   docker pull nanometa/nanometa-live:latest
+   docker pull quay.io/biocontainers/nanometa-live:0.3.0--pyhdfd78af_0
    ```
 
    This command downloads the latest version of the Nanometa Live Docker image.
 
 3. **Run Nanometa Live in a Docker Container:**
 
-   Start Nanometa Live within a Docker container using:
+   Start Nanometa Live and check version within a Docker container using:
 
    ```bash
-   docker run -p 8080:8080 nanometa/nanometa-live:latest
+   docker run -p 8050:8050 quay.io/biocontainers/nanometa-live:0.3.0--pyhdfd78af_0 nanometa-live --version
    ```
 
    The `-p` flag maps a port from your host machine to the container, allowing you to access the Nanometa Live GUI via a web browser.
 
 4. **Access the Web Interface:**
 
-   Open a web browser and navigate to `http://localhost:8080` to access the Nanometa Live GUI. This interface will be served from the Docker container.
+   Open a web browser and navigate to `http://localhost:8050` to access the Nanometa Live GUI. This interface will be served from the Docker container.
 
 5. **Data Volume Mounting (Optional):**
 
