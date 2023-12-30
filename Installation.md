@@ -42,7 +42,7 @@ Nanometa Live can be operated using Singularity, a container platform ideal for 
    Obtain the Nanometa Live container from Biocontainers with this command:
 
    ```bash
-   singularity pull nanometa-live.sif docker://quay.io/biocontainers/nanometa-live:latest
+   singularity  pull --nohttps  nanometa-live.sif docker://quay.io/biocontainers/nanometa-live:0.3.0--pyhdfd78af_0
    ```
 
    This command downloads the Singularity Image File (SIF) with Nanometa Live.
