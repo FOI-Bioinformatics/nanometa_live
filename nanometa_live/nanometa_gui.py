@@ -156,30 +156,6 @@ def create_sankey_data(selected_domains, clade_list, top_filter = 5):
     sankey_data = format_sankey(top_df, label, pad=30)
     return sankey_data
 
-def create_pathogen_table():
-    '''
-    Creates a colored table of specified pathogens.
-    Ranges for coloring specifyable in config file.
-    The callback functions send the variables 'data' and 'columns' here.
-    '''
-    # The lower read limit for when an entry is colored red.
-    dll = str(config_contents["danger_lower_limit"])
-    # Creates the table.
-    path_tabl = dash_table.DataTable(
-        data = df_to_print.to_dict('records'),
-        columns = [{"name": i, "id": i} for i in df_to_print.columns],
-        id='pathogen_table',
-        fill_width=False,
-        style_data_conditional=[
-            {'if': {
-                'filter_query': '{Reads} >' + dll
-                },
-                'backgroundColor': '#fc3030'} # red
-            ]
-        )
-
-    return path_tabl
-
 def create_top_table():
     '''
     Creates the toplist table in the layout.
@@ -235,7 +211,8 @@ config_contents = load_config(config_file_path)
 interval_freq = config_contents['update_interval_seconds']
 # Create variable for pathogen coloring cutoff.
 # Used in pathogen info section.
-dll_2 = str(config_contents["danger_lower_limit"])
+global dll
+dll=config_contents['danger_lower_limit']
 
 # Path to cumulative kraken report.
 # Used to create the raw kraken dataframe.
@@ -540,7 +517,19 @@ pathogen_head = html.H2('Species of Interest') # main headline
 
 # Colored table.
 pathogen_table = dbc.Container([dbc.Label('Species of interest:'),
-                                create_pathogen_table()])
+                                dash_table.DataTable(
+                                    data = df_to_print.to_dict('records'),
+                                    columns = [{"name": i, "id": i} for i in df_to_print.columns],
+                                    id='pathogen_table',
+                                    fill_width=False,
+                                    style_data_conditional=[
+                                        {'if': {
+                                                'filter_query': '{Reads} >' + str(dll)
+                                                 },
+                                                'backgroundColor': '#fc3030'} # red
+                                             ]
+                                        )
+                                ])
 
 # Validation option checkbox.
 validate_option = html.Div(children=[
@@ -548,7 +537,8 @@ validate_option = html.Div(children=[
     dcc.Checklist(['Validate'],
                   id='validate_box'
                   )
-    ])
+    ],
+    className="bg-light border")
 
 # Tooltip for validation checkbox.
 validation_tooltip = dbc.Tooltip('Adds an additional column with the number of reads validated by BLAST, \
@@ -558,14 +548,43 @@ validation_tooltip = dbc.Tooltip('Adds an additional column with the number of r
                                     placement='top',
                                     delay={'show': 1000})
 
+# color threshold
+color_threshold = html.Div(children=[
+    html.Label('Coloring threshold:', style={'padding-right': '10px'}),
+    html.Br(),
+    dcc.Input(id='threshold_val',
+                         value='100',
+                         type='number'
+                         )
+    ],
+    className="bg-light border")
+
+danger_threshold_tooltip = dbc.Tooltip('Species of interest with a number of reads above this threshold will be \
+                                       colored red in the chart and list. Changes implemented on the next update.',
+                                    target='threshold_val',
+                                    placement='top',
+                                    delay={'show': 1000})
+
 # Pahogen barchart.
 pathogen_fig_obj = dcc.Graph(id='pathogen_fig',
                            figure=pathogen_fig)
 
+# pathogen filter button
+filter_pathogen = html.Button(id='filter_pathogen',
+                            n_clicks=0,
+                            children='Apply'
+                            )
+
+# pathogen filter button tooltip
+filter_pathogen_tooltip = dbc.Tooltip('Apply your changes',
+                                    target='filter_pathogen',
+                                    placement='top',
+                                    delay={'show': 1000})
+
 pathogen_info_line1 = 'This section shows the abundance of all specified pathogens/species \
 of interest.'
 
-pathogen_info_line2 = 'The barchart and list are colored, so that species with more than ' + str(dll_2) + ' reads \
+pathogen_info_line2 = 'The barchart and list are colored, so that species with read number above the threshold \
 show up as red.'
 
 pathogen_info_line3 = 'The "Tax ID" column contains the taxonomic IDs from the databased used.'
@@ -639,7 +658,7 @@ export_pathogens_button = html.Div([
 ])
 
 # Placing the INFO button and Export list button horizontally
-pathogen_buttons = html.Div([pathogen_modal,
+pathogen_buttons = html.Div([filter_pathogen, pathogen_modal,
                   export_pathogens_button
                   ], className="hstack gap-3"
                   )
@@ -652,10 +671,13 @@ pathogen_section = html.Div(
                   pathogen_fig_obj,
                   pathogen_table,
                   html.Br(),
-                  validate_option,
-                  validation_tooltip,
+                  html.Div([validate_option, 
+                            validation_tooltip, 
+                            color_threshold,
+                            danger_threshold_tooltip], className="hstack gap-3"),
                   html.Br(),
-                  pathogen_buttons
+                  pathogen_buttons,
+                  filter_pathogen_tooltip
                   ],
                  className="bg-light border"),
     ], className="hstack gap-3"
@@ -1249,11 +1271,18 @@ def update_sunburst(interval_trigger, filter_click, filter_value, domains):
 @app.callback(Output('pathogen_fig', 'figure'), # barchart
               Output('pathogen_table', 'data'), # row data for table
               Output('pathogen_table', 'columns'), # specify table cols
+              Output('pathogen_table', 'style_data_conditional'), # worth a shot
               Input('interval_component', 'n_intervals'), # interval update
-              State('validate_box', 'value') # valiaditon option
+              Input('filter_pathogen', 'n_clicks'),
+              State('validate_box', 'value'), # valiaditon option
+              State('threshold_val', 'value') # coloring threshold
               )
-def pathogen_update(interval_trigger, val_state):
+def pathogen_update(interval_trigger, click, val_state, threshold):
     global df_to_print
+    global dll
+    # Cutoff for coloring.
+    dll = int(threshold) 
+
     # Create a dictionary to keep track of name and taxid pairs
     species_dict = {entry["taxid"]: entry["name"] for entry in config_contents['species_of_interest']}
 
@@ -1261,8 +1290,7 @@ def pathogen_update(interval_trigger, val_state):
     pathogen_list = list(species_dict.keys())
 
     pathogen_info = pathogen_df(pathogen_list, raw_df)
-    # Cutoff for coloring.
-    dll = int(config_contents["danger_lower_limit"])
+    
     # Deals with species of interest not present in kreport.
     for taxid in pathogen_list:
         if taxid not in pathogen_info['Tax ID'].values:
@@ -1316,7 +1344,9 @@ def pathogen_update(interval_trigger, val_state):
     # dash handling
     data = df_to_print.to_dict('records')
     columns = [{"name": i, "id": i} for i in df_to_print.columns]
-    return pathogen_barchart_fig, data, columns
+    style_data_conditional=[{'if': {'filter_query': '{Reads} >' + str(dll)},'backgroundColor': '#fc3030'}]
+                                
+    return pathogen_barchart_fig, data, columns, style_data_conditional
 
 ########## CALLBACKS FOR TOP TABLE ############################################
 
