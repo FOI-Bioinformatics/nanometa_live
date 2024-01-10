@@ -33,6 +33,7 @@ species_of_interest:
 ########## GUI Configuration #################################################
 
 # Description: Interval at which the GUI refreshes to show updated results.
+# Can be modified in the GUI as well.
 # Data type: Integer (seconds)
 # Note: Lower intervals may increase CPU usage.
 # Default: 30 seconds

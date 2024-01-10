@@ -209,6 +209,7 @@ config_contents = load_config(config_file_path)
 
 # Create interval frequency variable.
 interval_freq = config_contents['update_interval_seconds']
+
 # Create variable for pathogen coloring cutoff.
 # Used in pathogen info section.
 global dll
@@ -330,6 +331,23 @@ timestamp = html.Div(id='timestamp',
                      children = time_token
                      )
 
+# Change update frequency
+update_frequency_box = html.Div(children=[
+    html.Label('Update frequency (seconds):', style={'padding-right': '10px'}),
+    html.Br(),
+    dcc.Input(id='update_frequency',
+                         value=config_contents['update_interval_seconds'],
+                         type='number'
+                         )
+    ],
+    className="bg-light border")
+
+# Change update frequency tooltip
+update_frequency_tooltip = dbc.Tooltip('The number of seconds between GUI updates.',
+                                    target='update_frequency',
+                                    placement='top',
+                                    delay={'show': 1000})
+
 # Shutdown button for GUI/entire program.
 quit_button = html.Div([
     html.Button('Shut down program', id='shutdown-button'),
@@ -373,10 +391,12 @@ upper_gui_layout = html.Div(
                   update_toggle_tooltip,
                   update_status,
                   timestamp]),
-                  style={"margin-right": "300px"}
+                  style={"margin-right": "200px"}
                   ),
+        html.Div(dbc.Container(update_frequency_box)),
+        update_frequency_tooltip,
         html.Div(dbc.Container(quit_button)),
-        html.Div(dbc.Container(export_classificaion_button))
+        html.Div(dbc.Container(export_classificaion_button))        
     ], className="hstack gap-3",
     style={"display": "flex"}
 )
@@ -1234,6 +1254,14 @@ def live_update(toggle_value):
     else:
         status_var = 'off'
     return status_var, update_disabled
+
+# Callback to update the interval component
+@app.callback(
+    Output('interval_component', 'interval'),
+    Input('update_frequency', 'value')
+)
+def update_interval(update_frequency):
+    return update_frequency * 1000
 
 ########## CALLBACKS FOR SANKEY PLOT ##########################################
 
