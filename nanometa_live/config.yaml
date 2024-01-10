@@ -7,9 +7,10 @@
 
 ## PROJECT NAME ##
 # Description: The title of the analysis displayed at the top of the GUI.
+# Can be modified in the GUI as well.
 # Data type: String
-# Restrictions: No special characters. Max length: 50 characters.
-# Example: "Metagenomic Analysis of Soil Samples"
+# Restrictions: No special characters. Max length: 25 characters.
+# Example: "Analysis of Soil Samples"
 
 analysis_name: "Metagenomic analysis"
 
@@ -46,6 +47,7 @@ gui_port: "8050"
 
 ## DANGER CUTOFF ##
 # Description: Threshold for highlighting species based on their abundance.
+# Can be modified in the GUI as well.
 # Data type: Integer
 # Guidance: Set lower for sensitive analyses; higher for broader overview.
 # Default: 100

@@ -288,7 +288,13 @@ sunburst_fig = create_sunburst(icicle_sunburst_data(raw_df,
 
 # Main headline at the top of the page.
 # Specifiable from config.
-main_title = html.H2(config_contents["analysis_name"])
+# Can now be changed in GUI.
+main_title = dcc.Input(
+    id='title-input',
+    type='text',
+    placeholder=config_contents['analysis_name'],
+    style={'fontSize': '2em', 'border': 'none', 'outline': 'none', 'color': 'black'}
+    )
 
 # Program description and version.
 subtext = html.Div(['NANOMETA LIVE',
