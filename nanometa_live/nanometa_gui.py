@@ -289,7 +289,6 @@ sunburst_fig = create_sunburst(icicle_sunburst_data(raw_df,
 
 # Main headline at the top of the page.
 # Specifiable from config.
-# Can now be changed in GUI.
 main_title = html.H2(config_contents["analysis_name"])
 
 # Program description and version.
