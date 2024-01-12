@@ -290,12 +290,7 @@ sunburst_fig = create_sunburst(icicle_sunburst_data(raw_df,
 # Main headline at the top of the page.
 # Specifiable from config.
 # Can now be changed in GUI.
-main_title = dcc.Input(
-    id='title-input',
-    type='text',
-    placeholder=config_contents['analysis_name'],
-    style={'fontSize': '2em', 'border': 'none', 'outline': 'none', 'color': 'black'}
-    )
+main_title = html.H2(config_contents["analysis_name"])
 
 # Program description and version.
 subtext = html.Div(['NANOMETA LIVE',
@@ -557,6 +552,18 @@ pathogen_table = dbc.Container([dbc.Label('Species of interest:'),
                                         )
                                 ])
 
+# Info on blast cutoffs
+blast_info = html.Div(['CURRENT BLAST SETTINGS:',
+                    html.Br(),
+                    'Minimum percent identity: ' + str(config_contents["min_perc_identity"]),
+                     html.Br(),
+                    'E-value cutoff : ' + str(config_contents["e_val_cutoff"])                    
+                    ],
+                    style={'padding-right': '10px'},
+                    className="bg-light border"
+                    )
+
+
 # Validation option checkbox.
 validate_option = html.Div(children=[
     html.Label('BLAST validation'),
@@ -697,7 +704,10 @@ pathogen_section = html.Div(
                   pathogen_fig_obj,
                   pathogen_table,
                   html.Br(),
-                  html.Div([validate_option, 
+                  #blast_info,
+                  #html.Br(),
+                  html.Div([blast_info,
+                            validate_option, 
                             validation_tooltip, 
                             color_threshold,
                             danger_threshold_tooltip], className="hstack gap-3"),
