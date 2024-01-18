@@ -152,7 +152,7 @@ rule fastp_filtering:
 	conda:
 		pkg_resources.resource_filename('nanometa_live', 'snakemake_envs/fastp_env.yaml')
 	shell:
-		"fastp -i {input} -o {output.fastqs} -y --json {output.report} --html /dev/null"
+		"fastp -i {input} -o {output.fastqs}  --json {output.report} --html /dev/null"
 
 rule extract_fastp_info:
 	# Parses the json fastP report files to extract the needed info.
