@@ -97,27 +97,32 @@ Docker provides a convenient and consistent platform for running software in con
 
 3. **Run Nanometa Live in a Docker Container:**
 
-   Start Nanometa Live and check version within a Docker container using:
+   Start an interactive session in Docker container using:
 
    ```bash
-   docker run -p 8050:8050 quay.io/biocontainers/nanometa-live:0.4.2--pyhdfd78af_0 nanometa-live --version
+   DATADIR=/path/to/host/data
+   
+   docker run -it -v $DATADIR:$DATADIR -p 8050:8050 quay.io/biocontainers/nanometa-live:0.4.2--pyhdfd78af_0 /bin/bash
    ```
 
+   The `-v` flag maps the local folder to folder within docker.  
    The `-p` flag maps a port from your host machine to the container, allowing you to access the Nanometa Live GUI via a web browser.
 
-4. **Access the Web Interface:**
+    Replace `/path/to/host/data` with the path to your data directory. This step ensures that the Docker container has access to your local data.
+
+   
+   Test that docker image is working by checking Nanometa Live version
+
+   ```
+   nanometa-live --version
+   ```
+
+
+
+5. **Access the Web Interface:**
 
    Open a web browser and navigate to `http://localhost:8050` to access the Nanometa Live GUI. This interface will be served from the Docker container.
 
-5. **Data Volume Mounting (Optional):**
-
-   If you wish to process data stored on your host machine, mount the data directory as a volume in the Docker container:
-
-   ```bash
-   docker run -p 8080:8080 -v /path/to/host/data:/data nanometa/nanometa-live:latest
-   ```
-
-   Replace `/path/to/host/data` with the path to your data directory. This step ensures that the Docker container has access to your local data.
 
 6. **Additional Docker Commands:**
 
