@@ -42,32 +42,25 @@ Nanometa Live can be operated using Singularity, a container platform ideal for 
    Obtain the Nanometa Live container from Biocontainers with this command:
 
    ```bash
-   singularity  pull --nohttps  nanometa-live.sif docker://quay.io/biocontainers/nanometa-live:0.3.0--pyhdfd78af_0
+   DATADIR=/path/to/host/data
+   
+   singularity  shell --nohttps --bind $DATADIR:$DATADIR docker://quay.io/biocontainers/nanometa-live:0.4.2--pyhdfd78af_0
    ```
 
    This command downloads the Singularity Image File (SIF) with Nanometa Live.
 
 3. **Run Nanometa Live Using Singularity:**
 
-   After downloading the container, start Nanometa Live with:
+   After downloading and starting the container, test Nanometa Live with:
 
    ```bash
-   singularity run nanometa-live.sif
+   nanometa-live --version
    ```
 
    This will launch Nanometa Live within the Singularity container.
 
-4. **Access Host System Data:**
 
-   To use data from your host system inside the container, mount host directories using the `--bind` option:
-
-   ```bash
-   singularity run --bind /path/to/host/data:/data nanometa-live.sif
-   ```
-
-   Replace `/path/to/host/data` with your host system's data directory path.
-
-5. **Explore Additional Commands:**
+4. **Explore Additional Commands:**
 
    For further customization and control in Singularity, refer to the [Singularity user guide](https://sylabs.io/guides/3.0/user-guide/).
 
