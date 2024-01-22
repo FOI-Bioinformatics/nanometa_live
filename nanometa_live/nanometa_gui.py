@@ -1811,7 +1811,7 @@ def run_app():
     '''
     # A unique port specifiable in config.
     # Debug=True means it updates as you make changes in this script.
-    app.run(debug=True, port=int(config_contents['gui_port']))
+    app.run(debug=True, host="0.0.0.0", port=int(config_contents['gui_port']))
 if __name__ == "__main__":
     # The run_app makes it run as an entry point (bash command).
     run_app()
