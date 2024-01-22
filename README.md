@@ -46,8 +46,8 @@ Make sure to meet all these prerequisites to avoid installation issues and to en
 This section provides detailed instructions on how to install Nanometa Live. We recommend using [Mambaforge](https://github.com/conda-forge/miniforge#mambaforge) for a seamless installation experience.
 
 1. [Install with Conda/Mamba (Recommended)](https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/Installation.md#option-1-install-with-condamamba-recommended)
-2. [Install with Singularity and Biocontainers](https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/Installation.md#option-2-install-with-singularity-and-biocontainers)
-3. [Install with Docker](https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/Installation.md#option-3-install-with-docker)
+2. [Install with Docker](https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/Installation.md#option-2-install-with-docker)
+3. [Install with Singularity](https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/Installation.md#option-3-install-with-singularity)
 4. [Install from Source Code](https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/Installation.md#option-4-install-from-source-code)
 
 ### Post-Installation
