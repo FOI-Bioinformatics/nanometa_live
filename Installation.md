@@ -35,7 +35,7 @@ Using Docker, you can run Nanometa Live in a container, which is a great way to 
    To get the Nanometa Live image, use this command:
 
    ```bash
-   docker pull quay.io/biocontainers/nanometa-live:0.4.2--pyhdfd78af_0
+   docker pull quay.io/biocontainers/nanometa-live:0.4.3--pyhdfd78af_0
    ```
 
    This downloads the specific Nanometa Live image for Docker. Make sure to download the latest version. 
@@ -47,7 +47,7 @@ Using Docker, you can run Nanometa Live in a container, which is a great way to 
    ```bash
    DATADIR=/path/to/host/data
    
-   docker run -it -v $DATADIR:$DATADIR -p 8050:8050 quay.io/biocontainers/nanometa-live:0.4.2--pyhdfd78af_0 /bin/bash
+   docker run -it -v $DATADIR:$DATADIR -p 8050:8050 quay.io/biocontainers/nanometa-live:0.4.3--pyhdfd78af_0 /bin/bash
    ```
 
    Replace /path/to/host/data with your data folder path. The -v flag links your local data folder to the Docker container. The -p flag allows you to use Nanometa Live's web interface from your browser.
@@ -85,7 +85,7 @@ Nanometa Live can also be used through Singularity, a program that allows you to
    ```bash
    DATADIR=/path/to/host/data
    
-   singularity  shell --nohttps --bind $DATADIR:$DATADIR docker://quay.io/biocontainers/nanometa-live:0.4.2--pyhdfd78af_0
+   singularity  shell --nohttps --bind $DATADIR:$DATADIR docker://quay.io/biocontainers/nanometa-live:0.4.3--pyhdfd78af_0
    ```
 
    Replace /path/to/host/data with the path to your data. This command downloads the container with Nanometa Live.
