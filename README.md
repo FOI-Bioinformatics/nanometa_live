@@ -154,8 +154,6 @@ To terminate the process, use the `Shut down program` button in the interface, o
 - **Contact**: Kristoffer Sandås, [kristoffersandas@yahoo.se](mailto:kristoffersandas@yahoo.se)
 - **Issues**: For bug reports, feature requests, or any other queries, please [open an issue](https://github.com/FOI-Bioinformatics/nanometa_live/issues).
 
-Certainly! Below is a draft section about licensing that you can include in your README. It provides a brief explanation and directs the reader to the full license text.
-
 ---
 
 ## License
