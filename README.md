@@ -165,8 +165,9 @@ To terminate the process, use the `Shut down program` button in the interface, o
 
 ## Community & Support
 
-- **Contact**: Kristoffer Sandås, [kristoffersandas@yahoo.se](mailto:kristoffersandas@yahoo.se)
 - **Issues**: For bug reports, feature requests, or any other queries, please [open an issue](https://github.com/FOI-Bioinformatics/nanometa_live/issues).
+- **Documentation**: Refer to our [Nanometa Live Wiki](https://github.com/FOI-Bioinformatics/nanometa_live/wiki) for detailed guides, tutorials, and FAQs.
+
 
 ---
 
