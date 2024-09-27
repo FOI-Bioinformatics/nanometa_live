@@ -1,10 +1,10 @@
 import os
 import logging
-import subprocess
 import shutil
-from typing import Any, List, Dict, Union, NoReturn, List
+from typing import Any, List, Dict, Union
 from ruamel.yaml import YAML
 import pandas as pd
+
 
 def load_config(config_file: str) -> Union[Dict, None]:
     """
@@ -14,13 +14,14 @@ def load_config(config_file: str) -> Union[Dict, None]:
         config_file (str): Path to the YAML configuration file.
 
     Returns:
-        Union[Dict, None]: Dictionary containing the configuration settings, or None if an error occurs.
+        Union[Dict, None]: Dictionary containing the configuration settings,
+        or None if an error occurs.
     """
     logging.info(f"Attempting to load configuration from {config_file}")
 
     try:
-        yaml = YAML(typ='safe')
-        with open(config_file, 'r') as cf:
+        yaml = YAML(typ="safe")
+        with open(config_file, "r") as cf:
             config_data = yaml.load(cf)
         logging.info(f"Successfully loaded configuration from {config_file}")
         return config_data
@@ -29,7 +30,9 @@ def load_config(config_file: str) -> Union[Dict, None]:
     except PermissionError:
         logging.error(f"Permission denied: Cannot read {config_file}")
     except Exception as e:
-        logging.error(f"Failed to load configuration from {config_file}. Exception: {e}")
+        logging.error(
+            f"Failed to load configuration from {config_file}. Exception: {e}"
+        )
     return None
 
 
@@ -57,6 +60,7 @@ def create_new_project_directory(project_path: str) -> Union[bool, None]:
         logging.error(f"Failed to create project directory: {e}")
         return False
 
+
 def backup_config_file(project_path: str, config_file_name: str) -> bool:
     """
     Backup the existing config file by renaming it with a .bak extension.
@@ -74,16 +78,21 @@ def backup_config_file(project_path: str, config_file_name: str) -> bool:
     if os.path.exists(config_file_path):
         try:
             shutil.move(config_file_path, backup_file_path)
-            logging.info(f"Existing config file backed up as {config_file_name}.bak")
+            logging.info(
+                f"Existing config file backed up as {config_file_name}.bak"
+            )
             return True
         except Exception as e:
             logging.error(f"Failed to back up existing config file due to: {e}")
             return False
     else:
-        logging.info(f"No existing config file found. No need to back up.")
+        logging.info("No existing config file found. No need to back up.")
         return True
 
-def copy_config_file(config_path: str, project_path: str, config_file_name: str) -> bool:
+
+def copy_config_file(
+    config_path: str, project_path: str, config_file_name: str
+) -> bool:
     """
     Copy the general config file to the specified project directory.
 
@@ -96,7 +105,9 @@ def copy_config_file(config_path: str, project_path: str, config_file_name: str)
         bool: True if the config file was successfully copied, False otherwise.
     """
     try:
-        logging.info(f"Copying config file from {config_path} to {project_path}")
+        logging.info(
+            f"Copying config file from {config_path} to {project_path}"
+        )
         shutil.copy(config_path, os.path.join(project_path, config_file_name))
         logging.info("Config file copied successfully.")
         return os.path.exists(os.path.join(project_path, config_file_name))
@@ -104,7 +115,10 @@ def copy_config_file(config_path: str, project_path: str, config_file_name: str)
         logging.error(f"Failed to copy config file due to: {e}")
         return False
 
-def append_project_path_to_config(project_path: str, config_file_name: str) -> bool:
+
+def append_project_path_to_config(
+    project_path: str, config_file_name: str
+) -> bool:
     """
     Append the project path to the config file. This helps other scripts find the correct paths.
 
@@ -117,15 +131,22 @@ def append_project_path_to_config(project_path: str, config_file_name: str) -> b
     """
     try:
         logging.info(f"Appending project path {project_path} to config file")
-        with open(os.path.join(project_path, config_file_name), 'a') as f:
-            f.write(f'\n# Path to the main project folder.\nmain_dir: "{project_path}"')
+        with open(os.path.join(project_path, config_file_name), "a") as f:
+            f.write(
+                f'\n# Path to the main project folder.\nmain_dir: "{project_path}"'
+            )
         logging.info("Project path appended to config file successfully.")
         return True
     except Exception as e:
-        logging.error(f"Failed to append project path to config file due to: {e}")
+        logging.error(
+            f"Failed to append project path to config file due to: {e}"
+        )
         return False
 
-def update_config_file_with_comments(project_path: str, config_file_name: str, variable: str, new_value: Any) -> bool:
+
+def update_config_file_with_comments(
+    project_path: str, config_file_name: str, variable: str, new_value: Any
+) -> bool:
     """
     Update a specific variable in the config file.
 
@@ -142,12 +163,12 @@ def update_config_file_with_comments(project_path: str, config_file_name: str, v
     try:
         yaml = YAML()
         yaml.preserve_quotes = True
-        with open(config_file_path, 'r') as f:
+        with open(config_file_path, "r") as f:
             config_data = yaml.load(f)
 
-        update_nested_dict(config_data, variable.split('.'), new_value)
+        update_nested_dict(config_data, variable.split("."), new_value)
 
-        with open(config_file_path, 'w') as f:
+        with open(config_file_path, "w") as f:
             yaml.dump(config_data, f)
 
         logging.info(f"Updated {variable} in config file to {new_value}.")
@@ -156,7 +177,10 @@ def update_config_file_with_comments(project_path: str, config_file_name: str, v
         logging.error(f"Failed to update config file: {e}")
         return False
 
-def update_species_of_interest(project_path: str, config_file_name: str, species_list: List[str]) -> bool:
+
+def update_species_of_interest(
+    project_path: str, config_file_name: str, species_list: List[str]
+) -> bool:
     """
     Update the species of interest in the config file.
 
@@ -169,10 +193,15 @@ def update_species_of_interest(project_path: str, config_file_name: str, species
         bool: True if the update was successful, False otherwise.
     """
     if species_list:
-        species_data = [{"name": species, "taxid": ""} for species in species_list]
-        return update_config_file_with_comments(project_path, config_file_name, "species_of_interest", species_data)
+        species_data = [
+            {"name": species, "taxid": ""} for species in species_list
+        ]
+        return update_config_file_with_comments(
+            project_path, config_file_name, "species_of_interest", species_data
+        )
     else:
         return False
+
 
 # Update nested keys in a dictionary
 def update_nested_dict(d, keys, value):
@@ -181,49 +210,58 @@ def update_nested_dict(d, keys, value):
     d[keys[-1]] = value
 
 
-def update_yaml_config_with_taxid(data: Union[pd.DataFrame, dict], yaml_config_path: str):
+def update_yaml_config_with_taxid(
+    data: Union[pd.DataFrame, dict], yaml_config_path: str
+):
     logging.info("Starting the process to update YAML config file with taxid.")
 
     if isinstance(data, pd.DataFrame):
         if "Species" not in data.columns or "Tax_ID" not in data.columns:
-            logging.error("DataFrame is missing either 'Species' or 'Tax_ID' columns. Aborting.")
-            raise ValueError("DataFrame is missing either 'Species' or 'Tax_ID' columns.")
-        species_taxid_dict = dict(zip(data['Species'], data['Tax_ID']))
+            logging.error(
+                "DataFrame is missing either 'Species' or 'Tax_ID' columns. Aborting."
+            )
+            raise ValueError(
+                "DataFrame is missing either 'Species' or 'Tax_ID' columns."
+            )
+        species_taxid_dict = dict(zip(data["Species"], data["Tax_ID"]))
     elif isinstance(data, dict):
         species_taxid_dict = data
     else:
-        logging.error("The input data must be either a DataFrame or a dictionary.")
+        logging.error(
+            "The input data must be either a DataFrame or a dictionary."
+        )
         raise ValueError("Invalid data type for input data.")
 
     yaml = YAML()
 
     try:
-        with open(yaml_config_path, 'r') as stream:
+        with open(yaml_config_path, "r") as stream:
             yaml_data = yaml.load(stream)
     except Exception as e:
         logging.error(f"An error occurred while reading the YAML file: {e}")
         raise
 
     # Directly targeting the 'species_of_interest' section
-    species_of_interest = yaml_data.get('species_of_interest', [])
+    species_of_interest = yaml_data.get("species_of_interest", [])
 
     try:
         for entry in species_of_interest:
-            species_name = entry.get('name', '')
+            species_name = entry.get("name", "")
             if species_name in species_taxid_dict:
-                entry['taxid'] = species_taxid_dict[species_name]
+                entry["taxid"] = species_taxid_dict[species_name]
     except Exception as e:
         logging.error(f"An error occurred while updating the YAML data: {e}")
         raise
 
     try:
-        with open(yaml_config_path, 'w') as stream:
+        with open(yaml_config_path, "w") as stream:
             yaml.dump(yaml_data, stream)
     except Exception as e:
-        logging.error(f"An error occurred while writing the updated YAML data: {e}")
+        logging.error(
+            f"An error occurred while writing the updated YAML data: {e}"
+        )
         raise
 
-    logging.info(f"Successfully updated YAML config file at {yaml_config_path} with taxid.")
-
-
-
+    logging.info(
+        f"Successfully updated YAML config file at {yaml_config_path} with taxid."
+    )

@@ -21,12 +21,16 @@ def download_database(url: str, dest_file_path: str) -> bool:
     try:
         response = requests.get(url, stream=True)
         if response.status_code == 200:
-            with open(dest_file_path, 'wb') as f:
+            with open(dest_file_path, "wb") as f:
                 shutil.copyfileobj(response.raw, f)
-            logging.info(f"Successfully downloaded and saved file to {dest_file_path}")
+            logging.info(
+                f"Successfully downloaded and saved file to {dest_file_path}"
+            )
             return True
         else:
-            logging.error(f"Failed to download file from {url}. HTTP status code: {response.status_code}")
+            logging.error(
+                f"Failed to download file from {url}. HTTP status code: {response.status_code}"
+            )
             return False
     except Exception as e:
         logging.error(f"Error during file download from {url}: {e}")
@@ -41,18 +45,28 @@ def decompress_database(tar_file_path: str, extract_to_folder: str) -> bool:
     :param extract_to_folder: Folder where the contents should be extracted.
     :return: True if decompression is successful, False otherwise.
     """
-    logging.info(f"Starting decompression of '{tar_file_path}' into '{extract_to_folder}'")
+    logging.info(
+        f"Starting decompression of '{tar_file_path}' into '{extract_to_folder}'"
+    )
     try:
         with tarfile.open(tar_file_path, "r:gz") as tar:
             tar.extractall(path=extract_to_folder)
-        logging.info(f"Successfully unpacked '{tar_file_path}' into '{extract_to_folder}'")
+        logging.info(
+            f"Successfully unpacked '{tar_file_path}' into '{extract_to_folder}'"
+        )
         return True
     except tarfile.TarError as e:
-        logging.error(f"Error unpacking '{tar_file_path}' into '{extract_to_folder}': {e}")
+        logging.error(
+            f"Error unpacking '{tar_file_path}' into '{extract_to_folder}': {e}"
+        )
         return False
 
 
-def copy_inspect_file(source_folder: str, destination_folder: str, new_filename: str = "kraken2_databases-inspect.txt") -> bool:
+def copy_inspect_file(
+    source_folder: str,
+    destination_folder: str,
+    new_filename: str = "kraken2_databases-inspect.txt",
+) -> bool:
     """
     Copies the inspect.txt file from the source folder to the destination folder with a new filename.
 
@@ -70,7 +84,9 @@ def copy_inspect_file(source_folder: str, destination_folder: str, new_filename:
 
     try:
         shutil.copyfile(source_file_path, destination_file_path)
-        logging.info(f"Copied '{source_file_path}' to '{destination_file_path}'")
+        logging.info(
+            f"Copied '{source_file_path}' to '{destination_file_path}'"
+        )
         return True
     except Exception as e:
         logging.error(f"Failed to copy file: {e}")
@@ -92,8 +108,12 @@ def run_kraken2_inspect(kraken2_db_path: str, output_path: str) -> bool:
         bool: True if the command was successful or if the output file already exists, False otherwise.
     """
     if not os.path.exists(kraken2_db_path):
-        logging.error(f"Kraken2 database path {kraken2_db_path} does not exist.")
-        raise FileNotFoundError(f"Kraken2 database path {kraken2_db_path} does not exist.")
+        logging.error(
+            f"Kraken2 database path {kraken2_db_path} does not exist."
+        )
+        raise FileNotFoundError(
+            f"Kraken2 database path {kraken2_db_path} does not exist."
+        )
 
     if os.path.exists(output_path):
         logging.info(f"Kraken2 inspect file already exists at {output_path}.")
@@ -102,14 +122,24 @@ def run_kraken2_inspect(kraken2_db_path: str, output_path: str) -> bool:
 
     try:
         logging.info(f"Running Kraken2 inspect on database: {kraken2_db_path}")
-        with open(output_path, 'w') as f:
-            subprocess.run(['kraken2-inspect', '--db', kraken2_db_path], stdout=f, check=True)
-        logging.info(f"Kraken2 inspect completed successfully. Output saved to {output_path}.")
+        with open(output_path, "w") as f:
+            subprocess.run(
+                ["kraken2-inspect", "--db", kraken2_db_path],
+                stdout=f,
+                check=True,
+            )
+        logging.info(
+            f"Kraken2 inspect completed successfully. Output saved to {output_path}."
+        )
         return True
     except subprocess.CalledProcessError as e:
         logging.error(f"Error in running Kraken2 inspect: {e}")
         return False
-def parse_kraken2_inspect(output_path: str, species_list: List[str] = None) -> dict:
+
+
+def parse_kraken2_inspect(
+    output_path: str, species_list: List[str] = None
+) -> dict:
     """
     Parse the Kraken2 inspect output file to extract tax IDs and species strings.
     Only returns species that are in the provided list.
@@ -122,10 +152,12 @@ def parse_kraken2_inspect(output_path: str, species_list: List[str] = None) -> d
         dict: Dictionary with species strings as keys and tax IDs as values.
     """
     try:
-        logging.info(f"Attempting to read Kraken2 inspect file from: {output_path}")
+        logging.info(
+            f"Attempting to read Kraken2 inspect file from: {output_path}"
+        )
 
         # Read the file into a DataFrame, ignoring comment lines
-        df = pd.read_csv(output_path, sep='\t', comment="#", header=None)
+        df = pd.read_csv(output_path, sep="\t", comment="#", header=None)
         logging.info(f"Successfully read the file into a DataFrame.")
 
         # Strip leading spaces from the species string column
@@ -135,10 +167,14 @@ def parse_kraken2_inspect(output_path: str, species_list: List[str] = None) -> d
         # If a species list is provided, filter the DataFrame
         if species_list:
             df = df[df.iloc[:, -1].isin(species_list)]
-            logging.info(f"Filtered DataFrame based on provided species list. {len(df)} species remain.")
+            logging.info(
+                f"Filtered DataFrame based on provided species list. {len(df)} species remain."
+            )
 
         # Create a dictionary of species and tax IDs
-        species_taxid_dict = df.set_index(df.columns[-1])[df.columns[-2]].to_dict()
+        species_taxid_dict = df.set_index(df.columns[-1])[
+            df.columns[-2]
+        ].to_dict()
         logging.info("Successfully created species to tax ID dictionary.")
 
         return species_taxid_dict
