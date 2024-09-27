@@ -8,7 +8,9 @@ import logging
 from nanometa_live import __version__
 
 # Initialize logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 
 def nano_sim():
@@ -19,12 +21,36 @@ def nano_sim():
 
     # Argument parsing
     parser = argparse.ArgumentParser(description="A real-time nanopore simulator.")
-    parser.add_argument('-i', '--input_folder', required=True, help="Folder containing test fastq.gz files.")
-    parser.add_argument('-o', '--output_folder', required=True, help="Simulated nanopore output directory.")
-    parser.add_argument('--min_delay', default=1, type=float, help="Minimum interval between file copies (minutes).")
-    parser.add_argument('--max_delay', default=2, type=float, help="Maximum interval between file copies (minutes).")
-    parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}',
-                        help="Show the current version of the script.")
+    parser.add_argument(
+        "-i",
+        "--input_folder",
+        required=True,
+        help="Folder containing test fastq.gz files.",
+    )
+    parser.add_argument(
+        "-o",
+        "--output_folder",
+        required=True,
+        help="Simulated nanopore output directory.",
+    )
+    parser.add_argument(
+        "--min_delay",
+        default=1,
+        type=float,
+        help="Minimum interval between file copies (minutes).",
+    )
+    parser.add_argument(
+        "--max_delay",
+        default=2,
+        type=float,
+        help="Maximum interval between file copies (minutes).",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Show the current version of the script.",
+    )
     args = parser.parse_args()
 
     logging.info("Starting nanopore simulation.")
@@ -50,13 +76,17 @@ def nano_sim():
     try:
         for file in file_list:
             delay = random.randint(min_delay, max_delay)
-            logging.info(f"Waiting for {round(delay / 60, 1)} minutes before copying the next file.")
+            logging.info(
+                f"Waiting for {round(delay / 60, 1)} minutes before copying the next file."
+            )
             time.sleep(delay)
-            shutil.copy(os.path.join(input_folder, file), os.path.join(output_folder, file))
+            shutil.copy(
+                os.path.join(input_folder, file), os.path.join(output_folder, file)
+            )
             logging.info(f"{file} copied successfully.")
     except KeyboardInterrupt:
         logging.warning("Process aborted by user.")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     nano_sim()

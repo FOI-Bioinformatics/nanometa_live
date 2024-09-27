@@ -1,14 +1,18 @@
-import os
 import logging
 import subprocess
-import shutil
 import pkg_resources
 import time
-from typing import  Any, List, Dict, Union, NoReturn, List
+
+from nanometa_live.helpers.file_utils import remove_temp_files
 
 
-
-def execute_snakemake(snakefile_path, configfile_path, snakemake_cores, log_file_path="snakemake_output.log", config_contents=None):
+def execute_snakemake(
+    snakefile_path,
+    configfile_path,
+    snakemake_cores,
+    log_file_path="snakemake_output.log",
+    config_contents=None,
+):
     """
     Execute the Snakemake workflow with the specified number of cores and package management settings.
 
@@ -27,18 +31,20 @@ def execute_snakemake(snakefile_path, configfile_path, snakemake_cores, log_file
     # Build the Snakemake command
     snakemake_cmd = [
         "snakemake",
-        "--cores", str(snakemake_cores),
+        "--cores",
+        str(snakemake_cores),
         "--rerun-incomplete",
-        "--snakefile", snakefile_path,
-        "--configfile", configfile_path
+        "--snakefile",
+        snakefile_path,
+        "--configfile",
+        configfile_path,
     ]
 
     # Add conda-related options if local_package_management is 'conda'
-    if local_package_management == 'conda':
-        snakemake_cmd.extend([
-            "--use-conda",
-            "--conda-frontend", conda_frontend
-        ])
+    if local_package_management == "conda":
+        snakemake_cmd.extend(
+            ["--use-conda", "--conda-frontend", conda_frontend]
+        )
 
     logging.info(f'Executing shell command: {" ".join(snakemake_cmd)}')
 
@@ -56,15 +62,22 @@ def timed_senser(config_file_path: str, config_contents: dict) -> None:
         config_contents (dict): Loaded configuration content.
     """
     logging.info("Starting timed Snakemake workflow")
-    check_interval = config_contents['check_intervals_seconds']
-    snakemake_cores = config_contents['snakemake_cores']
-    snakefile_path = pkg_resources.resource_filename('nanometa_live', 'Snakefile')
-    should_remove_temp = config_contents.get('remove_temp_files') == "yes"
+    check_interval = config_contents["check_intervals_seconds"]
+    snakemake_cores = config_contents["snakemake_cores"]
+    snakefile_path = pkg_resources.resource_filename(
+        "nanometa_live", "Snakefile"
+    )
+    should_remove_temp = config_contents.get("remove_temp_files") == "yes"
 
     try:
         while True:
             logging.info(f"Current interval: {check_interval} seconds.")
-            execute_snakemake(snakefile_path, config_file_path, snakemake_cores, config_contents=config_contents)
+            execute_snakemake(
+                snakefile_path,
+                config_file_path,
+                snakemake_cores,
+                config_contents=config_contents,
+            )
             logging.info("Run completed.")
             time.sleep(check_interval)
 

@@ -3,7 +3,6 @@
 channels:
   - bioconda
   - conda-forge
-  - defaults
 channel_priority: strict
 dependencies:
   - fastp >= 0.23.2

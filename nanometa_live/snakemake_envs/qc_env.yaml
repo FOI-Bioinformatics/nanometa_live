@@ -3,7 +3,6 @@
 channels:
   - conda-forge
   - bioconda
-  - defaults
 channel_priority: strict
 dependencies:
   - python >= 3.11.0

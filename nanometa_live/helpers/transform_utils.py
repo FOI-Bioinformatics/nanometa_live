@@ -1,8 +1,11 @@
 import logging
 import pandas as pd
-from typing import Any, List, Dict, Union, NoReturn, List
+from typing import Any, List, Dict, Union, NoReturn
 
-def update_results_with_taxid_dict(results: dict, species_taxid_dict: dict) -> dict:
+
+def update_results_with_taxid_dict(
+    results: dict, species_taxid_dict: dict
+) -> dict:
     """
     Update the results dictionary with taxonomic IDs.
 
@@ -24,33 +27,45 @@ def update_results_with_taxid_dict(results: dict, species_taxid_dict: dict) -> d
 
         # Update the dictionary
         if tax_id is not None:
-            logging.info(f"Found tax ID {tax_id} in kraken2 inspect file for species {species_name}. Updating results.")
-            results[species_name]['tax_id'] = tax_id
+            logging.info(
+                f"Found tax ID {tax_id} in kraken2 inspect file for species {species_name}. Updating results."
+            )
+            results[species_name]["tax_id"] = tax_id
         else:
-            logging.warning(f"Tax ID not found for species {species_name}. Setting it to 'N/A'.")
-            results[species_name]['tax_id'] = 'N/A'  # If the tax ID is not found, set it to 'N/A'
+            logging.warning(
+                f"Tax ID not found for species {species_name}. Setting it to 'N/A'."
+            )
+            results[species_name][
+                "tax_id"
+            ] = "N/A"  # If the tax ID is not found, set it to 'N/A'
 
     logging.info("Finished updating results with taxonomic IDs.")
 
     return results
 
-def create_row_dict(species: str, species_info: Dict[str, Any], row: Dict[str, Any]) -> Dict[str, Any]:
+
+def create_row_dict(
+    species: str, species_info: Dict[str, Any], row: Dict[str, Any]
+) -> Dict[str, Any]:
     keys = [
-        ('gid', 'GID'),
-        ('accession', 'Accession'),
-        ('ncbiOrgName', 'NCBI_OrgName'),
-        ('ncbiTaxonomy', 'NCBI_Taxonomy'),
-        ('gtdbTaxonomy', 'GTDB_Taxonomy'),
-        ('isGtdbSpeciesRep', 'Is_GTDB_Species_Rep'),
-        ('isNcbiTypeMaterial', 'Is_NCBI_Type_Material')
+        ("gid", "GID"),
+        ("accession", "Accession"),
+        ("ncbiOrgName", "NCBI_OrgName"),
+        ("ncbiTaxonomy", "NCBI_Taxonomy"),
+        ("gtdbTaxonomy", "GTDB_Taxonomy"),
+        ("isGtdbSpeciesRep", "Is_GTDB_Species_Rep"),
+        ("isNcbiTypeMaterial", "Is_NCBI_Type_Material"),
     ]
     row_dict = {
-        'Species': species,
-        'Tax_ID': species_info.get('tax_id', 'N/A'),
-        'SearchQuery': f"s__{species}"
+        "Species": species,
+        "Tax_ID": species_info.get("tax_id", "N/A"),
+        "SearchQuery": f"s__{species}",
     }
-    row_dict.update({new_key: row.get(old_key, 'N/A') for old_key, new_key in keys})
+    row_dict.update(
+        {new_key: row.get(old_key, "N/A") for old_key, new_key in keys}
+    )
     return row_dict
+
 
 def parse_to_table_with_taxid(filtered_data: dict) -> pd.DataFrame:
     """
@@ -72,7 +87,7 @@ def parse_to_table_with_taxid(filtered_data: dict) -> pd.DataFrame:
         logging.debug(f"Parsing information for species: {species}")
 
         # Loop through each row of species_info.
-        for row in species_info['rows']:
+        for row in species_info["rows"]:
             logging.debug(f"Parsing row for species {species}")
 
             # Create a row dictionary.
@@ -86,12 +101,16 @@ def parse_to_table_with_taxid(filtered_data: dict) -> pd.DataFrame:
     # Create a DataFrame from the parsed data.
     parsed_df = pd.DataFrame(parsed_data)
 
-    logging.info(f"Finished parsing filtered data into a DataFrame with {len(parsed_df)} rows.")
+    logging.info(
+        f"Finished parsing filtered data into a DataFrame with {len(parsed_df)} rows."
+    )
 
     return parsed_df
 
 
-def add_taxid_to_results(filtered_results: pd.DataFrame, species_taxid_dict: Dict[str, int]) -> pd.DataFrame:
+def add_taxid_to_results(
+    filtered_results: pd.DataFrame, species_taxid_dict: Dict[str, int]
+) -> pd.DataFrame:
     """
     Adds tax IDs to the filtered_results DataFrame based on the species names.
 
@@ -105,12 +124,18 @@ def add_taxid_to_results(filtered_results: pd.DataFrame, species_taxid_dict: Dic
     logging.info("Adding tax IDs to filtered results.")
 
     # Create a new column 'Tax_ID' by mapping species names to tax IDs
-    filtered_results['Tax_ID'] = filtered_results['Species'].map(species_taxid_dict)
+    filtered_results["Tax_ID"] = filtered_results["Species"].map(
+        species_taxid_dict
+    )
 
     # Check if all species have corresponding tax IDs
-    missing_taxids = filtered_results[filtered_results['Tax_ID'].isnull()]['Species'].unique()
+    missing_taxids = filtered_results[filtered_results["Tax_ID"].isnull()][
+        "Species"
+    ].unique()
     if len(missing_taxids) > 0:
-        logging.error(f"Could not find tax IDs for the following species: {', '.join(missing_taxids)}. Aborting.")
+        logging.error(
+            f"Could not find tax IDs for the following species: {', '.join(missing_taxids)}. Aborting."
+        )
         raise ValueError("Missing tax IDs for some species.")
 
     logging.info("Successfully added tax IDs to filtered results.")
