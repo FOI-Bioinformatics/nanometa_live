@@ -1,11 +1,8 @@
 # Nanometa Live: Real-time Metagenomic Analysis
 
+![Cite](https://img.shields.io/badge/Cite-Our%20Paper-blue)
+
 Nanometa Live is a comprehensive workflow equipped with a graphical user interface (GUI) for real-time metagenomic sequencing analysis. It is designed for Oxford Nanopore MinION and Flongle flow cells and utilizes Kraken2 for classification and BLAST for sequence validation. The tool offers a dynamic, offline-capable solution with custom database support.
-
-
-<img src="https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/screenshots/main_tab.png" alt="main view" width="900" height="450">
-
-<img src="https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/screenshots/sankey_plot.png" alt="main view" width="900" height="450">
 
 ## Features
 
@@ -14,28 +11,45 @@ Nanometa Live is a comprehensive workflow equipped with a graphical user interfa
 - 🛠️ **Custom Database Support**: Tailor the tool to your specific needs.
 - 🔍 **Quality Control**: Features an inbuilt QC tab for basic data quality checks.
   
-For further details, visit our [Wiki](https://github.com/FOI-Bioinformatics/nanometa_live/wiki).
+Visit our [Nanometa Live Wiki](https://github.com/FOI-Bioinformatics/nanometa_live/wiki) for detailed documentation.
 
+## Citation
 
-## Prerequisites
+If you use Nanometa Live in your research, please cite our publication:
+
+> **Kristofer Sandås**, Jacob Lewerentz, Edvin Karlsson, Linda Karlsson, David Sundell, Kotryna Simonyté-Sjödin, Andreas Sjödin, *Nanometa Live: a user-friendly application for real-time metagenomic data analysis and pathogen identification*, **Bioinformatics**, Volume 40, Issue 3, March 2024, btae108, [https://doi.org/10.1093/bioinformatics/btae108](https://doi.org/10.1093/bioinformatics/btae108)
+
+## Screenshots
+
+<img src="https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/screenshots/main_tab.png" alt="main view" width="900" height="450">
+
+<img src="https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/screenshots/sankey_plot.png" alt="sankey plot" width="900" height="450">
+
+## Installation Guide
+
+This section provides detailed instructions on how to install Nanometa Live. We recommend using [Miniforge](https://github.com/conda-forge/miniforge?tab=readme-ov-file#download) for a seamless installation experience.
+
+### Prerequisites
 
 Before you begin with the installation of `Nanometa Live`, make sure your system meets the following prerequisites:
 
-### System Requirements
-- Operating System: Linux/Unix or macOS
-- Processor: Intel Core i5 or equivalent
-- RAM: 8GB minimum, 16GB recommended
-- Disk Space: At least 10GB of free space
+#### System Requirements
+- **Operating System**: Linux/Unix or macOS
+- **Processor**: Intel Core i5 or equivalent
+- **RAM**: 8GB minimum, 16GB recommended
+- **Disk Space**: At least 10GB of free space
 
-### Software Dependencies
+
+
+#### Software Dependencies
 - [Python](https://www.python.org/downloads/): Version 3.9 or higher
-- [Mambaforge](https://github.com/conda-forge/miniforge#mambaforge) or [Conda](https://docs.conda.io/en/latest/miniconda.html)
+- [Miniforge](https://github.com/conda-forge/miniforge?tab=readme-ov-file#download) or [Miniconda](https://docs.conda.io/en/latest/miniconda.html)
 - [Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git) for cloning the repository
 - [Kraken2](https://github.com/DerrickWood/kraken2) if not using the bundled version
 - [BLAST](https://blast.ncbi.nlm.nih.gov/Blast.cgi?CMD=Web&PAGE_TYPE=BlastDocs&DOC_TYPE=Download) if not using the bundled version
 - [NCBI Datasets](https://www.ncbi.nlm.nih.gov/datasets/docs/v2/reference-docs/command-line/datasets/) if not using the bundled version
 
-### Network Requirements
+#### Network Requirements
 - Internet access is required for initial setup and optional updates. The tool supports offline usage after the initial setup.
 
 Make sure to meet all these prerequisites to avoid installation issues and to ensure smooth operation of `Nanometa Live`.
@@ -158,9 +172,13 @@ To terminate the process, use the `Shut down program` button in the interface, o
 
 ## License
 
-`Nanometa Live` is licensed under the GNU General Public License v3.0. This license grants you the freedom to use, modify, and distribute the software in both source and binary form, provided that you include the original copyright and license notice in any copy of the software or source code.
+![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)
+
+`Nanometa Live` is licensed under the GNU General Public License v3.0. This license grants you the freedom to use, modify, and distribute the software in both source and binary form, provided that you include the original copyright and
+license notice in any copy of the software or source code.
 
 For the full license text, please refer to the [LICENSE](LICENSE.txt) file in the repository. This license was chosen to promote freedom in using the software and to ensure that derivative works are shared with the community.
+
 
 ---
 
