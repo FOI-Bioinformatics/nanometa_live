@@ -95,6 +95,10 @@ class ConfigManager:
         if not self.current_config:
             raise ValueError("No current configuration to save")
 
+        # If existing file and no new filename, use the same file to preserve comments
+        if self.config_path and not filename:
+            filename = os.path.basename(self.config_path)
+
         self.config_path = self.config_loader.save_config(self.current_config, filename)
         return self.config_path
 

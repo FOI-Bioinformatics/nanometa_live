@@ -10,12 +10,14 @@ It provides functionality to:
 """
 
 import os
-import yaml
 import logging
 import datetime
 import glob
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Union
+
+# Replace PyYAML with ruamel.yaml for comment preservation
+from ruamel.yaml import YAML
 
 
 class ConfigLoader:
@@ -71,7 +73,7 @@ class ConfigLoader:
 
     def load_config(self, config_path: str) -> Dict[str, Any]:
         """
-        Load a configuration from a file.
+        Load a configuration from a file with preserved comments.
 
         Args:
             config_path: Path to the configuration file
@@ -81,20 +83,32 @@ class ConfigLoader:
 
         Raises:
             FileNotFoundError: If the configuration file does not exist
-            yaml.YAMLError: If the configuration file is not valid YAML
         """
         logging.info(f"Loading configuration from {config_path}")
 
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
+        try:
+            yaml = YAML()
+            yaml.preserve_quotes = True
 
-        return config
+            with open(config_path, "r") as f:
+                config = yaml.load(f)
+
+            return config
+        except FileNotFoundError:
+            logging.error(f"Configuration file {config_path} not found")
+            raise
+        except PermissionError:
+            logging.error(f"Permission denied: Cannot read {config_path}")
+            raise
+        except Exception as e:
+            logging.error(f"Failed to load configuration from {config_path}. Exception: {e}")
+            raise
 
     def save_config(
         self, config: Dict[str, Any], filename: Optional[str] = None
     ) -> str:
         """
-        Save a configuration to a file.
+        Save a configuration to a file with preserved comments.
 
         Args:
             config: Configuration dictionary to save
@@ -108,14 +122,49 @@ class ConfigLoader:
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"config_{timestamp}.yaml"
 
+        # Fix for duplicate .yaml extensions in the filename
+        if filename.endswith('.yaml.yaml'):
+            filename = filename.replace('.yaml.yaml', '.yaml')
+        elif not filename.endswith('.yaml'):
+            filename = filename + '.yaml'
+
         # Update timestamp in config
         config["timestamp"] = datetime.datetime.now().isoformat()
 
         config_path = os.path.join(self.config_dir, filename)
         logging.info(f"Saving configuration to {config_path}")
 
-        with open(config_path, "w") as f:
-            yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
+        # Check if the file already exists and use existing file to preserve comments
+        if os.path.exists(config_path):
+            try:
+                yaml = YAML()
+                yaml.preserve_quotes = True
+
+                # Load existing file to preserve comments
+                with open(config_path, "r") as f:
+                    existing_config = yaml.load(f)
+
+                # Update with new values
+                for key, value in config.items():
+                    existing_config[key] = value
+
+                # Write back
+                with open(config_path, "w") as f:
+                    yaml.dump(existing_config, f)
+            except Exception as e:
+                logging.warning(f"Failed to preserve comments in {config_path}: {e}")
+                # Fallback to direct write
+                yaml = YAML()
+                yaml.preserve_quotes = True
+                with open(config_path, "w") as f:
+                    yaml.dump(config, f)
+        else:
+            # New file, just write directly
+            yaml = YAML()
+            yaml.preserve_quotes = True
+            yaml.indent(mapping=2, sequence=4, offset=2)
+            with open(config_path, "w") as f:
+                yaml.dump(config, f)
 
         return config_path
 

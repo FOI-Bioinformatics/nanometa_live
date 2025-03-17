@@ -319,10 +319,13 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             config["check_intervals_seconds"] = check_interval
 
         # Handle boolean/list values
-        config["kraken_memory_mapping"] = (
-            "--memory-mapping" if memory_mapping and "true" in memory_mapping else ""
-        )
-        config["blast_validation"] = blast_validation and "true" in blast_validation
+        if memory_mapping is not None:
+            config["kraken_memory_mapping"] = (
+                "--memory-mapping" if memory_mapping and "true" in memory_mapping else ""
+            )
+
+        if blast_validation is not None:
+            config["blast_validation"] = blast_validation and "true" in blast_validation
 
         if min_identity is not None:
             config["min_perc_identity"] = min_identity
@@ -334,9 +337,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             config["validation_cores"] = cores
             config["blast_cores"] = cores
 
-        config["remove_temp_files"] = (
-            "yes" if clean_temp and "true" in clean_temp else "no"
-        )
+        if clean_temp is not None:
+            config["remove_temp_files"] = (
+                "yes" if clean_temp and "true" in clean_temp else "no"
+            )
 
         return config
 
