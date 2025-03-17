@@ -16,7 +16,7 @@ import glob
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Union
 
-# Replace PyYAML with ruamel.yaml for comment preservation
+# Use ruamel.yaml for comment preservation
 from ruamel.yaml import YAML
 
 
@@ -32,6 +32,11 @@ class ConfigLoader:
         """
         self.config_dir = config_dir
         os.makedirs(config_dir, exist_ok=True)
+
+        # Initialize ruamel.yaml
+        self.yaml = YAML()
+        self.yaml.preserve_quotes = True
+        self.yaml.indent(mapping=2, sequence=4, offset=2)
 
     def create_default_config(self) -> Dict[str, Any]:
         """
@@ -87,11 +92,8 @@ class ConfigLoader:
         logging.info(f"Loading configuration from {config_path}")
 
         try:
-            yaml = YAML()
-            yaml.preserve_quotes = True
-
             with open(config_path, "r") as f:
-                config = yaml.load(f)
+                config = self.yaml.load(f)
 
             return config
         except FileNotFoundError:
@@ -137,12 +139,9 @@ class ConfigLoader:
         # Check if the file already exists and use existing file to preserve comments
         if os.path.exists(config_path):
             try:
-                yaml = YAML()
-                yaml.preserve_quotes = True
-
                 # Load existing file to preserve comments
                 with open(config_path, "r") as f:
-                    existing_config = yaml.load(f)
+                    existing_config = self.yaml.load(f)
 
                 # Update with new values
                 for key, value in config.items():
@@ -150,21 +149,16 @@ class ConfigLoader:
 
                 # Write back
                 with open(config_path, "w") as f:
-                    yaml.dump(existing_config, f)
+                    self.yaml.dump(existing_config, f)
             except Exception as e:
                 logging.warning(f"Failed to preserve comments in {config_path}: {e}")
                 # Fallback to direct write
-                yaml = YAML()
-                yaml.preserve_quotes = True
                 with open(config_path, "w") as f:
-                    yaml.dump(config, f)
+                    self.yaml.dump(config, f)
         else:
             # New file, just write directly
-            yaml = YAML()
-            yaml.preserve_quotes = True
-            yaml.indent(mapping=2, sequence=4, offset=2)
             with open(config_path, "w") as f:
-                yaml.dump(config, f)
+                self.yaml.dump(config, f)
 
         return config_path
 

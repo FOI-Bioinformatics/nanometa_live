@@ -16,6 +16,7 @@ import dash
 from dash import Dash, Input, Output, State, callback, ctx, no_update
 import dash_bootstrap_components as dbc
 from dash import html
+from ruamel.yaml import YAML
 
 from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.config.config_loader import ConfigLoader
@@ -120,6 +121,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("app-config", "data"),
             Output("load-config-modal", "is_open", allow_duplicate=True),
             Output("notification-trigger", "data", allow_duplicate=True),
+            Output("refresh-form-trigger", "data", allow_duplicate=True),
         ],
         Input({"type": "load-config-item", "index": dash.ALL}, "n_clicks"),
         State("available-configs", "children"),
@@ -129,12 +131,12 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     def load_selected_config(n_clicks, available_configs_json, data_dir):
         """Load the selected configuration."""
         if not any(n_clicks) or not ctx.triggered:
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
 
         # Find which button was clicked
         triggered_id = ctx.triggered[0]["prop_id"]
         if "index" not in triggered_id:
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
 
         trigger_idx = json.loads(triggered_id.split(".")[0])["index"]
 
@@ -153,6 +155,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                     "message": f"Successfully loaded configuration: {selected_config.get('name', 'Unnamed')}",
                     "color": "success",
                 },
+                True,  # Trigger form refresh
             )
         except Exception as e:
             return (
@@ -163,6 +166,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                     "message": f"Failed to load configuration: {str(e)}",
                     "color": "danger",
                 },
+                no_update,
             )
 
     @app.callback(
@@ -181,7 +185,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         return is_open
 
     @app.callback(
-        Output("notification-trigger", "data", allow_duplicate=True),
+        [
+            Output("app-config", "data", allow_duplicate=True),
+            Output("notification-trigger", "data", allow_duplicate=True),
+            Output("refresh-form-trigger", "data", allow_duplicate=True),
+        ],
         Input("confirm-save-config", "n_clicks"),
         [
             State("save-config-name", "value"),
@@ -193,36 +201,44 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     def save_config(n_clicks, config_name, config, data_dir):
         """Save the current configuration."""
         if not n_clicks or not config:
-            return no_update
+            return no_update, no_update, no_update
 
         if not config_name:
             config_name = f"Config_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
         try:
-            # Update the config with the name
-            config["analysis_name"] = config_name
+            # Create a new config object
+            new_config = {}
+            new_config.update(config)
 
-            # Save the config
+            # Update the config with the name
+            new_config["analysis_name"] = config_name
+
+            # Force update the header title immediately
+            app.layout.children[2].children[0].children[0].children[0].children[1].children = config_name
+
+            # Save the config using the ConfigLoader which now uses ruamel.yaml
             config_loader = ConfigLoader(os.path.join(data_dir, "configs"))
             filename = f"{config_name.replace(' ', '_').lower()}.yaml"
-            config_path = config_loader.save_config(config, filename)
+            config_path = config_loader.save_config(new_config, filename)
 
-            return {
+            return new_config, {
                 "title": "Configuration Saved",
                 "message": f"Successfully saved configuration as: {config_name}",
                 "color": "success",
-            }
+            }, True  # Trigger form refresh
         except Exception as e:
-            return {
+            return no_update, {
                 "title": "Error",
                 "message": f"Failed to save configuration: {str(e)}",
                 "color": "danger",
-            }
+            }, no_update
 
     @app.callback(
         [
             Output("app-config", "data", allow_duplicate=True),
             Output("notification-trigger", "data", allow_duplicate=True),
+            Output("refresh-form-trigger", "data", allow_duplicate=True),
         ],
         Input("reset-config-button", "n_clicks"),
         State("app-data-dir", "data"),
@@ -231,7 +247,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     def reset_config(n_clicks, data_dir):
         """Reset the configuration to defaults."""
         if not n_clicks:
-            return no_update, no_update
+            return no_update, no_update, no_update
 
         try:
             config_loader = ConfigLoader(os.path.join(data_dir, "configs"))
@@ -241,15 +257,146 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 "title": "Configuration Reset",
                 "message": "Configuration has been reset to defaults",
                 "color": "info",
-            }
+            }, True  # Trigger form refresh
         except Exception as e:
             return no_update, {
                 "title": "Error",
                 "message": f"Failed to reset configuration: {str(e)}",
                 "color": "danger",
-            }
+            }, no_update
 
-    # Form field updates
+    @app.callback(
+        [
+            Output("app-config", "data", allow_duplicate=True),
+            Output("apply-config-button", "children"),
+            Output("notification-trigger", "data", allow_duplicate=True),
+            Output("refresh-form-trigger", "data", allow_duplicate=True),
+        ],
+        Input("apply-config-button", "n_clicks"),
+        [
+            State("analysis-name-input", "value"),
+            State("nanopore-dir-input", "value"),
+            State("kraken-db-input", "value"),
+            State("update-interval-input", "value"),
+            State("danger-threshold-input", "value"),
+            State("kraken-taxonomy-input", "value"),
+            State("external-kraken-input", "value"),
+            State("check-interval-input", "value"),
+            State("memory-mapping-input", "value"),
+            State("blast-validation-input", "value"),
+            State("min-identity-input", "value"),
+            State("cores-input", "value"),
+            State("clean-temp-input", "value"),
+            State("app-config", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def apply_config_changes(
+        n_clicks,
+        analysis_name,
+        nanopore_dir,
+        kraken_db,
+        update_interval,
+        danger_threshold,
+        taxonomy,
+        external_kraken,
+        check_interval,
+        memory_mapping,
+        blast_validation,
+        min_identity,
+        cores,
+        clean_temp,
+        current_config,
+    ):
+        """Apply configuration changes without saving to a file."""
+        if not n_clicks:
+            return no_update, no_update, no_update, no_update
+
+        if not current_config:
+            return no_update, no_update, {
+                "title": "Error",
+                "message": "No configuration to update",
+                "color": "danger",
+            }, no_update
+
+        # Create a completely new config object to avoid reference issues
+        config = {}
+        config.update(current_config)
+
+        # Force update the header title immediately
+        if analysis_name:
+            app.layout.children[2].children[0].children[0].children[0].children[1].children = analysis_name
+
+        # Update fields if they have valid values
+        if analysis_name is not None:
+            config["analysis_name"] = analysis_name
+
+        if nanopore_dir is not None:
+            config["nanopore_output_directory"] = nanopore_dir
+
+        if kraken_db is not None:
+            config["kraken_db"] = kraken_db
+
+        if update_interval is not None:
+            config["update_interval_seconds"] = update_interval
+
+        if danger_threshold is not None:
+            config["danger_lower_limit"] = danger_threshold
+
+        if taxonomy is not None:
+            config["kraken_taxonomy"] = taxonomy
+
+        if external_kraken is not None:
+            config["external_kraken2_db"] = external_kraken
+
+        if check_interval is not None:
+            config["check_intervals_seconds"] = check_interval
+
+        # Handle boolean/list values
+        config["kraken_memory_mapping"] = (
+            "--memory-mapping" if memory_mapping and "true" in memory_mapping else ""
+        )
+
+        config["blast_validation"] = blast_validation and "true" in blast_validation
+
+        if min_identity is not None:
+            config["min_perc_identity"] = min_identity
+
+        if cores is not None:
+            # Set all core counts to the same value for simplicity
+            config["snakemake_cores"] = cores
+            config["kraken_cores"] = cores
+            config["validation_cores"] = cores
+            config["blast_cores"] = cores
+
+        config["remove_temp_files"] = (
+            "yes" if clean_temp and "true" in clean_temp else "no"
+        )
+
+        return config, "✓ Applied!", {
+            "title": "Changes Applied",
+            "message": f"Configuration changes have been applied. Analysis name: {analysis_name}",
+            "color": "success",
+        }, True  # Trigger form refresh
+
+    # Reset the Apply button text after a short delay
+    app.clientside_callback(
+        """
+        function(n_clicks) {
+            if (n_clicks) {
+                setTimeout(function() {
+                    return "Apply Changes";
+                }, 1000);
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("apply-config-button", "children", allow_duplicate=True),
+        Input("apply-config-button", "n_clicks"),
+        prevent_initial_call=True,
+    )
+
+    # Form field updates (not automatically triggering form refresh)
     @app.callback(
         Output("app-config", "data", allow_duplicate=True),
         [
@@ -344,7 +491,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
         return config
 
-    # Initialize form from config
+    # Initialize form from config - now triggered by both config changes and explicit refresh
     @app.callback(
         [
             Output("analysis-name-input", "value"),
@@ -361,15 +508,24 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("cores-input", "value"),
             Output("clean-temp-input", "value"),
         ],
-        Input("app-config", "data"),
+        [Input("app-config", "data"), Input("refresh-form-trigger", "data")],
     )
-    def initialize_form_from_config(config):
+    def initialize_form_from_config(config, _):
         """Initialize form fields from the current configuration."""
         if not config:
             return [no_update] * 13
 
-        # Extract values from config
+        # Ensure header title is synchronized with analysis_name
         analysis_name = config.get("analysis_name", "")
+
+        # Force update to the header (direct DOM manipulation for immediate effect)
+        # This is a backup method in case the callback doesn't update the header fast enough
+        try:
+            app.layout.children[2].children[0].children[0].children[0].children[1].children = analysis_name
+        except Exception as e:
+            logging.warning(f"Could not update header directly: {e}")
+
+        # Extract other values from config
         nanopore_dir = config.get("nanopore_output_directory", "")
         kraken_db = config.get("kraken_db", "")
         update_interval = config.get("update_interval_seconds", 30)

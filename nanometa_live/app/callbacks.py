@@ -99,6 +99,17 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
 
         return "Start Analysis", "primary", not config_complete
 
+    # New callback to update the header title when the config changes
+    @app.callback(
+        Output("header-title", "children"),
+        Input("app-config", "data")
+    )
+    def update_header_title(config):
+        """Update the header title based on the analysis name in config."""
+        if config and "analysis_name" in config:
+            return config["analysis_name"]
+        return "Nanometa Live Analysis"
+
     @app.callback(
         Output("notification-container", "children"),
         Input("notification-trigger", "data"),

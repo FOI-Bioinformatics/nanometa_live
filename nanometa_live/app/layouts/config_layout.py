@@ -22,6 +22,9 @@ def create_config_layout():
         A dash component representing the configuration tab layout
     """
     return html.Div([
+        # Hidden Store for refresh trigger
+        dcc.Store(id="refresh-form-trigger", data=False),
+
         # Introduction section
         dbc.Card(
             dbc.CardBody([
@@ -47,6 +50,13 @@ def create_config_layout():
                             id="save-config-button",
                             color="success",
                             className="me-2"
+                        ),
+                        dbc.Button(
+                            "Apply Changes",
+                            id="apply-config-button",
+                            color="info",  # Changed from primary to info for better visibility
+                            className="me-2",
+                            style={"fontWeight": "bold"}  # Make it bolder
                         ),
                         dbc.Button(
                             "Reset to Defaults",
@@ -96,6 +106,15 @@ def create_config_layout():
         # Configuration form
         dbc.Card(
             dbc.CardBody([
+                # Configuration feedback alert - shows when changes are applied
+                dbc.Alert(
+                    "Configuration changes have been applied",
+                    id="config-feedback-alert",
+                    color="success",
+                    dismissable=True,
+                    is_open=False,
+                    duration=3000
+                ),
                 create_config_form()
             ])
         ),

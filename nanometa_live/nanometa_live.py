@@ -121,14 +121,9 @@ def main():
             logging.error(f"Failed to load configuration from {args.config}: {e}")
             config = config_loader.create_default_config()
     else:
-        # Try to load most recent config, otherwise create default
-        recent_config = config_loader.get_most_recent_config()
-        if recent_config:
-            config = recent_config
-            logging.info(f"Loaded most recent configuration")
-        else:
-            config = config_loader.create_default_config()
-            logging.info("Created default configuration")
+        # Always create a default config first, don't automatically load the most recent
+        config = config_loader.create_default_config()
+        logging.info("Created default configuration")
 
     # Initialize backend manager (but don't start any processes yet)
     backend_manager = BackendManager(data_dir)

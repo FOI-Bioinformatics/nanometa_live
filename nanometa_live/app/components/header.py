@@ -24,12 +24,15 @@ def create_header(title="Nanometa Live"):
         # Hidden notification store
         dcc.Store(id="notification-trigger", data=None),
 
+        # Hidden refresh trigger
+        dcc.Store(id="refresh-form-trigger", data=False),
+
         dbc.Row([
             # Title and logo
             dbc.Col([
                 html.Div([
                     html.Img(src="/assets/logo.png", height="40px", className="me-2"),
-                    html.H2(title, className="mb-0")
+                    html.H2(id="header-title", className="mb-0", children=title)
                 ], className="d-flex align-items-center")
             ], width=4),
 
