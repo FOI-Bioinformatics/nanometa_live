@@ -1,77 +1,213 @@
-import time
+#!/usr/bin/env python3
+"""
+Backend process for Nanometa Live.
+
+This script handles the execution of the Snakemake workflow for processing
+nanopore sequence data. It can be run independently of the main application
+for headless processing.
+"""
+
 import os
-from ruamel.yaml import YAML
-import pkg_resources
-import shutil
+import sys
 import argparse
 import logging
-import subprocess
-import sys
-from typing import List, Dict, Union, NoReturn
+import time
+import signal
+from pathlib import Path
 
-
-from nanometa_live.helpers.config_utils import update_nested_dict, load_config
-from nanometa_live.helpers.pipeline_utils import execute_snakemake, timed_senser
-from nanometa_live.helpers.file_utils import remove_temp_files
-
+import snakemake
 
 from nanometa_live import __version__
+from nanometa_live.core.config.config_loader import ConfigLoader
+from nanometa_live.core.workflow.snakemake_manager import SnakemakeManager
 
-# Initialize logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+
+def setup_logging(debug=False, log_file=None):
+    """
+    Set up logging configuration.
+
+    Args:
+        debug: Whether to use debug level logging
+        log_file: Optional file to write logs to
+    """
+    log_level = logging.DEBUG if debug else logging.INFO
+    log_format = "%(asctime)s - %(levelname)s - %(message)s"
+
+    # Configure root logger
+    logging.basicConfig(
+        level=log_level, format=log_format, handlers=[logging.StreamHandler(sys.stdout)]
+    )
+
+    # Add file handler if specified
+    if log_file:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(logging.Formatter(log_format))
+        logging.getLogger().addHandler(file_handler)
+
+
+def parse_arguments():
+    """
+    Parse command-line arguments.
+
+    Returns:
+        Parsed arguments
+    """
+    parser = argparse.ArgumentParser(
+        description="Nanometa Live Backend: Run metagenomic analysis workflow"
+    )
+
+    parser.add_argument(
+        "--config", help="Path to the configuration file", required=True
+    )
+
+    parser.add_argument(
+        "--cores", type=int, default=1, help="Number of CPU cores to use (default: 1)"
+    )
+
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+
+    parser.add_argument("--log-file", help="Path to write log file")
+
+    parser.add_argument(
+        "--version", action="version", version=f"Nanometa Live Backend v{__version__}"
+    )
+
+    parser.add_argument(
+        "--dryrun",
+        action="store_true",
+        help="Perform a dry run without executing commands",
+    )
+
+    parser.add_argument(
+        "--unlock", action="store_true", help="Unlock the working directory"
+    )
+
+    return parser.parse_args()
+
+
+def handle_exit(snakemake_manager):
+    """
+    Set up signal handlers for graceful exit.
+
+    Args:
+        snakemake_manager: SnakemakeManager instance to stop on exit
+    """
+
+    def signal_handler(sig, frame):
+        """Handle signals by stopping workflow and exiting."""
+        logging.info("Stopping workflow...")
+        snakemake_manager.stop()
+        sys.exit(0)
+
+    # Set up handlers for various signals
+    signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
+    signal.signal(signal.SIGTERM, signal_handler)  # Kill command
+
+
+def unlock_workdir(config_path):
+    """
+    Unlock the Snakemake working directory.
+
+    Args:
+        config_path: Path to the configuration file
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # Find the Snakefile
+        import nanometa_live
+
+        package_dir = os.path.dirname(nanometa_live.__file__)
+        snakefile_path = os.path.join(package_dir, "Snakefile")
+
+        # Get the working directory
+        config_loader = ConfigLoader("")
+        config = config_loader.load_config(config_path)
+        workdir = config.get("main_dir", os.path.dirname(config_path))
+
+        # Unlock the working directory
+        success = snakemake.snakemake(
+            snakefile_path, unlock=True, workdir=workdir, quiet=False
+        )
+
+        return success
+    except Exception as e:
+        logging.error(f"Error unlocking working directory: {e}")
+        return False
 
 
 def main():
     """
-    Main function that parses command-line arguments and executes the timed_senser function.
+    Main function to run the Nanometa Live backend.
     """
+    # Parse arguments
+    args = parse_arguments()
 
-    parser = argparse.ArgumentParser(
-        description="A script that runs the Snakemake workflow at a set time interval."
-    )
-    parser.add_argument(
-        "--config",
-        default="config.yaml",
-        help="Path to the configuration file. Default is config.yaml.",
-    )
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"%(prog)s {__version__}",
-        help="Show the current version of the script.",
-    )
-    parser.add_argument(
-        "-p", "--path", default="", help="The path to the project directory."
-    )
-    args = parser.parse_args()
+    # Set up logging
+    setup_logging(args.debug, args.log_file)
 
-    if "--version" not in sys.argv:
-        # Initialize logging only if '--version' is not in the argument list
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s - %(levelname)s - %(message)s",
-        )
-        logging.info("nanometa_live backend started")
+    # Log startup information
+    logging.info(f"Nanometa Live Backend v{__version__}")
+    logging.info(f"Configuration file: {args.config}")
+    logging.info(f"CPU cores: {args.cores}")
 
-    # Check if any arguments were provided
-    if not any(vars(args).values()):
-        print("No arguments provided. Using default values.")
-        onfig_contents = load_config("config.yaml")
-        timed_senser("config.yaml", config_contents)
-    else:
-        if hasattr(args, "version") and args.version:
-            parser.print_version()
+    # Unlock mode if requested
+    if args.unlock:
+        logging.info("Unlocking working directory...")
+        if unlock_workdir(args.config):
+            logging.info("Working directory unlocked successfully.")
+            return 0
         else:
-            config_file_path = (
-                os.path.join(args.path, args.config)
-                if args.path
-                else args.config
-            )
-            config_contents = load_config(config_file_path)
-            timed_senser(config_file_path, config_contents)
+            logging.error("Failed to unlock working directory.")
+            return 1
+
+    # Create data directory
+    data_dir = os.path.dirname(args.config)
+    os.makedirs(os.path.join(data_dir, "logs"), exist_ok=True)
+
+    # Initialize SnakemakeManager
+    snakemake_manager = SnakemakeManager(data_dir)
+
+    # Set up signal handlers
+    handle_exit(snakemake_manager)
+
+    # Set up workflow
+    success, message = snakemake_manager.setup(args.config)
+    if not success:
+        logging.error(f"Failed to set up workflow: {message}")
+        return 1
+
+    logging.info(message)
+
+    # Start workflow
+    success, message = snakemake_manager.start(cores=args.cores, dryrun=args.dryrun)
+    if not success:
+        logging.error(f"Failed to start workflow: {message}")
+        return 1
+
+    logging.info(message)
+
+    # Wait for workflow to complete or be interrupted
+    try:
+        while snakemake_manager.running:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logging.info("Interrupted by user. Stopping workflow...")
+        snakemake_manager.stop()
+        return 1
+
+    # Check for errors
+    status = snakemake_manager.get_status()
+    if status.get("errors"):
+        logging.error("Workflow completed with errors:")
+        for error in status.get("errors", []):
+            logging.error(f"  - {error}")
+        return 1
+
+    logging.info("Workflow completed successfully.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

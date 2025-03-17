@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""
+Main entry point for Nanometa Live application.
+
+This script starts the Nanometa Live application directly, without requiring any
+prior configuration or setup. The user can configure the application via the UI
+and start the analysis workflow from there.
+"""
+
+import os
+import sys
+import argparse
+import logging
+import signal
+import time
+import threading
+from pathlib import Path
+
+from . import __version__
+from nanometa_live.app.app import create_app
+from nanometa_live.core.config.config_loader import ConfigLoader
+from nanometa_live.core.workflow.backend_manager import BackendManager
+
+
+def setup_logging(debug=False):
+    """Set up logging configuration."""
+    log_level = logging.DEBUG if debug else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+
+
+def parse_arguments():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Nanometa Live: Real-time metagenomic analysis"
+    )
+
+    parser.add_argument(
+        "--config", help="Path to an existing configuration file to load on startup"
+    )
+
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8050,
+        help="Port to run the dashboard on (default: 8050)",
+    )
+
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Run in debug mode with more verbose output",
+    )
+
+    parser.add_argument(
+        "--data-dir", help="Directory to store application data (default: ~/.nanometa)"
+    )
+
+    parser.add_argument(
+        "--version", action="version", version=f"Nanometa Live v{__version__}"
+    )
+
+    return parser.parse_args()
+
+
+def create_default_dirs(data_dir):
+    """Create default directories for the application if they don't exist."""
+    dirs = [
+        data_dir,
+        os.path.join(data_dir, "configs"),
+        os.path.join(data_dir, "data"),
+        os.path.join(data_dir, "reports"),
+        os.path.join(data_dir, "logs"),
+    ]
+
+    for d in dirs:
+        os.makedirs(d, exist_ok=True)
+        logging.debug(f"Ensuring directory exists: {d}")
+
+
+def handle_exit(app_runner, backend_manager):
+    """Handle graceful exit for the application."""
+
+    def signal_handler(sig, frame):
+        logging.info("Shutting down Nanometa Live...")
+        if backend_manager:
+            backend_manager.stop()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+
+def main():
+    """Main function to run the Nanometa Live application."""
+    # Parse arguments
+    args = parse_arguments()
+
+    # Setup logging
+    setup_logging(args.debug)
+
+    # Set up data directory
+    if args.data_dir:
+        data_dir = args.data_dir
+    else:
+        data_dir = os.path.expanduser("~/.nanometa")
+
+    create_default_dirs(data_dir)
+
+    # Load configuration
+    config_loader = ConfigLoader(os.path.join(data_dir, "configs"))
+
+    if args.config:
+        try:
+            config = config_loader.load_config(args.config)
+            logging.info(f"Loaded configuration from {args.config}")
+        except Exception as e:
+            logging.error(f"Failed to load configuration from {args.config}: {e}")
+            config = config_loader.create_default_config()
+    else:
+        # Try to load most recent config, otherwise create default
+        recent_config = config_loader.get_most_recent_config()
+        if recent_config:
+            config = recent_config
+            logging.info(f"Loaded most recent configuration")
+        else:
+            config = config_loader.create_default_config()
+            logging.info("Created default configuration")
+
+    # Initialize backend manager (but don't start any processes yet)
+    backend_manager = BackendManager(data_dir)
+
+    # Create and start the Dash application
+    app = create_app(config, data_dir, backend_manager)
+
+    # Set up signal handlers for graceful exit
+    handle_exit(app, backend_manager)
+
+    # Start the Dash server
+    logging.info(f"Starting Nanometa Live v{__version__} server on port {args.port}")
+    app.run_server(host="0.0.0.0", port=args.port, debug=args.debug)
+
+
+if __name__ == "__main__":
+    main()

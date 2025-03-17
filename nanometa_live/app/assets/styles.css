@@ -1,0 +1,254 @@
+/* Nanometa Live Custom Styles */
+
+/* Global styling */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f8f9fa;
+    color: #333;
+  }
+
+  /* Header styling */
+  .header {
+    padding: 15px 20px;
+    background-color: #fff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+  }
+
+  /* Footer styling */
+  .footer {
+    margin-top: 30px;
+    padding: 15px 20px;
+    background-color: #f1f1f1;
+    text-align: center;
+    font-size: 0.8rem;
+    color: #666;
+    border-top: 1px solid #ddd;
+  }
+
+  /* Card styling */
+  .card {
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+    margin-bottom: 20px;
+    border-radius: 5px;
+    overflow: hidden;
+  }
+
+  .card-header {
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+    padding: 12px 15px;
+  }
+
+  .card-body {
+    padding: 20px;
+  }
+
+  /* Button styling */
+  .btn {
+    transition: all 0.2s ease-in-out;
+  }
+
+  .btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  }
+
+  /* Tab styling */
+  .nav-tabs {
+    border-bottom: 1px solid #dee2e6;
+  }
+
+  .nav-tabs .nav-link {
+    border: 1px solid transparent;
+    border-top-left-radius: 0.25rem;
+    border-top-right-radius: 0.25rem;
+    color: #495057;
+    background-color: #fff;
+    margin-right: 2px;
+  }
+
+  .nav-tabs .nav-link:hover {
+    border-color: #e9ecef #e9ecef #dee2e6;
+  }
+
+  .nav-tabs .nav-link.active {
+    color: #007bff;
+    background-color: #fff;
+    border-color: #dee2e6 #dee2e6 #fff;
+  }
+
+  /* Form styling */
+  label {
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+  }
+
+  .form-group {
+    margin-bottom: 1.5rem;
+  }
+
+  .form-text {
+    color: #6c757d;
+    margin-top: 0.25rem;
+    font-size: 0.875rem;
+  }
+
+  /* Upload component styling */
+  .Upload {
+    border: 2px dashed #ced4da;
+    border-radius: 5px;
+    padding: 20px;
+    text-align: center;
+    transition: border-color 0.15s ease-in-out;
+  }
+
+  .Upload:hover {
+    border-color: #007bff;
+  }
+
+  /* Dashboard components */
+  .dashboard-card {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .dashboard-card .card-body {
+    flex: 1;
+  }
+
+  .status-indicator {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+
+  .status-indicator .status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 8px;
+  }
+
+  /* Table styling */
+  .dash-table-container {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  }
+
+  .dash-table-container .dash-spreadsheet-container {
+    border-radius: 5px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  .dash-table-container .dash-spreadsheet-inner th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    text-align: left;
+    padding: 12px 15px;
+  }
+
+  .dash-table-container .dash-spreadsheet-inner td {
+    padding: 10px 15px;
+    border-bottom: 1px solid #e9ecef;
+  }
+
+  /* Plot styling */
+  .js-plotly-plot {
+    border-radius: 5px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  /* Configuration form styling */
+  .config-section {
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #e9ecef;
+  }
+
+  .config-section:last-child {
+    border-bottom: none;
+  }
+
+  .config-section-title {
+    font-size: 1.25rem;
+    margin-bottom: 1rem;
+    color: #495057;
+  }
+
+  /* Notification container */
+  .notification-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    max-width: 400px;
+    z-index: 1000;
+  }
+
+  /* Species list */
+  .species-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid #e9ecef;
+    border-radius: 5px;
+    padding: 10px;
+  }
+
+  .species-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px;
+    margin-bottom: 5px;
+    border-bottom: 1px solid #f1f1f1;
+  }
+
+  .species-item:last-child {
+    border-bottom: none;
+  }
+
+  /* Helper utility classes */
+  .text-muted {
+    color: #6c757d;
+  }
+
+  .font-weight-bold {
+    font-weight: 600;
+  }
+
+  .text-success {
+    color: #28a745;
+  }
+
+  .text-danger {
+    color: #dc3545;
+  }
+
+  .text-warning {
+    color: #ffc107;
+  }
+
+  .text-info {
+    color: #17a2b8;
+  }
+
+  /* Responsive adjustments */
+  @media (max-width: 768px) {
+    .col-md-6 {
+      flex: 0 0 100%;
+      max-width: 100%;
+    }
+
+    .hstack {
+      flex-direction: column;
+    }
+
+    .hstack > div {
+      margin-right: 0 !important;
+      margin-bottom: 15px;
+    }
+  }
