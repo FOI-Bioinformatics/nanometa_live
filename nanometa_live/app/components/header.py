@@ -24,8 +24,8 @@ def create_header(title="Nanometa Live"):
         # Hidden notification store
         dcc.Store(id="notification-trigger", data=None),
 
-        # Hidden refresh trigger
-        dcc.Store(id="refresh-form-trigger", data=False),
+        # Removed duplicate refresh-form-trigger
+        # The one in config_layout.py will be retained
 
         dbc.Row([
             # Title and logo

@@ -185,10 +185,25 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         return is_open
 
     @app.callback(
+        Output("save-config-name", "value"),
+        Input("save-config-modal", "is_open"),
+        State("app-config", "data"),
+    )
+    def set_default_config_name(is_open, config):
+        """Set the default configuration name based on current analysis name."""
+        if not is_open:
+            return no_update
+
+        # If modal is opening, populate with current analysis name
+        if config and "analysis_name" in config and config["analysis_name"]:
+            return config["analysis_name"]
+        else:
+            return f"Config_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    @app.callback(
         [
             Output("app-config", "data", allow_duplicate=True),
             Output("notification-trigger", "data", allow_duplicate=True),
-            Output("refresh-form-trigger", "data", allow_duplicate=True),
         ],
         Input("confirm-save-config", "n_clicks"),
         [
@@ -201,23 +216,16 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     def save_config(n_clicks, config_name, config, data_dir):
         """Save the current configuration."""
         if not n_clicks or not config:
-            return no_update, no_update, no_update
+            return no_update, no_update
 
         if not config_name:
             config_name = f"Config_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
         try:
-            # Create a new config object
-            new_config = {}
-            new_config.update(config)
+            # Create a new config object with all current settings
+            new_config = dict(config)  # Create a copy
 
-            # Update the config with the name
-            new_config["analysis_name"] = config_name
-
-            # Force update the header title immediately
-            app.layout.children[2].children[0].children[0].children[0].children[1].children = config_name
-
-            # Save the config using the ConfigLoader which now uses ruamel.yaml
+            # Save the config using the ConfigLoader
             config_loader = ConfigLoader(os.path.join(data_dir, "configs"))
             filename = f"{config_name.replace(' ', '_').lower()}.yaml"
             config_path = config_loader.save_config(new_config, filename)
@@ -226,13 +234,13 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 "title": "Configuration Saved",
                 "message": f"Successfully saved configuration as: {config_name}",
                 "color": "success",
-            }, True  # Trigger form refresh
+            }
         except Exception as e:
             return no_update, {
                 "title": "Error",
                 "message": f"Failed to save configuration: {str(e)}",
                 "color": "danger",
-            }, no_update
+            }
 
     @app.callback(
         [
@@ -265,12 +273,13 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 "color": "danger",
             }, no_update
 
+    # Apply Config Changes Callback
     @app.callback(
         [
             Output("app-config", "data", allow_duplicate=True),
             Output("apply-config-button", "children"),
             Output("notification-trigger", "data", allow_duplicate=True),
-            Output("refresh-form-trigger", "data", allow_duplicate=True),
+            Output("config-feedback-alert", "is_open"),
         ],
         Input("apply-config-button", "n_clicks"),
         [
@@ -282,11 +291,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             State("kraken-taxonomy-input", "value"),
             State("external-kraken-input", "value"),
             State("check-interval-input", "value"),
-            State("memory-mapping-input", "value"),
-            State("blast-validation-input", "value"),
+            State("memory-mapping-input", "on"),  # Using "on" instead of "value"
+            State("blast-validation-input", "on"),  # Using "on" instead of "value"
             State("min-identity-input", "value"),
             State("cores-input", "value"),
-            State("clean-temp-input", "value"),
+            State("clean-temp-input", "on"),  # Using "on" instead of "value"
             State("app-config", "data"),
         ],
         prevent_initial_call=True,
@@ -317,15 +326,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 "title": "Error",
                 "message": "No configuration to update",
                 "color": "danger",
-            }, no_update
+            }, False
 
         # Create a completely new config object to avoid reference issues
-        config = {}
-        config.update(current_config)
-
-        # Force update the header title immediately
-        if analysis_name:
-            app.layout.children[2].children[0].children[0].children[0].children[1].children = analysis_name
+        config = dict(current_config)
 
         # Update fields if they have valid values
         if analysis_name is not None:
@@ -352,12 +356,12 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         if check_interval is not None:
             config["check_intervals_seconds"] = check_interval
 
-        # Handle boolean/list values
-        config["kraken_memory_mapping"] = (
-            "--memory-mapping" if memory_mapping and "true" in memory_mapping else ""
-        )
+        # Handle boolean values - using direct boolean values from "on" property
+        if memory_mapping is not None:
+            config["kraken_memory_mapping"] = "--memory-mapping" if memory_mapping else ""
 
-        config["blast_validation"] = blast_validation and "true" in blast_validation
+        if blast_validation is not None:
+            config["blast_validation"] = blast_validation
 
         if min_identity is not None:
             config["min_perc_identity"] = min_identity
@@ -369,15 +373,14 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             config["validation_cores"] = cores
             config["blast_cores"] = cores
 
-        config["remove_temp_files"] = (
-            "yes" if clean_temp and "true" in clean_temp else "no"
-        )
+        if clean_temp is not None:
+            config["remove_temp_files"] = "yes" if clean_temp else "no"
 
         return config, "✓ Applied!", {
             "title": "Changes Applied",
             "message": f"Configuration changes have been applied. Analysis name: {analysis_name}",
             "color": "success",
-        }, True  # Trigger form refresh
+        }, True  # Show the feedback alert
 
     # Reset the Apply button text after a short delay
     app.clientside_callback(
@@ -396,7 +399,24 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         prevent_initial_call=True,
     )
 
-    # Form field updates (not automatically triggering form refresh)
+    # Hide the feedback alert after a short delay
+    app.clientside_callback(
+        """
+        function(is_open) {
+            if (is_open) {
+                setTimeout(function() {
+                    return false;
+                }, 3000);
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("config-feedback-alert", "is_open", allow_duplicate=True),
+        Input("config-feedback-alert", "is_open"),
+        prevent_initial_call=True,
+    )
+
+    # Form field updates
     @app.callback(
         Output("app-config", "data", allow_duplicate=True),
         [
@@ -408,11 +428,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("kraken-taxonomy-input", "value"),
             Input("external-kraken-input", "value"),
             Input("check-interval-input", "value"),
-            Input("memory-mapping-input", "value"),
-            Input("blast-validation-input", "value"),
+            Input("memory-mapping-input", "on"),  # Using "on" instead of "value"
+            Input("blast-validation-input", "on"),  # Using "on" instead of "value"
             Input("min-identity-input", "value"),
             Input("cores-input", "value"),
-            Input("clean-temp-input", "value"),
+            Input("clean-temp-input", "on"),  # Using "on" instead of "value"
         ],
         State("app-config", "data"),
         prevent_initial_call=True,
@@ -465,14 +485,12 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         if check_interval is not None:
             config["check_intervals_seconds"] = check_interval
 
-        # Handle boolean/list values
+        # Handle boolean values
         if memory_mapping is not None:
-            config["kraken_memory_mapping"] = (
-                "--memory-mapping" if memory_mapping and "true" in memory_mapping else ""
-            )
+            config["kraken_memory_mapping"] = "--memory-mapping" if memory_mapping else ""
 
         if blast_validation is not None:
-            config["blast_validation"] = blast_validation and "true" in blast_validation
+            config["blast_validation"] = blast_validation
 
         if min_identity is not None:
             config["min_perc_identity"] = min_identity
@@ -485,13 +503,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             config["blast_cores"] = cores
 
         if clean_temp is not None:
-            config["remove_temp_files"] = (
-                "yes" if clean_temp and "true" in clean_temp else "no"
-            )
+            config["remove_temp_files"] = "yes" if clean_temp else "no"
 
         return config
 
-    # Initialize form from config - now triggered by both config changes and explicit refresh
+    # Initialize form from config
     @app.callback(
         [
             Output("analysis-name-input", "value"),
@@ -502,30 +518,21 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("kraken-taxonomy-input", "value"),
             Output("external-kraken-input", "value"),
             Output("check-interval-input", "value"),
-            Output("memory-mapping-input", "value"),
-            Output("blast-validation-input", "value"),
+            Output("memory-mapping-input", "on"),  # Using "on" instead of "value"
+            Output("blast-validation-input", "on"),  # Using "on" instead of "value"
             Output("min-identity-input", "value"),
             Output("cores-input", "value"),
-            Output("clean-temp-input", "value"),
+            Output("clean-temp-input", "on"),  # Using "on" instead of "value"
         ],
         [Input("app-config", "data"), Input("refresh-form-trigger", "data")],
     )
-    def initialize_form_from_config(config, _):
+    def initialize_form_from_config(config, refresh_trigger):
         """Initialize form fields from the current configuration."""
         if not config:
             return [no_update] * 13
 
-        # Ensure header title is synchronized with analysis_name
+        # Extract values from config
         analysis_name = config.get("analysis_name", "")
-
-        # Force update to the header (direct DOM manipulation for immediate effect)
-        # This is a backup method in case the callback doesn't update the header fast enough
-        try:
-            app.layout.children[2].children[0].children[0].children[0].children[1].children = analysis_name
-        except Exception as e:
-            logging.warning(f"Could not update header directly: {e}")
-
-        # Extract other values from config
         nanopore_dir = config.get("nanopore_output_directory", "")
         kraken_db = config.get("kraken_db", "")
         update_interval = config.get("update_interval_seconds", 30)
@@ -534,17 +541,12 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         external_kraken = config.get("external_kraken2_db", "")
         check_interval = config.get("check_intervals_seconds", 15)
 
-        # Handle boolean/list values
-        memory_mapping = (
-            ["true"]
-            if config.get("kraken_memory_mapping", "") == "--memory-mapping"
-            else []
-        )
-        blast_validation = ["true"] if config.get("blast_validation", True) else []
-
+        # Handle boolean values
+        memory_mapping = config.get("kraken_memory_mapping", "") == "--memory-mapping"
+        blast_validation = config.get("blast_validation", True)
         min_identity = config.get("min_perc_identity", 90)
         cores = config.get("snakemake_cores", 1)
-        clean_temp = ["true"] if config.get("remove_temp_files", "yes") == "yes" else []
+        clean_temp = config.get("remove_temp_files", "yes") == "yes"
 
         return [
             analysis_name,

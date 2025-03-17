@@ -95,6 +95,14 @@ class ConfigLoader:
             with open(config_path, "r") as f:
                 config = self.yaml.load(f)
 
+            # Ensure config is a dictionary
+            if config is None:
+                logging.warning(f"Configuration file {config_path} is empty, using defaults")
+                config = self.create_default_config()
+
+            # Update timestamp for tracking
+            config["timestamp"] = datetime.datetime.now().isoformat()
+
             return config
         except FileNotFoundError:
             logging.error(f"Configuration file {config_path} not found")
@@ -133,34 +141,23 @@ class ConfigLoader:
         # Update timestamp in config
         config["timestamp"] = datetime.datetime.now().isoformat()
 
+        # Ensure config directory exists
+        os.makedirs(self.config_dir, exist_ok=True)
+
         config_path = os.path.join(self.config_dir, filename)
         logging.info(f"Saving configuration to {config_path}")
 
-        # Check if the file already exists and use existing file to preserve comments
-        if os.path.exists(config_path):
-            try:
-                # Load existing file to preserve comments
-                with open(config_path, "r") as f:
-                    existing_config = self.yaml.load(f)
-
-                # Update with new values
-                for key, value in config.items():
-                    existing_config[key] = value
-
-                # Write back
-                with open(config_path, "w") as f:
-                    self.yaml.dump(existing_config, f)
-            except Exception as e:
-                logging.warning(f"Failed to preserve comments in {config_path}: {e}")
-                # Fallback to direct write
-                with open(config_path, "w") as f:
-                    self.yaml.dump(config, f)
-        else:
-            # New file, just write directly
+        try:
+            # Always write a new file to avoid corruption issues
             with open(config_path, "w") as f:
                 self.yaml.dump(config, f)
 
-        return config_path
+            logging.info(f"Configuration saved successfully to {config_path}")
+            return config_path
+
+        except Exception as e:
+            logging.error(f"Failed to save configuration to {config_path}: {e}")
+            raise
 
     def get_available_configs(self) -> List[Dict[str, Any]]:
         """
@@ -169,6 +166,9 @@ class ConfigLoader:
         Returns:
             A list of dictionaries containing metadata about available configs
         """
+        # Ensure config directory exists
+        os.makedirs(self.config_dir, exist_ok=True)
+
         config_files = glob.glob(os.path.join(self.config_dir, "*.yaml"))
         configs = []
 
@@ -178,7 +178,7 @@ class ConfigLoader:
                 configs.append(
                     {
                         "path": config_file,
-                        "name": config.get("analysis_name", "Unnamed"),
+                        "name": config.get("analysis_name", os.path.basename(config_file)),
                         "timestamp": config.get("timestamp", "Unknown"),
                         "filename": os.path.basename(config_file),
                     }
