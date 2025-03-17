@@ -46,15 +46,7 @@ class BackendManager:
         os.makedirs(self.log_dir, exist_ok=True)
 
     def setup_project(self, config: Dict[str, Any]) -> Tuple[bool, str]:
-        """
-        Set up a project with the given configuration.
-
-        Args:
-            config: Configuration dictionary
-
-        Returns:
-            Tuple of (success, message)
-        """
+        """Set up a project with the given configuration."""
         self.config = config
 
         # Validate required directories
@@ -76,23 +68,25 @@ class BackendManager:
 
         # Create subdirectories
         for subdir in [
-            "kraken_cumul",
-            "qc_data",
-            "fastp_reports",
-            "validation_fastas",
-            "blast_result_files",
-            "kraken_results",
-            "fastp_filtered",
-            "reports",
+            "kraken_cumul", "qc_data", "fastp_reports", "validation_fastas",
+            "blast_result_files", "kraken_results", "fastp_filtered", "reports",
         ]:
             os.makedirs(os.path.join(main_dir, subdir), exist_ok=True)
+
+        # Create a modified config for saving to YAML
+        yaml_config = dict(config)
+
+        # FORCE boolean values to be correct format, regardless of input
+        # This is the critical fix for toggle values
+        yaml_config["blast_validation"] = str(config.get("blast_validation")).lower() == "true"
+        yaml_config["kraken_memory_mapping"] = str(config.get("kraken_memory_mapping")).lower() == "true"
+        yaml_config["remove_temp_files"] = str(config.get("remove_temp_files")).lower() == "true"
 
         # Write configuration to project directory
         config_path = os.path.join(main_dir, "config.yaml")
         with open(config_path, "w") as f:
             import yaml
-
-            yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
+            yaml.safe_dump(yaml_config, f, default_flow_style=False, sort_keys=False)
 
         # Set up Snakemake workflow
         success, message = self.snakemake_manager.setup(config_path)

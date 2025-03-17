@@ -1,3 +1,6 @@
+Here's the complete content for `nanometa_live/Snakefile`:
+
+```python
 """
 Snakemake workflow for Nanometa Live.
 
@@ -103,7 +106,7 @@ if config.get("blast_validation", True):
             species_id = species.get("taxid")
             if species_id:
                 file_path = os.path.join(path2, str(species_id))
-                if not os.path.isfile(file_path):
+                if not os.path.exists(file_path):
                     with open(file_path, 'w') as f:
                         f.write("placeholder file")
                     logging.info(f"Created placeholder: {file_path}")
@@ -206,7 +209,7 @@ rule run_kraken:
     shell:
         "kraken2 --db {db} {mm} --gzip-compressed --report {{output.report}} {{input}} > {{output.txt}} && rm {{input}}".format(
             db=config.get("kraken_db", ""),
-            mm=config.get("kraken_memory_mapping", "--memory-mapping")
+            mm="--memory-mapping" if config.get("kraken_memory_mapping", True) else ""
         )
 
 rule append_kraken_cumul:
@@ -320,7 +323,7 @@ if config.get("blast_validation", True):
 
 # Cleanup rule to run at the end if enabled
 onsuccess:
-    if config.get("remove_temp_files", "yes") == "yes":
+    if config.get("remove_temp_files", True):
         logging.info("Cleaning up temporary files...")
 
         # Define paths to clean
@@ -349,3 +352,4 @@ onsuccess:
             logging.info("Removed validation placeholders")
 
         logging.info("Cleanup complete")
+```

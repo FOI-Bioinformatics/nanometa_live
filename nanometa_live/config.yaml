@@ -112,8 +112,8 @@ kraken_taxonomy: "gtdb"
 ## KRAKEN 2 HIGH RAM REQUIREMENTS ##
 # Description: Toggle for memory-mapping in Kraken2 to manage RAM usage.
 # Note: Enable this on systems with limited RAM for better performance.
-# Usage: Use "--memory-mapping" to enable or leave empty to disable.
-kraken_memory_mapping: "--memory-mapping"
+# Usage: Use "true"to enable or "false" to disable.
+kraken_memory_mapping: True
 
 
 ## External Kraken2 Databases ##
@@ -201,7 +201,7 @@ external_kraken2_info:
 ## BLAST VALIDATION ##
 # Description: Controls the activation of sequence validation using BLAST.
 # Note: Enabling validation enhances accuracy but may increase processing time.
-# Options: True (enable validation), False (disable validation)
+# Options: true (enable validation), Falsfalsee (disable validation)
 blast_validation: True
 
 
@@ -227,8 +227,8 @@ conda_frontend: "mamba"
 ## REMOVE TEMP FILES ##
 # Description: Option to remove temporary files created during workflow execution.
 # Note: Keeping temporary files can be useful for debugging but may consume significant disk space.
-# Options: "yes" (remove files), "no" (keep files)
-remove_temp_files: "yes"
+# Options: "true" (remove files), "false" (keep files)
+remove_temp_files: True
 
 ## PROJECT MAIN DIRECTORY ##
 # Description: The primary directory for the project, automatically set during project creation.

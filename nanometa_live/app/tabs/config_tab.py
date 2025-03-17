@@ -291,11 +291,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             State("kraken-taxonomy-input", "value"),
             State("external-kraken-input", "value"),
             State("check-interval-input", "value"),
-            State("memory-mapping-input", "on"),  # Using "on" instead of "value"
-            State("blast-validation-input", "on"),  # Using "on" instead of "value"
+            State("memory-mapping-input", "on"),  # Boolean switch
+            State("blast-validation-input", "on"),  # Boolean switch
             State("min-identity-input", "value"),
             State("cores-input", "value"),
-            State("clean-temp-input", "on"),  # Using "on" instead of "value"
+            State("clean-temp-input", "on"),  # Boolean switch
             State("app-config", "data"),
         ],
         prevent_initial_call=True,
@@ -356,12 +356,12 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         if check_interval is not None:
             config["check_intervals_seconds"] = check_interval
 
-        # Handle boolean values - using direct boolean values from "on" property
+        # Handle boolean values consistently as true/false
         if memory_mapping is not None:
-            config["kraken_memory_mapping"] = "--memory-mapping" if memory_mapping else ""
+            config["kraken_memory_mapping"] = bool(memory_mapping)
 
         if blast_validation is not None:
-            config["blast_validation"] = blast_validation
+            config["blast_validation"] = bool(blast_validation)
 
         if min_identity is not None:
             config["min_perc_identity"] = min_identity
@@ -374,7 +374,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             config["blast_cores"] = cores
 
         if clean_temp is not None:
-            config["remove_temp_files"] = "yes" if clean_temp else "no"
+            config["remove_temp_files"] = bool(clean_temp)
 
         return config, "✓ Applied!", {
             "title": "Changes Applied",
@@ -428,11 +428,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("kraken-taxonomy-input", "value"),
             Input("external-kraken-input", "value"),
             Input("check-interval-input", "value"),
-            Input("memory-mapping-input", "on"),  # Using "on" instead of "value"
-            Input("blast-validation-input", "on"),  # Using "on" instead of "value"
+            Input("memory-mapping-input", "on"),  # Boolean switch
+            Input("blast-validation-input", "on"),  # Boolean switch
             Input("min-identity-input", "value"),
             Input("cores-input", "value"),
-            Input("clean-temp-input", "on"),  # Using "on" instead of "value"
+            Input("clean-temp-input", "on"),  # Boolean switch
         ],
         State("app-config", "data"),
         prevent_initial_call=True,
@@ -485,12 +485,12 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         if check_interval is not None:
             config["check_intervals_seconds"] = check_interval
 
-        # Handle boolean values
+        # Handle boolean values consistently as true/false
         if memory_mapping is not None:
-            config["kraken_memory_mapping"] = "--memory-mapping" if memory_mapping else ""
+            config["kraken_memory_mapping"] = bool(memory_mapping)
 
         if blast_validation is not None:
-            config["blast_validation"] = blast_validation
+            config["blast_validation"] = bool(blast_validation)
 
         if min_identity is not None:
             config["min_perc_identity"] = min_identity
@@ -503,7 +503,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             config["blast_cores"] = cores
 
         if clean_temp is not None:
-            config["remove_temp_files"] = "yes" if clean_temp else "no"
+            config["remove_temp_files"] = bool(clean_temp)
 
         return config
 
