@@ -56,6 +56,29 @@ wait_for_input(
     config.get("check_intervals_seconds", 15)
 )
 
+def _adapt_boolean_for_snakemake(config):
+    """
+    Convert boolean parameters to the format expected by the Snakefile.
+
+    Args:
+        config: Configuration dictionary to adapt
+
+    Returns:
+        Modified configuration with adapted boolean values
+    """
+    # Create a copy to prevent modifying the original
+    adapted_config = dict(config)
+
+    # Convert kraken_memory_mapping to the expected flag format
+    if "kraken_memory_mapping" in adapted_config:
+        adapted_config["kraken_memory_mapping"] = "--memory-mapping" if adapted_config["kraken_memory_mapping"] else ""
+
+    # Convert remove_temp_files to "yes"/"no" format
+    if "remove_temp_files" in adapted_config:
+        adapted_config["remove_temp_files"] = "yes" if adapted_config["remove_temp_files"] else "no"
+
+    return adapted_config
+
 # Process files from input directory
 def glob_input_files():
     """Find all FASTQ files in the input directory."""
@@ -209,8 +232,9 @@ rule run_kraken:
     shell:
         "kraken2 --db {db} {mm} --gzip-compressed --report {{output.report}} {{input}} > {{output.txt}} && rm {{input}}".format(
             db=config.get("kraken_db", ""),
-            mm="--memory-mapping" if config.get("kraken_memory_mapping", True) else ""
+            mm=config.get("kraken_memory_mapping", "")  # This is now expected to be "--memory-mapping" or ""
         )
+
 
 rule append_kraken_cumul:
     """
@@ -323,7 +347,7 @@ if config.get("blast_validation", True):
 
 # Cleanup rule to run at the end if enabled
 onsuccess:
-    if config.get("remove_temp_files", True):
+    if config.get("remove_temp_files", "yes") == "yes":  # This expects "yes" or "no"
         logging.info("Cleaning up temporary files...")
 
         # Define paths to clean

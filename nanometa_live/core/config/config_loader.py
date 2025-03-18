@@ -19,44 +19,6 @@ from typing import Dict, Any, Optional, List, Union
 # Use ruamel.yaml for comment preservation
 from ruamel.yaml import YAML
 
-def _process_boolean_toggles(config_dict):
-    """
-    Process boolean toggle values to ensure they're in the correct format.
-    Must be called before saving to YAML.
-    """
-    if not isinstance(config_dict, dict):
-        return config_dict
-
-    # Create a copy to avoid modifying the original
-    result = dict(config_dict)
-
-    # Handle blast_validation explicitly
-    if "blast_validation" in result:
-        # Force to Python boolean value
-        if isinstance(result["blast_validation"], str):
-            result["blast_validation"] = result["blast_validation"].lower() in ["true", "yes", "y", "1"]
-        else:
-            result["blast_validation"] = bool(result["blast_validation"])
-
-    # Handle kraken_memory_mapping
-    if "kraken_memory_mapping" in result:
-        # Should be string "--memory-mapping" when true, "" when false
-        if isinstance(result["kraken_memory_mapping"], bool):
-            result["kraken_memory_mapping"] = "--memory-mapping" if result["kraken_memory_mapping"] else ""
-        elif result["kraken_memory_mapping"] not in ["--memory-mapping", ""]:
-            # Handle other string values like "True"/"False"
-            result["kraken_memory_mapping"] = "--memory-mapping" if str(result["kraken_memory_mapping"]).lower() in ["true", "yes", "y", "1"] else ""
-
-    # Handle remove_temp_files
-    if "remove_temp_files" in result:
-        # Should be string "yes" when true, "no" when false
-        if isinstance(result["remove_temp_files"], bool):
-            result["remove_temp_files"] = "yes" if result["remove_temp_files"] else "no"
-        elif result["remove_temp_files"] not in ["yes", "no"]:
-            # Handle other string values
-            result["remove_temp_files"] = "yes" if str(result["remove_temp_files"]).lower() in ["true", "yes", "y", "1"] else "no"
-
-    return result
 
 class ConfigLoader:
     """Handles loading and saving of application configurations."""
@@ -79,22 +41,6 @@ class ConfigLoader:
         # CRITICAL: Configure yaml to handle booleans correctly
         # This ensures true/false are output as lowercase in the YAML
         self.yaml.boolean_representation = ['false', 'true']
-
-        # Force booleans to be strings in specific cases
-        original_represent_bool = self.yaml.representer.represent_bool
-
-        def custom_represent_bool(self_repr, data):
-            # Handle specific config keys that should NOT be represented as booleans
-            if self_repr.serializer and hasattr(self_repr.serializer, 'current_key'):
-                if self_repr.serializer.current_key == 'remove_temp_files':
-                    return self_repr.represent_scalar('tag:yaml.org,2002:str', 'yes' if data else 'no')
-                elif self_repr.serializer.current_key == 'kraken_memory_mapping':
-                    return self_repr.represent_scalar('tag:yaml.org,2002:str', '--memory-mapping' if data else '')
-            # Default boolean handling
-            return original_represent_bool(data)
-
-        # Replace the boolean representer
-        self.yaml.representer.represent_bool = custom_represent_bool
 
     def create_default_config(self) -> Dict[str, Any]:
         """
@@ -120,7 +66,7 @@ class ConfigLoader:
             "check_intervals_seconds": 15,
             "kraken_db": "",
             "kraken_taxonomy": "gtdb",
-            # Now using boolean values consistently
+            # Using strict boolean values
             "kraken_memory_mapping": True,
             "blast_validation": True,
             "min_perc_identity": 90,
@@ -162,6 +108,9 @@ class ConfigLoader:
             # Update timestamp for tracking
             config["timestamp"] = datetime.datetime.now().isoformat()
 
+            # Ensure boolean parameters are strictly boolean
+            self._standardize_boolean_params(config)
+
             return config
         except FileNotFoundError:
             logging.error(f"Configuration file {config_path} not found")
@@ -172,6 +121,33 @@ class ConfigLoader:
         except Exception as e:
             logging.error(f"Failed to load configuration from {config_path}. Exception: {e}")
             raise
+
+    def _standardize_boolean_params(self, config: Dict[str, Any]) -> None:
+        """
+        Ensure boolean parameters are strictly boolean values.
+
+        Args:
+            config: Configuration dictionary to standardize
+        """
+        # Convert kraken_memory_mapping to boolean
+        if "kraken_memory_mapping" in config:
+            if isinstance(config["kraken_memory_mapping"], str):
+                config["kraken_memory_mapping"] = config["kraken_memory_mapping"] == "--memory-mapping" or \
+                    config["kraken_memory_mapping"].lower() in ["true", "yes", "y", "1"]
+            config["kraken_memory_mapping"] = bool(config["kraken_memory_mapping"])
+
+        # Convert blast_validation to boolean
+        if "blast_validation" in config:
+            if isinstance(config["blast_validation"], str):
+                config["blast_validation"] = config["blast_validation"].lower() in ["true", "yes", "y", "1"]
+            config["blast_validation"] = bool(config["blast_validation"])
+
+        # Convert remove_temp_files to boolean
+        if "remove_temp_files" in config:
+            if isinstance(config["remove_temp_files"], str):
+                config["remove_temp_files"] = config["remove_temp_files"] == "yes" or \
+                    config["remove_temp_files"].lower() in ["true", "yes", "y", "1"]
+            config["remove_temp_files"] = bool(config["remove_temp_files"])
 
     def save_config(self, config: Dict[str, Any], filename: Optional[str] = None) -> str:
         """Save a configuration to a file with preserved comments."""
@@ -191,37 +167,16 @@ class ConfigLoader:
         # Create a copy to prevent modifying the original
         save_config = dict(config)
 
-        # CRITICAL: Explicitly handle each toggle value
-        if "blast_validation" in save_config:
-            # Force to Python boolean type and then to correct string representation
-            blast_val = bool(save_config["blast_validation"])
-            save_config["blast_validation"] = False if blast_val is False else True
-
-        if "kraken_memory_mapping" in save_config:
-            # If it's a boolean already, leave it; if it's "--memory-mapping", convert to boolean
-            if save_config["kraken_memory_mapping"] == "--memory-mapping":
-                save_config["kraken_memory_mapping"] = True
-            elif save_config["kraken_memory_mapping"] == "":
-                save_config["kraken_memory_mapping"] = False
-
-        if "remove_temp_files" in save_config:
-            # Convert "yes"/"no" to boolean for consistency
-            if isinstance(save_config["remove_temp_files"], str):
-                save_config["remove_temp_files"] = save_config["remove_temp_files"] == "yes"
+        # Ensure boolean parameters are strictly boolean
+        self._standardize_boolean_params(save_config)
 
         # Ensure config directory exists
         os.makedirs(self.config_dir, exist_ok=True)
         config_path = os.path.join(self.config_dir, filename)
 
-        # Configure YAML specifically for this save operation
-        yaml = YAML()
-        yaml.preserve_quotes = True
-        yaml.indent(mapping=2, sequence=4, offset=2)
-        yaml.boolean_representation = ['false', 'true']
-
         try:
             with open(config_path, "w") as f:
-                yaml.dump(save_config, f)
+                self.yaml.dump(save_config, f)
             return config_path
         except Exception as e:
             logging.error(f"Failed to save configuration: {e}")
@@ -289,5 +244,8 @@ class ConfigLoader:
         for key, value in default_config.items():
             if key not in config:
                 config[key] = value
+
+        # Ensure boolean parameters are strictly boolean
+        self._standardize_boolean_params(config)
 
         return config

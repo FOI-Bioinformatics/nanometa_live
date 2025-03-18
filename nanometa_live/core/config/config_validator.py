@@ -34,7 +34,36 @@ def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
     _validate_validation_settings(validated_config)
     _validate_gui_settings(validated_config)
 
+    # Critical: Validate boolean parameters
+    _validate_boolean_parameters(validated_config)
+
     return validated_config
+
+
+def _validate_boolean_parameters(config: Dict[str, Any]) -> None:
+    """
+    Ensure key boolean parameters are strictly True or False.
+
+    Args:
+        config: Configuration dictionary to validate
+    """
+    # Ensure kraken_memory_mapping is a boolean
+    if "kraken_memory_mapping" in config:
+        config["kraken_memory_mapping"] = bool(config["kraken_memory_mapping"])
+    else:
+        config["kraken_memory_mapping"] = True
+
+    # Ensure blast_validation is a boolean
+    if "blast_validation" in config:
+        config["blast_validation"] = bool(config["blast_validation"])
+    else:
+        config["blast_validation"] = True
+
+    # Ensure remove_temp_files is a boolean
+    if "remove_temp_files" in config:
+        config["remove_temp_files"] = bool(config["remove_temp_files"])
+    else:
+        config["remove_temp_files"] = True
 
 
 def _validate_basic_settings(config: Dict[str, Any]) -> None:
@@ -111,10 +140,6 @@ def _validate_performance_settings(config: Dict[str, Any]) -> None:
     ):
         config["check_intervals_seconds"] = 15
 
-    # Temporary files
-    if "remove_temp_files" not in config:
-        config["remove_temp_files"] = "yes"
-
     # Local package management
     if "local_package_management" not in config:
         config["local_package_management"] = None
@@ -137,10 +162,6 @@ def _validate_taxonomy_settings(config: Dict[str, Any]) -> None:
         "ncbi",
     ]:
         config["kraken_taxonomy"] = "gtdb"
-
-    # Kraken memory mapping
-    if "kraken_memory_mapping" not in config:
-        config["kraken_memory_mapping"] = "--memory-mapping"
 
     # External Kraken database
     if "external_kraken2_db" not in config:
@@ -176,10 +197,6 @@ def _validate_validation_settings(config: Dict[str, Any]) -> None:
     Args:
         config: Configuration dictionary to validate
     """
-    # BLAST validation
-    if "blast_validation" not in config:
-        config["blast_validation"] = True
-
     # Minimum percent identity
     if (
         "min_perc_identity" not in config

@@ -485,7 +485,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         if check_interval is not None:
             config["check_intervals_seconds"] = check_interval
 
-        # Handle boolean values consistently as true/false
+        # Handle boolean values consistently as true Python booleans
         if memory_mapping is not None:
             config["kraken_memory_mapping"] = bool(memory_mapping)
 
@@ -507,6 +507,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
         return config
 
+
     # Initialize form from config
     @app.callback(
         [
@@ -526,6 +527,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         ],
         [Input("app-config", "data"), Input("refresh-form-trigger", "data")],
     )
+
     def initialize_form_from_config(config, refresh_trigger):
         """Initialize form fields from the current configuration."""
         if not config:
@@ -542,11 +544,26 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         check_interval = config.get("check_intervals_seconds", 15)
 
         # Handle boolean values
-        memory_mapping = config.get("kraken_memory_mapping", "") == "--memory-mapping"
+        memory_mapping = config.get("kraken_memory_mapping", "")
+        if isinstance(memory_mapping, str):
+            memory_mapping = memory_mapping == "--memory-mapping"
+        else:
+            memory_mapping = bool(memory_mapping)
+
         blast_validation = config.get("blast_validation", True)
+        if isinstance(blast_validation, str):
+            blast_validation = blast_validation.lower() in ["true", "yes", "y", "1"]
+        else:
+            blast_validation = bool(blast_validation)
+
         min_identity = config.get("min_perc_identity", 90)
         cores = config.get("snakemake_cores", 1)
-        clean_temp = config.get("remove_temp_files", "yes") == "yes"
+
+        clean_temp = config.get("remove_temp_files", "")
+        if isinstance(clean_temp, str):
+            clean_temp = clean_temp == "yes" or clean_temp.lower() in ["true", "yes", "y", "1"]
+        else:
+            clean_temp = bool(clean_temp)
 
         return [
             analysis_name,

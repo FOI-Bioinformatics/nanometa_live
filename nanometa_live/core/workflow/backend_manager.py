@@ -18,6 +18,30 @@ from pathlib import Path
 from nanometa_live.core.workflow.snakemake_manager import SnakemakeManager
 
 
+def _adapt_boolean_for_snakemake(config):
+    """
+    Convert boolean parameters to the format expected by the Snakefile.
+
+    Args:
+        config: Configuration dictionary to adapt
+
+    Returns:
+        Modified configuration with adapted boolean values
+    """
+    # Create a copy to prevent modifying the original
+    adapted_config = dict(config)
+
+    # Convert kraken_memory_mapping to the expected flag format
+    if "kraken_memory_mapping" in adapted_config:
+        adapted_config["kraken_memory_mapping"] = "--memory-mapping" if adapted_config["kraken_memory_mapping"] else ""
+
+    # Convert remove_temp_files to "yes"/"no" format
+    if "remove_temp_files" in adapted_config:
+        adapted_config["remove_temp_files"] = "yes" if adapted_config["remove_temp_files"] else "no"
+
+    return adapted_config
+
+
 class BackendManager:
     """Manages backend processes for Nanometa Live."""
 
@@ -47,22 +71,33 @@ class BackendManager:
 
     def setup_project(self, config: Dict[str, Any]) -> Tuple[bool, str]:
         """Set up a project with the given configuration."""
-        self.config = config
+        # Ensure we're working with a copy
+        self.config = dict(config)
 
         # Validate required directories
-        if not config.get("nanopore_output_directory"):
+        if not self.config.get("nanopore_output_directory"):
             return False, "Nanopore output directory is required"
 
-        if not config.get("kraken_db"):
+        if not self.config.get("kraken_db"):
             return False, "Kraken database is required"
 
+        # Ensure boolean parameters are strictly boolean
+        if "kraken_memory_mapping" in self.config:
+            self.config["kraken_memory_mapping"] = bool(self.config["kraken_memory_mapping"])
+
+        if "blast_validation" in self.config:
+            self.config["blast_validation"] = bool(self.config["blast_validation"])
+
+        if "remove_temp_files" in self.config:
+            self.config["remove_temp_files"] = bool(self.config["remove_temp_files"])
+
         # Create required directories
-        main_dir = config.get("main_dir")
+        main_dir = self.config.get("main_dir")
         if not main_dir:
             # Create a timestamped directory in the data directory
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             main_dir = os.path.join(self.data_dir, "data", f"analysis_{timestamp}")
-            config["main_dir"] = main_dir
+            self.config["main_dir"] = main_dir
 
         os.makedirs(main_dir, exist_ok=True)
 
@@ -73,14 +108,8 @@ class BackendManager:
         ]:
             os.makedirs(os.path.join(main_dir, subdir), exist_ok=True)
 
-        # Create a modified config for saving to YAML
-        yaml_config = dict(config)
-
-        # FORCE boolean values to be correct format, regardless of input
-        # This is the critical fix for toggle values
-        yaml_config["blast_validation"] = str(config.get("blast_validation")).lower() == "true"
-        yaml_config["kraken_memory_mapping"] = str(config.get("kraken_memory_mapping")).lower() == "true"
-        yaml_config["remove_temp_files"] = str(config.get("remove_temp_files")).lower() == "true"
+        # Adapt boolean values for Snakefile
+        yaml_config = _adapt_boolean_for_snakemake(self.config)
 
         # Write configuration to project directory
         config_path = os.path.join(main_dir, "config.yaml")
