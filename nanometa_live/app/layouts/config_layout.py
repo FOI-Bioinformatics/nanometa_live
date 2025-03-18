@@ -39,30 +39,55 @@ def create_config_layout():
                 # Configuration quick actions
                 dbc.Row([
                     dbc.Col([
-                        dbc.Button(
-                            "Load Configuration",
-                            id="load-config-button",
-                            color="primary",
-                            className="me-2"
-                        ),
-                        dbc.Button(
-                            "Save Configuration",
-                            id="save-config-button",
-                            color="success",
-                            className="me-2"
-                        ),
-                        dbc.Button(
-                            "Apply Changes",
-                            id="apply-config-button",
-                            color="info",  # Changed from primary to info for better visibility
-                            className="me-2",
-                            style={"fontWeight": "bold"}  # Make it bolder
-                        ),
-                        dbc.Button(
-                            "Reset to Defaults",
-                            id="reset-config-button",
-                            color="warning"
-                        )
+                        html.Div([
+                            dbc.Button(
+                                "Load Configuration",
+                                id="load-config-button",
+                                color="primary",
+                                className="me-2"
+                            ),
+                            dbc.Tooltip(
+                                "Load a previously saved configuration file, replacing current settings",
+                                target="load-config-button",
+                                placement="bottom"
+                            ),
+
+                            dbc.Button(
+                                "Save Configuration",
+                                id="save-config-button",
+                                color="success",
+                                className="me-2"
+                            ),
+                            dbc.Tooltip(
+                                "Save current configuration to disk for future use",
+                                target="save-config-button",
+                                placement="bottom"
+                            ),
+
+                            dbc.Button(
+                                "Apply Changes",
+                                id="apply-config-button",
+                                color="info",
+                                className="me-2",
+                                style={"fontWeight": "bold"}
+                            ),
+                            dbc.Tooltip(
+                                "Commit changes to the active configuration (doesn't save to disk)",
+                                target="apply-config-button",
+                                placement="bottom"
+                            ),
+
+                            dbc.Button(
+                                "Reset to Defaults",
+                                id="reset-config-button",
+                                color="warning"
+                            ),
+                            dbc.Tooltip(
+                                "Reset all settings to default values",
+                                target="reset-config-button",
+                                placement="bottom"
+                            )
+                        ], className="d-flex")
                     ], width=12)
                 ], className="mb-4"),
 

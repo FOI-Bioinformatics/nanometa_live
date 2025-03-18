@@ -116,23 +116,37 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     )
     def show_notification(notification_data, current_notifications):
         """Show a notification."""
-        if not notification_data:
+        try:
+            if not notification_data:
+                return current_notifications or []
+
+            if current_notifications is None:
+                current_notifications = []
+
+            # Validate notification data structure
+            if not isinstance(notification_data, dict):
+                logging.error(f"Invalid notification data format: {notification_data}")
+                return current_notifications
+
+            # Make sure required fields exist
+            message = notification_data.get("message", "Notification")
+            title = notification_data.get("title", "Notification")
+            color = notification_data.get("color", "primary")
+
+            notification = dbc.Toast(
+                message,
+                id=f"notification-{int(time.time())}",
+                header=title,
+                is_open=True,
+                dismissable=True,
+                duration=4000,
+                color=color,
+            )
+
+            return current_notifications + [notification]
+        except Exception as e:
+            logging.error(f"Error showing notification: {str(e)}")
             return current_notifications or []
-
-        if current_notifications is None:
-            current_notifications = []
-
-        notification = dbc.Toast(
-            notification_data.get("message", "Notification"),
-            id=f"notification-{int(time.time())}",
-            header=notification_data.get("title", "Notification"),
-            is_open=True,
-            dismissable=True,
-            duration=4000,
-            color=notification_data.get("color", "primary"),
-        )
-
-        return current_notifications + [notification]
 
     @app.callback(
         Output("notification-trigger", "data", allow_duplicate=True),
@@ -216,97 +230,148 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         - Update progress during preparation
         - Close modal when done
         """
-        # Default values for returns
-        no_changes = [no_update, no_update, no_update, no_update, no_update, no_update]
+        try:
+            # Default values for returns
+            no_changes = [no_update, no_update, no_update, no_update, no_update, no_update]
 
-        # Handle modal closing
-        if close_clicks and ctx.triggered_id == "close-prepare-modal":
-            return [False] + no_changes[1:]
+            # Handle modal closing
+            if close_clicks and ctx.triggered_id == "close-prepare-modal":
+                return False, no_update, no_update, no_update, no_update, no_update
 
-        # Handle preparation cancellation
-        if cancel_clicks and ctx.triggered_id == "cancel-prepare-button":
-            # Can add cancellation functionality here if needed
-            return [False] + no_changes[1:] + [{"display": "none"}, {
-                "title": "Cancelled",
-                "message": "Data preparation was cancelled",
-                "color": "warning",
-            }]
+            # Handle preparation cancellation
+            if cancel_clicks and ctx.triggered_id == "cancel-prepare-button":
+                try:
+                    # Update backend status if possible
+                    if hasattr(backend_manager, 'prep_status'):
+                        backend_manager.prep_status["running"] = False
+                        backend_manager.prep_status["message"] = "Cancelled by user"
+                except Exception as e:
+                    logging.error(f"Error cancelling preparation: {e}")
 
-        # Start preparation
-        if prepare_clicks and ctx.triggered_id == "prepare-data-button":
-            if not config:
-                return no_changes[:-1] + [{
-                    "title": "Error",
-                    "message": "No configuration loaded. Please configure the application first.",
-                    "color": "danger",
-                }]
+                return False, no_update, no_update, no_update, {"display": "none"}, {
+                    "title": "Cancelled",
+                    "message": "Data preparation was cancelled",
+                    "color": "warning",
+                }
 
-            # Start the preparation process
-            success, message = backend_manager.prepare_data()
-            if not success:
-                return no_changes[:-1] + [{
-                    "title": "Error",
-                    "message": f"Failed to start data preparation: {message}",
-                    "color": "danger",
-                }]
+            # Start preparation
+            if prepare_clicks and ctx.triggered_id == "prepare-data-button":
+                if not config:
+                    return no_update, no_update, no_update, no_update, no_update, {
+                        "title": "Error",
+                        "message": "No configuration loaded. Please configure the application first.",
+                        "color": "danger",
+                    }
 
-            # Preparation started successfully
-            return [
-                True,  # Open modal
-                "Starting data preparation...",  # Status message
-                0,  # Progress value
-                True,  # Close button disabled
-                {"display": "block"},  # Cancel button visible
-                no_update  # No notification
-            ]
+                # Make sure backend manager has the current config
+                if hasattr(backend_manager, 'config'):
+                    backend_manager.config = config
 
-        # Update progress during preparation
-        if is_open and ctx.triggered_id == "update-interval":
-            status = backend_manager.get_preparation_status()
+                # Start the preparation process
+                try:
+                    success, message = backend_manager.prepare_data()
+                    if not success:
+                        return no_update, no_update, no_update, no_update, no_update, {
+                            "title": "Error",
+                            "message": f"Failed to start data preparation: {message}",
+                            "color": "danger",
+                        }
+                except Exception as e:
+                    logging.error(f"Exception starting data preparation: {e}")
+                    return no_update, no_update, no_update, no_update, no_update, {
+                        "title": "Error",
+                        "message": f"Exception starting data preparation: {str(e)}",
+                        "color": "danger",
+                    }
 
-            if not status["running"]:
-                # Preparation finished
-                if status["errors"]:
-                    # Preparation failed
-                    return [
+                # Preparation started successfully
+                return (
+                    True,  # Open modal
+                    "Starting data preparation...",  # Status message
+                    0,  # Progress value
+                    True,  # Close button disabled
+                    {"display": "block"},  # Cancel button visible
+                    no_update  # No notification
+                )
+
+            # Update progress during preparation
+            if is_open and ctx.triggered_id == "update-interval":
+                try:
+                    status = backend_manager.get_preparation_status()
+                except Exception as e:
+                    logging.error(f"Error getting preparation status: {e}")
+                    return (
                         True,  # Keep modal open
-                        f"Error: {status['errors'][0]}",  # Show first error
-                        100,  # Complete progress
+                        f"Error retrieving status: {str(e)}",  # Show error
+                        0,  # Reset progress
                         False,  # Enable close button
                         {"display": "none"},  # Hide cancel button
                         {
                             "title": "Error",
-                            "message": f"Data preparation failed: {status['errors'][0]}",
+                            "message": f"Error retrieving preparation status: {str(e)}",
                             "color": "danger",
                         }
-                    ]
-                else:
-                    # Preparation succeeded
-                    return [
-                        True,  # Keep modal open
-                        "Data preparation completed successfully!",  # Success message
-                        100,  # Complete progress
-                        False,  # Enable close button
-                        {"display": "none"},  # Hide cancel button
-                        {
-                            "title": "Success",
-                            "message": "Data preparation completed successfully",
-                            "color": "success",
-                        }
-                    ]
-            else:
-                # Preparation still running
-                return [
-                    True,  # Keep modal open
-                    status["message"],  # Current status message
-                    status["progress"],  # Current progress value
-                    True,  # Keep close button disabled
-                    {"display": "block"},  # Show cancel button
-                    no_update  # No notification
-                ]
+                    )
 
-        # Default return if no conditions met
-        return no_changes
+                if not status["running"]:
+                    # Preparation finished
+                    if status["errors"]:
+                        # Preparation failed
+                        return (
+                            True,  # Keep modal open
+                            f"Error: {status['errors'][0]}",  # Show first error
+                            100,  # Complete progress
+                            False,  # Enable close button
+                            {"display": "none"},  # Hide cancel button
+                            {
+                                "title": "Error",
+                                "message": f"Data preparation failed: {status['errors'][0]}",
+                                "color": "danger",
+                            }
+                        )
+                    else:
+                        # Preparation succeeded
+                        return (
+                            True,  # Keep modal open
+                            "Data preparation completed successfully!",  # Success message
+                            100,  # Complete progress
+                            False,  # Enable close button
+                            {"display": "none"},  # Hide cancel button
+                            {
+                                "title": "Success",
+                                "message": "Data preparation completed successfully",
+                                "color": "success",
+                            }
+                        )
+                else:
+                    # Preparation still running
+                    return (
+                        True,  # Keep modal open
+                        status.get("message", "Processing..."),  # Current status message
+                        status.get("progress", 0),  # Current progress value
+                        True,  # Keep close button disabled
+                        {"display": "block"},  # Show cancel button
+                        no_update  # No notification
+                    )
+
+            # Default return if no conditions met
+            return no_changes
+
+        except Exception as e:
+            # Global error handler
+            logging.error(f"Exception in manage_data_preparation: {str(e)}")
+            return (
+                False,
+                f"Error: {str(e)}",
+                0,
+                False,
+                {"display": "none"},
+                {
+                    "title": "Error",
+                    "message": f"An unexpected error occurred: {str(e)}",
+                    "color": "danger",
+                }
+            )
 
     @app.callback(
         Output("app-config", "data", allow_duplicate=True),
@@ -333,3 +398,69 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             return backend_manager.config
 
         return no_update
+
+    @app.callback(
+        Output("notification-trigger", "data", allow_duplicate=True),
+        Input("prepare-data-button", "n_clicks"),
+        [State("app-config", "data")],
+        prevent_initial_call=True,
+    )
+    def handle_prepare_data_click(n_clicks, config):
+        """Handle clicks on the Prepare Data button."""
+        if not n_clicks:
+            return no_update
+
+        try:
+            # Update the backend manager's configuration
+            if config is None:
+                return {
+                    "title": "Error",
+                    "message": "No configuration loaded. Please configure the application first.",
+                    "color": "danger",
+                }
+
+            # Update backend manager with current config
+            backend_manager.config = config
+
+            # Now start data preparation
+            success, message = backend_manager.prepare_data()
+
+            # Return result as notification
+            return {
+                "title": "Data Preparation" if success else "Error",
+                "message": message,
+                "color": "success" if success else "danger",
+            }
+        except Exception as e:
+            # Catch any errors and return them as a notification
+            logging.error(f"Error in prepare data button handler: {str(e)}")
+            return {
+                "title": "Error",
+                "message": f"An unexpected error occurred: {str(e)}",
+                "color": "danger",
+            }
+
+    @app.callback(
+        Output("prepare-data-modal", "is_open", allow_duplicate=True),
+        Input("prepare-data-button", "n_clicks"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
+    )
+    def open_prepare_data_modal(n_clicks, config):
+        """Open the prepare data modal when the button is clicked."""
+        if not n_clicks:
+            return no_update
+
+        try:
+            if config is None:
+                # Don't open the modal if there's no config
+                return no_update
+
+            # Update backend manager with current config
+            backend_manager.config = config
+
+            # Return True to open the modal
+            return True
+        except Exception as e:
+            logging.error(f"Error opening prepare data modal: {str(e)}")
+            return no_update

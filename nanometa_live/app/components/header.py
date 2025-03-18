@@ -59,11 +59,22 @@ def create_header(title="Nanometa Live"):
                         color="info",
                         className="me-2"
                     ),
+                    dbc.Tooltip(
+                        "Extract taxonomy IDs and prepare validation databases",
+                        target="prepare-data-button",
+                        placement="bottom"
+                    ),
+
                     dbc.Button(
                         "Start Analysis",
                         id="start-stop-button",
                         color="primary",
                         className="me-2"
+                    ),
+                    dbc.Tooltip(
+                        "Begin processing the nanopore sequence data",
+                        target="start-stop-button",
+                        placement="bottom"
                     )
                 ], className="d-flex justify-content-end")
             ], width=3)

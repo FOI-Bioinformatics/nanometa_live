@@ -393,3 +393,25 @@ def get_most_recent_file(directory: str, pattern: str = None) -> Optional[str]:
     except Exception as e:
         logging.error(f"Error finding most recent file in {directory}: {e}")
         return None
+
+def check_command_exists(command: str) -> bool:
+    """
+    Check if an external command exists and is executable.
+
+    Args:
+        command: Name of the command to check
+
+    Returns:
+        True if the command exists and is executable, False otherwise
+    """
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["which", command],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
