@@ -15,7 +15,8 @@ import time
 import signal
 from pathlib import Path
 
-import snakemake
+# Update this import
+from snakemake.api import SnakemakeApi
 
 from nanometa_live import __version__
 from nanometa_live.core.config.config_loader import ConfigLoader
@@ -126,10 +127,14 @@ def unlock_workdir(config_path):
         config = config_loader.load_config(config_path)
         workdir = config.get("main_dir", os.path.dirname(config_path))
 
-        # Unlock the working directory
-        success = snakemake.snakemake(
-            snakefile_path, unlock=True, workdir=workdir, quiet=False
+        # Unlock the working directory using the new API
+        api = SnakemakeApi(
+            snakefile=snakefile_path,
+            unlock=True,
+            workdir=workdir,
+            quiet=False
         )
+        success = api.execute()
 
         return success
     except Exception as e:

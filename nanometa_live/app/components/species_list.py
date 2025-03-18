@@ -38,14 +38,12 @@ def create_species_list(species_data=None):
                         ),
                         width=7,
                     ),
-                    # Tax ID display (read-only)
+                    # Tax ID input (now editable)
                     dbc.Col(
                         dbc.Input(
                             id={"type": "species-taxid", "index": i},
                             value=species.get("taxid", ""),
-                            disabled=True,
-                            readOnly=True,
-                            placeholder="Tax ID (auto-filled)",
+                            placeholder="Enter/auto Tax ID",
                             className="mb-2",
                         ),
                         width=3,
@@ -111,8 +109,7 @@ def create_species_list(species_data=None):
         [
             html.H5("Species of Interest", className="mt-3"),
             html.P(
-                "Define the species you want to track in the analysis. Tax IDs will be "
-                + "filled automatically when the analysis starts.",
+                "Define the species you want to track in the analysis. You can manually enter Tax IDs or they will be auto-filled from the database.",
                 className="text-muted",
             ),
             html.Div(id="species-list-container", children=species_rows),

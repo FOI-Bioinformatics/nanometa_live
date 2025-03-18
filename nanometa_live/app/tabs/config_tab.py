@@ -617,9 +617,12 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             # Parse the file content
             new_species = []
             for line in decoded.splitlines():
-                species_name = line.strip()
+                parts = line.strip().split(',')  # Allow CSV format with name,taxid
+                species_name = parts[0].strip()
+                taxid = parts[1].strip() if len(parts) > 1 else ""
+
                 if species_name:
-                    new_species.append({"name": species_name, "taxid": ""})
+                    new_species.append({"name": species_name, "taxid": taxid})
 
             # Replace the existing species list
             species_list = new_species
@@ -654,7 +657,16 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                                 placeholder="Enter species name",
                                 className="mb-2",
                             ),
-                            width=10,
+                            width=7,
+                        ),
+                        dbc.Col(
+                            dbc.Input(
+                                id={"type": "species-taxid", "index": i},
+                                value=species.get("taxid", ""),
+                                placeholder="Enter/auto Tax ID",
+                                className="mb-2",
+                            ),
+                            width=3,
                         ),
                         dbc.Col(
                             dbc.Button(
@@ -702,6 +714,80 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 index = id_dict.get("index")
                 if 0 <= index < len(species_list):
                     species_list[index]["name"] = value
+
+        # Update the config
+        new_config["species_of_interest"] = species_list
+
+        return new_config
+
+    # Add a new callback to handle taxid input changes
+    @app.callback(
+        Output("app-config", "data", allow_duplicate=True),
+        Input({"type": "species-taxid", "index": dash.ALL}, "value"),
+        State({"type": "species-taxid", "index": dash.ALL}, "id"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
+    )
+    def update_species_taxids(values, ids, config):
+        """Update species taxids in the configuration."""
+        if not values or not ids or not config:
+            return no_update
+
+        # Create a copy of the current config
+        new_config = dict(config)
+        species_list = new_config.get("species_of_interest", [])
+
+        # Update the species taxids
+        for i, (value, id_dict) in enumerate(zip(values, ids)):
+            if value is not None:
+                index = id_dict.get("index")
+                if 0 <= index < len(species_list):
+                    species_list[index]["taxid"] = value
+
+        # Update the config
+        new_config["species_of_interest"] = species_list
+
+        return new_config
+
+    @app.callback(
+        Output("app-config", "data", allow_duplicate=True),
+        Input("species-file-upload", "contents"),
+        State("species-file-upload", "filename"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
+    )
+    def upload_species_file(contents, filename, config):
+        """Handle uploading a file with species names and taxids."""
+        if not contents or not config:
+            return no_update
+
+        content_type, content_string = contents.split(",")
+        decoded = base64.b64decode(content_string).decode("utf-8")
+
+        # Create a copy of the current config
+        new_config = dict(config)
+        species_list = []
+
+        # Detect format (CSV, TSV, or plain text)
+        if "," in decoded:
+            delimiter = ","
+        elif "\t" in decoded:
+            delimiter = "\t"
+        else:
+            delimiter = None
+
+        # Parse the file content
+        for line in decoded.splitlines():
+            if delimiter:
+                parts = line.split(delimiter)
+                species_name = parts[0].strip()
+                taxid = parts[1].strip() if len(parts) > 1 else ""
+            else:
+                species_name = line.strip()
+                taxid = ""
+
+            if species_name:
+                species_list.append({"name": species_name, "taxid": taxid})
 
         # Update the config
         new_config["species_of_interest"] = species_list

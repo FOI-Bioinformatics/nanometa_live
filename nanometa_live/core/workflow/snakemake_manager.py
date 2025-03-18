@@ -13,7 +13,15 @@ import time
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 
-import snakemake
+# Import the appropriate Snakemake interface
+try:
+    # For Snakemake 8.x
+    from snakemake.api import SnakemakeApi as Snakemake
+    SNAKEMAKE_V8 = True
+except ImportError:
+    # For Snakemake 7.x
+    import snakemake
+    SNAKEMAKE_V8 = False
 
 
 class SnakemakeManager:
@@ -156,22 +164,42 @@ class SnakemakeManager:
             log_file = os.path.join(self.log_dir, "snakemake.log")
 
             with open(log_file, "w") as log:
-                # Run Snakemake using the Python API
-                success = snakemake.snakemake(
-                    self.snakefile_path,
-                    cores=cores,
-                    configfiles=[self.config_path],
-                    workdir=os.path.dirname(self.config_path),
-                    dryrun=dryrun,
-                    printshellcmds=True,
-                    printreason=True,
-                    printrulegraph=True,
-                    stats=os.path.join(self.log_dir, "stats.json"),
-                    unlock=False,
-                    keepgoing=True,
-                    quiet=False,
-                    log_handler=[log],
-                )
+                # Run Snakemake using the appropriate API
+                if SNAKEMAKE_V8:
+                    # Snakemake 8.x API
+                    api = Snakemake(
+                        snakefile=self.snakefile_path,
+                        cores=cores,
+                        configfiles=[self.config_path],
+                        workdir=os.path.dirname(self.config_path),
+                        dryrun=dryrun,
+                        printshellcmds=True,
+                        printreason=True,
+                        printrulegraph=True,
+                        stats=os.path.join(self.log_dir, "stats.json"),
+                        unlock=False,
+                        keepgoing=True,
+                        quiet=False,
+                        log_handlers=[log]
+                    )
+                    success = api.execute()
+                else:
+                    # Snakemake 7.x API
+                    success = snakemake.snakemake(
+                        self.snakefile_path,
+                        cores=cores,
+                        configfiles=[self.config_path],
+                        workdir=os.path.dirname(self.config_path),
+                        dryrun=dryrun,
+                        printshellcmds=True,
+                        printreason=True,
+                        printrulegraph=True,
+                        stats=os.path.join(self.log_dir, "stats.json"),
+                        unlock=False,
+                        keepgoing=True,
+                        quiet=False,
+                        log_handler=[log],
+                    )
 
                 if not success:
                     self.status["errors"].append("Snakemake workflow failed")

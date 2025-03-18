@@ -451,9 +451,12 @@ class BackendManager:
 
             # Check if we matched any species
             if matched_species_count == 0:
-                self.prep_status["message"] = "Warning: No species matched in the database. Check species names."
-                self.prep_status["progress"] = 45
+                self.prep_status["running"] = False
+                self.prep_status["errors"].append("No species matched in the database. Check species names.")
+                self.prep_status["message"] = "Error: No species matched in the database. Check species names."
+                self.prep_status["progress"] = 100
                 self.prep_status["last_update"] = time.time()
+                return  # Exit the function immediately
             else:
                 self.prep_status["message"] = f"Found taxonomy IDs for {matched_species_count} out of {len(species_list)} species."
                 self.prep_status["progress"] = 45
@@ -530,7 +533,8 @@ class BackendManager:
                             "makeblastdb",
                             "-in", genome_file,
                             "-dbtype", "nucl",
-                            "-out", db_file
+                            "-out", db_file,
+                            "-parse_seqids"
                         ]
                         subprocess.run(cmd, check=True, stderr=subprocess.PIPE)
                     except subprocess.CalledProcessError as e:

@@ -150,7 +150,7 @@ def main():
 
     # Start the Dash server
     logging.info(f"Starting Nanometa Live v{__version__} server on port {args.port}")
-    app.run_server(host="0.0.0.0", port=args.port, debug=args.debug)
+    app.run(host="0.0.0.0", port=args.port, debug=args.debug)
 
 
 if __name__ == "__main__":
