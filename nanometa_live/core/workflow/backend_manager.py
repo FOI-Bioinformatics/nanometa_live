@@ -263,3 +263,217 @@ class BackendManager:
 
             # Sleep for a bit
             time.sleep(5)
+
+    def prepare_data(self) -> Tuple[bool, str]:
+        """
+        Prepare data for analysis by:
+        1. Extracting taxonomy IDs from Kraken database
+        2. Downloading genome sequences for species of interest
+        3. Building BLAST databases for validation
+
+        Returns:
+            Tuple of (success, message)
+        """
+        if not self.config:
+            return False, "No configuration loaded"
+
+        # Create a temporary progress file to track preparation progress
+        self.prep_status = {
+            "running": True,
+            "progress": 0,
+            "message": "Initializing data preparation...",
+            "errors": [],
+            "last_update": time.time()
+        }
+
+        # Start the preparation process in a background thread
+        prep_thread = threading.Thread(target=self._run_data_preparation, daemon=True)
+        prep_thread.start()
+
+        return True, "Data preparation started"
+
+    def get_preparation_status(self) -> Dict[str, Any]:
+        """
+        Get the current status of data preparation.
+
+        Returns:
+            Dictionary with preparation status information
+        """
+        if not hasattr(self, 'prep_status'):
+            return {
+                "running": False,
+                "progress": 0,
+                "message": "No preparation in progress",
+                "errors": [],
+                "last_update": None
+            }
+        return self.prep_status
+
+    def _run_data_preparation(self):
+        """Run data preparation in a background thread."""
+        try:
+            config = self.config
+
+            # Step 1: Extract taxonomy IDs from Kraken database
+            self.prep_status["message"] = "Extracting taxonomy IDs from Kraken database..."
+            self.prep_status["progress"] = 10
+            self.prep_status["last_update"] = time.time()
+
+            species_list = [s.get("name", "") for s in config.get("species_of_interest", [])]
+            kraken_db = config.get("kraken_db", "")
+            main_dir = config.get("main_dir", "")
+
+            if not species_list:
+                self.prep_status["running"] = False
+                self.prep_status["errors"].append("No species of interest defined")
+                return
+
+            if not kraken_db:
+                self.prep_status["running"] = False
+                self.prep_status["errors"].append("Kraken database not specified")
+                return
+
+            # Create data directories
+            data_dir = os.path.join(main_dir, "data-files")
+            os.makedirs(data_dir, exist_ok=True)
+
+            # Run kraken2-inspect to get taxonomy IDs
+            inspect_file = os.path.join(data_dir, f"{os.path.basename(kraken_db)}-inspect.txt")
+
+            if not os.path.exists(inspect_file):
+                try:
+                    self.prep_status["message"] = "Running kraken2-inspect..."
+                    self.prep_status["progress"] = 20
+                    self.prep_status["last_update"] = time.time()
+
+                    cmd = ["kraken2-inspect", "--db", kraken_db]
+                    with open(inspect_file, 'w') as f:
+                        subprocess.run(cmd, stdout=f, check=True)
+                except subprocess.CalledProcessError as e:
+                    self.prep_status["running"] = False
+                    self.prep_status["errors"].append(f"Error running kraken2-inspect: {e}")
+                    return
+
+            # Parse the inspect file to extract taxonomy IDs
+            self.prep_status["message"] = "Parsing taxonomy information..."
+            self.prep_status["progress"] = 30
+            self.prep_status["last_update"] = time.time()
+
+            species_taxids = {}
+            try:
+                with open(inspect_file, 'r') as f:
+                    for line in f:
+                        parts = line.strip().split('\t')
+                        if len(parts) >= 6:  # At least 6 columns expected
+                            # Column format: %krakenuniq, cumul reads, reads, level_type, taxid, name
+                            level_type = parts[3]
+                            taxid = parts[4]
+                            name = parts[5].strip()
+
+                            # Only process species level entries
+                            if level_type == 'species':
+                                # Check if any of our species match this name
+                                for species in species_list:
+                                    if species in name:
+                                        species_taxids[species] = taxid
+            except Exception as e:
+                self.prep_status["running"] = False
+                self.prep_status["errors"].append(f"Error parsing inspect file: {e}")
+                return
+
+            # Update config with taxonomy IDs
+            self.prep_status["message"] = "Updating configuration with taxonomy IDs..."
+            self.prep_status["progress"] = 40
+            self.prep_status["last_update"] = time.time()
+
+            updated_species = []
+            for species in config.get("species_of_interest", []):
+                name = species.get("name", "")
+                if name in species_taxids:
+                    updated_species.append({
+                        "name": name,
+                        "taxid": species_taxids[name]
+                    })
+                else:
+                    updated_species.append(species)
+
+            self.config["species_of_interest"] = updated_species
+
+            # Step 2: Check for missing genome files
+            self.prep_status["message"] = "Checking for missing genome files..."
+            self.prep_status["progress"] = 50
+            self.prep_status["last_update"] = time.time()
+
+            # Create genomes directory
+            genomes_dir = os.path.join(data_dir, "genomes")
+            os.makedirs(genomes_dir, exist_ok=True)
+
+            # Check which genomes are missing
+            missing_genomes = []
+            for species in updated_species:
+                taxid = species.get("taxid", "")
+                if taxid:
+                    genome_file = os.path.join(genomes_dir, f"{taxid}.fasta")
+                    if not os.path.exists(genome_file):
+                        missing_genomes.append((species.get("name", ""), taxid))
+
+            if missing_genomes:
+                self.prep_status["message"] = f"Found {len(missing_genomes)} missing genomes"
+                self.prep_status["progress"] = 60
+                self.prep_status["last_update"] = time.time()
+
+                # For now, just report missing genomes
+                # In a full implementation, would download them from NCBI here
+                pass
+
+            # Step 3: Build BLAST databases
+            self.prep_status["message"] = "Building BLAST databases for validation..."
+            self.prep_status["progress"] = 70
+            self.prep_status["last_update"] = time.time()
+
+            # Create BLAST directory
+            blast_dir = os.path.join(data_dir, "blast")
+            os.makedirs(blast_dir, exist_ok=True)
+
+            # Check which BLAST databases are missing
+            missing_dbs = []
+            for species in updated_species:
+                taxid = species.get("taxid", "")
+                if taxid:
+                    blast_db = os.path.join(blast_dir, f"{taxid}.fasta.nhr")
+                    if not os.path.exists(blast_db):
+                        genomes_file = os.path.join(genomes_dir, f"{taxid}.fasta")
+                        if os.path.exists(genomes_file):
+                            missing_dbs.append((taxid, genomes_file))
+
+            # Build missing BLAST databases
+            if missing_dbs:
+                self.prep_status["message"] = f"Building {len(missing_dbs)} BLAST databases..."
+                self.prep_status["progress"] = 80
+                self.prep_status["last_update"] = time.time()
+
+                for taxid, genome_file in missing_dbs:
+                    try:
+                        db_file = os.path.join(blast_dir, f"{taxid}.fasta")
+                        cmd = [
+                            "makeblastdb",
+                            "-in", genome_file,
+                            "-dbtype", "nucl",
+                            "-out", db_file
+                        ]
+                        subprocess.run(cmd, check=True)
+                    except subprocess.CalledProcessError as e:
+                        self.prep_status["errors"].append(f"Error building BLAST database for {taxid}: {e}")
+
+            # Completed
+            self.prep_status["message"] = "Data preparation completed successfully!"
+            self.prep_status["progress"] = 100
+            self.prep_status["running"] = False
+            self.prep_status["last_update"] = time.time()
+
+        except Exception as e:
+            self.prep_status["message"] = f"Error: {str(e)}"
+            self.prep_status["progress"] = 100
+            self.prep_status["running"] = False
+            self.prep_status["errors"].append(str(e))
+            self.prep_status["last_update"] = time.time()

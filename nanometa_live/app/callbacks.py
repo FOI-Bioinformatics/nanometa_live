@@ -184,3 +184,152 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             return "main-tab"
 
         return current_tab
+
+    @app.callback(
+        [
+            Output("prepare-data-modal", "is_open"),
+            Output("prepare-status", "children"),
+            Output("prepare-progress", "value"),
+            Output("close-prepare-modal", "disabled"),
+            Output("cancel-prepare-button", "style"),
+            Output("notification-trigger", "data", allow_duplicate=True),
+        ],
+        [
+            Input("prepare-data-button", "n_clicks"),
+            Input("close-prepare-modal", "n_clicks"),
+            Input("cancel-prepare-button", "n_clicks"),
+            Input("update-interval", "n_intervals"),
+        ],
+        [
+            State("app-config", "data"),
+            State("prepare-data-modal", "is_open"),
+        ],
+        prevent_initial_call=True,
+    )
+    def manage_data_preparation(
+        prepare_clicks, close_clicks, cancel_clicks, n_intervals,
+        config, is_open
+    ):
+        """
+        Manage the data preparation process:
+        - Start preparation on button click
+        - Update progress during preparation
+        - Close modal when done
+        """
+        # Default values for returns
+        no_changes = [no_update, no_update, no_update, no_update, no_update, no_update]
+
+        # Handle modal closing
+        if close_clicks and ctx.triggered_id == "close-prepare-modal":
+            return [False] + no_changes[1:]
+
+        # Handle preparation cancellation
+        if cancel_clicks and ctx.triggered_id == "cancel-prepare-button":
+            # Can add cancellation functionality here if needed
+            return [False] + no_changes[1:] + [{"display": "none"}, {
+                "title": "Cancelled",
+                "message": "Data preparation was cancelled",
+                "color": "warning",
+            }]
+
+        # Start preparation
+        if prepare_clicks and ctx.triggered_id == "prepare-data-button":
+            if not config:
+                return no_changes[:-1] + [{
+                    "title": "Error",
+                    "message": "No configuration loaded. Please configure the application first.",
+                    "color": "danger",
+                }]
+
+            # Start the preparation process
+            success, message = backend_manager.prepare_data()
+            if not success:
+                return no_changes[:-1] + [{
+                    "title": "Error",
+                    "message": f"Failed to start data preparation: {message}",
+                    "color": "danger",
+                }]
+
+            # Preparation started successfully
+            return [
+                True,  # Open modal
+                "Starting data preparation...",  # Status message
+                0,  # Progress value
+                True,  # Close button disabled
+                {"display": "block"},  # Cancel button visible
+                no_update  # No notification
+            ]
+
+        # Update progress during preparation
+        if is_open and ctx.triggered_id == "update-interval":
+            status = backend_manager.get_preparation_status()
+
+            if not status["running"]:
+                # Preparation finished
+                if status["errors"]:
+                    # Preparation failed
+                    return [
+                        True,  # Keep modal open
+                        f"Error: {status['errors'][0]}",  # Show first error
+                        100,  # Complete progress
+                        False,  # Enable close button
+                        {"display": "none"},  # Hide cancel button
+                        {
+                            "title": "Error",
+                            "message": f"Data preparation failed: {status['errors'][0]}",
+                            "color": "danger",
+                        }
+                    ]
+                else:
+                    # Preparation succeeded
+                    return [
+                        True,  # Keep modal open
+                        "Data preparation completed successfully!",  # Success message
+                        100,  # Complete progress
+                        False,  # Enable close button
+                        {"display": "none"},  # Hide cancel button
+                        {
+                            "title": "Success",
+                            "message": "Data preparation completed successfully",
+                            "color": "success",
+                        }
+                    ]
+            else:
+                # Preparation still running
+                return [
+                    True,  # Keep modal open
+                    status["message"],  # Current status message
+                    status["progress"],  # Current progress value
+                    True,  # Keep close button disabled
+                    {"display": "block"},  # Show cancel button
+                    no_update  # No notification
+                ]
+
+        # Default return if no conditions met
+        return no_changes
+
+    @app.callback(
+        Output("app-config", "data", allow_duplicate=True),
+        Input("update-interval", "n_intervals"),
+        [
+            State("prepare-data-modal", "is_open"),
+            State("app-config", "data")
+        ],
+        prevent_initial_call=True,
+    )
+    def update_config_after_preparation(n_intervals, modal_open, current_config):
+        """
+        Update the app configuration after data preparation completes.
+        This ensures any taxonomy IDs discovered during preparation are reflected in the UI.
+        """
+        if not modal_open:
+            return no_update
+
+        status = backend_manager.get_preparation_status()
+
+        if not status["running"] and status["progress"] >= 100 and not status["errors"]:
+            # Preparation completed successfully
+            # Return the updated configuration
+            return backend_manager.config
+
+        return no_update

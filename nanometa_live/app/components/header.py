@@ -24,9 +24,6 @@ def create_header(title="Nanometa Live"):
         # Hidden notification store
         dcc.Store(id="notification-trigger", data=None),
 
-        # Removed duplicate refresh-form-trigger
-        # The one in config_layout.py will be retained
-
         dbc.Row([
             # Title and logo
             dbc.Col([
@@ -56,6 +53,12 @@ def create_header(title="Nanometa Live"):
             # Control buttons
             dbc.Col([
                 html.Div([
+                    dbc.Button(
+                        "Prepare Data",
+                        id="prepare-data-button",
+                        color="info",
+                        className="me-2"
+                    ),
                     dbc.Button(
                         "Start Analysis",
                         id="start-stop-button",

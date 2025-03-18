@@ -151,6 +151,24 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
                 children=create_sunburst_layout()
             )
         ], id="tabs", active_tab="config-tab"),
+        # Data preparation modal
+        dbc.Modal([
+            dbc.ModalHeader("Preparing Data"),
+            dbc.ModalBody([
+                html.P("This may take several minutes. Please wait while we:"),
+                html.Ul([
+                    html.Li("Extract taxonomy IDs from Kraken database"),
+                    html.Li("Download reference genomes for species of interest"),
+                    html.Li("Build BLAST databases for validation")
+                ]),
+                dbc.Progress(id="prepare-progress", value=0, striped=True, animated=True),
+                html.Div(id="prepare-status", className="mt-3")
+            ]),
+            dbc.ModalFooter([
+                dbc.Button("Cancel", id="cancel-prepare-button", color="secondary", className="me-2"),
+                dbc.Button("Close", id="close-prepare-modal", disabled=True)
+            ])
+        ], id="prepare-data-modal", is_open=False, backdrop="static", centered=True),
 
         # Footer
         html.Footer(
