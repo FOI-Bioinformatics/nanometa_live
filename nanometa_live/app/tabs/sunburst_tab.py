@@ -25,10 +25,10 @@ def register_sunburst_callbacks(app: Dash):
 
     @app.callback(
         Output("sunburst-chart", "figure"),
-        [Input("update-interval", "n_intervals"), Input("sun-submit", "n_clicks")],
+        [Input("update-interval", "n_intervals"), Input("apply-sunburst-settings", "n_clicks")],
         [
-            State("sun-filter-val", "value"),
-            State("sun-domains", "value"),
+            State("sunburst-filter-input", "value"),
+            State("sunburst-domains-input", "value"),
             State("app-config", "data"),
             State("backend-status", "data"),
         ],
@@ -54,14 +54,6 @@ def register_sunburst_callbacks(app: Dash):
 
             if not os.path.exists(kraken_report_file):
                 return create_empty_sunburst("No data available yet")
-
-            # Load the data
-            kraken_df = pd.read_csv(
-                kraken_report_file,
-                sep="\t",
-                header=None,
-                names=["%", "cumul_reads", "reads", "rank", "taxid", "name"],
-            )
 
             # Create sunburst data
             sunburst_data = create_sunburst_data(kraken_df, domains, min_reads, config)

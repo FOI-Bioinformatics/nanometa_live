@@ -26,11 +26,11 @@ def register_sankey_callbacks(app: Dash):
 
     @app.callback(
         Output("sankey-plot", "figure"),
-        [Input("update-interval", "n_intervals"), Input("filter-submit", "n_clicks")],
+        [Input("update-interval", "n_intervals"), Input("apply-sankey-settings", "n_clicks")],
         [
-            State("filter-value", "value"),
-            State("domains", "value"),
-            State("clades", "value"),
+            State("sankey-filter-input", "value"),
+            State("sankey-domains-input", "value"),
+            State("sankey-levels-input", "value"),
             State("app-config", "data"),
             State("backend-status", "data"),
         ],
@@ -66,14 +66,6 @@ def register_sankey_callbacks(app: Dash):
 
             if not os.path.exists(kraken_report_file):
                 return create_placeholder_sankey("No data available yet")
-
-            # Load the Kraken report
-            kraken_df = pd.read_csv(
-                kraken_report_file,
-                sep="\t",
-                header=None,
-                names=["%", "cumul_reads", "reads", "rank", "taxid", "name"],
-            )
 
             # Create the Sankey plot data
             sankey_data = create_sankey_data(

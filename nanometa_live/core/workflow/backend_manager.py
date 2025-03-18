@@ -31,11 +31,11 @@ def _adapt_boolean_for_snakemake(config):
     # Create a copy to prevent modifying the original
     adapted_config = dict(config)
 
-    # Convert kraken_memory_mapping to the expected flag format
+    # Convert kraken_memory_mapping to the expected flag format for CLI
     if "kraken_memory_mapping" in adapted_config:
         adapted_config["kraken_memory_mapping"] = "--memory-mapping" if adapted_config["kraken_memory_mapping"] else ""
 
-    # Convert remove_temp_files to "yes"/"no" format
+    # Convert remove_temp_files to "yes"/"no" format for Snakemake onsuccess rule
     if "remove_temp_files" in adapted_config:
         adapted_config["remove_temp_files"] = "yes" if adapted_config["remove_temp_files"] else "no"
 

@@ -291,15 +291,15 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             State("kraken-taxonomy-input", "value"),
             State("external-kraken-input", "value"),
             State("check-interval-input", "value"),
-            State("memory-mapping-input", "on"),  # Boolean switch
-            State("blast-validation-input", "on"),  # Boolean switch
+            State("memory-mapping-input", "value"),  # Changed from "on" to "value"
+            State("blast-validation-input", "value"),  # Changed from "on" to "value"
             State("min-identity-input", "value"),
             State("cores-input", "value"),
-            State("clean-temp-input", "on"),  # Boolean switch
+            State("clean-temp-input", "value"),  # Changed from "on" to "value"
             State("app-config", "data"),
         ],
         prevent_initial_call=True,
-    )
+)
     def apply_config_changes(
         n_clicks,
         analysis_name,
@@ -428,11 +428,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("kraken-taxonomy-input", "value"),
             Input("external-kraken-input", "value"),
             Input("check-interval-input", "value"),
-            Input("memory-mapping-input", "on"),  # Boolean switch
-            Input("blast-validation-input", "on"),  # Boolean switch
+            Input("memory-mapping-input", "value"),  # Changed from "on" to "value"
+            Input("blast-validation-input", "value"),  # Changed from "on" to "value"
             Input("min-identity-input", "value"),
             Input("cores-input", "value"),
-            Input("clean-temp-input", "on"),  # Boolean switch
+            Input("clean-temp-input", "value"),  # Changed from "on" to "value"
         ],
         State("app-config", "data"),
         prevent_initial_call=True,
@@ -507,7 +507,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
         return config
 
-
     # Initialize form from config
     @app.callback(
         [
@@ -519,15 +518,14 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("kraken-taxonomy-input", "value"),
             Output("external-kraken-input", "value"),
             Output("check-interval-input", "value"),
-            Output("memory-mapping-input", "on"),  # Using "on" instead of "value"
-            Output("blast-validation-input", "on"),  # Using "on" instead of "value"
+            Output("memory-mapping-input", "value"),  # Changed from "on" to "value"
+            Output("blast-validation-input", "value"),  # Changed from "on" to "value"
             Output("min-identity-input", "value"),
             Output("cores-input", "value"),
-            Output("clean-temp-input", "on"),  # Using "on" instead of "value"
+            Output("clean-temp-input", "value"),  # Changed from "on" to "value"
         ],
         [Input("app-config", "data"), Input("refresh-form-trigger", "data")],
     )
-
     def initialize_form_from_config(config, refresh_trigger):
         """Initialize form fields from the current configuration."""
         if not config:
@@ -544,26 +542,27 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         check_interval = config.get("check_intervals_seconds", 15)
 
         # Handle boolean values
-        memory_mapping = config.get("kraken_memory_mapping", "")
+        memory_mapping = config.get("kraken_memory_mapping", True)
+        # Ensure it's a boolean regardless of stored format
         if isinstance(memory_mapping, str):
-            memory_mapping = memory_mapping == "--memory-mapping"
-        else:
-            memory_mapping = bool(memory_mapping)
+            memory_mapping = memory_mapping == "--memory-mapping" or \
+                memory_mapping.lower() in ["true", "yes", "y", "1"]
+        memory_mapping = bool(memory_mapping)
 
         blast_validation = config.get("blast_validation", True)
+        # Ensure it's a boolean regardless of stored format
         if isinstance(blast_validation, str):
             blast_validation = blast_validation.lower() in ["true", "yes", "y", "1"]
-        else:
-            blast_validation = bool(blast_validation)
+        blast_validation = bool(blast_validation)
 
         min_identity = config.get("min_perc_identity", 90)
         cores = config.get("snakemake_cores", 1)
 
-        clean_temp = config.get("remove_temp_files", "")
+        clean_temp = config.get("remove_temp_files", True)
+        # Ensure it's a boolean regardless of stored format
         if isinstance(clean_temp, str):
             clean_temp = clean_temp == "yes" or clean_temp.lower() in ["true", "yes", "y", "1"]
-        else:
-            clean_temp = bool(clean_temp)
+        clean_temp = bool(clean_temp)
 
         return [
             analysis_name,

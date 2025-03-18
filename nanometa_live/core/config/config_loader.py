@@ -132,21 +132,26 @@ class ConfigLoader:
         # Convert kraken_memory_mapping to boolean
         if "kraken_memory_mapping" in config:
             if isinstance(config["kraken_memory_mapping"], str):
+                # Handle legacy format (convert "--memory-mapping" to True)
                 config["kraken_memory_mapping"] = config["kraken_memory_mapping"] == "--memory-mapping" or \
                     config["kraken_memory_mapping"].lower() in ["true", "yes", "y", "1"]
+            # Ensure final type is boolean
             config["kraken_memory_mapping"] = bool(config["kraken_memory_mapping"])
 
         # Convert blast_validation to boolean
         if "blast_validation" in config:
             if isinstance(config["blast_validation"], str):
                 config["blast_validation"] = config["blast_validation"].lower() in ["true", "yes", "y", "1"]
+            # Ensure final type is boolean
             config["blast_validation"] = bool(config["blast_validation"])
 
         # Convert remove_temp_files to boolean
         if "remove_temp_files" in config:
             if isinstance(config["remove_temp_files"], str):
+                # Handle legacy format (convert "yes" to True)
                 config["remove_temp_files"] = config["remove_temp_files"] == "yes" or \
                     config["remove_temp_files"].lower() in ["true", "yes", "y", "1"]
+            # Ensure final type is boolean
             config["remove_temp_files"] = bool(config["remove_temp_files"])
 
     def save_config(self, config: Dict[str, Any], filename: Optional[str] = None) -> str:

@@ -49,21 +49,31 @@ def _validate_boolean_parameters(config: Dict[str, Any]) -> None:
     """
     # Ensure kraken_memory_mapping is a boolean
     if "kraken_memory_mapping" in config:
+        if isinstance(config["kraken_memory_mapping"], str):
+            # Handle legacy format
+            config["kraken_memory_mapping"] = config["kraken_memory_mapping"] == "--memory-mapping" or \
+                config["kraken_memory_mapping"].lower() in ["true", "yes", "y", "1"]
         config["kraken_memory_mapping"] = bool(config["kraken_memory_mapping"])
     else:
-        config["kraken_memory_mapping"] = True
+        config["kraken_memory_mapping"] = True  # Default value
 
     # Ensure blast_validation is a boolean
     if "blast_validation" in config:
+        if isinstance(config["blast_validation"], str):
+            config["blast_validation"] = config["blast_validation"].lower() in ["true", "yes", "y", "1"]
         config["blast_validation"] = bool(config["blast_validation"])
     else:
-        config["blast_validation"] = True
+        config["blast_validation"] = True  # Default value
 
     # Ensure remove_temp_files is a boolean
     if "remove_temp_files" in config:
+        if isinstance(config["remove_temp_files"], str):
+            # Handle legacy format
+            config["remove_temp_files"] = config["remove_temp_files"] == "yes" or \
+                config["remove_temp_files"].lower() in ["true", "yes", "y", "1"]
         config["remove_temp_files"] = bool(config["remove_temp_files"])
     else:
-        config["remove_temp_files"] = True
+        config["remove_temp_files"] = True  # Default value
 
 
 def _validate_basic_settings(config: Dict[str, Any]) -> None:

@@ -124,6 +124,23 @@ class ConfigManager:
         # Update with new values
         config.update(updates)
 
+        # Ensure boolean parameters are treated correctly
+        for param in ["kraken_memory_mapping", "blast_validation", "remove_temp_files"]:
+            if param in config:
+                # Convert to boolean if it's a string representation
+                if isinstance(config[param], str):
+                    if param == "kraken_memory_mapping":
+                        config[param] = config[param] == "--memory-mapping" or \
+                            config[param].lower() in ["true", "yes", "y", "1"]
+                    elif param == "remove_temp_files":
+                        config[param] = config[param] == "yes" or \
+                            config[param].lower() in ["true", "yes", "y", "1"]
+                    else:
+                        config[param] = config[param].lower() in ["true", "yes", "y", "1"]
+
+                # Ensure final value is boolean
+                config[param] = bool(config[param])
+
         # Validate the updated configuration
         self.current_config = validate_config(config)
 

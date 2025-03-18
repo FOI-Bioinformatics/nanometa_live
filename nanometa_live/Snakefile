@@ -232,7 +232,7 @@ rule run_kraken:
     shell:
         "kraken2 --db {db} {mm} --gzip-compressed --report {{output.report}} {{input}} > {{output.txt}} && rm {{input}}".format(
             db=config.get("kraken_db", ""),
-            mm=config.get("kraken_memory_mapping", "")  # This is now expected to be "--memory-mapping" or ""
+            mm=config.get("kraken_memory_mapping", "")  # Will be "--memory-mapping" or ""
         )
 
 

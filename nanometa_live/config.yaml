@@ -201,7 +201,7 @@ external_kraken2_info:
 ## BLAST VALIDATION ##
 # Description: Controls the activation of sequence validation using BLAST.
 # Note: Enabling validation enhances accuracy but may increase processing time.
-# Options: true (enable validation), Falsfalsee (disable validation)
+# Options: true (enable validation), False (disable validation)
 blast_validation: True
 
 
