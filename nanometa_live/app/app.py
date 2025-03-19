@@ -155,29 +155,29 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
         dbc.Modal([
             dbc.ModalHeader([
                 html.H4("Data Preparation", className="mb-0"),
-                html.Span(id="prep-step-indicator", className="text-muted ms-3")
+                html.Span(id="prepare-step-indicator", className="text-muted ms-3")
             ], className="d-flex align-items-center"),
             dbc.ModalBody([
                 # Step progress
                 html.Div([
-                    html.H5(id="prep-current-step", children="Initializing..."),
-                    html.Div(id="prep-step-details", className="text-muted mb-2"),
-                    dbc.Progress(id="prep-step-progress", value=0, className="mb-1", striped=True, animated=True),
+                    html.H5(id="prepare-current-step", children="Initializing..."),
+                    html.Div(id="prepare-step-details", className="text-muted mb-2"),
+                    dbc.Progress(id="prepare-step-progress", value=0, className="mb-1", striped=True, animated=True),
                 ], className="mb-3"),
 
                 # Overall progress
                 html.Div([
                     html.H5("Overall Progress"),
-                    dbc.Progress(id="prep-overall-progress", value=0, className="mb-1", striped=True, animated=True),
-                    html.Div(id="prep-status", className="mt-2")
+                    dbc.Progress(id="prepare-overall-progress", value=0, className="mb-1", striped=True, animated=True),
+                    html.Div(id="prepare-status", className="mt-2")
                 ]),
 
                 # Error message area
-                html.Div(id="prep-error-container", className="mt-3")
+                html.Div(id="prepare-error-container", className="mt-3")
             ]),
             dbc.ModalFooter([
-                dbc.Button("Cancel", id="cancel-prep-button", color="secondary", className="me-2"),
-                dbc.Button("Close", id="close-prep-modal", disabled=True)
+                dbc.Button("Cancel", id="cancel-prepare-button", color="secondary", className="me-2"),
+                dbc.Button("Close", id="close-prepare-modal", disabled=True)
             ])
         ], id="prepare-data-modal", is_open=False, backdrop="static", centered=True, size="lg"),
 

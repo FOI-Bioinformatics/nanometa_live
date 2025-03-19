@@ -14,6 +14,7 @@ import logging
 import threading
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
+import pandas as pd
 
 from nanometa_live.core.utils.file_utils import check_command_exists
 from nanometa_live.core.workflow.snakemake_manager import SnakemakeManager
@@ -686,68 +687,84 @@ class BackendManager:
                             parsed_data.append(row_dict)
 
                     df = pd.DataFrame(parsed_data)
+                    logging.info(f"Species list: {species_list}")
+                    logging.info(f"API results: {results}")
 
                     # Extract accessions for download
-                    if "GID" in df.columns and not df.empty:
+                    if df is not None and not df.empty and "GID" in df.columns:
                         self.prep_status["message"] = "Preparing to download genomes from NCBI..."
                         self.prep_status["progress"] = 60
                         self.prep_status["last_update"] = time.time()
 
                         # Get accessions
                         accessions = df["GID"].tolist()
+                        if accessions:
+                            logging.info(f"Found {len(accessions)} accessions: {accessions}")
 
-                        # Write accessions to file
-                        accession_file = os.path.join(data_dir, "ncbi_download_list.txt")
-                        with open(accession_file, "w") as f:
-                            f.write("\n".join(accessions) + "\n")
+                            # Write accessions to file
+                            accession_file = os.path.join(data_dir, "ncbi_download_list.txt")
+                            with open(accession_file, "w") as f:
+                                f.write("\n".join(accessions) + "\n")
 
-                        # Download genomes
-                        self.prep_status["message"] = f"Downloading {len(accessions)} genomes from NCBI..."
-                        self.prep_status["progress"] = 65
-                        self.prep_status["last_update"] = time.time()
-                        download_prefix = "nanometa"
-                        output_zip = os.path.join(data_dir, f"{download_prefix}_ncbi_download.zip")
-
-                        # Use datasets command line tool to download genomes
-                        cmd = [
-                            "datasets", "download", "genome", "accession",
-                            "--inputfile", accession_file,
-                            "--filename", output_zip
-                        ]
-                        try:
-                            subprocess.run(cmd, check=True)
-
-                            # Decompress and rename
-                            self.prep_status["message"] = "Processing downloaded genomes..."
-                            self.prep_status["progress"] = 75
+                            # Download genomes
+                            self.prep_status["message"] = f"Downloading {len(accessions)} genomes from NCBI..."
+                            self.prep_status["progress"] = 65
                             self.prep_status["last_update"] = time.time()
+                            download_prefix = "nanometa"
+                            output_zip = os.path.join(data_dir, f"{download_prefix}_ncbi_download.zip")
 
-                            # Extract zip file
-                            with zipfile.ZipFile(output_zip, 'r') as zip_ref:
-                                zip_ref.extractall(data_dir)
+                            # Use datasets command line tool to download genomes
+                            cmd = [
+                                "datasets", "download", "genome", "accession",
+                                "--inputfile", accession_file,
+                                "--filename", output_zip
+                            ]
+                            try:
+                                subprocess.run(cmd, check=True)
 
-                            # Rename files based on taxids
-                            for species, taxid in species_to_taxid.items():
-                                if species in missing_species:
-                                    species_rows = df[df["Species"] == species]
-                                    if not species_rows.empty:
-                                        gid = species_rows.iloc[0]["GID"]
-                                        ncbi_data_dir = os.path.join(data_dir, "ncbi_dataset", "data")
-                                        accession_path = os.path.join(ncbi_data_dir, gid)
+                                # Decompress and rename
+                                self.prep_status["message"] = "Processing downloaded genomes..."
+                                self.prep_status["progress"] = 75
+                                self.prep_status["last_update"] = time.time()
 
-                                        if os.path.isdir(accession_path):
-                                            # Find FNA file
-                                            for filename in os.listdir(accession_path):
-                                                if filename.endswith(".fna"):
-                                                    source_file = os.path.join(accession_path, filename)
-                                                    target_file = os.path.join(genomes_dir, f"{taxid}.fasta")
-                                                    shutil.copy(source_file, target_file)
-                                                    break
-                        except subprocess.CalledProcessError as e:
-                            self.prep_status["errors"].append(f"Error downloading genomes: {str(e)}")
+                                # Extract zip file
+                                with zipfile.ZipFile(output_zip, 'r') as zip_ref:
+                                    zip_ref.extractall(data_dir)
 
+                                # Rename files based on taxids
+                                for species, taxid in species_to_taxid.items():
+                                    if species in missing_species:
+                                        species_rows = df[df["Species"] == species]
+                                        if not species_rows.empty:
+                                            gid = species_rows.iloc[0]["GID"]
+                                            ncbi_data_dir = os.path.join(data_dir, "ncbi_dataset", "data")
+                                            accession_path = os.path.join(ncbi_data_dir, gid)
+
+                                            if os.path.isdir(accession_path):
+                                                # Find FNA file
+                                                for filename in os.listdir(accession_path):
+                                                    if filename.endswith(".fna"):
+                                                        source_file = os.path.join(accession_path, filename)
+                                                        target_file = os.path.join(genomes_dir, f"{taxid}.fasta")
+                                                        shutil.copy(source_file, target_file)
+                                                        break
+                            except subprocess.CalledProcessError as e:
+                                self.prep_status["errors"].append(f"Error downloading genomes: {str(e)}")
+                        else:
+                            logging.warning("DataFrame has GID column but no accessions found")
+                            self.prep_status["errors"].append("No accessions found for download. Check species names and try again.")
                     else:
-                        self.prep_status["errors"].append("Failed to find accessions for download")
+                        if df is None:
+                            logging.error("DataFrame is None - API results parsing failed")
+                        elif df.empty:
+                            logging.error("DataFrame is empty - no results from API")
+                        else:
+                            logging.error(f"GID column missing from DataFrame. Available columns: {df.columns.tolist()}")
+
+                        self.prep_status["errors"].append("Failed to find accessions for download. Check species names and try again.")
+
+                        # Continue with preparation even without genomes
+                        self.prep_status["message"] = "Continuing preparation without genome downloads..."
 
                 except Exception as e:
                     self.prep_status["errors"].append(f"Error downloading genomes: {str(e)}")

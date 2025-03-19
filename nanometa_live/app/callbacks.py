@@ -203,7 +203,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         [
             Output("prepare-data-modal", "is_open"),
             Output("prepare-status", "children"),
-            Output("prepare-progress", "value"),
+            Output("prepare-overall-progress", "value"),
             Output("close-prepare-modal", "disabled"),
             Output("cancel-prepare-button", "style"),
             Output("notification-trigger", "data", allow_duplicate=True),
