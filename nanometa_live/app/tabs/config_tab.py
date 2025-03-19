@@ -157,6 +157,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 },
                 True,  # Trigger form refresh
             )
+
         except Exception as e:
             return (
                 no_update,
@@ -580,37 +581,62 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             clean_temp,
         ]
 
-    # Species list handling
+    # NEW INITIALIZATION CALLBACK FOR SPECIES LIST
+    
+
+    # MODIFIED SPECIES LIST CALLBACK
+    
     @app.callback(
         [
             Output("species-list-container", "children"),
             Output("app-config", "data", allow_duplicate=True),
         ],
         [
+            Input("app-config", "data"),  # Add this to listen for initial config
             Input("species-file-input", "contents"),
             Input("add-species-button", "n_clicks"),
             Input({"type": "remove-species", "index": dash.ALL}, "n_clicks"),
+            Input("refresh-form-trigger", "data")
         ],
         [
             State("species-file-input", "filename"),
-            State("app-config", "data"),
             State("species-list-container", "children"),
         ],
-        prevent_initial_call=True,
+        prevent_initial_call=True  # Set to True to avoid duplicate callback issues
     )
-    def update_species_list(
-        contents, add_clicks, remove_clicks, filename, config, current_list
+    def manage_species_list(
+        config, contents, add_clicks, remove_clicks, refresh_trigger, filename, current_list
     ):
-        """Update the species list based on file upload or user actions."""
+        """
+        Single callback to handle all species list operations:
+        - Initial loading of species from config
+        - Adding/removing species
+        - Uploading species files
+        - Refreshing after config changes
+        """
         if not config:
-            return no_update, no_update
+            return [html.P("No species of interest defined. Click 'Add Species' to add one.")], no_update
 
         # Create a copy of the current config
         new_config = dict(config)
         species_list = new_config.get("species_of_interest", [])
-
-        # Handle file upload
-        if contents and filename:
+        
+        # Get triggered component
+        triggered_id = ctx.triggered_id if ctx.triggered else None
+        
+        # Handle triggered cases
+        if triggered_id == "add-species-button" and add_clicks:
+            # Add a new empty species
+            species_list.append({"name": "", "taxid": ""})
+            new_config["species_of_interest"] = species_list
+        elif isinstance(triggered_id, dict) and triggered_id.get("type") == "remove-species":
+            # Remove a species
+            index = triggered_id.get("index")
+            if index is not None and 0 <= index < len(species_list):
+                species_list.pop(index)
+                new_config["species_of_interest"] = species_list
+        elif triggered_id == "species-file-input" and contents and filename:
+            # Handle file upload
             content_type, content_string = contents.split(",")
             decoded = base64.b64decode(content_string).decode("utf-8")
 
@@ -626,25 +652,9 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
             # Replace the existing species list
             species_list = new_species
+            new_config["species_of_interest"] = species_list
 
-        # Handle add species button
-        elif ctx.triggered_id == "add-species-button":
-            species_list.append({"name": "", "taxid": ""})
-
-        # Handle remove species button
-        elif (
-            ctx.triggered_id
-            and isinstance(ctx.triggered_id, dict)
-            and ctx.triggered_id.get("type") == "remove-species"
-        ):
-            index = ctx.triggered_id.get("index")
-            if index is not None and 0 <= index < len(species_list):
-                species_list.pop(index)
-
-        # Update the config
-        new_config["species_of_interest"] = species_list
-
-        # Create the species list UI
+        # Create the species list UI (always done regardless of what triggered the callback)
         species_items = []
         for i, species in enumerate(species_list):
             species_items.append(
@@ -689,6 +699,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 )
             ]
 
+        # If triggered by app-config (initial load) or refresh, just update UI, not config
+        if triggered_id == "app-config" or triggered_id == "refresh-form-trigger":
+            return species_items, no_update
+        
+        # Otherwise update both UI and config
         return species_items, new_config
 
     # Update species names in config
