@@ -332,7 +332,7 @@ class BackendManager:
         try:
             config = self.config
 
-            # Additional validation of the Kraken database
+            # STEP 1: Validate inputs and dependencies
             kraken_db = config.get("kraken_db", "")
             main_dir = config.get("main_dir", "")
             species_list = [s.get("name", "") for s in config.get("species_of_interest", [])]
@@ -372,7 +372,7 @@ class BackendManager:
                 self.prep_status["progress"] = 100
                 return
 
-            # Step 1: Extract taxonomy IDs from Kraken database
+            # STEP 2: Extract taxonomy IDs from Kraken database
             self.prep_status["message"] = "Extracting taxonomy IDs from Kraken database..."
             self.prep_status["progress"] = 10
             self.prep_status["last_update"] = time.time()
@@ -390,7 +390,6 @@ class BackendManager:
                     self.prep_status["progress"] = 20
                     self.prep_status["last_update"] = time.time()
 
-                    import subprocess
                     cmd = ["kraken2-inspect", "--db", kraken_db]
                     with open(inspect_file, 'w') as f:
                         proc = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, check=True)
@@ -476,7 +475,7 @@ class BackendManager:
                 self.prep_status["message"] = "Error: No species matched in the database. Check species names."
                 self.prep_status["progress"] = 100
                 self.prep_status["last_update"] = time.time()
-                return  # Exit the function immediately
+                return
             else:
                 self.prep_status["message"] = f"Found taxonomy IDs for {matched_species_count} out of {len(config.get('species_of_interest', []))} species."
                 self.prep_status["progress"] = 45
@@ -484,96 +483,225 @@ class BackendManager:
 
             self.config["species_of_interest"] = updated_species
 
-            # Step 2: Check for missing genome files
+            # STEP 3: Prepare directories for genome data
+            self.prep_status["message"] = "Setting up directories for genome data..."
+            self.prep_status["progress"] = 45
+            self.prep_status["last_update"] = time.time()
+
+            # Create data directories
+            data_dir = os.path.join(main_dir, "data-files")
+            genomes_dir = os.path.join(data_dir, "genomes")
+            os.makedirs(data_dir, exist_ok=True)
+            os.makedirs(genomes_dir, exist_ok=True)
+
+            # STEP 4: Check which genomes need to be downloaded
             self.prep_status["message"] = "Checking for missing genome files..."
             self.prep_status["progress"] = 50
             self.prep_status["last_update"] = time.time()
 
-            # Create genomes directory
-            genomes_dir = os.path.join(data_dir, "genomes")
-            os.makedirs(genomes_dir, exist_ok=True)
+            # Create a dictionary mapping species names to taxonomy IDs
+            species_to_taxid = {s.get("name", ""): s.get("taxid", "")
+                                for s in updated_species if s.get("taxid", "")}
 
             # Check which genomes are missing
-            missing_genomes = []
-            for species in updated_species:
-                taxid = species.get("taxid", "")
-                if taxid:
-                    genome_file = os.path.join(genomes_dir, f"{taxid}.fasta")
-                    if not os.path.exists(genome_file):
-                        missing_genomes.append((species.get("name", ""), taxid))
+            missing_species = []
+            for species, taxid in species_to_taxid.items():
+                genome_file = os.path.join(genomes_dir, f"{taxid}.fasta")
+                if not os.path.exists(genome_file):
+                    missing_species.append(species)
 
-            if missing_genomes:
-                self.prep_status["message"] = f"Found {len(missing_genomes)} missing genomes. Preparing for download..."
-                self.prep_status["progress"] = 60
+            # STEP 5: Download missing genomes using GTDB API
+            if missing_species:
+                self.prep_status["message"] = f"Found {len(missing_species)} missing genomes. Preparing to download..."
+                self.prep_status["progress"] = 55
                 self.prep_status["last_update"] = time.time()
 
-                # In a real implementation, would download genomes from NCBI here
-                # For now, create placeholder files
-                for species_name, taxid in missing_genomes:
-                    placeholder_path = os.path.join(genomes_dir, f"{taxid}.fasta")
-                    # Create BLAST-compatible header: use a simple format without spaces or special chars
-                    safe_name = species_name.replace(" ", "_").replace(",", "").replace("'", "").replace("(", "").replace(")", "")
-                    with open(placeholder_path, 'w') as f:
-                        # Use standard NCBI-like header format
-                        f.write(f">gnl|nanometa|{taxid} [Taxid={taxid}] {safe_name} placeholder sequence\n")
-                        # Make the sequence longer and more varied
-                        f.write("ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\n" * 10)
+                try:
+                    # Initialize results dictionary
+                    results = {}
+                    kraken_taxonomy = config.get("kraken_taxonomy", "gtdb")
 
-                self.prep_status["message"] = f"Created placeholder genome files for {len(missing_genomes)} species."
-                self.prep_status["progress"] = 65
-                self.prep_status["last_update"] = time.time()
+                    # Fetch data for each missing species from GTDB
+                    for species in missing_species:
+                        search_query = f"s__{species}"
+                        # Fetch species data using requests
+                        base_url = "https://gtdb-api.ecogenomic.org/search/gtdb"
+                        params = {
+                            "search": search_query,
+                            "page": 1,
+                            "itemsPerPage": 1000,
+                            "searchField": f"{kraken_taxonomy}_tax",
+                            "gtdbSpeciesRepOnly": True if kraken_taxonomy == "gtdb" else False,
+                            "ncbiTypeMaterialOnly": True if kraken_taxonomy == "ncbi" else False,
+                        }
 
-            # Step 3: Build BLAST databases
+                        try:
+                            response = requests.get(base_url, params=params, headers={"accept": "application/json"})
+
+                            if response.status_code == 200:
+                                result = response.json()
+                                rows = result.get("rows", [])
+
+                                if rows:
+                                    results[species] = {"rows": rows}
+                                    self.prep_status["message"] = f"Found data for {species}"
+                                else:
+                                    self.prep_status["message"] = f"No data found for {species}"
+                            else:
+                                self.prep_status["message"] = f"API request failed for {species}"
+                        except Exception as e:
+                            self.prep_status["message"] = f"Error fetching data for {species}: {str(e)}"
+
+                    # Update results with taxonomy IDs
+                    for species_name in results.keys():
+                        tax_id = species_to_taxid.get(species_name, None)
+                        if tax_id is not None:
+                            results[species_name]["tax_id"] = tax_id
+                        else:
+                            results[species_name]["tax_id"] = "N/A"
+
+                    # Filter results to include only exact matches
+                    filtered_results = {}
+                    for species, species_info in results.items():
+                        if "rows" not in species_info:
+                            continue
+
+                        exact_matches = []
+                        for row in species_info["rows"]:
+                            # Get the taxonomy field based on the taxonomy database
+                            if kraken_taxonomy == "gtdb":
+                                taxonomy = row.get("gtdbTaxonomy", "")
+                            else:  # ncbi
+                                taxonomy = row.get("ncbiTaxonomy", "")
+
+                            # Check for exact match
+                            if taxonomy and taxonomy.endswith(f"s__{species}"):
+                                exact_matches.append(row)
+
+                        if exact_matches:
+                            filtered_results[species] = {"rows": exact_matches, "tax_id": species_info.get("tax_id", "N/A")}
+
+                    # Convert to DataFrame
+                    parsed_data = []
+                    for species, species_info in filtered_results.items():
+                        for row in species_info["rows"]:
+                            row_dict = {
+                                "Species": species,
+                                "Tax_ID": species_info.get("tax_id", "N/A"),
+                                "SearchQuery": f"s__{species}",
+                                "GID": row.get("gid", "N/A"),
+                                "Accession": row.get("accession", "N/A"),
+                                "NCBI_OrgName": row.get("ncbiOrgName", "N/A"),
+                                "NCBI_Taxonomy": row.get("ncbiTaxonomy", "N/A"),
+                                "GTDB_Taxonomy": row.get("gtdbTaxonomy", "N/A"),
+                                "Is_GTDB_Species_Rep": row.get("isGtdbSpeciesRep", "N/A"),
+                                "Is_NCBI_Type_Material": row.get("isNcbiTypeMaterial", "N/A"),
+                            }
+                            parsed_data.append(row_dict)
+
+                    df = pd.DataFrame(parsed_data)
+
+                    # Extract accessions for download
+                    if "GID" in df.columns and not df.empty:
+                        self.prep_status["message"] = "Preparing to download genomes from NCBI..."
+                        self.prep_status["progress"] = 60
+                        self.prep_status["last_update"] = time.time()
+
+                        # Get accessions
+                        accessions = df["GID"].tolist()
+
+                        # Write accessions to file
+                        accession_file = os.path.join(data_dir, "ncbi_download_list.txt")
+                        with open(accession_file, "w") as f:
+                            f.write("\n".join(accessions) + "\n")
+
+                        # Download genomes
+                        self.prep_status["message"] = f"Downloading {len(accessions)} genomes from NCBI..."
+                        self.prep_status["progress"] = 65
+                        self.prep_status["last_update"] = time.time()
+                        download_prefix = "nanometa"
+                        output_zip = os.path.join(data_dir, f"{download_prefix}_ncbi_download.zip")
+
+                        # Use datasets command line tool to download genomes
+                        cmd = [
+                            "datasets", "download", "genome", "accession",
+                            "--inputfile", accession_file,
+                            "--filename", output_zip
+                        ]
+                        try:
+                            subprocess.run(cmd, check=True)
+
+                            # Decompress and rename
+                            self.prep_status["message"] = "Processing downloaded genomes..."
+                            self.prep_status["progress"] = 75
+                            self.prep_status["last_update"] = time.time()
+
+                            # Extract zip file
+                            with zipfile.ZipFile(output_zip, 'r') as zip_ref:
+                                zip_ref.extractall(data_dir)
+
+                            # Rename files based on taxids
+                            for species, taxid in species_to_taxid.items():
+                                if species in missing_species:
+                                    species_rows = df[df["Species"] == species]
+                                    if not species_rows.empty:
+                                        gid = species_rows.iloc[0]["GID"]
+                                        ncbi_data_dir = os.path.join(data_dir, "ncbi_dataset", "data")
+                                        accession_path = os.path.join(ncbi_data_dir, gid)
+
+                                        if os.path.isdir(accession_path):
+                                            # Find FNA file
+                                            for filename in os.listdir(accession_path):
+                                                if filename.endswith(".fna"):
+                                                    source_file = os.path.join(accession_path, filename)
+                                                    target_file = os.path.join(genomes_dir, f"{taxid}.fasta")
+                                                    shutil.copy(source_file, target_file)
+                                                    break
+                        except subprocess.CalledProcessError as e:
+                            self.prep_status["errors"].append(f"Error downloading genomes: {str(e)}")
+
+                    else:
+                        self.prep_status["errors"].append("Failed to find accessions for download")
+
+                except Exception as e:
+                    self.prep_status["errors"].append(f"Error downloading genomes: {str(e)}")
+
+            # STEP 6: Build BLAST databases
             self.prep_status["message"] = "Building BLAST databases for validation..."
-            self.prep_status["progress"] = 70
+            self.prep_status["progress"] = 85
             self.prep_status["last_update"] = time.time()
-
-            # Create BLAST directory
-            blast_dir = os.path.join(data_dir, "blast")
-            os.makedirs(blast_dir, exist_ok=True)
 
             # Check which BLAST databases are missing
             missing_dbs = []
-            for species in updated_species:
-                taxid = species.get("taxid", "")
-                if taxid:
-                    blast_db = os.path.join(blast_dir, f"{taxid}.fasta.nhr")
-                    if not os.path.exists(blast_db):
-                        genomes_file = os.path.join(genomes_dir, f"{taxid}.fasta")
-                        if os.path.exists(genomes_file):
-                            missing_dbs.append((taxid, genomes_file))
+            blast_dir = os.path.join(data_dir, "blast")
+            os.makedirs(blast_dir, exist_ok=True)
+
+            for species, taxid in species_to_taxid.items():
+                blast_db_file = os.path.join(blast_dir, f"{taxid}.fasta.nhr")
+                if not os.path.exists(blast_db_file):
+                    missing_dbs.append(str(taxid))
 
             # Build missing BLAST databases
             if missing_dbs:
-                self.prep_status["message"] = f"Building {len(missing_dbs)} BLAST databases..."
-                self.prep_status["progress"] = 80
-                self.prep_status["last_update"] = time.time()
+                input_folder = os.path.join(data_dir, "genomes")
+                for taxid in missing_dbs:
+                    file_path = os.path.join(input_folder, f"{taxid}.fasta")
+                    database_name = os.path.join(blast_dir, f"{taxid}.fasta")
 
-                for taxid, genome_file in missing_dbs:
-                    try:
-                        db_file = os.path.join(blast_dir, f"{taxid}.fasta")
-                        import subprocess
-                        cmd = [
+                    if os.path.exists(file_path):
+                        system_cmd = [
                             "makeblastdb",
-                            "-in", genome_file,
+                            "-in", file_path,
                             "-dbtype", "nucl",
-                            "-out", db_file,
-                            "-parse_seqids",
-                            "-hash_index",
-                            "-title", f"Nanometa_Tax{taxid}"
+                            "-out", database_name,
                         ]
-                        # Add error handling with full output capture
-                        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                        if result.returncode != 0:
-                            raise subprocess.CalledProcessError(result.returncode, cmd, result.stdout, result.stderr)
-                    except subprocess.CalledProcessError as e:
-                        error_message = e.stderr.decode() if e.stderr else str(e)
-                        self.prep_status["errors"].append(f"Error building BLAST database for {taxid}: {error_message}")
 
-                        # Continue with other databases even if one fails
-                        continue
+                        try:
+                            subprocess.run(system_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+                        except subprocess.CalledProcessError as e:
+                            self.prep_status["errors"].append(f"Error building BLAST database for {taxid}: {e.stderr.decode() if e.stderr else str(e)}")
 
-            # Completed
+            # STEP 7: Complete preparation
             self.prep_status["message"] = "Data preparation completed successfully!"
             self.prep_status["progress"] = 100
             self.prep_status["running"] = False

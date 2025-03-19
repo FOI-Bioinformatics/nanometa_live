@@ -12,3 +12,4 @@ pyfastx>=2.2.0
 flask>=3.1.0
 scipy>=1.10.0
 requests>=2.32.3
+ncbi-datasets-cli
