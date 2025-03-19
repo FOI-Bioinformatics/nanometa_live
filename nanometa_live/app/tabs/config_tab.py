@@ -582,10 +582,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         ]
 
     # NEW INITIALIZATION CALLBACK FOR SPECIES LIST
-    
+
 
     # MODIFIED SPECIES LIST CALLBACK
-    
+
     @app.callback(
         [
             Output("species-list-container", "children"),
@@ -620,10 +620,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         # Create a copy of the current config
         new_config = dict(config)
         species_list = new_config.get("species_of_interest", [])
-        
+
         # Get triggered component
         triggered_id = ctx.triggered_id if ctx.triggered else None
-        
+
         # Handle triggered cases
         if triggered_id == "add-species-button" and add_clicks:
             # Add a new empty species
@@ -702,7 +702,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         # If triggered by app-config (initial load) or refresh, just update UI, not config
         if triggered_id == "app-config" or triggered_id == "refresh-form-trigger":
             return species_items, no_update
-        
+
         # Otherwise update both UI and config
         return species_items, new_config
 
@@ -808,3 +808,16 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         new_config["species_of_interest"] = species_list
 
         return new_config
+
+    @app.callback(
+        Output("external-kraken-input", "options"),
+        Input("kraken-databases", "data")
+    )
+    def populate_kraken_database_options(databases):
+        options = [{"label": "None (use local)", "value": ""}]
+
+        for db_id, db_info in databases.items():
+            label = f"{db_id} ({db_info.get('description', '')})"
+            options.append({"label": label, "value": db_id})
+
+        return options

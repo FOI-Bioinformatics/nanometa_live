@@ -21,6 +21,23 @@ from nanometa_live.app.layouts.sunburst_layout import create_sunburst_layout
 from nanometa_live.app.layouts.config_layout import create_config_layout
 from nanometa_live.app.components.header import create_header
 from nanometa_live.core.workflow.backend_manager import BackendManager
+from nanometa_live.core.config.config_loader import ConfigLoader
+
+
+
+def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendManager) -> Dash:
+    # Load kraken databases directly
+    import yaml
+    import os
+
+    try:
+        kraken_db_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "kraken2_databases.yaml")
+        with open(kraken_db_file, 'r') as f:
+            kraken_databases = yaml.safe_load(f).get("kraken2_databases", {})
+    except Exception as e:
+        logging.error(f"Error loading Kraken databases: {e}")
+        kraken_databases = {}
+
 
 
 def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendManager) -> Dash:
@@ -111,6 +128,7 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
         dcc.Store(id='app-config', data=config),
         dcc.Store(id='backend-status', data={"running": False}),
         dcc.Store(id='app-data-dir', data=data_dir),
+        dcc.Store(id='kraken-databases', data=kraken_databases),
 
         # Interval for updating data
         dcc.Interval(
@@ -158,7 +176,7 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
                 html.Span(id="prepare-step-indicator", className="text-muted ms-3")
             ], className="d-flex align-items-center"),
             dbc.ModalBody([
-                # Step progress
+                # Step progress - Update this section
                 html.Div([
                     html.H5(id="prepare-current-step", children="Initializing..."),
                     html.Div(id="prepare-step-details", className="text-muted mb-2"),

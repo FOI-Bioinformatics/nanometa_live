@@ -464,3 +464,73 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         except Exception as e:
             logging.error(f"Error opening prepare data modal: {str(e)}")
             return no_update
+
+    @app.callback(
+        [
+            Output("prepare-current-step", "children"),
+            Output("prepare-step-details", "children"),
+            Output("prepare-step-progress", "value"),
+            Output("prepare-status", "children", allow_duplicate=True),
+            Output("prepare-overall-progress", "value", allow_duplicate=True),
+            Output("close-prepare-modal", "disabled", allow_duplicate=True),
+            Output("cancel-prepare-button", "style", allow_duplicate=True),
+        ],
+        Input("update-interval", "n_intervals"),
+        State("prepare-data-modal", "is_open"),
+        prevent_initial_call=True,
+    )
+    def update_preparation_progress(n_intervals, modal_open):
+        """Update the preparation progress modal with latest status"""
+        if not modal_open:
+            return no_update, no_update, no_update, no_update, no_update, no_update, no_update
+
+        try:
+            status = backend_manager.get_preparation_status()
+
+            # Determine current step based on progress
+            step_name = "Initializing..."
+            step_details = "Preparing to start"
+            step_progress = 0
+
+            if status["progress"] < 10:
+                step_name = "Starting up"
+                step_details = "Initializing preparation"
+                step_progress = status["progress"] * 10
+            elif status["progress"] < 30:
+                step_name = "Extracting taxonomy IDs"
+                step_details = status.get("message", "Processing taxonomy data")
+                step_progress = (status["progress"] - 10) * 5
+            elif status["progress"] < 50:
+                step_name = "Matching species"
+                step_details = status.get("message", "Finding species in databases")
+                step_progress = (status["progress"] - 30) * 5
+            elif status["progress"] < 70:
+                step_name = "Downloading genomes"
+                step_details = status.get("message", "Retrieving reference genomes")
+                step_progress = (status["progress"] - 50) * 5
+            elif status["progress"] < 90:
+                step_name = "Building BLAST databases"
+                step_details = status.get("message", "Preparing validation databases")
+                step_progress = (status["progress"] - 70) * 5
+            else:
+                step_name = "Finishing up"
+                step_details = status.get("message", "Completing preparation")
+                step_progress = 100
+
+            # Format status message
+            if status["errors"]:
+                status_message = f"Error: {status['errors'][0]}"
+            else:
+                status_message = status.get("message", "Processing...")
+
+            # Only enable close button when complete or error
+            close_disabled = status["running"]
+
+            # Hide cancel button when complete
+            cancel_style = {"display": "block" if status["running"] else "none"}
+
+            return step_name, step_details, step_progress, status_message, status["progress"], close_disabled, cancel_style
+
+        except Exception as e:
+            logging.error(f"Error updating preparation progress: {e}")
+            return "Error", f"Failed to update status: {str(e)}", 0, f"Error: {str(e)}", 0, False, {"display": "none"}

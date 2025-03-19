@@ -254,3 +254,18 @@ class ConfigLoader:
         self._standardize_boolean_params(config)
 
         return config
+
+
+    def load_kraken_databases_from_file():
+        """Load Kraken databases directly from YAML file"""
+        import yaml
+        import os
+
+        db_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "kraken2_databases.yaml")
+        try:
+            with open(db_file, 'r') as f:
+                db_config = yaml.safe_load(f)
+            return db_config.get("kraken2_databases", {})
+        except Exception as e:
+            logging.error(f"Error loading Kraken databases: {e}")
+            return {}

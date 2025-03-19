@@ -164,15 +164,7 @@ def create_config_form():
                                 dbc.Label("External Kraken2 Database", html_for="external-kraken-input"),
                                 dbc.Select(
                                     id="external-kraken-input",
-                                    options=[
-                                        {"label": "None (use local)", "value": ""},
-                                        {"label": "Standard", "value": "Standard"},
-                                        {"label": "PlusPF (Protozoa & Fungi)", "value": "PlusPF"},
-                                        {"label": "PlusPFP (Protozoa, Fungi & Plant)", "value": "PlusPFP"},
-                                        {"label": "Viral", "value": "Viral"},
-                                        {"label": "MinusB", "value": "MinusB"}
-                                    ],
-                                    value=""
+                                    # Options will be populated by callback
                                 ),
                                 dbc.FormText("Optional: download and use a predefined Kraken2 database")
                             ], className="mb-3")
