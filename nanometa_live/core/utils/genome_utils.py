@@ -14,57 +14,7 @@ import shutil
 import pandas as pd
 from typing import Dict, List, Any, Union, Optional
 
-# GTDB API Integration Functions
-def fetch_species_data(search_query: str, taxonomy_db: str = "gtdb") -> List[Dict[str, Any]]:
-    """Fetch species data from GTDB API."""
-    base_url = "https://gtdb-api.ecogenomic.org/search/gtdb"
-    params = {
-        "search": search_str,
-        "page": page,
-        "itemsPerPage": itemsPerPage,
-        "searchField": f"{db}_tax",
-        "gtdbSpeciesRepOnly": True if db == "gtdb" else False,
-        "ncbiTypeMaterialOnly": True if db == "ncbi" else False,
-    }
-    try:
-        response = requests.get(
-            base_url, params=params, headers={"accept": "application/json"}
-        )
-        if response.status_code == 200:
-            rows = json.loads(response.text)["rows"]
-            num_rows = len(rows)  # Get the number of rows
 
-            # Stop if no rows are returned
-            if num_rows == 0:
-                logging.warning(
-                    f"No data fetched for {search_str} from {db}. Stopping function."
-                )
-                sys.exit(
-                    "Terminating the program due to zero fetched rows."
-                )  # Terminate the program
-
-            logging.info(
-                f"Successfully fetched {num_rows} rows for {search_str} from {db}."
-            )
-
-            # Log details of fetched data for debugging
-            for row in rows:
-                ncbiorgname = row.get("ncbiOrgName", "N/A")
-                gid = row.get("gid", "N/A")
-                gtdb_rep = row.get("isGtdbSpeciesRep", "N/A")
-                ncbi_type = row.get("isGtdbSpeciesRep", "N/A")
-                # logging.info(f"Search string: {search_str}, Fetched row details: NCBI organism: {ncbiorgname}, GID: {gid}, GTDB representative: {gtdb_rep}, NCBI type strain: {ncbi_type}")
-            return rows
-        else:
-            logging.warning(
-                f"Failed to get data for {search_str} from {db}. HTTP Status Code: {response.status_code}"
-            )
-            return []
-    except Exception as e:
-        logging.error(f"An error occurred while fetching data: {e}")
-        sys.exit(
-            f"Terminating the program due to an error: {e}"
-        )  # Terminate the program
 
 def filter_data_by_exact_match(results: Dict[str, Any], taxonomy_db: str = "gtdb") -> Dict[str, Any]:
     """

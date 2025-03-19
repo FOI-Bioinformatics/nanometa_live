@@ -20,30 +20,7 @@ from . import __version__
 from nanometa_live.app.app import create_app
 from nanometa_live.core.config.config_loader import ConfigLoader
 from nanometa_live.core.workflow.backend_manager import BackendManager
-
-
-def setup_logging(debug=False, log_dir=None):
-    """Set up logging configuration."""
-    log_level = logging.DEBUG if debug else logging.INFO
-    log_format = "%(asctime)s - %(levelname)s - %(message)s"
-
-    # Configure handlers
-    handlers = [logging.StreamHandler(sys.stdout)]
-
-    # Add file handler if log_dir is provided
-    if log_dir:
-        os.makedirs(log_dir, exist_ok=True)
-        log_file = os.path.join(log_dir, f"nanometa_live_{time.strftime('%Y%m%d_%H%M%S')}.log")
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setFormatter(logging.Formatter(log_format))
-        handlers.append(file_handler)
-
-    # Configure root logger
-    logging.basicConfig(
-        level=log_level,
-        format=log_format,
-        handlers=handlers,
-    )
+from nanometa_live.core.utils.logging_utils import setup_logging
 
 
 def parse_arguments():
@@ -122,7 +99,8 @@ def main():
     create_default_dirs(data_dir)
 
     # Setup logging with file output
-    setup_logging(args.debug, os.path.join(data_dir, "logs"))
+    log_file = setup_logging(args.debug, os.path.join(data_dir, "logs"))
+    logging.info(f"Logging to {log_file}")
 
     # Load configuration
     config_loader = ConfigLoader(os.path.join(data_dir, "configs"))

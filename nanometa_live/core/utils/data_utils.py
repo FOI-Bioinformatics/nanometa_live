@@ -273,18 +273,44 @@ def parse_blast_results(blast_file: str) -> Tuple[int, int]:
         logging.error(f"Error parsing BLAST results {blast_file}: {e}")
         return 0, 0
 
+def test_gtdb_api_directly(species_name):
+    """Direct test of GTDB API"""
+    import requests
+    import json
 
-def fetch_species_data(search_str: str, db: str) -> List[Dict[str, Any]]:
-    """
-    Fetch species data from the GTDB API.
+    formatted_name = f"s__{species_name.replace(' ', '_')}"
+    logging.info(f"Direct API test for: {formatted_name}")
 
-    Args:
-        search_str: Species name to search for
-        db: Database to search (gtdb or ncbi)
+    url = "https://gtdb-api.ecogenomic.org/search/gtdb"
+    params = {
+        "search": formatted_name,
+        "page": 1,
+        "itemsPerPage": 10,
+        "searchField": "gtdb_tax"
+    }
 
-    Returns:
-        List of dictionaries with species data
-    """
+    try:
+        response = requests.get(url, params=params, timeout=30)
+        logging.info(f"API Status: {response.status_code}")
+
+        if response.status_code == 200:
+            data = response.json()
+            logging.info(f"Raw API response: {json.dumps(data)[:200]}...")
+            return data
+        else:
+            logging.error(f"API error: {response.text}")
+            return None
+    except Exception as e:
+        logging.exception(f"API request failed: {e}")
+        return None
+
+def fetch_species_data(search_str: str, db: str = "gtdb") -> List[Dict[str, Any]]:
+    """Fetch species data from GTDB API."""
+    if not search_str.startswith("s__"):
+        formatted_search = f"s__{search_str.replace(' ', '_')}"
+        logging.info(f"Reformatting search: '{search_str}' → '{formatted_search}'")
+        search_str = formatted_search
+
     base_url = "https://gtdb-api.ecogenomic.org/search/gtdb"
     params = {
         "search": search_str,
@@ -295,28 +321,41 @@ def fetch_species_data(search_str: str, db: str) -> List[Dict[str, Any]]:
         "ncbiTypeMaterialOnly": True if db == "ncbi" else False,
     }
 
+    logging.info(f"API URL: {base_url}")
+    logging.info(f"API params: {params}")
+
     try:
         response = requests.get(
-            base_url, params=params, headers={"accept": "application/json"}
+            base_url, params=params, headers={"accept": "application/json"}, timeout=30
         )
+
+        logging.info(f"API status: {response.status_code}")
 
         if response.status_code == 200:
             result = response.json()
+            logging.info(f"API response keys: {list(result.keys() if result else [])}")
             rows = result.get("rows", [])
 
-            if not rows:
-                logging.warning(f"No data found for {search_str} in {db}")
-                return []
+            if rows:
+                logging.info(f"Found {len(rows)} results")
+                logging.info(f"Sample row: {rows[0]}" if rows else "No rows")
+            else:
+                # Try alternate form with underscores instead of spaces
+                alt_search = search_str.replace(' ', '_')
+                logging.info(f"No results, trying alternate form: {alt_search}")
+                params["search"] = alt_search
+                alt_response = requests.get(base_url, params=params, headers={"accept": "application/json"})
+                if alt_response.status_code == 200:
+                    alt_result = alt_response.json()
+                    rows = alt_result.get("rows", [])
+                    logging.info(f"Alternate search found {len(rows)} results")
 
-            logging.info(f"Fetched {len(rows)} results for {search_str} from {db}")
             return rows
-
         else:
-            logging.error(f"API request failed with status code {response.status_code}")
+            logging.error(f"API request failed: {response.text}")
             return []
-
     except Exception as e:
-        logging.error(f"Error fetching species data for {search_str}: {e}")
+        logging.exception(f"API exception: {e}")
         return []
 
 

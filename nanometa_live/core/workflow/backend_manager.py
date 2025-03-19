@@ -15,10 +15,13 @@ import threading
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 import pandas as pd
+import subprocess
+import zipfile, shutil
 
 from nanometa_live.core.utils.file_utils import check_command_exists
 from nanometa_live.core.workflow.snakemake_manager import SnakemakeManager
 from nanometa_live.core.utils.database_utils import download_and_prepare_kraken_database
+from nanometa_live.core.utils.data_utils import fetch_species_data, test_gtdb_api_directly
 
 
 def _adapt_boolean_for_snakemake(config):
@@ -610,34 +613,29 @@ class BackendManager:
 
                     # Fetch data for each missing species from GTDB
                     for species in missing_species:
-                        search_query = f"s__{species}"
-                        # Fetch species data using requests
-                        base_url = "https://gtdb-api.ecogenomic.org/search/gtdb"
-                        params = {
-                            "search": search_query,
-                            "page": 1,
-                            "itemsPerPage": 1000,
-                            "searchField": f"{kraken_taxonomy}_tax",
-                            "gtdbSpeciesRepOnly": True if kraken_taxonomy == "gtdb" else False,
-                            "ncbiTypeMaterialOnly": True if kraken_taxonomy == "ncbi" else False,
-                        }
+                        # Test API directly first - for diagnostic purposes
+                        test_result = test_gtdb_api_directly(species)
+                        if test_result:
+                            logging.info(f"Direct API test successful for {species}")
+                        else:
+                            logging.error(f"Direct API test failed for {species}")
 
-                        try:
-                            response = requests.get(base_url, params=params, headers={"accept": "application/json"})
+                        # Now use the fetch_species_data function
+                        search_query = f"s__{species.replace(' ', '_')}"
+                        logging.info(f"Querying GTDB API for: {search_query}")
 
-                            if response.status_code == 200:
-                                result = response.json()
-                                rows = result.get("rows", [])
+                        species_data = fetch_species_data(search_query, kraken_taxonomy)
 
-                                if rows:
-                                    results[species] = {"rows": rows}
-                                    self.prep_status["message"] = f"Found data for {species}"
-                                else:
-                                    self.prep_status["message"] = f"No data found for {species}"
-                            else:
-                                self.prep_status["message"] = f"API request failed for {species}"
-                        except Exception as e:
-                            self.prep_status["message"] = f"Error fetching data for {species}: {str(e)}"
+                        # Log diagnostics
+                        logging.info(f"Species data type: {type(species_data)}")
+                        logging.info(f"Species data length: {len(species_data) if species_data else 0}")
+
+                        # Store results
+                        if species_data:
+                            results[species] = {"rows": species_data}
+                            logging.info(f"Stored results for {species}")
+                        else:
+                            logging.warning(f"No data found for {species}")
 
                     # Update results with taxonomy IDs
                     for species_name in results.keys():
@@ -646,6 +644,9 @@ class BackendManager:
                             results[species_name]["tax_id"] = tax_id
                         else:
                             results[species_name]["tax_id"] = "N/A"
+
+                    logging.info(f"Species list: {species_list}")
+                    logging.info(f"API results: {results}")
 
                     # Filter results to include only exact matches
                     filtered_results = {}
@@ -662,7 +663,7 @@ class BackendManager:
                                 taxonomy = row.get("ncbiTaxonomy", "")
 
                             # Check for exact match
-                            if taxonomy and taxonomy.endswith(f"s__{species}"):
+                            if taxonomy and (taxonomy.endswith(f"s__{species}") or taxonomy.endswith(f"s__{species.replace(' ', '_')}")):
                                 exact_matches.append(row)
 
                         if exact_matches:
@@ -670,12 +671,13 @@ class BackendManager:
 
                     # Convert to DataFrame
                     parsed_data = []
+                    logging.info(f"Starting taxonomy filtering on {len(results)} species")
                     for species, species_info in filtered_results.items():
                         for row in species_info["rows"]:
                             row_dict = {
                                 "Species": species,
                                 "Tax_ID": species_info.get("tax_id", "N/A"),
-                                "SearchQuery": f"s__{species}",
+                                "SearchQuery": f"s__{species.replace(' ', '_')}",
                                 "GID": row.get("gid", "N/A"),
                                 "Accession": row.get("accession", "N/A"),
                                 "NCBI_OrgName": row.get("ncbiOrgName", "N/A"),
@@ -687,8 +689,7 @@ class BackendManager:
                             parsed_data.append(row_dict)
 
                     df = pd.DataFrame(parsed_data)
-                    logging.info(f"Species list: {species_list}")
-                    logging.info(f"API results: {results}")
+                    logging.info(f"Created DataFrame with {len(df)} rows")
 
                     # Extract accessions for download
                     if df is not None and not df.empty and "GID" in df.columns:
@@ -816,3 +817,4 @@ class BackendManager:
             self.prep_status["running"] = False
             self.prep_status["errors"].append(str(e))
             self.prep_status["last_update"] = time.time()
+
