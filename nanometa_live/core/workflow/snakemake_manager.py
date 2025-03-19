@@ -16,7 +16,7 @@ from typing import Dict, Any, Optional, List, Tuple
 # Import the appropriate Snakemake interface
 try:
     # For Snakemake 8.x
-    from snakemake.api import SnakemakeApi as Snakemake
+    from snakemake.api import SnakemakeApi
     SNAKEMAKE_V8 = True
 except ImportError:
     # For Snakemake 7.x
@@ -166,21 +166,21 @@ class SnakemakeManager:
             with open(log_file, "w") as log:
                 # Run Snakemake using the appropriate API
                 if SNAKEMAKE_V8:
-                    # Snakemake 8.x API
-                    api = Snakemake(
-                        snakefile=self.snakefile_path,
+                    # Snakemake 8.x API - check the correct parameter names
+                    api = SnakemakeApi(
+                        snakefile=self.snakefile_path,  # Use snakefile, not workflow
                         cores=cores,
                         configfiles=[self.config_path],
                         workdir=os.path.dirname(self.config_path),
-                        dryrun=dryrun,
-                        printshellcmds=True,
-                        printreason=True,
-                        printrulegraph=True,
+                        dryrun=dryrun,  # Use dryrun, not dry_run
+                        printshellcmds=True,  # Use printshellcmds, not print_shell_commands
+                        printreason=True,  # Use printreason, not print_reason
+                        printrulegraph=True,  # Use printrulegraph, not print_rulegraph
                         stats=os.path.join(self.log_dir, "stats.json"),
                         unlock=False,
-                        keepgoing=True,
+                        keepgoing=True,  # Use keepgoing, not keep_going
                         quiet=False,
-                        log_handlers=[log]
+                        log_handler=[log]  # Use log_handler, not log_handlers
                     )
                     success = api.execute()
                 else:

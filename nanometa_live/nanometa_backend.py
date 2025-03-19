@@ -127,9 +127,9 @@ def unlock_workdir(config_path):
         config = config_loader.load_config(config_path)
         workdir = config.get("main_dir", os.path.dirname(config_path))
 
-        # Unlock the working directory using the new API
+        # Unlock the working directory using the new API - use correct parameters
         api = SnakemakeApi(
-            snakefile=snakefile_path,
+            snakefile=snakefile_path,  # Use snakefile, not workflow
             unlock=True,
             workdir=workdir,
             quiet=False

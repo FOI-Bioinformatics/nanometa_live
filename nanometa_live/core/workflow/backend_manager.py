@@ -365,7 +365,7 @@ class BackendManager:
                 return
 
             # Validate species list
-            if not species_list:
+            if not species_list and not any(s.get("taxid") for s in config.get("species_of_interest", [])):
                 self.prep_status["running"] = False
                 self.prep_status["errors"].append("No species of interest defined")
                 self.prep_status["message"] = "Error: No species of interest defined. Please add species in the Configuration tab."
@@ -406,6 +406,18 @@ class BackendManager:
             self.prep_status["progress"] = 30
             self.prep_status["last_update"] = time.time()
 
+            # Define taxonomic level mappings
+            level_mappings = {
+                'S': 'species',
+                'G': 'genus',
+                'F': 'family',
+                'O': 'order',
+                'C': 'class',
+                'P': 'phylum',
+                'D': 'superkingdom',
+                'K': 'kingdom'
+            }
+
             species_taxids = {}
             try:
                 with open(inspect_file, 'r') as f:
@@ -417,11 +429,11 @@ class BackendManager:
                             taxid = parts[4]
                             name = parts[5].strip()
 
-                            # Only process species level entries
-                            if level_type == 'species':
+                            # Only process species level entries - checking both abbreviated and full names
+                            if level_type == 'S' or level_type == 'species' or level_mappings.get(level_type) == 'species':
                                 # Check if any of our species match this name
                                 for species in species_list:
-                                    if species.lower() in name.lower():
+                                    if species and species.lower() in name.lower():
                                         species_taxids[species] = taxid
             except Exception as e:
                 self.prep_status["running"] = False
@@ -440,13 +452,21 @@ class BackendManager:
 
             for species in config.get("species_of_interest", []):
                 name = species.get("name", "")
-                if name in species_taxids:
+                taxid = species.get("taxid", "")
+
+                # If taxid already provided, keep it
+                if taxid:
+                    updated_species.append(species)
+                    matched_species_count += 1
+                # Otherwise try to match by name
+                elif name in species_taxids:
                     updated_species.append({
                         "name": name,
                         "taxid": species_taxids[name]
                     })
                     matched_species_count += 1
                 else:
+                    # Keep the original entry even if no match found
                     updated_species.append(species)
 
             # Check if we matched any species
@@ -458,7 +478,7 @@ class BackendManager:
                 self.prep_status["last_update"] = time.time()
                 return  # Exit the function immediately
             else:
-                self.prep_status["message"] = f"Found taxonomy IDs for {matched_species_count} out of {len(species_list)} species."
+                self.prep_status["message"] = f"Found taxonomy IDs for {matched_species_count} out of {len(config.get('species_of_interest', []))} species."
                 self.prep_status["progress"] = 45
                 self.prep_status["last_update"] = time.time()
 
@@ -491,9 +511,13 @@ class BackendManager:
                 # For now, create placeholder files
                 for species_name, taxid in missing_genomes:
                     placeholder_path = os.path.join(genomes_dir, f"{taxid}.fasta")
+                    # Create BLAST-compatible header: use a simple format without spaces or special chars
+                    safe_name = species_name.replace(" ", "_").replace(",", "").replace("'", "").replace("(", "").replace(")", "")
                     with open(placeholder_path, 'w') as f:
-                        f.write(f">placeholder_sequence_for_{species_name}_taxid_{taxid}\n")
-                        f.write("ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\n")
+                        # Use standard NCBI-like header format
+                        f.write(f">gnl|nanometa|{taxid} [Taxid={taxid}] {safe_name} placeholder sequence\n")
+                        # Make the sequence longer and more varied
+                        f.write("ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT\n" * 10)
 
                 self.prep_status["message"] = f"Created placeholder genome files for {len(missing_genomes)} species."
                 self.prep_status["progress"] = 65
@@ -534,9 +558,14 @@ class BackendManager:
                             "-in", genome_file,
                             "-dbtype", "nucl",
                             "-out", db_file,
-                            "-parse_seqids"
+                            "-parse_seqids",
+                            "-hash_index",
+                            "-title", f"Nanometa_Tax{taxid}"
                         ]
-                        subprocess.run(cmd, check=True, stderr=subprocess.PIPE)
+                        # Add error handling with full output capture
+                        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                        if result.returncode != 0:
+                            raise subprocess.CalledProcessError(result.returncode, cmd, result.stdout, result.stderr)
                     except subprocess.CalledProcessError as e:
                         error_message = e.stderr.decode() if e.stderr else str(e)
                         self.prep_status["errors"].append(f"Error building BLAST database for {taxid}: {error_message}")
