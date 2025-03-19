@@ -17,6 +17,7 @@ from pathlib import Path
 
 from nanometa_live.core.utils.file_utils import check_command_exists
 from nanometa_live.core.workflow.snakemake_manager import SnakemakeManager
+from nanometa_live.core.utils.database_utils import download_and_prepare_kraken_database
 
 
 def _adapt_boolean_for_snakemake(config):
@@ -265,6 +266,87 @@ class BackendManager:
             # Sleep for a bit
             time.sleep(5)
 
+    def _update_progress(self, progress: int, message: str):
+        """
+        Update preparation progress.
+        This is a helper method for callbacks.
+        """
+        # Calculate the actual progress value based on the stage
+        if self.prep_status["progress"] < 30:
+            # We're in the database preparation stage (0-30%)
+            self.prep_status["progress"] = progress
+        else:
+            # We're in a later stage, adjust progress accordingly
+            self.prep_status["progress"] = 30 + int(progress * 0.7)
+
+        self.prep_status["message"] = message
+        self.prep_status["last_update"] = time.time()
+
+    def handle_external_kraken_database(self):
+        """
+        Check for and handle external Kraken2 database if specified in config.
+        This method should be called from _run_data_preparation.
+        """
+        try:
+            config = self.config
+
+            # Check if an external Kraken2 database is specified
+            external_db_key = (config.get("external_kraken2_db") or "").strip()
+            external_db_info = config.get("external_kraken2_info", {})
+
+            if external_db_key and external_db_key in external_db_info:
+                self.prep_status["message"] = f"Checking external Kraken2 database: {external_db_key}"
+                self.prep_status["progress"] = 10
+                self.prep_status["last_update"] = time.time()
+
+                # Prepare database folders
+                kraken_db_folder = os.path.join(self.data_dir, "kraken2_databases")
+                os.makedirs(kraken_db_folder, exist_ok=True)
+
+                # Download and prepare the database
+                success, message, db_path = download_and_prepare_kraken_database(
+                    external_db_key,
+                    external_db_info,
+                    kraken_db_folder,
+                    progress_callback=self._update_progress
+                )
+
+                if not success:
+                    self.prep_status["errors"].append(message)
+                    self.prep_status["message"] = f"Error: {message}"
+                    self.prep_status["progress"] = 100
+                    self.prep_status["running"] = False
+                    self.prep_status["last_update"] = time.time()
+                    return False
+
+                # Update configuration with new database path
+                if db_path:
+                    # Get taxonomy from database info
+                    db_details = external_db_info[external_db_key]
+                    kraken_taxonomy = db_details.get("kraken_taxonomy", config.get("kraken_taxonomy", "gtdb"))
+
+                    # Update config
+                    config["kraken_db"] = os.path.abspath(db_path)
+                    config["kraken_taxonomy"] = kraken_taxonomy
+                    self.config = config
+
+                    self.prep_status["message"] = f"Successfully prepared external Kraken2 database: {external_db_key}"
+                    self.prep_status["progress"] = 30
+                    self.prep_status["last_update"] = time.time()
+
+                return True
+
+            return True  # No external database specified, continue with preparation
+
+        except Exception as e:
+            error_msg = f"Error handling external Kraken2 database: {str(e)}"
+            self.prep_status["errors"].append(error_msg)
+            self.prep_status["message"] = f"Error: {error_msg}"
+            self.prep_status["progress"] = 100
+            self.prep_status["running"] = False
+            self.prep_status["last_update"] = time.time()
+            return False
+
     def prepare_data(self) -> Tuple[bool, str]:
         """
         Prepare data for analysis by:
@@ -371,6 +453,10 @@ class BackendManager:
                 self.prep_status["message"] = "Error: No species of interest defined. Please add species in the Configuration tab."
                 self.prep_status["progress"] = 100
                 return
+
+            # STEP 1.5: Check for external Kraken2 database
+            if not self.handle_external_kraken_database():
+                return  # Error occurred during database handling
 
             # STEP 2: Extract taxonomy IDs from Kraken database
             self.prep_status["message"] = "Extracting taxonomy IDs from Kraken database..."

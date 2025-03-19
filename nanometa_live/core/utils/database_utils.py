@@ -1,622 +1,220 @@
 """
 Database utilities for Nanometa Live.
 
-This module provides utility functions for managing databases used by Nanometa Live,
-including downloading, extracting, and validating Kraken2 databases.
+This module provides utility functions for downloading and managing Kraken2 databases.
 """
 
 import os
 import logging
 import requests
 import tarfile
-import yaml
-import subprocess
-from typing import Dict, Tuple, List, Optional, Any, Union
 import time
+from typing import Optional, Tuple, Dict, Any, Callable
 
 
-def load_database_list() -> Dict[str, Dict[str, str]]:
+def download_and_prepare_kraken_database(
+    external_db_key: str,
+    external_db_info: Dict[str, Dict[str, str]],
+    destination_folder: str,
+    progress_callback: Optional[Callable] = None
+) -> Tuple[bool, str, str]:
     """
-    Load the list of available external Kraken2 databases.
-
-    Returns:
-        Dictionary of database names mapped to their details
-    """
-    try:
-        # Find the database list file in the package
-        import nanometa_live
-        package_dir = os.path.dirname(nanometa_live.__file__)
-        db_list_path = os.path.join(package_dir, "kraken2_databases.yaml")
-
-        # Load the database list
-        with open(db_list_path, 'r') as f:
-            db_list = yaml.safe_load(f)
-
-        return db_list.get("kraken2_databases", {})
-    except Exception as e:
-        logging.error(f"Error loading database list: {e}")
-        return {}
-
-
-def download_kraken_database(
-    db_info: Dict[str, str],
-    dest_dir: str,
-    progress_callback: Optional[callable] = None
-) -> Tuple[bool, str]:
-    """
-    Download a Kraken2 database from the specified URL.
+    Download and decompress an external Kraken2 database.
 
     Args:
-        db_info: Dictionary containing database information (name, url, etc.)
-        dest_dir: Directory to download the database to
-        progress_callback: Optional callback function for progress updates
+        external_db_key: Key of the database in external_db_info
+        external_db_info: Dictionary of database information
+        destination_folder: Folder to download the database to
+        progress_callback: Callback function for progress updates
 
     Returns:
-        Tuple of (success, message)
+        Tuple of (success, message, database_path)
     """
-    db_name = db_info.get("name", "unknown")
-    db_url = db_info.get("database_url")
-
-    if not db_url:
-        return False, f"No download URL provided for database {db_name}"
-
     try:
-        # Create destination directory if it doesn't exist
-        os.makedirs(dest_dir, exist_ok=True)
+        if external_db_key not in external_db_info:
+            return False, f"Database '{external_db_key}' not found in configuration", ""
 
-        # Download to a temporary file first
-        temp_path = os.path.join(dest_dir, f"{db_name}.tar.gz")
+        db_details = external_db_info[external_db_key]
+        db_url = db_details.get("database_url")
 
-        # Send progress update if callback is provided
-        if progress_callback:
-            progress_callback(0, f"Starting download of {db_name} from {db_url}")
+        if not db_url:
+            return False, f"No URL provided for database '{external_db_key}'", ""
 
-        # Stream the download to avoid loading the whole file into memory
-        with requests.get(db_url, stream=True) as response:
-            response.raise_for_status()
-            total_size = int(response.headers.get("content-length", 0))
+        # Create destination folder if it doesn't exist
+        os.makedirs(destination_folder, exist_ok=True)
 
-            # Use a small chunk size to show progress
-            chunk_size = 8192
-            downloaded = 0
+        # Define database file and extraction folder paths
+        db_file_name = os.path.join(destination_folder, f"{external_db_key}.tar.gz")
+        db_extract_folder = os.path.join(destination_folder, external_db_key)
+        hash_file_path = os.path.join(db_extract_folder, "hash.k2d")
 
-            with open(temp_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=chunk_size):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
+        # Check if already downloaded and extracted
+        if os.path.exists(hash_file_path):
+            logging.info(f"Database '{external_db_key}' already exists at {db_extract_folder}")
+            return True, f"Database '{external_db_key}' already exists", db_extract_folder
 
-                        # Send progress updates
-                        if progress_callback and total_size > 0:
-                            # Calculate progress as percentage
-                            percent = (downloaded / total_size) * 100
-                            progress_callback(
-                                int(percent),
-                                f"Downloading... {downloaded / (1024*1024):.1f} MB / {total_size / (1024*1024):.1f} MB ({percent:.1f}%)"
-                            )
+        # Download the database if needed
+        if not os.path.exists(db_file_name):
+            if progress_callback:
+                progress_callback(10, f"Downloading Kraken2 database '{external_db_key}' from {db_url}")
 
-        # Extract the database
-        extract_dir = os.path.join(dest_dir, db_name)
-        os.makedirs(extract_dir, exist_ok=True)
+            # Stream the download with progress updates
+            download_success = download_database(db_url, db_file_name, progress_callback)
 
-        if progress_callback:
-            progress_callback(50, f"Download complete. Extracting to {extract_dir}")
+            if not download_success:
+                return False, f"Failed to download database '{external_db_key}'", ""
+        else:
+            if progress_callback:
+                progress_callback(40, f"Database file '{db_file_name}' already downloaded.")
 
-        with tarfile.open(temp_path, "r:gz") as tar:
-            members = tar.getmembers()
-            total_members = len(members)
+        # Create extraction folder if needed
+        os.makedirs(db_extract_folder, exist_ok=True)
 
-            for i, member in enumerate(members):
-                tar.extract(member, path=extract_dir)
+        # Extract the database if needed
+        if not os.path.exists(hash_file_path):
+            if progress_callback:
+                progress_callback(45, f"Extracting database '{external_db_key}'...")
 
-                # Send progress updates
-                if progress_callback and i % 10 == 0:
-                    extract_percent = 50 + (i / total_members) * 50
-                    progress_callback(
-                        int(extract_percent),
-                        f"Extracting... {i} / {total_members} files ({i / total_members * 100:.1f}%)"
-                    )
+            extract_success = decompress_database(db_file_name, db_extract_folder, progress_callback)
+
+            if not extract_success:
+                return False, f"Failed to extract database '{external_db_key}'", ""
+        else:
+            if progress_callback:
+                progress_callback(80, f"Database '{external_db_key}' already extracted.")
 
         if progress_callback:
-            progress_callback(100, f"Successfully downloaded and extracted {db_name}")
+            progress_callback(100, f"Database '{external_db_key}' successfully prepared")
 
-        # Return success
-        return True, extract_dir
+        return True, f"Successfully prepared database '{external_db_key}'", db_extract_folder
 
-    except requests.exceptions.RequestException as e:
-        return False, f"Error downloading database: {str(e)}"
-    except tarfile.TarError as e:
-        return False, f"Error extracting database: {str(e)}"
     except Exception as e:
-        return False, f"Unexpected error: {str(e)}"
+        error_msg = f"Error preparing Kraken2 database: {str(e)}"
+        logging.error(error_msg)
+        if progress_callback:
+            progress_callback(100, f"Error: {error_msg}")
+        return False, error_msg, ""
 
 
-def verify_kraken_db(db_path: str) -> bool:
-    """
-    Verify that a Kraken2 database is valid.
-
-    Args:
-        db_path: Path to the Kraken2 database
-
-    Returns:
-        True if the database is valid, False otherwise
-    """
-    # Check for key files that should be present in any Kraken database
-    required_files = ["hash.k2d", "opts.k2d", "taxo.k2d"]
-
-    for file in required_files:
-        if not os.path.isfile(os.path.join(db_path, file)):
-            logging.warning(f"Kraken2 database missing required file: {file}")
-            return False
-
-    return True
-
-
-def run_kraken2_inspect(
-    db_path: str,
-    output_path: str,
-    progress_callback: Optional[callable] = None
+def download_database(
+    url: str,
+    dest_file_path: str,
+    progress_callback: Optional[Callable] = None
 ) -> bool:
     """
-    Run kraken2-inspect on a database to extract taxonomy information.
+    Download a file from the specified URL with progress reporting.
 
     Args:
-        db_path: Path to the Kraken2 database
-        output_path: Path to save the inspection report
-        progress_callback: Optional callback function for progress updates
+        url: URL to download from
+        dest_file_path: Path to save the downloaded file
+        progress_callback: Callback function for progress updates
 
     Returns:
         True if successful, False otherwise
     """
     try:
-        if not verify_kraken_db(db_path):
-            return False
+        # Start the download
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
 
+        # Get file size for progress reporting
+        total_size = int(response.headers.get("content-length", 0))
+        downloaded = 0
+        chunk_size = 8192  # 8KB chunks
+
+        # Download in chunks with progress reporting
+        with open(dest_file_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=chunk_size):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+
+                    # Update progress every 5MB
+                    if progress_callback and total_size > 0 and downloaded % (5 * 1024 * 1024) < chunk_size:
+                        percent = int((downloaded / total_size) * 30) + 10  # Scale to 10-40%
+                        progress_callback(
+                            percent,
+                            f"Downloading... {downloaded/(1024*1024):.1f} MB / {total_size/(1024*1024):.1f} MB ({downloaded/total_size*100:.1f}%)"
+                        )
+
+        logging.info(f"Successfully downloaded file to {dest_file_path}")
+        return True
+
+    except Exception as e:
+        logging.error(f"Error downloading file: {str(e)}")
         if progress_callback:
-            progress_callback(0, f"Starting kraken2-inspect on {db_path}")
+            progress_callback(40, f"Error downloading file: {str(e)}")
+        return False
 
-        # Run kraken2-inspect
-        cmd = ["kraken2-inspect", "--db", db_path]
 
-        with open(output_path, "w") as f:
-            process = subprocess.Popen(
-                cmd,
-                stdout=f,
-                stderr=subprocess.PIPE,
-                text=True
-            )
+def decompress_database(
+    tar_file_path: str,
+    extract_folder: str,
+    progress_callback: Optional[Callable] = None
+) -> bool:
+    """
+    Decompress a TAR.GZ file with progress reporting.
 
-            # Monitor the process and provide progress updates
-            if progress_callback:
-                progress_callback(10, "kraken2-inspect running...")
+    Args:
+        tar_file_path: Path to the TAR.GZ file
+        extract_folder: Folder to extract the contents to
+        progress_callback: Callback function for progress updates
 
-                while process.poll() is None:
-                    # Send periodic updates while the process is running
-                    progress_callback(50, "kraken2-inspect in progress...")
-                    time.sleep(1)
-
-            # Wait for process to complete
-            process.wait()
-
-            if process.returncode != 0:
-                error_msg = process.stderr.read() if process.stderr else "Unknown error"
-                if progress_callback:
-                    progress_callback(100, f"kraken2-inspect failed: {error_msg}")
-                return False
-
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
         if progress_callback:
-            progress_callback(100, "kraken2-inspect completed successfully")
+            progress_callback(50, f"Decompressing {os.path.basename(tar_file_path)}...")
+
+        # Open the tar file
+        with tarfile.open(tar_file_path, "r:gz") as tar:
+            # Get member info for progress reporting
+            members = tar.getmembers()
+            total_members = len(members)
+
+            # Extract with progress updates
+            for i, member in enumerate(members):
+                tar.extract(member, path=extract_folder)
+
+                # Update progress every 100 files
+                if progress_callback and i % 100 == 0:
+                    percent = 50 + int((i / total_members) * 30)  # Scale to 50-80%
+                    progress_callback(
+                        percent,
+                        f"Extracting... {i}/{total_members} files ({i/total_members*100:.1f}%)"
+                    )
+
+        logging.info(f"Successfully extracted {tar_file_path} to {extract_folder}")
+        if progress_callback:
+            progress_callback(80, f"Extraction complete.")
 
         return True
 
     except Exception as e:
+        logging.error(f"Error extracting file: {str(e)}")
         if progress_callback:
-            progress_callback(100, f"Error running kraken2-inspect: {str(e)}")
+            progress_callback(80, f"Error extracting file: {str(e)}")
         return False
 
 
-def parse_species_from_inspect(
-    inspect_file: str,
-    species_list: List[str],
-    progress_callback: Optional[callable] = None
-) -> Dict[str, str]:
+def verify_kraken_database(db_path: str) -> bool:
     """
-    Parse a kraken2-inspect output file to extract taxonomy IDs for species.
+    Verify that a Kraken2 database is valid.
 
     Args:
-        inspect_file: Path to the kraken2-inspect output file
-        species_list: List of species names to search for
-        progress_callback: Optional callback function for progress updates
+        db_path: Path to the Kraken2 database folder
 
     Returns:
-        Dictionary mapping species names to taxonomy IDs
+        True if valid, False otherwise
     """
-    if progress_callback:
-        progress_callback(0, f"Parsing taxonomy information from {inspect_file}")
-
-    species_taxids = {}
-    level_mappings = {
-        'S': 'species',
-        'G': 'genus',
-        'F': 'family',
-        'O': 'order',
-        'C': 'class',
-        'P': 'phylum',
-        'D': 'superkingdom',
-        'K': 'kingdom'
-    }
-
-    try:
-        line_count = 0
-        matched_count = 0
-
-        # Count total lines for progress tracking
-        with open(inspect_file, 'r') as f:
-            total_lines = sum(1 for _ in f)
-
-        with open(inspect_file, 'r') as f:
-            for i, line in enumerate(f):
-                line_count += 1
-
-                # Update progress every 10,000 lines
-                if progress_callback and line_count % 10000 == 0:
-                    percent = (line_count / total_lines) * 100
-                    progress_callback(
-                        int(percent),
-                        f"Processed {line_count:,} of {total_lines:,} entries ({percent:.1f}%)..."
-                    )
-
-                parts = line.strip().split('\t')
-                if len(parts) >= 6:  # At least 6 columns expected
-                    # Column format: %krakenuniq, cumul reads, reads, level_type, taxid, name
-                    level_type = parts[3]
-                    taxid = parts[4]
-                    name = parts[5].strip()
-
-                    # Only process species level entries - checking both abbreviated and full names
-                    if level_type == 'S' or level_type == 'species' or level_mappings.get(level_type) == 'species':
-                        # Check if any of our species match this name
-                        for species in species_list:
-                            if species and species.lower() in name.lower():
-                                species_taxids[species] = taxid
-                                matched_count += 1
-
-                                if progress_callback:
-                                    progress_callback(
-                                        int((line_count / total_lines) * 100),
-                                        f"Found taxonomy ID for {species}: {taxid} ({matched_count}/{len(species_list)} matched)"
-                                    )
-
-        if progress_callback:
-            progress_callback(
-                100,
-                f"Finished parsing. Found taxonomy IDs for {matched_count} out of {len(species_list)} species."
-            )
-
-        return species_taxids
-
-    except Exception as e:
-        if progress_callback:
-            progress_callback(100, f"Error parsing taxonomy information: {str(e)}")
-        return {}
-
-
-def download_genome_for_taxid(
-    taxid: str,
-    species: str,
-    accession: str,
-    output_dir: str,
-    progress_callback: Optional[callable] = None
-) -> Tuple[bool, str]:
-    """
-    Download a genome for a specific taxonomy ID using NCBI datasets tool.
-
-    Args:
-        taxid: Taxonomy ID
-        species: Species name
-        accession: NCBI accession number
-        output_dir: Directory to save the genome
-        progress_callback: Optional callback function for progress updates
-
-    Returns:
-        Tuple of (success, message)
-    """
-    try:
-        if progress_callback:
-            progress_callback(0, f"Starting download for {species} (taxid: {taxid})")
-
-        # Create output directory
-        os.makedirs(output_dir, exist_ok=True)
-
-        # Write accession to temporary file
-        accession_file = os.path.join(output_dir, f"{taxid}_accession.txt")
-        with open(accession_file, "w") as f:
-            f.write(f"{accession}\n")
-
-        # Define output zip file
-        output_zip = os.path.join(output_dir, f"{taxid}_genome.zip")
-
-        # Download using datasets command
-        cmd = [
-            "datasets", "download", "genome", "accession",
-            "--inputfile", accession_file,
-            "--filename", output_zip
-        ]
-
-        if progress_callback:
-            progress_callback(10, f"Running NCBI datasets command for {species}")
-
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True
-        )
-
-        # Monitor process output for progress updates
-        while True:
-            output = process.stdout.readline()
-            if output == '' and process.poll() is not None:
-                break
-            if output:
-                output = output.strip()
-                if progress_callback:
-                    progress_callback(50, f"NCBI download: {output}")
-
-        rc = process.poll()
-        if rc != 0:
-            if progress_callback:
-                progress_callback(100, f"Download failed with exit code {rc}")
-            return False, f"Download failed with exit code {rc}"
-
-        # Extract and process the downloaded file
-        if progress_callback:
-            progress_callback(70, f"Extracting genome files for {species}")
-
-        import zipfile
-
-        with zipfile.ZipFile(output_zip, 'r') as zip_ref:
-            zip_ref.extractall(output_dir)
-
-        # Find and copy the genome file
-        ncbi_data_dir = os.path.join(output_dir, "ncbi_dataset", "data", accession)
-        genome_file = None
-
-        for root, dirs, files in os.walk(ncbi_data_dir):
-            for file in files:
-                if file.endswith(".fna"):
-                    genome_file = os.path.join(root, file)
-                    break
-            if genome_file:
-                break
-
-        if not genome_file:
-            if progress_callback:
-                progress_callback(100, f"No genome file found for {species}")
-            return False, f"No genome file found for {species}"
-
-        # Copy the genome file to the final location
-        import shutil
-        target_file = os.path.join(output_dir, f"{taxid}.fasta")
-        shutil.copy(genome_file, target_file)
-
-        if progress_callback:
-            progress_callback(100, f"Successfully downloaded genome for {species}")
-
-        # Clean up intermediate files
-        try:
-            os.remove(accession_file)
-            os.remove(output_zip)
-            shutil.rmtree(os.path.join(output_dir, "ncbi_dataset"))
-        except Exception as e:
-            logging.warning(f"Error cleaning up temporary files: {str(e)}")
-
-        return True, target_file
-
-    except Exception as e:
-        if progress_callback:
-            progress_callback(100, f"Error downloading genome: {str(e)}")
-        return False, f"Error downloading genome: {str(e)}"
-
-
-def build_blast_database(
-    genome_file: str,
-    output_dir: str,
-    progress_callback: Optional[callable] = None
-) -> Tuple[bool, str]:
-    """
-    Build a BLAST database from a genome file.
-
-    Args:
-        genome_file: Path to the genome FASTA file
-        output_dir: Directory to save the BLAST database
-        progress_callback: Optional callback function for progress updates
-
-    Returns:
-        Tuple of (success, message)
-    """
-    try:
-        if progress_callback:
-            progress_callback(0, f"Starting BLAST database build for {os.path.basename(genome_file)}")
-
-        # Create output directory
-        os.makedirs(output_dir, exist_ok=True)
-
-        # Get base filename without extension
-        base_name = os.path.splitext(os.path.basename(genome_file))[0]
-        output_path = os.path.join(output_dir, base_name)
-
-        # Build BLAST database
-        cmd = [
-            "makeblastdb",
-            "-in", genome_file,
-            "-dbtype", "nucl",
-            "-out", output_path
-        ]
-
-        if progress_callback:
-            progress_callback(20, "Running makeblastdb command...")
-
-        process = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=True
-        )
-
-        # Check if required files were created
-        for ext in [".nhr", ".nin", ".nsq"]:
-            if not os.path.exists(f"{output_path}{ext}"):
-                if progress_callback:
-                    progress_callback(100, f"BLAST database file {output_path}{ext} not created")
-                return False, f"BLAST database file {output_path}{ext} not created"
-
-        if progress_callback:
-            progress_callback(100, "BLAST database built successfully")
-
-        return True, output_path
-
-    except subprocess.CalledProcessError as e:
-        error_msg = e.stderr if e.stderr else str(e)
-        if progress_callback:
-            progress_callback(100, f"Error building BLAST database: {error_msg}")
-        return False, f"Error building BLAST database: {error_msg}"
-
-    except Exception as e:
-        if progress_callback:
-            progress_callback(100, f"Error building BLAST database: {str(e)}")
-        return False, f"Error building BLAST database: {str(e)}"
-
-
-def fetch_gtdb_data(
-    species: str,
-    taxonomy_db: str = "gtdb",
-    progress_callback: Optional[callable] = None
-) -> Tuple[bool, Dict[str, Any]]:
-    """
-    Fetch data for a species from the GTDB API.
-
-    Args:
-        species: Species name
-        taxonomy_db: Taxonomy database to use ('gtdb' or 'ncbi')
-        progress_callback: Optional callback function for progress updates
-
-    Returns:
-        Tuple of (success, data)
-    """
-    try:
-        if progress_callback:
-            progress_callback(0, f"Starting GTDB API query for {species}")
-
-        search_query = f"s__{species}"
-
-        # Fetch species data using requests
-        base_url = "https://gtdb-api.ecogenomic.org/search/gtdb"
-        params = {
-            "search": search_query,
-            "page": 1,
-            "itemsPerPage": 1000,
-            "searchField": f"{taxonomy_db}_tax",
-            "gtdbSpeciesRepOnly": True if taxonomy_db == "gtdb" else False,
-            "ncbiTypeMaterialOnly": True if taxonomy_db == "ncbi" else False,
-        }
-
-        if progress_callback:
-            progress_callback(20, f"Sending API request for {species}")
-
-        response = requests.get(base_url, params=params, headers={"accept": "application/json"})
-
-        if response.status_code != 200:
-            if progress_callback:
-                progress_callback(100, f"API request failed with status code {response.status_code}")
-            return False, {}
-
-        result = response.json()
-        rows = result.get("rows", [])
-
-        if not rows:
-            if progress_callback:
-                progress_callback(100, f"No data found for {species}")
-            return False, {}
-
-        if progress_callback:
-            progress_callback(50, f"Found {len(rows)} results for {species}")
-
-        # Find exact matches
-        exact_matches = []
-
-        for row in rows:
-            # Get the taxonomy field based on the taxonomy database
-            if taxonomy_db == "gtdb":
-                taxonomy = row.get("gtdbTaxonomy", "")
-            else:  # ncbi
-                taxonomy = row.get("ncbiTaxonomy", "")
-
-            # Check for exact match
-            if taxonomy and taxonomy.endswith(f"s__{species}"):
-                exact_matches.append(row)
-
-        if exact_matches:
-            # Return the first exact match
-            if progress_callback:
-                progress_callback(100, f"Found exact match for {species}")
-            return True, exact_matches[0]
-        else:
-            # Return first result if no exact match
-            if progress_callback:
-                progress_callback(100, f"No exact match found for {species}, using first result")
-            return True, rows[0]
-
-    except Exception as e:
-        if progress_callback:
-            progress_callback(100, f"Error fetching GTDB data: {str(e)}")
-        return False, {}
-
-
-def check_missing_genomes(
-    species_to_taxid: Dict[str, str],
-    genomes_dir: str
-) -> List[str]:
-    """
-    Check which genomes are missing for the given species.
-
-    Args:
-        species_to_taxid: Dictionary mapping species names to taxonomy IDs
-        genomes_dir: Directory where genome files should be located
-
-    Returns:
-        List of species names that are missing genome files
-    """
-    missing_species = []
-
-    for species, taxid in species_to_taxid.items():
-        genome_file = os.path.join(genomes_dir, f"{taxid}.fasta")
-        if not os.path.exists(genome_file):
-            missing_species.append(species)
-
-    return missing_species
-
-
-def check_missing_blast_dbs(
-    species_to_taxid: Dict[str, str],
-    blast_dir: str
-) -> List[str]:
-    """
-    Check which BLAST databases are missing for the given species.
-
-    Args:
-        species_to_taxid: Dictionary mapping species names to taxonomy IDs
-        blast_dir: Directory where BLAST databases should be located
-
-    Returns:
-        List of taxonomy IDs that are missing BLAST databases
-    """
-    missing_dbs = []
-
-    for species, taxid in species_to_taxid.items():
-        blast_db_file = os.path.join(blast_dir, f"{taxid}.fasta.nhr")
-        if not os.path.exists(blast_db_file):
-            missing_dbs.append(str(taxid))
-
-    return missing_dbs
+    # Required files for a Kraken2 database
+    required_files = ["hash.k2d", "opts.k2d", "taxo.k2d"]
+
+    for file in required_files:
+        file_path = os.path.join(db_path, file)
+        if not os.path.exists(file_path):
+            logging.warning(f"Missing required Kraken2 database file: {file}")
+            return False
+
+    return True
