@@ -581,18 +581,13 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             clean_temp,
         ]
 
-    # NEW INITIALIZATION CALLBACK FOR SPECIES LIST
-
-
-    # MODIFIED SPECIES LIST CALLBACK
-
     @app.callback(
         [
             Output("species-list-container", "children"),
             Output("app-config", "data", allow_duplicate=True),
         ],
         [
-            Input("app-config", "data"),  # Add this to listen for initial config
+            Input("app-config", "data"),  # Listen for config changes
             Input("species-file-input", "contents"),
             Input("add-species-button", "n_clicks"),
             Input({"type": "remove-species", "index": dash.ALL}, "n_clicks"),
@@ -602,7 +597,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             State("species-file-input", "filename"),
             State("species-list-container", "children"),
         ],
-        prevent_initial_call=True  # Set to True to avoid duplicate callback issues
+        prevent_initial_call=True
     )
     def manage_species_list(
         config, contents, add_clicks, remove_clicks, refresh_trigger, filename, current_list
@@ -614,97 +609,58 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         - Uploading species files
         - Refreshing after config changes
         """
+
         if not config:
             return [html.P("No species of interest defined. Click 'Add Species' to add one.")], no_update
-
-        # Create a copy of the current config
-        new_config = dict(config)
-        species_list = new_config.get("species_of_interest", [])
 
         # Get triggered component
         triggered_id = ctx.triggered_id if ctx.triggered else None
 
-        # Handle triggered cases
-        if triggered_id == "add-species-button" and add_clicks:
-            # Add a new empty species
-            species_list.append({"name": "", "taxid": ""})
-            new_config["species_of_interest"] = species_list
-        elif isinstance(triggered_id, dict) and triggered_id.get("type") == "remove-species":
-            # Remove a species
-            index = triggered_id.get("index")
-            if index is not None and 0 <= index < len(species_list):
-                species_list.pop(index)
-                new_config["species_of_interest"] = species_list
-        elif triggered_id == "species-file-input" and contents and filename:
-            # Handle file upload
-            content_type, content_string = contents.split(",")
-            decoded = base64.b64decode(content_string).decode("utf-8")
-
-            # Parse the file content
-            new_species = []
-            for line in decoded.splitlines():
-                parts = line.strip().split(',')  # Allow CSV format with name,taxid
-                species_name = parts[0].strip()
-                taxid = parts[1].strip() if len(parts) > 1 else ""
-
-                if species_name:
-                    new_species.append({"name": species_name, "taxid": taxid})
-
-            # Replace the existing species list
-            species_list = new_species
-            new_config["species_of_interest"] = species_list
-
-        # Create the species list UI (always done regardless of what triggered the callback)
-        species_items = []
-        for i, species in enumerate(species_list):
-            species_items.append(
-                dbc.Row(
-                    [
-                        dbc.Col(
-                            dbc.Input(
-                                id={"type": "species-name", "index": i},
-                                value=species.get("name", ""),
-                                placeholder="Enter species name",
-                                className="mb-2",
-                            ),
-                            width=7,
-                        ),
-                        dbc.Col(
-                            dbc.Input(
-                                id={"type": "species-taxid", "index": i},
-                                value=species.get("taxid", ""),
-                                placeholder="Enter/auto Tax ID",
-                                className="mb-2",
-                            ),
-                            width=3,
-                        ),
-                        dbc.Col(
-                            dbc.Button(
-                                "✕",
-                                id={"type": "remove-species", "index": i},
-                                color="danger",
-                                size="sm",
-                                className="mb-2",
-                            ),
-                            width=2,
-                        ),
-                    ]
-                )
-            )
-
-        if not species_items:
-            species_items = [
-                html.P(
-                    "No species of interest defined. Click 'Add Species' to add one."
-                )
-            ]
-
-        # If triggered by app-config (initial load) or refresh, just update UI, not config
+        # If triggered by app-config changes, just update UI, don't modify config
         if triggered_id == "app-config" or triggered_id == "refresh-form-trigger":
-            return species_items, no_update
+            species_items = []
+            for i, species in enumerate(config.get("species_of_interest", [])):
+                species_items.append(
+                    dbc.Row(
+                        [
+                            dbc.Col(
+                                dbc.Input(
+                                    id={"type": "species-name", "index": i},
+                                    value=species.get("name", ""),
+                                    placeholder="Enter species name",
+                                    className="mb-2",
+                                ),
+                                width=7,
+                            ),
+                            dbc.Col(
+                                dbc.Input(
+                                    id={"type": "species-taxid", "index": i},
+                                    value=species.get("taxid", ""),
+                                    placeholder="Enter/auto Tax ID",
+                                    className="mb-2",
+                                ),
+                                width=3,
+                            ),
+                            dbc.Col(
+                                dbc.Button(
+                                    "✕",
+                                    id={"type": "remove-species", "index": i},
+                                    color="danger",
+                                    size="sm",
+                                    className="mb-2",
+                                ),
+                                width=2,
+                            ),
+                        ]
+                    )
+                )
 
-        # Otherwise update both UI and config
-        return species_items, new_config
+            if not species_items:
+                species_items = [
+                    html.P("No species of interest defined. Click 'Add Species' to add one.")
+                ]
+
+            return species_items, no_update
 
     # Update species names in config
     @app.callback(

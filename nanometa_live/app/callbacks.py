@@ -375,9 +375,11 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
 
     @app.callback(
         Output("app-config", "data", allow_duplicate=True),
-        Input("update-interval", "n_intervals"),
         [
-            State("prepare-data-modal", "is_open"),
+            Input("update-interval", "n_intervals"),
+            Input("prepare-data-modal", "is_open")  # Make this an Input instead of State
+        ],
+        [
             State("app-config", "data")
         ],
         prevent_initial_call=True,
@@ -387,15 +389,22 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         Update the app configuration after data preparation completes.
         This ensures any taxonomy IDs discovered during preparation are reflected in the UI.
         """
-        if not modal_open:
-            return no_update
+        # Check if modal just closed (triggered by modal_open changing to False)
+        if ctx.triggered_id == "prepare-data-modal" and not modal_open:
+            status = backend_manager.get_preparation_status()
 
-        status = backend_manager.get_preparation_status()
+            # If preparation completed successfully
+            if status["progress"] >= 100 and not status["errors"]:
+                # Get the updated config and force a refresh
+                return backend_manager.config
 
-        if not status["running"] and status["progress"] >= 100 and not status["errors"]:
-            # Preparation completed successfully
-            # Return the updated configuration
-            return backend_manager.config
+        # Regular interval update while modal is open
+        elif modal_open:
+            status = backend_manager.get_preparation_status()
+
+            # If preparation just completed
+            if not status["running"] and status["progress"] >= 100 and not status["errors"]:
+                return backend_manager.config
 
         return no_update
 

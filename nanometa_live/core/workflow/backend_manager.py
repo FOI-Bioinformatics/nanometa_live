@@ -590,8 +590,13 @@ class BackendManager:
             self.prep_status["last_update"] = time.time()
 
             # Create a dictionary mapping species names to taxonomy IDs
-            species_to_taxid = {s.get("name", ""): s.get("taxid", "")
-                                for s in updated_species if s.get("taxid", "")}
+            # FIXED: Make sure to include all species with valid taxids, even newly found ones
+            species_to_taxid = {}
+            for species in self.config["species_of_interest"]:
+                name = species.get("name", "")
+                taxid = species.get("taxid", "")
+                if name and taxid:
+                    species_to_taxid[name] = taxid
 
             # Check which genomes are missing
             missing_species = []
@@ -601,10 +606,14 @@ class BackendManager:
                     missing_species.append(species)
 
             # STEP 5: Download missing genomes using GTDB API
+            # Modified: Always proceed to download section, but with proper handling for empty list
+            self.prep_status["message"] = f"Found {len(missing_species)} missing genomes. Preparing to download..."
+            self.prep_status["progress"] = 55
+            self.prep_status["last_update"] = time.time()
+
+
+            # STEP 5: Download missing genomes using GTDB API
             if missing_species:
-                self.prep_status["message"] = f"Found {len(missing_species)} missing genomes. Preparing to download..."
-                self.prep_status["progress"] = 55
-                self.prep_status["last_update"] = time.time()
 
                 try:
                     # Initialize results dictionary
