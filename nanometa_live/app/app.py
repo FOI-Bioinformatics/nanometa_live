@@ -23,21 +23,7 @@ from nanometa_live.app.components.header import create_header
 from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.config.config_loader import ConfigLoader
 
-
-
-def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendManager) -> Dash:
-    # Load kraken databases directly
-    import yaml
-    import os
-
-    try:
-        kraken_db_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "kraken2_databases.yaml")
-        with open(kraken_db_file, 'r') as f:
-            kraken_databases = yaml.safe_load(f).get("kraken2_databases", {})
-    except Exception as e:
-        logging.error(f"Error loading Kraken databases: {e}")
-        kraken_databases = {}
-
+from nanometa_live import __version__
 
 
 def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendManager) -> Dash:
@@ -52,6 +38,18 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
     Returns:
         Configured Dash application
     """
+    # Load kraken databases directly
+    import yaml
+    import os
+
+    try:
+        kraken_db_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "kraken2_databases.yaml")
+        with open(kraken_db_file, 'r') as f:
+            kraken_databases = yaml.safe_load(f).get("kraken2_databases", {})
+    except Exception as e:
+        logging.error(f"Error loading Kraken databases: {e}")
+        kraken_databases = {}
+
     # Ensure assets directory exists
     assets_dir = os.path.join(os.path.dirname(__file__), "assets")
     os.makedirs(assets_dir, exist_ok=True)

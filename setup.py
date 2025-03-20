@@ -9,7 +9,7 @@ from setuptools import setup, find_packages
 import os, re
 
 
-__version__ = "0.4.3"
+from nanometa_live import __version__
 
 
 # Read requirements.txt for dependencies
