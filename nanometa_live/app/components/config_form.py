@@ -76,8 +76,9 @@ def create_config_form():
                                 dcc.Upload(
                                     id="species-file-input",
                                     children=html.Div([
-                                        html.A("Drag and Drop or Select a File")
-                                    ]),
+                                        html.I(className="fas fa-file-upload me-2"),
+                                        html.Span("Drag and Drop or Select a File")
+                                    ], className="d-flex align-items-center justify-content-center"),
                                     style={
                                         "width": "100%",
                                         "height": "60px",
@@ -86,11 +87,13 @@ def create_config_form():
                                         "borderStyle": "dashed",
                                         "borderRadius": "5px",
                                         "textAlign": "center",
-                                        "margin": "10px 0"
+                                        "margin": "10px 0",
+                                        "backgroundColor": "#fafafa",
+                                        "cursor": "pointer"
                                     },
                                     multiple=False
                                 ),
-                                dbc.FormText("A text file with one species per line (optional)")
+                                dbc.FormText("A text file with one species per line (optional). Each line can be formatted as 'Species name,taxid' or just 'Species name'.")
                             ], className="mb-3")
                         ], width=12)
                     ]),
