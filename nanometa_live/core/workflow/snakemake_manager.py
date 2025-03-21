@@ -12,16 +12,9 @@ import threading
 import time
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
+import sys
 
-# Import the appropriate Snakemake interface
-try:
-    # For Snakemake 8.x
-    from snakemake.api import SnakemakeApi
-    SNAKEMAKE_V8 = True
-except ImportError:
-    # For Snakemake 7.x
-    import snakemake
-    SNAKEMAKE_V8 = False
+import snakemake  # required for the subprocess executor alternative
 
 
 class SnakemakeManager:
@@ -38,7 +31,6 @@ class SnakemakeManager:
         self.log_dir = os.path.join(data_dir, "logs")
         self.snakefile_path = None
         self.config_path = None
-        self.workflow = None
         self.execution_lock = threading.Lock()
         self.running = False
         self.status = {
@@ -68,7 +60,7 @@ class SnakemakeManager:
         try:
             self.config_path = config_path
 
-            # Find the Snakefile
+            # Find the Snakefile from the nanometa_live package
             import nanometa_live
 
             package_dir = os.path.dirname(nanometa_live.__file__)
@@ -130,7 +122,8 @@ class SnakemakeManager:
                 return False, "Workflow is not running"
 
             try:
-                # Flag to stop the workflow
+                # Flag to stop the workflow; note that programmatic CLI calls cannot be
+                # interrupted externally easily. This flag may be used for status tracking.
                 self.running = False
 
                 # Update status
@@ -154,7 +147,7 @@ class SnakemakeManager:
 
     def _run_workflow(self, cores: int, dryrun: bool):
         """
-        Run the Snakemake workflow.
+        Run the Snakemake workflow using its CLI interface.
 
         Args:
             cores: Number of CPU cores to use
@@ -162,46 +155,43 @@ class SnakemakeManager:
         """
         try:
             log_file = os.path.join(self.log_dir, "snakemake.log")
-
             with open(log_file, "w") as log:
-                # Run Snakemake using the appropriate API
-                if SNAKEMAKE_V8:
-                    # Snakemake 8.x API - check the correct parameter names
-                    api = SnakemakeApi(
-                        snakefile=self.snakefile_path,  # Use snakefile, not workflow
-                        cores=cores,
-                        configfiles=[self.config_path],
-                        workdir=os.path.dirname(self.config_path),
-                        dryrun=dryrun,  # Use dryrun, not dry_run
-                        printshellcmds=True,  # Use printshellcmds, not print_shell_commands
-                        printreason=True,  # Use printreason, not print_reason
-                        printrulegraph=True,  # Use printrulegraph, not print_rulegraph
-                        stats=os.path.join(self.log_dir, "stats.json"),
-                        unlock=False,
-                        keepgoing=True,  # Use keepgoing, not keep_going
-                        quiet=False,
-                        log_handler=[log]  # Use log_handler, not log_handlers
-                    )
-                    success = api.execute()
-                else:
-                    # Snakemake 7.x API
-                    success = snakemake.snakemake(
-                        self.snakefile_path,
-                        cores=cores,
-                        configfiles=[self.config_path],
-                        workdir=os.path.dirname(self.config_path),
-                        dryrun=dryrun,
-                        printshellcmds=True,
-                        printreason=True,
-                        printrulegraph=True,
-                        stats=os.path.join(self.log_dir, "stats.json"),
-                        unlock=False,
-                        keepgoing=True,
-                        quiet=False,
-                        log_handler=[log],
-                    )
+                # Build the command-line arguments for snakemake
+                args = [
+                    "--snakefile", self.snakefile_path,
+                    "--configfile", self.config_path,
+                    "--workdir", os.path.dirname(self.config_path),
+                    "--cores", str(cores),
+                    "--printshellcmds",
+                    "--printreason",
+                    "--printrulegraph",
+                    "--stats", os.path.join(self.log_dir, "stats.json"),
+                    "--keepgoing",
+                ]
+                if dryrun:
+                    args.append("--dryrun")
+                # You can add additional flags here as needed
 
-                if not success:
+                # Import the main CLI function from snakemake
+                from snakemake.__main__ import main as snakemake_main
+
+                # Redirect stdout and stderr to the log file
+                old_stdout = sys.stdout
+                old_stderr = sys.stderr
+                sys.stdout = log
+                sys.stderr = log
+                try:
+                    # Call the Snakemake CLI with the built arguments.
+                    # snakemake_main may call sys.exit(), so we catch SystemExit.
+                    try:
+                        exit_code = snakemake_main(args)
+                    except SystemExit as e:
+                        exit_code = e.code
+                finally:
+                    sys.stdout = old_stdout
+                    sys.stderr = old_stderr
+
+                if exit_code != 0:
                     self.status["errors"].append("Snakemake workflow failed")
 
         except Exception as e:
@@ -251,23 +241,18 @@ class SnakemakeExecutor:
 
         try:
             log_file = os.path.join(self.log_dir, "snakemake.log")
-
             with open(log_file, "w") as log:
                 # Find the Snakefile
                 import nanometa_live
-
                 package_dir = os.path.dirname(nanometa_live.__file__)
                 snakefile_path = os.path.join(package_dir, "Snakefile")
 
                 # Build the command
                 cmd = [
                     "snakemake",
-                    "--snakefile",
-                    snakefile_path,
-                    "--configfile",
-                    config_path,
-                    "--cores",
-                    str(cores),
+                    "--snakefile", snakefile_path,
+                    "--configfile", config_path,
+                    "--cores", str(cores),
                     "--printshellcmds",
                     "--verbose",
                 ]
@@ -284,7 +269,6 @@ class SnakemakeExecutor:
                 self.running = True
                 self.status["running"] = True
                 self.status["last_updated"] = time.time()
-
                 self.status_thread = threading.Thread(
                     target=self._monitor_status, daemon=True
                 )
@@ -336,20 +320,13 @@ class SnakemakeExecutor:
     def _monitor_status(self):
         """Monitor the status of the Snakemake subprocess."""
         while self.running and self.process:
-            # Check if process is still running
             if self.process.poll() is not None:
                 self.running = False
                 self.status["running"] = False
-
                 if self.process.returncode != 0:
                     self.status["errors"].append(
                         f"Snakemake process exited with code {self.process.returncode}"
                     )
-
                 break
-
-            # Update timestamp
             self.status["last_updated"] = time.time()
-
-            # Sleep for a bit
             time.sleep(5)
