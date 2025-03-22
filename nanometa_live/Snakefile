@@ -1,6 +1,3 @@
-Here's the complete content for `nanometa_live/Snakefile`:
-
-```python
 """
 Snakemake workflow for Nanometa Live.
 
@@ -376,4 +373,3 @@ onsuccess:
             logging.info("Removed validation placeholders")
 
         logging.info("Cleanup complete")
-```
