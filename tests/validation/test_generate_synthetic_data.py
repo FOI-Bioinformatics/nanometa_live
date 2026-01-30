@@ -74,3 +74,26 @@ def test_generate_kraken_report_barcode04_negative(tmp_path):
     watchlisted = {1773, 1280, 1639, 28901, 446, 83334, 1491}
     overlap = taxids & watchlisted
     assert len(overlap) == 0, f"Negative control has watchlisted pathogens: {overlap}"
+
+
+def test_cumulative_time_points(tmp_path):
+    """Cumulative reports should exist for 3 time points with increasing reads."""
+    from tests.validation.generate_synthetic_data import generate_all_synthetic_data
+
+    generate_all_synthetic_data(tmp_path)
+
+    kraken_dir = tmp_path / "kraken2"
+    for i in range(3):
+        batch_path = kraken_dir / f"barcode01_batch{i}.kraken2.report.txt"
+        assert batch_path.exists(), f"Batch {i} report missing"
+
+    import pandas as pd
+    totals = []
+    for i in range(3):
+        batch_path = kraken_dir / f"barcode01_batch{i}.kraken2.report.txt"
+        df = pd.read_csv(batch_path, sep="\t", header=None,
+                         names=["%", "cumul_reads", "reads", "rank", "taxid", "name"])
+        total = df[df["rank"] == "S"]["reads"].sum()
+        totals.append(total)
+
+    assert totals[0] < totals[1] < totals[2], f"Reads should increase: {totals}"

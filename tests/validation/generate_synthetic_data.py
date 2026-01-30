@@ -249,6 +249,18 @@ def generate_all_synthetic_data(output_dir):
         fastp_path = fastp_dir / f"{name}.fastp.json"
         fastp_path.write_text(json.dumps(_generate_fastp_json(total_reads), indent=2))
 
+        # Batch time-point reports (3 points with 33%, 66%, 100% of reads)
+        for batch_idx, fraction in enumerate([0.33, 0.66, 1.0]):
+            scaled_organisms = []
+            for org in organisms:
+                scaled = dict(org)
+                scaled["reads"] = max(1, int(org["reads"] * fraction))
+                scaled_organisms.append(scaled)
+            scaled_total = max(100, int(total_reads * fraction))
+            batch_lines = _build_report_lines(scaled_total, scaled_organisms)
+            batch_path = kraken_dir / f"{name}_batch{batch_idx}.kraken2.report.txt"
+            batch_path.write_text("\n".join(batch_lines) + "\n")
+
     # PAF file for barcode01 M. tuberculosis validation
     paf_lines = _generate_paf_lines(
         ref_name="NC_000962.3",
