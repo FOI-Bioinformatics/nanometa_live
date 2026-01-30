@@ -18,66 +18,102 @@ def _kraken_line(pct, cumul, reads, rank, taxid, name):
 
 
 def _build_report_lines(total_reads, organisms):
-    """
-    Build a complete Kraken2 report from organism definitions.
+    """Build a complete Kraken2 report with unique taxid rows.
 
-    organisms: list of dicts with keys:
-        phylum, phylum_taxid, phylum_class, class_taxid, order, order_taxid,
-        family, family_taxid, genus, genus_taxid, species, taxid, reads
-    Plus background flora.
-    Returns list of report lines.
+    Aggregates taxonomy nodes that share the same taxid so each taxid
+    appears exactly once, matching real Kraken2 report format.
+
+    Args:
+        total_reads: Total number of reads in the sample.
+        organisms: List of dicts with taxonomy and read count info.
+
+    Returns:
+        List of formatted Kraken2 report lines.
     """
-    lines = []
-    classified_reads = sum(o["reads"] for o in organisms)
     bg_reads_each = max(50, int(total_reads * 0.02))
-    bg_species_count = 2  # C. acnes, B. subtilis
-    bg_total = bg_reads_each * bg_species_count
-    classified_reads += bg_total
-    unclassified = total_reads - classified_reads
 
-    # Unclassified
+    # Collect all nodes: taxid -> {rank, name, reads (direct), cumul}
+    nodes = {}
+
+    # Add organisms and their lineage
+    for org in organisms:
+        lineage = [
+            ("P", org.get("phylum_taxid", 0), f"    {org['phylum']}"),
+            ("C", org.get("class_taxid", 0), f"      {org['phylum_class']}"),
+            ("O", org.get("order_taxid", 0), f"        {org['order']}"),
+            ("F", org.get("family_taxid", 0), f"          {org['family']}"),
+            ("G", org.get("genus_taxid", 0), f"            {org['genus']}"),
+            ("S", org["taxid"], f"              {org['species']}"),
+        ]
+        for rank, taxid, name in lineage:
+            if taxid not in nodes:
+                nodes[taxid] = {"rank": rank, "name": name, "reads": 0, "cumul": 0}
+            if rank == "S":
+                nodes[taxid]["reads"] = org["reads"]
+            nodes[taxid]["cumul"] += org["reads"]
+
+    # Background: C. acnes
+    bg_lineage_acnes = [
+        ("P", 201174, "    Actinomycetota"),
+        ("C", 1760, "      Actinomycetia"),
+        ("O", 31957, "        Propionibacteriales"),
+        ("F", 31958, "          Propionibacteriaceae"),
+        ("G", 1743, "            Cutibacterium"),
+        ("S", 1747, "              Cutibacterium acnes"),
+    ]
+    for rank, taxid, name in bg_lineage_acnes:
+        if taxid not in nodes:
+            nodes[taxid] = {"rank": rank, "name": name, "reads": 0, "cumul": 0}
+        if rank == "S":
+            nodes[taxid]["reads"] = bg_reads_each
+        nodes[taxid]["cumul"] += bg_reads_each
+
+    # Background: B. subtilis
+    bg_lineage_bsub = [
+        ("P", 1239, "    Bacillota"),
+        ("C", 91061, "      Bacilli"),
+        ("O", 1385, "        Bacillales"),
+        ("F", 186817, "          Bacillaceae"),
+        ("G", 1386, "            Bacillus"),
+        ("S", 1423, "              Bacillus subtilis"),
+    ]
+    for rank, taxid, name in bg_lineage_bsub:
+        if taxid not in nodes:
+            nodes[taxid] = {"rank": rank, "name": name, "reads": 0, "cumul": 0}
+        if rank == "S":
+            nodes[taxid]["reads"] = bg_reads_each
+        nodes[taxid]["cumul"] += bg_reads_each
+
+    # Calculate totals
+    total_classified = sum(n["reads"] for n in nodes.values())
+    unclassified = total_reads - total_classified
+
+    # Build lines in order: U, R, D, then by rank depth
+    lines = []
     lines.append(_kraken_line(
         unclassified / total_reads * 100, unclassified, unclassified,
         "U", 0, "unclassified"
     ))
-    # Root
     lines.append(_kraken_line(
-        classified_reads / total_reads * 100, classified_reads, 0,
+        total_classified / total_reads * 100, total_classified, 0,
         "R", 1, "root"
     ))
-    # Domain
     lines.append(_kraken_line(
-        classified_reads / total_reads * 100, classified_reads, 0,
+        total_classified / total_reads * 100, total_classified, 0,
         "D", 2, "  Bacteria"
     ))
 
-    # Each organism with full taxonomy
-    for org in organisms:
-        r = org["reads"]
-        pct = r / total_reads * 100
-        lines.append(_kraken_line(pct, r, 0, "P", org.get("phylum_taxid", 0), f"    {org['phylum']}"))
-        lines.append(_kraken_line(pct, r, 0, "C", org.get("class_taxid", 0), f"      {org['phylum_class']}"))
-        lines.append(_kraken_line(pct, r, 0, "O", org.get("order_taxid", 0), f"        {org['order']}"))
-        lines.append(_kraken_line(pct, r, 0, "F", org.get("family_taxid", 0), f"          {org['family']}"))
-        lines.append(_kraken_line(pct, r, 0, "G", org.get("genus_taxid", 0), f"            {org['genus']}"))
-        lines.append(_kraken_line(pct, r, r, "S", org["taxid"], f"              {org['species']}"))
-
-    # Background: C. acnes
-    pct_bg = bg_reads_each / total_reads * 100
-    lines.append(_kraken_line(pct_bg, bg_reads_each, 0, "P", 201174, "    Actinomycetota"))
-    lines.append(_kraken_line(pct_bg, bg_reads_each, 0, "C", 1760, "      Actinomycetia"))
-    lines.append(_kraken_line(pct_bg, bg_reads_each, 0, "O", 31957, "        Propionibacteriales"))
-    lines.append(_kraken_line(pct_bg, bg_reads_each, 0, "F", 31958, "          Propionibacteriaceae"))
-    lines.append(_kraken_line(pct_bg, bg_reads_each, 0, "G", 1743, "            Cutibacterium"))
-    lines.append(_kraken_line(pct_bg, bg_reads_each, bg_reads_each, "S", 1747, "              Cutibacterium acnes"))
-
-    # Background: B. subtilis
-    lines.append(_kraken_line(pct_bg, bg_reads_each, 0, "P", 1239, "    Bacillota"))
-    lines.append(_kraken_line(pct_bg, bg_reads_each, 0, "C", 91061, "      Bacilli"))
-    lines.append(_kraken_line(pct_bg, bg_reads_each, 0, "O", 1385, "        Bacillales"))
-    lines.append(_kraken_line(pct_bg, bg_reads_each, 0, "F", 186817, "          Bacillaceae"))
-    lines.append(_kraken_line(pct_bg, bg_reads_each, 0, "G", 1386, "            Bacillus"))
-    lines.append(_kraken_line(pct_bg, bg_reads_each, bg_reads_each, "S", 1423, "              Bacillus subtilis"))
+    # Output by rank order, sorted by cumulative reads within each rank
+    rank_order = ["P", "C", "O", "F", "G", "S"]
+    for rank in rank_order:
+        rank_nodes = [(tid, n) for tid, n in nodes.items() if n["rank"] == rank]
+        rank_nodes.sort(key=lambda x: x[1]["cumul"], reverse=True)
+        for taxid, node in rank_nodes:
+            pct = node["cumul"] / total_reads * 100
+            lines.append(_kraken_line(
+                pct, node["cumul"], node["reads"],
+                node["rank"], taxid, node["name"]
+            ))
 
     return lines
 
