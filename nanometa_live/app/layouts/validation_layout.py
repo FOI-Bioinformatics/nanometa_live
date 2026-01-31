@@ -1,12 +1,9 @@
 """
 Validation results layout for Nanometa Live v2.1.
 
-This layout displays BLAST/minimap2 validation results for watched pathogens,
-showing confirmation status, identity statistics, and coverage metrics.
-
-The layout is designed to work in two states:
-1. No validation data available (placeholder)
-2. Real validation results from nanometanf
+Split into two sub-tabs:
+1. Read Validation (BLAST) - sequence identity and read-level confirmation
+2. Coverage Validation (minimap2) - genome coverage depth and breadth
 """
 
 from dash import html, dcc, dash_table
@@ -81,276 +78,295 @@ def create_validation_status_card(
     ], className="mb-4")
 
 
+def _create_blast_tab() -> dbc.Tab:
+    """Create the Read Validation (BLAST) sub-tab."""
+    return dbc.Tab(
+        label="Read Validation (BLAST)",
+        tab_id="blast-tab",
+        children=html.Div([
+            # Summary container
+            html.Div(id="blast-summary-container", className="mb-4"),
+
+            # Controls row
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label("Filter by Status:", className="fw-bold"),
+                    dcc.Dropdown(
+                        id="blast-status-filter",
+                        options=[
+                            {"label": "All", "value": "all"},
+                            {"label": "Confirmed (>80%)", "value": "confirmed"},
+                            {"label": "Partial (50-80%)", "value": "partial"},
+                            {"label": "Low Confidence (<50%)", "value": "low"},
+                            {"label": "No Data", "value": "no_data"},
+                        ],
+                        value="all",
+                        clearable=False,
+                    )
+                ], md=3),
+                dbc.Col([
+                    dbc.Label("Sort By:", className="fw-bold"),
+                    dcc.Dropdown(
+                        id="blast-sort-select",
+                        options=[
+                            {"label": "Validation %", "value": "percent_validated"},
+                            {"label": "Read Count", "value": "validated_reads"},
+                            {"label": "Identity %", "value": "percent_identity_mean"},
+                            {"label": "Species Name", "value": "species"},
+                        ],
+                        value="percent_validated",
+                        clearable=False,
+                    )
+                ], md=3),
+                dbc.Col([
+                    dbc.Button(
+                        [html.I(className="bi bi-download me-2"), "Export Report"],
+                        id="export-blast-button",
+                        color="secondary",
+                        outline=True,
+                        className="float-end mt-4"
+                    )
+                ], md=6, className="d-flex justify-content-end align-items-end")
+            ], className="mb-4"),
+
+            html.Hr(),
+
+            # Empty state
+            html.Div(
+                id="blast-empty-message",
+                children=[
+                    dbc.Alert(
+                        "No BLAST validation results available. Run the pipeline "
+                        "with BLAST validation enabled to see results here.",
+                        color="light",
+                        className="text-center"
+                    )
+                ]
+            ),
+
+            # Results cards container
+            html.Div(id="blast-results-container", className="mb-4"),
+
+            # Identity distribution plot (collapsible)
+            dbc.Accordion([
+                dbc.AccordionItem([
+                    html.P(
+                        "Distribution of sequence identity scores for validated reads. "
+                        "Higher identity indicates more confident matches to reference genomes.",
+                        className="text-muted mb-3",
+                    ),
+                    dcc.Loading(
+                        type="circle",
+                        children=[
+                            dcc.Graph(
+                                id="blast-identity-plot",
+                                config={"displayModeBar": True, "displaylogo": False},
+                                style={"height": "400px"},
+                            )
+                        ]
+                    )
+                ], title="Identity Distribution")
+            ], start_collapsed=True, className="mb-4"),
+
+            # Stats table (collapsible)
+            dbc.Accordion([
+                dbc.AccordionItem([
+                    html.P(
+                        "Detailed BLAST validation metrics for each pathogen.",
+                        className="text-muted mb-3",
+                    ),
+                    dcc.Loading(
+                        type="default",
+                        children=[
+                            dash_table.DataTable(
+                                id="blast-stats-table",
+                                columns=[
+                                    {"name": "Species", "id": "species"},
+                                    {"name": "Sample", "id": "sample_id"},
+                                    {"name": "Total Reads", "id": "total_reads", "type": "numeric"},
+                                    {"name": "Validated", "id": "validated_reads", "type": "numeric"},
+                                    {"name": "Validated %", "id": "percent_validated", "type": "numeric"},
+                                    {"name": "Identity %", "id": "percent_identity_mean", "type": "numeric"},
+                                    {"name": "Coverage", "id": "coverage_breadth", "type": "numeric"},
+                                    {"name": "Status", "id": "status"},
+                                ],
+                                data=[],
+                                style_cell=TABLE_STYLE_CELL,
+                                style_header=TABLE_STYLE_HEADER,
+                                style_data_conditional=[
+                                    {
+                                        "if": {"filter_query": "{status} = 'confirmed'"},
+                                        "backgroundColor": "#d4edda",
+                                        "color": "#155724"
+                                    },
+                                    {
+                                        "if": {"filter_query": "{status} = 'partial'"},
+                                        "backgroundColor": "#fff3cd",
+                                        "color": "#856404"
+                                    },
+                                    {
+                                        "if": {"filter_query": "{status} = 'low'"},
+                                        "backgroundColor": "#f8d7da",
+                                        "color": "#721c24"
+                                    },
+                                ],
+                                page_size=15,
+                                sort_action="native",
+                                filter_action="native",
+                            )
+                        ]
+                    )
+                ], title="Detailed Validation Statistics")
+            ], start_collapsed=True, className="mb-4"),
+
+            # Download component
+            dcc.Download(id="download-blast-report"),
+        ], className="pt-3")
+    )
+
+
+def _create_coverage_tab() -> dbc.Tab:
+    """Create the Coverage Validation (minimap2) sub-tab."""
+    return dbc.Tab(
+        label="Coverage Validation (minimap2)",
+        tab_id="coverage-tab",
+        children=html.Div([
+            # Summary container
+            html.Div(id="coverage-summary-container", className="mb-4"),
+
+            # Controls row
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label("Species / Sample:", className="fw-bold"),
+                    dcc.Dropdown(
+                        id="coverage-species-selector",
+                        placeholder="Select a species to view coverage...",
+                        clearable=True,
+                    ),
+                ], md=6),
+                dbc.Col([
+                    dbc.Label("Min MapQ filter:", className="fw-bold"),
+                    dcc.Input(
+                        id="coverage-mapq-filter",
+                        type="number",
+                        value=0,
+                        min=0,
+                        max=60,
+                        step=1,
+                        className="form-control",
+                        style={"maxWidth": "120px"},
+                    ),
+                ], md=3),
+                dbc.Col([
+                    dbc.Button(
+                        [html.I(className="bi bi-download me-2"), "Export Report"],
+                        id="export-coverage-button",
+                        color="secondary",
+                        outline=True,
+                        className="float-end mt-4"
+                    )
+                ], md=3, className="d-flex justify-content-end align-items-end")
+            ], className="mb-3"),
+
+            # Empty state
+            html.Div(
+                id="coverage-empty-message",
+                children=[
+                    dbc.Alert(
+                        "No minimap2 coverage data available. Run the pipeline "
+                        "with minimap2 validation to see coverage results here.",
+                        color="light",
+                        className="text-center"
+                    )
+                ]
+            ),
+
+            # Coverage stats badges
+            html.Div(id="coverage-stats-container", className="mb-3"),
+
+            # Main coverage depth plot (full width)
+            dcc.Loading(
+                type="circle",
+                children=[
+                    dcc.Graph(
+                        id="coverage-depth-plot",
+                        config={"displayModeBar": True, "displaylogo": False},
+                        style={"height": "450px"},
+                    )
+                ],
+            ),
+
+            # Cumulative + Histogram side by side
+            dbc.Row([
+                dbc.Col([
+                    dcc.Loading(
+                        type="circle",
+                        children=[
+                            dcc.Graph(
+                                id="coverage-cumulative-plot",
+                                config={"displayModeBar": True, "displaylogo": False},
+                                style={"height": "280px"},
+                            )
+                        ],
+                    ),
+                ], md=6),
+                dbc.Col([
+                    dcc.Loading(
+                        type="circle",
+                        children=[
+                            dcc.Graph(
+                                id="coverage-histogram-plot",
+                                config={"displayModeBar": True, "displaylogo": False},
+                                style={"height": "280px"},
+                            )
+                        ],
+                    ),
+                ], md=6),
+            ], className="mb-4"),
+
+            html.Hr(),
+
+            # Results cards container (minimap2 cards)
+            html.Div(id="coverage-results-container", className="mb-4"),
+
+            # Download component
+            dcc.Download(id="download-coverage-report"),
+        ], className="pt-3")
+    )
+
+
 def create_validation_layout() -> dbc.Container:
     """
-    Create the validation results tab layout.
+    Create the validation results tab layout with BLAST and coverage sub-tabs.
 
     Returns:
         dbc.Container with validation visualization components
     """
     return dbc.Container([
-        # Page title and description
+        # Page title
         html.H4("Pathogen Validation Results", className="mb-3"),
-        html.P([
-            "This tab shows the results of sequence validation for detected pathogens. ",
-            "Validation compares classified reads against reference genomes to confirm ",
-            "identification accuracy."
-        ], className="text-muted mb-4"),
-
-        # Status alert for when validation is not available
-        html.Div(id="validation-status-alert", children=[
-            dbc.Alert([
-                html.H5([
-                    html.I(className="bi bi-info-circle me-2"),
-                    "Validation Not Available"
-                ], className="alert-heading"),
-                html.P([
-                    "BLAST/minimap2 validation has not been configured or no results are available yet. ",
-                    "To enable validation:"
-                ]),
-                html.Ol([
-                    html.Li("Add pathogens to your watchlist in the Watchlist tab"),
-                    html.Li("Download reference genomes for watched pathogens"),
-                    html.Li("Enable 'BLAST Validation' in the Configuration tab"),
-                    html.Li("Run or restart the analysis pipeline")
-                ]),
-            ], color="info", className="mb-4")
-        ]),
-
-        # Validation Summary Card (populated by callback)
-        html.Div(id="validation-summary-container"),
-
-        # Controls row
-        dbc.Row([
-            dbc.Col([
-                dbc.Label("Filter by Status:", className="fw-bold"),
-                dcc.Dropdown(
-                    id="validation-status-filter",
-                    options=[
-                        {"label": "All", "value": "all"},
-                        {"label": "Confirmed (>80%)", "value": "confirmed"},
-                        {"label": "Partial (50-80%)", "value": "partial"},
-                        {"label": "Low Confidence (<50%)", "value": "low"},
-                        {"label": "No Data", "value": "no_data"},
-                    ],
-                    value="all",
-                    clearable=False,
-                )
-            ], md=3),
-            dbc.Col([
-                dbc.Label("Filter by Method:", className="fw-bold"),
-                dcc.Dropdown(
-                    id="validation-method-filter",
-                    options=[
-                        {"label": "All Methods", "value": "all"},
-                        {"label": "BLAST", "value": "blast"},
-                        {"label": "minimap2", "value": "minimap2"},
-                    ],
-                    value="all",
-                    clearable=False,
-                )
-            ], md=2),
-            dbc.Col([
-                dbc.Label("Sort By:", className="fw-bold"),
-                dcc.Dropdown(
-                    id="validation-sort-by",
-                    options=[
-                        {"label": "Validation %", "value": "percent_validated"},
-                        {"label": "Read Count", "value": "validated_reads"},
-                        {"label": "Identity %", "value": "percent_identity_mean"},
-                        {"label": "Species Name", "value": "species"},
-                    ],
-                    value="percent_validated",
-                    clearable=False,
-                )
-            ], md=2),
-            dbc.Col([
-                dbc.Button(
-                    [html.I(className="bi bi-download me-2"), "Export Report"],
-                    id="export-validation-report",
-                    color="secondary",
-                    outline=True,
-                    className="float-end mt-4"
-                )
-            ], md=5, className="d-flex justify-content-end align-items-end")
-        ], className="mb-4"),
-
-        html.Hr(),
-
-        # Validation Results Cards Container
-        html.Div(id="validation-results-container", children=[
-            # This will be populated by callback with ValidationResultCard components
-            dbc.Alert(
-                "Validation results will appear here when available",
-                color="light",
-                className="text-center"
-            )
-        ], className="mb-4"),
-
-        # --- Coverage Visualization Section ---
-        html.Hr(className="my-4"),
-        html.H5([
-            html.I(className="bi bi-bar-chart-line me-2"),
-            "Genome Coverage"
-        ], className="mb-3"),
         html.P(
-            "Per-position read depth across the reference genome. "
-            "Select a species from the dropdown or click 'View Coverage' on a result card.",
-            className="text-muted mb-3",
+            "Validation compares classified reads against reference genomes to confirm "
+            "identification accuracy. Use the tabs below to view BLAST read-level results "
+            "or minimap2 coverage analysis.",
+            className="text-muted mb-4",
         ),
 
-        # Species selector for coverage
-        dbc.Row([
-            dbc.Col([
-                dbc.Label("Species / Sample:", className="fw-bold"),
-                dcc.Dropdown(
-                    id="coverage-species-selector",
-                    placeholder="Select a species to view coverage...",
-                    clearable=True,
-                ),
-            ], md=6),
-            dbc.Col([
-                dbc.Label("Min MapQ filter:", className="fw-bold"),
-                dcc.Input(
-                    id="coverage-min-mapq",
-                    type="number",
-                    value=0,
-                    min=0,
-                    max=60,
-                    step=1,
-                    className="form-control",
-                    style={"maxWidth": "120px"},
-                ),
-            ], md=3),
-        ], className="mb-3"),
+        # Shared data store
+        dcc.Store(id="validation-data-store", data={}),
 
-        # Coverage stats row
-        html.Div(id="coverage-stats-container"),
-
-        # Main coverage depth plot (full width)
-        dcc.Loading(
-            id="loading-coverage-depth",
-            type="circle",
+        # Sub-tabs
+        dbc.Tabs(
+            id="validation-sub-tabs",
+            active_tab="blast-tab",
             children=[
-                dcc.Graph(
-                    id="coverage-depth-plot",
-                    config={"displayModeBar": True, "displaylogo": False},
-                    style={"height": "450px"},
-                )
+                _create_blast_tab(),
+                _create_coverage_tab(),
             ],
+            className="mb-4",
         ),
 
-        # Cumulative + Histogram side by side
-        dbc.Row([
-            dbc.Col([
-                dcc.Loading(
-                    id="loading-cumulative-plot",
-                    type="circle",
-                    children=[
-                        dcc.Graph(
-                            id="cumulative-coverage-plot",
-                            config={"displayModeBar": True, "displaylogo": False},
-                            style={"height": "280px"},
-                        )
-                    ],
-                ),
-            ], md=6),
-            dbc.Col([
-                dcc.Loading(
-                    id="loading-depth-histogram",
-                    type="circle",
-                    children=[
-                        dcc.Graph(
-                            id="depth-histogram-plot",
-                            config={"displayModeBar": True, "displaylogo": False},
-                            style={"height": "280px"},
-                        )
-                    ],
-                ),
-            ], md=6),
-        ], className="mb-4"),
-
-        html.Hr(),
-
-        # Detailed Statistics Table (collapsible)
-        dbc.Accordion([
-            dbc.AccordionItem([
-                html.P([
-                    "Detailed validation metrics for each pathogen. ",
-                    "These statistics show per-read alignment quality."
-                ], className="text-muted mb-3"),
-                dcc.Loading(
-                    id="loading-validation-table",
-                    type="default",
-                    children=[
-                        dash_table.DataTable(
-                            id="validation-details-table",
-                            columns=[
-                                {"name": "Species", "id": "species"},
-                                {"name": "Sample", "id": "sample_id"},
-                                {"name": "Total Reads", "id": "total_reads", "type": "numeric"},
-                                {"name": "Validated", "id": "validated_reads", "type": "numeric"},
-                                {"name": "Validated %", "id": "percent_validated", "type": "numeric"},
-                                {"name": "Identity %", "id": "percent_identity_mean", "type": "numeric"},
-                                {"name": "Coverage", "id": "coverage_breadth", "type": "numeric"},
-                                {"name": "Method", "id": "validation_method"},
-                                {"name": "MapQ", "id": "avg_mapq", "type": "numeric"},
-                                {"name": "Status", "id": "status"},
-                            ],
-                            data=[],
-                            style_cell=TABLE_STYLE_CELL,
-                            style_header=TABLE_STYLE_HEADER,
-                            style_data_conditional=[
-                                {
-                                    "if": {"filter_query": "{status} = 'confirmed'"},
-                                    "backgroundColor": "#d4edda",
-                                    "color": "#155724"
-                                },
-                                {
-                                    "if": {"filter_query": "{status} = 'partial'"},
-                                    "backgroundColor": "#fff3cd",
-                                    "color": "#856404"
-                                },
-                                {
-                                    "if": {"filter_query": "{status} = 'low'"},
-                                    "backgroundColor": "#f8d7da",
-                                    "color": "#721c24"
-                                },
-                            ],
-                            page_size=15,
-                            sort_action="native",
-                            filter_action="native",
-                        )
-                    ]
-                )
-            ], title="Detailed Validation Statistics")
-        ], start_collapsed=True, className="mb-4"),
-
-        # Identity Distribution Plot (collapsible)
-        dbc.Accordion([
-            dbc.AccordionItem([
-                html.P([
-                    "Distribution of sequence identity scores for validated reads. ",
-                    "Higher identity indicates more confident matches to reference genomes."
-                ], className="text-muted mb-3"),
-                dcc.Loading(
-                    id="loading-identity-plot",
-                    type="circle",
-                    children=[
-                        dcc.Graph(
-                            id="validation-identity-plot",
-                            config={
-                                "displayModeBar": True,
-                                "displaylogo": False
-                            },
-                            style={"height": "400px"}
-                        )
-                    ]
-                )
-            ], title="Identity Distribution")
-        ], start_collapsed=True, className="mb-4"),
-
-        # Help Section
+        # Help Section (outside tabs)
         dbc.Card([
             dbc.CardHeader(html.H5("Understanding Validation Results", className="mb-0")),
             dbc.CardBody([
@@ -420,11 +436,6 @@ def create_validation_layout() -> dbc.Container:
             ])
         ], className="mb-4", style={"backgroundColor": "#f8f9fa"}),
 
-        # Hidden stores for validation data
-        dcc.Store(id="validation-data-store", data={}),
-        # Download component
-        dcc.Download(id="download-validation-report"),
-
     ], fluid=True)
 
 
@@ -439,7 +450,8 @@ def create_validation_result_card(
     coverage: float = 0.0,
     sample_id: str = "",
     validation_method: str = "blast",
-    avg_mapq: float = 0.0
+    avg_mapq: float = 0.0,
+    show_coverage_button: bool = False
 ) -> dbc.Card:
     """
     Create a card displaying validation results for a single species.
@@ -454,11 +466,13 @@ def create_validation_result_card(
         validated_reads: Reads validated by BLAST
         coverage: Reference genome coverage (0-1)
         sample_id: Sample identifier
+        validation_method: Validation method used (blast or minimap2)
+        avg_mapq: Average mapping quality (minimap2)
+        show_coverage_button: Whether to show the View Coverage button
 
     Returns:
         dbc.Card component
     """
-    # Determine status icon and colors
     status_config = {
         "confirmed": {
             "icon": "bi-check-circle-fill",
@@ -549,7 +563,6 @@ def create_validation_result_card(
                     ])
                 ], md=3),
             ]),
-            # Progress bar showing validation %
             html.Div([
                 dbc.Progress(
                     value=percent_validated,
@@ -571,6 +584,6 @@ def create_validation_result_card(
                 size="sm",
                 outline=True,
                 className="float-end",
-            ) if validation_method in ("minimap2", "both") else html.Span(),
+            ) if show_coverage_button else html.Span(),
         ], className="py-1")
     ], className=f"mb-3 {config['border']}", style={"borderLeftWidth": "4px"})
