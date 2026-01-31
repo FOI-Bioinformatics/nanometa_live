@@ -6,23 +6,18 @@ including data loading, filtering, visualization, and export functionality.
 """
 
 import os
-import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Optional
 from datetime import datetime
 
-from dash import Dash, Input, Output, State, callback, ctx, no_update, html, ALL
+from dash import Dash, Input, Output, State, ctx, no_update, html, ALL
 import dash_bootstrap_components as dbc
-import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 
 from nanometa_live.core.parsers.blast_validation_parser import (
     BlastValidationParser,
-    ValidationResult,
-    ValidationStatus,
-    generate_mock_validation_data,
 )
 from nanometa_live.core.parsers.paf_coverage_parser import (
     parse_paf_coverage,

@@ -4,10 +4,9 @@ Validation results layout for Nanometa Live v2.1.
 This layout displays BLAST/minimap2 validation results for watched pathogens,
 showing confirmation status, identity statistics, and coverage metrics.
 
-The layout is designed to work in three states:
+The layout is designed to work in two states:
 1. No validation data available (placeholder)
-2. Mock/demo mode (generated test data)
-3. Real validation results from nanometanf
+2. Real validation results from nanometanf
 """
 
 from dash import html, dcc, dash_table
