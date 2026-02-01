@@ -31,6 +31,24 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         backend_manager: Backend manager instance
     """
 
+    # Trigger form initialization on app startup
+    # This fires once when the config-tab first renders
+    @app.callback(
+        Output("refresh-form-trigger", "data"),
+        Input("tabs", "active_tab"),
+        State("refresh-form-trigger", "data"),
+        prevent_initial_call=False,
+    )
+    def trigger_initial_form_load(active_tab, current_trigger):
+        """Trigger form initialization when config tab is first shown or on initial load."""
+        # Fire on initial load (current_trigger will be False initially)
+        if current_trigger is False:
+            return True
+        # Also refresh when switching to config tab
+        if active_tab == "config-tab":
+            return not current_trigger  # Toggle to trigger callback
+        return no_update
+
     @app.callback(
         Output("available-configs", "children"),
         Input("update-interval", "n_intervals"),
@@ -72,7 +90,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
         try:
             configs = json.loads(available_configs_json)
-        except:
+        except (json.JSONDecodeError, TypeError) as e:
+            logging.debug(f"Could not parse configs JSON: {e}")
             configs = []
 
         if not configs:
@@ -85,8 +104,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 # Try to parse ISO format timestamp
                 dt = datetime.fromisoformat(timestamp)
                 timestamp = dt.strftime("%Y-%m-%d %H:%M:%S")
-            except:
-                pass
+            except (ValueError, TypeError):
+                pass  # Keep original timestamp string if parsing fails
 
             config_item = dbc.ListGroupItem(
                 [
@@ -274,7 +293,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 "color": "danger",
             }, no_update
 
-    # Apply Config Changes Callback
+    # Apply Config Changes Callback - THE SINGLE POINT OF CONFIG UPDATE
+    # All form values (including species) are read here and committed to app-config
     @app.callback(
         [
             Output("app-config", "data", allow_duplicate=True),
@@ -287,38 +307,66 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             State("analysis-name-input", "value"),
             State("nanopore-dir-input", "value"),
             State("kraken-db-input", "value"),
+            State("results-dir-input", "value"),
             State("update-interval-input", "value"),
             State("danger-threshold-input", "value"),
             State("kraken-taxonomy-input", "value"),
-            State("external-kraken-input", "value"),
             State("check-interval-input", "value"),
-            State("memory-mapping-input", "value"),  # Changed from "on" to "value"
-            State("blast-validation-input", "value"),  # Changed from "on" to "value"
+            State("min-reads-per-level-input", "value"),
+            State("memory-mapping-input", "value"),
+            State("blast-validation-input", "value"),
+            State("validation-method-input", "value"),
             State("min-identity-input", "value"),
+            State("e-value-cutoff-input", "value"),
+            State("genome-cache-dir-input", "value"),
             State("cores-input", "value"),
-            State("clean-temp-input", "value"),  # Changed from "on" to "value"
+            State("gui-port-input", "value"),
+            State("clean-temp-input", "value"),
+            State("pipeline-profile-input", "value"),
+            State("pipeline-source-type-input", "value"),
+            State("pipeline-branch-input", "value"),
+            State("minimap2-preset-input", "value"),
+            State("minimap2-min-mapq-input", "value"),
+            State("pipeline-local-path-input", "value"),
+            State("processing-mode-input", "value"),
+            State("sample-handling-input", "value"),
+            State("sample-name-input", "value"),
             State("app-config", "data"),
         ],
         prevent_initial_call=True,
-)
+    )
     def apply_config_changes(
         n_clicks,
         analysis_name,
         nanopore_dir,
         kraken_db,
+        results_dir,
         update_interval,
         danger_threshold,
         taxonomy,
-        external_kraken,
         check_interval,
+        min_reads_per_level,
         memory_mapping,
         blast_validation,
+        validation_method,
         min_identity,
+        e_value_cutoff,
+        genome_cache_dir,
         cores,
+        gui_port,
         clean_temp,
+        pipeline_profile,
+        pipeline_source_type,
+        pipeline_branch,
+        minimap2_preset,
+        minimap2_min_mapq,
+        pipeline_local_path,
+        processing_mode,
+        sample_handling,
+        sample_name,
         current_config,
     ):
-        """Apply configuration changes without saving to a file."""
+        """Apply configuration changes with validation."""
         if not n_clicks:
             return no_update, no_update, no_update, no_update
 
@@ -328,6 +376,97 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 "message": "No configuration to update",
                 "color": "danger",
             }, False
+
+        # Validation errors list
+        errors = []
+
+        # Validate required fields
+        if not nanopore_dir or not nanopore_dir.strip():
+            errors.append("Nanopore Output Directory is required")
+
+        if not kraken_db or not kraken_db.strip():
+            errors.append("Kraken2 Database is required")
+
+        # Validate directories exist (if provided)
+        if nanopore_dir and nanopore_dir.strip():
+            if not os.path.exists(nanopore_dir):
+                errors.append(f"Nanopore directory does not exist: {nanopore_dir}")
+            elif not os.path.isdir(nanopore_dir):
+                errors.append(f"Nanopore path is not a directory: {nanopore_dir}")
+            else:
+                # Validate directory structure matches sample handling mode
+                import glob
+                if sample_handling == "by_barcode":
+                    barcode_dirs = glob.glob(os.path.join(nanopore_dir, "barcode*"))
+                    if not barcode_dirs:
+                        errors.append(
+                            "By-barcode mode selected but no barcode directories found. "
+                            "Directory should contain barcode01/, barcode02/, etc. "
+                            "For flat file directories, use 'Single sample' or 'Per file' mode."
+                        )
+                elif sample_handling in ["single_sample", "per_file"] and processing_mode == "batch":
+                    # Check for FASTQ files directly in directory
+                    fastq_files = glob.glob(os.path.join(nanopore_dir, "*.fastq*"))
+                    barcode_dirs = glob.glob(os.path.join(nanopore_dir, "barcode*"))
+                    if not fastq_files and barcode_dirs:
+                        errors.append(
+                            f"No FASTQ files found directly in {nanopore_dir}, but barcode directories exist. "
+                            "For barcoded samples, use 'By barcode' handling mode."
+                        )
+
+        if kraken_db and kraken_db.strip():
+            if not os.path.exists(kraken_db):
+                errors.append(f"Kraken2 database does not exist: {kraken_db}")
+            elif not os.path.isdir(kraken_db):
+                errors.append(f"Kraken2 database path is not a directory: {kraken_db}")
+            else:
+                # Validate Kraken2 database format - check for required files
+                required_files = ["hash.k2d", "opts.k2d", "taxo.k2d"]
+                missing_files = []
+                for req_file in required_files:
+                    file_path = os.path.join(kraken_db, req_file)
+                    if not os.path.exists(file_path):
+                        missing_files.append(req_file)
+
+                if missing_files:
+                    errors.append(f"Invalid Kraken2 database format. Missing required files: {', '.join(missing_files)}")
+
+        # Validate numeric ranges
+        if update_interval is not None:
+            if update_interval < 1 or update_interval > 300:
+                errors.append("Update Interval must be between 1-300 seconds")
+
+        if check_interval is not None:
+            if check_interval < 1 or check_interval > 300:
+                errors.append("Check Interval must be between 1-300 seconds")
+
+        if min_reads_per_level is not None:
+            if min_reads_per_level < 1:
+                errors.append("Minimum Reads per Level must be at least 1")
+
+        if min_identity is not None:
+            if min_identity < 50 or min_identity > 100:
+                errors.append("Validation Threshold must be between 50-100%")
+
+        if e_value_cutoff is not None:
+            if e_value_cutoff < 0 or e_value_cutoff > 1:
+                errors.append("E-value Cutoff must be between 0-1")
+
+        if cores is not None:
+            if cores < 1:
+                errors.append("CPU Cores must be at least 1")
+
+        if gui_port is not None:
+            if gui_port < 1024 or gui_port > 65535:
+                errors.append("GUI Port must be between 1024-65535")
+
+        # If there are validation errors, return them
+        if errors:
+            return no_update, no_update, {
+                "title": "Validation Error",
+                "message": " | ".join(errors),
+                "color": "danger",
+            }, True
 
         # Create a completely new config object to avoid reference issues
         config = dict(current_config)
@@ -342,6 +481,12 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         if kraken_db is not None:
             config["kraken_db"] = kraken_db
 
+        if results_dir is not None:
+            # If empty, use the default
+            if not results_dir.strip():
+                results_dir = os.path.join(os.path.expanduser("~"), "nanometa_results")
+            config["results_output_directory"] = results_dir
+
         if update_interval is not None:
             config["update_interval_seconds"] = update_interval
 
@@ -351,11 +496,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         if taxonomy is not None:
             config["kraken_taxonomy"] = taxonomy
 
-        if external_kraken is not None:
-            config["external_kraken2_db"] = external_kraken
-
         if check_interval is not None:
             config["check_intervals_seconds"] = check_interval
+
+        if min_reads_per_level is not None:
+            config["default_reads_per_level"] = min_reads_per_level
 
         # Handle boolean values consistently as true/false
         if memory_mapping is not None:
@@ -364,20 +509,74 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         if blast_validation is not None:
             config["blast_validation"] = bool(blast_validation)
 
+        if validation_method is not None:
+            config["validation_method"] = validation_method
+
+        if minimap2_preset is not None:
+            config["minimap2_preset"] = minimap2_preset
+
+        if minimap2_min_mapq is not None:
+            config["minimap2_min_mapq"] = minimap2_min_mapq
+
         if min_identity is not None:
             config["min_perc_identity"] = min_identity
 
+        if e_value_cutoff is not None:
+            config["e_val_cutoff"] = e_value_cutoff
+
+        if genome_cache_dir is not None and genome_cache_dir.strip():
+            config["genome_cache_dir"] = genome_cache_dir.strip()
+
         if cores is not None:
             # Set all core counts to the same value for simplicity
-            config["snakemake_cores"] = cores
+            config["pipeline_cores"] = cores
             config["kraken_cores"] = cores
             config["validation_cores"] = cores
             config["blast_cores"] = cores
 
+        if gui_port is not None:
+            config["gui_port"] = gui_port
+
         if clean_temp is not None:
             config["remove_temp_files"] = bool(clean_temp)
 
-        return config, "✓ Applied!", {
+        if pipeline_profile is not None:
+            config["pipeline_profile"] = pipeline_profile
+
+        # Build pipeline_source from source type, branch, and local path
+        if pipeline_source_type == "remote":
+            # Use remote repository with selected branch
+            branch = pipeline_branch if pipeline_branch else "master"
+            config["pipeline_source"] = f"remote:{branch}"
+        elif pipeline_source_type == "local" and pipeline_local_path:
+            # Validate local path exists
+            if not os.path.isdir(pipeline_local_path):
+                errors.append(f"Local pipeline path does not exist: {pipeline_local_path}")
+            else:
+                config["pipeline_source"] = pipeline_local_path
+
+        # Input mode settings
+        if processing_mode is not None:
+            config["processing_mode"] = processing_mode
+
+        if sample_handling is not None:
+            config["sample_handling"] = sample_handling
+
+        if sample_name is not None:
+            config["sample_name"] = sample_name if sample_name.strip() else "sample"
+
+        # Note: Species watchlist is now managed via the Watchlist tab
+        # and WatchlistManager, not through this config form
+
+        # If validation errors occurred during pipeline source setup, return them
+        if errors:
+            return no_update, no_update, {
+                "title": "Validation Error",
+                "message": " | ".join(errors),
+                "color": "danger",
+            }, True
+
+        return config, "Use These Settings", {
             "title": "Changes Applied",
             "message": f"Configuration changes have been applied. Analysis name: {analysis_name}",
             "color": "success",
@@ -417,130 +616,88 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         prevent_initial_call=True,
     )
 
-    # Form field updates
+    # REMOVED: Auto-update callback that was causing duplicate updates
+    # Now users must explicitly click "Apply Changes" to commit form changes to config
+    # This provides better UX with explicit user control over when changes are applied
+
+    # Toggle pipeline source fields based on source type selection
     @app.callback(
-        Output("app-config", "data", allow_duplicate=True),
         [
-            Input("analysis-name-input", "value"),
-            Input("nanopore-dir-input", "value"),
-            Input("kraken-db-input", "value"),
-            Input("update-interval-input", "value"),
-            Input("danger-threshold-input", "value"),
-            Input("kraken-taxonomy-input", "value"),
-            Input("external-kraken-input", "value"),
-            Input("check-interval-input", "value"),
-            Input("memory-mapping-input", "value"),  # Changed from "on" to "value"
-            Input("blast-validation-input", "value"),  # Changed from "on" to "value"
-            Input("min-identity-input", "value"),
-            Input("cores-input", "value"),
-            Input("clean-temp-input", "value"),  # Changed from "on" to "value"
+            Output("pipeline-branch-col", "style"),
+            Output("pipeline-local-path-col", "style"),
         ],
-        State("app-config", "data"),
-        prevent_initial_call=True,
+        Input("pipeline-source-type-input", "value"),
     )
-    def update_config_from_form(
-        analysis_name,
-        nanopore_dir,
-        kraken_db,
-        update_interval,
-        danger_threshold,
-        taxonomy,
-        external_kraken,
-        check_interval,
-        memory_mapping,
-        blast_validation,
-        min_identity,
-        cores,
-        clean_temp,
-        current_config,
-    ):
-        """Update the configuration from form inputs."""
-        if not current_config:
-            return no_update
+    def toggle_pipeline_source_fields(source_type):
+        """Show/hide branch selector or local path input based on source type."""
+        if source_type == "remote":
+            return {"display": "block"}, {"display": "none"}
+        else:  # local
+            return {"display": "none"}, {"display": "block"}
 
-        # Create a copy of the current config
-        config = dict(current_config)
+    # Toggle sample name field visibility based on sample handling mode
+    @app.callback(
+        Output("sample-name-col", "style"),
+        Input("sample-handling-input", "value"),
+    )
+    def toggle_sample_name_field(sample_handling):
+        """Show sample name input only for single_sample mode."""
+        if sample_handling == "single_sample":
+            return {"display": "block"}
+        else:
+            return {"display": "none"}
 
-        # Update fields if they have valid values
-        if analysis_name is not None:
-            config["analysis_name"] = analysis_name
-
-        if nanopore_dir is not None:
-            config["nanopore_output_directory"] = nanopore_dir
-
-        if kraken_db is not None:
-            config["kraken_db"] = kraken_db
-
-        if update_interval is not None:
-            config["update_interval_seconds"] = update_interval
-
-        if danger_threshold is not None:
-            config["danger_lower_limit"] = danger_threshold
-
-        if taxonomy is not None:
-            config["kraken_taxonomy"] = taxonomy
-
-        if external_kraken is not None:
-            config["external_kraken2_db"] = external_kraken
-
-        if check_interval is not None:
-            config["check_intervals_seconds"] = check_interval
-
-        # Handle boolean values consistently as true Python booleans
-        if memory_mapping is not None:
-            config["kraken_memory_mapping"] = bool(memory_mapping)
-
-        if blast_validation is not None:
-            config["blast_validation"] = bool(blast_validation)
-
-        if min_identity is not None:
-            config["min_perc_identity"] = min_identity
-
-        if cores is not None:
-            # Set all core counts to the same value for simplicity
-            config["snakemake_cores"] = cores
-            config["kraken_cores"] = cores
-            config["validation_cores"] = cores
-            config["blast_cores"] = cores
-
-        if clean_temp is not None:
-            config["remove_temp_files"] = bool(clean_temp)
-
-        return config
-
-    # Initialize form from config
+    # Initialize form from config - ONLY on explicit refresh trigger
+    # Changed: app-config is now a State, not an Input, to prevent form resets
+    # when other callbacks update the config store
     @app.callback(
         [
             Output("analysis-name-input", "value"),
             Output("nanopore-dir-input", "value"),
             Output("kraken-db-input", "value"),
+            Output("results-dir-input", "value"),
             Output("update-interval-input", "value"),
             Output("danger-threshold-input", "value"),
             Output("kraken-taxonomy-input", "value"),
-            Output("external-kraken-input", "value"),
             Output("check-interval-input", "value"),
-            Output("memory-mapping-input", "value"),  # Changed from "on" to "value"
-            Output("blast-validation-input", "value"),  # Changed from "on" to "value"
+            Output("min-reads-per-level-input", "value"),
+            Output("memory-mapping-input", "value"),
+            Output("blast-validation-input", "value"),
+            Output("validation-method-input", "value"),
             Output("min-identity-input", "value"),
+            Output("e-value-cutoff-input", "value"),
+            Output("minimap2-preset-input", "value"),
+            Output("minimap2-min-mapq-input", "value"),
+            Output("genome-cache-dir-input", "value"),
             Output("cores-input", "value"),
-            Output("clean-temp-input", "value"),  # Changed from "on" to "value"
+            Output("gui-port-input", "value"),
+            Output("clean-temp-input", "value"),
+            Output("pipeline-profile-input", "value"),
+            Output("pipeline-source-type-input", "value"),
+            Output("pipeline-branch-input", "value"),
+            Output("pipeline-local-path-input", "value"),
+            Output("processing-mode-input", "value"),
+            Output("sample-handling-input", "value"),
+            Output("sample-name-input", "value"),
         ],
-        [Input("app-config", "data"), Input("refresh-form-trigger", "data")],
+        Input("refresh-form-trigger", "data"),
+        State("app-config", "data"),
     )
-    def initialize_form_from_config(config, refresh_trigger):
+    def initialize_form_from_config(refresh_trigger, config):
         """Initialize form fields from the current configuration."""
         if not config:
-            return [no_update] * 13
+            return [no_update] * 26
 
         # Extract values from config
         analysis_name = config.get("analysis_name", "")
         nanopore_dir = config.get("nanopore_output_directory", "")
         kraken_db = config.get("kraken_db", "")
+        results_dir = config.get("results_output_directory", "")
         update_interval = config.get("update_interval_seconds", 30)
         danger_threshold = config.get("danger_lower_limit", 100)
         taxonomy = config.get("kraken_taxonomy", "gtdb")
-        external_kraken = config.get("external_kraken2_db", "")
         check_interval = config.get("check_intervals_seconds", 15)
+        min_reads_per_level = config.get("default_reads_per_level", 10)
 
         # Handle boolean values
         memory_mapping = config.get("kraken_memory_mapping", True)
@@ -556,8 +713,15 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             blast_validation = blast_validation.lower() in ["true", "yes", "y", "1"]
         blast_validation = bool(blast_validation)
 
+        validation_method = config.get("validation_method", "blast")
+        minimap2_preset = config.get("minimap2_preset", "map-ont")
+        minimap2_min_mapq = config.get("minimap2_min_mapq", 30)
+
         min_identity = config.get("min_perc_identity", 90)
-        cores = config.get("snakemake_cores", 1)
+        e_value_cutoff = config.get("e_val_cutoff", 0.01)
+        genome_cache_dir = config.get("genome_cache_dir", "~/.nanometa")
+        cores = config.get("pipeline_cores", config.get("snakemake_cores", 1))  # Backward compatibility
+        gui_port = config.get("gui_port", 8050)
 
         clean_temp = config.get("remove_temp_files", True)
         # Ensure it's a boolean regardless of stored format
@@ -565,404 +729,674 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             clean_temp = clean_temp == "yes" or clean_temp.lower() in ["true", "yes", "y", "1"]
         clean_temp = bool(clean_temp)
 
+        # Pipeline profile
+        pipeline_profile = config.get("pipeline_profile", "docker")
+
+        # Parse pipeline_source to extract type, branch, and local path
+        pipeline_source = config.get("pipeline_source", "remote:master")
+        pipeline_source_type = "remote"
+        pipeline_branch = "master"
+        pipeline_local_path = ""
+
+        if pipeline_source.startswith("remote:"):
+            pipeline_source_type = "remote"
+            pipeline_branch = pipeline_source.split(":", 1)[1] if ":" in pipeline_source else "master"
+        elif pipeline_source in ("master", "main", "dev"):
+            # Shorthand for remote branch
+            pipeline_source_type = "remote"
+            pipeline_branch = "master" if pipeline_source == "main" else pipeline_source
+        elif os.path.isdir(pipeline_source):
+            # Local path
+            pipeline_source_type = "local"
+            pipeline_local_path = pipeline_source
+        else:
+            # Assume local path even if it doesn't exist yet
+            pipeline_source_type = "local"
+            pipeline_local_path = pipeline_source
+
+        # Input mode settings
+        processing_mode = config.get("processing_mode", "batch")
+        sample_handling = config.get("sample_handling", "single_sample")
+        sample_name = config.get("sample_name", "sample")
+
         return [
             analysis_name,
             nanopore_dir,
             kraken_db,
+            results_dir,
             update_interval,
             danger_threshold,
             taxonomy,
-            external_kraken,
             check_interval,
+            min_reads_per_level,
             memory_mapping,
             blast_validation,
+            validation_method,
+            minimap2_preset,
+            minimap2_min_mapq,
             min_identity,
+            e_value_cutoff,
+            genome_cache_dir,
             cores,
+            gui_port,
             clean_temp,
+            pipeline_profile,
+            pipeline_source_type,
+            pipeline_branch,
+            pipeline_local_path,
+            processing_mode,
+            sample_handling,
+            sample_name,
         ]
 
+    # Species watchlist management is now handled in the Watchlist tab
+    # via WatchlistManager - all legacy species callbacks have been removed
+
+    # NOTE: populate_kraken_database_options moved to preparation_tab.py
+
+    # Folder browser callbacks
     @app.callback(
         [
-            Output("species-list-container", "children"),
-            Output("app-config", "data", allow_duplicate=True),
+            Output("folder-browser-modal", "is_open"),
+            Output("browse-target-field", "data"),
+            Output("current-browse-path", "data"),
         ],
         [
-            Input("app-config", "data"),  # Listen for config changes
-            Input("species-file-input", "contents"),
-            Input("add-species-button", "n_clicks"),
-            Input({"type": "remove-species", "index": dash.ALL}, "n_clicks"),
-            Input("refresh-form-trigger", "data")
+            Input("browse-nanopore-dir", "n_clicks"),
+            Input("browse-kraken-db", "n_clicks"),
+            Input("browse-results-dir", "n_clicks"),
+            Input("browse-pipeline-path", "n_clicks"),
+            Input("confirm-directory-select", "n_clicks"),
+            Input("cancel-directory-select", "n_clicks"),
         ],
         [
-            State("species-file-input", "filename"),
-            State("species-list-container", "children"),
+            State("folder-browser-modal", "is_open"),
+            State("current-browse-path", "data"),
         ],
-        prevent_initial_call=True
+        prevent_initial_call=True,
     )
-    def manage_species_list(
-        config, contents, add_clicks, remove_clicks, refresh_trigger, filename, current_list
+    def toggle_folder_browser(
+        nanopore_clicks, kraken_clicks, results_clicks, pipeline_clicks, confirm_clicks, cancel_clicks, is_open, current_path
     ):
-        """
-        Single callback to handle all species list operations:
-        - Initial loading of species from config
-        - Adding/removing species
-        - Uploading species files
-        - Refreshing after config changes
-        """
-
-        if not config:
-            return [html.P("No species of interest defined. Click 'Add Species' to add one.")], no_update
-
-        # Get triggered component
+        """Toggle folder browser modal and track which field is being edited."""
         triggered_id = ctx.triggered_id if ctx.triggered else None
 
-        # If triggered by app-config changes, just update UI, don't modify config
-        if triggered_id == "app-config" or triggered_id == "refresh-form-trigger":
-            species_items = []
-            for i, species in enumerate(config.get("species_of_interest", [])):
-                species_items.append(
-                    dbc.Row(
+        # Open modal for nanopore directory
+        if triggered_id == "browse-nanopore-dir":
+            return True, "nanopore-dir-input", os.path.expanduser("~")
+
+        # Open modal for kraken database
+        if triggered_id == "browse-kraken-db":
+            return True, "kraken-db-input", os.path.expanduser("~")
+
+        # Open modal for results output directory
+        if triggered_id == "browse-results-dir":
+            return True, "results-dir-input", os.path.expanduser("~")
+
+        # Open modal for local pipeline path
+        if triggered_id == "browse-pipeline-path":
+            return True, "pipeline-local-path-input", os.path.expanduser("~")
+
+        # Close modal (confirm or cancel)
+        if triggered_id in ["confirm-directory-select", "cancel-directory-select"]:
+            return False, None, current_path
+
+        return is_open, no_update, no_update
+
+    @app.callback(
+        [
+            Output("directory-tree", "children"),
+            Output("current-path-display", "value"),
+        ],
+        [
+            Input("current-browse-path", "data"),
+            Input({"type": "browse-dir", "path": dash.ALL}, "n_clicks"),
+        ],
+        State({"type": "browse-dir", "path": dash.ALL}, "id"),
+        prevent_initial_call=True,
+    )
+    def update_directory_tree(current_path, dir_clicks, dir_ids):
+        """Update the directory tree display with parent directory option."""
+        triggered_id = ctx.triggered_id if ctx.triggered else None
+
+        # If a directory was clicked, navigate to it
+        if isinstance(triggered_id, dict) and triggered_id.get("type") == "browse-dir":
+            current_path = triggered_id.get("path")
+
+        if not current_path or not os.path.exists(current_path):
+            current_path = os.path.expanduser("~")
+
+        # Get directories in current path
+        try:
+            entries = []
+
+            # Add parent directory option if not at root
+            parent_path = os.path.dirname(current_path)
+            if parent_path and parent_path != current_path:
+                entries.append(
+                    dbc.ListGroupItem(
                         [
-                            dbc.Col(
-                                dbc.Input(
-                                    id={"type": "species-name", "index": i},
-                                    value=species.get("name", ""),
-                                    placeholder="Enter species name",
-                                    className="mb-2",
-                                ),
-                                width=7,
-                            ),
-                            dbc.Col(
-                                dbc.Input(
-                                    id={"type": "species-taxid", "index": i},
-                                    value=species.get("taxid", ""),
-                                    placeholder="Enter/auto Tax ID",
-                                    className="mb-2",
-                                ),
-                                width=3,
-                            ),
-                            dbc.Col(
-                                dbc.Button(
-                                    "✕",
-                                    id={"type": "remove-species", "index": i},
-                                    color="danger",
-                                    size="sm",
-                                    className="mb-2",
-                                ),
-                                width=2,
-                            ),
-                        ]
+                            html.I(className="fas fa-level-up-alt text-primary me-2"),
+                            html.Span(".. (Parent Directory)", className="fw-bold"),
+                        ],
+                        id={"type": "browse-dir", "path": parent_path},
+                        action=True,
+                        className="d-flex align-items-center",
+                        color="light",
                     )
                 )
 
-            if not species_items:
-                species_items = [
-                    html.P("No species of interest defined. Click 'Add Species' to add one.")
-                ]
-
-            return species_items, no_update
-
-        # Handle file upload
-        if triggered_id == "species-file-input" and contents:
-            # Parse uploaded file
-            content_type, content_string = contents.split(",")
-            decoded = base64.b64decode(content_string).decode("utf-8")
-
-            # Process file content into species list
-            species_list = []
-
-            # Detect format (CSV, TSV, or plain text)
-            if "," in decoded:
-                delimiter = ","
-            elif "\t" in decoded:
-                delimiter = "\t"
-            else:
-                delimiter = None
-
-            # Parse the file content
-            for line in decoded.splitlines():
-                if line.strip() == "":
-                    continue
-
-                if delimiter:
-                    parts = line.split(delimiter)
-                    species_name = parts[0].strip()
-                    taxid = parts[1].strip() if len(parts) > 1 else ""
-                else:
-                    species_name = line.strip()
-                    taxid = ""
-
-                if species_name:
-                    species_list.append({"name": species_name, "taxid": taxid})
-
-            # Update config with new species
-            new_config = dict(config)
-            new_config["species_of_interest"] = species_list
-
-            # Create UI elements for species
-            species_items = []
-            for i, species in enumerate(species_list):
-                species_items.append(
-                    dbc.Row(
-                        [
-                            dbc.Col(
-                                dbc.Input(
-                                    id={"type": "species-name", "index": i},
-                                    value=species.get("name", ""),
-                                    placeholder="Enter species name",
-                                    className="mb-2",
-                                ),
-                                width=7,
-                            ),
-                            dbc.Col(
-                                dbc.Input(
-                                    id={"type": "species-taxid", "index": i},
-                                    value=species.get("taxid", ""),
-                                    placeholder="Enter/auto Tax ID",
-                                    className="mb-2",
-                                ),
-                                width=3,
-                            ),
-                            dbc.Col(
-                                dbc.Button(
-                                    "✕",
-                                    id={"type": "remove-species", "index": i},
-                                    color="danger",
-                                    size="sm",
-                                    className="mb-2",
-                                ),
-                                width=2,
-                            ),
-                        ]
-                    )
-                )
-
-            return species_items, new_config
-
-        # Handle "Add Species" button click
-        if triggered_id == "add-species-button" and add_clicks:
-            # Create a copy of current config
-            new_config = dict(config)
-            species_list = new_config.get("species_of_interest", [])
-
-            # Add a new empty species entry
-            species_list.append({"name": "", "taxid": ""})
-            new_config["species_of_interest"] = species_list
-
-            # Create UI elements for species
-            species_items = []
-            for i, species in enumerate(species_list):
-                species_items.append(
-                    dbc.Row(
-                        [
-                            dbc.Col(
-                                dbc.Input(
-                                    id={"type": "species-name", "index": i},
-                                    value=species.get("name", ""),
-                                    placeholder="Enter species name",
-                                    className="mb-2",
-                                ),
-                                width=7,
-                            ),
-                            dbc.Col(
-                                dbc.Input(
-                                    id={"type": "species-taxid", "index": i},
-                                    value=species.get("taxid", ""),
-                                    placeholder="Enter/auto Tax ID",
-                                    className="mb-2",
-                                ),
-                                width=3,
-                            ),
-                            dbc.Col(
-                                dbc.Button(
-                                    "✕",
-                                    id={"type": "remove-species", "index": i},
-                                    color="danger",
-                                    size="sm",
-                                    className="mb-2",
-                                ),
-                                width=2,
-                            ),
-                        ]
-                    )
-                )
-
-            return species_items, new_config
-
-        # Handle "Remove Species" button click
-        if isinstance(triggered_id, dict) and triggered_id.get("type") == "remove-species":
-            # Get index of species to remove
-            remove_idx = triggered_id.get("index")
-
-            # Create a copy of current config
-            new_config = dict(config)
-            species_list = new_config.get("species_of_interest", [])
-
-            # Remove the species at the specified index
-            if 0 <= remove_idx < len(species_list):
-                del species_list[remove_idx]
-                new_config["species_of_interest"] = species_list
-
-                # Create UI elements for remaining species
-                species_items = []
-                for i, species in enumerate(species_list):
-                    species_items.append(
-                        dbc.Row(
-                            [
-                                dbc.Col(
-                                    dbc.Input(
-                                        id={"type": "species-name", "index": i},
-                                        value=species.get("name", ""),
-                                        placeholder="Enter species name",
-                                        className="mb-2",
-                                    ),
-                                    width=7,
-                                ),
-                                dbc.Col(
-                                    dbc.Input(
-                                        id={"type": "species-taxid", "index": i},
-                                        value=species.get("taxid", ""),
-                                        placeholder="Enter/auto Tax ID",
-                                        className="mb-2",
-                                    ),
-                                    width=3,
-                                ),
-                                dbc.Col(
-                                    dbc.Button(
-                                        "✕",
-                                        id={"type": "remove-species", "index": i},
-                                        color="danger",
-                                        size="sm",
-                                        className="mb-2",
-                                    ),
-                                    width=2,
-                                ),
-                            ]
+            # Add subdirectories
+            for entry in sorted(os.listdir(current_path)):
+                entry_path = os.path.join(current_path, entry)
+                if os.path.isdir(entry_path):
+                    # Don't show hidden directories (starting with .)
+                    if not entry.startswith('.'):
+                        entries.append(
+                            dbc.ListGroupItem(
+                                [
+                                    html.I(className="fas fa-folder text-warning me-2"),
+                                    html.Span(entry),
+                                ],
+                                id={"type": "browse-dir", "path": entry_path},
+                                action=True,
+                                className="d-flex align-items-center",
+                            )
                         )
+
+            if len(entries) == 0 or (len(entries) == 1 and parent_path):
+                entries.append(
+                    dbc.ListGroupItem(
+                        [
+                            html.I(className="fas fa-info-circle text-muted me-2"),
+                            html.Span("No subdirectories", className="text-muted"),
+                        ],
+                        disabled=True,
                     )
+                )
 
-                if not species_items:
-                    species_items = [
-                        html.P("No species of interest defined. Click 'Add Species' to add one.")
-                    ]
+            directory_list = dbc.ListGroup(entries)
 
-                return species_items, new_config
+        except PermissionError:
+            directory_list = dbc.Alert(
+                "Permission denied. Cannot access this directory.",
+                color="warning",
+            )
+        except Exception as e:
+            directory_list = dbc.Alert(
+                f"Error reading directory: {str(e)}",
+                color="danger",
+            )
 
-        # Default return
-        return no_update, no_update
-
-    # Update species names in config
-    @app.callback(
-        Output("app-config", "data", allow_duplicate=True),
-        Input({"type": "species-name", "index": dash.ALL}, "value"),
-        State({"type": "species-name", "index": dash.ALL}, "id"),
-        State("app-config", "data"),
-        prevent_initial_call=True,
-    )
-    def update_species_names(values, ids, config):
-        """Update species names in the configuration."""
-        if not values or not ids or not config:
-            return no_update
-
-        # Create a copy of the current config
-        new_config = dict(config)
-        species_list = new_config.get("species_of_interest", [])
-
-        # Update the species names
-        for i, (value, id_dict) in enumerate(zip(values, ids)):
-            if value is not None:
-                index = id_dict.get("index")
-                if 0 <= index < len(species_list):
-                    species_list[index]["name"] = value
-
-        # Update the config
-        new_config["species_of_interest"] = species_list
-
-        return new_config
-
-    # Add a new callback to handle taxid input changes
-    @app.callback(
-        Output("app-config", "data", allow_duplicate=True),
-        Input({"type": "species-taxid", "index": dash.ALL}, "value"),
-        State({"type": "species-taxid", "index": dash.ALL}, "id"),
-        State("app-config", "data"),
-        prevent_initial_call=True,
-    )
-    def update_species_taxids(values, ids, config):
-        """Update species taxids in the configuration."""
-        if not values or not ids or not config:
-            return no_update
-
-        # Create a copy of the current config
-        new_config = dict(config)
-        species_list = new_config.get("species_of_interest", [])
-
-        # Update the species taxids
-        for i, (value, id_dict) in enumerate(zip(values, ids)):
-            if value is not None:
-                index = id_dict.get("index")
-                if 0 <= index < len(species_list):
-                    species_list[index]["taxid"] = value
-
-        # Update the config
-        new_config["species_of_interest"] = species_list
-
-        return new_config
+        return directory_list, current_path
 
     @app.callback(
-        Output("app-config", "data", allow_duplicate=True),
-        Input("species-file-upload", "contents"),
-        State("species-file-upload", "filename"),
-        State("app-config", "data"),
+        Output("current-browse-path", "data", allow_duplicate=True),
+        [
+            Input("browse-parent-dir", "n_clicks"),
+            Input("quick-home", "n_clicks"),
+            Input("quick-desktop", "n_clicks"),
+            Input("quick-documents", "n_clicks"),
+            Input("quick-root", "n_clicks"),
+            Input("current-path-display", "n_submit"),
+        ],
+        [
+            State("current-browse-path", "data"),
+            State("current-path-display", "value"),
+        ],
         prevent_initial_call=True,
     )
-    def upload_species_file(contents, filename, config):
-        """Handle uploading a file with species names and taxids."""
-        if not contents or not config:
-            return no_update
+    def navigate_directories(parent_clicks, home_clicks, desktop_clicks, docs_clicks, root_clicks, path_submit, current_path, typed_path):
+        """Handle all directory navigation actions."""
+        triggered_id = ctx.triggered_id if ctx.triggered else None
 
-        content_type, content_string = contents.split(",")
-        decoded = base64.b64decode(content_string).decode("utf-8")
+        # Navigate to parent directory
+        if triggered_id == "browse-parent-dir":
+            parent_path = os.path.dirname(current_path)
+            if parent_path and parent_path != current_path:
+                return parent_path
 
-        # Create a copy of the current config
-        new_config = dict(config)
-        species_list = []
+        # Quick access: Home
+        elif triggered_id == "quick-home":
+            return os.path.expanduser("~")
 
-        # Detect format (CSV, TSV, or plain text)
-        if "," in decoded:
-            delimiter = ","
-        elif "\t" in decoded:
-            delimiter = "\t"
+        # Quick access: Desktop
+        elif triggered_id == "quick-desktop":
+            desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+            if os.path.exists(desktop_path):
+                return desktop_path
+            return os.path.expanduser("~")
+
+        # Quick access: Documents
+        elif triggered_id == "quick-documents":
+            docs_path = os.path.join(os.path.expanduser("~"), "Documents")
+            if os.path.exists(docs_path):
+                return docs_path
+            return os.path.expanduser("~")
+
+        # Quick access: Root
+        elif triggered_id == "quick-root":
+            return "/"
+
+        # Manual path entry
+        elif triggered_id == "current-path-display" and typed_path:
+            expanded_path = os.path.expanduser(typed_path)
+            if os.path.exists(expanded_path) and os.path.isdir(expanded_path):
+                return expanded_path
+
+        return no_update
+
+    @app.callback(
+        [
+            Output("nanopore-dir-input", "value", allow_duplicate=True),
+            Output("kraken-db-input", "value", allow_duplicate=True),
+            Output("results-dir-input", "value", allow_duplicate=True),
+            Output("pipeline-local-path-input", "value", allow_duplicate=True),
+            Output("folder-browser-modal", "is_open", allow_duplicate=True),
+        ],
+        [
+            Input("confirm-directory-select", "n_clicks"),
+            Input("use-current-dir", "n_clicks"),
+        ],
+        [
+            State("current-browse-path", "data"),
+            State("browse-target-field", "data"),
+            State("folder-browser-modal", "is_open"),
+        ],
+        prevent_initial_call=True,
+    )
+    def confirm_directory_selection(confirm_clicks, use_clicks, selected_path, target_field, is_open):
+        """Update the appropriate input field with selected directory."""
+        triggered_id = ctx.triggered_id if ctx.triggered else None
+
+        if not selected_path or not target_field:
+            return no_update, no_update, no_update, no_update, no_update
+
+        # Close modal on confirm button
+        should_close = triggered_id == "confirm-directory-select"
+
+        if target_field == "nanopore-dir-input":
+            return selected_path, no_update, no_update, no_update, not is_open if should_close else no_update
+        elif target_field == "kraken-db-input":
+            return no_update, selected_path, no_update, no_update, not is_open if should_close else no_update
+        elif target_field == "results-dir-input":
+            return no_update, no_update, selected_path, no_update, not is_open if should_close else no_update
+        elif target_field == "pipeline-local-path-input":
+            return no_update, no_update, no_update, selected_path, not is_open if should_close else no_update
+
+        return no_update, no_update, no_update, no_update, no_update
+
+    # Real-time validation feedback
+    @app.callback(
+        Output("nanopore-dir-status", "children"),
+        Input("nanopore-dir-input", "value"),
+        prevent_initial_call=True,
+    )
+    def validate_nanopore_directory(path):
+        """Provide real-time validation feedback for nanopore directory."""
+        if not path or not path.strip():
+            return ""
+
+        if not os.path.exists(path):
+            return html.I(className="bi bi-x-circle text-danger")
+        elif not os.path.isdir(path):
+            return html.I(className="bi bi-x-circle text-danger")
         else:
-            delimiter = None
-
-        # Parse the file content
-        for line in decoded.splitlines():
-            if delimiter:
-                parts = line.split(delimiter)
-                species_name = parts[0].strip()
-                taxid = parts[1].strip() if len(parts) > 1 else ""
-            else:
-                species_name = line.strip()
-                taxid = ""
-
-            if species_name:
-                species_list.append({"name": species_name, "taxid": taxid})
-
-        # Update the config
-        new_config["species_of_interest"] = species_list
-
-        return new_config
+            return html.I(className="bi bi-check-circle text-success")
 
     @app.callback(
-        Output("external-kraken-input", "options"),
-        Input("kraken-databases", "data")
+        Output("kraken-db-status", "children"),
+        Input("kraken-db-input", "value"),
+        prevent_initial_call=True,
     )
-    def populate_kraken_database_options(databases):
-        options = [{"label": "None (use local)", "value": ""}]
+    def validate_kraken_database(path):
+        """Provide real-time validation feedback for Kraken2 database."""
+        if not path or not path.strip():
+            return ""
 
-        for db_id, db_info in databases.items():
-            label = f"{db_id} ({db_info.get('description', '')})"
-            options.append({"label": label, "value": db_id})
+        if not os.path.exists(path):
+            return html.I(className="bi bi-x-circle text-danger")
+        elif not os.path.isdir(path):
+            return html.I(className="bi bi-x-circle text-danger")
+        else:
+            # Check for required Kraken2 database files
+            required_files = ["hash.k2d", "opts.k2d", "taxo.k2d"]
+            missing_files = []
+            for req_file in required_files:
+                file_path = os.path.join(path, req_file)
+                if not os.path.exists(file_path):
+                    missing_files.append(req_file)
 
-        return options
+            if missing_files:
+                return html.I(className="bi bi-exclamation-triangle text-warning")
+            else:
+                return html.I(className="bi bi-check-circle text-success")
+
+    @app.callback(
+        Output("results-dir-status", "children"),
+        Input("results-dir-input", "value"),
+        prevent_initial_call=True,
+    )
+    def validate_results_directory(path):
+        """Provide real-time validation feedback for results output directory."""
+        if not path or not path.strip():
+            # Empty is OK - will use default ~/nanometa_results
+            return html.I(className="bi bi-info-circle text-muted")
+
+        expanded_path = os.path.expanduser(path)
+
+        if os.path.exists(expanded_path):
+            if os.path.isdir(expanded_path):
+                # Directory exists - check if writable
+                if os.access(expanded_path, os.W_OK):
+                    return html.I(className="bi bi-check-circle text-success")
+                else:
+                    return html.I(className="bi bi-exclamation-triangle text-warning")
+            else:
+                # Path exists but is not a directory
+                return html.I(className="bi bi-x-circle text-danger")
+        else:
+            # Directory doesn't exist - will be created (show info icon)
+            parent = os.path.dirname(expanded_path)
+            if parent and os.path.exists(parent) and os.access(parent, os.W_OK):
+                return html.I(className="bi bi-plus-circle text-info")
+            else:
+                return html.I(className="bi bi-exclamation-triangle text-warning")
+
+    @app.callback(
+        Output("pipeline-path-status", "children"),
+        Input("pipeline-local-path-input", "value"),
+        prevent_initial_call=True,
+    )
+    def validate_pipeline_path(path):
+        """Provide real-time validation feedback for local pipeline path."""
+        if not path or not path.strip():
+            return ""
+
+        expanded_path = os.path.expanduser(path)
+
+        if not os.path.exists(expanded_path):
+            return html.I(className="bi bi-x-circle text-danger")
+        elif not os.path.isdir(expanded_path):
+            return html.I(className="bi bi-x-circle text-danger")
+        else:
+            # Check for main.nf file (required for Nextflow pipeline)
+            main_nf = os.path.join(expanded_path, "main.nf")
+            if not os.path.exists(main_nf):
+                return html.I(className="bi bi-exclamation-triangle text-warning")
+            else:
+                return html.I(className="bi bi-check-circle text-success")
+
+    # =========================================================================
+    # Configuration State Management Callbacks (v2.0)
+    # =========================================================================
+
+    # Callback: Update config source and snapshot when config is loaded from file
+    @app.callback(
+        [
+            Output("config-source", "data", allow_duplicate=True),
+            Output("saved-config-snapshot", "data", allow_duplicate=True),
+            Output("config-modified", "data", allow_duplicate=True),
+        ],
+        Input({"type": "load-config-item", "index": dash.ALL}, "n_clicks"),
+        State("available-configs", "children"),
+        prevent_initial_call=True,
+    )
+    def update_config_source_on_load(n_clicks, available_configs_json):
+        """Update config source info when loading from file."""
+        if not any(n_clicks) or not ctx.triggered:
+            return no_update, no_update, no_update
+
+        triggered_id = ctx.triggered[0]["prop_id"]
+        if "index" not in triggered_id:
+            return no_update, no_update, no_update
+
+        try:
+            trigger_idx = json.loads(triggered_id.split(".")[0])["index"]
+            configs = json.loads(available_configs_json)
+            selected_config = configs[trigger_idx]
+
+            # Update source info
+            source_info = {
+                "type": "file",
+                "path": selected_config.get("path", ""),
+                "name": selected_config.get("name", "Loaded Configuration")
+            }
+
+            # Load config for snapshot
+            config_loader = ConfigLoader(os.path.join(
+                os.path.dirname(selected_config.get("path", "")), ""
+            ))
+            config = config_loader.load_config(selected_config["path"])
+
+            return source_info, config, False  # Not modified after loading
+
+        except Exception:
+            return no_update, no_update, no_update
+
+    # Callback: Update config source after save
+    @app.callback(
+        [
+            Output("config-source", "data", allow_duplicate=True),
+            Output("saved-config-snapshot", "data", allow_duplicate=True),
+            Output("config-modified", "data", allow_duplicate=True),
+        ],
+        Input("confirm-save-config", "n_clicks"),
+        [
+            State("save-config-name", "value"),
+            State("app-config", "data"),
+            State("app-data-dir", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def update_config_source_on_save(n_clicks, config_name, config, data_dir):
+        """Update config source info after saving to file."""
+        if not n_clicks or not config:
+            return no_update, no_update, no_update
+
+        if not config_name:
+            config_name = f"Config_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        # Build expected file path
+        filename = f"{config_name.replace(' ', '_').lower()}.yaml"
+        config_path = os.path.join(data_dir or "", "configs", filename)
+
+        # Update source info
+        source_info = {
+            "type": "file",
+            "path": config_path,
+            "name": config_name
+        }
+
+        return source_info, config, False  # Not modified after saving
+
+    # Callback: Mark as modified after reset (resets to defaults)
+    @app.callback(
+        [
+            Output("config-source", "data", allow_duplicate=True),
+            Output("config-modified", "data", allow_duplicate=True),
+        ],
+        Input("reset-config-button", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def update_config_source_on_reset(n_clicks):
+        """Update config source info after reset to defaults."""
+        if not n_clicks:
+            return no_update, no_update
+
+        source_info = {
+            "type": "default",
+            "path": None,
+            "name": "Default Configuration"
+        }
+
+        return source_info, False  # Not modified (it IS the defaults)
+
+    # Callback: Update status banner display
+    @app.callback(
+        [
+            Output("config-source-display", "children"),
+            Output("config-path-display", "children"),
+            Output("config-modified-badge", "style"),
+            Output("config-saved-badge", "style"),
+            Output("config-status-banner", "className"),
+        ],
+        [
+            Input("config-source", "data"),
+            Input("config-modified", "data"),
+        ],
+    )
+    def update_config_status_display(source_info, is_modified):
+        """Update the config status banner display."""
+        if not source_info:
+            source_info = {
+                "type": "default",
+                "path": None,
+                "name": "Default Configuration"
+            }
+
+        # Determine source display text
+        source_name = source_info.get("name", "Unknown")
+        source_path = source_info.get("path", "")
+        source_type = source_info.get("type", "default")
+
+        # Truncate path for display
+        if source_path:
+            # Show just filename and parent directory
+            path_parts = source_path.split(os.sep)
+            if len(path_parts) > 2:
+                display_path = os.sep.join(["...", path_parts[-2], path_parts[-1]])
+            else:
+                display_path = source_path
+        else:
+            display_path = ""
+
+        # Badge visibility
+        modified_style = {"display": "inline"} if is_modified else {"display": "none"}
+        saved_style = {"display": "none"} if is_modified else {"display": "inline"}
+
+        # Banner CSS class
+        base_class = "config-status-banner mb-3"
+        if is_modified:
+            banner_class = f"{base_class} modified"
+        elif source_type == "file":
+            banner_class = f"{base_class} saved"
+        else:
+            banner_class = base_class
+
+        return source_name, display_path, modified_style, saved_style, banner_class
+
+    # Callback: Detect form changes and update modified state
+    @app.callback(
+        Output("config-modified", "data", allow_duplicate=True),
+        [
+            Input("analysis-name-input", "value"),
+            Input("nanopore-dir-input", "value"),
+            Input("kraken-db-input", "value"),
+            Input("results-dir-input", "value"),
+            Input("update-interval-input", "value"),
+            Input("danger-threshold-input", "value"),
+            Input("kraken-taxonomy-input", "value"),
+            Input("check-interval-input", "value"),
+            Input("min-reads-per-level-input", "value"),
+            Input("memory-mapping-input", "value"),
+            Input("blast-validation-input", "value"),
+            Input("validation-method-input", "value"),
+            Input("min-identity-input", "value"),
+            Input("e-value-cutoff-input", "value"),
+            Input("minimap2-preset-input", "value"),
+            Input("minimap2-min-mapq-input", "value"),
+            Input("genome-cache-dir-input", "value"),
+            Input("cores-input", "value"),
+            Input("gui-port-input", "value"),
+            Input("clean-temp-input", "value"),
+        ],
+        [
+            State("saved-config-snapshot", "data"),
+            State("config-modified", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def detect_form_changes(
+        analysis_name, nanopore_dir, kraken_db, results_dir, update_interval,
+        danger_threshold, taxonomy, check_interval,
+        min_reads_per_level, memory_mapping, blast_validation, validation_method,
+        min_identity, e_value_cutoff, minimap2_preset, minimap2_min_mapq,
+        genome_cache_dir, cores, gui_port, clean_temp,
+        saved_snapshot, currently_modified
+    ):
+        """Detect when form values differ from saved snapshot."""
+        if not saved_snapshot:
+            return no_update
+
+        # Build current form state for comparison
+        current_values = {
+            "analysis_name": analysis_name or "",
+            "nanopore_output_directory": nanopore_dir or "",
+            "kraken_db": kraken_db or "",
+            "results_output_directory": results_dir or "",
+            "update_interval_seconds": update_interval,
+            "danger_lower_limit": danger_threshold,
+            "kraken_taxonomy": taxonomy or "",
+            "check_intervals_seconds": check_interval,
+            "default_reads_per_level": min_reads_per_level,
+            "kraken_memory_mapping": bool(memory_mapping),
+            "blast_validation": bool(blast_validation),
+            "validation_method": validation_method or "blast",
+            "minimap2_preset": minimap2_preset or "map-ont",
+            "minimap2_min_mapq": minimap2_min_mapq,
+            "min_perc_identity": min_identity,
+            "e_val_cutoff": e_value_cutoff,
+            "genome_cache_dir": genome_cache_dir or "~/.nanometa",
+            "pipeline_cores": cores,
+            "gui_port": gui_port,
+            "remove_temp_files": bool(clean_temp),
+        }
+
+        # Compare key fields with snapshot
+        is_modified = False
+        for key, current_val in current_values.items():
+            snapshot_val = saved_snapshot.get(key)
+
+            # Handle None values
+            if current_val is None and snapshot_val is None:
+                continue
+
+            # Normalize values for comparison
+            if isinstance(current_val, bool):
+                # Convert snapshot value to bool for comparison
+                if isinstance(snapshot_val, str):
+                    snapshot_val = snapshot_val.lower() in ["true", "yes", "y", "1", "--memory-mapping"]
+                else:
+                    snapshot_val = bool(snapshot_val) if snapshot_val is not None else False
+
+            # Compare normalized values
+            if current_val != snapshot_val:
+                is_modified = True
+                break
+
+        return is_modified
+
+    # Callback: Mark as not modified after Apply (config matches current form)
+    @app.callback(
+        [
+            Output("saved-config-snapshot", "data", allow_duplicate=True),
+            Output("config-modified", "data", allow_duplicate=True),
+        ],
+        Input("apply-config-button", "n_clicks"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
+    )
+    def update_snapshot_on_apply(n_clicks, config):
+        """Update snapshot to match current config after Apply (session-only)."""
+        if not n_clicks or not config:
+            return no_update, no_update
+
+        # Note: After Apply, the form matches the config, so it's "not modified"
+        # relative to the applied state. However, it may still differ from
+        # the saved-to-disk state. For clarity, we only update modified to False
+        # when actually saving to file.
+        #
+        # Actually, let's keep modified=True if it differs from what's on disk,
+        # so the user knows they need to save. We won't update snapshot here.
+        return no_update, no_update

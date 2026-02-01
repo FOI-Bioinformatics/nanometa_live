@@ -6,24 +6,37 @@ This module initializes the Dash application and sets up the core layout and cal
 
 import os
 import logging
-import importlib.resources as pkg_resources
 from typing import Dict, Any
 
+import yaml
 import dash
-from dash import Dash, html, dcc
+from dash import Dash, html, dcc, Input, Output, State, ClientsideFunction, DiskcacheManager
 import dash_bootstrap_components as dbc
+import diskcache
+import multiprocess
+
+# Use 'spawn' instead of 'fork' to avoid BrokenPipeError on macOS/Python 3.13
+# when DiskcacheManager forks a process with a closed stderr pipe.
+multiprocess.set_start_method("spawn", force=True)
+
+# Initialize cache for background callbacks (enables async progress reporting)
+_cache_dir = os.path.join(os.path.expanduser("~"), ".nanometa", "cache")
+os.makedirs(_cache_dir, exist_ok=True)
+_cache = diskcache.Cache(_cache_dir)
+background_callback_manager = DiskcacheManager(_cache)
 
 from nanometa_live import __version__
 from nanometa_live.app.layouts.main_layout import create_main_layout
 from nanometa_live.app.layouts.qc_layout import create_qc_layout
-from nanometa_live.app.layouts.sankey_layout import create_sankey_layout
-from nanometa_live.app.layouts.sunburst_layout import create_sunburst_layout
+from nanometa_live.app.layouts.classification_layout import create_classification_layout
 from nanometa_live.app.layouts.config_layout import create_config_layout
+from nanometa_live.app.layouts.dashboard_layout import create_dashboard_layout
+from nanometa_live.app.layouts.watchlist_layout import create_watchlist_layout
+from nanometa_live.app.layouts.validation_layout import create_validation_layout
+from nanometa_live.app.layouts.preparation_layout import create_preparation_layout
 from nanometa_live.app.components.header import create_header
 from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.config.config_loader import ConfigLoader
-
-from nanometa_live import __version__
 
 
 def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendManager) -> Dash:
@@ -39,9 +52,6 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
         Configured Dash application
     """
     # Load kraken databases directly
-    import yaml
-    import os
-
     try:
         kraken_db_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "kraken2_databases.yaml")
         with open(kraken_db_file, 'r') as f:
@@ -109,24 +119,73 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
             with open(logo_file, 'wb') as f:
                 f.write(base64.b64decode(empty_pixel))
 
-    # Initialize the Dash app
+    # Determine if running in debug mode (show errors during development)
+    debug_mode = os.environ.get('DASH_DEBUG', '').lower() in ('1', 'true', 'yes')
+
+    # Initialize the Dash app with background callback support
+    # Note: suppress_callback_exceptions=True is always enabled because:
+    # 1. Dynamic layouts may reference components that don't exist yet
+    # 2. Browser cache can reference removed components causing false errors
+    # 3. Collapsible sections create/destroy components dynamically
     app = Dash(
         __name__,
-        external_stylesheets=[dbc.themes.BOOTSTRAP],
-        suppress_callback_exceptions=True,
+        external_stylesheets=[
+            dbc.themes.BOOTSTRAP,
+            dbc.icons.BOOTSTRAP,  # Bootstrap Icons for bi-* classes
+        ],
+        suppress_callback_exceptions=True,  # Always suppress - dynamic layouts + cache issues
         assets_folder=assets_dir,
+        background_callback_manager=background_callback_manager,  # Enable async progress
         meta_tags=[
-            {"name": "viewport", "content": "width=device-width, initial-scale=1"}
+            {"name": "viewport", "content": "width=device-width, initial-scale=1"},
+            {"http-equiv": "Cache-Control", "content": "no-cache, no-store, must-revalidate"},
+            {"http-equiv": "Pragma", "content": "no-cache"},
+            {"http-equiv": "Expires", "content": "0"}
         ]
     )
 
     # Create app layout with tabs
     app.layout = html.Div([
+        # Accessibility: Skip to main content link
+        html.A(
+            "Skip to main content",
+            href="#main-content",
+            className="skip-to-main"
+        ),
+
         # Store components for app state
         dcc.Store(id='app-config', data=config),
         dcc.Store(id='backend-status', data={"running": False}),
         dcc.Store(id='app-data-dir', data=data_dir),
         dcc.Store(id='kraken-databases', data=kraken_databases),
+
+        # Configuration state tracking stores
+        dcc.Store(id='config-source', data={
+            "type": "file",  # "file", "default", or "unsaved"
+            "path": None,    # File path if loaded from file
+            "name": "Default Configuration"  # Display name
+        }),
+        dcc.Store(id='saved-config-snapshot', data=config),  # Snapshot of last saved state
+        dcc.Store(id='config-modified', data=False),  # True if current config differs from saved
+
+        # Sample management stores (for multi-sample/barcode support)
+        dcc.Store(id='selected-sample', data='All Samples'),
+        dcc.Store(id='available-samples', data=['All Samples']),
+        dcc.Store(id='sample-file-mapping', data={}),
+        dcc.Store(id='notification-trigger', data={}),
+        dcc.Store(id='last-update-time', data=None),
+        dcc.Store(id='toast-message', data=None),
+        dcc.Store(id='theme-preference', data='auto'),  # auto, light, dark
+        dcc.Store(id='previous-running-state', data=False),  # For detecting analysis completion
+
+        # Shared stores for cross-tab communication (Watchlist <-> Preparation)
+        dcc.Store(id='taxmap-collection', data=None),
+        dcc.Store(id='taxmap-database-info', data=None),
+        dcc.Store(id='taxmap-rescan-complete', data=None),
+        dcc.Download(id='taxmap-export-download'),
+        dcc.Store(id='genome-status-data', data={}),
+        dcc.Store(id='genome-download-complete', data=None),
+        dcc.Store(id='blast-build-complete', data=None),
 
         # Interval for updating data
         dcc.Interval(
@@ -136,41 +195,141 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
             disabled=False
         ),
 
+        # Fast interval for countdown timer (1 second ticks)
+        dcc.Interval(
+            id='countdown-tick',
+            interval=1000,  # 1 second
+            n_intervals=0,
+            disabled=False
+        ),
+
         # Header with title, controls, and status
         create_header(config.get('analysis_name', 'Nanometa Live Analysis')),
 
-        # Main tabs container
-        dbc.Tabs([
-            dbc.Tab(
-                label="Configuration",
-                tab_id="config-tab",
-                children=create_config_layout()
-            ),
-            dbc.Tab(
-                label="Main Results",
-                tab_id="main-tab",
-                children=create_main_layout()
-            ),
-            dbc.Tab(
-                label="QC",
-                tab_id="qc-tab",
-                children=create_qc_layout()
-            ),
-            dbc.Tab(
-                label="Sankey Plot",
-                tab_id="sankey-tab",
-                children=create_sankey_layout()
-            ),
-            dbc.Tab(
-                label="Sunburst Chart",
-                tab_id="sunburst-tab",
-                children=create_sunburst_layout()
-            )
-        ], id="tabs", active_tab="config-tab"),
+        # Sample selector bar with live indicator
+        html.Div([
+            dbc.Container([
+                dbc.Row([
+                    dbc.Col([
+                        html.Div([
+                            html.I(className="bi bi-collection me-2",
+                                   style={"fontSize": "18px", "color": "#007bff"}),
+                            html.Label(
+                                "Viewing data for:",
+                                className="fw-semibold me-2 mb-0",
+                                htmlFor="sample-selector",
+                                style={"whiteSpace": "nowrap"}
+                            ),
+                            dcc.Dropdown(
+                                id='sample-selector',
+                                options=[{'label': 'All Samples (Aggregated)', 'value': 'All Samples'}],
+                                value='All Samples',
+                                clearable=False,
+                                style={"minWidth": "250px", "maxWidth": "400px"},
+                                placeholder="Select sample or barcode...",
+                                persistence=False,
+                                persistence_type='session'
+                            ),
+                        ], className="d-flex align-items-center")
+                    ], md=6),
+
+                    dbc.Col([
+                        # Live data indicator with theme toggle
+                        html.Div([
+                            # Stale data warning (hidden by default)
+                            html.Div(
+                                id="stale-data-warning",
+                                children=[
+                                    html.I(className="bi bi-exclamation-triangle me-1"),
+                                    html.Span("Data may be stale", className="small")
+                                ],
+                                className="stale-data-warning me-3",
+                                style={"display": "none"}
+                            ),
+                            # Live indicator
+                            html.Span(id="live-indicator-dot", className="live-indicator-dot offline", **{"aria-hidden": "true"}),
+                            html.Span(id="live-indicator-text", children="Idle", className="fw-medium"),
+                            html.Span(" | ", className="text-muted mx-2"),
+                            html.I(className="bi bi-clock-history me-1"),
+                            html.Span(id="last-update-display", children="--", className="text-muted small"),
+                            # Theme toggle button
+                            html.Button(
+                                id="theme-toggle",
+                                children=[html.I(id="theme-icon", className="bi bi-moon-stars")],
+                                className="theme-toggle ms-3",
+                                title="Toggle dark mode",
+                                **{"aria-label": "Toggle dark mode"}
+                            )
+                        ], className="live-indicator d-flex align-items-center justify-content-end")
+                    ], md=6, className="d-flex align-items-center justify-content-end")
+                ])
+            ], fluid=True)
+        ], className="py-3 border-bottom bg-light"),
+
+        # Main content area with accessibility landmark
+        html.Main([
+            # Main tabs container - Dashboard first for monitoring workflow
+            dbc.Tabs([
+                # Overview group
+                dbc.Tab(
+                    label="Dashboard",
+                    tab_id="dashboard-tab",
+                    children=create_dashboard_layout(),
+                    tabClassName="fw-semibold tab-dashboard"
+                ),
+                # Analysis group
+                dbc.Tab(
+                    label="Organisms",
+                    tab_id="main-tab",
+                    children=create_main_layout(),
+                    tabClassName="tab-organisms tab-group-start"
+                ),
+                dbc.Tab(
+                    label="Quality Control",
+                    tab_id="qc-tab",
+                    children=create_qc_layout(),
+                    tabClassName="tab-qc"
+                ),
+                dbc.Tab(
+                    label="Taxonomy",
+                    tab_id="classification-tab",
+                    children=create_classification_layout(),
+                    tabClassName="tab-taxonomy"
+                ),
+                dbc.Tab(
+                    label="Validation",
+                    tab_id="validation-tab",
+                    children=create_validation_layout(),
+                    tabClassName="tab-validation"
+                ),
+                # Setup group
+                dbc.Tab(
+                    label="Watchlist",
+                    tab_id="watchlist-tab",
+                    children=create_watchlist_layout(),
+                    tabClassName="tab-watchlist tab-group-start"
+                ),
+                dbc.Tab(
+                    label="Configuration",
+                    tab_id="config-tab",
+                    children=create_config_layout(),
+                    tabClassName="tab-config"
+                ),
+                dbc.Tab(
+                    label="Preparation",
+                    tab_id="preparation-tab",
+                    children=create_preparation_layout(),
+                    tabClassName="tab-preparation"
+                )
+            ], id="tabs", active_tab="dashboard-tab"),
+        ], id="main-content", role="main"),
+
+        # Toast notification container (for non-blocking feedback)
+        html.Div(id="toast-container", className="toast-container"),
         # Data preparation modal
         dbc.Modal([
             dbc.ModalHeader([
-                html.H4("Data Preparation", className="mb-0"),
+                html.H4("Validation Setup", className="mb-0"),
                 html.Span(id="prepare-step-indicator", className="text-muted ms-3")
             ], className="d-flex align-items-center"),
             dbc.ModalBody([
@@ -207,7 +366,64 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
                 html.A("Report Issue", href="https://github.com/FOI-Bioinformatics/nanometa_live/issues", target="_blank")
             ], className="footer-content"),
             className="footer"
-        )
+        ),
+
+        # Welcome modal for first-time users
+        dbc.Modal([
+            dbc.ModalHeader(
+                html.H4([html.I(className="bi bi-rocket-takeoff me-2"), "Welcome to Nanometa Live"], className="mb-0"),
+                close_button=True
+            ),
+            dbc.ModalBody([
+                html.P(
+                    "Nanometa Live provides real-time visualization of Oxford Nanopore "
+                    "sequencing analysis. Follow these steps to get started:",
+                    className="mb-3"
+                ),
+                html.Div([
+                    html.Div([
+                        html.Div([
+                            dbc.Badge("1", color="primary", className="me-2",
+                                      style={"fontSize": "1rem", "borderRadius": "50%", "width": "28px", "height": "28px",
+                                             "display": "inline-flex", "alignItems": "center", "justifyContent": "center"}),
+                            html.Strong("Configure"),
+                        ], className="d-flex align-items-center mb-1"),
+                        html.P("Go to the Configuration tab and set your input directory and Kraken2 database.",
+                               className="text-muted small ms-4 mb-3"),
+                    ]),
+                    html.Div([
+                        html.Div([
+                            dbc.Badge("2", color="primary", className="me-2",
+                                      style={"fontSize": "1rem", "borderRadius": "50%", "width": "28px", "height": "28px",
+                                             "display": "inline-flex", "alignItems": "center", "justifyContent": "center"}),
+                            html.Strong("Start Analysis"),
+                        ], className="d-flex align-items-center mb-1"),
+                        html.P("Click 'Start Analysis' in the header to begin processing.",
+                               className="text-muted small ms-4 mb-3"),
+                    ]),
+                    html.Div([
+                        html.Div([
+                            dbc.Badge("3", color="primary", className="me-2",
+                                      style={"fontSize": "1rem", "borderRadius": "50%", "width": "28px", "height": "28px",
+                                             "display": "inline-flex", "alignItems": "center", "justifyContent": "center"}),
+                            html.Strong("Monitor Results"),
+                        ], className="d-flex align-items-center mb-1"),
+                        html.P("The Dashboard and Organisms tabs update automatically as data becomes available.",
+                               className="text-muted small ms-4 mb-0"),
+                    ]),
+                ]),
+                dbc.Alert([
+                    html.I(className="bi bi-lightbulb me-2"),
+                    "If you already have results, use ",
+                    html.Code("--main_dir /path/to/results"),
+                    " to visualize existing data without running the pipeline.",
+                ], color="info", className="mt-3 mb-0"),
+            ]),
+            dbc.ModalFooter(
+                dbc.Button("Get Started", id="close-welcome-modal", color="primary")
+            )
+        ], id="welcome-modal", is_open=False, centered=True, size="lg"),
+        dcc.Store(id="welcome-shown", storage_type="local", data=False),
     ])
 
     # Register all callbacks
@@ -228,14 +444,55 @@ def register_callbacks(app: Dash, backend_manager: BackendManager):
     from nanometa_live.app.tabs.config_tab import register_config_callbacks
     from nanometa_live.app.tabs.main_tab import register_main_callbacks
     from nanometa_live.app.tabs.qc_tab import register_qc_callbacks
-    from nanometa_live.app.tabs.sankey_tab import register_sankey_callbacks
-    from nanometa_live.app.tabs.sunburst_tab import register_sunburst_callbacks
+    from nanometa_live.app.tabs.classification_tab import register_classification_callbacks
+    from nanometa_live.app.tabs.dashboard_tab import register_dashboard_callbacks
+    from nanometa_live.app.tabs.watchlist_tab import register_watchlist_callbacks
+    from nanometa_live.app.tabs.validation_tab import register_validation_callbacks
+    from nanometa_live.app.tabs.preparation_tab import register_preparation_callbacks
     from nanometa_live.app.callbacks import register_core_callbacks
 
     # Register callbacks for each tab
     register_core_callbacks(app, backend_manager)
+    register_dashboard_callbacks(app)
     register_config_callbacks(app, backend_manager)
     register_main_callbacks(app)
     register_qc_callbacks(app)
-    register_sankey_callbacks(app)
-    register_sunburst_callbacks(app)
+    register_classification_callbacks(app)
+    register_watchlist_callbacks(app)
+    register_validation_callbacks(app)
+    register_preparation_callbacks(app)
+
+    # Clientside callback for countdown timer (smooth, no server round-trips)
+    app.clientside_callback(
+        """
+        function(n_intervals, interval_ms, backend_status, last_data_update) {
+            // Calculate time since last data update
+            var interval_sec = interval_ms / 1000;
+            var now = Date.now();
+
+            // Check if backend is running
+            var is_running = backend_status && backend_status.running;
+
+            if (!is_running) {
+                return "Paused";
+            }
+
+            // Calculate time remaining based on last update timestamp
+            // Using a simple countdown from interval_sec
+            var time_remaining = Math.ceil(interval_sec - ((now / 1000) % interval_sec));
+
+            if (time_remaining <= 0 || time_remaining > interval_sec) {
+                return "Updating...";
+            }
+
+            return "Next: " + time_remaining + "s";
+        }
+        """,
+        Output("update-countdown", "children"),
+        [
+            Input("countdown-tick", "n_intervals"),
+            Input("update-interval", "interval"),
+            Input("backend-status", "data"),
+            Input("last-update-time", "data")
+        ]
+    )
