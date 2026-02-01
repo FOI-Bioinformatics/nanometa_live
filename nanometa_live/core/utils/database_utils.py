@@ -59,8 +59,8 @@ def download_and_prepare_kraken_database(
             if os.path.exists(download_flag_file):
                 try:
                     os.remove(download_flag_file)
-                except:
-                    pass
+                except (OSError, PermissionError) as e:
+                    logging.debug(f"Could not remove flag file: {e}")
             return True, f"Database '{external_db_key}' already exists", db_extract_folder
 
         # Start fresh if redownloading
@@ -69,8 +69,8 @@ def download_and_prepare_kraken_database(
             if os.path.exists(db_file_name):
                 try:
                     os.remove(db_file_name)
-                except:
-                    pass
+                except (OSError, PermissionError) as e:
+                    logging.warning(f"Could not remove incomplete download: {e}")
 
         # Download the database
         if progress_callback:
@@ -138,8 +138,8 @@ def download_and_prepare_kraken_database(
         if 'download_flag_file' in locals() and os.path.exists(download_flag_file):
             try:
                 os.remove(download_flag_file)
-            except:
-                pass
+            except (OSError, PermissionError) as e:
+                logging.debug(f"Could not remove flag file during cleanup: {e}")
         if progress_callback:
             progress_callback(100, f"Error: {error_msg}")
         return False, error_msg, ""
@@ -220,14 +220,24 @@ def download_database(
         logging.info(f"Successfully downloaded file to {dest_file_path}")
         return True
 
-    except Exception as e:
-        logging.error(f"Error downloading file: {str(e)}")
+    except requests.RequestException as e:
+        logging.error(f"Network error downloading file: {str(e)}")
         # Clean up temp file if it exists
         if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
             try:
                 os.remove(temp_file_path)
-            except:
-                pass
+            except (OSError, PermissionError) as cleanup_err:
+                logging.debug(f"Could not remove temp file: {cleanup_err}")
+        if progress_callback:
+            progress_callback(40, f"Error downloading file: {str(e)}")
+        return False
+    except (IOError, OSError) as e:
+        logging.error(f"I/O error downloading file: {str(e)}")
+        if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except (OSError, PermissionError) as cleanup_err:
+                logging.debug(f"Could not remove temp file: {cleanup_err}")
         if progress_callback:
             progress_callback(40, f"Error downloading file: {str(e)}")
         return False

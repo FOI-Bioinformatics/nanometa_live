@@ -13,7 +13,7 @@ import subprocess
 import tarfile
 import shutil
 import tempfile
-from typing import Dict, List, Optional, Tuple, Union, Any
+from typing import Any, Dict, List, Optional, Tuple, Union
 import pandas as pd
 import requests
 
@@ -161,6 +161,40 @@ def inspect_kraken_db(db_path: str, output_path: str = None) -> Tuple[bool, str]
         return False, f"Unexpected error: {str(e)}"
 
 
+def ensure_inspect_file(db_path: str) -> Optional[str]:
+    """
+    Generate the inspect.txt file for a Kraken2 database if it does not exist.
+
+    This ensures the inspect file is available for offline taxonomy index
+    building without requiring network access.
+
+    Args:
+        db_path: Path to the Kraken2 database directory.
+
+    Returns:
+        Path to the inspect.txt file, or None if generation failed.
+    """
+    inspect_path = os.path.join(db_path, "inspect.txt")
+    if os.path.exists(inspect_path):
+        return inspect_path
+
+    if not verify_kraken_db(db_path):
+        logging.warning(f"Cannot generate inspect file: invalid database at {db_path}")
+        return None
+
+    if not shutil.which("kraken2-inspect"):
+        logging.warning("kraken2-inspect not found in PATH, cannot generate inspect file")
+        return None
+
+    success, msg = inspect_kraken_db(db_path, inspect_path)
+    if success:
+        logging.info(f"Generated inspect file at {inspect_path}")
+        return inspect_path
+    else:
+        logging.warning(f"Failed to generate inspect file: {msg}")
+        return None
+
+
 def parse_kraken_report(report_path: str) -> pd.DataFrame:
     """
     Parse a Kraken2 report file into a DataFrame.
@@ -271,17 +305,20 @@ def get_taxonomy_tree(
         # Add to the last child
         add_node(parent["children"][-1], node_data, level - 1)
 
-    # Add each row to the tree
-    for _, row in filtered_df.iterrows():
+    # Add each row to the tree - pre-extract data for faster iteration
+    names = filtered_df["name"].tolist()
+    taxids = filtered_df["taxid"].astype(str).tolist()
+    reads_vals = filtered_df["reads"].astype(int).tolist()
+
+    for name, taxid, reads in zip(names, taxids, reads_vals):
         # Determine the level from the name (count leading spaces and divide by 2)
-        name = row["name"]
         level = (len(name) - len(name.lstrip())) // 2
 
         # Create node data
         node_data = {
             "name": name.strip(),
-            "taxid": str(row["taxid"]),
-            "reads": int(row["reads"]),
+            "taxid": taxid,
+            "reads": reads,
             "children": [],
         }
 
