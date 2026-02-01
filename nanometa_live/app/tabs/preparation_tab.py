@@ -165,6 +165,13 @@ def register_preparation_callbacks(app):
                     html.Strong("Preparation failed. "),
                     html.Br(),
                     html.Ul([html.Li(e) for e in result.errors]),
+                    html.Hr(),
+                    dbc.Button(
+                        [html.I(className="bi bi-arrow-clockwise me-2"), "Retry Preparation"],
+                        id="retry-preparation-btn",
+                        color="warning",
+                        size="sm"
+                    )
                 ], color="danger")
 
             warnings_div = html.Div()
@@ -184,7 +191,18 @@ def register_preparation_callbacks(app):
             logger.error(f"Preparation failed: {e}", exc_info=True)
             return (
                 html.Div(),
-                dbc.Alert(f"Error: {e}", color="danger"),
+                dbc.Alert([
+                    html.I(className="bi bi-x-circle me-2"),
+                    html.Strong("Preparation error: "),
+                    str(e),
+                    html.Hr(),
+                    dbc.Button(
+                        [html.I(className="bi bi-arrow-clockwise me-2"), "Retry Preparation"],
+                        id="retry-preparation-btn",
+                        color="warning",
+                        size="sm"
+                    )
+                ], color="danger"),
                 False,
             )
 
@@ -1135,5 +1153,21 @@ def register_preparation_callbacks(app):
                 color="danger",
                 className="py-2 mb-0",
             )
+
+    # Retry button wires to clicking the start button
+    app.clientside_callback(
+        """
+        function(n_clicks) {
+            if (n_clicks) {
+                var btn = document.getElementById('start-prep-btn');
+                if (btn) { btn.click(); }
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("start-prep-btn", "className", allow_duplicate=True),
+        Input("retry-preparation-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
 
     logger.info("Preparation tab callbacks registered")

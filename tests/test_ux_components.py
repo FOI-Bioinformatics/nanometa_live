@@ -12,6 +12,7 @@ from nanometa_live.core.utils.data_loaders import (
     _empty_fastp_stats,
     _empty_nanoplot_stats,
 )
+from nanometa_live.app.components.modern_components import EmptyStateMessage
 from nanometa_live.app.utils.error_handler import (
     get_actionable_error,
     create_error_toast,
@@ -55,6 +56,32 @@ class TestEmptyStates:
         for key, value in stats.items():
             if key != "source":
                 assert value == 0 or value == 0.0
+
+
+    def test_empty_state_message_has_all_params(self):
+        """EmptyStateMessage renders with all supported parameters."""
+        from dash import html
+
+        # Basic usage
+        component = EmptyStateMessage(
+            title="Test Title",
+            message="Test message",
+            icon="bi-inbox",
+        )
+        assert isinstance(component, html.Div)
+
+        # With action button
+        component_with_action = EmptyStateMessage(
+            title="No Data",
+            message="Start analysis",
+            icon="bi-hourglass",
+            action_button={"label": "Start", "id": "start-btn"},
+        )
+        assert isinstance(component_with_action, html.Div)
+
+        # Default params
+        component_default = EmptyStateMessage()
+        assert isinstance(component_default, html.Div)
 
 
 class TestActionableErrors:

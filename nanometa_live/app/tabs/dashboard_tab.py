@@ -37,7 +37,8 @@ from nanometa_live.app.layouts.dashboard_layout import create_alerts_list, creat
 from nanometa_live.app.components.modern_components import (
     QualityScoreBadge,
     N50Badge,
-    ClassificationRateBadge
+    ClassificationRateBadge,
+    LastUpdatedBadge
 )
 from nanometa_live.app.components.pathogen_alert import (
     PathogenAlertPanel,
@@ -1229,6 +1230,44 @@ def register_dashboard_callbacks(app: Dash):
                     html.Span(f"Error loading watchlist: {str(e)}", className="text-muted small")
                 ], className="text-center py-3")
             )
+
+    @app.callback(
+        [
+            Output("dashboard-last-updated", "data"),
+            Output("dashboard-last-updated-badge", "children")
+        ],
+        [Input("update-interval", "n_intervals")],
+        [
+            State("app-config", "data"),
+            State("dashboard-last-updated", "data")
+        ]
+    )
+    def update_data_freshness(n_intervals, config, last_updated):
+        """
+        Update data freshness timestamp and badge.
+
+        Stores the current time when data loads successfully,
+        and shows a stale warning when data age exceeds 2x the polling interval.
+        """
+        if not config:
+            return None, LastUpdatedBadge(timestamp=None)
+
+        now = datetime.now().isoformat()
+        update_interval = config.get("update_interval_seconds", 30)
+        stale_threshold = update_interval * 2
+
+        # Check staleness against previous timestamp
+        stale = False
+        if last_updated:
+            try:
+                last_dt = datetime.fromisoformat(last_updated)
+                age_seconds = (datetime.now() - last_dt).total_seconds()
+                if age_seconds > stale_threshold:
+                    stale = True
+            except (ValueError, TypeError):
+                pass
+
+        return now, LastUpdatedBadge(timestamp=now, stale=stale)
 
     @app.callback(
         Output("dashboard-watchlist-collapse", "is_open"),

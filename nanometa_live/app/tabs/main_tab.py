@@ -599,9 +599,33 @@ def register_main_callbacks(app: Dash):
                 )
                 organism_cards.append(dbc.Col(card, md=6, lg=4, className="mb-3"))
 
-            # Wrap cards in a Row
+            # Wrap cards in a Row with "Show more" if > 20
+            MAX_VISIBLE_CARDS = 20
             if organism_cards:
-                cards_container = dbc.Row(organism_cards)
+                if len(organism_cards) > MAX_VISIBLE_CARDS:
+                    visible = organism_cards[:MAX_VISIBLE_CARDS]
+                    hidden = organism_cards[MAX_VISIBLE_CARDS:]
+                    cards_container = html.Div([
+                        dbc.Row(visible),
+                        dbc.Collapse(
+                            dbc.Row(hidden),
+                            id="organism-cards-overflow",
+                            is_open=False,
+                        ),
+                        html.Div(
+                            dbc.Button(
+                                f"Show {len(hidden)} more organisms",
+                                id="show-more-organisms-btn",
+                                color="secondary",
+                                outline=True,
+                                size="sm",
+                                className="mt-2",
+                            ),
+                            className="text-center",
+                        ),
+                    ])
+                else:
+                    cards_container = dbc.Row(organism_cards)
             else:
                 cards_container = EmptyStateMessage(
                     title="No Matches",
@@ -660,6 +684,24 @@ def register_main_callbacks(app: Dash):
         if config:
             return config.get("species_of_interest", [])
         return []
+
+    # Show more organisms toggle
+    @app.callback(
+        [
+            Output("organism-cards-overflow", "is_open"),
+            Output("show-more-organisms-btn", "children"),
+        ],
+        Input("show-more-organisms-btn", "n_clicks"),
+        State("organism-cards-overflow", "is_open"),
+        prevent_initial_call=True,
+    )
+    def toggle_show_more_organisms(n_clicks, is_open):
+        """Toggle visibility of overflow organism cards."""
+        if not n_clicks:
+            return no_update, no_update
+        new_state = not is_open
+        label = "Show fewer organisms" if new_state else "Show more organisms"
+        return new_state, label
 
     # Export modal callbacks - open modal and pre-select format
     @app.callback(

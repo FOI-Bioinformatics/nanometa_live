@@ -847,6 +847,7 @@ def create_pathogen_row(
                         color="secondary",
                         outline=True,
                         title="Edit",
+                        **{"aria-label": f"Edit {name}"},
                     ),
                     dbc.Button(
                         html.I(className="bi bi-check2-circle"),
@@ -855,6 +856,7 @@ def create_pathogen_row(
                         color="info",
                         outline=True,
                         title="Validate via API",
+                        **{"aria-label": f"Validate {name} via API"},
                     ),
                     dbc.Button(
                         html.I(className="bi bi-toggle-on" if enabled else "bi bi-toggle-off"),
@@ -863,6 +865,7 @@ def create_pathogen_row(
                         color="success" if enabled else "secondary",
                         outline=True,
                         title="Enable/Disable",
+                        **{"aria-label": f"{'Disable' if enabled else 'Enable'} {name}"},
                     ),
                 ], size="sm"),
             ], width=3),

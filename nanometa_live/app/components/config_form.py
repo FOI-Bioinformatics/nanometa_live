@@ -82,7 +82,8 @@ def create_config_form():
                         dbc.Tooltip(
                             "The directory where nanometanf outputs its results (contains kraken2/, nanoplot/ folders)",
                             target="nanopore-dir-info"
-                        )
+                        ),
+                        html.Div(id="nanopore-dir-feedback", className="mt-1")
                     ], md=12)
                 ], className="mb-4"),
 
@@ -185,7 +186,8 @@ def create_config_form():
                         dbc.Tooltip(
                             "Path to Kraken2 database directory (must contain hash.k2d, opts.k2d, and taxo.k2d)",
                             target="kraken-db-info"
-                        )
+                        ),
+                        html.Div(id="kraken-db-feedback", className="mt-1")
                     ], md=12)
                 ], className="mb-4"),
 

@@ -8,6 +8,7 @@ actionable language.
 """
 
 from typing import Optional, List, Dict, Any
+from datetime import datetime
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 
@@ -263,18 +264,20 @@ def ActionButton(
     icon: Optional[str] = None,
     variant: str = "primary",
     size: str = "md",
-    disabled: bool = False
+    disabled: bool = False,
+    loading: bool = False
 ) -> dbc.Button:
     """
-    Prominent call-to-action button.
+    Prominent call-to-action button with optional loading state.
 
     Args:
         label: Button text in plain language
         button_id: Required ID for callbacks
-        icon: Icon placeholder (for future dash-iconify integration)
+        icon: Bootstrap icon class (e.g. "bi-play-fill")
         variant: "primary", "secondary", "success", "danger", "warning", "info"
         size: "sm", "md", "lg"
         disabled: Button disabled state
+        loading: If True, shows a spinner and disables the button
 
     Returns:
         dbc.Button component
@@ -287,17 +290,25 @@ def ActionButton(
         ...     size="md"
         ... )
     """
-    button_content = label
-    if icon:
-        # Placeholder for future icon integration
-        button_content = f"{icon} {label}"
+    if loading:
+        button_content = [
+            dbc.Spinner(size="sm", spinner_class_name="me-2"),
+            label
+        ]
+    elif icon:
+        button_content = [
+            html.I(className=f"bi {icon} me-2"),
+            label
+        ]
+    else:
+        button_content = label
 
     return dbc.Button(
         button_content,
         id=button_id,
         color=variant,
         size=size,
-        disabled=disabled
+        disabled=disabled or loading
     )
 
 
@@ -675,6 +686,51 @@ def EmptyStateMessage(
         style={"minHeight": "250px", "display": "flex", "flexDirection": "column",
                "justifyContent": "center", "alignItems": "center"}
     )
+
+
+def LastUpdatedBadge(
+    timestamp: Optional[str] = None,
+    stale: bool = False,
+    badge_id: Optional[str] = None
+) -> html.Span:
+    """
+    Small muted text showing when data was last updated.
+
+    Args:
+        timestamp: ISO format timestamp string, or None for "never"
+        stale: If True, badge turns amber with stale warning
+        badge_id: Optional ID for callback targeting
+
+    Returns:
+        html.Span with "Updated: HH:MM:SS" or stale warning
+    """
+    props = {"className": "text-muted small", "style": {"fontSize": "0.75rem"}}
+    if badge_id:
+        props["id"] = badge_id
+
+    if not timestamp:
+        return html.Span([
+            html.I(className="bi bi-clock me-1"),
+            "No data yet"
+        ], **props)
+
+    try:
+        dt = datetime.fromisoformat(timestamp)
+        time_str = dt.strftime("%H:%M:%S")
+    except (ValueError, TypeError):
+        time_str = str(timestamp)
+
+    if stale:
+        props["className"] = "text-warning small fw-bold"
+        return html.Span([
+            html.I(className="bi bi-exclamation-triangle me-1"),
+            f"Data may be stale (last: {time_str})"
+        ], **props)
+
+    return html.Span([
+        html.I(className="bi bi-clock me-1"),
+        f"Updated: {time_str}"
+    ], **props)
 
 
 # =============================================================================

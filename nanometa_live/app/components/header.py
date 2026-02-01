@@ -113,6 +113,34 @@ def create_header(title="Nanometa Live"):
             ], width=3)
         ], className="py-3 border-bottom"),
 
+        # Stop Analysis Confirmation Modal
+        dbc.Modal([
+            dbc.ModalHeader(
+                dbc.ModalTitle([
+                    html.I(className="bi bi-exclamation-triangle-fill text-warning me-2"),
+                    "Stop Analysis?"
+                ]),
+                close_button=True
+            ),
+            dbc.ModalBody(
+                "Are you sure you want to stop the analysis? "
+                "This will terminate the running pipeline."
+            ),
+            dbc.ModalFooter([
+                dbc.Button(
+                    "Cancel",
+                    id="cancel-stop-analysis",
+                    color="secondary",
+                    className="me-2"
+                ),
+                dbc.Button(
+                    [html.I(className="bi bi-stop-fill me-2"), "Stop Analysis"],
+                    id="confirm-stop-analysis",
+                    color="danger"
+                ),
+            ])
+        ], id="stop-confirm-modal", is_open=False, centered=True),
+
         # Notification area
         html.Div(
             id="notification-container",

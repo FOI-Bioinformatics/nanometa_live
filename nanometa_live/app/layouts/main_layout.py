@@ -107,7 +107,8 @@ def create_main_layout():
                             html.I(
                                 className="bi bi-info-circle text-muted ms-3",
                                 id="blast-info-icon",
-                                style={"cursor": "pointer"}
+                                style={"cursor": "pointer"},
+                                **{"aria-label": "BLAST validation information", "role": "img"}
                             ),
                             dbc.Tooltip(
                                 "When BLAST validation is enabled, watched species are verified "
@@ -257,7 +258,8 @@ def create_main_layout():
                                 "fontWeight": "bold"
                             }
                         ],
-                        page_size=20,
+                        page_size=25,
+                        page_action="native",
                         sort_action="native",
                         filter_action="native"
                     )

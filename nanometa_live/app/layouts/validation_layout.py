@@ -10,6 +10,7 @@ from dash import html, dcc, dash_table
 import dash_bootstrap_components as dbc
 
 from nanometa_live.app.components.modern_components import (
+    EmptyStateMessage,
     TABLE_STYLE_CELL,
     TABLE_STYLE_HEADER,
 )
@@ -135,11 +136,10 @@ def _create_blast_tab() -> dbc.Tab:
             html.Div(
                 id="blast-empty-message",
                 children=[
-                    dbc.Alert(
-                        "No BLAST validation results available. Run the pipeline "
-                        "with BLAST validation enabled to see results here.",
-                        color="light",
-                        className="text-center"
+                    EmptyStateMessage(
+                        title="No Validation Results",
+                        message="No BLAST validation results available. Run the pipeline with BLAST validation enabled to see results here.",
+                        icon="bi-shield-check"
                     )
                 ]
             ),
@@ -210,7 +210,8 @@ def _create_blast_tab() -> dbc.Tab:
                                         "color": "#721c24"
                                     },
                                 ],
-                                page_size=15,
+                                page_size=25,
+                                page_action="native",
                                 sort_action="native",
                                 filter_action="native",
                             )
@@ -272,11 +273,10 @@ def _create_coverage_tab() -> dbc.Tab:
             html.Div(
                 id="coverage-empty-message",
                 children=[
-                    dbc.Alert(
-                        "No minimap2 coverage data available. Run the pipeline "
-                        "with minimap2 validation to see coverage results here.",
-                        color="light",
-                        className="text-center"
+                    EmptyStateMessage(
+                        title="No Coverage Data",
+                        message="No minimap2 coverage data available. Run minimap2 validation or select a validated species.",
+                        icon="bi-bar-chart-line"
                     )
                 ]
             ),

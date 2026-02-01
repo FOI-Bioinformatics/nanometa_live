@@ -11,7 +11,7 @@ import time
 import json
 from typing import Dict, Any
 
-from dash import Dash, Input, Output, State, callback, ctx, no_update
+from dash import Dash, Input, Output, State, callback, ctx, html, no_update
 import dash_bootstrap_components as dbc
 
 from nanometa_live.core.workflow.backend_manager import BackendManager
@@ -167,7 +167,10 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         config_complete = all(field in config and config[field] for field in required_fields)
 
         if status.get("running", False):
-            return "Stop Analysis", "danger", False
+            return [
+                dbc.Spinner(size="sm", spinner_class_name="me-2"),
+                "Stop Analysis"
+            ], "danger", False
 
         return "Start Analysis", "primary", not config_complete
 
@@ -271,42 +274,34 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         [
             Output("notification-trigger", "data", allow_duplicate=True),
             Output("app-config", "data", allow_duplicate=True),
+            Output("stop-confirm-modal", "is_open", allow_duplicate=True),
         ],
         Input("start-stop-button", "n_clicks"),
         [State("app-config", "data"), State("backend-status", "data")],
         prevent_initial_call=True,
     )
-    def start_stop_analysis(n_clicks, config, status):
-        """Start or stop the analysis based on current state."""
+    def start_or_prompt_stop(n_clicks, config, status):
+        """Start analysis or open stop confirmation dialog."""
         from nanometa_live.app.utils.config_manager import merge_config_safely
 
         if not n_clicks:
-            return no_update, no_update
+            return no_update, no_update, no_update
 
         if status.get("running", False):
-            # Stop the analysis
-            success, message = backend_manager.stop()
-            color = "success" if success else "danger"
-
-            return {
-                "title": "Analysis Stopped" if success else "Error",
-                "message": message,
-                "color": color,
-            }, no_update
+            # Open confirmation modal instead of stopping directly
+            return no_update, no_update, True
         else:
-            # Start the analysis - first set the config on backend_manager
+            # Start the analysis
             if not config:
                 return {
                     "title": "Error",
                     "message": "No configuration loaded. Please load or configure settings first.",
                     "color": "danger",
-                }, no_update
+                }, no_update, no_update
             backend_manager.config = config
             success, message = backend_manager.start()
             color = "success" if success else "danger"
 
-            # After start, backend_manager.config has updated main_dir with analysis directory
-            # Merge the updated config while preserving internal state
             if success:
                 updated_config = merge_config_safely(config, backend_manager.config)
             else:
@@ -316,7 +311,38 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 "title": "Analysis Started" if success else "Error",
                 "message": message,
                 "color": color,
-            }, updated_config
+            }, updated_config, no_update
+
+    @app.callback(
+        [
+            Output("stop-confirm-modal", "is_open"),
+            Output("notification-trigger", "data", allow_duplicate=True),
+        ],
+        [
+            Input("confirm-stop-analysis", "n_clicks"),
+            Input("cancel-stop-analysis", "n_clicks"),
+        ],
+        State("stop-confirm-modal", "is_open"),
+        prevent_initial_call=True,
+    )
+    def handle_stop_confirmation(confirm_clicks, cancel_clicks, is_open):
+        """Handle stop confirmation modal buttons."""
+        if not is_open:
+            return no_update, no_update
+
+        triggered = ctx.triggered_id
+        if triggered == "confirm-stop-analysis" and confirm_clicks:
+            success, message = backend_manager.stop()
+            color = "success" if success else "danger"
+            return False, {
+                "title": "Analysis Stopped" if success else "Error",
+                "message": message,
+                "color": color,
+            }
+        elif triggered == "cancel-stop-analysis" and cancel_clicks:
+            return False, no_update
+
+        return no_update, no_update
 
     @app.callback(
         Output("tabs", "active_tab"),

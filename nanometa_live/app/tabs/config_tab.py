@@ -1028,36 +1028,57 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
     # Real-time validation feedback
     @app.callback(
-        Output("nanopore-dir-status", "children"),
+        [
+            Output("nanopore-dir-status", "children"),
+            Output("nanopore-dir-feedback", "children")
+        ],
         Input("nanopore-dir-input", "value"),
         prevent_initial_call=True,
     )
     def validate_nanopore_directory(path):
         """Provide real-time validation feedback for nanopore directory."""
         if not path or not path.strip():
-            return ""
+            return "", html.Small("Required. Specify the path to your FASTQ files.", className="text-danger")
 
         if not os.path.exists(path):
-            return html.I(className="bi bi-x-circle text-danger")
+            return (
+                html.I(className="bi bi-x-circle text-danger"),
+                html.Small("Directory does not exist.", className="text-danger")
+            )
         elif not os.path.isdir(path):
-            return html.I(className="bi bi-x-circle text-danger")
+            return (
+                html.I(className="bi bi-x-circle text-danger"),
+                html.Small("Path is not a directory.", className="text-danger")
+            )
         else:
-            return html.I(className="bi bi-check-circle text-success")
+            return (
+                html.I(className="bi bi-check-circle text-success"),
+                html.Small("Directory found.", className="text-success")
+            )
 
     @app.callback(
-        Output("kraken-db-status", "children"),
+        [
+            Output("kraken-db-status", "children"),
+            Output("kraken-db-feedback", "children")
+        ],
         Input("kraken-db-input", "value"),
         prevent_initial_call=True,
     )
     def validate_kraken_database(path):
         """Provide real-time validation feedback for Kraken2 database."""
         if not path or not path.strip():
-            return ""
+            return "", html.Small("Required. Specify the path to your Kraken2 database.", className="text-danger")
 
         if not os.path.exists(path):
-            return html.I(className="bi bi-x-circle text-danger")
+            return (
+                html.I(className="bi bi-x-circle text-danger"),
+                html.Small("Directory does not exist.", className="text-danger")
+            )
         elif not os.path.isdir(path):
-            return html.I(className="bi bi-x-circle text-danger")
+            return (
+                html.I(className="bi bi-x-circle text-danger"),
+                html.Small("Path is not a directory.", className="text-danger")
+            )
         else:
             # Check for required Kraken2 database files
             required_files = ["hash.k2d", "opts.k2d", "taxo.k2d"]
@@ -1068,9 +1089,15 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                     missing_files.append(req_file)
 
             if missing_files:
-                return html.I(className="bi bi-exclamation-triangle text-warning")
+                return (
+                    html.I(className="bi bi-exclamation-triangle text-warning"),
+                    html.Small(f"Missing database files: {', '.join(missing_files)}", className="text-warning")
+                )
             else:
-                return html.I(className="bi bi-check-circle text-success")
+                return (
+                    html.I(className="bi bi-check-circle text-success"),
+                    html.Small("Valid Kraken2 database found.", className="text-success")
+                )
 
     @app.callback(
         Output("results-dir-status", "children"),

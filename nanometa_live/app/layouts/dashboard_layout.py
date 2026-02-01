@@ -18,6 +18,7 @@ from nanometa_live.app.components.modern_components import (
     SampleStatusBadge,
     AlertListItem,
     EmptyStateMessage,
+    LastUpdatedBadge,
     QualityScoreBadge,
     N50Badge,
     ClassificationRateBadge,
@@ -55,6 +56,7 @@ def create_dashboard_layout():
         # Hidden stores for dashboard state
         dcc.Store(id='dashboard-data-cache', data={}),
         dcc.Store(id='pathogen-report-data', data={}),
+        dcc.Store(id='dashboard-last-updated', data=None),
 
         # Pathogen Report Modal
         dbc.Modal([
@@ -212,7 +214,9 @@ def create_dashboard_layout():
                                 html.H3(
                                     id="dashboard-status-text",
                                     children="System Idle",
-                                    className="mb-1"
+                                    className="mb-1",
+                                    role="status",
+                                    **{"aria-live": "polite"}
                                 ),
                                 html.P(
                                     id="dashboard-status-subtitle",
@@ -279,7 +283,9 @@ def create_dashboard_layout():
                         # Pathogen alerts will be dynamically inserted here
                         # Initially empty - populated by callback when threats detected
                     ],
-                    style={"display": "none"}  # Hidden until threats detected
+                    style={"display": "none"},  # Hidden until threats detected
+                    role="alert",
+                    **{"aria-live": "assertive"}
                 )
             ], width=12)
         ], id="pathogen-alert-row", className="mb-0"),
@@ -306,7 +312,9 @@ def create_dashboard_layout():
                             html.H4(
                                 id="dashboard-threat-status",
                                 children="ALL CLEAR",
-                                className="mb-1"
+                                className="mb-1",
+                                role="status",
+                                **{"aria-live": "polite"}
                             ),
                             html.P(
                                 id="dashboard-threat-subtitle",
@@ -407,6 +415,11 @@ def create_dashboard_layout():
         ]),
 
         # Key Metrics Grid (4 cards)
+        html.Div([
+            html.Span(id="dashboard-last-updated-badge", children=[
+                LastUpdatedBadge(timestamp=None)
+            ])
+        ], className="text-end mb-2"),
         dbc.Row([
             # Sequences Processed
             dbc.Col([

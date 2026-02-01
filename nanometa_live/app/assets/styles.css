@@ -1011,6 +1011,10 @@ body {
     min-width: 200px;
   }
 
+  .sample-selector-compact {
+    min-width: 200px;
+  }
+
   .species-tag {
     display: inline-flex;
     align-items: center;
@@ -2942,5 +2946,56 @@ body {
       content: " (" attr(href) ")";
       font-size: 0.8em;
       color: #666;
+    }
+  }
+
+  /* ============================================
+     RESPONSIVE LAYOUT FIXES
+     ============================================ */
+
+  /* Mobile: sample selector full width */
+  @media (max-width: 576px) {
+    .sample-selector-compact,
+    .sample-selector-compact .Select {
+      min-width: 100% !important;
+      width: 100% !important;
+    }
+
+    /* Dropdown menus constrained to viewport */
+    .dropdown-menu {
+      max-width: calc(100vw - 2rem);
+    }
+
+    /* Header buttons stack vertically */
+    .header .d-flex.justify-content-end {
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    /* Export dropdown opens upward on mobile */
+    .dropup .dropdown-menu {
+      bottom: 100%;
+      top: auto;
+    }
+  }
+
+  /* Tablet: header status indicators stack */
+  @media (max-width: 768px) {
+    .header .d-flex.align-items-center {
+      flex-wrap: wrap;
+    }
+
+    /* Status indicators vertical on tablet */
+    .update-timer,
+    .elapsed-time,
+    .pipeline-info {
+      margin-left: 0 !important;
+      margin-top: 0.25rem;
+    }
+
+    /* Prevent horizontal scroll from wide tables */
+    .dash-table-container {
+      overflow-x: auto;
+      max-width: 100vw;
     }
   }

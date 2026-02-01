@@ -83,11 +83,10 @@ def create_compact_sample_selector(selector_id: str = "sample-selector-compact")
             value='All Samples',
             clearable=False,
             className="sample-selector-compact",
-            style={'minWidth': '200px'},
             persistence=True,
             persistence_type='session'
         )
-    ], style={'display': 'inline-block', 'minWidth': '200px'})
+    ], className="sample-selector-compact", style={'display': 'inline-block'})
 
 
 def create_sample_info_badge(sample_count: int = 0) -> dbc.Badge:

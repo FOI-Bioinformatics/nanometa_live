@@ -12,6 +12,7 @@ import dash_bootstrap_components as dbc
 import plotly.express as px
 
 from nanometa_live.app.components.modern_components import (
+    EmptyStateMessage,
     TABLE_STYLE_CELL,
     TABLE_STYLE_HEADER,
     status_conditional_style,
@@ -54,11 +55,10 @@ def create_qc_layout():
                 html.Div(
                     id="qc-metrics-summary-container",
                     children=[
-                        # Placeholder - will be populated by callback with KeyMetricsSummaryCard
-                        dbc.Alert(
-                            "Key metrics will appear here once data is loaded",
-                            color="light",
-                            className="text-center"
+                        EmptyStateMessage(
+                            title="No QC Metrics",
+                            message="Key metrics will appear here once data is loaded",
+                            icon="bi-speedometer2"
                         )
                     ],
                     className="d-flex justify-content-center mb-4"
@@ -78,10 +78,10 @@ def create_qc_layout():
                     color="#198754",
                     children=[
                         html.Div(id="base-quality-card-container", children=[
-                            dbc.Alert(
-                                "Base quality metrics will appear here once data is loaded",
-                                color="light",
-                                className="text-center"
+                            EmptyStateMessage(
+                                title="No Base Quality Data",
+                                message="Base quality metrics will appear here once data is loaded",
+                                icon="bi-bar-chart"
                             )
                         ])
                     ]
@@ -94,10 +94,10 @@ def create_qc_layout():
                     color="#198754",
                     children=[
                         html.Div(id="read-statistics-card-container", children=[
-                            dbc.Alert(
-                                "Read statistics will appear here once data is loaded",
-                                color="light",
-                                className="text-center"
+                            EmptyStateMessage(
+                                title="No Read Statistics",
+                                message="Read statistics will appear here once data is loaded",
+                                icon="bi-file-earmark-text"
                             )
                         ])
                     ]
@@ -127,11 +127,10 @@ def create_qc_layout():
             color="#0d6efd",
             children=[
                 html.Div(id="filtering-breakdown-container", children=[
-                    # This will be populated by callback with FilteringBreakdownVisual
-                    dbc.Alert(
-                        "Filtering statistics will appear here once analysis is complete",
-                        color="light",
-                        className="text-center"
+                    EmptyStateMessage(
+                        title="No Filtering Data",
+                        message="Filtering statistics will appear here once analysis is complete",
+                        icon="bi-funnel"
                     )
                 ], className="mb-4")
             ]

@@ -40,6 +40,7 @@ class ActionableError:
     severity: str = "error"  # error, warning, info
     show_technical: bool = False
     technical_details: str = ""
+    retry_id: Optional[str] = None  # Button ID for retry action
 
     def to_alert(self, include_technical: bool = False) -> dbc.Alert:
         """Convert to a Dash Bootstrap alert component."""
@@ -85,6 +86,17 @@ class ActionableError:
                     }
                 )
             ]))
+
+        if self.retry_id:
+            children.append(html.Hr())
+            children.append(
+                dbc.Button(
+                    [html.I(className="bi bi-arrow-clockwise me-2"), "Retry"],
+                    id=self.retry_id,
+                    color="warning",
+                    size="sm"
+                )
+            )
 
         return dbc.Alert(
             children,
