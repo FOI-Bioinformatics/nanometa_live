@@ -131,7 +131,7 @@ BARCODE01_CLINICAL = [
     {
         "phylum": "Bacillota", "phylum_taxid": 1239,
         "phylum_class": "Bacilli", "class_taxid": 91061,
-        "order": "Staphylococcales", "order_taxid": 1385,
+        "order": "Bacillales", "order_taxid": 1385,
         "family": "Staphylococcaceae", "family_taxid": 90964,
         "genus": "Staphylococcus", "genus_taxid": 1279,
         "species": "Staphylococcus aureus", "taxid": 1280,
@@ -204,14 +204,24 @@ def _generate_fastp_json(total_reads):
             "before_filtering": {
                 "total_reads": total_reads,
                 "total_bases": total_reads * 1500,
+                "q20_bases": int(total_reads * 1500 * 0.95),
+                "q30_bases": int(total_reads * 1500 * 0.85),
+                "q20_rate": 0.95,
                 "q30_rate": 0.85,
+                "read1_mean_length": 1500,
                 "mean_length": 1500,
+                "gc_content": 0.45,
             },
             "after_filtering": {
                 "total_reads": passed,
                 "total_bases": passed * 1520,
+                "q20_bases": int(passed * 1520 * 0.97),
+                "q30_bases": int(passed * 1520 * 0.92),
+                "q20_rate": 0.97,
                 "q30_rate": 0.92,
+                "read1_mean_length": 1520,
                 "mean_length": 1520,
+                "gc_content": 0.46,
             },
         },
         "filtering_result": {

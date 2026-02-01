@@ -1,0 +1,106 @@
+# Custom Pathogen Watchlist Example
+#
+# This file demonstrates how to create a custom watchlist for Nanometa Live.
+# You can use this as a template for your own species of interest.
+#
+# Usage:
+# 1. Copy this file and modify entries as needed
+# 2. Reference it in your analysis config or use the species_of_interest section
+#
+# Each pathogen entry supports the following fields:
+#   Required:
+#     - taxid: NCBI taxonomy ID (integer)
+#     - name: Scientific name (string)
+#
+#   Optional:
+#     - common_name: Common/disease name
+#     - threat_level: critical, high, moderate, low (default: moderate)
+#     - bsl_level: 1, 2, 3, or 4 (biosafety level)
+#     - category: Classification category for organization
+#     - notes: Additional information about the organism
+#     - alert_threshold: Minimum reads to trigger alert (default: 10)
+#     - action_required: Recommended action when detected
+
+version: "1.0"
+
+metadata:
+  name: "Example Custom Watchlist"
+  description: "Demonstration watchlist for project-specific organisms"
+  created_by: "Laboratory Name"
+  created_date: "2025-01-15"
+
+pathogens:
+  # Project-specific critical pathogens
+  critical:
+    # Example: A pathogen relevant to your specific research
+    - taxid: 727
+      name: "Haemophilus influenzae"
+      common_name: "H. flu"
+      threat_level: "critical"
+      bsl_level: 2
+      category: "Project-Critical"
+      notes: "Elevated to critical for this specific project due to patient population"
+      alert_threshold: 5
+      action_required: "Notify clinical team immediately for patient safety assessment"
+
+  # High-risk organisms for monitoring
+  high:
+    - taxid: 1313
+      name: "Streptococcus pneumoniae"
+      common_name: "Pneumococcus"
+      threat_level: "high"
+      bsl_level: 2
+      category: "Respiratory"
+      notes: "Monitor for antimicrobial resistance markers"
+      alert_threshold: 20
+      action_required: "Report to infection control if detected in clinical samples"
+
+    - taxid: 485
+      name: "Neisseria meningitidis"
+      common_name: "Meningococcus"
+      threat_level: "high"
+      bsl_level: 2
+      category: "Invasive"
+      notes: "Causative agent of bacterial meningitis"
+      alert_threshold: 10
+      action_required: "Notify public health for contact tracing if confirmed"
+
+  # Moderate concern organisms
+  moderate:
+    - taxid: 1423
+      name: "Bacillus cereus"
+      common_name: "B. cereus food poisoning"
+      threat_level: "moderate"
+      bsl_level: 2
+      category: "Foodborne"
+      notes: "May indicate food contamination"
+      alert_threshold: 100
+      action_required: "Document and report to food safety team"
+
+    - taxid: 1520
+      name: "Clostridium perfringens"
+      common_name: "Gas gangrene / food poisoning"
+      threat_level: "moderate"
+      bsl_level: 2
+      category: "Foodborne"
+      notes: "Common cause of foodborne illness"
+      alert_threshold: 50
+      action_required: "Document findings for food safety investigation"
+
+# How to use this file:
+#
+# Option 1: Reference in analysis config
+# In your config.yaml, add:
+#   custom_watchlist_file: "/path/to/custom_watchlist.yaml"
+#
+# Option 2: Add entries directly to species_of_interest
+# In your config.yaml, add:
+#   species_of_interest:
+#     - taxid: 727
+#       name: "Haemophilus influenzae"
+#       threat_level: "critical"
+#       alert_threshold: 5
+#     - taxid: 1313
+#       name: "Streptococcus pneumoniae"
+#       threat_level: "high"
+#       alert_threshold: 20
