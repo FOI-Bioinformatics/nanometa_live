@@ -113,6 +113,132 @@ def sample_status() -> Dict[str, Any]:
     }
 
 
+@pytest.fixture(scope="session")
+def realtime_output_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Provide a simulated real-time pipeline output directory."""
+    base = tmp_path_factory.mktemp("realtime_output")
+
+    kraken_dir = base / "kraken2"
+    kraken_dir.mkdir()
+    fastp_dir = base / "fastp"
+    fastp_dir.mkdir()
+
+    cumulative_report = (
+        " 0.00\t0\t0\tU\t0\tunclassified\n"
+        "100.00\t150\t0\tR\t1\troot\n"
+        "100.00\t150\t0\tD\t2\t  Bacteria\n"
+        "100.00\t150\t150\tS\t562\t    Escherichia coli\n"
+    )
+    (kraken_dir / "barcode01.cumulative.kraken2.report.txt").write_text(cumulative_report)
+
+    batch_report = (
+        " 0.00\t0\t0\tU\t0\tunclassified\n"
+        "100.00\t50\t0\tR\t1\troot\n"
+        "100.00\t50\t0\tD\t2\t  Bacteria\n"
+        "100.00\t50\t50\tS\t562\t    Escherichia coli\n"
+    )
+    (kraken_dir / "barcode01_batch0.kraken2.report.txt").write_text(batch_report)
+
+    standard_report = (
+        " 0.00\t0\t0\tU\t0\tunclassified\n"
+        "100.00\t100\t0\tR\t1\troot\n"
+        "100.00\t100\t0\tD\t2\t  Bacteria\n"
+        "100.00\t100\t100\tS\t562\t    Escherichia coli\n"
+    )
+    (kraken_dir / "barcode01.kraken2.report.txt").write_text(standard_report)
+
+    fastp_json = (
+        '{"summary":{"before_filtering":{"total_reads":1000,"total_bases":500000},'
+        '"after_filtering":{"total_reads":950,"total_bases":475000,"q30_rate":0.92}},'
+        '"filtering_result":{"passed_filter_reads":950,"low_quality_reads":30,'
+        '"too_short_reads":15,"too_many_N_reads":5}}'
+    )
+    (fastp_dir / "barcode01.fastp.json").write_text(fastp_json)
+
+    return base
+
+
+@pytest.fixture(scope="session")
+def batch_output_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Provide a simulated batch pipeline output directory."""
+    base = tmp_path_factory.mktemp("batch_output")
+
+    kraken_dir = base / "kraken2"
+    kraken_dir.mkdir()
+    fastp_dir = base / "fastp"
+    fastp_dir.mkdir()
+
+    standard_report = (
+        " 0.00\t0\t0\tU\t0\tunclassified\n"
+        "100.00\t200\t0\tR\t1\troot\n"
+        "100.00\t200\t0\tD\t2\t  Bacteria\n"
+        "100.00\t200\t200\tS\t562\t    Escherichia coli\n"
+    )
+    (kraken_dir / "barcode01.kraken2.report.txt").write_text(standard_report)
+
+    fastp_json = (
+        '{"summary":{"before_filtering":{"total_reads":1000,"total_bases":500000},'
+        '"after_filtering":{"total_reads":950,"total_bases":475000,"q30_rate":0.92}},'
+        '"filtering_result":{"passed_filter_reads":950,"low_quality_reads":30,'
+        '"too_short_reads":15,"too_many_N_reads":5}}'
+    )
+    (fastp_dir / "barcode01.fastp.json").write_text(fastp_json)
+
+    return base
+
+
+@pytest.fixture(scope="session")
+def malformed_output_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Provide a directory with malformed output files for error handling tests."""
+    base = tmp_path_factory.mktemp("malformed_output")
+
+    kraken_dir = base / "kraken2"
+    kraken_dir.mkdir()
+    fastp_dir = base / "fastp"
+    fastp_dir.mkdir()
+    validation_dir = base / "validation" / "minimap2"
+    validation_dir.mkdir(parents=True)
+
+    (kraken_dir / "bad_columns.kraken2.report.txt").write_text(
+        "col1\tcol2\tcol3\n"
+        "a\tb\tc\n"
+    )
+    (kraken_dir / "truncated.kraken2.report.txt").write_text("X")
+    (fastp_dir / "corrupt.fastp.json").write_text("not json {")
+    (validation_dir / "empty.paf").write_text("")
+
+    return base
+
+
+@pytest.fixture(scope="session")
+def multi_analysis_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Provide a directory with multiple timestamped analysis runs."""
+    base = tmp_path_factory.mktemp("multi_analysis")
+
+    report_100 = (
+        " 0.00\t0\t0\tU\t0\tunclassified\n"
+        "100.00\t100\t0\tR\t1\troot\n"
+        "100.00\t100\t0\tD\t2\t  Bacteria\n"
+        "100.00\t100\t100\tS\t562\t    Escherichia coli\n"
+    )
+    report_200 = (
+        " 0.00\t0\t0\tU\t0\tunclassified\n"
+        "100.00\t200\t0\tR\t1\troot\n"
+        "100.00\t200\t0\tD\t2\t  Bacteria\n"
+        "100.00\t200\t200\tS\t562\t    Escherichia coli\n"
+    )
+
+    for dirname, content in [
+        ("analysis_20240101_120000", report_100),
+        ("analysis_20240102_120000", report_200),
+    ]:
+        kraken_dir = base / dirname / "kraken2"
+        kraken_dir.mkdir(parents=True)
+        (kraken_dir / "barcode01.kraken2.report.txt").write_text(content)
+
+    return base
+
+
 # Validation helper functions
 
 def validate_kraken_hierarchy(df: pd.DataFrame, require_root: bool = True) -> List[str]:
