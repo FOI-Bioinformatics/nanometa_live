@@ -130,7 +130,8 @@ def _validate_performance_settings(config: Dict[str, Any]) -> None:
     """
     # CPU cores
     for core_type in [
-        "snakemake_cores",
+        "pipeline_cores",  # Renamed from snakemake_cores for Nextflow
+        "snakemake_cores",  # Deprecated - kept for backward compatibility
         "kraken_cores",
         "validation_cores",
         "blast_cores",

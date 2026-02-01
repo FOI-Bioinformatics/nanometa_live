@@ -1,0 +1,371 @@
+# Pathogen Database for Nanometa Live
+#
+# This file contains pre-configured lists of dangerous pathogens based on:
+# - CDC Bioterrorism Categories (A, B, C)
+# - WHO Priority Pathogens for Antimicrobial Resistance
+# - Common foodborne and nosocomial pathogens
+#
+# References:
+# - CDC Bioterrorism Agents: https://www.cdc.gov/niosh/topics/emres/chemagent.html
+# - WHO Priority Pathogens: https://www.who.int/publications/i/item/9789240093461
+#
+# Users may override or extend this database by creating a custom watchlist
+# in their analysis configuration file (species_of_interest section).
+#
+# Threat Levels:
+#   critical - BSL-3/4 agents, immediate action required
+#   high     - BSL-2+, significant concern, follow strict protocols
+#   moderate - Monitor closely, document findings
+#   low      - Common organisms, generally not dangerous
+#
+# BSL Levels:
+#   1 - Basic laboratory
+#   2 - Clinical/diagnostic laboratories
+#   3 - High-risk infectious agents
+#   4 - Dangerous and exotic agents
+#
+# File format version (for future compatibility)
+version: "1.0"
+
+# Database metadata
+metadata:
+  name: "Nanometa Live Pathogen Database"
+  description: "Pre-configured dangerous pathogen watchlist for biosurveillance"
+  last_updated: "2025-01-15"
+  maintainer: "FOI Bioinformatics"
+
+# Pathogen categories
+# Each pathogen entry requires:
+#   - taxid: NCBI taxonomy ID (integer)
+#   - name: Scientific name (string)
+# Optional fields:
+#   - common_name: Common/disease name
+#   - threat_level: critical, high, moderate, low (default: moderate)
+#   - bsl_level: 1, 2, 3, or 4 (biosafety level)
+#   - category: Classification category (CDC-A, CDC-B, WHO-Critical, etc.)
+#   - notes: Additional information
+#   - alert_threshold: Minimum reads to trigger alert (default: 10)
+#   - action_required: Recommended action when detected
+
+pathogens:
+  # ============================================================================
+  # CDC Category A - Highest Priority Bioterrorism Agents
+  # Easily disseminated, high mortality, may cause public panic
+  # ============================================================================
+  critical:
+    - taxid: 1392
+      name: "Bacillus anthracis"
+      common_name: "Anthrax"
+      threat_level: "critical"
+      bsl_level: 3
+      category: "CDC-A"
+      notes: "Causative agent of anthrax. Spore-forming bacterium."
+      alert_threshold: 5
+      action_required: "Contact biosafety officer immediately. Do not handle sample without BSL-3 precautions."
+
+    - taxid: 632
+      name: "Yersinia pestis"
+      common_name: "Plague"
+      threat_level: "critical"
+      bsl_level: 3
+      category: "CDC-A"
+      notes: "Causative agent of bubonic/pneumonic plague."
+      alert_threshold: 5
+      action_required: "Contact biosafety officer immediately. Notify public health authorities."
+
+    - taxid: 263
+      name: "Francisella tularensis"
+      common_name: "Tularemia"
+      threat_level: "critical"
+      bsl_level: 3
+      category: "CDC-A"
+      notes: "Highly infectious bacterium. Low infectious dose."
+      alert_threshold: 5
+      action_required: "Contact biosafety officer. BSL-3 protocols required."
+
+    - taxid: 11266
+      name: "Ebolavirus"
+      common_name: "Ebola virus"
+      threat_level: "critical"
+      bsl_level: 4
+      category: "CDC-A"
+      notes: "Filovirus causing severe hemorrhagic fever. Extremely dangerous."
+      alert_threshold: 1
+      action_required: "STOP WORK IMMEDIATELY. Contact BSL-4 facility. Do not open containment."
+
+    - taxid: 11269
+      name: "Marburgvirus"
+      common_name: "Marburg virus"
+      threat_level: "critical"
+      bsl_level: 4
+      category: "CDC-A"
+      notes: "Filovirus causing severe hemorrhagic fever."
+      alert_threshold: 1
+      action_required: "STOP WORK IMMEDIATELY. Contact BSL-4 facility."
+
+    - taxid: 12637
+      name: "Lassa mammarenavirus"
+      common_name: "Lassa fever virus"
+      threat_level: "critical"
+      bsl_level: 4
+      category: "CDC-A"
+      notes: "Arenavirus causing Lassa fever. Endemic in West Africa."
+      alert_threshold: 1
+      action_required: "STOP WORK IMMEDIATELY. Contact BSL-4 facility."
+
+    - taxid: 11292
+      name: "Variola virus"
+      common_name: "Smallpox"
+      threat_level: "critical"
+      bsl_level: 4
+      category: "CDC-A"
+      notes: "Eradicated pathogen. Detection would be extraordinary."
+      alert_threshold: 1
+      action_required: "IMMEDIATELY contact CDC and WHO. This would be a global emergency."
+
+    - taxid: 1491
+      name: "Clostridium botulinum"
+      common_name: "Botulism"
+      threat_level: "critical"
+      bsl_level: 2
+      category: "CDC-A"
+      notes: "Produces botulinum toxin, one of the most lethal substances known."
+      alert_threshold: 10
+      action_required: "Contact biosafety officer. Follow BSL-2 enhanced protocols."
+
+  # ============================================================================
+  # CDC Category B - Second Highest Priority
+  # Moderately easy to disseminate, moderate morbidity, lower mortality
+  # ============================================================================
+  high:
+    - taxid: 777
+      name: "Coxiella burnetii"
+      common_name: "Q fever"
+      threat_level: "high"
+      bsl_level: 3
+      category: "CDC-B"
+      notes: "Highly infectious. Single organism can cause infection."
+      alert_threshold: 10
+      action_required: "Follow laboratory biosafety protocols"
+
+    - taxid: 782
+      name: "Brucella melitensis"
+      common_name: "Brucellosis"
+      threat_level: "high"
+      bsl_level: 3
+      category: "CDC-B"
+      notes: "Zoonotic pathogen. Laboratory-acquired infection common."
+      alert_threshold: 10
+      action_required: "Follow laboratory biosafety protocols"
+
+    - taxid: 780
+      name: "Brucella abortus"
+      common_name: "Brucellosis"
+      threat_level: "high"
+      bsl_level: 3
+      category: "CDC-B"
+      notes: "Zoonotic pathogen causing brucellosis."
+      alert_threshold: 10
+      action_required: "Follow laboratory biosafety protocols"
+
+    - taxid: 615
+      name: "Burkholderia mallei"
+      common_name: "Glanders"
+      threat_level: "high"
+      bsl_level: 3
+      category: "CDC-B"
+      notes: "Causative agent of glanders. Primarily affects horses."
+      alert_threshold: 10
+      action_required: "Follow laboratory biosafety protocols"
+
+    - taxid: 13373
+      name: "Burkholderia pseudomallei"
+      common_name: "Melioidosis"
+      threat_level: "high"
+      bsl_level: 3
+      category: "CDC-B"
+      notes: "Environmental bacterium causing melioidosis."
+      alert_threshold: 10
+      action_required: "Follow laboratory biosafety protocols"
+
+    - taxid: 562
+      name: "Escherichia coli O157:H7"
+      common_name: "STEC"
+      threat_level: "high"
+      bsl_level: 2
+      category: "CDC-B"
+      notes: "Shiga toxin-producing E. coli. Food safety concern."
+      alert_threshold: 20
+      action_required: "Follow laboratory biosafety protocols"
+
+    - taxid: 666
+      name: "Vibrio cholerae"
+      common_name: "Cholera"
+      threat_level: "high"
+      bsl_level: 2
+      category: "CDC-B"
+      notes: "Causative agent of cholera. Water-transmitted."
+      alert_threshold: 20
+      action_required: "Follow laboratory biosafety protocols"
+
+    - taxid: 1280
+      name: "Staphylococcus aureus"
+      common_name: "Staph aureus / MRSA"
+      threat_level: "high"
+      bsl_level: 2
+      category: "WHO-Priority"
+      notes: "Common hospital-acquired pathogen. MRSA strains are antibiotic-resistant."
+      alert_threshold: 50
+      action_required: "Follow infection control protocols. Check for antibiotic resistance markers."
+
+    - taxid: 11676
+      name: "Human immunodeficiency virus 1"
+      common_name: "HIV-1"
+      threat_level: "high"
+      bsl_level: 2
+      category: "CDC-C"
+      notes: "Causative agent of AIDS."
+      alert_threshold: 10
+      action_required: "Follow laboratory biosafety protocols"
+
+    - taxid: 694009
+      name: "Severe acute respiratory syndrome-related coronavirus"
+      common_name: "SARS-CoV"
+      threat_level: "high"
+      bsl_level: 3
+      category: "CDC-C"
+      notes: "Original SARS coronavirus."
+      alert_threshold: 10
+      action_required: "Follow laboratory biosafety protocols"
+
+    - taxid: 1335626
+      name: "Middle East respiratory syndrome-related coronavirus"
+      common_name: "MERS-CoV"
+      threat_level: "high"
+      bsl_level: 3
+      category: "CDC-C"
+      notes: "MERS coronavirus. High fatality rate."
+      alert_threshold: 10
+      action_required: "Follow laboratory biosafety protocols"
+
+    - taxid: 470
+      name: "Acinetobacter baumannii"
+      common_name: "MDR Acinetobacter"
+      threat_level: "high"
+      bsl_level: 2
+      category: "WHO-Critical"
+      notes: "Carbapenem-resistant strains of critical concern."
+      alert_threshold: 50
+      action_required: "Follow laboratory biosafety protocols"
+
+    - taxid: 1639
+      name: "Listeria monocytogenes"
+      common_name: "Listeriosis"
+      threat_level: "high"
+      bsl_level: 2
+      category: "Foodborne"
+      notes: "Severe foodborne pathogen. High fatality in vulnerable groups."
+      alert_threshold: 20
+      action_required: "Follow laboratory biosafety protocols"
+
+    - taxid: 1773
+      name: "Mycobacterium tuberculosis"
+      common_name: "Tuberculosis"
+      threat_level: "high"
+      bsl_level: 3
+      category: "WHO-Priority"
+      notes: "Leading infectious disease killer globally. MDR strains emerging."
+      alert_threshold: 10
+      action_required: "Follow BSL-3 protocols. Contact biosafety officer."
+
+  # ============================================================================
+  # Moderate Risk - CDC Category C and WHO Priority Pathogens
+  # Emerging threats, AMR concerns, requires monitoring
+  # ============================================================================
+  moderate:
+    - taxid: 590
+      name: "Salmonella enterica"
+      common_name: "Salmonellosis"
+      threat_level: "moderate"
+      bsl_level: 2
+      category: "CDC-B"
+      notes: "Common foodborne pathogen."
+      alert_threshold: 50
+      action_required: "Document findings and follow standard protocols"
+
+    - taxid: 11320
+      name: "Influenza A virus"
+      common_name: "Influenza A"
+      threat_level: "moderate"
+      bsl_level: 2
+      category: "CDC-C"
+      notes: "Respiratory virus with pandemic potential."
+      alert_threshold: 50
+      action_required: "Document findings and follow standard protocols"
+
+    - taxid: 2697049
+      name: "Severe acute respiratory syndrome coronavirus 2"
+      common_name: "SARS-CoV-2"
+      threat_level: "moderate"
+      bsl_level: 3
+      category: "CDC-C"
+      notes: "Causative agent of COVID-19."
+      alert_threshold: 20
+      action_required: "Follow BSL-3 protocols for culture work"
+
+    - taxid: 287
+      name: "Pseudomonas aeruginosa"
+      common_name: "Pseudomonas"
+      threat_level: "moderate"
+      bsl_level: 2
+      category: "WHO-Critical"
+      notes: "Opportunistic pathogen. MDR strains emerging."
+      alert_threshold: 100
+      action_required: "Document findings and follow standard protocols"
+
+    - taxid: 573
+      name: "Klebsiella pneumoniae"
+      common_name: "Klebsiella"
+      threat_level: "moderate"
+      bsl_level: 2
+      category: "WHO-Critical"
+      notes: "Carbapenem-resistant strains of concern."
+      alert_threshold: 100
+      action_required: "Document findings and follow standard protocols"
+
+    - taxid: 197
+      name: "Campylobacter jejuni"
+      common_name: "Campylobacteriosis"
+      threat_level: "moderate"
+      bsl_level: 2
+      category: "Foodborne"
+      notes: "Common cause of gastroenteritis."
+      alert_threshold: 50
+      action_required: "Document findings and follow standard protocols"
+
+    - taxid: 1351
+      name: "Enterococcus faecalis"
+      common_name: "VRE / Enterococcus"
+      threat_level: "moderate"
+      bsl_level: 2
+      category: "WHO-Priority"
+      notes: "Common hospital-acquired pathogen. VRE strains are vancomycin-resistant."
+      alert_threshold: 100
+      action_required: "Document findings and follow standard protocols"
+
+    - taxid: 1352
+      name: "Enterococcus faecium"
+      common_name: "VRE / Enterococcus"
+      threat_level: "moderate"
+      bsl_level: 2
+      category: "WHO-Priority"
+      notes: "Hospital-acquired pathogen often associated with VRE."
+      alert_threshold: 100
+      action_required: "Document findings and follow standard protocols"
+
+# Default settings applied to all pathogens if not specified
+defaults:
+  threat_level: "moderate"
+  bsl_level: 2
+  alert_threshold: 10
+  action_required: "Follow laboratory biosafety protocols"

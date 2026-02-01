@@ -1,0 +1,239 @@
+# CDC Bioterrorism Agents Watchlist
+# Based on CDC's Classification of Biological Agents
+# Category A: Highest priority, easily disseminated, high mortality
+# Category B: Second highest priority, moderately easy to disseminate
+# Category C: Emerging pathogens with potential for high impact
+
+version: "2.0"
+taxonomy_support: ["ncbi", "gtdb"]
+
+metadata:
+  name: "CDC Bioterrorism Agents"
+  description: "CDC Category A, B, and C bioterrorism agents"
+  source: "CDC"
+  reference: "https://www.cdc.gov/bioterrorism/"
+
+pathogens:
+  # Category A - Highest Priority
+  - name: "Bacillus anthracis"
+    names_alt: ["Bacillus_anthracis"]
+    taxid_ncbi: 1392
+    common_name: "Anthrax"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "CDC-A"
+    alert_threshold: 5
+    action_required: "Contact biosafety officer immediately. Isolate sample. Do not open outside BSL-3."
+    notes: "Forms resistant endospores. Causative agent of anthrax. Select agent."
+
+  - name: "Yersinia pestis"
+    names_alt: ["Yersinia_pestis"]
+    taxid_ncbi: 632
+    common_name: "Plague"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "CDC-A"
+    alert_threshold: 5
+    action_required: "Contact biosafety officer immediately. Quarantine protocols may apply."
+    notes: "Causative agent of bubonic and pneumonic plague. Select agent."
+
+  - name: "Francisella tularensis"
+    names_alt: ["Francisella_tularensis"]
+    taxid_ncbi: 263
+    common_name: "Tularemia"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "CDC-A"
+    alert_threshold: 5
+    action_required: "Contact biosafety officer. Handle with extreme caution."
+    notes: "Extremely infectious. Select agent. Low infectious dose."
+
+  - name: "Clostridium botulinum"
+    names_alt: ["Clostridium_botulinum"]
+    taxid_ncbi: 1491
+    common_name: "Botulism"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "CDC-A"
+    alert_threshold: 5
+    action_required: "Contact public health authorities. Assess for toxin production."
+    notes: "Produces botulinum toxin. Food safety and bioterrorism concern."
+
+  - name: "Variola major"
+    names_alt: ["Variola_major"]
+    taxid_ncbi: 10255
+    common_name: "Smallpox"
+    threat_level: "critical"
+    bsl_level: 4
+    category: "CDC-A"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. Contact CDC immediately. Extreme containment required."
+    notes: "Eradicated disease. Detection requires immediate investigation."
+
+  # Viral Hemorrhagic Fevers (Category A)
+  - name: "Ebola virus"
+    names_alt: ["Ebolavirus", "Ebola_virus", "Zaire_ebolavirus"]
+    taxid_ncbi: 186538
+    common_name: "Ebola"
+    threat_level: "critical"
+    bsl_level: 4
+    category: "CDC-A"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
+    notes: "Viral hemorrhagic fever. High mortality rate. Select agent."
+
+  - name: "Marburg virus"
+    names_alt: ["Marburgvirus", "Marburg_virus", "Marburg_marburgvirus"]
+    taxid_ncbi: 11269
+    common_name: "Marburg"
+    threat_level: "critical"
+    bsl_level: 4
+    category: "CDC-A"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
+    notes: "Viral hemorrhagic fever. High mortality rate. Select agent."
+
+  - name: "Lassa virus"
+    names_alt: ["Lassa_mammarenavirus", "Lassa_virus"]
+    taxid_ncbi: 11620
+    common_name: "Lassa fever"
+    threat_level: "critical"
+    bsl_level: 4
+    category: "CDC-A"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
+    notes: "Viral hemorrhagic fever endemic to West Africa. Select agent."
+
+  # Category B - Second Highest Priority
+  - name: "Brucella melitensis"
+    names_alt: ["Brucella_melitensis"]
+    taxid_ncbi: 29459
+    common_name: "Brucellosis"
+    threat_level: "high"
+    bsl_level: 3
+    category: "CDC-B"
+    alert_threshold: 10
+    action_required: "Contact biosafety officer. BSL-3 handling required."
+    notes: "Zoonotic pathogen. Occupational hazard for laboratory workers."
+
+  - name: "Brucella abortus"
+    names_alt: ["Brucella_abortus"]
+    taxid_ncbi: 235
+    common_name: "Brucellosis"
+    threat_level: "high"
+    bsl_level: 3
+    category: "CDC-B"
+    alert_threshold: 10
+    action_required: "Contact biosafety officer. BSL-3 handling required."
+    notes: "Zoonotic pathogen causing brucellosis."
+
+  - name: "Burkholderia mallei"
+    names_alt: ["Burkholderia_mallei"]
+    taxid_ncbi: 13373
+    common_name: "Glanders"
+    threat_level: "high"
+    bsl_level: 3
+    category: "CDC-B"
+    alert_threshold: 10
+    action_required: "Contact biosafety officer. Handle with caution."
+    notes: "Causative agent of glanders. Select agent."
+
+  - name: "Burkholderia pseudomallei"
+    names_alt: ["Burkholderia_pseudomallei"]
+    taxid_ncbi: 28450
+    common_name: "Melioidosis"
+    threat_level: "high"
+    bsl_level: 3
+    category: "CDC-B"
+    alert_threshold: 10
+    action_required: "Contact biosafety officer. Endemic in Southeast Asia and Australia."
+    notes: "Causative agent of melioidosis. Environmental saprophyte. Select agent."
+
+  - name: "Coxiella burnetii"
+    names_alt: ["Coxiella_burnetii"]
+    taxid_ncbi: 777
+    common_name: "Q fever"
+    threat_level: "high"
+    bsl_level: 3
+    category: "CDC-B"
+    alert_threshold: 10
+    action_required: "Contact biosafety officer. Highly infectious."
+    notes: "Causative agent of Q fever. Extremely low infectious dose. Select agent."
+
+  - name: "Rickettsia prowazekii"
+    names_alt: ["Rickettsia_prowazekii"]
+    taxid_ncbi: 782
+    common_name: "Typhus"
+    threat_level: "high"
+    bsl_level: 3
+    category: "CDC-B"
+    alert_threshold: 10
+    action_required: "Contact biosafety officer. Historical epidemic pathogen."
+    notes: "Causative agent of epidemic typhus. Select agent."
+
+  - name: "Vibrio cholerae"
+    names_alt: ["Vibrio_cholerae"]
+    taxid_ncbi: 666
+    common_name: "Cholera"
+    threat_level: "high"
+    bsl_level: 2
+    category: "CDC-B"
+    alert_threshold: 10
+    action_required: "Notify public health. Assess for toxigenic strains."
+    notes: "Causative agent of cholera. Water safety concern."
+
+  - name: "Salmonella enterica"
+    names_alt: ["Salmonella_enterica"]
+    taxid_ncbi: 28901
+    common_name: "Salmonellosis"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "CDC-B"
+    alert_threshold: 20
+    action_required: "Standard precautions. Report to public health."
+    notes: "Common foodborne pathogen. Multiple serotypes."
+
+  - name: "Shigella dysenteriae"
+    names_alt: ["Shigella_dysenteriae"]
+    taxid_ncbi: 622
+    common_name: "Shigellosis"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "CDC-B"
+    alert_threshold: 20
+    action_required: "Standard precautions. Report to public health."
+    notes: "Causative agent of bacillary dysentery. Serotype 1 produces Shiga toxin."
+
+  # Category C - Emerging Pathogens
+  - name: "Nipah virus"
+    names_alt: ["Nipah_henipavirus", "Nipah_virus"]
+    taxid_ncbi: 121791
+    common_name: "Nipah"
+    threat_level: "critical"
+    bsl_level: 4
+    category: "CDC-C"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
+    notes: "Emerging zoonotic virus. High mortality. Endemic in Southeast Asia."
+
+  - name: "Hantavirus"
+    names_alt: ["Orthohantavirus", "Sin_Nombre_orthohantavirus"]
+    taxid_ncbi: 1980471
+    common_name: "Hantavirus"
+    threat_level: "high"
+    bsl_level: 3
+    category: "CDC-C"
+    alert_threshold: 5
+    action_required: "Contact public health. Assess for rodent exposure."
+    notes: "Causes hantavirus pulmonary syndrome. Rodent-borne."
+
+  - name: "Mycobacterium tuberculosis"
+    names_alt: ["Mycobacterium_tuberculosis"]
+    taxid_ncbi: 1773
+    common_name: "Tuberculosis"
+    threat_level: "high"
+    bsl_level: 3
+    category: "CDC-C"
+    alert_threshold: 10
+    action_required: "Airborne precautions. TB reporting required."
+    notes: "Leading infectious disease killer globally. Drug resistance concern."

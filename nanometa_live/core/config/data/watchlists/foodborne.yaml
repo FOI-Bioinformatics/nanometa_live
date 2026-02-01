@@ -1,0 +1,169 @@
+# Foodborne Pathogens Watchlist
+# Common foodborne pathogens for food safety monitoring
+
+version: "2.0"
+taxonomy_support: ["ncbi", "gtdb"]
+
+metadata:
+  name: "Foodborne Pathogens"
+  description: "Common foodborne pathogens for food safety and quality monitoring"
+  source: "FDA/CDC"
+  reference: "https://www.cdc.gov/foodsafety/foodborne-germs.html"
+
+pathogens:
+  # Critical Foodborne Pathogens
+  - name: "Listeria monocytogenes"
+    names_alt: ["Listeria_monocytogenes"]
+    taxid_ncbi: 1639
+    common_name: "Listeria"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 5
+    action_required: "Product recall assessment. Contact regulatory authorities."
+    notes: "Zero tolerance in ready-to-eat foods. High mortality in vulnerable populations."
+
+  - name: "Escherichia coli O157:H7"
+    names_alt: ["Escherichia_coli_O157:H7", "STEC", "EHEC"]
+    taxid_ncbi: 83334
+    common_name: "E. coli O157"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 5
+    action_required: "Hemolytic uremic syndrome risk. Product recall assessment."
+    notes: "Shiga toxin-producing E. coli. Severe disease in children."
+
+  - name: "Clostridium botulinum"
+    names_alt: ["Clostridium_botulinum"]
+    taxid_ncbi: 1491
+    common_name: "Botulism"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 5
+    action_required: "Assess canning/preservation practices. Contact public health."
+    notes: "Produces deadly botulinum toxin. Canning safety concern."
+
+  # High Priority Foodborne Pathogens
+  - name: "Salmonella enterica"
+    names_alt: ["Salmonella_enterica"]
+    taxid_ncbi: 28901
+    common_name: "Salmonella"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 10
+    action_required: "Source tracking. Report to public health."
+    notes: "Leading cause of foodborne illness. Multiple serotypes."
+
+  - name: "Campylobacter jejuni"
+    names_alt: ["Campylobacter_jejuni"]
+    taxid_ncbi: 197
+    common_name: "Campylobacter"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 10
+    action_required: "Poultry source assessment. Report to public health."
+    notes: "Most common bacterial cause of foodborne diarrhea."
+
+  - name: "Vibrio cholerae"
+    names_alt: ["Vibrio_cholerae"]
+    taxid_ncbi: 666
+    common_name: "Cholera"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 10
+    action_required: "Seafood source assessment. Notify public health."
+    notes: "Associated with contaminated water and shellfish."
+
+  - name: "Vibrio parahaemolyticus"
+    names_alt: ["Vibrio_parahaemolyticus"]
+    taxid_ncbi: 670
+    common_name: "V. parahaemolyticus"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 10
+    action_required: "Seafood source assessment."
+    notes: "Leading cause of seafood-associated gastroenteritis."
+
+  - name: "Vibrio vulnificus"
+    names_alt: ["Vibrio_vulnificus"]
+    taxid_ncbi: 672
+    common_name: "V. vulnificus"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 10
+    action_required: "High mortality. Seafood/wound source assessment."
+    notes: "High case fatality rate. Raw oyster consumption risk."
+
+  - name: "Bacillus cereus"
+    names_alt: ["Bacillus_cereus"]
+    taxid_ncbi: 1396
+    common_name: "B. cereus"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 15
+    action_required: "Food handling assessment. Rice and starchy foods."
+    notes: "Emetic and diarrheal toxins. Associated with rice dishes."
+
+  - name: "Clostridium perfringens"
+    names_alt: ["Clostridium_perfringens"]
+    taxid_ncbi: 1502
+    common_name: "C. perfringens"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 15
+    action_required: "Food temperature control assessment."
+    notes: "Commonly associated with improperly held meat dishes."
+
+  - name: "Yersinia enterocolitica"
+    names_alt: ["Yersinia_enterocolitica"]
+    taxid_ncbi: 630
+    common_name: "Yersiniosis"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 15
+    action_required: "Pork source assessment. Can grow at refrigeration temperatures."
+    notes: "Associated with undercooked pork. Cold-tolerant pathogen."
+
+  - name: "Cronobacter sakazakii"
+    names_alt: ["Cronobacter_sakazakii"]
+    taxid_ncbi: 28141
+    common_name: "Cronobacter"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 5
+    action_required: "Infant formula safety assessment. High risk to neonates."
+    notes: "Severe risk to neonates and immunocompromised individuals."
+
+  - name: "Shigella sonnei"
+    names_alt: ["Shigella_sonnei"]
+    taxid_ncbi: 624
+    common_name: "Shigellosis"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 20
+    action_required: "Food handler assessment. Report to public health."
+    notes: "Very low infectious dose. Person-to-person transmission."
+
+  # Parasites (not bacterial but included for food safety)
+  - name: "Cyclospora cayetanensis"
+    names_alt: ["Cyclospora_cayetanensis"]
+    taxid_ncbi: 88456
+    common_name: "Cyclosporiasis"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 10
+    action_required: "Fresh produce source assessment. Import tracing."
+    notes: "Associated with fresh berries and herbs. Requires prolonged treatment."

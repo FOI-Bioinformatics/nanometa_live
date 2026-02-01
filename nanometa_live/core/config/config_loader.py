@@ -49,9 +49,13 @@ class ConfigLoader:
         Returns:
             A dictionary containing the default configuration
         """
+        # Default results directory: ~/nanometa_results
+        default_results_dir = os.path.join(os.path.expanduser("~"), "nanometa_results")
+
         default_config = {
             "analysis_name": "Nanometa Live Analysis",
             "nanopore_output_directory": "",
+            "results_output_directory": default_results_dir,
             "species_of_interest": [],
             "update_interval_seconds": 30,
             "gui_port": 8050,
@@ -59,7 +63,7 @@ class ConfigLoader:
             "taxonomic_hierarchy_letters": ["D", "P", "C", "O", "F", "G", "S"],
             "default_hierarchy_letters": ["D", "C", "G", "S"],
             "default_reads_per_level": 10,
-            "snakemake_cores": 1,
+            "pipeline_cores": 1,
             "kraken_cores": 1,
             "validation_cores": 1,
             "blast_cores": 1,
@@ -68,14 +72,27 @@ class ConfigLoader:
             "kraken_taxonomy": "gtdb",
             # Using strict boolean values
             "kraken_memory_mapping": True,
-            "blast_validation": True,
+            # Validation settings
+            "blast_validation": False,  # Disabled by default - requires genomes to be downloaded
+            "validation_method": "blast",  # 'blast', 'minimap2', or 'both'
             "min_perc_identity": 90,
             "e_val_cutoff": 0.01,
+            "validation_hit_rate_threshold": 0.5,
+            "validation_identity_threshold": 90.0,
+            # Genome cache directory for downloaded reference genomes
+            "genome_cache_dir": os.path.join(os.path.expanduser("~"), ".nanometa"),
             "external_kraken2_db": "",
             "local_package_management": None,
             "conda_frontend": "mamba",
             "remove_temp_files": True,
             "main_dir": "",
+            # Processing mode settings
+            "processing_mode": "batch",
+            "sample_handling": "by_barcode",
+            "sample_name": "sample",
+            # Batch settings (for realtime mode, batch_size=1 processes files immediately)
+            "batch_size": 1,
+            "min_batch_size": 1,
             "timestamp": datetime.datetime.now().isoformat(),
         }
 
@@ -187,6 +204,35 @@ class ConfigLoader:
             logging.error(f"Failed to save configuration: {e}")
             raise
 
+    def _get_config_metadata(self, config_path: str) -> Optional[Dict[str, Any]]:
+        """
+        Extract minimal metadata from a config file without full loading.
+
+        This is a lightweight operation that only reads the fields needed
+        for the config dropdown, avoiding excessive logging.
+
+        Args:
+            config_path: Path to the configuration file
+
+        Returns:
+            Dictionary with path, name, timestamp, filename or None on error
+        """
+        try:
+            with open(config_path, "r") as f:
+                config = self.yaml.load(f)
+
+            if config is None:
+                return None
+
+            return {
+                "path": config_path,
+                "name": config.get("analysis_name", os.path.basename(config_path)),
+                "timestamp": config.get("timestamp", "Unknown"),
+                "filename": os.path.basename(config_path),
+            }
+        except Exception:
+            return None
+
     def get_available_configs(self) -> List[Dict[str, Any]]:
         """
         Get a list of available configuration files.
@@ -201,18 +247,10 @@ class ConfigLoader:
         configs = []
 
         for config_file in config_files:
-            try:
-                config = self.load_config(config_file)
-                configs.append(
-                    {
-                        "path": config_file,
-                        "name": config.get("analysis_name", os.path.basename(config_file)),
-                        "timestamp": config.get("timestamp", "Unknown"),
-                        "filename": os.path.basename(config_file),
-                    }
-                )
-            except Exception as e:
-                logging.warning(f"Failed to load config {config_file}: {e}")
+            # Use lightweight metadata extraction (no logging)
+            metadata = self._get_config_metadata(config_file)
+            if metadata:
+                configs.append(metadata)
 
         # Sort by timestamp, newest first
         configs.sort(key=lambda x: x["timestamp"], reverse=True)
@@ -256,8 +294,9 @@ class ConfigLoader:
         return config
 
 
+    @staticmethod
     def load_kraken_databases_from_file():
-        """Load Kraken databases directly from YAML file"""
+        """Load Kraken databases directly from YAML file."""
         import yaml
         import os
 

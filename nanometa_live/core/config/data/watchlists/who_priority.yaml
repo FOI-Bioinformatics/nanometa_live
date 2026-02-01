@@ -1,0 +1,170 @@
+# WHO Priority Pathogens Watchlist
+# Based on WHO Priority Pathogens List for antimicrobial resistance
+# Critical, High, and Medium priority pathogens
+
+version: "2.0"
+taxonomy_support: ["ncbi", "gtdb"]
+
+metadata:
+  name: "WHO Priority Pathogens"
+  description: "WHO priority pathogens for antimicrobial resistance research"
+  source: "WHO"
+  reference: "https://www.who.int/news/item/27-02-2017-who-publishes-list-of-bacteria-for-which-new-antibiotics-are-urgently-needed"
+
+pathogens:
+  # Critical Priority
+  - name: "Acinetobacter baumannii"
+    names_alt: ["Acinetobacter_baumannii"]
+    taxid_ncbi: 470
+    common_name: "A. baumannii"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "WHO-Critical"
+    alert_threshold: 10
+    action_required: "Monitor for carbapenem resistance. Infection control alert."
+    notes: "Carbapenem-resistant strains are critical priority. Healthcare-associated infections."
+
+  - name: "Pseudomonas aeruginosa"
+    names_alt: ["Pseudomonas_aeruginosa"]
+    taxid_ncbi: 287
+    common_name: "P. aeruginosa"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "WHO-Critical"
+    alert_threshold: 10
+    action_required: "Monitor for carbapenem resistance. Assess infection control."
+    notes: "Carbapenem-resistant strains are critical priority. Opportunistic pathogen."
+
+  - name: "Klebsiella pneumoniae"
+    names_alt: ["Klebsiella_pneumoniae"]
+    taxid_ncbi: 573
+    common_name: "K. pneumoniae"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "WHO-Critical"
+    alert_threshold: 10
+    action_required: "Monitor for carbapenem/ESBL resistance. Infection control."
+    notes: "Carbapenem-resistant and ESBL-producing strains are critical priority."
+
+  - name: "Escherichia coli"
+    names_alt: ["Escherichia_coli"]
+    taxid_ncbi: 562
+    common_name: "E. coli"
+    threat_level: "high"
+    bsl_level: 2
+    category: "WHO-Critical"
+    alert_threshold: 20
+    action_required: "Assess for pathogenic strains and resistance profile."
+    notes: "Carbapenem-resistant and ESBL-producing strains are critical priority."
+
+  # High Priority
+  - name: "Enterococcus faecium"
+    names_alt: ["Enterococcus_faecium"]
+    taxid_ncbi: 1352
+    common_name: "VRE"
+    threat_level: "high"
+    bsl_level: 2
+    category: "WHO-High"
+    alert_threshold: 15
+    action_required: "Monitor for vancomycin resistance. Contact precautions."
+    notes: "Vancomycin-resistant enterococci (VRE) are high priority."
+
+  - name: "Staphylococcus aureus"
+    names_alt: ["Staphylococcus_aureus"]
+    taxid_ncbi: 1280
+    common_name: "S. aureus"
+    threat_level: "high"
+    bsl_level: 2
+    category: "WHO-High"
+    alert_threshold: 15
+    action_required: "Assess for MRSA. Implement contact precautions if indicated."
+    notes: "Methicillin-resistant (MRSA) and vancomycin-intermediate strains are high priority."
+
+  - name: "Helicobacter pylori"
+    names_alt: ["Helicobacter_pylori"]
+    taxid_ncbi: 210
+    common_name: "H. pylori"
+    threat_level: "high"
+    bsl_level: 2
+    category: "WHO-High"
+    alert_threshold: 20
+    action_required: "Clinical assessment for clarithromycin resistance."
+    notes: "Clarithromycin-resistant strains are high priority."
+
+  - name: "Campylobacter jejuni"
+    names_alt: ["Campylobacter_jejuni"]
+    taxid_ncbi: 197
+    common_name: "Campylobacter"
+    threat_level: "high"
+    bsl_level: 2
+    category: "WHO-High"
+    alert_threshold: 20
+    action_required: "Foodborne illness assessment. Monitor fluoroquinolone resistance."
+    notes: "Fluoroquinolone-resistant strains are high priority."
+
+  - name: "Campylobacter coli"
+    names_alt: ["Campylobacter_coli"]
+    taxid_ncbi: 195
+    common_name: "Campylobacter"
+    threat_level: "high"
+    bsl_level: 2
+    category: "WHO-High"
+    alert_threshold: 20
+    action_required: "Foodborne illness assessment."
+    notes: "Fluoroquinolone-resistant strains are high priority."
+
+  - name: "Neisseria gonorrhoeae"
+    names_alt: ["Neisseria_gonorrhoeae"]
+    taxid_ncbi: 485
+    common_name: "Gonorrhea"
+    threat_level: "high"
+    bsl_level: 2
+    category: "WHO-High"
+    alert_threshold: 15
+    action_required: "STI surveillance. Monitor cephalosporin/fluoroquinolone resistance."
+    notes: "Multi-drug resistant strains are high priority. STI concern."
+
+  # Medium Priority
+  - name: "Streptococcus pneumoniae"
+    names_alt: ["Streptococcus_pneumoniae"]
+    taxid_ncbi: 1313
+    common_name: "Pneumococcus"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "WHO-Medium"
+    alert_threshold: 25
+    action_required: "Respiratory pathogen assessment. Monitor penicillin resistance."
+    notes: "Penicillin-non-susceptible strains are medium priority."
+
+  - name: "Haemophilus influenzae"
+    names_alt: ["Haemophilus_influenzae"]
+    taxid_ncbi: 727
+    common_name: "H. influenzae"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "WHO-Medium"
+    alert_threshold: 25
+    action_required: "Respiratory pathogen assessment. Monitor ampicillin resistance."
+    notes: "Ampicillin-resistant strains are medium priority."
+
+  - name: "Shigella sonnei"
+    names_alt: ["Shigella_sonnei"]
+    taxid_ncbi: 624
+    common_name: "Shigellosis"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "WHO-Medium"
+    alert_threshold: 25
+    action_required: "Gastrointestinal illness. Report to public health."
+    notes: "Fluoroquinolone-resistant strains are medium priority."
+
+  - name: "Shigella flexneri"
+    names_alt: ["Shigella_flexneri"]
+    taxid_ncbi: 623
+    common_name: "Shigellosis"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "WHO-Medium"
+    alert_threshold: 25
+    action_required: "Gastrointestinal illness. Report to public health."
+    notes: "Fluoroquinolone-resistant strains are medium priority."

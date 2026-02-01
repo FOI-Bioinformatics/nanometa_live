@@ -18,7 +18,7 @@ analysis_name: "Metagenomic analysis"
 # Note: If the path is invalid, the system will prompt for a correct path.
 # Default: "/home/user/nanopore_out" (Replace with your directory path)
 
-nanopore_output_directory: ""
+nanopore_output_directory: "/Users/andreassjodin/Desktop/ONT/demodata_ONT/data/live"
 
 
 ## SPECIES OF INTEREST ##
@@ -82,8 +82,8 @@ default_reads_per_level: 10
 ## Core Allocation for Workflow Components ##
 # Description: Number of CPU cores assigned to different components of the workflow.
 # Note: Assign more cores for faster processing if your system allows.
-# Example: If you have a 4-core CPU, assigning 2 cores to snakemake_cores may optimize performance.
-snakemake_cores: 1
+# Example: If you have a 4-core CPU, assigning 2 cores may optimize performance.
+pipeline_cores: 1
 kraken_cores: 1
 validation_cores: 1
 blast_cores: 1
@@ -97,6 +97,32 @@ blast_cores: 1
 check_intervals_seconds: 15
 
 
+########## Input Mode Configuration ##########################################
+
+## PROCESSING MODE ##
+# Description: Controls how the pipeline processes input files.
+# Options:
+#   - "batch": Process all existing files at once (recommended for completed sequencing runs)
+#   - "realtime": Watch directory for new files as they appear (for active sequencing)
+# Default: "batch"
+processing_mode: "realtime"
+
+## SAMPLE HANDLING ##
+# Description: Controls how files in the input directory are treated as samples.
+# Options:
+#   - "single_sample": All files in the directory belong to ONE sample
+#   - "per_file": Each file is treated as a separate sample
+#   - "by_barcode": Files are organized in barcode subdirectories (barcode01/, barcode02/, etc.)
+# Default: "single_sample"
+sample_handling: "single_sample"
+
+## SAMPLE NAME ##
+# Description: Name to use when sample_handling is "single_sample".
+# Only used when all files should be treated as one sample.
+# Default: "sample"
+sample_name: "sample"
+
+
 ########## Database and Tools Configuration ##################################
 
 
@@ -105,7 +131,7 @@ check_intervals_seconds: 15
 # Note: Ensure the database is updated regularly for accurate classification.
 # Supported Taxonomies: "gtdb" and "ncbi"
 # Example Path: "/path/to/kraken2/database"
-kraken_db: ""
+kraken_db: "/Users/andreassjodin/Desktop/ONT/demodata_ONT/database/kraken2.gtdb_bac120_4Gb"
 kraken_taxonomy: "gtdb"
 
 
@@ -215,12 +241,10 @@ e_val_cutoff: 0.01
 
 ########## Advanced/Optional Settings ########################################
 
-## GENERIC SNAKEMAKE SETTINGS ##
-# Description: Settings for managing Snakemake dependencies.
-# Options for local_package_management:
-# - None (assumes all applications are installed)
-# - "conda" (Snakemake creates a local environment during runtime)
-# Choosing "conda" with "mamba" as the frontend can speed up environment creation.
+## PACKAGE MANAGEMENT ##
+# Description: Settings for managing pipeline dependencies (deprecated - kept for compatibility).
+# Note: Package management is now handled by Nextflow/nf-core modules.
+# Options: None (default - assumes all applications are installed)
 local_package_management: None
 conda_frontend: "mamba"
 
@@ -235,4 +259,13 @@ remove_temp_files: True
 # Note: Changing this path after project creation can lead to data misplacement or loss.
 # Typically set as an absolute path.
 # Example: "/path/to/project/main_directory"
-main_dir: ""
+main_dir: "/Users/andreassjodin/.nanometa/data"
+
+## PIPELINE SOURCE ##
+# Description: Controls where the nanometanf pipeline is loaded from.
+# Options:
+#   - "remote:main" - GitHub repo with main branch (default, stable)
+#   - "remote:dev" - GitHub repo with dev branch
+#   - "local:/path/to/pipeline" - Local directory (for development)
+# Default: "remote:main"
+pipeline_source: "local:/Users/andreassjodin/Code/nanometanf"

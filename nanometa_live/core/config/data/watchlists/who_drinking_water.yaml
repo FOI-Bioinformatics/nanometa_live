@@ -1,0 +1,346 @@
+# WHO Drinking Water Quality Watchlist
+# Based on Table 7.1 from WHO Guidelines for Drinking-Water Quality (4th edition, 2022)
+# Pathogens transmitted through drinking-water
+# Reference: https://www.ncbi.nlm.nih.gov/books/NBK579466/table/ch7.tab1/
+
+version: "2.0"
+taxonomy_support: ["ncbi", "gtdb"]
+
+metadata:
+  name: "WHO Drinking Water Pathogens"
+  description: "Waterborne pathogens from WHO Guidelines for Drinking-Water Quality Table 7.1"
+  source: "WHO Guidelines for Drinking-Water Quality, 4th edition, 2022"
+  category: "drinking_water"
+
+# Health significance: High, Moderate, Low
+# Persistence: Short (<1 week), Moderate (1 week-1 month), Long (>1 month), May multiply
+# Chlorine resistance: Low (<1 min.mg/L), Moderate (1-30 min.mg/L), High (>30 min.mg/L)
+
+pathogens:
+  # =====================
+  # BACTERIA
+  # =====================
+
+  - name: "Burkholderia pseudomallei"
+    common_name: "Melioidosis agent"
+    taxid: 28450
+    threat_level: "high"
+    bsl_level: 3
+    alert_threshold: 5
+    category: "WHO-Drinking-Water"
+    notes: "Causes melioidosis. May multiply in water. Low chlorine resistance."
+    persistence: "may_multiply"
+    chlorine_resistance: "low"
+    animal_reservoir: false
+
+  - name: "Campylobacter jejuni"
+    common_name: "Campylobacter gastroenteritis"
+    taxid: 197
+    threat_level: "high"
+    bsl_level: 2
+    alert_threshold: 10
+    category: "WHO-Drinking-Water"
+    notes: "Major cause of gastroenteritis. Moderate persistence, low chlorine resistance."
+    persistence: "moderate"
+    chlorine_resistance: "low"
+    animal_reservoir: true
+
+  - name: "Campylobacter coli"
+    common_name: "Campylobacter gastroenteritis"
+    taxid: 195
+    threat_level: "high"
+    bsl_level: 2
+    alert_threshold: 10
+    category: "WHO-Drinking-Water"
+    notes: "Causes gastroenteritis. Moderate persistence, low chlorine resistance."
+    persistence: "moderate"
+    chlorine_resistance: "low"
+    animal_reservoir: true
+
+  - name: "Escherichia coli"
+    common_name: "Diarrhoeagenic E. coli"
+    taxid: 562
+    threat_level: "high"
+    bsl_level: 2
+    alert_threshold: 10
+    category: "WHO-Drinking-Water"
+    notes: "Diarrhoeagenic strains cause gastroenteritis. Moderate persistence, low chlorine resistance."
+    persistence: "moderate"
+    chlorine_resistance: "low"
+    animal_reservoir: true
+
+  - name: "Francisella tularensis"
+    common_name: "Tularemia agent"
+    taxid: 263
+    threat_level: "critical"
+    bsl_level: 3
+    alert_threshold: 1
+    category: "WHO-Drinking-Water"
+    notes: "Causes tularemia. Long persistence, moderate chlorine resistance. CDC Category A."
+    persistence: "long"
+    chlorine_resistance: "moderate"
+    animal_reservoir: true
+
+  - name: "Legionella pneumophila"
+    common_name: "Legionnaires' disease"
+    taxid: 446
+    threat_level: "high"
+    bsl_level: 2
+    alert_threshold: 5
+    category: "WHO-Drinking-Water"
+    notes: "Causes Legionnaires' disease. May multiply in water systems. Low chlorine resistance."
+    persistence: "may_multiply"
+    chlorine_resistance: "low"
+    animal_reservoir: false
+
+  - name: "Mycobacterium avium"
+    common_name: "MAC infection"
+    taxid: 1764
+    threat_level: "moderate"
+    bsl_level: 2
+    alert_threshold: 50
+    category: "WHO-Drinking-Water"
+    notes: "Opportunistic pathogen. May multiply in water. High chlorine resistance."
+    persistence: "may_multiply"
+    chlorine_resistance: "high"
+    animal_reservoir: false
+
+  - name: "Salmonella typhi"
+    common_name: "Typhoid fever"
+    taxid: 90370
+    threat_level: "high"
+    bsl_level: 3
+    alert_threshold: 5
+    category: "WHO-Drinking-Water"
+    notes: "Causes typhoid fever. Moderate persistence, low chlorine resistance."
+    persistence: "moderate"
+    chlorine_resistance: "low"
+    animal_reservoir: false
+
+  - name: "Salmonella enterica"
+    common_name: "Salmonellosis"
+    taxid: 28901
+    threat_level: "high"
+    bsl_level: 2
+    alert_threshold: 10
+    category: "WHO-Drinking-Water"
+    notes: "Causes gastroenteritis. May multiply in water. Low chlorine resistance."
+    persistence: "may_multiply"
+    chlorine_resistance: "low"
+    animal_reservoir: true
+
+  - name: "Shigella dysenteriae"
+    common_name: "Bacillary dysentery"
+    taxid: 622
+    threat_level: "high"
+    bsl_level: 2
+    alert_threshold: 5
+    category: "WHO-Drinking-Water"
+    notes: "Causes severe dysentery. Short persistence, low chlorine resistance."
+    persistence: "short"
+    chlorine_resistance: "low"
+    animal_reservoir: false
+
+  - name: "Vibrio cholerae"
+    common_name: "Cholera"
+    taxid: 666
+    threat_level: "critical"
+    bsl_level: 2
+    alert_threshold: 1
+    category: "WHO-Drinking-Water"
+    notes: "Causes cholera. Variable persistence (short to long). Low chlorine resistance."
+    persistence: "variable"
+    chlorine_resistance: "low"
+    animal_reservoir: false
+
+  # =====================
+  # VIRUSES
+  # =====================
+
+  - name: "Adenoviridae"
+    common_name: "Adenovirus"
+    taxid: 10508
+    threat_level: "moderate"
+    bsl_level: 2
+    alert_threshold: 20
+    category: "WHO-Drinking-Water"
+    notes: "Causes respiratory and gastrointestinal illness. Long persistence, moderate chlorine resistance."
+    persistence: "long"
+    chlorine_resistance: "moderate"
+    animal_reservoir: false
+
+  - name: "Astroviridae"
+    common_name: "Astrovirus"
+    taxid: 39733
+    threat_level: "moderate"
+    bsl_level: 2
+    alert_threshold: 20
+    category: "WHO-Drinking-Water"
+    notes: "Causes gastroenteritis. Long persistence, moderate chlorine resistance."
+    persistence: "long"
+    chlorine_resistance: "moderate"
+    animal_reservoir: false
+
+  - name: "Norovirus"
+    common_name: "Norovirus gastroenteritis"
+    taxid: 142786
+    threat_level: "high"
+    bsl_level: 2
+    alert_threshold: 10
+    category: "WHO-Drinking-Water"
+    notes: "Major cause of viral gastroenteritis outbreaks. Long persistence, moderate chlorine resistance."
+    persistence: "long"
+    chlorine_resistance: "moderate"
+    animal_reservoir: false
+
+  - name: "Hepatitis E virus"
+    common_name: "Hepatitis E"
+    taxid: 12461
+    threat_level: "high"
+    bsl_level: 2
+    alert_threshold: 5
+    category: "WHO-Drinking-Water"
+    notes: "Causes hepatitis E. Long persistence, moderate chlorine resistance. Potentially zoonotic."
+    persistence: "long"
+    chlorine_resistance: "moderate"
+    animal_reservoir: true
+
+  - name: "Enterovirus"
+    common_name: "Enteric viruses"
+    taxid: 12059
+    threat_level: "high"
+    bsl_level: 2
+    alert_threshold: 10
+    category: "WHO-Drinking-Water"
+    notes: "Includes poliovirus, coxsackievirus. Long persistence, moderate chlorine resistance."
+    persistence: "long"
+    chlorine_resistance: "moderate"
+    animal_reservoir: false
+
+  - name: "Hepatitis A virus"
+    common_name: "Hepatitis A"
+    taxid: 12092
+    threat_level: "high"
+    bsl_level: 2
+    alert_threshold: 5
+    category: "WHO-Drinking-Water"
+    notes: "Causes hepatitis A. Long persistence, moderate chlorine resistance."
+    persistence: "long"
+    chlorine_resistance: "moderate"
+    animal_reservoir: false
+
+  - name: "Rotavirus"
+    common_name: "Rotavirus gastroenteritis"
+    taxid: 10912
+    threat_level: "high"
+    bsl_level: 2
+    alert_threshold: 10
+    category: "WHO-Drinking-Water"
+    notes: "Major cause of childhood diarrhea. Long persistence, moderate chlorine resistance."
+    persistence: "long"
+    chlorine_resistance: "moderate"
+    animal_reservoir: false
+
+  # =====================
+  # PROTOZOA
+  # =====================
+
+  - name: "Acanthamoeba"
+    common_name: "Acanthamoeba infection"
+    taxid: 5754
+    threat_level: "high"
+    bsl_level: 2
+    alert_threshold: 10
+    category: "WHO-Drinking-Water"
+    notes: "Causes keratitis and encephalitis. May multiply in water. High chlorine resistance."
+    persistence: "may_multiply"
+    chlorine_resistance: "high"
+    animal_reservoir: false
+
+  - name: "Cryptosporidium parvum"
+    common_name: "Cryptosporidiosis"
+    taxid: 5807
+    threat_level: "high"
+    bsl_level: 2
+    alert_threshold: 5
+    category: "WHO-Drinking-Water"
+    notes: "Causes severe diarrhea. Long persistence. HIGH chlorine resistance - major water treatment concern."
+    persistence: "long"
+    chlorine_resistance: "high"
+    animal_reservoir: true
+
+  - name: "Cryptosporidium hominis"
+    common_name: "Cryptosporidiosis"
+    taxid: 237895
+    threat_level: "high"
+    bsl_level: 2
+    alert_threshold: 5
+    category: "WHO-Drinking-Water"
+    notes: "Human-specific cryptosporidium. Long persistence, high chlorine resistance."
+    persistence: "long"
+    chlorine_resistance: "high"
+    animal_reservoir: false
+
+  - name: "Cyclospora cayetanensis"
+    common_name: "Cyclosporiasis"
+    taxid: 88456
+    threat_level: "high"
+    bsl_level: 2
+    alert_threshold: 5
+    category: "WHO-Drinking-Water"
+    notes: "Causes prolonged diarrhea. Long persistence, high chlorine resistance."
+    persistence: "long"
+    chlorine_resistance: "high"
+    animal_reservoir: false
+
+  - name: "Entamoeba histolytica"
+    common_name: "Amoebiasis"
+    taxid: 5759
+    threat_level: "high"
+    bsl_level: 2
+    alert_threshold: 5
+    category: "WHO-Drinking-Water"
+    notes: "Causes amoebic dysentery. Moderate persistence, high chlorine resistance."
+    persistence: "moderate"
+    chlorine_resistance: "high"
+    animal_reservoir: false
+
+  - name: "Giardia intestinalis"
+    common_name: "Giardiasis"
+    taxid: 5741
+    threat_level: "high"
+    bsl_level: 2
+    alert_threshold: 5
+    category: "WHO-Drinking-Water"
+    notes: "Common waterborne parasite. Moderate persistence, high chlorine resistance."
+    persistence: "moderate"
+    chlorine_resistance: "high"
+    animal_reservoir: true
+
+  - name: "Naegleria fowleri"
+    common_name: "Primary amoebic meningoencephalitis"
+    taxid: 5763
+    threat_level: "critical"
+    bsl_level: 3
+    alert_threshold: 1
+    category: "WHO-Drinking-Water"
+    notes: "Causes fatal brain infection. May multiply in warm water. Low chlorine resistance."
+    persistence: "may_multiply"
+    chlorine_resistance: "low"
+    animal_reservoir: false
+
+  # =====================
+  # HELMINTHS
+  # =====================
+
+  - name: "Dracunculus medinensis"
+    common_name: "Guinea worm"
+    taxid: 318479
+    threat_level: "high"
+    bsl_level: 2
+    alert_threshold: 1
+    category: "WHO-Drinking-Water"
+    notes: "Causes dracunculiasis. Moderate persistence and chlorine resistance. Near eradication."
+    persistence: "moderate"
+    chlorine_resistance: "moderate"
+    animal_reservoir: false
