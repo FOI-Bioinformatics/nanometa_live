@@ -1,12 +1,286 @@
-/* Nanometa Live Custom Styles */
+/* Nanometa Live Custom Styles - Operator-Focused Design */
+/* Version 2.1 - Enhanced with Dark Mode, Accessibility, and Modern UI */
+
+/* ============================================
+   CSS VARIABLES - Operator-Focused Color System
+   ============================================ */
+:root {
+    /* Color scheme preference */
+    color-scheme: light dark;
+
+    /* Status Colors - Traffic Light System */
+    --status-good: #28a745;          /* Green - Safe to proceed */
+    --status-good-bg: #d4edda;       /* Light green background */
+    --status-good-border: #c3e6cb;   /* Green border */
+    --status-good-text: #0f5132;     /* WCAG AA compliant text */
+
+    --status-warning: #ffc107;       /* Amber - Attention needed */
+    --status-warning-bg: #fff3cd;    /* Light amber background */
+    --status-warning-border: #ffeaa7; /* Amber border */
+    --status-warning-text: #664d03;  /* WCAG AA compliant text */
+
+    --status-danger: #dc3545;        /* Red - Critical issue */
+    --status-danger-bg: #f8d7da;     /* Light red background */
+    --status-danger-border: #f5c6cb; /* Red border */
+    --status-danger-text: #842029;   /* WCAG AA compliant text */
+
+    --status-info: #17a2b8;          /* Blue - Information */
+    --status-info-bg: #d1ecf1;       /* Light blue background */
+    --status-info-border: #bee5eb;   /* Blue border */
+    --status-info-text: #055160;     /* WCAG AA compliant text */
+
+    --status-neutral: #6c757d;       /* Gray - Inactive/Idle */
+    --status-neutral-bg: #e9ecef;    /* Light gray background */
+    --status-neutral-border: #dee2e6; /* Gray border */
+
+    /* Semantic Colors */
+    --primary: #007bff;              /* Primary actions */
+    --secondary: #6c757d;            /* Secondary actions */
+    --light: #f8f9fa;                /* Light backgrounds */
+    --dark: #343a40;                 /* Dark text */
+
+    /* Card colors (for dark mode support) */
+    --card-bg: #ffffff;
+    --card-border: #dee2e6;
+    --body-bg: #f8f9fa;
+
+    /* Typography Scale (1.25 ratio) */
+    --font-family-base: 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-size-xs: 0.75rem;         /* 12px */
+    --font-size-sm: 0.875rem;        /* 14px */
+    --font-size-base: 1rem;          /* 16px */
+    --font-size-md: 1.125rem;        /* 18px */
+    --font-size-lg: 1.25rem;         /* 20px */
+    --font-size-xl: 1.5rem;          /* 24px */
+    --font-size-2xl: 2rem;           /* 32px */
+    --font-size-3xl: 2.5rem;         /* 40px */
+
+    /* Line heights */
+    --line-height-tight: 1.2;
+    --line-height-base: 1.5;
+    --line-height-relaxed: 1.75;
+
+    --font-weight-normal: 400;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --font-weight-bold: 700;
+
+    /* Spacing Scale - Mobile-first */
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+    --space-xxl: 48px;
+
+    /* Border Radius */
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-full: 9999px;
+
+    /* Shadows - Subtle depth */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+    --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.15);
+
+    /* Z-index layers */
+    --z-dropdown: 1000;
+    --z-sticky: 1020;
+    --z-fixed: 1030;
+    --z-modal: 1050;
+    --z-tooltip: 1070;
+
+    /* Transitions */
+    --transition-fast: 150ms ease-in-out;
+    --transition-base: 250ms ease-in-out;
+    --transition-slow: 350ms ease-in-out;
+}
+
+/* ============================================
+   DARK MODE SUPPORT - For Lab Environments
+   ============================================ */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --light: #1a1a2e;
+        --dark: #eaeaea;
+        --body-bg: #16213e;
+        --card-bg: #1a1a2e;
+        --card-border: #2d2d5a;
+
+        --status-neutral-bg: #2d2d44;
+        --status-neutral-border: #404060;
+
+        /* Adjusted status colors for dark mode */
+        --status-good-bg: #0d3320;
+        --status-good-border: #1a5a3c;
+        --status-warning-bg: #3d3218;
+        --status-warning-border: #5a4a20;
+        --status-danger-bg: #3d1a20;
+        --status-danger-border: #5a2530;
+        --status-info-bg: #163040;
+        --status-info-border: #204560;
+    }
+
+    body {
+        background-color: var(--body-bg);
+        color: var(--dark);
+    }
+
+    .card {
+        background-color: var(--card-bg);
+        border-color: var(--card-border);
+    }
+
+    .card-header {
+        background-color: rgba(255, 255, 255, 0.05);
+        border-color: var(--card-border);
+    }
+
+    .header {
+        background-color: var(--card-bg);
+        border-bottom: 1px solid var(--card-border);
+    }
+
+    .footer {
+        background-color: var(--card-bg);
+        border-top: 1px solid var(--card-border);
+        color: var(--dark);
+    }
+
+    /* Form inputs in dark mode */
+    .form-control, .form-select, input, select, textarea {
+        background-color: var(--status-neutral-bg);
+        border-color: var(--card-border);
+        color: var(--dark);
+    }
+
+    .form-control:focus, .form-select:focus {
+        background-color: var(--status-neutral-bg);
+        border-color: var(--primary);
+        color: var(--dark);
+    }
+
+    /* Dropdown menus in dark mode */
+    .Select-menu-outer, .dropdown-menu {
+        background-color: var(--card-bg);
+        border-color: var(--card-border);
+    }
+
+    /* Tables in dark mode */
+    .dash-table-container .dash-spreadsheet-inner {
+        background-color: var(--card-bg);
+    }
+
+    .dash-table-container th {
+        background-color: rgba(255, 255, 255, 0.05) !important;
+        color: var(--dark);
+    }
+
+    .dash-table-container td {
+        color: var(--dark);
+        border-color: var(--card-border);
+    }
+
+    /* Nav tabs in dark mode */
+    .nav-tabs .nav-link {
+        color: #9ca3af;
+    }
+
+    .nav-tabs .nav-link:hover {
+        color: var(--dark);
+        background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    .tab-group-start {
+        border-left-color: var(--card-border) !important;
+    }
+
+    /* Alerts in dark mode */
+    .alert-info {
+        background-color: var(--status-info-bg);
+        border-color: var(--status-info-border);
+        color: #7dd3fc;
+    }
+
+    .alert-warning {
+        background-color: var(--status-warning-bg);
+        border-color: var(--status-warning-border);
+        color: #fcd34d;
+    }
+
+    .alert-danger {
+        background-color: var(--status-danger-bg);
+        border-color: var(--status-danger-border);
+        color: #fca5a5;
+    }
+
+    .alert-success {
+        background-color: var(--status-good-bg);
+        border-color: var(--status-good-border);
+        color: #86efac;
+    }
+
+    /* Plotly charts in dark mode */
+    .js-plotly-plot .plotly .main-svg {
+        background-color: var(--card-bg) !important;
+    }
+
+    /* Text colors */
+    .text-muted {
+        color: #9ca3af !important;
+    }
+
+    /* Accordion in dark mode */
+    .accordion-item {
+        background-color: var(--card-bg);
+        border-color: var(--card-border);
+    }
+
+    .accordion-button {
+        background-color: var(--card-bg);
+        color: var(--dark);
+    }
+
+    .accordion-button:not(.collapsed) {
+        background-color: rgba(0, 123, 255, 0.15);
+        color: var(--primary);
+    }
+}
+
+/* Manual dark mode toggle support */
+[data-theme="dark"] {
+    --light: #1a1a2e;
+    --dark: #eaeaea;
+    --body-bg: #16213e;
+    --card-bg: #1a1a2e;
+    --card-border: #2d2d5a;
+}
+
+[data-theme="dark"] .nav-tabs .nav-link {
+    color: #9ca3af;
+}
+
+[data-theme="dark"] .nav-tabs .nav-link:hover {
+    color: var(--dark);
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="dark"] .tab-group-start {
+    border-left-color: var(--card-border) !important;
+}
 
 /* Global styling */
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: var(--font-family-base);
+    font-size: var(--font-size-base);
+    line-height: 1.6;
     margin: 0;
     padding: 0;
-    background-color: #f8f9fa;
-    color: #333;
+    background-color: var(--light);
+    color: var(--dark);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   /* Header styling */
@@ -46,38 +320,155 @@ body {
     padding: 20px;
   }
 
-  /* Button styling */
+  /* ============================================
+     BUTTON STYLING - Touch-friendly, clear states
+     ============================================ */
   .btn {
-    transition: all 0.2s ease-in-out;
+    font-family: var(--font-family-base);
+    font-weight: var(--font-weight-medium);
+    border-radius: var(--radius-md);
+    transition: all var(--transition-fast);
+    min-height: 44px; /* Minimum touch target */
+    padding: var(--space-sm) var(--space-lg);
+    border: 2px solid transparent;
+    box-shadow: var(--shadow-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
   }
 
   .btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+  }
+
+  .btn:active {
+    transform: translateY(0);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
+  }
+
+  /* Primary action button */
+  .btn-primary {
+    background-color: var(--primary);
+    border-color: var(--primary);
+  }
+
+  .btn-primary:hover {
+    background-color: #0056b3;
+    border-color: #0056b3;
+  }
+
+  /* Success/Good action button */
+  .btn-success {
+    background-color: var(--status-good);
+    border-color: var(--status-good);
+  }
+
+  .btn-success:hover {
+    background-color: #218838;
+    border-color: #1e7e34;
+  }
+
+  /* Warning/Caution button */
+  .btn-warning {
+    background-color: var(--status-warning);
+    border-color: var(--status-warning);
+    color: var(--dark);
+  }
+
+  .btn-warning:hover {
+    background-color: #e0a800;
+    border-color: #d39e00;
+  }
+
+  /* Danger/Critical button */
+  .btn-danger {
+    background-color: var(--status-danger);
+    border-color: var(--status-danger);
+  }
+
+  .btn-danger:hover {
+    background-color: #c82333;
+    border-color: #bd2130;
   }
 
   /* Tab styling */
   .nav-tabs {
-    border-bottom: 1px solid #dee2e6;
+    border-bottom: 1px solid var(--status-neutral-border);
   }
 
   .nav-tabs .nav-link {
     border: 1px solid transparent;
     border-top-left-radius: 0.25rem;
     border-top-right-radius: 0.25rem;
-    color: #495057;
-    background-color: #fff;
+    color: var(--secondary);
+    background-color: transparent;
     margin-right: 2px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    white-space: nowrap;
   }
 
   .nav-tabs .nav-link:hover {
-    border-color: #e9ecef #e9ecef #dee2e6;
+    border-color: var(--status-neutral-border) var(--status-neutral-border) transparent;
+    color: var(--dark);
+    background-color: rgba(0, 123, 255, 0.05);
   }
 
   .nav-tabs .nav-link.active {
-    color: #007bff;
-    background-color: #fff;
-    border-color: #dee2e6 #dee2e6 #fff;
+    color: var(--primary);
+    background-color: var(--card-bg);
+    border-color: var(--status-neutral-border) var(--status-neutral-border) var(--card-bg);
+  }
+
+  /* Tab group separators */
+  .tab-group-start {
+    margin-left: 12px !important;
+    padding-left: 12px !important;
+    border-left: 2px solid var(--status-neutral-border) !important;
+  }
+
+  /* Tab Icons - Bootstrap Icons via ::before pseudo-elements */
+  .tab-dashboard::before { content: "\F3FC"; }       /* bi-grid */
+  .tab-organisms::before { content: "\F1DC"; }       /* bi-bug */
+  .tab-qc::before { content: "\F28B"; }              /* bi-clipboard-check */
+  .tab-taxonomy::before { content: "\F2EE"; }        /* bi-diagram-3 */
+  .tab-watchlist::before { content: "\F588"; }       /* bi-star */
+  .tab-validation::before { content: "\F26B"; }      /* bi-check-circle */
+  .tab-config::before { content: "\F3E5"; }          /* bi-gear */
+  .tab-preparation::before { content: "\F1CB"; }     /* bi-box-seam */
+
+  .tab-dashboard::before,
+  .tab-organisms::before,
+  .tab-qc::before,
+  .tab-taxonomy::before,
+  .tab-watchlist::before,
+  .tab-validation::before,
+  .tab-config::before,
+  .tab-preparation::before {
+    font-family: "bootstrap-icons";
+    display: inline-block;
+    font-style: normal;
+    font-weight: normal;
+    font-size: 1em;
+    line-height: 1;
+    vertical-align: -0.125em;
+    color: inherit;
+    opacity: 0.7;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  .nav-tabs .nav-link.active::before {
+    opacity: 1;
   }
 
   /* Form styling */
@@ -236,6 +627,360 @@ body {
     color: #17a2b8;
   }
 
+  /* ============================================
+     STATUS BADGES - Operator-focused visual indicators
+     ============================================ */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-full);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border: 2px solid transparent;
+  }
+
+  /* Good status - Green */
+  .status-badge-good,
+  .badge-success {
+    background-color: var(--status-good-bg);
+    color: var(--status-good);
+    border-color: var(--status-good-border);
+  }
+
+  /* Warning status - Amber */
+  .status-badge-warning,
+  .status-badge-review,
+  .badge-warning {
+    background-color: var(--status-warning-bg);
+    color: #856404; /* Darker amber for readability */
+    border-color: var(--status-warning-border);
+  }
+
+  /* Danger/Issue status - Red */
+  .status-badge-danger,
+  .status-badge-issue,
+  .badge-danger {
+    background-color: var(--status-danger-bg);
+    color: var(--status-danger);
+    border-color: var(--status-danger-border);
+  }
+
+  /* Info/Processing status - Blue */
+  .status-badge-info,
+  .status-badge-processing,
+  .badge-info {
+    background-color: var(--status-info-bg);
+    color: #0c5460;
+    border-color: var(--status-info-border);
+  }
+
+  /* Neutral/Idle status - Gray */
+  .status-badge-neutral,
+  .badge-secondary {
+    background-color: var(--status-neutral-bg);
+    color: var(--status-neutral);
+    border-color: var(--status-neutral-border);
+  }
+
+  /* ============================================
+     ALERT COMPONENTS - Critical information display
+     ============================================ */
+  .alert-modern {
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    border-left: 4px solid transparent;
+    margin-bottom: var(--space-md);
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-md);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .alert-modern-icon {
+    font-size: 24px;
+    line-height: 1;
+    min-width: 24px;
+  }
+
+  .alert-modern-content {
+    flex: 1;
+  }
+
+  .alert-modern-title {
+    font-weight: var(--font-weight-semibold);
+    margin-bottom: var(--space-xs);
+    font-size: var(--font-size-base);
+  }
+
+  .alert-modern-message {
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+    margin-bottom: var(--space-sm);
+  }
+
+  .alert-modern-recommendation {
+    font-size: var(--font-size-sm);
+    font-style: italic;
+    opacity: 0.9;
+  }
+
+  /* Alert severity variants */
+  .alert-critical,
+  .alert-danger {
+    background-color: var(--status-danger-bg);
+    border-left-color: var(--status-danger);
+    color: #721c24;
+  }
+
+  .alert-warning {
+    background-color: var(--status-warning-bg);
+    border-left-color: var(--status-warning);
+    color: #856404;
+  }
+
+  .alert-info {
+    background-color: var(--status-info-bg);
+    border-left-color: var(--status-info);
+    color: #0c5460;
+  }
+
+  .alert-success {
+    background-color: var(--status-good-bg);
+    border-left-color: var(--status-good);
+    color: #155724;
+  }
+
+  /* ============================================
+     STAT CARDS - Dashboard metrics display
+     ============================================ */
+  .stat-card {
+    padding: var(--space-lg);
+    border-radius: var(--radius-lg);
+    background: white;
+    box-shadow: var(--shadow-md);
+    border-left: 4px solid var(--primary);
+    transition: transform var(--transition-fast);
+  }
+
+  .stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .stat-card-value {
+    font-size: 2.5rem;
+    font-weight: var(--font-weight-bold);
+    line-height: 1;
+    margin-bottom: var(--space-sm);
+  }
+
+  .stat-card-label {
+    font-size: var(--font-size-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--secondary);
+    font-weight: var(--font-weight-medium);
+  }
+
+  /* Stat card color variants */
+  .stat-card-primary { border-left-color: var(--primary); }
+  .stat-card-success { border-left-color: var(--status-good); }
+  .stat-card-warning { border-left-color: var(--status-warning); }
+  .stat-card-danger { border-left-color: var(--status-danger); }
+  .stat-card-info { border-left-color: var(--status-info); }
+
+  /* ============================================
+     TRAFFIC LIGHT INDICATORS - Visual status system
+     ============================================ */
+  .traffic-light {
+    width: 60px;
+    height: 60px;
+    border-radius: var(--radius-full);
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
+    display: inline-block;
+    position: relative;
+    transition: all var(--transition-base);
+  }
+
+  .traffic-light::before {
+    content: '';
+    position: absolute;
+    inset: -8px;
+    border-radius: var(--radius-full);
+    opacity: 0.3;
+    transition: all var(--transition-base);
+  }
+
+  .traffic-light-good {
+    background-color: var(--status-good);
+  }
+
+  .traffic-light-good::before {
+    background-color: var(--status-good);
+    box-shadow: 0 0 30px var(--status-good);
+  }
+
+  .traffic-light-warning {
+    background-color: var(--status-warning);
+  }
+
+  .traffic-light-warning::before {
+    background-color: var(--status-warning);
+    box-shadow: 0 0 30px var(--status-warning);
+  }
+
+  .traffic-light-danger {
+    background-color: var(--status-danger);
+  }
+
+  .traffic-light-danger::before {
+    background-color: var(--status-danger);
+    box-shadow: 0 0 30px var(--status-danger);
+  }
+
+  .traffic-light-neutral {
+    background-color: var(--status-neutral);
+  }
+
+  /* ============================================
+     TOOLTIP SYSTEM - Contextual help
+     ============================================ */
+  .tooltip-trigger {
+    cursor: help;
+    border-bottom: 1px dotted var(--secondary);
+  }
+
+  .help-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: var(--radius-full);
+    background-color: var(--status-info);
+    color: white;
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-bold);
+    cursor: help;
+    transition: all var(--transition-fast);
+  }
+
+  .help-icon:hover {
+    background-color: #117a8b;
+    transform: scale(1.1);
+  }
+
+  /* ============================================
+     ACCESSIBILITY ENHANCEMENTS
+     ============================================ */
+  /* Focus visible for keyboard navigation */
+  *:focus-visible {
+    outline: 3px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  /* Skip to main content link */
+  .skip-to-main {
+    position: absolute;
+    top: -40px;
+    left: 0;
+    background: var(--primary);
+    color: white;
+    padding: var(--space-sm) var(--space-md);
+    text-decoration: none;
+    z-index: var(--z-modal);
+  }
+
+  .skip-to-main:focus {
+    top: 0;
+  }
+
+  /* Screen reader only content */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  /* High contrast mode support */
+  @media (prefers-contrast: high) {
+    .btn {
+      border-width: 3px;
+    }
+
+    .status-badge {
+      border-width: 3px;
+    }
+  }
+
+  /* Reduced motion support */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* Dashboard-specific styles */
+  .status-indicator-circle {
+    transition: background-color var(--transition-base), box-shadow var(--transition-base);
+  }
+
+  .progress-ring-container {
+    padding: 10px;
+  }
+
+  .data-quality-meter {
+    padding: 10px;
+  }
+
+  .alert-message {
+    line-height: 1.5;
+  }
+
+  /* Dashboard sample table row styling */
+  .dash-table-container .dash-spreadsheet-inner tr[data-dash-row] {
+    transition: background-color 0.15s ease-in-out;
+  }
+
+  .dash-table-container .dash-spreadsheet-inner tr[data-dash-row]:hover {
+    background-color: rgba(0, 123, 255, 0.05);
+    cursor: pointer;
+  }
+
+  /* Alert panel scrollbar styling */
+  #dashboard-alerts-panel::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  #dashboard-alerts-panel::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+  }
+
+  #dashboard-alerts-panel::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 10px;
+  }
+
+  #dashboard-alerts-panel::-webkit-scrollbar-thumb:hover {
+    background: #555;
+  }
+
   /* Responsive adjustments */
   @media (max-width: 768px) {
     .col-md-6 {
@@ -250,5 +995,1952 @@ body {
     .hstack > div {
       margin-right: 0 !important;
       margin-bottom: 15px;
+    }
+
+    /* Dashboard status card stacking */
+    #dashboard-status-card .row > div {
+      text-align: center;
+      margin-bottom: 15px;
+    }
+  }
+
+  /* ============================================
+     SPECIES SELECTOR - Watchlist management
+     ============================================ */
+  .species-selector-compact {
+    min-width: 200px;
+  }
+
+  .species-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-sm) var(--space-md);
+    background-color: var(--primary);
+    color: white;
+    border-radius: var(--radius-full);
+    margin: var(--space-xs);
+    font-size: var(--font-size-sm);
+    transition: all var(--transition-fast);
+  }
+
+  .species-tag:hover {
+    background-color: #0056b3;
+    transform: scale(1.02);
+  }
+
+  .species-tag-remove {
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: var(--radius-full);
+    transition: background-color var(--transition-fast);
+  }
+
+  .species-tag-remove:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+  }
+
+  /* ============================================
+     WATCHED ORGANISMS - Highlighted display
+     ============================================ */
+  .watched-organism-card {
+    border: 2px solid var(--status-warning) !important;
+    background-color: #fffbeb !important;
+  }
+
+  .watched-organism-card .card-body {
+    background-color: #fffbeb;
+  }
+
+  .watched-badge {
+    background-color: var(--status-warning);
+    color: #856404;
+    font-weight: var(--font-weight-semibold);
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .watch-btn {
+    transition: all var(--transition-fast);
+  }
+
+  .watch-btn.watched {
+    background-color: var(--status-warning) !important;
+    border-color: var(--status-warning) !important;
+    color: #856404 !important;
+  }
+
+  .watch-btn:hover {
+    transform: scale(1.05);
+  }
+
+  /* Star icon animation */
+  .bi-star-fill {
+    animation: starPulse 2s ease-in-out infinite;
+  }
+
+  @keyframes starPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+
+  /* ============================================
+     ORGANISM CARDS - Enhanced display
+     ============================================ */
+  .organism-card {
+    transition: all var(--transition-fast);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+
+  .organism-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .abundance-bar-container {
+    background-color: var(--status-neutral-bg);
+    border-radius: var(--radius-sm);
+    height: 12px;
+    overflow: hidden;
+  }
+
+  .abundance-bar {
+    height: 100%;
+    border-radius: var(--radius-sm);
+    transition: width var(--transition-base);
+  }
+
+  .abundance-bar-primary {
+    background-color: var(--primary);
+  }
+
+  .abundance-bar-warning {
+    background-color: var(--status-warning);
+  }
+
+  .confidence-badge-high {
+    background-color: var(--status-good-bg);
+    color: var(--status-good);
+    border: 1px solid var(--status-good-border);
+  }
+
+  .confidence-badge-medium {
+    background-color: var(--status-warning-bg);
+    color: #856404;
+    border: 1px solid var(--status-warning-border);
+  }
+
+  .confidence-badge-low {
+    background-color: var(--status-danger-bg);
+    color: var(--status-danger);
+    border: 1px solid var(--status-danger-border);
+  }
+
+  /* ============================================
+     ALERT BANNER - Species detection
+     ============================================ */
+  .species-alert-banner {
+    animation: slideIn 0.3s ease-out;
+  }
+
+  @keyframes slideIn {
+    from {
+      transform: translateY(-20px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  /* ============================================
+     DASHBOARD STATUS INDICATORS
+     ============================================ */
+  .status-running {
+    background-color: var(--status-good) !important;
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  .status-idle {
+    background-color: var(--status-neutral) !important;
+  }
+
+  .status-error {
+    background-color: var(--status-danger) !important;
+    animation: shake 0.5s ease-in-out;
+  }
+
+  .status-warning-state {
+    background-color: var(--status-warning) !important;
+  }
+
+  @keyframes pulse {
+    0%, 100% {
+      box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.4);
+    }
+    50% {
+      box-shadow: 0 0 0 15px rgba(40, 167, 69, 0);
+    }
+  }
+
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    75% { transform: translateX(5px); }
+  }
+
+  /* Spin animation for loading/running indicators */
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .spin-animation {
+    animation: spin 1s linear infinite;
+  }
+
+  /* Spinning class for pipeline stage indicator */
+  .spinning {
+    animation: spin 1s linear infinite;
+  }
+
+  /* ============================================
+     HEADER TIMER AND PROGRESS DISPLAY
+     ============================================ */
+  .update-timer {
+    color: var(--secondary);
+    font-weight: var(--font-weight-medium);
+    display: flex;
+    align-items: center;
+  }
+
+  .elapsed-time {
+    color: var(--dark);
+    font-weight: var(--font-weight-medium);
+    display: flex;
+    align-items: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .pipeline-info {
+    display: flex;
+    align-items: center;
+    color: var(--primary);
+    font-weight: var(--font-weight-medium);
+  }
+
+  .pipeline-info .text-muted {
+    color: var(--secondary) !important;
+  }
+
+  /* Dark mode support for timer elements */
+  @media (prefers-color-scheme: dark) {
+    .update-timer {
+      color: #9ca3af;
+    }
+
+    .elapsed-time {
+      color: #eaeaea;
+    }
+  }
+
+  [data-theme="dark"] .update-timer {
+    color: #9ca3af;
+  }
+
+  [data-theme="dark"] .elapsed-time {
+    color: #eaeaea;
+  }
+
+  /* Metric card hover effects */
+  .metric-card {
+    transition: all var(--transition-fast);
+    cursor: pointer;
+  }
+
+  .metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .metric-card-value {
+    font-size: 2rem;
+    font-weight: var(--font-weight-bold);
+    line-height: 1.2;
+  }
+
+  .metric-card-label {
+    font-size: var(--font-size-sm);
+    color: var(--secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* Quality badge colors */
+  .q-badge-excellent {
+    background-color: var(--status-good);
+    color: white;
+  }
+
+  .q-badge-good {
+    background-color: #20c997;
+    color: white;
+  }
+
+  .q-badge-fair {
+    background-color: var(--status-warning);
+    color: #856404;
+  }
+
+  .q-badge-poor {
+    background-color: var(--status-danger);
+    color: white;
+  }
+
+  /* ============================================
+     CONFIGURATION TAB IMPROVEMENTS
+     ============================================ */
+
+  /* Config Status Banner */
+  .config-status-banner {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border: 1px solid #dee2e6;
+    border-left: 4px solid var(--primary);
+    border-radius: var(--radius-md);
+    padding: var(--space-md) var(--space-lg);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  }
+
+  .config-status-banner.modified {
+    border-left-color: #ffc107;
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  }
+
+  .config-status-banner.saved {
+    border-left-color: #28a745;
+  }
+
+  .config-source-info {
+    font-size: 0.95rem;
+  }
+
+  .config-source-info .bi {
+    color: var(--primary);
+  }
+
+  /* Dark mode support for config banner */
+  [data-theme="dark"] .config-status-banner {
+    background: linear-gradient(135deg, #1f2937 0%, #374151 100%);
+    border-color: #4b5563;
+    border-left-color: var(--primary);
+  }
+
+  [data-theme="dark"] .config-status-banner.modified {
+    background: linear-gradient(135deg, #422006 0%, #713f12 100%);
+    border-left-color: #ffc107;
+  }
+
+  .config-mode-toggle {
+    display: inline-flex;
+    gap: var(--space-sm);
+    padding: var(--space-xs);
+    background-color: var(--status-neutral-bg);
+    border-radius: var(--radius-full);
+  }
+
+  .config-mode-btn {
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-full);
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    font-weight: var(--font-weight-medium);
+  }
+
+  .config-mode-btn.active {
+    background-color: var(--primary);
+    color: white;
+  }
+
+  .config-mode-btn:hover:not(.active) {
+    background-color: rgba(0, 123, 255, 0.1);
+  }
+
+  /* Database selector card */
+  .database-card {
+    border: 2px solid var(--status-neutral-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .database-card:hover {
+    border-color: var(--primary);
+    background-color: rgba(0, 123, 255, 0.05);
+  }
+
+  .database-card.selected {
+    border-color: var(--primary);
+    background-color: rgba(0, 123, 255, 0.1);
+  }
+
+  /* ============================================
+     QC TAB VISUAL IMPROVEMENTS
+     ============================================ */
+  .quality-gauge-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .quality-score-display {
+    font-size: 3rem;
+    font-weight: var(--font-weight-bold);
+    line-height: 1;
+  }
+
+  .quality-interpretation {
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-medium);
+    margin-top: var(--space-sm);
+  }
+
+  .filtering-breakdown-bar {
+    height: 40px;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    display: flex;
+  }
+
+  .filtering-segment {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: var(--font-weight-medium);
+    font-size: var(--font-size-sm);
+    transition: all var(--transition-fast);
+  }
+
+  .filtering-segment:hover {
+    filter: brightness(1.1);
+  }
+
+  .filtering-segment-passed {
+    background-color: var(--status-good);
+  }
+
+  .filtering-segment-low-quality {
+    background-color: var(--status-danger);
+  }
+
+  .filtering-segment-too-short {
+    background-color: #fd7e14;
+  }
+
+  .filtering-segment-low-complexity {
+    background-color: #6f42c1;
+  }
+
+  /* ============================================
+     BOOTSTRAP ICON OVERRIDES
+     ============================================ */
+  .bi {
+    vertical-align: -0.125em;
+  }
+
+  /* Large icons */
+  .bi-lg {
+    font-size: 1.5rem;
+  }
+
+  .bi-xl {
+    font-size: 2rem;
+  }
+
+  .bi-xxl {
+    font-size: 3rem;
+  }
+
+  /* ============================================
+     LOADING & REFRESH INDICATORS
+     ============================================ */
+  /* Refresh pulse animation */
+  @keyframes refreshPulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+  }
+
+  .refreshing {
+    animation: refreshPulse 1s ease-in-out infinite;
+  }
+
+  /* Live data indicator */
+  .live-indicator {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: var(--font-size-sm);
+  }
+
+  .live-indicator-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: var(--status-good);
+    animation: livePulse 2s ease-in-out infinite;
+  }
+
+  @keyframes livePulse {
+    0%, 100% {
+      box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.4);
+    }
+    50% {
+      box-shadow: 0 0 0 8px rgba(40, 167, 69, 0);
+    }
+  }
+
+  .live-indicator-dot.offline {
+    background-color: var(--status-neutral);
+    animation: none;
+  }
+
+  /* Update indicator (bottom corner) */
+  .update-indicator {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: var(--card-bg);
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    font-size: var(--font-size-sm);
+    z-index: var(--z-fixed);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    border: 1px solid var(--card-border);
+  }
+
+  /* Last update timestamp */
+  .last-update {
+    font-size: var(--font-size-xs);
+    color: var(--secondary);
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+  }
+
+  /* ============================================
+     IMPROVED TABLE STYLING
+     ============================================ */
+  /* Tabular numbers for aligned data */
+  .dash-table-container .dash-spreadsheet-inner td {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Zebra striping */
+  .dash-table-container .dash-spreadsheet-inner tr:nth-child(odd) td {
+    background-color: rgba(0, 0, 0, 0.02);
+  }
+
+  .dash-table-container .dash-spreadsheet-inner tr:nth-child(even) td {
+    background-color: var(--card-bg);
+  }
+
+  /* Enhanced row hover */
+  .dash-table-container .dash-spreadsheet-inner tr:hover td {
+    background-color: rgba(0, 123, 255, 0.08) !important;
+  }
+
+  /* Status icon in tables */
+  .status-icon {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+  }
+
+  .status-icon::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  .status-icon.status-good::before {
+    background-color: var(--status-good);
+  }
+
+  .status-icon.status-warning::before {
+    background-color: var(--status-warning);
+  }
+
+  .status-icon.status-danger::before {
+    background-color: var(--status-danger);
+  }
+
+  /* ============================================
+     ENHANCED ACCESSIBILITY
+     ============================================ */
+  /* Skip to main content link */
+  .skip-to-main {
+    position: absolute;
+    top: -100px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--primary);
+    color: white;
+    padding: var(--space-md) var(--space-lg);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    font-weight: var(--font-weight-semibold);
+    z-index: calc(var(--z-modal) + 1);
+    transition: top 0.3s ease;
+  }
+
+  .skip-to-main:focus {
+    top: 10px;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.5);
+  }
+
+  /* High-visibility focus ring */
+  *:focus-visible {
+    outline: 3px solid var(--primary);
+    outline-offset: 3px;
+    border-radius: var(--radius-sm);
+  }
+
+  /* Ensure focus is visible on dark backgrounds */
+  .btn:focus-visible {
+    outline-color: white;
+    box-shadow: 0 0 0 4px rgba(0, 123, 255, 0.5);
+  }
+
+  /* Ensure links are distinguishable (not just by color) */
+  a:not(.btn):not(.nav-link) {
+    text-decoration: underline;
+    text-decoration-color: rgba(0, 123, 255, 0.3);
+    text-underline-offset: 2px;
+  }
+
+  a:not(.btn):not(.nav-link):hover {
+    text-decoration-color: var(--primary);
+  }
+
+  /* ============================================
+     MOBILE RESPONSIVE ENHANCEMENTS
+     ============================================ */
+  @media (max-width: 767px) {
+    /* Increase touch targets */
+    .btn, .nav-link {
+      min-height: 48px;
+      padding: var(--space-md) var(--space-lg);
+    }
+
+    /* Full-width sample selector */
+    #sample-selector {
+      width: 100% !important;
+      max-width: none !important;
+    }
+
+    /* Simplified table for mobile */
+    .dash-table-container {
+      font-size: 12px;
+    }
+
+    .dash-table-container td,
+    .dash-table-container th {
+      padding: 8px 6px;
+    }
+
+    /* Larger tap targets for checkboxes */
+    .form-check-input {
+      width: 1.5em;
+      height: 1.5em;
+    }
+
+    /* Stack status banner vertically */
+    #dashboard-status-card .row > div {
+      text-align: center;
+      margin-bottom: 15px;
+    }
+  }
+
+  /* Tablet adjustments */
+  @media (min-width: 768px) and (max-width: 1024px) {
+    /* Two-column layout for metrics */
+    .metrics-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+
+    #dashboard-sample-table {
+      font-size: 13px;
+    }
+  }
+
+  /* ============================================
+     SKELETON LOADING STATES
+     ============================================ */
+  .skeleton {
+    background: linear-gradient(90deg,
+      var(--status-neutral-bg) 25%,
+      rgba(255, 255, 255, 0.5) 50%,
+      var(--status-neutral-bg) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite linear;
+    border-radius: var(--radius-md);
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  .skeleton-text {
+    height: 1em;
+    margin-bottom: 0.5em;
+    border-radius: var(--radius-sm);
+  }
+
+  .skeleton-text-sm {
+    height: 0.75em;
+    width: 60%;
+  }
+
+  .skeleton-text-lg {
+    height: 1.5em;
+    width: 80%;
+  }
+
+  .skeleton-card {
+    height: 120px;
+    border-radius: var(--radius-lg);
+  }
+
+  .skeleton-circle {
+    border-radius: 50%;
+  }
+
+  .skeleton-metric {
+    height: 3rem;
+    width: 5rem;
+    margin: 0 auto;
+  }
+
+  /* Dark mode skeleton */
+  @media (prefers-color-scheme: dark) {
+    .skeleton {
+      background: linear-gradient(90deg,
+        var(--status-neutral-bg) 25%,
+        rgba(255, 255, 255, 0.1) 50%,
+        var(--status-neutral-bg) 75%
+      );
+      background-size: 200% 100%;
+    }
+  }
+
+  /* ============================================
+     STALE DATA WARNING
+     ============================================ */
+  .stale-data-warning {
+    background-color: var(--status-warning-bg);
+    border: 2px solid var(--status-warning);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    animation: pulseWarning 2s ease-in-out infinite;
+  }
+
+  @keyframes pulseWarning {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+
+  .stale-indicator {
+    color: var(--status-warning);
+    font-weight: var(--font-weight-semibold);
+  }
+
+  /* ============================================
+     ACCORDION EXPANSION INDICATORS
+     ============================================ */
+  .accordion-button {
+    position: relative;
+  }
+
+  .accordion-button::after {
+    content: '';
+    width: 1.25rem;
+    height: 1.25rem;
+    margin-left: auto;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23495057' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' d='M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-size: 1.25rem;
+    transition: transform var(--transition-base);
+    flex-shrink: 0;
+  }
+
+  .accordion-button:not(.collapsed)::after {
+    transform: rotate(-180deg);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .accordion-button::after {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23eaeaea' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' d='M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z'/%3E%3C/svg%3E");
+    }
+  }
+
+  /* ============================================
+     TOAST NOTIFICATIONS
+     ============================================ */
+  .toast-container {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: var(--z-tooltip);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .toast-notification {
+    min-width: 300px;
+    max-width: 400px;
+    background: var(--card-bg);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    padding: var(--space-md);
+    border-left: 4px solid var(--primary);
+    animation: slideInRight 0.3s ease-out;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-md);
+  }
+
+  @keyframes slideInRight {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  .toast-success {
+    border-left-color: var(--status-good);
+  }
+
+  .toast-warning {
+    border-left-color: var(--status-warning);
+  }
+
+  .toast-danger {
+    border-left-color: var(--status-danger);
+  }
+
+  .toast-info {
+    border-left-color: var(--status-info);
+  }
+
+  .toast-icon {
+    font-size: 1.5rem;
+    line-height: 1;
+  }
+
+  .toast-content {
+    flex: 1;
+  }
+
+  .toast-title {
+    font-weight: var(--font-weight-semibold);
+    margin-bottom: var(--space-xs);
+  }
+
+  .toast-message {
+    font-size: var(--font-size-sm);
+    color: var(--secondary);
+  }
+
+  .toast-close {
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    cursor: pointer;
+    opacity: 0.5;
+    transition: opacity var(--transition-fast);
+    padding: 0;
+    line-height: 1;
+  }
+
+  .toast-close:hover {
+    opacity: 1;
+  }
+
+  /* ============================================
+     TAB STYLING ENHANCEMENT
+     ============================================ */
+  .nav-tabs .nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    padding: var(--space-md) var(--space-lg);
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+  }
+
+  .nav-tabs .nav-link:hover {
+    background-color: rgba(0, 123, 255, 0.05);
+  }
+
+  /* Active tab indicator line */
+  .nav-tabs .nav-link.active {
+    position: relative;
+  }
+
+  .nav-tabs .nav-link.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background-color: var(--primary);
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  }
+
+  /* ============================================
+     DARK MODE TOGGLE BUTTON
+     ============================================ */
+  .theme-toggle {
+    background: none;
+    border: 2px solid var(--status-neutral-border);
+    border-radius: var(--radius-full);
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    color: var(--secondary);
+  }
+
+  .theme-toggle:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+    background-color: rgba(0, 123, 255, 0.1);
+  }
+
+  .theme-toggle .bi {
+    font-size: 1.25rem;
+    transition: transform var(--transition-base);
+  }
+
+  .theme-toggle:hover .bi {
+    transform: rotate(15deg);
+  }
+
+  /* ============================================
+     ENHANCED DASHBOARD STATUS INDICATOR
+     ============================================ */
+  .dashboard-traffic-light {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    transition: all var(--transition-base);
+  }
+
+  .dashboard-traffic-light::before {
+    content: '';
+    position: absolute;
+    inset: -10px;
+    border-radius: 50%;
+    opacity: 0.3;
+    transition: all var(--transition-base);
+  }
+
+  .dashboard-traffic-light.status-good {
+    background-color: var(--status-good);
+    box-shadow: 0 0 30px rgba(40, 167, 69, 0.4);
+  }
+
+  .dashboard-traffic-light.status-good::before {
+    background-color: var(--status-good);
+    animation: trafficPulse 2s ease-in-out infinite;
+  }
+
+  .dashboard-traffic-light.status-warning {
+    background-color: var(--status-warning);
+    box-shadow: 0 0 30px rgba(255, 193, 7, 0.4);
+  }
+
+  .dashboard-traffic-light.status-danger {
+    background-color: var(--status-danger);
+    box-shadow: 0 0 30px rgba(220, 53, 69, 0.4);
+    animation: dangerShake 0.5s ease-in-out;
+  }
+
+  .dashboard-traffic-light.status-idle {
+    background-color: var(--status-neutral);
+    box-shadow: 0 0 15px rgba(108, 117, 125, 0.3);
+  }
+
+  @keyframes trafficPulse {
+    0%, 100% {
+      transform: scale(1);
+      opacity: 0.3;
+    }
+    50% {
+      transform: scale(1.1);
+      opacity: 0.15;
+    }
+  }
+
+  @keyframes dangerShake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-3px); }
+    40% { transform: translateX(3px); }
+    60% { transform: translateX(-3px); }
+    80% { transform: translateX(3px); }
+  }
+
+  /* ============================================
+     AUTO-REFRESH COUNTDOWN
+     ============================================ */
+  .refresh-countdown {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: var(--font-size-sm);
+    color: var(--secondary);
+  }
+
+  .refresh-countdown-ring {
+    width: 24px;
+    height: 24px;
+    position: relative;
+  }
+
+  .refresh-countdown-ring svg {
+    transform: rotate(-90deg);
+  }
+
+  .refresh-countdown-ring circle {
+    fill: none;
+    stroke-width: 3;
+  }
+
+  .refresh-countdown-ring .bg {
+    stroke: var(--status-neutral-bg);
+  }
+
+  .refresh-countdown-ring .progress {
+    stroke: var(--primary);
+    stroke-linecap: round;
+    transition: stroke-dashoffset 1s linear;
+  }
+
+  /* ============================================
+     METRIC VALUE ANIMATION
+     ============================================ */
+  .metric-value-update {
+    animation: countUp 0.3s ease-out;
+  }
+
+  @keyframes countUp {
+    from {
+      opacity: 0.5;
+      transform: translateY(5px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Number change highlight */
+  .value-changed {
+    animation: valueHighlight 1s ease-out;
+  }
+
+  @keyframes valueHighlight {
+    0% {
+      background-color: rgba(0, 123, 255, 0.2);
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
+
+  /* ============================================
+     PATHOGEN ALERT SYSTEM
+     Critical alerts for dangerous pathogen detection
+     ============================================ */
+
+  /* Critical Alert - Highest severity (BSL-3/4 pathogens) */
+  .pathogen-alert-critical {
+    background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+    border-left: 6px solid #8b0000;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    animation: criticalAlertPulse 3s ease-in-out infinite;
+  }
+
+  .pathogen-alert-critical:hover {
+    box-shadow: var(--shadow-lg);
+  }
+
+  /* Icon container for critical alerts */
+  .pathogen-alert-icon-container {
+    width: 64px;
+    height: 64px;
+    min-width: 64px;
+    border-radius: 50%;
+    background-color: #8b0000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 20px rgba(139, 0, 0, 0.4);
+    flex-shrink: 0;
+  }
+
+  /* Pulsing animation for critical alerts */
+  @keyframes criticalAlertPulse {
+    0%, 100% {
+      box-shadow: 0 4px 12px rgba(139, 0, 0, 0.3);
+    }
+    50% {
+      box-shadow: 0 4px 24px rgba(139, 0, 0, 0.5);
+    }
+  }
+
+  /* High Risk Alert styling */
+  .pathogen-alert-high {
+    background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+    border-left: 4px solid #dc3545;
+    border-radius: var(--radius-sm);
+  }
+
+  /* Moderate/Watch Alert styling */
+  .pathogen-alert-moderate {
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+    border-left: 4px solid #fd7e14;
+    border-radius: var(--radius-sm);
+  }
+
+  /* Info/Watch Alert styling */
+  .pathogen-alert-watch {
+    background: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%);
+    border-left: 3px solid #17a2b8;
+    border-radius: var(--radius-sm);
+  }
+
+  /* Pathogen name styling (scientific nomenclature) */
+  .pathogen-name {
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-bold);
+    font-style: italic;
+    color: var(--dark);
+  }
+
+  .pathogen-common-name {
+    font-size: var(--font-size-base);
+    font-style: normal;
+    color: var(--secondary);
+  }
+
+  /* Alert recommendation text */
+  .alert-recommendation {
+    background-color: rgba(255, 255, 255, 0.5);
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(139, 0, 0, 0.2);
+  }
+
+  /* All Clear indicator */
+  .pathogen-all-clear {
+    background-color: var(--status-good-bg);
+    border: 1px solid var(--status-good-border);
+    border-radius: var(--radius-md);
+    text-align: center;
+  }
+
+  /* Threat summary indicator */
+  #threat-summary-indicator {
+    transition: all var(--transition-fast);
+  }
+
+  #threat-summary-indicator:hover {
+    transform: translateY(-1px);
+  }
+
+  /* Pathogen alert panel */
+  .pathogen-alert-panel {
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  /* ============================================
+     PRINT STYLES
+     ============================================ */
+  @media print {
+    .btn, .nav-tabs, .accordion-button, .update-indicator, .live-indicator,
+    .toast-container, .theme-toggle, .refresh-countdown {
+      display: none !important;
+    }
+
+    .card {
+      break-inside: avoid;
+      box-shadow: none !important;
+      border: 1px solid #dee2e6 !important;
+    }
+
+    body {
+      font-size: 12pt;
+      background: white !important;
+    }
+
+    .container-fluid {
+      padding: 0 !important;
+    }
+
+    a[href]:after {
+      content: none !important;
+    }
+  }
+
+/* ============================================
+   THREAT SUMMARY INDICATOR
+   Always-visible threat status card
+   ============================================ */
+
+/* Threat card base styling */
+#dashboard-threat-card {
+  transition: all 0.3s ease;
+}
+
+/* Critical threat state */
+#dashboard-threat-card[style*="8b0000"] {
+  animation: threatCardPulse 2s ease-in-out infinite;
+}
+
+/* Threat card pulse animation */
+@keyframes threatCardPulse {
+  0%, 100% {
+    box-shadow: 0 4px 12px rgba(139, 0, 0, 0.2);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 6px 20px rgba(139, 0, 0, 0.4);
+    transform: scale(1.01);
+  }
+}
+
+/* Threat icon animation for critical state */
+#dashboard-threat-icon[style*="8b0000"],
+#dashboard-threat-icon[style*="dc3545"] {
+  animation: threatIconPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes threatIconPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.05);
+  }
+}
+
+/* Safe state styling */
+#dashboard-threat-card[style*="28a745"] {
+  animation: none;
+}
+
+/* Pathogen summary list styling */
+#dashboard-pathogen-summary {
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+/* ============================================
+   WATCHLIST EXPANDABLE STYLES
+   ============================================ */
+
+/* Watchlist file item container */
+.watchlist-file-item {
+  transition: background-color 0.15s ease-in-out;
+}
+
+.watchlist-file-item:hover {
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+/* Enabled/disabled row states */
+.watchlist-file-item.watchlist-disabled {
+  opacity: 0.7;
+}
+
+.watchlist-file-item.watchlist-enabled {
+  border-left: 3px solid var(--status-good, #28a745);
+  padding-left: calc(var(--space-md, 1rem) - 3px);
+}
+
+/* Expand trigger hover state */
+.watchlist-expand-trigger {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  margin: -4px -8px;
+  border-radius: var(--radius-sm, 4px);
+  transition: background-color 0.15s ease-in-out;
+}
+
+.watchlist-expand-trigger:hover {
+  background-color: rgba(0, 123, 255, 0.08);
+}
+
+/* Nested pathogen row styling */
+.nested-pathogen-row {
+  transition: background-color 0.15s ease-in-out;
+}
+
+/* Zebra striping for nested rows */
+.nested-pathogen-row:nth-child(even) {
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+.nested-pathogen-row:hover {
+  background-color: rgba(0, 123, 255, 0.06) !important;
+}
+
+/* Chevron icon rotation animation */
+.watchlist-expand-icon {
+  transition: transform 0.2s ease-in-out;
+}
+
+/* Nested pathogen list scrollable container */
+.watchlist-pathogen-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* Sticky header for nested pathogen list */
+.watchlist-pathogen-list .sticky-top,
+.watchlist-pathogen-list-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: white;
+  border-bottom: 2px solid var(--status-neutral-border, #dee2e6);
+}
+
+/* Collapse animation smoothing */
+.collapse {
+  transition: height 0.2s ease-in-out;
+}
+
+/* Dark mode support for watchlist */
+@media (prefers-color-scheme: dark) {
+  .watchlist-expand-trigger:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .nested-pathogen-row:nth-child(even) {
+    background-color: rgba(255, 255, 255, 0.03);
+  }
+
+  .nested-pathogen-row:hover {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+  }
+
+  .watchlist-file-item:hover {
+    background-color: rgba(255, 255, 255, 0.03);
+  }
+
+  .watchlist-pathogen-list .sticky-top,
+  .watchlist-pathogen-list-header {
+    background-color: var(--card-bg, #1e1e1e);
+  }
+}
+
+/* ============================================
+   QC TAB - ENHANCED COMPONENTS
+   ============================================ */
+
+/* Sticky Key Metrics Summary Bar */
+.qc-summary-bar {
+  z-index: var(--z-sticky);
+  border-radius: var(--radius-md);
+}
+
+.qc-metric-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: var(--space-sm);
+}
+
+.qc-metric-label {
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--secondary);
+  font-weight: var(--font-weight-medium);
+  margin-bottom: var(--space-xs);
+}
+
+.qc-metric-value {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--dark);
+}
+
+/* Quality Indicator Compact - New design without gauge */
+.quality-indicator-compact {
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+@media (max-width: 576px) {
+  .quality-indicator-compact .d-flex {
+    flex-direction: column !important;
+    gap: var(--space-md) !important;
+  }
+
+  .quality-indicator-compact .d-flex > div[style*="width: 1px"] {
+    display: none !important;
+  }
+}
+
+/* Key Metrics Summary Card - Matches QualityScoreIndicator design */
+.key-metrics-summary-card {
+  max-width: 600px;
+  margin: 0 auto;
+  transition: all var(--transition-fast);
+}
+
+.key-metrics-summary-card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+/* Responsive layout for Key Metrics Summary Card */
+@media (max-width: 768px) {
+  .key-metrics-summary-card {
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+    gap: var(--space-md) !important;
+  }
+
+  .key-metrics-summary-card > div[style*="width: 1px"] {
+    display: none !important;
+  }
+
+  .key-metrics-summary-card > div:first-child,
+  .key-metrics-summary-card > div:last-child {
+    flex: 0 0 45%;
+  }
+
+  .key-metrics-summary-card > div:nth-child(3) {
+    flex: 0 0 100%;
+    margin-top: var(--space-sm);
+    padding-top: var(--space-sm);
+    border-top: 1px solid rgba(0, 0, 0, 0.1);
+  }
+}
+
+@media (max-width: 480px) {
+  .key-metrics-summary-card {
+    flex-direction: column !important;
+    text-align: center;
+  }
+
+  .key-metrics-summary-card > div {
+    flex: 0 0 100% !important;
+    width: 100%;
+  }
+
+  .key-metrics-summary-card > div:nth-child(3) {
+    border-top: none;
+    padding-top: 0;
+  }
+}
+
+/* Base Quality Card - Q20/Q30 metrics with sparkline */
+.base-quality-card {
+  transition: all var(--transition-fast);
+}
+
+.base-quality-card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+/* Responsive layout for Base Quality Card */
+@media (max-width: 576px) {
+  .base-quality-card .d-flex.align-items-stretch {
+    flex-wrap: wrap !important;
+    gap: var(--space-md) !important;
+  }
+
+  .base-quality-card .d-flex.align-items-stretch > div[style*="width: 1px"] {
+    display: none !important;
+  }
+
+  .base-quality-card .d-flex.align-items-stretch > div[style*="flex: 1"] {
+    flex: 0 0 48% !important;
+  }
+}
+
+/* Read Statistics Card - Length, N50, GC content */
+.read-statistics-card {
+  transition: all var(--transition-fast);
+}
+
+.read-statistics-card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+/* Responsive layout for Read Statistics Card */
+@media (max-width: 576px) {
+  .read-statistics-card .d-flex.align-items-stretch {
+    flex-wrap: wrap !important;
+    gap: var(--space-md) !important;
+  }
+
+  .read-statistics-card .d-flex.align-items-stretch > div[style*="width: 1px"] {
+    display: none !important;
+  }
+
+  .read-statistics-card .d-flex.align-items-stretch > div[style*="flex: 1"] {
+    flex: 0 0 48% !important;
+  }
+}
+
+/* Dark Mode Support for new QC cards */
+@media (prefers-color-scheme: dark) {
+  .base-quality-card,
+  .read-statistics-card {
+    background-color: var(--card-bg, #2d2d2d) !important;
+    border-color: var(--card-border, #444) !important;
+  }
+}
+
+/* Status Icons - WCAG 1.4.1 Compliant */
+.status-icon {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-full);
+}
+
+.status-icon-success {
+  background-color: var(--status-good);
+}
+
+.status-icon-warning {
+  background-color: var(--status-warning);
+}
+
+.status-icon-danger {
+  background-color: var(--status-danger);
+}
+
+.status-icon-neutral {
+  background-color: var(--status-neutral);
+}
+
+/* Filtering Breakdown Container */
+.filtering-breakdown-container {
+  background-color: var(--light);
+  padding: var(--space-lg);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--card-border);
+}
+
+.filtering-reason-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: white;
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-sm);
+  margin-right: var(--space-sm);
+}
+
+.filtering-reason-item {
+  display: flex;
+  align-items: center;
+  padding: var(--space-sm);
+  background-color: white;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--card-border);
+}
+
+.filtering-breakdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+/* Dark Mode Support for QC Components */
+@media (prefers-color-scheme: dark) {
+  .qc-summary-bar {
+    background-color: var(--card-bg, #2d2d2d) !important;
+    border-color: var(--card-border, #444) !important;
+  }
+
+  .qc-metric-value {
+    color: var(--light);
+  }
+
+  .filtering-breakdown-container {
+    background-color: var(--card-bg, #2d2d2d);
+    border-color: var(--card-border, #444);
+  }
+
+  .filtering-reason-item {
+    background-color: var(--card-bg, #1e1e1e);
+    border-color: var(--card-border, #444);
+  }
+}
+
+/* ============================================
+   TAXID MAPPING STYLES
+   ============================================ */
+
+/* Mapping Dashboard */
+.taxmap-dashboard {
+  border-left: 4px solid var(--status-info);
+}
+
+.taxmap-dashboard.fully-mapped {
+  border-left-color: var(--status-good);
+}
+
+.taxmap-dashboard.needs-attention {
+  border-left-color: var(--status-warning);
+}
+
+.taxmap-dashboard.has-errors {
+  border-left-color: var(--status-danger);
+}
+
+/* Match Type Indicators */
+.match-type-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-sm);
+  border-radius: var(--radius-sm);
+  background: var(--light);
+  min-width: 80px;
+}
+
+.match-type-indicator .count {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  line-height: 1.2;
+}
+
+.match-type-indicator .label {
+  font-size: var(--font-size-xs);
+  color: var(--secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.match-type-indicator.exact .count {
+  color: var(--status-good);
+}
+
+.match-type-indicator.fuzzy .count {
+  color: var(--status-info);
+}
+
+.match-type-indicator.manual .count {
+  color: var(--primary);
+}
+
+.match-type-indicator.unmapped .count {
+  color: var(--status-danger);
+}
+
+/* Mapping Table Rows */
+.mapping-row {
+  transition: background-color var(--transition-fast);
+  border-bottom: 1px solid var(--card-border);
+}
+
+.mapping-row:hover {
+  background-color: var(--light);
+}
+
+.mapping-row.status-exact {
+  border-left: 3px solid var(--status-good);
+}
+
+.mapping-row.status-fuzzy {
+  border-left: 3px solid var(--status-info);
+}
+
+.mapping-row.status-manual {
+  border-left: 3px solid var(--primary);
+}
+
+.mapping-row.status-unmapped {
+  border-left: 3px solid var(--status-danger);
+  background-color: var(--status-danger-bg);
+}
+
+/* Status Icons */
+.mapping-status-icon {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-sm);
+}
+
+.mapping-status-icon.exact {
+  background-color: var(--status-good-bg);
+  color: var(--status-good);
+}
+
+.mapping-status-icon.fuzzy {
+  background-color: var(--status-info-bg);
+  color: var(--status-info);
+}
+
+.mapping-status-icon.manual {
+  background-color: #e7f1ff;
+  color: var(--primary);
+}
+
+.mapping-status-icon.unmapped {
+  background-color: var(--status-danger-bg);
+  color: var(--status-danger);
+}
+
+/* Score Badge */
+.mapping-score-badge {
+  font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-sm);
+}
+
+.mapping-score-badge.high {
+  color: var(--status-good);
+}
+
+.mapping-score-badge.medium {
+  color: var(--status-warning-text);
+}
+
+.mapping-score-badge.low {
+  color: var(--status-danger);
+}
+
+/* Manual Mapping Modal */
+.mapping-modal-header {
+  background: linear-gradient(135deg, var(--primary) 0%, #0056b3 100%);
+  color: white;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.mapping-suggestion-item {
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  border-left: 3px solid transparent;
+}
+
+.mapping-suggestion-item:hover {
+  background-color: var(--light);
+  border-left-color: var(--primary);
+}
+
+.mapping-suggestion-item.selected {
+  background-color: #e7f1ff;
+  border-left-color: var(--primary);
+}
+
+.mapping-suggestion-similarity {
+  font-weight: var(--font-weight-medium);
+}
+
+.mapping-suggestion-similarity.high {
+  color: var(--status-good);
+}
+
+.mapping-suggestion-similarity.medium {
+  color: var(--status-warning-text);
+}
+
+.mapping-suggestion-similarity.low {
+  color: var(--status-neutral);
+}
+
+/* Progress Container */
+.mapping-progress-container {
+  padding: var(--space-md);
+  background: var(--light);
+  border-radius: var(--radius-md);
+}
+
+/* Mapping Section Collapse */
+.mapping-section {
+  transition: all var(--transition-base);
+}
+
+/* Dark mode support for taxid mapping */
+@media (prefers-color-scheme: dark) {
+  .taxmap-dashboard {
+    background-color: var(--card-bg, #1e1e1e);
+  }
+
+  .match-type-indicator {
+    background: var(--card-bg, #2d2d2d);
+  }
+
+  .mapping-row:hover {
+    background-color: var(--card-bg, #2d2d2d);
+  }
+
+  .mapping-row.status-unmapped {
+    background-color: rgba(220, 53, 69, 0.15);
+  }
+
+  .mapping-status-icon.exact {
+    background-color: rgba(40, 167, 69, 0.2);
+  }
+
+  .mapping-status-icon.fuzzy {
+    background-color: rgba(23, 162, 184, 0.2);
+  }
+
+  .mapping-status-icon.manual {
+    background-color: rgba(0, 123, 255, 0.2);
+  }
+
+  .mapping-status-icon.unmapped {
+    background-color: rgba(220, 53, 69, 0.2);
+  }
+
+  .mapping-suggestion-item:hover {
+    background-color: var(--card-bg, #2d2d2d);
+  }
+
+  .mapping-suggestion-item.selected {
+    background-color: rgba(0, 123, 255, 0.15);
+  }
+
+  .mapping-progress-container {
+    background: var(--card-bg, #2d2d2d);
+  }
+}
+
+/* ============================================
+   KRAKEN2 MATCH BADGE - Pathogens Table
+   ============================================ */
+
+/* Interactive badge styling */
+.kraken2-match-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border-radius: var(--radius-sm, 4px);
+  cursor: pointer;
+  transition: all var(--transition-fast, 150ms ease-in-out);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.05));
+}
+
+.kraken2-match-badge:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md, 0 4px 6px rgba(0, 0, 0, 0.1));
+  filter: brightness(1.1);
+}
+
+.kraken2-match-badge:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.05));
+}
+
+/* Badge icon spacing */
+.kraken2-match-badge .bi {
+  font-size: 0.85em;
+}
+
+/* Pathogen row hover - highlight related badge */
+.pathogen-row:hover .kraken2-match-badge {
+  filter: brightness(1.05);
+}
+
+/* Dark mode support for Kraken2 Match badge */
+@media (prefers-color-scheme: dark) {
+  .kraken2-match-badge {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+
+  .kraken2-match-badge:hover {
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+  }
+}
+
+
+  /* ============================================
+     PRINT STYLES
+     ============================================ */
+
+  @media print {
+
+    body {
+      font-size: 12pt;
+      line-height: 1.4;
+      background-color: white !important;
+      color: black !important;
+    }
+
+    /* Force light mode for print */
+    * {
+      background-color: white !important;
+      color: black !important;
+    }
+
+    /* Ensure charts print properly */
+    .js-plotly-plot {
+      page-break-inside: avoid;
+      max-width: 100%;
+    }
+
+    /* Show URLs for links */
+    a[href]::after {
+      content: " (" attr(href) ")";
+      font-size: 0.8em;
+      color: #666;
     }
   }
