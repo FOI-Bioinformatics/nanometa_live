@@ -2,7 +2,7 @@
 Backend manager for Nanometa Live.
 
 This module manages the backend processes for the application, including:
-- Starting/stopping the Snakemake workflow
+- Starting/stopping the Nextflow workflow (nanometanf pipeline)
 - Monitoring the processing status
 - Checking files and directories
 """
@@ -10,46 +10,25 @@ This module manages the backend processes for the application, including:
 import os
 import sys
 import time
+import json
 import logging
 import threading
-from typing import Dict, Any, Optional, List, Tuple
+import fcntl
+from datetime import datetime
+from typing import Dict, Any, Optional, List, Tuple, IO
 from pathlib import Path
 import pandas as pd
 import subprocess
 import zipfile, shutil
 
 from nanometa_live.core.utils.file_utils import check_command_exists
-from nanometa_live.core.workflow.snakemake_manager import SnakemakeManager
+from nanometa_live.core.workflow.nextflow_manager import NextflowManager
 from nanometa_live.core.utils.database_utils import download_and_prepare_kraken_database
 from nanometa_live.core.utils.data_utils import fetch_species_data, test_gtdb_api_directly
 
 
-def _adapt_boolean_for_snakemake(config):
-    """
-    Convert boolean parameters to the format expected by the Snakefile.
-
-    Args:
-        config: Configuration dictionary to adapt
-
-    Returns:
-        Modified configuration with adapted boolean values
-    """
-    # Create a copy to prevent modifying the original
-    adapted_config = dict(config)
-
-    # Convert kraken_memory_mapping to the expected flag format for CLI
-    if "kraken_memory_mapping" in adapted_config:
-        adapted_config["kraken_memory_mapping"] = "--memory-mapping" if adapted_config["kraken_memory_mapping"] else ""
-
-    # Convert remove_temp_files to "yes"/"no" format for Snakemake onsuccess rule
-    if "remove_temp_files" in adapted_config:
-        adapted_config["remove_temp_files"] = "yes" if adapted_config["remove_temp_files"] else "no"
-
-    return adapted_config
-
-
 class BackendManager:
-    """Manages backend processes for Nanometa Live."""
+    """Manages backend processes for Nanometa Live using nanometanf pipeline."""
 
     def __init__(self, data_dir: str):
         """
@@ -60,20 +39,212 @@ class BackendManager:
         """
         self.data_dir = data_dir
         self.log_dir = os.path.join(data_dir, "logs")
-        self.snakemake_manager = SnakemakeManager(data_dir)
+        self.workflow_manager = NextflowManager(data_dir)  # Using NextflowManager
         self.config = None
         self.status_thread = None
+        self._status_lock = threading.Lock()  # Thread safety for status updates
+        self._prep_status_lock = threading.Lock()  # Thread safety for prep_status updates
+        self._lock_fd: Optional[IO] = None  # File lock descriptor for multi-user safety
+        self._lock_file_path: Optional[str] = None  # Path to lock file
         self.status = {
             "running": False,
             "pipeline_status": "idle",
             "files_processed": 0,
             "files_waiting": 0,
+            "current_batch": 0,
+            "processes_running": 0,
+            "processes_complete": 0,
             "last_update": None,
+            "start_time": None,
             "errors": [],
         }
 
         # Create logs directory
         os.makedirs(self.log_dir, exist_ok=True)
+
+        logging.info("BackendManager initialized with NextflowManager")
+
+    # Blocked path prefixes for security
+    BLOCKED_PATH_PREFIXES = [
+        "/etc", "/usr", "/var", "/root", "/proc", "/sys", "/dev",
+        "/boot", "/sbin", "/bin", "/lib", "/lib64"
+    ]
+
+    @staticmethod
+    def _validate_path(
+        path: str,
+        description: str = "path",
+        must_exist: bool = True,
+        allow_creation: bool = False
+    ) -> str:
+        """
+        Validate a path before using it in subprocess calls.
+
+        Security checks:
+        - Path traversal detection (..)
+        - Blocked system directories
+        - Path resolution to absolute path
+
+        Args:
+            path: Path to validate
+            description: Description for error messages
+            must_exist: If True, path must exist (default True for input paths)
+            allow_creation: If True, allow paths that don't exist (for output dirs)
+
+        Returns:
+            Resolved absolute path if valid
+
+        Raises:
+            ValueError: If path fails validation
+        """
+        if not path or not path.strip():
+            raise ValueError(f"Empty {description} provided")
+
+        # Strip whitespace
+        path = path.strip()
+
+        # Check for path traversal attempts
+        if ".." in path:
+            logging.error(f"Path traversal detected in {description}: {path}")
+            raise ValueError(
+                f"Path traversal detected in {description}. "
+                f"Paths containing '..' are not allowed for security reasons."
+            )
+
+        # Resolve to absolute path
+        try:
+            resolved = os.path.abspath(os.path.expanduser(path))
+        except Exception as e:
+            raise ValueError(f"Invalid {description}: {e}")
+
+        # Check against blocked prefixes
+        for prefix in BackendManager.BLOCKED_PATH_PREFIXES:
+            if resolved.startswith(prefix):
+                logging.error(f"Blocked path prefix detected in {description}: {resolved}")
+                raise ValueError(
+                    f"Access to system directory '{prefix}' is not allowed for {description}. "
+                    f"Please use a path in your home directory or designated data directories."
+                )
+
+        # Check existence
+        if must_exist and not allow_creation:
+            if not os.path.exists(resolved):
+                raise ValueError(f"{description} does not exist: {resolved}")
+
+        # For output paths that can be created, check parent exists
+        if allow_creation and not os.path.exists(resolved):
+            parent = os.path.dirname(resolved)
+            if parent and not os.path.exists(parent):
+                raise ValueError(
+                    f"Parent directory for {description} does not exist: {parent}"
+                )
+
+        logging.debug(f"Path validated for {description}: {resolved}")
+        return resolved
+
+    @staticmethod
+    def _validate_path_for_output(path: str, description: str = "output path") -> str:
+        """
+        Validate a path intended for output (may not exist yet).
+
+        Args:
+            path: Path to validate
+            description: Description for error messages
+
+        Returns:
+            Resolved absolute path if valid
+        """
+        return BackendManager._validate_path(
+            path, description, must_exist=False, allow_creation=True
+        )
+
+    def _acquire_lock(self, results_dir: str) -> Tuple[bool, str]:
+        """
+        Acquire exclusive lock on results directory to prevent multi-user collisions.
+
+        Uses file-based locking (fcntl) to ensure only one pipeline can write
+        to a given results directory at a time.
+
+        Args:
+            results_dir: Path to the results directory to lock
+
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        lock_file = os.path.join(results_dir, ".nanometa.lock")
+        self._lock_file_path = lock_file
+
+        try:
+            # Create/open lock file
+            self._lock_fd = open(lock_file, 'w')
+
+            # Try to acquire exclusive, non-blocking lock
+            fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+            # Write lock info for debugging
+            lock_info = {
+                "pid": os.getpid(),
+                "hostname": os.uname().nodename,
+                "user": os.environ.get("USER", "unknown"),
+                "acquired_at": datetime.now().isoformat(),
+                "data_dir": self.data_dir
+            }
+            self._lock_fd.write(json.dumps(lock_info, indent=2))
+            self._lock_fd.flush()
+
+            logging.info(f"Acquired lock on results directory: {results_dir}")
+            return True, "Lock acquired successfully"
+
+        except BlockingIOError:
+            # Another process has the lock
+            existing_info = ""
+            try:
+                with open(lock_file, 'r') as f:
+                    existing_info = f.read()
+            except Exception:
+                pass
+
+            error_msg = (
+                f"Another pipeline is already running in this directory. "
+                f"Lock file: {lock_file}"
+            )
+            if existing_info:
+                error_msg += f"\nLock info: {existing_info}"
+
+            logging.error(error_msg)
+            self._lock_fd = None
+            return False, error_msg
+
+        except Exception as e:
+            logging.error(f"Error acquiring lock: {e}")
+            if self._lock_fd:
+                self._lock_fd.close()
+                self._lock_fd = None
+            return False, f"Error acquiring lock: {e}"
+
+    def _release_lock(self) -> None:
+        """
+        Release the exclusive lock on results directory.
+
+        Safe to call even if no lock is held.
+        """
+        if self._lock_fd:
+            try:
+                fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_UN)
+                self._lock_fd.close()
+                logging.info("Released lock on results directory")
+            except Exception as e:
+                logging.warning(f"Error releasing lock: {e}")
+            finally:
+                self._lock_fd = None
+
+        # Clean up lock file
+        if self._lock_file_path and os.path.exists(self._lock_file_path):
+            try:
+                os.remove(self._lock_file_path)
+            except OSError:
+                pass  # File may already be removed
+            self._lock_file_path = None
 
     def setup_project(self, config: Dict[str, Any]) -> Tuple[bool, str]:
         """Set up a project with the given configuration."""
@@ -107,32 +278,58 @@ class BackendManager:
 
         os.makedirs(main_dir, exist_ok=True)
 
-        # Create subdirectories
-        for subdir in [
-            "kraken_cumul", "qc_data", "fastp_reports", "validation_fastas",
-            "blast_result_files", "kraken_results", "fastp_filtered", "reports",
-        ]:
-            os.makedirs(os.path.join(main_dir, subdir), exist_ok=True)
-
-        # Adapt boolean values for Snakefile
-        yaml_config = _adapt_boolean_for_snakemake(self.config)
-
-        # Write configuration to project directory
-        config_path = os.path.join(main_dir, "config.yaml")
+        # Note: nanometanf creates its own output structure, but we keep config here
+        # Write configuration to project directory (JSON format for Nextflow)
+        config_path = os.path.join(main_dir, "config.json")
         with open(config_path, "w") as f:
-            import yaml
-            yaml.safe_dump(yaml_config, f, default_flow_style=False, sort_keys=False)
+            json.dump(self.config, f, indent=2)
 
-        # Set up Snakemake workflow
-        success, message = self.snakemake_manager.setup(config_path)
+        # Update pipeline source if specified in config
+        pipeline_source = self.config.get("pipeline_source", "remote:main")
+        self.workflow_manager.set_pipeline_source(pipeline_source)
+
+        # Set up Nextflow workflow
+        success, message = self.workflow_manager.setup(config_path)
         if not success:
             return False, message
 
+        logging.info(f"Project set up successfully in {main_dir}")
         return True, f"Project set up successfully in {main_dir}"
 
-    def start(self) -> Tuple[bool, str]:
+    def can_resume(self) -> bool:
+        """
+        Check if a previous run can be resumed.
+
+        Returns:
+            True if work directory contains resumable state
+        """
+        work_dir = os.path.join(self.data_dir, "work")
+        if not os.path.exists(work_dir):
+            return False
+
+        # Check for Nextflow cache files (indicates resumable state)
+        # Nextflow stores task cache in .nextflow/ and work/
+        nextflow_cache = os.path.join(self.data_dir, ".nextflow")
+        has_cache = os.path.exists(nextflow_cache)
+
+        # Also check for any completed tasks in work directory
+        has_work = any(
+            os.path.isdir(os.path.join(work_dir, d))
+            for d in os.listdir(work_dir)
+            if len(d) == 2  # Nextflow work dirs are 2-char hex prefixes
+        )
+
+        return has_cache or has_work
+
+    def start(self, profile: str = None, resume: bool = False) -> Tuple[bool, str]:
         """
         Start the backend processes.
+
+        Args:
+            profile: Nextflow profile to use (docker, singularity, conda).
+                     If None, uses the value from config or defaults to 'docker'.
+            resume: Whether to resume from a previous run (uses Nextflow -resume flag).
+                    When True, Nextflow will reuse cached results from prior execution.
 
         Returns:
             Tuple of (success, message)
@@ -143,27 +340,46 @@ class BackendManager:
         if not self.config:
             return False, "No configuration loaded"
 
+        # Check if resume is requested but not possible
+        if resume and not self.can_resume():
+            logging.warning("Resume requested but no previous run found. Starting fresh.")
+            resume = False
+
         # Set up the project
         success, message = self.setup_project(self.config)
         if not success:
             return False, message
 
-        # Start the Snakemake workflow
-        cores = self.config.get("snakemake_cores", 1)
-        success, message = self.snakemake_manager.start(cores=cores)
+        # Acquire exclusive lock on results directory to prevent multi-user collisions
+        results_dir = self.config.get("main_dir", self.data_dir)
+        lock_success, lock_message = self._acquire_lock(results_dir)
+        if not lock_success:
+            return False, lock_message
+
+        # Get profile from config if not explicitly passed
+        if profile is None:
+            profile = self.config.get("pipeline_profile", "docker")
+
+        # Start the Nextflow workflow
+        cores = self.config.get("snakemake_cores", None)  # Keep param name for compatibility
+        success, message = self.workflow_manager.start(profile=profile, cores=cores, resume=resume)
         if not success:
+            self._release_lock()  # Release lock on failure
             return False, message
 
-        # Mark as running
-        self.status["running"] = True
-        self.status["pipeline_status"] = "running"
-        self.status["last_update"] = time.time()
+        # Mark as running with start time for elapsed time tracking (thread-safe)
+        with self._status_lock:
+            self.status["running"] = True
+            self.status["pipeline_status"] = "running"
+            self.status["start_time"] = datetime.now().isoformat()
+            self.status["last_update"] = time.time()
 
         # Start status monitoring thread
         self.status_thread = threading.Thread(target=self._monitor_status, daemon=True)
         self.status_thread.start()
 
-        return True, "Backend started successfully"
+        logging.info(f"Backend started successfully with profile: {profile}")
+        return True, f"Backend started successfully with profile: {profile}"
 
     def stop(self) -> Tuple[bool, str]:
         """
@@ -175,16 +391,23 @@ class BackendManager:
         if not self.status.get("running"):
             return False, "Backend is not running"
 
-        # Stop the Snakemake workflow
-        success, message = self.snakemake_manager.stop()
+        # Stop the Nextflow workflow
+        success, message = self.workflow_manager.stop()
         if not success:
+            # Still release lock even if stop fails
+            self._release_lock()
             return False, message
 
-        # Mark as stopped
-        self.status["running"] = False
-        self.status["pipeline_status"] = "stopped"
-        self.status["last_update"] = time.time()
+        # Release exclusive lock on results directory
+        self._release_lock()
 
+        # Mark as stopped (thread-safe)
+        with self._status_lock:
+            self.status["running"] = False
+            self.status["pipeline_status"] = "stopped"
+            self.status["last_update"] = time.time()
+
+        logging.info("Backend stopped successfully")
         return True, "Backend stopped successfully"
 
     def get_status(self) -> Dict[str, Any]:
@@ -192,35 +415,48 @@ class BackendManager:
         Get the current status of the backend.
 
         Returns:
-            Dictionary with status information
+            Dictionary with status information including pipeline stages
         """
-        # Update with Snakemake status
-        snakemake_status = self.snakemake_manager.get_status()
+        # Update with Nextflow workflow manager status
+        workflow_status = self.workflow_manager.get_status()
 
-        # Update pipeline status based on Snakemake status
-        if snakemake_status.get("running"):
-            self.status["pipeline_status"] = "running"
-        elif len(snakemake_status.get("errors", [])) > 0:
-            self.status["pipeline_status"] = "error"
-            self.status["errors"].extend(snakemake_status.get("errors", []))
-        elif self.status.get("running"):
-            self.status["pipeline_status"] = "stopping"
-        else:
-            self.status["pipeline_status"] = "stopped"
+        # Thread-safe status update
+        with self._status_lock:
+            # Update pipeline status based on workflow status
+            if workflow_status.get("running"):
+                self.status["pipeline_status"] = "running"
+            elif len(workflow_status.get("errors", [])) > 0:
+                self.status["pipeline_status"] = "error"
+                self.status["errors"].extend(workflow_status.get("errors", []))
+            elif self.status.get("running"):
+                self.status["pipeline_status"] = "stopping"
+            else:
+                self.status["pipeline_status"] = "stopped"
 
-        # If we're running, update the file counts
-        if self.status.get("running") and self.config:
-            self._update_file_counts()
+            # Update process and batch information from workflow manager
+            self.status["processes_running"] = workflow_status.get("processes_running", 0)
+            self.status["processes_complete"] = workflow_status.get("processes_complete", 0)
+            self.status["files_processed"] = workflow_status.get("files_processed", 0)
+            self.status["current_batch"] = workflow_status.get("current_batch", 0)
 
-        return self.status
+            # Update stage-level tracking for dashboard display
+            self.status["stages"] = workflow_status.get("stages", [])
+            self.status["current_stage"] = workflow_status.get("current_stage", None)
+            self.status["stage_progress"] = workflow_status.get("stage_progress", {})
+            self.status["processes_failed"] = workflow_status.get("processes_failed", 0)
+            self.status["total_processes"] = workflow_status.get("total_processes", 0)
+
+            # If we're running, update additional file counts
+            if self.status.get("running") and self.config:
+                self._update_file_counts()
+
+            # Return a copy to prevent external modification
+            return dict(self.status)
 
     def _update_file_counts(self):
         """Update the file processing counts from the file system."""
         try:
             nanopore_dir = self.config.get("nanopore_output_directory", "")
-            qc_file = os.path.join(
-                self.config.get("main_dir", ""), "qc_data/cumul_qc.txt"
-            )
 
             # Count files in nanopore directory
             waiting_files = 0
@@ -233,63 +469,107 @@ class BackendManager:
                     ]
                 )
 
-            # Count processed files from QC data
-            processed_files = 0
-            if os.path.exists(qc_file):
-                with open(qc_file, "r") as f:
-                    processed_files = sum(1 for _ in f)
-
-            # Update status
+            # Update status with waiting files
+            # Processed files comes from workflow_manager status
             self.status["files_waiting"] = waiting_files
-            self.status["files_processed"] = processed_files
 
         except Exception as e:
             logging.error(f"Error updating file counts: {e}")
 
     def _monitor_status(self):
         """Monitor the status of the backend processes in a separate thread."""
+        logging.info("Status monitoring thread started")
+
         while self.status.get("running"):
-            # Get Snakemake status
-            snakemake_status = self.snakemake_manager.get_status()
+            try:
+                # Get workflow manager status
+                workflow_status = self.workflow_manager.get_status()
 
-            # Update status based on Snakemake status
-            if (
-                not snakemake_status.get("running")
-                and len(snakemake_status.get("errors", [])) > 0
-            ):
-                self.status["pipeline_status"] = "error"
-                self.status["errors"].extend(snakemake_status.get("errors", []))
-                self.status["running"] = False
+                # Thread-safe status update
+                with self._status_lock:
+                    # Update status based on workflow status
+                    if (
+                        not workflow_status.get("running")
+                        and len(workflow_status.get("errors", [])) > 0
+                    ):
+                        self.status["pipeline_status"] = "error"
+                        self.status["errors"].extend(workflow_status.get("errors", []))
+                        self.status["running"] = False
+                        logging.error("Pipeline encountered errors, stopping")
 
-            # Update file counts
-            self._update_file_counts()
+                    # Update process information
+                    self.status["processes_running"] = workflow_status.get("processes_running", 0)
+                    self.status["processes_complete"] = workflow_status.get("processes_complete", 0)
+                    self.status["files_processed"] = workflow_status.get("files_processed", 0)
+                    self.status["current_batch"] = workflow_status.get("current_batch", 0)
 
-            # Update last update time
-            self.status["last_update"] = time.time()
+                    # Update file counts
+                    self._update_file_counts()
 
-            # Sleep for a bit
-            time.sleep(5)
+                    # Update last update time
+                    self.status["last_update"] = time.time()
+
+                # Sleep for a bit
+                time.sleep(5)
+
+            except Exception as e:
+                logging.error(f"Error in monitoring thread: {e}")
+                time.sleep(5)
+
+        # Release lock when monitoring thread exits (pipeline completed or stopped)
+        self._release_lock()
+        logging.info("Status monitoring thread stopped")
 
     def _update_progress(self, progress: int, message: str):
         """
         Update preparation progress.
         This is a helper method for callbacks.
+        Thread-safe: uses _prep_status_lock.
         """
-        # Calculate the actual progress value based on the stage
-        if self.prep_status["progress"] < 30:
-            # We're in the database preparation stage (0-30%)
-            self.prep_status["progress"] = progress
-        else:
-            # We're in a later stage, adjust progress accordingly
-            self.prep_status["progress"] = 30 + int(progress * 0.7)
+        with self._prep_status_lock:
+            # Calculate the actual progress value based on the stage
+            if self.prep_status["progress"] < 30:
+                # We're in the database preparation stage (0-30%)
+                self.prep_status["progress"] = progress
+            else:
+                # We're in a later stage, adjust progress accordingly
+                self.prep_status["progress"] = 30 + int(progress * 0.7)
 
-        self.prep_status["message"] = message
-        self.prep_status["last_update"] = time.time()
+            self.prep_status["message"] = message
+            self.prep_status["last_update"] = time.time()
+
+    def _update_prep_status(
+        self,
+        message: Optional[str] = None,
+        progress: Optional[int] = None,
+        running: Optional[bool] = None,
+        error: Optional[str] = None
+    ):
+        """
+        Thread-safe helper to update prep_status fields.
+
+        Args:
+            message: Status message to set (optional)
+            progress: Progress percentage 0-100 (optional)
+            running: Running state (optional)
+            error: Error message to append to errors list (optional)
+        """
+        with self._prep_status_lock:
+            if message is not None:
+                self.prep_status["message"] = message
+            if progress is not None:
+                self.prep_status["progress"] = progress
+            if running is not None:
+                self.prep_status["running"] = running
+            if error is not None:
+                self.prep_status["errors"].append(error)
+            self.prep_status["last_update"] = time.time()
 
     def handle_external_kraken_database(self):
         """
         Check for and handle external Kraken2 database if specified in config.
         This method should be called from _run_data_preparation.
+        Thread-safe: uses _update_prep_status() for status updates.
         """
         try:
             config = self.config
@@ -299,9 +579,10 @@ class BackendManager:
             external_db_info = config.get("external_kraken2_info", {})
 
             if external_db_key and external_db_key in external_db_info:
-                self.prep_status["message"] = f"Checking external Kraken2 database: {external_db_key}"
-                self.prep_status["progress"] = 10
-                self.prep_status["last_update"] = time.time()
+                self._update_prep_status(
+                    message=f"Checking external Kraken2 database: {external_db_key}",
+                    progress=10
+                )
 
                 # Prepare database folders
                 kraken_db_folder = os.path.join(self.data_dir, "kraken2_databases")
@@ -316,11 +597,12 @@ class BackendManager:
                 )
 
                 if not success:
-                    self.prep_status["errors"].append(message)
-                    self.prep_status["message"] = f"Error: {message}"
-                    self.prep_status["progress"] = 100
-                    self.prep_status["running"] = False
-                    self.prep_status["last_update"] = time.time()
+                    self._update_prep_status(
+                        message=f"Error: {message}",
+                        progress=100,
+                        running=False,
+                        error=message
+                    )
                     return False
 
                 # Update configuration with new database path
@@ -334,9 +616,10 @@ class BackendManager:
                     config["kraken_taxonomy"] = kraken_taxonomy
                     self.config = config
 
-                    self.prep_status["message"] = f"Successfully prepared external Kraken2 database: {external_db_key}"
-                    self.prep_status["progress"] = 30
-                    self.prep_status["last_update"] = time.time()
+                    self._update_prep_status(
+                        message=f"Successfully prepared external Kraken2 database: {external_db_key}",
+                        progress=30
+                    )
 
                 return True
 
@@ -344,11 +627,12 @@ class BackendManager:
 
         except Exception as e:
             error_msg = f"Error handling external Kraken2 database: {str(e)}"
-            self.prep_status["errors"].append(error_msg)
-            self.prep_status["message"] = f"Error: {error_msg}"
-            self.prep_status["progress"] = 100
-            self.prep_status["running"] = False
-            self.prep_status["last_update"] = time.time()
+            self._update_prep_status(
+                message=f"Error: {error_msg}",
+                progress=100,
+                running=False,
+                error=error_msg
+            )
             return False
 
     def prepare_data(self) -> Tuple[bool, str]:
@@ -399,9 +683,10 @@ class BackendManager:
     def get_preparation_status(self) -> Dict[str, Any]:
         """
         Get the current status of data preparation.
+        Thread-safe: uses _prep_status_lock.
 
         Returns:
-            Dictionary with preparation status information
+            Dictionary with preparation status information (copy to prevent external modification)
         """
         if not hasattr(self, 'prep_status'):
             return {
@@ -411,7 +696,9 @@ class BackendManager:
                 "errors": [],
                 "last_update": None
             }
-        return self.prep_status
+        # Return a copy to prevent external modification
+        with self._prep_status_lock:
+            return dict(self.prep_status)
 
     def _run_data_preparation(self):
         """Run data preparation in a background thread."""
@@ -425,17 +712,19 @@ class BackendManager:
 
             # Validate Kraken database
             if not kraken_db:
-                self.prep_status["running"] = False
-                self.prep_status["errors"].append("Kraken database path not specified")
-                self.prep_status["message"] = "Error: Kraken database path not specified"
-                self.prep_status["progress"] = 100
+                self._update_prep_status(
+                    message="Error: Kraken database path not specified",
+                    progress=100, running=False,
+                    error="Kraken database path not specified"
+                )
                 return
 
             if not os.path.exists(kraken_db):
-                self.prep_status["running"] = False
-                self.prep_status["errors"].append(f"Kraken database directory not found: {kraken_db}")
-                self.prep_status["message"] = f"Error: Kraken database directory not found: {kraken_db}"
-                self.prep_status["progress"] = 100
+                self._update_prep_status(
+                    message=f"Error: Kraken database directory not found: {kraken_db}",
+                    progress=100, running=False,
+                    error=f"Kraken database directory not found: {kraken_db}"
+                )
                 return
 
             # Check if it's a valid Kraken database
@@ -443,19 +732,21 @@ class BackendManager:
             missing_files = [f for f in required_files if not os.path.exists(os.path.join(kraken_db, f))]
 
             if missing_files:
-                self.prep_status["running"] = False
                 missing_str = ", ".join(missing_files)
-                self.prep_status["errors"].append(f"Invalid Kraken2 database: missing files {missing_str}")
-                self.prep_status["message"] = f"Error: Invalid Kraken2 database: missing files {missing_str}"
-                self.prep_status["progress"] = 100
+                self._update_prep_status(
+                    message=f"Error: Invalid Kraken2 database: missing files {missing_str}",
+                    progress=100, running=False,
+                    error=f"Invalid Kraken2 database: missing files {missing_str}"
+                )
                 return
 
             # Validate species list
             if not species_list and not any(s.get("taxid") for s in config.get("species_of_interest", [])):
-                self.prep_status["running"] = False
-                self.prep_status["errors"].append("No species of interest defined")
-                self.prep_status["message"] = "Error: No species of interest defined. Please add species in the Configuration tab."
-                self.prep_status["progress"] = 100
+                self._update_prep_status(
+                    message="Error: No species of interest defined. Please add species in the Configuration tab.",
+                    progress=100, running=False,
+                    error="No species of interest defined"
+                )
                 return
 
             # STEP 1.5: Check for external Kraken2 database
@@ -463,9 +754,10 @@ class BackendManager:
                 return  # Error occurred during database handling
 
             # STEP 2: Extract taxonomy IDs from Kraken database
-            self.prep_status["message"] = "Extracting taxonomy IDs from Kraken database..."
-            self.prep_status["progress"] = 10
-            self.prep_status["last_update"] = time.time()
+            self._update_prep_status(
+                message="Extracting taxonomy IDs from Kraken database...",
+                progress=10
+            )
 
             # Create data directories
             data_dir = os.path.join(main_dir, "data-files")
@@ -476,24 +768,30 @@ class BackendManager:
 
             if not os.path.exists(inspect_file):
                 try:
-                    self.prep_status["message"] = "Running kraken2-inspect..."
-                    self.prep_status["progress"] = 20
-                    self.prep_status["last_update"] = time.time()
+                    self._update_prep_status(
+                        message="Running kraken2-inspect...",
+                        progress=20
+                    )
 
-                    cmd = ["kraken2-inspect", "--db", kraken_db]
+                    # Validate kraken_db path before subprocess call
+                    self._validate_path(kraken_db, "Kraken database path")
+
+                    cmd = ["kraken2-inspect", "--db", os.path.abspath(kraken_db)]
                     with open(inspect_file, 'w') as f:
                         proc = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, check=True)
                 except subprocess.CalledProcessError as e:
-                    self.prep_status["running"] = False
-                    self.prep_status["errors"].append(f"Error running kraken2-inspect: {e.stderr.decode() if e.stderr else str(e)}")
-                    self.prep_status["message"] = f"Error running kraken2-inspect. Check if Kraken2 is properly installed."
-                    self.prep_status["progress"] = 100
+                    self._update_prep_status(
+                        message="Error running kraken2-inspect. Check if Kraken2 is properly installed.",
+                        progress=100, running=False,
+                        error=f"Error running kraken2-inspect: {e.stderr.decode() if e.stderr else str(e)}"
+                    )
                     return
 
             # Parse the inspect file to extract taxonomy IDs
-            self.prep_status["message"] = "Parsing taxonomy information..."
-            self.prep_status["progress"] = 30
-            self.prep_status["last_update"] = time.time()
+            self._update_prep_status(
+                message="Parsing taxonomy information...",
+                progress=30
+            )
 
             # Define taxonomic level mappings
             level_mappings = {
@@ -525,16 +823,18 @@ class BackendManager:
                                     if species and species.lower() in name.lower():
                                         species_taxids[species] = taxid
             except Exception as e:
-                self.prep_status["running"] = False
-                self.prep_status["errors"].append(f"Error parsing inspect file: {e}")
-                self.prep_status["message"] = f"Error parsing taxonomy data: {str(e)}"
-                self.prep_status["progress"] = 100
+                self._update_prep_status(
+                    message=f"Error parsing taxonomy data: {str(e)}",
+                    progress=100, running=False,
+                    error=f"Error parsing inspect file: {e}"
+                )
                 return
 
             # Update config with taxonomy IDs
-            self.prep_status["message"] = "Updating configuration with taxonomy IDs..."
-            self.prep_status["progress"] = 40
-            self.prep_status["last_update"] = time.time()
+            self._update_prep_status(
+                message="Updating configuration with taxonomy IDs...",
+                progress=40
+            )
 
             updated_species = []
             matched_species_count = 0
@@ -560,23 +860,25 @@ class BackendManager:
 
             # Check if we matched any species
             if matched_species_count == 0:
-                self.prep_status["running"] = False
-                self.prep_status["errors"].append("No species matched in the database. Check species names.")
-                self.prep_status["message"] = "Error: No species matched in the database. Check species names."
-                self.prep_status["progress"] = 100
-                self.prep_status["last_update"] = time.time()
+                self._update_prep_status(
+                    message="Error: No species matched in the database. Check species names.",
+                    progress=100, running=False,
+                    error="No species matched in the database. Check species names."
+                )
                 return
             else:
-                self.prep_status["message"] = f"Found taxonomy IDs for {matched_species_count} out of {len(config.get('species_of_interest', []))} species."
-                self.prep_status["progress"] = 45
-                self.prep_status["last_update"] = time.time()
+                self._update_prep_status(
+                    message=f"Found taxonomy IDs for {matched_species_count} out of {len(config.get('species_of_interest', []))} species.",
+                    progress=45
+                )
 
             self.config["species_of_interest"] = updated_species
 
             # STEP 3: Prepare directories for genome data
-            self.prep_status["message"] = "Setting up directories for genome data..."
-            self.prep_status["progress"] = 45
-            self.prep_status["last_update"] = time.time()
+            self._update_prep_status(
+                message="Setting up directories for genome data...",
+                progress=45
+            )
 
             # Create data directories
             data_dir = os.path.join(main_dir, "data-files")
@@ -585,9 +887,10 @@ class BackendManager:
             os.makedirs(genomes_dir, exist_ok=True)
 
             # STEP 4: Check which genomes need to be downloaded
-            self.prep_status["message"] = "Checking for missing genome files..."
-            self.prep_status["progress"] = 50
-            self.prep_status["last_update"] = time.time()
+            self._update_prep_status(
+                message="Checking for missing genome files...",
+                progress=50
+            )
 
             # Create a dictionary mapping species names to taxonomy IDs
             # FIXED: Make sure to include all species with valid taxids, even newly found ones
@@ -607,9 +910,10 @@ class BackendManager:
 
             # STEP 5: Download missing genomes using GTDB API
             # Modified: Always proceed to download section, but with proper handling for empty list
-            self.prep_status["message"] = f"Found {len(missing_species)} missing genomes. Preparing to download..."
-            self.prep_status["progress"] = 55
-            self.prep_status["last_update"] = time.time()
+            self._update_prep_status(
+                message=f"Found {len(missing_species)} missing genomes. Preparing to download...",
+                progress=55
+            )
 
 
             # STEP 5: Download missing genomes using GTDB API
@@ -702,67 +1006,114 @@ class BackendManager:
 
                     # Extract accessions for download
                     if df is not None and not df.empty and "GID" in df.columns:
-                        self.prep_status["message"] = "Preparing to download genomes from NCBI..."
-                        self.prep_status["progress"] = 60
-                        self.prep_status["last_update"] = time.time()
+                        self._update_prep_status(
+                            message="Preparing to download genomes from NCBI...",
+                            progress=60
+                        )
 
                         # Get accessions
                         accessions = df["GID"].tolist()
                         if accessions:
                             logging.info(f"Found {len(accessions)} accessions: {accessions}")
 
-                            # Write accessions to file
-                            accession_file = os.path.join(data_dir, "ncbi_download_list.txt")
-                            with open(accession_file, "w") as f:
-                                f.write("\n".join(accessions) + "\n")
+                            # SECURITY: Validate all accessions before using in subprocess
+                            # Genome IDs should be alphanumeric with underscores/dots only
+                            import re
+                            valid_gid_pattern = re.compile(r'^[A-Za-z0-9_.\-]+$')
+                            validated_accessions = []
+                            for acc in accessions:
+                                acc_str = str(acc).strip()
+                                if not valid_gid_pattern.match(acc_str):
+                                    logging.warning(f"Skipping invalid genome ID: {acc_str}")
+                                    continue
+                                if ".." in acc_str or "/" in acc_str or "\\" in acc_str:
+                                    logging.warning(f"Skipping potentially malicious genome ID: {acc_str}")
+                                    continue
+                                validated_accessions.append(acc_str)
 
-                            # Download genomes
-                            self.prep_status["message"] = f"Downloading {len(accessions)} genomes from NCBI..."
-                            self.prep_status["progress"] = 65
-                            self.prep_status["last_update"] = time.time()
-                            download_prefix = "nanometa"
-                            output_zip = os.path.join(data_dir, f"{download_prefix}_ncbi_download.zip")
+                            if not validated_accessions:
+                                self._update_prep_status(
+                                    error="No valid genome IDs found after validation"
+                                )
+                                logging.error("All genome IDs failed validation")
+                            else:
+                                # Write validated accessions to file
+                                accession_file = os.path.join(data_dir, "ncbi_download_list.txt")
+                                # Validate output path
+                                accession_file = self._validate_path_for_output(accession_file, "accession file")
 
-                            # Use datasets command line tool to download genomes
-                            cmd = [
-                                "datasets", "download", "genome", "accession",
-                                "--inputfile", accession_file,
-                                "--filename", output_zip
-                            ]
-                            try:
-                                subprocess.run(cmd, check=True)
+                                with open(accession_file, "w") as f:
+                                    f.write("\n".join(validated_accessions) + "\n")
 
-                                # Decompress and rename
-                                self.prep_status["message"] = "Processing downloaded genomes..."
-                                self.prep_status["progress"] = 75
-                                self.prep_status["last_update"] = time.time()
+                                # Download genomes
+                                self._update_prep_status(
+                                    message=f"Downloading {len(validated_accessions)} genomes from NCBI...",
+                                    progress=65
+                                )
+                                download_prefix = "nanometa"
+                                output_zip = os.path.join(data_dir, f"{download_prefix}_ncbi_download.zip")
+                                # Validate output path
+                                output_zip = self._validate_path_for_output(output_zip, "download zip file")
 
-                                # Extract zip file
-                                with zipfile.ZipFile(output_zip, 'r') as zip_ref:
-                                    zip_ref.extractall(data_dir)
+                                # Use datasets command line tool to download genomes
+                                cmd = [
+                                    "datasets", "download", "genome", "accession",
+                                    "--inputfile", accession_file,
+                                    "--filename", output_zip
+                                ]
+                                try:
+                                    subprocess.run(cmd, check=True)
 
-                                # Rename files based on taxids
-                                for species, taxid in species_to_taxid.items():
-                                    if species in missing_species:
-                                        species_rows = df[df["Species"] == species]
-                                        if not species_rows.empty:
-                                            gid = species_rows.iloc[0]["GID"]
-                                            ncbi_data_dir = os.path.join(data_dir, "ncbi_dataset", "data")
-                                            accession_path = os.path.join(ncbi_data_dir, gid)
+                                    # Decompress and rename
+                                    self._update_prep_status(
+                                        message="Processing downloaded genomes...",
+                                        progress=75
+                                    )
 
-                                            if os.path.isdir(accession_path):
-                                                # Find FNA file
-                                                for filename in os.listdir(accession_path):
-                                                    if filename.endswith(".fna"):
-                                                        source_file = os.path.join(accession_path, filename)
-                                                        target_file = os.path.join(genomes_dir, f"{taxid}.fasta")
-                                                        shutil.copy(source_file, target_file)
-                                                        break
-                            except subprocess.CalledProcessError as e:
-                                self.prep_status["errors"].append(f"Error downloading genomes: {str(e)}")
+                                    # Extract zip file
+                                    with zipfile.ZipFile(output_zip, 'r') as zip_ref:
+                                        zip_ref.extractall(data_dir)
+
+                                    # Rename files based on taxids
+                                    for species, taxid in species_to_taxid.items():
+                                        if species in missing_species:
+                                            species_rows = df[df["Species"] == species]
+                                            if not species_rows.empty:
+                                                gid = str(species_rows.iloc[0]["GID"]).strip()
+
+                                                # SECURITY: Validate GID before using in path
+                                                if not valid_gid_pattern.match(gid):
+                                                    logging.warning(f"Skipping invalid genome ID for {species}: {gid}")
+                                                    continue
+                                                if ".." in gid or "/" in gid or "\\" in gid:
+                                                    logging.warning(f"Skipping path traversal in genome ID for {species}: {gid}")
+                                                    continue
+
+                                                ncbi_data_dir = os.path.join(data_dir, "ncbi_dataset", "data")
+                                                accession_path = os.path.join(ncbi_data_dir, gid)
+
+                                                # SECURITY: Ensure accession_path is within expected directory
+                                                if not os.path.abspath(accession_path).startswith(os.path.abspath(ncbi_data_dir)):
+                                                    logging.warning(f"Path escape detected for {species}: {accession_path}")
+                                                    continue
+
+                                                if os.path.isdir(accession_path):
+                                                    # Find FNA file
+                                                    for filename in os.listdir(accession_path):
+                                                        if filename.endswith(".fna"):
+                                                            source_file = os.path.join(accession_path, filename)
+                                                            target_file = os.path.join(genomes_dir, f"{taxid}.fasta")
+                                                            shutil.copy(source_file, target_file)
+                                                            break
+                                except subprocess.CalledProcessError as e:
+                                    self._update_prep_status(
+                                        error=f"Error downloading genomes: {str(e)}"
+                                    )
                         else:
                             logging.warning("DataFrame has GID column but no accessions found")
-                            self.prep_status["errors"].append("No accessions found for download. Check species names and try again.")
+                            self._update_prep_status(
+                                error="No accessions found for download. Check species names and try again."
+                            )
                     else:
                         if df is None:
                             logging.error("DataFrame is None - API results parsing failed")
@@ -771,18 +1122,21 @@ class BackendManager:
                         else:
                             logging.error(f"GID column missing from DataFrame. Available columns: {df.columns.tolist()}")
 
-                        self.prep_status["errors"].append("Failed to find accessions for download. Check species names and try again.")
-
-                        # Continue with preparation even without genomes
-                        self.prep_status["message"] = "Continuing preparation without genome downloads..."
+                        self._update_prep_status(
+                            message="Continuing preparation without genome downloads...",
+                            error="Failed to find accessions for download. Check species names and try again."
+                        )
 
                 except Exception as e:
-                    self.prep_status["errors"].append(f"Error downloading genomes: {str(e)}")
+                    self._update_prep_status(
+                        error=f"Error downloading genomes: {str(e)}"
+                    )
 
             # STEP 6: Build BLAST databases
-            self.prep_status["message"] = "Building BLAST databases for validation..."
-            self.prep_status["progress"] = 85
-            self.prep_status["last_update"] = time.time()
+            self._update_prep_status(
+                message="Building BLAST databases for validation...",
+                progress=85
+            )
 
             # Check which BLAST databases are missing
             missing_dbs = []
@@ -798,8 +1152,26 @@ class BackendManager:
             if missing_dbs:
                 input_folder = os.path.join(data_dir, "genomes")
                 for taxid in missing_dbs:
-                    file_path = os.path.join(input_folder, f"{taxid}.fasta")
-                    database_name = os.path.join(blast_dir, f"{taxid}.fasta")
+                    # SECURITY: Validate taxid is numeric before using in subprocess
+                    try:
+                        taxid_int = int(taxid)
+                        if taxid_int <= 0:
+                            raise ValueError("Taxid must be positive")
+                        taxid_str = str(taxid_int)  # Ensure clean string
+                    except (ValueError, TypeError) as e:
+                        logging.warning(f"Skipping invalid taxid for BLAST db: {taxid}")
+                        continue
+
+                    file_path = os.path.join(input_folder, f"{taxid_str}.fasta")
+                    database_name = os.path.join(blast_dir, f"{taxid_str}.fasta")
+
+                    # Validate paths before subprocess
+                    try:
+                        file_path = self._validate_path(file_path, "genome file")
+                        database_name = self._validate_path_for_output(database_name, "BLAST database")
+                    except ValueError as e:
+                        logging.warning(f"Path validation failed for taxid {taxid_str}: {e}")
+                        continue
 
                     if os.path.exists(file_path):
                         system_cmd = [
@@ -812,18 +1184,22 @@ class BackendManager:
                         try:
                             subprocess.run(system_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
                         except subprocess.CalledProcessError as e:
-                            self.prep_status["errors"].append(f"Error building BLAST database for {taxid}: {e.stderr.decode() if e.stderr else str(e)}")
+                            self._update_prep_status(
+                                error=f"Error building BLAST database for {taxid_str}: {e.stderr.decode() if e.stderr else str(e)}"
+                            )
 
             # STEP 7: Complete preparation
-            self.prep_status["message"] = "Data preparation completed successfully!"
-            self.prep_status["progress"] = 100
-            self.prep_status["running"] = False
-            self.prep_status["last_update"] = time.time()
+            self._update_prep_status(
+                message="Data preparation completed successfully!",
+                progress=100,
+                running=False
+            )
 
         except Exception as e:
-            self.prep_status["message"] = f"Error: {str(e)}"
-            self.prep_status["progress"] = 100
-            self.prep_status["running"] = False
-            self.prep_status["errors"].append(str(e))
-            self.prep_status["last_update"] = time.time()
+            self._update_prep_status(
+                message=f"Error: {str(e)}",
+                progress=100,
+                running=False,
+                error=str(e)
+            )
 

@@ -123,7 +123,8 @@ class DataProcessor:
                         try:
                             blast_df = pd.read_csv(blast_file, sep="\t", header=None)
                             val_count = blast_df[0].nunique()
-                        except:
+                        except (pd.errors.EmptyDataError, pd.errors.ParserError, KeyError, IndexError) as e:
+                            logging.debug(f"Could not parse BLAST file {blast_file}: {e}")
                             val_count = 0
                     else:
                         val_count = 0
@@ -242,20 +243,16 @@ class DataProcessor:
             top_df["Index"] = range(1, len(top_df) + 1)
             top_df["name"] = top_df["name"].str.strip()
 
-            # Prepare result
-            result_data = []
-            for _, row in top_df.iterrows():
-                result_data.append(
-                    {
-                        "Index": int(row["Index"]),
-                        "Name": row["name"],
-                        "Tax ID": row["taxid"],
-                        "Tax Rank": row["rank"],
-                        "Reads": int(row["reads"]),
-                    }
-                )
+            # Prepare result (vectorized - no iterrows)
+            result_df = pd.DataFrame({
+                "Index": top_df["Index"].astype(int),
+                "Name": top_df["name"],
+                "Tax ID": top_df["taxid"],
+                "Tax Rank": top_df["rank"],
+                "Reads": top_df["reads"].astype(int)
+            })
 
-            return pd.DataFrame(result_data)
+            return result_df
 
         except Exception as e:
             logging.error(f"Error processing top matches: {e}")
@@ -511,8 +508,9 @@ class DataProcessor:
 
                 for level in tax_levels:
                     level_df = df[df["rank"] == level]
-                    for _, row in level_df.iterrows():
-                        name = row["name"].strip()
+                    # Vectorized - extract names as list
+                    names = level_df["name"].str.strip().tolist()
+                    for name in names:
                         if name not in node_map:
                             node_map[name] = node_id
                             node_labels.append(name)
@@ -536,8 +534,12 @@ class DataProcessor:
                         .head(top_n)
                     )
 
-                    for _, lower_row in lower_df.iterrows():
-                        lower_name = lower_row["name"].strip()
+                    # Pre-extract data for faster iteration
+                    lower_names = lower_df["name"].str.strip().tolist()
+                    lower_reads = lower_df["reads"].astype(int).tolist()
+                    lower_indices = lower_df.index.tolist()
+
+                    for lower_name, reads, row_idx in zip(lower_names, lower_reads, lower_indices):
                         lower_id = node_map.get(lower_name)
 
                         if lower_id is None:
@@ -545,7 +547,7 @@ class DataProcessor:
 
                         # Find the parent in the hierarchy
                         parent_idx = None
-                        for j in range(lower_row.name + 1, len(df)):
+                        for j in range(row_idx + 1, len(df)):
                             if df.iloc[j]["rank"] == higher_level:
                                 parent_idx = j
                                 break
@@ -559,7 +561,7 @@ class DataProcessor:
                                     {
                                         "source": parent_id,
                                         "target": lower_id,
-                                        "value": int(lower_row["reads"]),
+                                        "value": reads,
                                     }
                                 )
 
@@ -664,12 +666,15 @@ class DataProcessor:
 
                 return "root"  # Default to root if no parent found
 
-            # Process each row
-            for i, row in filtered_df.iterrows():
-                name = row["name"].strip()
-                parent = find_parent(i, filtered_df)
-                value = row["reads"]
+            # Process each row - pre-extract data for faster iteration
+            # Reset index to ensure find_parent works with positional indices
+            filtered_df = filtered_df.reset_index(drop=True)
+            names = filtered_df["name"].str.strip().tolist()
+            names_full = filtered_df["name"].tolist()  # Keep full names for level calculation
+            reads_vals = filtered_df["reads"].tolist()
 
+            for i, (name, name_full, value) in enumerate(zip(names, names_full, reads_vals)):
+                parent = find_parent(i, filtered_df)
                 taxons.append(name)
                 parents.append(parent)
                 values.append(value)

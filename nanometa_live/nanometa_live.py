@@ -117,6 +117,9 @@ def main():
         config = config_loader.create_default_config()
         logging.info("Created default configuration")
 
+    # Sync CLI port argument to config so GUI shows correct value
+    config["gui_port"] = args.port
+
     # Initialize backend manager (but don't start any processes yet)
     backend_manager = BackendManager(data_dir)
 

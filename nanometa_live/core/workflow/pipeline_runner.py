@@ -11,7 +11,6 @@ import sys
 import time
 import logging
 import subprocess
-import pkg_resources
 from typing import Dict, Any, Optional, List, Tuple
 
 
