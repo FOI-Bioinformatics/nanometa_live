@@ -26,7 +26,7 @@ python -m nanometa_live.app.app --main_dir /tmp/nanometa_test_normal --debug
 - ✅ Dashboard shows green quality indicators
 - ✅ OrganismCard components display with abundance bars
 - ✅ QualityScoreIndicator shows "GOOD" or "EXCELLENT"
-- ✅ Classification visualizations show typical diversity
+- ✅ Taxonomy visualizations show typical diversity
 
 ---
 
@@ -46,7 +46,7 @@ python -m nanometa_live.app.app --main_dir /tmp/nanometa_test_pathogen --debug
 
 **What to Test**:
 - ✅ Alert banner displays for detected pathogens
-- ✅ Pathogen organisms highlighted in Main Results tab
+- ✅ Pathogen organisms highlighted in Organisms tab
 - ✅ OrganismCard shows HIGH confidence for pathogens
 - ✅ Export functionality works (CSV, PDF)
 
@@ -83,7 +83,7 @@ python -m nanometa_live.app.app --main_dir /tmp/nanometa_test_quality --debug
 - [ ] Alerts display when expected (pathogens, low quality)
 - [ ] Sample selector works (if multiple samples)
 
-### Main Results Tab
+### Organisms Tab
 - [ ] **OrganismSummaryCard** displays at top:
   - Total organisms count
   - Total DNA sequences
@@ -117,7 +117,7 @@ python -m nanometa_live.app.app --main_dir /tmp/nanometa_test_quality --debug
 - [ ] Detailed plots collapsible
 - [ ] Help section provides troubleshooting guidance
 
-### Classification Tab
+### Taxonomy Tab
 - [ ] View selector with explanations:
   - Sankey explanation visible when selected
   - Sunburst explanation visible when selected
@@ -249,7 +249,7 @@ Take screenshots for documentation:
    - [ ] Quality issues scenario (red indicators)
    - [ ] Pathogen alert banner
 
-2. **Main Results Tab**:
+2. **Organisms Tab**:
    - [ ] OrganismSummaryCard
    - [ ] OrganismCard grid (top organisms)
    - [ ] Abundance bars visible
@@ -259,7 +259,7 @@ Take screenshots for documentation:
    - [ ] FilteringBreakdownVisual
    - [ ] Color-coded per-sample table
 
-4. **Classification Tab**:
+4. **Taxonomy Tab**:
    - [ ] Sankey diagram
    - [ ] Sunburst chart
    - [ ] Filter options expanded
@@ -308,6 +308,5 @@ If you see this error, ensure you have the latest version of the code with the u
 
 **Testing infrastructure completed**: 2025-10-07
 **Related docs**:
-- `TEST_COVERAGE_SUMMARY.md` - Automated test suite documentation
-- `TAB_IMPLEMENTATION_COMPLETE.md` - Tab modernization summary
-- `TAB_MODERNIZATION_STRATEGY.md` - Design strategy and principles
+- [Developer Guide](developer-guide.md) - Architecture and contributing
+- [User Guide](user-guide.md) - Usage instructions

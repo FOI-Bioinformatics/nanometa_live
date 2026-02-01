@@ -23,6 +23,7 @@
 | [Parser Guide](nanometanf_parser_guide.md) | Output file parsing |
 | [Parser Quick Reference](parser_quick_reference.md) | Common parser operations |
 | [Migration Guide](MIGRATION_GUIDE_V2.md) | Upgrading from v1.x |
+| [Validation Walkthrough](validation-walkthrough-checklist.md) | Validation feature checklist |
 
 ## Archive
 

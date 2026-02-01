@@ -13,6 +13,8 @@ Nanometa Live provides real-time monitoring and visualization of taxonomic class
 - **Interactive Visualizations**: Sankey diagrams and sunburst charts for taxonomic exploration
 - **Multi-sample Support**: Analyze barcoded/multiplexed sequencing runs
 - **Species Tracking**: Configure alerts for organisms of interest
+- **Watchlist System**: Built-in and custom pathogen watchlists with threat levels and action guidance
+- **Validation**: BLAST and minimap2 coverage validation of detected organisms
 - **Quality Control**: Monitor read quality and filtering statistics
 - **GUI-based Control**: Start/stop analysis and configure settings from the web interface
 
@@ -77,19 +79,24 @@ Key settings in the Configuration tab:
 | Tab | Purpose |
 |-----|---------|
 | **Dashboard** | Overview with status indicators and alerts |
-| **Main Results** | Species of interest and top classifications |
-| **QC** | Quality metrics and filtering statistics |
-| **Classification** | Interactive Sankey/Sunburst visualizations |
+| **Organisms** | Detected organisms with abundance and confidence indicators |
+| **Quality Control** | Quality metrics and filtering statistics |
+| **Taxonomy** | Interactive Sankey/Sunburst visualizations |
+| **Validation** | BLAST identity scores and minimap2 coverage plots |
+| **Watchlist** | Pathogen watchlist management and monitoring |
 | **Configuration** | Analysis settings and pipeline control |
+| **Preparation** | Pre-run setup and genome preparation |
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
 | [User Guide](docs/user-guide.md) | Complete usage instructions |
+| [Operator Guide](docs/OPERATOR_GUIDE.md) | Quick reference for lab personnel |
 | [Configuration Reference](docs/configuration.md) | All configuration options |
 | [Developer Guide](docs/developer-guide.md) | Architecture and contributing |
 | [API Reference](docs/api-reference.md) | Parser and data loader APIs |
+| [Migration Guide](docs/MIGRATION_GUIDE_V2.md) | Upgrading from v1.x to v2.0 |
 
 ## Example
 

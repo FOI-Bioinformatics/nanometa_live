@@ -278,6 +278,9 @@ Data stores available in callbacks:
 | `selected-sample` | str | Current sample selection |
 | `available-samples` | list | Detected sample names |
 | `last-update-time` | str | Timestamp of last data refresh |
+| `validation-data-store` | dict | Validation results (BLAST/minimap2) |
+| `taxmap-collection` | dict | Kraken2 taxid mapping data |
+| `watchlist-tab-state` | str | Watchlist UI state trigger |
 
 ### Accessing in Callbacks
 

@@ -694,6 +694,6 @@ species_only = df[df['rank'] == 'S']  # Much smaller DataFrame
 
 ## See Also
 
-- [Nanometa Live Architecture](architecture.md)
-- [Dash Development Guide](dash_development.md)
-- [nanometanf Pipeline Documentation](https://github.com/foi-bioinformatics/nanometanf)
+- [Developer Guide](developer-guide.md)
+- [API Reference](api-reference.md)
+- [nanometanf Pipeline Documentation](https://github.com/FOI-Bioinformatics/nanometanf)

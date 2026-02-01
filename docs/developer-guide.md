@@ -19,37 +19,82 @@ nanometa_live/
 │   ├── app.py              # Main Dash application
 │   ├── callbacks.py        # Core callbacks
 │   ├── components/         # Reusable UI components
-│   │   ├── header.py       # Header with status/timer
+│   │   ├── config_form.py
+│   │   ├── coverage_plots.py
+│   │   ├── header.py
+│   │   ├── modern_components.py
+│   │   ├── organism_components.py
+│   │   ├── pathogen_alert.py
 │   │   ├── sample_selector.py
-│   │   └── ...
+│   │   ├── taxid_mapping_ui.py
+│   │   ├── tooltip_components.py
+│   │   ├── watchlist_manager_ui.py
+│   │   └── watchlist_modal.py
 │   ├── layouts/            # Tab layouts
-│   │   ├── main_layout.py
+│   │   ├── classification_layout.py  # Taxonomy tab
+│   │   ├── config_layout.py
+│   │   ├── dashboard_layout.py
+│   │   ├── main_layout.py           # Organisms tab
+│   │   ├── preparation_layout.py
 │   │   ├── qc_layout.py
-│   │   ├── classification_layout.py
-│   │   └── config_layout.py
+│   │   ├── validation_layout.py
+│   │   └── watchlist_layout.py
 │   ├── tabs/               # Tab callbacks
-│   │   ├── main_tab.py
-│   │   ├── qc_tab.py
 │   │   ├── classification_tab.py
-│   │   └── config_tab.py
+│   │   ├── config_tab.py
+│   │   ├── dashboard_tab.py
+│   │   ├── main_tab.py
+│   │   ├── preparation_tab.py
+│   │   ├── qc_tab.py
+│   │   ├── validation_tab.py
+│   │   └── watchlist_tab.py
+│   ├── utils/              # Callback helpers
+│   │   ├── callback_helpers.py
+│   │   ├── chart_builders.py
+│   │   ├── config_manager.py
+│   │   ├── debounce.py
+│   │   ├── error_handler.py
+│   │   ├── export_utils.py
+│   │   └── plotly_theme.py
 │   └── assets/
 │       └── styles.css
 ├── core/
 │   ├── config/
 │   │   ├── config_loader.py
 │   │   ├── config_validator.py
-│   │   └── parameter_mapping.py
+│   │   ├── parameter_mapping.py
+│   │   ├── pathogen_loader.py
+│   │   └── data/watchlists/    # Built-in watchlist YAML files
 │   ├── parsers/
-│   │   └── ...
+│   │   ├── blast_validation_parser.py
+│   │   ├── nanometanf_parser.py
+│   │   └── paf_coverage_parser.py
+│   ├── taxonomy/
+│   │   ├── database_indexer.py
+│   │   ├── taxid_mapping.py
+│   │   └── taxonomy_api.py
 │   ├── utils/
 │   │   ├── sample_detector.py
 │   │   ├── data_loaders.py
+│   │   ├── genome_manager.py
+│   │   ├── read_extractor.py
+│   │   ├── alert_engine.py
+│   │   ├── diversity_metrics.py
 │   │   └── ...
+│   ├── watchlist/
+│   │   ├── watchlist_loader.py
+│   │   ├── watchlist_manager.py
+│   │   └── taxonomy_matcher.py
 │   └── workflow/
 │       ├── backend_manager.py
-│       └── nextflow_manager.py
+│       ├── nextflow_manager.py
+│       ├── on_demand_validator.py
+│       ├── pipeline_runner.py
+│       └── ...
 └── docs/
 ```
+
+For detailed architecture documentation including data flow, watchlist system, validation system, and genome management, see [CLAUDE.md](../CLAUDE.md).
 
 ### Data Flow
 

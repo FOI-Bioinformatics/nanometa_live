@@ -133,7 +133,7 @@ Click the button in the alert or follow the listed steps.
 1. Click "Generate Report" button (in alerts or top right)
 2. Select PDF or Excel format
 3. Save to your designated location
-4. Review results in Classification tab if needed
+4. Review results in Taxonomy tab if needed
 5. Archive or share report as per protocol
 
 **Time required**: 5 minutes
@@ -159,7 +159,7 @@ Click the button in the alert or follow the listed steps.
 
 **What to do** (IMMEDIATE):
 1. Click "Review Detections" button
-2. Navigate to Classification tab
+2. Navigate to Organisms tab
 3. Verify the organism identification (check read counts)
 4. Click "Generate Report" for detailed species info
 5. Follow your organization's reporting protocol
@@ -210,26 +210,43 @@ Click the button in the alert or follow the listed steps.
 ### Configuration Tab
 - **Purpose**: Set up new analyses
 - **When to use**: Before starting a new run
-- **Key settings**: Database selection, species of interest
+- **Key settings**: Database selection, processing mode
 - **Note**: Usually pre-configured, but verify before critical runs
 
-### Main Results Tab
-- **Purpose**: Detailed classification results
+### Organisms Tab
+- **Purpose**: Detected organisms and classification results
 - **When to use**: After analysis completes
-- **Key info**: Top organisms, abundance charts
+- **Key info**: Organism cards with abundance bars and confidence badges
 - **Export**: Download species lists
 
-### QC (Quality Control) Tab
+### Quality Control Tab
 - **Purpose**: Data quality metrics
 - **When to use**: When quality alerts appear
 - **Key info**: Pass rates, filtering reasons, per-sample breakdown
 - **Use for**: Troubleshooting quality issues
 
-### Classification Tab
+### Taxonomy Tab
 - **Purpose**: Visual organism relationships
 - **When to use**: Understanding complex samples
 - **Key views**: Sankey diagram (flow), Sunburst (hierarchy)
 - **Tip**: Switch between views with radio buttons
+
+### Validation Tab
+- **Purpose**: Verify organism identifications
+- **When to use**: When a detection needs confirmation
+- **Key views**: BLAST identity scores, minimap2 coverage plots
+- **Tip**: Use "Validate" buttons on organism cards to trigger on-demand validation
+
+### Watchlist Tab
+- **Purpose**: Manage which pathogens to monitor
+- **When to use**: Setting up monitoring for specific organisms
+- **Key features**: Built-in watchlists (clinical, foodborne, respiratory, etc.), custom uploads
+- **Tip**: Quick-start buttons let you activate common watchlists with one click
+
+### Preparation Tab
+- **Purpose**: Download reference genomes and prepare BLAST databases
+- **When to use**: Before running validation on new organisms
+- **Key info**: Genome download status, database readiness
 
 ---
 
@@ -252,7 +269,7 @@ Click the button in the alert or follow the listed steps.
 1. **High read counts** (>1000 reads): High confidence identification
 2. **Medium read counts** (100-1000): Likely present, verify if critical
 3. **Low read counts** (<100): Possible contamination or background
-4. **Verify target species**: Always check Classification tab for confirmation
+4. **Verify target species**: Always check Taxonomy tab for confirmation
 
 ### When to Contact Support
 - Red system errors that persist
@@ -351,7 +368,7 @@ Mark when you've successfully completed each task:
 - [ ] Interpret QC statistics
 - [ ] Identify samples needing attention
 - [ ] Follow action guidance for an alert
-- [ ] Export organism list from Classification tab
+- [ ] Export organism list from Taxonomy tab
 
 **Advanced (Optional - 30 minutes)**
 - [ ] Configure species of interest

@@ -19,8 +19,8 @@ Nanometa Live v2.0 introduces a major architectural change: the Snakemake workfl
 - **New (v2.0)**: Nextflow + nanometanf pipeline
 
 ### 2. Configuration Format
-- **Old**: YAML files with Snakemake-specific adaptations
-- **New**: JSON files with direct boolean parameters
+- **Old**: YAML files with Snakemake-specific string flags (e.g., `"--memory-mapping"`, `"yes"`)
+- **New**: YAML files with direct boolean parameters (e.g., `true`, `false`)
 
 ### 3. Output Directory Structure
 - **Old**: Custom Snakemake structure (`kraken_cumul/`, `qc_data/`, `fastp_reports/`)
@@ -80,18 +80,16 @@ remove_temp_files: "yes"                    # String "yes"/"no"
 
 ↓ **Converted to** ↓
 
-```json
-{
-  "kraken_memory_mapping": true,            // Boolean
-  "remove_temp_files": true                  // Boolean
-}
+```yaml
+kraken_memory_mapping: true            # Boolean
+remove_temp_files: true                # Boolean
 ```
 
 ### Manual Migration
 
 If you need to manually update configurations:
 
-**Old Format (v1.x - config.yaml):**
+**Old Format (v1.x):**
 ```yaml
 nanopore_output_directory: /path/to/sequencer
 kraken_db: /path/to/kraken2_db
@@ -102,18 +100,16 @@ snakemake_cores: 4
 check_intervals_seconds: 15
 ```
 
-**New Format (v2.0 - config.json):**
-```json
-{
-  "nanopore_output_directory": "/path/to/sequencer",
-  "kraken_db": "/path/to/kraken2_db",
-  "main_dir": "/path/to/results",
-  "kraken_memory_mapping": true,
-  "blast_validation": true,
-  "snakemake_cores": 4,
-  "check_intervals_seconds": 15,
-  "analysis_name": "My Analysis"
-}
+**New Format (v2.0):**
+```yaml
+nanopore_output_directory: "/path/to/sequencer"
+kraken_db: "/path/to/kraken2_db"
+main_dir: "/path/to/results"
+kraken_memory_mapping: true
+blast_validation: true
+pipeline_cores: 4
+update_interval_seconds: 15
+analysis_name: "My Analysis"
 ```
 
 ## Output Structure Changes
@@ -237,7 +233,7 @@ All Nanometa Live v1.x functionality is preserved in v2.0:
 
 ### Temporary Limitations (v2.0.0)
 1. **Config UI**: GUI still shows "Snakemake Cores" label (functional, just naming)
-2. **Legacy Configs**: Old YAML files auto-convert but save as JSON going forward
+2. **Legacy Configs**: Old YAML files with string flags auto-convert to boolean parameters
 3. **Docker Requirement**: Docker is the default profile (Singularity/Conda available but not yet in GUI)
 
 ### No Longer Supported
@@ -279,7 +275,7 @@ old_report = parse_kraken_report("v1_results/kraken_cumul/kraken_cumul_report.kr
 
 ### Issue: "Configuration not loading"
 **Solution:**
-1. Check config format (JSON not YAML)
+1. Check config format (YAML with boolean parameters)
 2. Verify all paths are absolute
 3. Ensure Kraken2 database has required files (`hash.k2d`, `opts.k2d`, `taxo.k2d`)
 
@@ -367,7 +363,7 @@ A: Yes, nanometanf v1.1.0 supports Dorado basecalling. GUI integration coming in
 
 **Changed:**
 - Backend: Snakemake → Nextflow/nanometanf
-- Config format: YAML → JSON
+- Config format: String flags → native booleans
 - Boolean parameters: Simplified (no more string flags)
 - Output structure: Follows nanometanf conventions
 - Performance: 10-15% faster with better resource usage

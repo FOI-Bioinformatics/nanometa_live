@@ -101,27 +101,44 @@ Overview of your analysis:
 - Sample summary
 - Alerts for species of interest
 
-### Main Results Tab
+### Organisms Tab
 
-Classification results:
-- **Species of Interest**: Organisms you're tracking with read counts
-- **Top Matches**: Most abundant taxa at each taxonomic level
-- **BLAST Validation**: Confirmed identifications (if enabled)
+Detected organisms and classification results:
+- **Organism Cards**: Each detected organism with abundance bars and confidence badges
+- **Summary Card**: Total organisms, DNA sequences, classification rate
+- **Watchlist Matches**: Organisms matching active watchlist entries highlighted
+- **On-Demand Validation**: Validate unexpected organisms with BLAST
 
-### QC Tab
+### Quality Control Tab
 
 Quality control metrics:
+- Quality score indicator with plain-language rating
+- Filtering breakdown visualization
 - Read counts before/after filtering
-- Quality score distributions
-- Per-sample statistics table
+- Per-sample statistics table with color-coded quality
 - Time-series plots of cumulative and per-batch data
 
-### Classification Tab
+### Taxonomy Tab
 
 Interactive taxonomic visualizations:
 - **Sankey Diagram**: Flow visualization of taxonomic hierarchy
 - **Sunburst Chart**: Radial hierarchical view
 - Filters for minimum reads, domains, and taxonomy levels
+
+### Validation Tab
+
+Organism identity verification:
+- **BLAST Sub-tab**: Read-centric validation with identity scores, filtering, and statistics
+- **Coverage Sub-tab**: Genome-centric minimap2 coverage plots (depth, cumulative, histogram)
+- Species selector and mapping quality filters
+
+### Watchlist Tab
+
+Pathogen monitoring management:
+- Browse and activate built-in watchlists (clinical, foodborne, respiratory, etc.)
+- Upload custom watchlist YAML files
+- Toggle individual pathogen entries on/off
+- Kraken2 taxid mapping for database compatibility
 
 ### Configuration Tab
 
@@ -130,6 +147,13 @@ Analysis settings:
 - Kraken2 database selection
 - Processing mode (batch/real-time)
 - Start/stop analysis controls
+
+### Preparation Tab
+
+Pre-run setup:
+- Reference genome downloads for watchlist pathogens
+- BLAST database preparation
+- Genome management status
 
 ## Processing Modes
 
@@ -208,14 +232,11 @@ processing_mode: "realtime"
 sample_handling: "by_barcode"
 update_interval_seconds: 30
 
-species_of_interest:
-  - name: "Escherichia coli"
-    taxid: "562"
-  - name: "Salmonella enterica"
-    taxid: "28901"
-
 pipeline_profile: "docker"
 blast_validation: false
+
+# Watchlists are managed via the Watchlist tab in the GUI
+# Built-in watchlists: clinical_pathogens, foodborne, respiratory, etc.
 ```
 
 ## Tips
