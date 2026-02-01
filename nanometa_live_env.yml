@@ -17,7 +17,6 @@ dependencies:
   - pyyaml >=6.0
   - pytest >=7.2.1
   - tqdm >=4.67.1
-  - snakemake-minimal >=8.30.0
   - setuptools >=67.6.0
   - pip >=23.0.1
   - blast >=2.16.0

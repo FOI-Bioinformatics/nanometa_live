@@ -1,145 +1,137 @@
-# Nanometa Live: Real-time Metagenomic Analysis
+# Nanometa Live
 
-![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)
+Real-time visualization dashboard for Oxford Nanopore metagenomic sequencing analysis.
 
-Nanometa Live is a comprehensive workflow with a user-friendly graphical interface for real-time metagenomic sequencing analysis. It is designed for Oxford Nanopore MinION and Flongle flow cells, utilizing Kraken2 for classification and BLAST for sequence validation.
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 
-## New Streamlined Interface
-
-This updated version of Nanometa Live features a completely redesigned user experience that makes it easier than ever to get started:
-
-- **Single Command Setup**: Start the application with a single `nanometa-live` command
-- **In-App Configuration**: Configure all settings directly within the user interface
-- **Save/Load Configurations**: Save your configurations for future use and quickly switch between projects
-- **Real-time Monitoring**: View analysis progress, quality metrics, and results in real-time
-- **Interactive Visualizations**: Explore your data with dynamic, interactive charts and plots
+Nanometa Live provides real-time monitoring and visualization of taxonomic classification results from nanopore sequencing runs. It integrates with the [nanometanf](https://github.com/FOI-Bioinformatics/nanometanf) Nextflow pipeline for automated analysis.
 
 ## Features
 
-- 📊 **Real-time Visualization**: Dynamic Sankey plots, sunburst charts, and more
-- 🌐 **Offline Support**: Operates without internet connectivity after initial setup
-- 🛠️ **Custom Database Support**: Use your own custom Kraken2 databases
-- 🔍 **Quality Control**: Built-in QC tab for monitoring data quality
-- 🔄 **Automated Analysis**: Continuously processes new data as it becomes available
-
-## Screenshots
-
-![Main View](https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/screenshots/main_tab.png)
-
-![Sankey Plot](https://github.com/FOI-Bioinformatics/nanometa_live/blob/main/screenshots/sankey_plot.png)
+- **Real-time Monitoring**: Watch classification results update as sequencing progresses
+- **Interactive Visualizations**: Sankey diagrams and sunburst charts for taxonomic exploration
+- **Multi-sample Support**: Analyze barcoded/multiplexed sequencing runs
+- **Species Tracking**: Configure alerts for organisms of interest
+- **Quality Control**: Monitor read quality and filtering statistics
+- **GUI-based Control**: Start/stop analysis and configure settings from the web interface
 
 ## Quick Start
 
+### Prerequisites
+
+- Python 3.9+
+- Docker (recommended) or Conda
+- [Nextflow](https://www.nextflow.io/) (for running the analysis pipeline)
+
 ### Installation
 
-#### Option 1: Install with Conda/Mamba (Recommended)
-
 ```bash
-# Create a new environment
-mamba create --name nanometa_live_env
-# Activate the environment
-mamba activate nanometa_live_env
-# Install Nanometa Live
-mamba install -c conda-forge -c bioconda nanometa-live
+# Create and activate environment
+conda create -n nanometa python=3.10
+conda activate nanometa
+
+# Install from source
+git clone https://github.com/FOI-Bioinformatics/nanometa_live.git
+cd nanometa_live
+pip install -e .
 ```
 
-#### Option 2: Install with pip
+### Running the Dashboard
 
+**Visualization mode** (view existing results):
 ```bash
-# Create a virtual environment
-python -m venv nanometa_env
-# Activate the environment
-source nanometa_env/bin/activate
-# Install Nanometa Live
-pip install nanometa-live
+python -m nanometa_live.app --main_dir /path/to/nanometanf/output
 ```
 
-### Running Nanometa Live
-
-Simply run the following command to start the application:
-
+**Full analysis mode** (run pipeline from GUI):
 ```bash
-nanometa-live
+python -m nanometa_live.app --config config.yaml
 ```
 
-This will:
-1. Start the Nanometa Live interface in your default web browser
-2. Load any existing configuration or create a default one
-3. Allow you to configure and start your analysis workflow
+Then open http://localhost:8050 in your browser.
+
+## Usage
+
+### Input Data Formats
+
+Nanometa Live supports multiple input configurations:
+
+| Input Type | Directory Structure | Sample Handling |
+|------------|---------------------|-----------------|
+| Barcoded FASTQ | `barcode01/`, `barcode02/`, ... | Automatic detection |
+| Flat FASTQ | `*.fastq.gz` files | Single sample or per-file |
+| Pipeline Output | nanometanf results directory | Direct visualization |
 
 ### Configuration
 
-In the Configuration tab, you can:
+Key settings in the Configuration tab:
 
-1. Set up your project with a name and description
-2. Specify the Nanopore output directory and Kraken2 database
-3. Add species of interest to track
-4. Adjust performance settings
-5. Save your configuration for future use
+- **Input Directory**: Path to FASTQ files or nanometanf output
+- **Kraken2 Database**: Path to classification database
+- **Processing Mode**: Batch (one-time) or Real-time (continuous monitoring)
+- **Sample Handling**: By barcode, single sample, or per-file
 
-Once configured, click "Start Analysis" to begin processing.
+### Dashboard Tabs
 
-## Usage Guide
+| Tab | Purpose |
+|-----|---------|
+| **Dashboard** | Overview with status indicators and alerts |
+| **Main Results** | Species of interest and top classifications |
+| **QC** | Quality metrics and filtering statistics |
+| **Classification** | Interactive Sankey/Sunburst visualizations |
+| **Configuration** | Analysis settings and pipeline control |
 
-### Main Results Tab
+## Documentation
 
-The Main Results tab displays:
-- Species of interest with read counts
-- Top matches from the analysis
-- Export options for saving results
+| Document | Description |
+|----------|-------------|
+| [User Guide](docs/user-guide.md) | Complete usage instructions |
+| [Configuration Reference](docs/configuration.md) | All configuration options |
+| [Developer Guide](docs/developer-guide.md) | Architecture and contributing |
+| [API Reference](docs/api-reference.md) | Parser and data loader APIs |
 
-### QC Tab
-
-The QC tab provides:
-- Processing statistics
-- Read quality metrics
-- Interactive charts of cumulative and per-batch data
-
-### Sankey Plot Tab
-
-The Sankey Plot tab offers:
-- Hierarchical visualization of taxonomic classifications
-- Filtering options for domains and taxonomic levels
-- Customizable visualization settings
-
-### Sunburst Chart Tab
-
-The Sunburst Chart provides:
-- Radial visualization of taxonomic hierarchy
-- Interactive zooming for detailed exploration
-- Filtering options for minimum read counts
-
-## Advanced Usage
-
-### Running a Simulated Analysis
-
-For testing or demonstration purposes, you can use the built-in simulator:
+## Example
 
 ```bash
-# Simulate Nanopore sequencing output
-nanometa-sim -f reference.fastq.gz -o output_dir -n 100 --num_files 10
+# Run with test data
+python -m nanometa_live.app \
+    --main_dir /path/to/test_data \
+    --port 8050
+
+# The dashboard will:
+# 1. Auto-detect samples from the directory
+# 2. Load Kraken2 classification results
+# 3. Display interactive visualizations
+# 4. Update automatically every 30 seconds
 ```
 
-### Manual Backend Control
+## Requirements
 
-If needed, you can manually control the backend process:
-
-```bash
-# Start only the backend processing
-nanometa-backend --config your_config.yaml
+```
+dash>=2.0.0
+dash-bootstrap-components>=1.0.0
+plotly>=5.0.0
+pandas>=1.3.0
+pyyaml>=5.4
 ```
 
-## Community & Support
-
-- **Issues**: For bug reports, feature requests, or questions, please [open an issue](https://github.com/FOI-Bioinformatics/nanometa_live/issues)
-- **Documentation**: Refer to our [Wiki](https://github.com/FOI-Bioinformatics/nanometa_live/wiki) for detailed guides
+For pipeline execution:
+- Nextflow 23.04+
+- Docker or Singularity
 
 ## Citation
 
-If you use Nanometa Live in your research, please cite our publication:
+If you use Nanometa Live in your research, please cite:
 
-> **Kristofer Sandås**, Jacob Lewerentz, Edvin Karlsson, Linda Karlsson, David Sundell, Kotryna Simonyté-Sjödin, Andreas Sjödin, *Nanometa Live: a user-friendly application for real-time metagenomic data analysis and pathogen identification*, **Bioinformatics**, Volume 40, Issue 3, March 2024, btae108, [https://doi.org/10.1093/bioinformatics/btae108](https://doi.org/10.1093/bioinformatics/btae108)
+> Sandas K, Lewerentz J, Karlsson E, et al. *Nanometa Live: a user-friendly application for real-time metagenomic data analysis and pathogen identification.* Bioinformatics. 2024;40(3):btae108. [doi:10.1093/bioinformatics/btae108](https://doi.org/10.1093/bioinformatics/btae108)
 
 ## License
 
-Nanometa Live is licensed under the GNU General Public License v3.0. See the [LICENSE](LICENSE.txt) file for details.
+GNU General Public License v3.0. See [LICENSE](LICENSE.txt).
+
+## Links
+
+- [GitHub Repository](https://github.com/FOI-Bioinformatics/nanometa_live)
+- [nanometanf Pipeline](https://github.com/FOI-Bioinformatics/nanometanf)
+- [Issue Tracker](https://github.com/FOI-Bioinformatics/nanometa_live/issues)

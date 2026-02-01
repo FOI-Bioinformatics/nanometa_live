@@ -28,18 +28,14 @@ setup(
     include_package_data=True,
     package_data={
         'nanometa_live': [
-            'Snakefile',
             'config.yaml',
             'kraken2_databases.yaml',
-            'snakemake_envs/*.yaml',
-            'snakemake_scripts/*.py',
             'app/assets/*'
         ]
     },
     entry_points={
         'console_scripts': [
             'nanometa-live=nanometa_live.nanometa_live:main',
-            'nanometa-backend=nanometa_live.nanometa_backend:main',
             'nanometa-sim=nanometa_live.nanopore_simulator:nano_sim'
         ]
     },
