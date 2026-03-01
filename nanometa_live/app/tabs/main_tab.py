@@ -190,30 +190,21 @@ def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
     if kraken_df is not None and not kraken_df.empty:
         kraken_df = kraken_df.copy()
         kraken_df['taxid_int'] = kraken_df['taxid'].fillna(0).astype(int)
-        kraken_df['name_lower'] = kraken_df['name'].fillna('').str.lower().str.strip()
 
-        # Build lookup by taxid and by name
-        for _, row in kraken_df.iterrows():
-            taxid = int(row['taxid_int'])
-            name = row['name_lower']
-            reads = int(row.get('reads', 0))
-            abundance = float(row.get('%', 0.0))
-
-            # Store by Kraken2 taxid
-            if taxid > 0:
-                kraken_lookup[taxid] = {
-                    'reads': reads,
-                    'abundance': abundance,
-                    'name': row['name']
-                }
-            # Also store by mapped NCBI taxid
-            ncbi_taxid = db_to_ncbi.get(taxid, taxid)
-            if ncbi_taxid != taxid:
-                kraken_lookup[ncbi_taxid] = {
-                    'reads': reads,
-                    'abundance': abundance,
-                    'name': row['name']
-                }
+        # Build lookup vectorized (avoid iterrows for performance with large dataframes)
+        valid_mask = kraken_df['taxid_int'] > 0
+        for taxid, reads, abundance, name in zip(
+            kraken_df.loc[valid_mask, 'taxid_int'],
+            kraken_df.loc[valid_mask, 'reads'].fillna(0).astype(int),
+            kraken_df.loc[valid_mask, '%'].fillna(0.0).astype(float),
+            kraken_df.loc[valid_mask, 'name'].fillna(''),
+        ):
+            entry = {'reads': int(reads), 'abundance': float(abundance), 'name': name}
+            kraken_lookup[int(taxid)] = entry
+            # Also store by mapped NCBI taxid if different
+            ncbi_taxid = db_to_ncbi.get(int(taxid), int(taxid))
+            if ncbi_taxid != int(taxid):
+                kraken_lookup[ncbi_taxid] = entry
 
     # Build result list from ALL active watchlist entries
     result = []

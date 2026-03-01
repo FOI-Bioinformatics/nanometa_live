@@ -123,7 +123,7 @@ def create_qc_layout():
         html.H4("Quality Filtering Breakdown", className="mb-3"),
         dcc.Loading(
             id="loading-filtering-breakdown",
-            type="default",
+            type="circle",
             color="#0d6efd",
             children=[
                 html.Div(id="filtering-breakdown-container", children=[
@@ -233,7 +233,7 @@ def create_qc_layout():
                                 # Top row of plots
                                 dcc.Loading(
                                     id="loading-cumulative-charts",
-                                    type="default",
+                                    type="circle",
                                     color="#0d6efd",
                                     children=[
                                         dbc.Row([
@@ -260,7 +260,7 @@ def create_qc_layout():
                                 # Bottom row of plots
                                 dcc.Loading(
                                     id="loading-batch-charts",
-                                    type="default",
+                                    type="circle",
                                     color="#0d6efd",
                                     children=[
                                         dbc.Row([

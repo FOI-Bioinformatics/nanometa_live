@@ -436,38 +436,14 @@ body {
     border-left: 2px solid var(--status-neutral-border) !important;
   }
 
-  /* Tab Icons - Bootstrap Icons via ::before pseudo-elements */
-  .tab-dashboard::before { content: "\F3FC"; }       /* bi-grid */
-  .tab-organisms::before { content: "\F1DC"; }       /* bi-bug */
-  .tab-qc::before { content: "\F28B"; }              /* bi-clipboard-check */
-  .tab-taxonomy::before { content: "\F2EE"; }        /* bi-diagram-3 */
-  .tab-watchlist::before { content: "\F588"; }       /* bi-star */
-  .tab-validation::before { content: "\F26B"; }      /* bi-check-circle */
-  .tab-config::before { content: "\F3E5"; }          /* bi-gear */
-  .tab-preparation::before { content: "\F1CB"; }     /* bi-box-seam */
-
-  .tab-dashboard::before,
-  .tab-organisms::before,
-  .tab-qc::before,
-  .tab-taxonomy::before,
-  .tab-watchlist::before,
-  .tab-validation::before,
-  .tab-config::before,
-  .tab-preparation::before {
-    font-family: "bootstrap-icons";
-    display: inline-block;
-    font-style: normal;
-    font-weight: normal;
-    font-size: 1em;
-    line-height: 1;
-    vertical-align: -0.125em;
-    color: inherit;
+  /* Tab icon styling - icons are embedded inline in label props */
+  .nav-tabs .nav-link .bi {
     opacity: 0.7;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+    transition: opacity var(--transition-fast);
   }
 
-  .nav-tabs .nav-link.active::before {
+  .nav-tabs .nav-link.active .bi,
+  .nav-tabs .nav-link:hover .bi {
     opacity: 1;
   }
 
@@ -1081,14 +1057,9 @@ body {
     transform: scale(1.05);
   }
 
-  /* Star icon animation */
+  /* Star icon - subtle highlight only, no animation to avoid visual fatigue */
   .bi-star-fill {
-    animation: starPulse 2s ease-in-out infinite;
-  }
-
-  @keyframes starPulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.7; }
+    color: #ffc107;
   }
 
   /* ============================================
@@ -1764,12 +1735,6 @@ body {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
-    animation: pulseWarning 2s ease-in-out infinite;
-  }
-
-  @keyframes pulseWarning {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.7; }
   }
 
   .stale-indicator {

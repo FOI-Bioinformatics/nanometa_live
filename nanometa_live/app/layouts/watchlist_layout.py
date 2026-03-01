@@ -68,7 +68,7 @@ def create_watchlist_layout() -> html.Div:
         # Taxid mapping modal (for Kraken2 Match badge clicks)
         _create_taxid_mapping_modal_only(),
 
-    ], id="watchlist-tab-content", className="watchlist-tab")
+    ], id="watchlist-tab-content", className="watchlist-tab p-4")
 
 
 # =============================================================================

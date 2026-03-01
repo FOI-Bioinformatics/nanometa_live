@@ -154,9 +154,12 @@ class ValidationParser:
         """
         self.results_dir = Path(results_dir)
 
-        # Try multiple possible directory names
+        # Try multiple possible directory names.
+        # nanometanf v1.1+ publishes individual BLAST files to validation/blast/
+        # and the aggregate JSON to validation/validation_results.json.
+        # Legacy layouts used blast_validation/ or blast/ at the top level.
         self.validation_dir = None
-        for dirname in ['blast_validation', 'validation', 'blast']:
+        for dirname in ['blast_validation', 'validation/blast', 'validation', 'blast']:
             test_dir = self.results_dir / dirname
             if test_dir.exists():
                 self.validation_dir = test_dir
@@ -467,8 +470,9 @@ class ValidationParser:
                     continue
                 results.append(result)
 
-        # Also check for legacy BLAST tabular files
-        blast_patterns = ['*.blast.txt', '*_blast.txt']
+        # Also check for legacy BLAST tabular files.
+        # nanometanf v1.1+ produces *.blast.tsv; legacy formats used *.blast.txt.
+        blast_patterns = ['*.blast.tsv', '*.blast.txt', '*_blast.txt']
         for pattern in blast_patterns:
             for blast_file in self.validation_dir.glob(pattern):
                 # Try to extract sample and taxid from filename

@@ -39,6 +39,11 @@ from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.config.config_loader import ConfigLoader
 
 
+def _tab_label(icon_class: str, text: str):
+    """Create a tab label with a Bootstrap Icon and text."""
+    return [html.I(className=f"bi {icon_class} me-1"), text]
+
+
 def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendManager) -> Dash:
     """
     Create and configure the Dash application.
@@ -215,7 +220,7 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
                             html.I(className="bi bi-collection me-2",
                                    style={"fontSize": "18px", "color": "#007bff"}),
                             html.Label(
-                                "Viewing data for:",
+                                "Sample:",
                                 className="fw-semibold me-2 mb-0",
                                 htmlFor="sample-selector",
                                 style={"whiteSpace": "nowrap"}
@@ -272,51 +277,51 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
             dbc.Tabs([
                 # Overview group
                 dbc.Tab(
-                    label="Dashboard",
+                    label=_tab_label("bi-grid", "Dashboard"),
                     tab_id="dashboard-tab",
                     children=create_dashboard_layout(),
                     tabClassName="fw-semibold tab-dashboard"
                 ),
                 # Analysis group
                 dbc.Tab(
-                    label="Organisms",
+                    label=_tab_label("bi-bug", "Organisms"),
                     tab_id="main-tab",
                     children=create_main_layout(),
                     tabClassName="tab-organisms tab-group-start"
                 ),
                 dbc.Tab(
-                    label="Quality Control",
+                    label=_tab_label("bi-clipboard-check", "Quality Control"),
                     tab_id="qc-tab",
                     children=create_qc_layout(),
                     tabClassName="tab-qc"
                 ),
                 dbc.Tab(
-                    label="Taxonomy",
+                    label=_tab_label("bi-diagram-3", "Taxonomy"),
                     tab_id="classification-tab",
                     children=create_classification_layout(),
                     tabClassName="tab-taxonomy"
                 ),
                 dbc.Tab(
-                    label="Validation",
+                    label=_tab_label("bi-shield-check", "Validation"),
                     tab_id="validation-tab",
                     children=create_validation_layout(),
                     tabClassName="tab-validation"
                 ),
-                # Setup group
+                # Setup group (ordered by workflow: configure -> watchlist -> prepare)
                 dbc.Tab(
-                    label="Watchlist",
-                    tab_id="watchlist-tab",
-                    children=create_watchlist_layout(),
-                    tabClassName="tab-watchlist tab-group-start"
-                ),
-                dbc.Tab(
-                    label="Configuration",
+                    label=_tab_label("bi-gear", "Configuration"),
                     tab_id="config-tab",
                     children=create_config_layout(),
-                    tabClassName="tab-config"
+                    tabClassName="tab-config tab-group-start"
                 ),
                 dbc.Tab(
-                    label="Preparation",
+                    label=_tab_label("bi-star", "Watchlist"),
+                    tab_id="watchlist-tab",
+                    children=create_watchlist_layout(),
+                    tabClassName="tab-watchlist"
+                ),
+                dbc.Tab(
+                    label=_tab_label("bi-box-seam", "Preparation"),
                     tab_id="preparation-tab",
                     children=create_preparation_layout(),
                     tabClassName="tab-preparation"
@@ -396,9 +401,9 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
                             dbc.Badge("2", color="primary", className="me-2",
                                       style={"fontSize": "1rem", "borderRadius": "50%", "width": "28px", "height": "28px",
                                              "display": "inline-flex", "alignItems": "center", "justifyContent": "center"}),
-                            html.Strong("Start Analysis"),
+                            html.Strong("Set up Watchlist"),
                         ], className="d-flex align-items-center mb-1"),
-                        html.P("Click 'Start Analysis' in the header to begin processing.",
+                        html.P("Go to the Watchlist tab to select which organisms to monitor for alerts.",
                                className="text-muted small ms-4 mb-3"),
                     ]),
                     html.Div([
@@ -406,9 +411,19 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
                             dbc.Badge("3", color="primary", className="me-2",
                                       style={"fontSize": "1rem", "borderRadius": "50%", "width": "28px", "height": "28px",
                                              "display": "inline-flex", "alignItems": "center", "justifyContent": "center"}),
-                            html.Strong("Monitor Results"),
+                            html.Strong("Prepare Databases"),
                         ], className="d-flex align-items-center mb-1"),
-                        html.P("The Dashboard and Organisms tabs update automatically as data becomes available.",
+                        html.P("Go to the Preparation tab to download reference genomes and build validation databases.",
+                               className="text-muted small ms-4 mb-3"),
+                    ]),
+                    html.Div([
+                        html.Div([
+                            dbc.Badge("4", color="primary", className="me-2",
+                                      style={"fontSize": "1rem", "borderRadius": "50%", "width": "28px", "height": "28px",
+                                             "display": "inline-flex", "alignItems": "center", "justifyContent": "center"}),
+                            html.Strong("Start Analysis"),
+                        ], className="d-flex align-items-center mb-1"),
+                        html.P("Click 'Start Analysis' in the header. The Dashboard and Organisms tabs update automatically as data becomes available.",
                                className="text-muted small ms-4 mb-0"),
                     ]),
                 ]),

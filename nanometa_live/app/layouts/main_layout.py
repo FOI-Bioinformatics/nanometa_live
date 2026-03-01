@@ -160,7 +160,7 @@ def create_main_layout():
             # Organism Cards
             dcc.Loading(
                 id="loading-organism-cards",
-                type="default",
+                type="circle",
                 color="#6f42c1",
                 children=[
                     html.Div(

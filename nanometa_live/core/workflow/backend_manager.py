@@ -427,7 +427,13 @@ class BackendManager:
                 self.status["pipeline_status"] = "running"
             elif len(workflow_status.get("errors", [])) > 0:
                 self.status["pipeline_status"] = "error"
-                self.status["errors"].extend(workflow_status.get("errors", []))
+                # Replace errors with current workflow errors to prevent unbounded growth
+                # from repeated polling; deduplicate to avoid duplicate entries
+                existing = set(self.status["errors"])
+                for err in workflow_status.get("errors", []):
+                    if err not in existing:
+                        self.status["errors"].append(err)
+                        existing.add(err)
             elif self.status.get("running"):
                 self.status["pipeline_status"] = "stopping"
             else:
@@ -493,7 +499,12 @@ class BackendManager:
                         and len(workflow_status.get("errors", [])) > 0
                     ):
                         self.status["pipeline_status"] = "error"
-                        self.status["errors"].extend(workflow_status.get("errors", []))
+                        # Deduplicate to avoid unbounded growth from repeated polling
+                        existing = set(self.status["errors"])
+                        for err in workflow_status.get("errors", []):
+                            if err not in existing:
+                                self.status["errors"].append(err)
+                                existing.add(err)
                         self.status["running"] = False
                         logging.error("Pipeline encountered errors, stopping")
 

@@ -13,14 +13,14 @@ import dash_bootstrap_components as dbc
 from nanometa_live.app.components.sample_selector import create_sample_selector
 
 
-def create_classification_layout() -> dbc.Container:
+def create_classification_layout() -> html.Div:
     """
     Create the classification tab layout with Sankey/Sunburst toggle.
 
     Returns:
-        dbc.Container with classification visualization components
+        html.Div containing the classification visualization components
     """
-    return dbc.Container([
+    return html.Div([dbc.Container([
         # Header row with title, view toggle, and color scheme
         dbc.Row([
             # Title + view selector
@@ -289,4 +289,4 @@ def create_classification_layout() -> dbc.Container:
             ])
         ], id='classification-export-modal', is_open=False),
 
-    ], fluid=True)
+    ], fluid=True)], className="p-4")

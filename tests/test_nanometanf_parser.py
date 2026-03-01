@@ -27,7 +27,7 @@ class TestNanometanfOutputParser:
         (outdir / "multiqc" / "multiqc_data").mkdir(parents=True)
         (outdir / "fastp").mkdir()
         (outdir / "kraken2").mkdir()
-        (outdir / "blast").mkdir()
+        (outdir / "validation" / "blast").mkdir(parents=True)
         (outdir / "realtime_batch_stats").mkdir()
 
         return outdir
@@ -45,7 +45,7 @@ class TestNanometanfOutputParser:
         assert parser.multiqc_dir == Path(mock_outdir) / "multiqc"
         assert parser.fastp_dir == Path(mock_outdir) / "fastp"
         assert parser.kraken2_dir == Path(mock_outdir) / "kraken2"
-        assert parser.blast_dir == Path(mock_outdir) / "blast"
+        assert parser.blast_dir == Path(mock_outdir) / "validation" / "blast"
         assert parser.realtime_batch_dir == Path(mock_outdir) / "realtime_batch_stats"
 
     def test_file_exists_with_retry(self, parser, tmp_path):
@@ -250,8 +250,8 @@ class TestNanometanfOutputParser:
 
     def test_parse_blast_results(self, parser, mock_outdir):
         """Test BLAST results parsing."""
-        # Create mock BLAST output
-        blast_file = mock_outdir / "blast" / "sample1_1350.blast.txt"
+        # Create mock BLAST output (nanometanf v1.1+ publishes to validation/blast/)
+        blast_file = mock_outdir / "validation" / "blast" / "sample1_1350.blast.txt"
         blast_data = "read1\tref1\t98.5\t500\t2\t1\t1\t500\t1\t500\t1e-100\t900\n"
         blast_data += "read2\tref2\t95.0\t450\t5\t2\t1\t450\t1\t450\t1e-80\t800\n"
         blast_file.write_text(blast_data)

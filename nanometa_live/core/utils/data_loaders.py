@@ -310,6 +310,8 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
                     os.path.join(kraken_dir, "*_batch*.kreport2.txt"),
                     os.path.join(kraken_dir, "**", "*_batch*.kraken2.report.txt"),
                     os.path.join(kraken_dir, "**", "*_batch*.kreport2.txt"),
+                    # v1.5 scalable streaming: batch_reports/ inside per-sample subdirs
+                    os.path.join(kraken_dir, "**", "batch_reports", "*.kraken2.report.txt"),
                 ]
                 for pattern in batch_patterns:
                     kreport_files.extend(glob.glob(pattern, recursive=True))
@@ -398,6 +400,8 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
             os.path.join(kraken_dir, f"{sample}_batch*.kreport2.txt"),        # Legacy batches
             os.path.join(kraken_dir, "**", f"{sample}_batch*.kraken2.report.txt"),  # In subdirs
             os.path.join(kraken_dir, "**", f"{sample}_batch*.kreport2.txt"),        # Legacy in subdirs
+            # v1.5 scalable streaming: batch_reports/ subdirectory inside per-sample folder
+            os.path.join(kraken_dir, sample, "batch_reports", "*.kraken2.report.txt"),
         ]
 
         sample_files = []
@@ -1109,13 +1113,16 @@ def load_blast_validation_data(
             except Exception as e:
                 logging.warning(f"Error reading aggregate validation JSON {agg_path}: {e}")
 
-    blast_dir = os.path.join(main_dir, "blast_validation")
+    # nanometanf v1.1+ publishes BLAST results to validation/blast/
+    blast_dir = os.path.join(main_dir, "validation", "blast")
 
-    # Try alternative directory names used by nanometanf
+    # Fallback to legacy directory names
+    if not os.path.exists(blast_dir):
+        blast_dir = os.path.join(main_dir, "blast_validation")
     if not os.path.exists(blast_dir):
         blast_dir = os.path.join(main_dir, "blast")
     if not os.path.exists(blast_dir):
-        logging.debug(f"BLAST validation directory not found")
+        logging.debug("BLAST validation directory not found")
         return {}
 
     # OPTIMIZATION: Load Kraken data ONCE outside the loop (was loading per-species)

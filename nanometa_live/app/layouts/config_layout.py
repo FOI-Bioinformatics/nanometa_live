@@ -47,11 +47,11 @@ def create_config_layout():
                                 className="ms-2",
                                 style={"display": "none"}
                             ),
-                            # Saved indicator
+                            # Config state indicator (Default / Saved)
                             dbc.Badge(
-                                "Saved",
+                                "Default",
                                 id="config-saved-badge",
-                                color="success",
+                                color="secondary",
                                 className="ms-2",
                                 style={"display": "inline"}
                             ),
@@ -75,8 +75,9 @@ def create_config_layout():
             dbc.CardBody([
                 html.H3("Configuration", className="card-title"),
                 html.P(
-                    "Configure Nanometa Live before starting your analysis. "
-                    "Fill in the required fields, save your configuration, and start the analysis.",
+                    "Set your input directories, Kraken2 database, and analysis parameters. "
+                    "After configuring, proceed to the Watchlist tab to select organisms to monitor, "
+                    "then to Preparation to download reference genomes before starting analysis.",
                     className="card-text text-muted"
                 ),
                 html.Hr(),

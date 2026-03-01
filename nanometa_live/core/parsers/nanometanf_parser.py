@@ -58,7 +58,7 @@ class NanometanfOutputParser:
         self.multiqc_dir = self.outdir / "multiqc"
         self.fastp_dir = self.outdir / "fastp"
         self.kraken2_dir = self.outdir / "kraken2"
-        self.blast_dir = self.outdir / "blast"
+        self.blast_dir = self.outdir / "validation" / "blast"
         self.realtime_batch_dir = self.outdir / "realtime_batch_stats"
         self.nanoplot_dir = self.outdir / "nanoplot"
 

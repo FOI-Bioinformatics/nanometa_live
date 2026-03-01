@@ -176,7 +176,7 @@ def _create_blast_tab() -> dbc.Tab:
                         className="text-muted mb-3",
                     ),
                     dcc.Loading(
-                        type="default",
+                        type="circle",
                         children=[
                             dash_table.DataTable(
                                 id="blast-stats-table",
@@ -335,14 +335,14 @@ def _create_coverage_tab() -> dbc.Tab:
     )
 
 
-def create_validation_layout() -> dbc.Container:
+def create_validation_layout() -> html.Div:
     """
     Create the validation results tab layout with BLAST and coverage sub-tabs.
 
     Returns:
-        dbc.Container with validation visualization components
+        html.Div containing the validation visualization components
     """
-    return dbc.Container([
+    return html.Div([dbc.Container([
         # Page title
         html.H4("Pathogen Validation Results", className="mb-3"),
         html.P(
@@ -436,7 +436,7 @@ def create_validation_layout() -> dbc.Container:
             ])
         ], className="mb-4", style={"backgroundColor": "#f8f9fa"}),
 
-    ], fluid=True)
+    ], fluid=True)], className="p-4")
 
 
 def create_validation_result_card(

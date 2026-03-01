@@ -363,8 +363,7 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     validation_taxids, genome_paths = get_validation_species(config)
     has_species = bool(validation_taxids)
 
-    logging.info(f"VALIDATION DEBUG: blast_validation={config.get('blast_validation', False)}")
-    logging.info(f"VALIDATION DEBUG: has_species={has_species}, taxids={validation_taxids}")
+    logging.debug(f"blast_validation={config.get('blast_validation', False)}, has_species={has_species}, taxids={validation_taxids}")
 
     # Generate pathogen_genomes.json if validation is requested
     # The nanometanf pipeline's VALIDATION workflow requires:
@@ -378,16 +377,16 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         # Generate pathogen_genomes.json from downloaded genomes
         # Use configurable genome cache directory from config
         genome_cache_dir = config.get("genome_cache_dir", "~/.nanometa")
-        logging.info(f"VALIDATION DEBUG: Using genome cache directory: {genome_cache_dir}")
+        logging.debug(f"Using genome cache directory for validation: {genome_cache_dir}")
 
         genome_manager = get_genome_manager(cache_dir=genome_cache_dir)
 
         # Log genome manager stats
         try:
             stats = genome_manager.get_statistics()
-            logging.info(f"VALIDATION DEBUG: Genome manager stats: {stats}")
+            logging.debug(f"Genome manager stats: {stats}")
         except Exception as e:
-            logging.warning(f"VALIDATION DEBUG: Could not get genome stats: {e}")
+            logging.debug(f"Could not get genome stats: {e}")
 
         # Get the full species list with both NCBI and Kraken taxids
         # We need NCBI taxids for genome file lookup, and Kraken taxids for pipeline filtering
@@ -403,24 +402,24 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
                 ncbi_taxids.append(ncbi_taxid)
                 if kraken_taxid and kraken_taxid != ncbi_taxid:
                     ncbi_to_kraken_mapping[ncbi_taxid] = kraken_taxid
-                    logging.info(
-                        f"VALIDATION DEBUG: Taxid mapping - NCBI {ncbi_taxid} -> Kraken {kraken_taxid}"
+                    logging.debug(
+                        f"Taxid mapping: NCBI {ncbi_taxid} -> Kraken2 db {kraken_taxid}"
                     )
 
         # Check which taxids have genomes (by NCBI taxid)
         for taxid in ncbi_taxids:
             has_genome = genome_manager.has_genome(taxid)
-            logging.info(f"VALIDATION DEBUG: Taxid {taxid} has_genome={has_genome}")
+            logging.debug(f"Taxid {taxid} has_genome={has_genome}")
 
         # Generate JSON file in the results directory
         # Uses NCBI taxids for file lookup, Kraken taxids as JSON keys
         json_output_path = os.path.join(main_dir, "validation", "pathogen_genomes.json")
         os.makedirs(os.path.dirname(json_output_path), exist_ok=True)
 
-        logging.info(f"VALIDATION DEBUG: Generating pathogen_genomes.json at {json_output_path}")
+        logging.debug(f"Generating pathogen_genomes.json at {json_output_path}")
         if ncbi_to_kraken_mapping:
-            logging.info(
-                f"VALIDATION DEBUG: Using taxid mapping for {len(ncbi_to_kraken_mapping)} species"
+            logging.debug(
+                f"Applying taxid mapping for {len(ncbi_to_kraken_mapping)} species"
             )
 
         pathogen_genomes_path = genome_manager.generate_pathogen_genomes_json(
@@ -438,9 +437,9 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
                 import json
                 with open(pathogen_genomes_path, 'r') as f:
                     content = json.load(f)
-                logging.info(f"VALIDATION DEBUG: pathogen_genomes.json contains {len(content)} entries")
+                logging.debug(f"pathogen_genomes.json contains {len(content)} entries")
             except Exception as e:
-                logging.warning(f"VALIDATION DEBUG: Could not read JSON: {e}")
+                logging.debug(f"Could not read pathogen_genomes.json for verification: {e}")
         else:
             logging.warning(
                 "No downloaded genomes found for enabled watchlist species. "
@@ -497,6 +496,7 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         "e_val_cutoff": config.get("e_val_cutoff", 0.01),
 
         # QC settings
+        "qc_tool": config.get("qc_tool", "fastp"),
         "skip_fastp": False,
         "skip_nanoplot": config.get("skip_nanoplot", False),
 
@@ -640,7 +640,8 @@ def create_nextflow_config(config: Dict[str, Any]) -> str:
         True
     """
     # Extract resource configuration
-    max_cores = config.get("snakemake_cores", 4)
+    # pipeline_cores is the current key; snakemake_cores is kept for backwards compatibility
+    max_cores = config.get("pipeline_cores") or config.get("snakemake_cores", 4)
     kraken_cores = config.get("kraken_cores", max_cores)
     blast_cores = config.get("blast_cores", 2)
     validation_cores = config.get("validation_cores", 2)

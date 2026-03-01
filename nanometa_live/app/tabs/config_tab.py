@@ -1266,6 +1266,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("config-path-display", "children"),
             Output("config-modified-badge", "style"),
             Output("config-saved-badge", "style"),
+            Output("config-saved-badge", "children"),
+            Output("config-saved-badge", "color"),
             Output("config-status-banner", "className"),
         ],
         [
@@ -1302,6 +1304,14 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         modified_style = {"display": "inline"} if is_modified else {"display": "none"}
         saved_style = {"display": "none"} if is_modified else {"display": "inline"}
 
+        # Badge text and color depend on config source type
+        if source_type == "file":
+            saved_badge_text = "Saved"
+            saved_badge_color = "success"
+        else:
+            saved_badge_text = "Default"
+            saved_badge_color = "secondary"
+
         # Banner CSS class
         base_class = "config-status-banner mb-3"
         if is_modified:
@@ -1311,7 +1321,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         else:
             banner_class = base_class
 
-        return source_name, display_path, modified_style, saved_style, banner_class
+        return source_name, display_path, modified_style, saved_style, saved_badge_text, saved_badge_color, banner_class
 
     # Callback: Detect form changes and update modified state
     @app.callback(

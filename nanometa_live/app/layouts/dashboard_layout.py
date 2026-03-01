@@ -613,7 +613,7 @@ def create_dashboard_layout():
                     dbc.CardBody([
                         dcc.Loading(
                             id="loading-sample-table",
-                            type="default",
+                            type="circle",
                             color="#0d6efd",
                             children=[
                                 html.Div(id="dashboard-sample-table-container", children=[

@@ -206,7 +206,9 @@ def register_qc_callbacks(app: Dash):
 
             # Last resort: use Kraken2 reports
             if not sample_data and os.path.exists(kraken_dir):
-                kreport_files = glob.glob(os.path.join(kraken_dir, "*.kraken2.report.txt"))
+                kreport_files = glob.glob(os.path.join(kraken_dir, "*.cumulative.kraken2.report.txt"))
+                if not kreport_files:
+                    kreport_files = glob.glob(os.path.join(kraken_dir, "*.kraken2.report.txt"))
                 if not kreport_files:
                     kreport_files = glob.glob(os.path.join(kraken_dir, "*.kreport2.txt"))
 
@@ -226,7 +228,7 @@ def register_qc_callbacks(app: Dash):
 
                         if total_reads > 0:
                             mtime = os.path.getmtime(kreport_file)
-                            sample_name = os.path.basename(kreport_file).replace(".kraken2.report.txt", "").replace(".kreport2.txt", "")
+                            sample_name = os.path.basename(kreport_file).replace(".cumulative.kraken2.report.txt", "").replace(".kraken2.report.txt", "").replace(".kreport2.txt", "")
 
                             sample_data.append({
                                 "Sample": sample_name,
@@ -448,14 +450,15 @@ def register_qc_callbacks(app: Dash):
             classified_reads = 0
             unclassified_reads = 0
             if os.path.exists(kraken_dir):
-                # Support both nanometanf v1.2+ and legacy file naming
+                # Support incremental realtime, nanometanf v1.2+, and legacy file naming
                 kreport_patterns = [
+                    os.path.join(kraken_dir, "*.cumulative.kraken2.report.txt"),  # Incremental realtime mode
                     os.path.join(kraken_dir, "*.kraken2.report.txt"),  # nanometanf v1.2+
                     os.path.join(kraken_dir, "*.kreport2.txt"),         # Legacy
                 ]
-                kreport_files = []
-                for pattern in kreport_patterns:
-                    kreport_files.extend(glob.glob(pattern))
+                kreport_files = list(dict.fromkeys(
+                    f for pattern in kreport_patterns for f in glob.glob(pattern)
+                ))
                 for kreport_file in kreport_files:
                     try:
                         kraken_df = pd.read_csv(
@@ -1100,12 +1103,13 @@ def register_qc_callbacks(app: Dash):
             # Get classification stats from Kraken2
             if os.path.exists(kraken_dir):
                 kreport_patterns = [
+                    os.path.join(kraken_dir, "*.cumulative.kraken2.report.txt"),  # Incremental realtime mode
                     os.path.join(kraken_dir, "*.kraken2.report.txt"),
                     os.path.join(kraken_dir, "*.kreport2.txt"),
                 ]
-                kreport_files = []
-                for pattern in kreport_patterns:
-                    kreport_files.extend(glob.glob(pattern))
+                kreport_files = list(dict.fromkeys(
+                    f for pattern in kreport_patterns for f in glob.glob(pattern)
+                ))
                 for kreport_file in kreport_files:
                     try:
                         kraken_df = pd.read_csv(

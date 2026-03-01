@@ -172,6 +172,11 @@ def detect_samples_from_kraken(kraken_dir: str) -> Set[str]:
     """
     Detect available samples from Kraken2 output directory.
 
+    Supports both flat (v1.2+) and nested per-sample subdirectory (v1.5)
+    output structures:
+    - Flat: ``kraken2/{sample_id}.cumulative.kraken2.report.txt``
+    - Nested: ``kraken2/{sample_id}/batch_reports/{sample_id}_batch0.kraken2.report.txt``
+
     Args:
         kraken_dir: Path to kraken2 output directory
 
@@ -202,6 +207,21 @@ def detect_samples_from_kraken(kraken_dir: str) -> Set[str]:
         sample_name = extract_sample_name(file_path)
         samples.add(sample_name)
         logging.debug(f"Detected sample from Kraken2: {sample_name}")
+
+    # v1.5 nested structure: detect sample subdirectories that contain a
+    # batch_reports/ or batches/ folder, in case no top-level cumulative
+    # report has been written yet (early in a run).
+    for item in os.listdir(kraken_dir):
+        item_path = os.path.join(kraken_dir, item)
+        if not os.path.isdir(item_path):
+            continue
+        has_batch_subdir = (
+            os.path.isdir(os.path.join(item_path, "batch_reports"))
+            or os.path.isdir(os.path.join(item_path, "batches"))
+        )
+        if has_batch_subdir and item not in samples:
+            samples.add(item)
+            logging.debug(f"Detected sample from Kraken2 v1.5 subdirectory: {item}")
 
     return samples
 
@@ -373,8 +393,10 @@ def get_available_samples(main_dir: str) -> List[str]:
     nanoplot_dir = os.path.join(main_dir, "nanoplot")
     all_samples.update(detect_samples_from_nanoplot(nanoplot_dir))
 
-    # Detect from BLAST output
-    blast_dir = os.path.join(main_dir, "blast")
+    # Detect from BLAST output (nanometanf v1.1+ publishes to validation/blast/)
+    blast_dir = os.path.join(main_dir, "validation", "blast")
+    if not os.path.exists(blast_dir):
+        blast_dir = os.path.join(main_dir, "blast")
     all_samples.update(detect_samples_from_blast(blast_dir))
 
     # Sort samples alphabetically
@@ -447,8 +469,10 @@ def get_sample_file_mapping(main_dir: str) -> Dict[str, Dict[str, List[str]]]:
         if fastp_files:
             sample_files['fastp'] = sorted(fastp_files)
 
-        # BLAST files (may be multiple per sample)
-        blast_dir = os.path.join(main_dir, "blast")
+        # BLAST files (nanometanf v1.1+ publishes to validation/blast/)
+        blast_dir = os.path.join(main_dir, "validation", "blast")
+        if not os.path.exists(blast_dir):
+            blast_dir = os.path.join(main_dir, "blast")
         blast_files = glob.glob(os.path.join(blast_dir, f"{sample}_*.txt"))
         if blast_files:
             sample_files['blast'] = sorted(blast_files)

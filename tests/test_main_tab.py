@@ -181,7 +181,9 @@ aken2 and BLAST data."""
 
     def test_validation_data_structure(self, mock_data_dir):
         """Test BLAST validation data structure."""
-        blast_dir = mock_data_dir / "blast"
+        blast_dir = mock_data_dir / "validation" / "blast"
+        if not blast_dir.exists():
+            blast_dir = mock_data_dir / "blast"
 
         if blast_dir.exists():
             # Check for BLAST files
