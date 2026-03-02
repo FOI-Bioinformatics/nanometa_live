@@ -40,8 +40,8 @@ from nanometa_live.core.config.config_loader import ConfigLoader
 
 
 def _tab_label(icon_class: str, text: str):
-    """Create a tab label with a Bootstrap Icon and text."""
-    return [html.I(className=f"bi {icon_class} me-1"), text]
+    """Create a tab label string. Icons are not supported by dbc.Tab label prop in dbc 2.0.4."""
+    return text
 
 
 def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendManager) -> Dash:

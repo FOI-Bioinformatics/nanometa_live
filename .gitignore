@@ -163,8 +163,6 @@ cython_debug/
 # Worktrees
 .worktrees/
 
-# Claude Code
-CLAUDE.md
 
 # Development plans and internal docs
 DEVELOPMENT_ROADMAP.md
