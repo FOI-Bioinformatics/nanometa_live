@@ -393,32 +393,17 @@ def register_qc_callbacks(app: Dash):
                         logging.debug(f"Error reading batch file {batch_file}: {e}")
                         continue
 
-            # Get filtering stats from FASTP JSON files (or seqkit if chopper is used)
+            # Get filtering stats from FASTP (sample-filtered) or seqkit if chopper is used
             fastp_found = False
-            if os.path.exists(fastp_dir):
-                fastp_files = glob.glob(os.path.join(fastp_dir, "*.fastp.json"))
-                if fastp_files:
-                    fastp_found = True
-                    for fastp_file in fastp_files:
-                        try:
-                            with open(fastp_file, 'r') as f:
-                                fastp_data = json.load(f)
-                                summary = fastp_data.get("summary", {})
-                                before_filtering = summary.get("before_filtering", {})
-                                after_filtering = summary.get("after_filtering", {})
-
-                                tot_passed_reads += after_filtering.get("total_reads", 0)
-
-                                # Calculate removed reads
-                                filtering_result = fastp_data.get("filtering_result", {})
-                                tot_low_quality_reads += filtering_result.get("low_quality_reads", 0)
-                                tot_too_many_N_reads += filtering_result.get("too_many_N_reads", 0)
-                                tot_too_short_reads += filtering_result.get("too_short_reads", 0)
-                        except (json.JSONDecodeError, IOError, KeyError) as e:
-                            logging.debug(f"Error reading FASTP file {fastp_file}: {e}")
-                            continue
-
-                    tot_removed_reads = tot_low_quality_reads + tot_too_many_N_reads + tot_too_short_reads
+            fastp_stats = load_fastp_data(main_dir, selected_sample)
+            if fastp_stats.get('total_reads_after', 0) > 0:
+                fastp_found = True
+                tot_passed_reads = fastp_stats['total_reads_after']
+                tot_reads_pre_filt = fastp_stats['total_reads_before']
+                tot_low_quality_reads = fastp_stats['low_quality']
+                tot_too_many_N_reads = fastp_stats['too_many_N']
+                tot_too_short_reads = fastp_stats['too_short']
+                tot_removed_reads = tot_low_quality_reads + tot_too_many_N_reads + tot_too_short_reads
 
             # Fallback to seqkit stats if FASTP not found (used with chopper QC tool)
             if not fastp_found:
@@ -945,29 +930,16 @@ def register_qc_callbacks(app: Dash):
             tot_too_many_N_reads = 0
             tot_too_short_reads = 0
 
-            # Get filtering stats from FASTP JSON files
+            # Get filtering stats from FASTP (sample-filtered)
             fastp_found = False
-            if os.path.exists(fastp_dir):
-                fastp_files = glob.glob(os.path.join(fastp_dir, "*.fastp.json"))
-                if fastp_files:
-                    fastp_found = True
-                    for fastp_file in fastp_files:
-                        try:
-                            with open(fastp_file, 'r') as f:
-                                fastp_data = json.load(f)
-                                summary = fastp_data.get("summary", {})
-                                before = summary.get("before_filtering", {})
-                                after = summary.get("after_filtering", {})
-                                tot_reads_pre_filt += before.get("total_reads", 0)
-                                tot_passed_reads += after.get("total_reads", 0)
-
-                                filtering_result = fastp_data.get("filtering_result", {})
-                                tot_low_quality_reads += filtering_result.get("low_quality_reads", 0)
-                                tot_too_many_N_reads += filtering_result.get("too_many_N_reads", 0)
-                                tot_too_short_reads += filtering_result.get("too_short_reads", 0)
-                        except (json.JSONDecodeError, IOError, KeyError, TypeError) as e:
-                            logging.debug(f"Error reading FASTP filtering data from {fastp_file}: {e}")
-                            continue
+            fastp_stats = load_fastp_data(main_dir, selected_sample)
+            if fastp_stats.get('total_reads_after', 0) > 0:
+                fastp_found = True
+                tot_reads_pre_filt = fastp_stats['total_reads_before']
+                tot_passed_reads = fastp_stats['total_reads_after']
+                tot_low_quality_reads = fastp_stats['low_quality']
+                tot_too_many_N_reads = fastp_stats['too_many_N']
+                tot_too_short_reads = fastp_stats['too_short']
 
             # Fallback to seqkit/Kraken2 if FASTP not found (chopper QC)
             if not fastp_found:
@@ -1071,21 +1043,11 @@ def register_qc_callbacks(app: Dash):
             samples = get_available_samples(main_dir)
             sample_count = len([s for s in samples if s != "All Samples"])
 
-            # Get filtering stats from FASTP JSON files
-            if os.path.exists(fastp_dir):
-                fastp_files = glob.glob(os.path.join(fastp_dir, "*.fastp.json"))
-                for fastp_file in fastp_files:
-                    try:
-                        with open(fastp_file, 'r') as f:
-                            fastp_data = json.load(f)
-                            summary = fastp_data.get("summary", {})
-                            before = summary.get("before_filtering", {})
-                            after = summary.get("after_filtering", {})
-                            tot_reads_pre_filt += before.get("total_reads", 0)
-                            tot_passed_reads += after.get("total_reads", 0)
-                    except (json.JSONDecodeError, IOError, KeyError, TypeError) as e:
-                        logging.debug(f"Error reading FASTP summary from {fastp_file}: {e}")
-                        continue
+            # Get filtering stats from FASTP (sample-filtered)
+            fastp_stats = load_fastp_data(main_dir, selected_sample)
+            if fastp_stats.get('total_reads_after', 0) > 0:
+                tot_reads_pre_filt = fastp_stats['total_reads_before']
+                tot_passed_reads = fastp_stats['total_reads_after']
 
             # Fallback to seqkit/Kraken2 if FASTP not found
             if tot_passed_reads == 0:

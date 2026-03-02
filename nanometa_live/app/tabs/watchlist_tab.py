@@ -564,6 +564,17 @@ def register_watchlist_callbacks(app: Dash) -> None:
         rows = []
         for i, entry in enumerate(entries):
             taxid = entry.get("taxid", 0)
+
+            # Validate taxid before creating pattern-matching IDs
+            try:
+                taxid = int(taxid)
+            except (ValueError, TypeError):
+                logger.error(f"Invalid taxid for entry {entry.get('name', 'Unknown')}: {taxid}")
+                continue
+            if not taxid:
+                logger.error(f"Zero taxid for entry {entry.get('name', 'Unknown')}, skipping")
+                continue
+
             mapping_info = mapping_dict.get(taxid)
 
             # Get genome status
@@ -574,7 +585,10 @@ def register_watchlist_callbacks(app: Dash) -> None:
                     "has_blast_db": genome_mgr.has_blast_db(taxid),
                 }
 
-            rows.append(create_pathogen_row(entry, i, mapping_info, genome_info))
+            try:
+                rows.append(create_pathogen_row(entry, i, mapping_info, genome_info))
+            except Exception as e:
+                logger.error(f"Failed to create row for taxid {taxid} ({entry.get('name', 'Unknown')}): {e}")
 
         count = len(entries)
         return (

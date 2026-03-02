@@ -696,10 +696,10 @@ def create_pathogen_row(
     Returns:
         html.Div containing the row
     """
-    taxid = entry.get("taxid", 0)
-    name = entry.get("name", "Unknown")
-    common_name = entry.get("common_name", "")
-    threat_level = entry.get("threat_level", "moderate")
+    taxid = entry.get("taxid", 0) or 0
+    name = entry.get("name") or "Unknown"
+    common_name = entry.get("common_name") or ""
+    threat_level = entry.get("threat_level") or "moderate"
     bsl = entry.get("bsl_level")
     enabled = entry.get("enabled", True)
     validated = entry.get("validated", False)

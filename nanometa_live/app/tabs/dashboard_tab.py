@@ -299,7 +299,7 @@ def register_dashboard_callbacks(app: Dash):
             metric_sample = selected_dashboard_sample if selected_dashboard_sample else "All Samples"
 
             # Calculate overall status (always uses all samples for overall status)
-            overall_status = _calculate_overall_status(main_dir, config, available_samples)
+            overall_status = _calculate_overall_status(main_dir, config, available_samples, pipeline_running)
 
             # Generate status card components (including accessible label)
             status_results = _generate_status_display(overall_status["status"])
@@ -1410,7 +1410,8 @@ def _get_error_dashboard_state(error_msg: str) -> Tuple:
 def _calculate_overall_status(
     main_dir: str,
     config: Dict[str, Any],
-    available_samples: List[str]
+    available_samples: List[str],
+    pipeline_running: bool = False
 ) -> Dict[str, Any]:
     """
     Calculate overall analysis status from available data.
@@ -1419,10 +1420,13 @@ def _calculate_overall_status(
         main_dir: Main analysis directory
         config: Application configuration
         available_samples: List of sample names
+        pipeline_running: Whether the pipeline is actively running
 
     Returns:
         Dict with overall status metrics
     """
+    visualization_only = config.get("visualization_only", False)
+
     # Filter out "All Samples" pseudo-sample
     real_samples = [s for s in available_samples if s != "All Samples"]
     total_samples = len(real_samples)
@@ -1443,7 +1447,9 @@ def _calculate_overall_status(
         organisms_detected = len(species_df[species_df["reads"] > 10])
 
     # Determine overall status
-    if quality_score is not None and quality_score < 60:
+    if visualization_only and not pipeline_running:
+        overall_status = "viewing"
+    elif quality_score is not None and quality_score < 60:
         overall_status = "warning"
     elif organisms_detected > 100:
         overall_status = "warning"  # Too many species might indicate contamination
@@ -1572,7 +1578,7 @@ def _generate_status_display(status: str) -> Tuple[Dict, str, str, str, str, str
     Generate status indicator style, icon, text, subtitle, label text, and label icon.
 
     Args:
-        status: "success", "warning", or "danger"
+        status: "success", "viewing", "warning", or "danger"
 
     Returns:
         Tuple of (style_dict, icon_class, status_text, subtitle_text, label_text, label_icon)
@@ -1585,6 +1591,14 @@ def _generate_status_display(status: str) -> Tuple[Dict, str, str, str, str, str
             "subtitle": "All systems operating normally",
             "label": "RUNNING",
             "label_icon": "bi bi-check-circle-fill ms-1"
+        },
+        "viewing": {
+            "color": "#17a2b8",  # Teal/Info
+            "icon": "bi bi-eye",
+            "text": "Data Available",
+            "subtitle": "Viewing existing results",
+            "label": "VIEWING",
+            "label_icon": "bi bi-eye-fill ms-1"
         },
         "warning": {
             "color": "#ffc107",  # Amber
