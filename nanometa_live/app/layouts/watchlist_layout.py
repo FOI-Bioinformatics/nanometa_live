@@ -1049,7 +1049,8 @@ def create_watchlist_file_item(wl: Dict[str, Any], pathogens: List[Dict[str, Any
                     ),
                 ], style={"cursor": "pointer"},
                    className="watchlist-expand-trigger",
-                   id={"type": "watchlist-expand-trigger", "index": wl_id}),
+                   id={"type": "watchlist-expand-trigger", "index": wl_id},
+                   n_clicks=0),
             ], width=5),
 
             # Pathogen count
