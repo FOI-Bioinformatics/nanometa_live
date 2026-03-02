@@ -21,6 +21,7 @@ from nanometa_live.app.utils.callback_helpers import (
     validate_config_and_get_main_dir,
     log_callback_error,
 )
+from nanometa_live.app.components.modern_components import EmptyStateMessage
 
 
 def register_classification_callbacks(app: Dash):
@@ -57,7 +58,11 @@ def register_classification_callbacks(app: Dash):
         return presets.get(preset, ['F', 'G', 'S'])
 
     @app.callback(
-        Output("classification-plot", "figure"),
+        [
+            Output("classification-plot", "figure"),
+            Output("classification-info-message", "children"),
+            Output("classification-plot", "style"),
+        ],
         [
             Input("update-interval", "n_intervals"),
             Input("apply-classification-settings", "n_clicks"),
@@ -96,14 +101,31 @@ def register_classification_callbacks(app: Dash):
 
         Switches between Sankey and Sunburst based on view_type selection.
         Supports per-sample and aggregated data views.
+
+        Returns:
+            Tuple of (figure, info_message_children, graph_style)
         """
+        # Style constants for showing/hiding the graph
+        graph_visible = {"width": "100%"}
+        graph_hidden = {"width": "100%", "display": "none"}
+
+        # Empty state for when no data is available
+        empty_state = EmptyStateMessage(
+            title="No Classification Data",
+            message="Classification results will appear here once analysis data is available",
+            icon="bi-diagram-3"
+        )
+
+        # Helper to create a minimal empty figure (used when graph is hidden)
+        def _empty_figure():
+            fig = go.Figure()
+            fig.update_layout(height=50, margin=dict(l=0, r=0, t=0, b=0))
+            return fig
+
         # Validate config and get output directory using centralized helper
         main_dir = validate_config_and_get_main_dir(config)
         if not main_dir:
-            if view_type == "sunburst":
-                return create_empty_sunburst()
-            else:
-                return create_placeholder_sankey()
+            return _empty_figure(), empty_state, graph_hidden
 
         # CRITICAL FIX: Ensure selected_sample is a string, not a list
         # If it's a list, it means parameters are mismatched - use default
@@ -137,10 +159,7 @@ def register_classification_callbacks(app: Dash):
             kraken_df = load_kraken_data(main_dir, selected_sample)
 
             if kraken_df.empty:
-                if view_type == "sunburst":
-                    return create_empty_sunburst("No data available")
-                else:
-                    return create_placeholder_sankey("No data available")
+                return _empty_figure(), empty_state, graph_hidden
 
             # Get the selected color palette (default to tableau)
             color_palette = COLOR_SCHEMES.get(color_scheme or "tableau", COLORS_TABLEAU)
@@ -149,20 +168,20 @@ def register_classification_callbacks(app: Dash):
             if view_type == "sunburst":
                 figure = create_sunburst_data(kraken_df, domains, tax_levels, filter_value, config, color_palette)
                 if figure is None:
-                    return create_empty_sunburst("No data matches the selected filters")
-                return figure
+                    return create_empty_sunburst("No data matches the selected filters"), None, graph_visible
+                return figure, None, graph_visible
             else:  # sankey
                 figure = create_sankey_data(kraken_df, domains, tax_levels, filter_value, max_taxa, chart_height, color_palette)
                 if figure is None:
-                    return create_placeholder_sankey("No data matches the selected filters")
-                return figure
+                    return create_placeholder_sankey("No data matches the selected filters"), None, graph_visible
+                return figure, None, graph_visible
 
         except Exception as e:
             logging.error(f"Error updating classification plot: {e}")
             if view_type == "sunburst":
-                return create_empty_sunburst(f"Error: {str(e)}")
+                return create_empty_sunburst(f"Error: {str(e)}"), None, graph_visible
             else:
-                return create_placeholder_sankey(f"Error: {str(e)}")
+                return create_placeholder_sankey(f"Error: {str(e)}"), None, graph_visible
 
     @app.callback(
         Output("classification-levels-container", "style"),

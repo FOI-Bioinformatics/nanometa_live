@@ -380,10 +380,21 @@ def register_dashboard_callbacks(app: Dash):
             alerts_count_val = len(alerts_data)
             alerts_count_display = str(alerts_count_val)
 
-            # Alerts icon styling
+            # Alerts icon styling - color reflects highest severity
             if alerts_count_val > 0:
                 alerts_icon_class = "bi bi-bell-fill"
-                alerts_icon_style = {"fontSize": "32px", "color": "#dc3545"}
+                # Map highest severity to icon color
+                _severity_colors = {
+                    "danger": "#dc3545",    # red - critical
+                    "warning": "#ffc107",   # amber - warning
+                    "info": "#0dcaf0",      # blue - informational
+                    "success": "#198754",   # green - positive
+                }
+                highest_severity = _get_alerts_badge_color(alerts_data)
+                alerts_icon_style = {
+                    "fontSize": "32px",
+                    "color": _severity_colors.get(highest_severity, "#6c757d")
+                }
             else:
                 alerts_icon_class = "bi bi-bell"
                 alerts_icon_style = {"fontSize": "32px", "color": "#6c757d"}
@@ -1914,13 +1925,13 @@ def _estimate_classified_rate(organisms: int) -> float:
 
 
 def _get_alerts_badge_color(alerts_data: List[Dict[str, Any]]) -> str:
-    """Determine badge color based on alert severity."""
+    """Determine badge color based on highest alert severity."""
     if not alerts_data:
         return "secondary"
 
     severities = [alert.get("severity", "info") for alert in alerts_data]
 
-    if "danger" in severities:
+    if "critical" in severities or "danger" in severities:
         return "danger"
     elif "warning" in severities:
         return "warning"

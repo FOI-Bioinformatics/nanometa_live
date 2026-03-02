@@ -402,6 +402,7 @@ body {
   /* Tab styling */
   .nav-tabs {
     border-bottom: 1px solid var(--status-neutral-border);
+    padding-top: 16px;
   }
 
   .nav-tabs .nav-link {
@@ -434,6 +435,28 @@ body {
     margin-left: 12px !important;
     padding-left: 12px !important;
     border-left: 2px solid var(--status-neutral-border) !important;
+    position: relative;
+  }
+
+  /* Tab group labels */
+  .tab-group-start::before {
+    position: absolute;
+    top: -14px;
+    left: 12px;
+    font-size: 0.6rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #6c757d;
+    pointer-events: none;
+  }
+
+  .tab-organisms.tab-group-start::before {
+    content: "Results";
+  }
+
+  .tab-config.tab-group-start::before {
+    content: "Setup";
   }
 
   /* Tab icon styling - icons are embedded inline in label props */

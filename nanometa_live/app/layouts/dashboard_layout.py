@@ -919,15 +919,17 @@ def create_alerts_list(alerts_data: list) -> dbc.ListGroup:
         ], className="text-center py-4")
 
     # Severity icons and colors
+    # Maps both alert engine names ("critical") and Bootstrap names ("danger")
     severity_config = {
+        "critical": {"icon": "bi-exclamation-triangle-fill", "color": "danger"},
         "danger": {"icon": "bi-exclamation-triangle-fill", "color": "danger"},
         "warning": {"icon": "bi-exclamation-circle-fill", "color": "warning"},
         "info": {"icon": "bi-info-circle-fill", "color": "info"},
         "success": {"icon": "bi-check-circle-fill", "color": "success"}
     }
 
-    # Sort by severity (danger > warning > info > success)
-    severity_order = {"danger": 0, "warning": 1, "info": 2, "success": 3}
+    # Sort by severity (critical/danger > warning > info > success)
+    severity_order = {"critical": 0, "danger": 0, "warning": 1, "info": 2, "success": 3}
     sorted_alerts = sorted(
         alerts_data,
         key=lambda x: severity_order.get(x.get("severity", "info"), 2)
