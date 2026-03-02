@@ -344,6 +344,10 @@ class WatchlistManager:
         Args:
             config: Application configuration dictionary
         """
+        # Preserve watchlists that were already enabled via enable_watchlist()
+        # before load_config was called (race condition with Dash callbacks).
+        pre_enabled = set(self._enabled_watchlists)
+
         self._entries = {}
         self._name_index = {}
         self._enabled_watchlists = set()
@@ -394,6 +398,15 @@ class WatchlistManager:
             logger.info(f"Migrating {len(species_of_interest)} legacy species_of_interest entries")
             for species in species_of_interest:
                 self._add_entry_from_dict(species, WatchlistSource.MIGRATED)
+
+        # Re-enable watchlists that were activated before load_config ran.
+        # This handles the race condition where enable_watchlist() is called
+        # by a Dash callback before load_config() runs in another callback.
+        if pre_enabled:
+            for wl_id in pre_enabled:
+                if wl_id not in self._enabled_watchlists:
+                    self.enable_watchlist(wl_id)
+            logger.info(f"Re-enabled {len(pre_enabled)} pre-existing watchlists: {pre_enabled}")
 
         self._loaded = True
         logger.info(f"WatchlistManager loaded {len(self._entries)} entries "
