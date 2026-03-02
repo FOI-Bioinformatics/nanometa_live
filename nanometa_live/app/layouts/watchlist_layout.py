@@ -139,20 +139,24 @@ def _create_stats_bar() -> dbc.Card:
                 # Spacer
                 dbc.Col([], className="flex-grow-1"),
 
-                # API options for validation
+                # API options for validation lookups
                 dbc.Col([
-                    dbc.Checklist(
-                        id="watchlist-api-options",
-                        options=[
-                            {"label": "NCBI", "value": "ncbi"},
-                            {"label": "GTDB", "value": "gtdb"},
-                        ],
-                        value=["ncbi", "gtdb"],
-                        inline=True,
-                        className="small",
-                        inputClassName="me-1",
-                        labelClassName="me-2 small",
-                    ),
+                    html.Span([
+                        dbc.Checklist(
+                            id="watchlist-api-options",
+                            options=[
+                                {"label": "NCBI", "value": "ncbi"},
+                                {"label": "GTDB", "value": "gtdb"},
+                            ],
+                            value=["ncbi", "gtdb"],
+                            inline=True,
+                            className="small d-inline-flex",
+                            inputClassName="me-1",
+                            labelClassName="me-2 small",
+                            persistence=True,
+                            persistence_type="session",
+                        ),
+                    ], title="Select which taxonomy databases to query when validating species names"),
                 ], width="auto", className="me-2 d-flex align-items-center"),
 
                 # Validation controls
