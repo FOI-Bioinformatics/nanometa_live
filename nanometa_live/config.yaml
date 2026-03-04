@@ -10,7 +10,7 @@
 # Restrictions: No special characters. Max length:50 characters.
 # Example: "Analysis of Soil Samples"
 
-analysis_name: "Metagenomic analysis"
+analysis_name: "Real-time Integration Test"
 
 
 ## NANOPORE FASTQ OUTPUT DIRECTORY ##
@@ -18,7 +18,7 @@ analysis_name: "Metagenomic analysis"
 # Note: If the path is invalid, the system will prompt for a correct path.
 # Default: "/home/user/nanopore_out" (Replace with your directory path)
 
-nanopore_output_directory: "/Users/andreassjodin/Desktop/ONT/demodata_ONT/data/live"
+nanopore_output_directory: "/Users/andreassjodin/Desktop/claude-team/sim_output"
 
 
 ## SPECIES OF INTEREST ##
@@ -114,7 +114,7 @@ processing_mode: "realtime"
 #   - "per_file": Each file is treated as a separate sample
 #   - "by_barcode": Files are organized in barcode subdirectories (barcode01/, barcode02/, etc.)
 # Default: "single_sample"
-sample_handling: "single_sample"
+sample_handling: "by_barcode"
 
 ## SAMPLE NAME ##
 # Description: Name to use when sample_handling is "single_sample".
@@ -131,15 +131,15 @@ sample_name: "sample"
 # Note: Ensure the database is updated regularly for accurate classification.
 # Supported Taxonomies: "gtdb" and "ncbi"
 # Example Path: "/path/to/kraken2/database"
-kraken_db: "/Users/andreassjodin/Desktop/ONT/demodata_ONT/database/kraken2.gtdb_bac120_4Gb"
-kraken_taxonomy: "gtdb"
+kraken_db: "/Volumes/Orico/kraken_db/k2_pluspfp_08_GB_20251015"
+kraken_taxonomy: "ncbi"
 
 
 ## KRAKEN 2 HIGH RAM REQUIREMENTS ##
 # Description: Toggle for memory-mapping in Kraken2 to manage RAM usage.
 # Note: Enable this on systems with limited RAM for better performance.
 # Usage: Use "true"to enable or "false" to disable.
-kraken_memory_mapping: True
+kraken_memory_mapping: False
 
 
 ## External Kraken2 Databases ##
@@ -259,7 +259,7 @@ remove_temp_files: True
 # Note: Changing this path after project creation can lead to data misplacement or loss.
 # Typically set as an absolute path.
 # Example: "/path/to/project/main_directory"
-main_dir: "/Users/andreassjodin/.nanometa/data"
+main_dir: "/Users/andreassjodin/Desktop/claude-team/results"
 
 ## PIPELINE SOURCE ##
 # Description: Controls where the nanometanf pipeline is loaded from.
@@ -269,3 +269,10 @@ main_dir: "/Users/andreassjodin/.nanometa/data"
 #   - "local:/path/to/pipeline" - Local directory (for development)
 # Default: "remote:main"
 pipeline_source: "local:/Users/andreassjodin/Code/nanometanf"
+
+########## Watchlist Configuration #############################################
+watchlist:
+  enabled: true
+  taxonomy_mode: "auto"
+  builtin:
+    - "clinical_pathogens"

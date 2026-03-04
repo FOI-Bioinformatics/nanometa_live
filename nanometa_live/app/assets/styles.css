@@ -951,6 +951,28 @@ body {
     line-height: 1.5;
   }
 
+  /* Dashboard metric cards - compact with subtle left accent */
+  .dashboard-metric-card {
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+    border-left: 3px solid transparent;
+  }
+
+  .dashboard-metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+  }
+
+  /* Alerts card accent when alerts are active */
+  #dashboard-alerts-card.has-alerts {
+    border-left: 3px solid var(--status-warning);
+    box-shadow: 0 0 8px rgba(255, 193, 7, 0.15);
+  }
+
+  #dashboard-alerts-card.has-critical-alerts {
+    border-left: 3px solid var(--status-danger);
+    box-shadow: 0 0 8px rgba(220, 53, 69, 0.15);
+  }
+
   /* Dashboard sample table row styling */
   .dash-table-container .dash-spreadsheet-inner tr[data-dash-row] {
     transition: background-color 0.15s ease-in-out;
@@ -963,7 +985,7 @@ body {
 
   /* Alert panel scrollbar styling */
   #dashboard-alerts-panel::-webkit-scrollbar {
-    width: 8px;
+    width: 6px;
   }
 
   #dashboard-alerts-panel::-webkit-scrollbar-track {
@@ -972,12 +994,12 @@ body {
   }
 
   #dashboard-alerts-panel::-webkit-scrollbar-thumb {
-    background: #888;
+    background: #aaa;
     border-radius: 10px;
   }
 
   #dashboard-alerts-panel::-webkit-scrollbar-thumb:hover {
-    background: #555;
+    background: #777;
   }
 
   /* Responsive adjustments */
@@ -1000,6 +1022,11 @@ body {
     #dashboard-status-card .row > div {
       text-align: center;
       margin-bottom: 15px;
+    }
+
+    /* Stack metric cards 2x2 on mobile */
+    .dashboard-metric-card {
+      margin-bottom: 8px;
     }
   }
 
@@ -2372,6 +2399,55 @@ body {
   .watchlist-pathogen-list .sticky-top,
   .watchlist-pathogen-list-header {
     background-color: var(--card-bg, #1e1e1e);
+  }
+}
+
+/* ============================================
+   WATCHLIST TAB - ENHANCED STATS BAR
+   ============================================ */
+
+/* Stats bar with subtle left-border accent */
+.watchlist-stats-bar {
+  border-left: 3px solid var(--primary, #007bff);
+}
+
+/* Table header with sticky positioning */
+.watchlist-table-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: #f8f9fa;
+}
+
+/* Pathogen row hover highlight */
+.pathogen-row:hover {
+  background-color: rgba(0, 123, 255, 0.04);
+}
+
+/* Kraken2 match badge - "Not Scanned" uses muted style */
+.kraken2-match-badge.btn-light {
+  color: #6c757d;
+  border-color: #dee2e6;
+  font-style: italic;
+}
+
+/* Quick-start button active states (filled when watchlist is enabled) */
+.quick-start-active {
+  font-weight: 600;
+}
+
+/* Dark mode support for enhanced watchlist */
+@media (prefers-color-scheme: dark) {
+  .watchlist-stats-bar {
+    border-left-color: var(--primary, #007bff);
+  }
+
+  .watchlist-table-header {
+    background-color: var(--card-bg, #1e1e1e) !important;
+  }
+
+  .pathogen-row:hover {
+    background-color: rgba(255, 255, 255, 0.05);
   }
 }
 

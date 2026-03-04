@@ -14,6 +14,106 @@ import dash_bootstrap_components as dbc
 from nanometa_live.app.components.config_form import create_config_form
 
 
+def _create_workflow_steps() -> html.Div:
+    """
+    Create a compact workflow step indicator showing where Configuration
+    fits in the setup sequence.
+    """
+    return html.Div([
+        dbc.Row([
+            # Step 1: Configure (current)
+            dbc.Col([
+                html.Div([
+                    html.Div([
+                        html.Span("1", className="step-number-active"),
+                    ], className="d-flex align-items-center justify-content-center",
+                       style={
+                           "width": "28px", "height": "28px",
+                           "borderRadius": "50%",
+                           "backgroundColor": "#007bff",
+                           "color": "white",
+                           "fontSize": "0.8rem",
+                           "fontWeight": "bold",
+                       }),
+                    html.Small("Configure", className="fw-bold text-primary mt-1"),
+                ], className="d-flex flex-column align-items-center"),
+            ], className="text-center", width=True),
+
+            # Arrow
+            dbc.Col([
+                html.I(className="bi bi-chevron-right text-muted",
+                       style={"fontSize": "1.2rem"}),
+            ], width="auto", className="d-flex align-items-center px-0"),
+
+            # Step 2: Watchlist
+            dbc.Col([
+                html.Div([
+                    html.Div([
+                        html.Span("2", className="step-number"),
+                    ], className="d-flex align-items-center justify-content-center",
+                       style={
+                           "width": "28px", "height": "28px",
+                           "borderRadius": "50%",
+                           "backgroundColor": "#e9ecef",
+                           "color": "#6c757d",
+                           "fontSize": "0.8rem",
+                           "fontWeight": "bold",
+                       }),
+                    html.Small("Watchlist", className="text-muted mt-1"),
+                ], className="d-flex flex-column align-items-center"),
+            ], className="text-center", width=True),
+
+            # Arrow
+            dbc.Col([
+                html.I(className="bi bi-chevron-right text-muted",
+                       style={"fontSize": "1.2rem"}),
+            ], width="auto", className="d-flex align-items-center px-0"),
+
+            # Step 3: Preparation
+            dbc.Col([
+                html.Div([
+                    html.Div([
+                        html.Span("3", className="step-number"),
+                    ], className="d-flex align-items-center justify-content-center",
+                       style={
+                           "width": "28px", "height": "28px",
+                           "borderRadius": "50%",
+                           "backgroundColor": "#e9ecef",
+                           "color": "#6c757d",
+                           "fontSize": "0.8rem",
+                           "fontWeight": "bold",
+                       }),
+                    html.Small("Prepare", className="text-muted mt-1"),
+                ], className="d-flex flex-column align-items-center"),
+            ], className="text-center", width=True),
+
+            # Arrow
+            dbc.Col([
+                html.I(className="bi bi-chevron-right text-muted",
+                       style={"fontSize": "1.2rem"}),
+            ], width="auto", className="d-flex align-items-center px-0"),
+
+            # Step 4: Analyse
+            dbc.Col([
+                html.Div([
+                    html.Div([
+                        html.I(className="bi bi-play-fill",
+                               style={"fontSize": "0.8rem"}),
+                    ], className="d-flex align-items-center justify-content-center",
+                       style={
+                           "width": "28px", "height": "28px",
+                           "borderRadius": "50%",
+                           "backgroundColor": "#e9ecef",
+                           "color": "#6c757d",
+                       }),
+                    html.Small("Analyse", className="text-muted mt-1"),
+                ], className="d-flex flex-column align-items-center"),
+            ], className="text-center", width=True),
+        ], className="g-0 align-items-center justify-content-center",
+           style={"maxWidth": "500px", "margin": "0 auto"}),
+    ], className="py-2 mb-3")
+
+
 def create_config_layout():
     """
     Create the layout for the configuration tab.
@@ -24,6 +124,9 @@ def create_config_layout():
     return html.Div([
         # Hidden Store for refresh trigger
         dcc.Store(id="refresh-form-trigger", data=False),
+
+        # Workflow step indicator
+        _create_workflow_steps(),
 
         # Configuration Status Banner - Shows source and modified state
         html.Div(
@@ -73,12 +176,16 @@ def create_config_layout():
         # Introduction section
         dbc.Card(
             dbc.CardBody([
-                html.H3("Configuration", className="card-title"),
+                html.Div([
+                    html.I(className="bi bi-gear-fill me-2",
+                           style={"fontSize": "1.3rem"}),
+                    html.H4("Configuration", className="card-title mb-0 d-inline"),
+                ], className="d-flex align-items-center mb-2"),
                 html.P(
                     "Set your input directories, Kraken2 database, and analysis parameters. "
                     "After configuring, proceed to the Watchlist tab to select organisms to monitor, "
                     "then to Preparation to download reference genomes before starting analysis.",
-                    className="card-text text-muted"
+                    className="card-text text-muted small"
                 ),
                 html.Hr(),
 
@@ -87,8 +194,8 @@ def create_config_layout():
                     # Primary action (most important) - Use These Settings
                     dbc.Col([
                         dbc.Button([
-                            html.I(className="bi bi-play-circle-fill me-2"),
-                            "Use These Settings"
+                            html.I(className="bi bi-check-circle-fill me-2"),
+                            "Apply Settings"
                         ],
                             id="apply-config-button",
                             color="success",
@@ -158,7 +265,11 @@ def create_config_layout():
                 # Simplified explanation
                 html.Small([
                     html.I(className="bi bi-info-circle me-1 text-muted"),
-                    html.Span("Click 'Use These Settings' to apply. Use 'Save for Later' to keep settings for future sessions.", className="text-muted")
+                    html.Span(
+                        "Click 'Apply Settings' to use these parameters. "
+                        "Use 'Save for Later' to store settings for future sessions.",
+                        className="text-muted",
+                    )
                 ], className="d-block mb-0"),
 
                 # Config file selection modal (initially hidden)

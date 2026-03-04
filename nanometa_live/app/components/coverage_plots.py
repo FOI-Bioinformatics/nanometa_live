@@ -102,7 +102,7 @@ def create_coverage_depth_figure(
     fig.update_layout(
         title=dict(
             text=f"Genome Coverage Depth - {coverage.ref_name}",
-            font_size=14,
+            font=dict(size=14, color="#374151"),
         ),
         xaxis=dict(
             title="Genome Position (bp)",
@@ -112,9 +112,18 @@ def create_coverage_depth_figure(
         yaxis=dict(title="Read Depth"),
         template="plotly_white",
         height=450,
-        margin=dict(l=50, r=30, t=40, b=30),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=50, r=30, t=50, b=30),
+        font=dict(family="Arial, sans-serif", size=12),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            font=dict(size=11),
+        ),
         showlegend=True,
+        hovermode="x unified",
     )
 
     return fig
@@ -149,14 +158,16 @@ def create_cumulative_coverage_figure(coverage: CoverageData) -> go.Figure:
     ))
 
     fig.update_layout(
-        title=dict(text="Cumulative Coverage", font_size=13),
+        title=dict(text="Cumulative Coverage", font=dict(size=13, color="#374151")),
         xaxis_title="Minimum Depth",
         yaxis_title="Genome Covered (%)",
         yaxis_range=[0, 105],
         template="plotly_white",
         height=280,
-        margin=dict(l=50, r=20, t=35, b=40),
+        margin=dict(l=50, r=20, t=40, b=40),
+        font=dict(family="Arial, sans-serif", size=12),
         showlegend=False,
+        hovermode="x",
     )
 
     return fig
@@ -204,13 +215,16 @@ def create_depth_histogram_figure(
     )
 
     fig.update_layout(
-        title=dict(text="Depth Distribution", font_size=13),
+        title=dict(text="Depth Distribution", font=dict(size=13, color="#374151")),
         xaxis_title="Depth",
         yaxis_title="Positions",
+        yaxis_tickformat=",",
         template="plotly_white",
         height=280,
-        margin=dict(l=50, r=20, t=35, b=40),
+        margin=dict(l=50, r=20, t=40, b=40),
+        font=dict(family="Arial, sans-serif", size=12),
         showlegend=False,
+        bargap=0.05,
     )
 
     return fig
@@ -255,12 +269,13 @@ def create_empty_coverage_figure(title: str = "No coverage data") -> go.Figure:
         xref="paper", yref="paper",
         x=0.5, y=0.5,
         showarrow=False,
-        font=dict(size=14, color="gray"),
+        font=dict(size=14, color="#9CA3AF"),
     )
     fig.update_layout(
-        title=title,
+        title=dict(text=title, font=dict(size=13, color="#374151")),
         template="plotly_white",
         height=300,
         margin=dict(l=50, r=30, t=40, b=30),
+        font=dict(family="Arial, sans-serif", size=12),
     )
     return fig

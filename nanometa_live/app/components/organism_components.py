@@ -542,9 +542,13 @@ def FilteringBreakdownVisual(
     Returns:
         Filtering visualization component with stacked bar chart
     """
-    failed_reads = total_reads - passed_reads
-    pass_rate = (passed_reads / total_reads * 100) if total_reads > 0 else 0
-    fail_rate = 100 - pass_rate
+    # When post-filter count exceeds pre-filter baseline (e.g., seqkit counted
+    # slightly more reads than kraken2 processed), cap to avoid impossible percentages
+    if passed_reads > total_reads and total_reads > 0:
+        total_reads = passed_reads
+    failed_reads = max(0, total_reads - passed_reads)
+    pass_rate = min((passed_reads / total_reads * 100) if total_reads > 0 else 0, 100.0)
+    fail_rate = max(0, 100 - pass_rate)
 
     # Calculate percentages for removal reasons (of total, not of failed)
     reason_percentages_of_total = {}
@@ -603,6 +607,7 @@ def FilteringBreakdownVisual(
         margin=dict(l=0, r=0, t=0, b=0),
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(family="Arial, sans-serif", size=11),
         showlegend=True,
         legend=dict(
             orientation="h",
@@ -610,19 +615,19 @@ def FilteringBreakdownVisual(
             y=-0.3,
             xanchor="center",
             x=0.5,
-            font=dict(size=11)
+            font=dict(size=10),
         ),
         xaxis=dict(
             range=[0, 100],
             showgrid=False,
             showticklabels=False,
-            zeroline=False
+            zeroline=False,
         ),
         yaxis=dict(
             showgrid=False,
             showticklabels=False,
-            zeroline=False
-        )
+            zeroline=False,
+        ),
     )
 
     # Build detailed breakdown list
@@ -689,7 +694,18 @@ def FilteringBreakdownVisual(
         html.Div([
             html.H6("Removal Breakdown:", className="mb-3"),
             html.Div(breakdown_items, className="filtering-breakdown-list")
-        ]) if breakdown_items else None
+        ]) if breakdown_items else None,
+
+        # Note about read count sources
+        html.Div([
+            html.I(className="bi bi-info-circle me-1"),
+            html.Small(
+                "Read counts may differ slightly between pipeline steps "
+                "(seqkit stats vs. Kraken2) due to processing overhead.",
+                className="text-muted"
+            )
+        ], className="mt-3", style={"fontSize": "11px"})
+        if pass_rate >= 99.5 and failed_reads == 0 else None
     ], className="filtering-breakdown-container")
 
 
@@ -1122,9 +1138,9 @@ def BaseQualityCard(
     Returns:
         Base quality card component
 
-    Color thresholds:
-        Q20: >= 90% (good), 80-90% (warning), < 80% (poor)
-        Q30: >= 80% (good), 60-80% (warning), < 60% (poor)
+    Color thresholds (calibrated for Oxford Nanopore):
+        Q20: >= 65% (good), 50-65% (warning), < 50% (poor)
+        Q30: >= 45% (good), 30-45% (warning), < 30% (poor)
     """
     # Color configuration
     color_config = {
@@ -1134,18 +1150,18 @@ def BaseQualityCard(
     }
 
     def get_q20_color(value: float) -> dict:
-        """Get color for Q20 rate."""
-        if value < 80:
+        """Get color for Q20 rate (nanopore-calibrated)."""
+        if value < 50:
             return color_config["danger"]
-        elif value < 90:
+        elif value < 65:
             return color_config["warning"]
         return color_config["success"]
 
     def get_q30_color(value: float) -> dict:
-        """Get color for Q30 rate."""
-        if value < 60:
+        """Get color for Q30 rate (nanopore-calibrated)."""
+        if value < 30:
             return color_config["danger"]
-        elif value < 80:
+        elif value < 45:
             return color_config["warning"]
         return color_config["success"]
 
@@ -1162,12 +1178,12 @@ def BaseQualityCard(
     q20_colors = get_q20_color(q20_rate)
     q30_colors = get_q30_color(q30_rate)
 
-    # Determine overall card color based on lower metric
+    # Determine overall card color based on lower metric (nanopore-calibrated)
     overall_metric = min(q20_rate, q30_rate)
-    if overall_metric < 60:
+    if overall_metric < 30:
         card_bg = color_config["danger"]["bg_light"]
         card_border = "rgba(220, 53, 69, 0.25)"
-    elif overall_metric < 75:
+    elif overall_metric < 45:
         card_bg = color_config["warning"]["bg_light"]
         card_border = "rgba(255, 193, 7, 0.30)"
     else:
@@ -1205,9 +1221,11 @@ def BaseQualityCard(
             margin=dict(l=0, r=30, t=0, b=0),
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(family="Arial, sans-serif"),
             showlegend=False,
             xaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
-            yaxis=dict(showticklabels=False, showgrid=False, zeroline=False, range=[0, 45])
+            yaxis=dict(showticklabels=False, showgrid=False, zeroline=False, range=[0, 45]),
+            hovermode="x",
         )
 
         sparkline_section = html.Div([

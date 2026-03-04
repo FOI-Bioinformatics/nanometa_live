@@ -291,7 +291,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
             if wl_id in enabled_ids:
                 results.extend([base_color, False])  # Solid filled button
             else:
-                results.extend(["secondary", True])  # Gray outlined button
+                results.extend([base_color, True])  # Outlined in original color
         return tuple(results)
 
     # ---------------------------------------------------------------------

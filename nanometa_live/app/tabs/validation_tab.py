@@ -243,6 +243,16 @@ def register_validation_callbacks(app: Dash):
         if not species_names:
             return _create_empty_identity_plot()
 
+        # Color bars by identity level: green >= 95, amber 90-95, red < 90
+        bar_colors = []
+        for v in identity_means:
+            if v >= 95:
+                bar_colors.append("#28a745")
+            elif v >= 90:
+                bar_colors.append("#fd7e14")
+            else:
+                bar_colors.append("#dc3545")
+
         fig = go.Figure()
         fig.add_trace(go.Bar(
             x=species_names,
@@ -252,32 +262,46 @@ def register_validation_callbacks(app: Dash):
                 symmetric=False,
                 array=[mx - mn for mn, mx in zip(identity_means, identity_maxs)],
                 arrayminus=[mn - mi for mn, mi in zip(identity_means, identity_mins)],
+                color="#6c757d",
+                thickness=1.5,
             ),
-            marker_color="#fd7e14",
+            marker_color=bar_colors,
+            marker_line_width=0,
             text=[f"{v:.1f}%" for v in identity_means],
             textposition="outside",
+            textfont=dict(size=11, color="#374151"),
             hovertemplate=(
-                "<b>%{x}</b><br>Mean: %{y:.1f}%<br>"
-                "Range: %{customdata[0]:.1f}% - %{customdata[1]:.1f}%<extra></extra>"
+                "<b>%{x}</b><br>"
+                "Mean identity: %{y:.1f}%<br>"
+                "Range: %{customdata[0]:.1f}% - %{customdata[1]:.1f}%"
+                "<extra></extra>"
             ),
             customdata=list(zip(identity_mins, identity_maxs)),
         ))
 
         fig.update_layout(
-            title="Sequence Identity by Species (BLAST)",
+            title=dict(
+                text="Sequence Identity by Species (BLAST)",
+                font=dict(size=14, color="#374151"),
+            ),
             xaxis_title="Species",
             yaxis_title="Identity (%)",
-            yaxis_range=[0, 105],
+            yaxis_range=[0, 108],
             showlegend=False,
             template="plotly_white",
-            margin=dict(l=50, r=50, t=60, b=100),
+            margin=dict(l=50, r=30, t=50, b=100),
+            font=dict(family="Arial, sans-serif", size=12),
+            bargap=0.3,
         )
         fig.add_hline(
             y=90,
             line_dash="dash",
-            line_color="green",
+            line_color="#6c757d",
+            line_width=1,
             annotation_text="90% threshold",
             annotation_position="top right",
+            annotation_font_size=10,
+            annotation_font_color="#6c757d",
         )
         return fig
 
@@ -564,12 +588,18 @@ def _create_empty_identity_plot() -> go.Figure:
         x=0.5,
         y=0.5,
         showarrow=False,
-        font=dict(size=16, color="gray"),
+        font=dict(size=14, color="#9CA3AF"),
     )
     fig.update_layout(
-        title="Sequence Identity by Species",
+        title=dict(
+            text="Sequence Identity by Species",
+            font=dict(size=14, color="#374151"),
+        ),
         xaxis_title="Species",
         yaxis_title="Identity (%)",
         template="plotly_white",
+        height=350,
+        margin=dict(l=50, r=30, t=50, b=60),
+        font=dict(family="Arial, sans-serif", size=12),
     )
     return fig

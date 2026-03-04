@@ -280,7 +280,12 @@ def register_dashboard_callbacks(app: Dash):
         # Also check if we have samples detected - indicates data is available
         has_data = available_samples and len(available_samples) > 1
 
-        if not (visualization_mode or pipeline_running or pipeline_completed or has_data):
+        # Check if main_dir has analysis output (handles visualization mode
+        # where visualization_only may not be explicitly set)
+        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
+        has_results_dir = main_dir and os.path.exists(os.path.join(main_dir, "kraken2"))
+
+        if not (visualization_mode or pipeline_running or pipeline_completed or has_data or has_results_dir):
             return _get_idle_dashboard_state()
 
         try:
@@ -360,10 +365,11 @@ def register_dashboard_callbacks(app: Dash):
                 sample_quality = _estimate_quality_score(main_dir, sample_kraken_df)
                 quality_score = str(sample_quality) if sample_quality else "--"
 
-                # Per-sample organisms count
+                # Per-sample organisms count (species + genus, matching Organisms tab)
                 if not sample_kraken_df.empty:
-                    species_df = sample_kraken_df[sample_kraken_df["rank"] == "S"]
-                    organisms_count = str(len(species_df[species_df["reads"] > 10]))
+                    org_df = sample_kraken_df[sample_kraken_df["rank"].isin(["S", "G"])]
+                    org_df = org_df[org_df["taxid"] > 1]
+                    organisms_count = str(len(org_df[org_df["reads"] >= 1]))
                 else:
                     organisms_count = "0"
             else:
@@ -473,11 +479,12 @@ def register_dashboard_callbacks(app: Dash):
             Output("dashboard-current-stage", "children")
         ],
         [Input("update-interval", "n_intervals")],
-        [State("backend-status", "data")]
+        [State("backend-status", "data"), State("app-config", "data")]
     )
     def update_pipeline_stages(
         n_intervals: int,
-        status: Dict[str, Any]
+        status: Dict[str, Any],
+        config: Dict[str, Any]
     ) -> Tuple:
         """
         Update the pipeline stages display.
@@ -485,32 +492,42 @@ def register_dashboard_callbacks(app: Dash):
         Args:
             n_intervals: Interval counter
             status: Backend status including stages information
+            config: Application configuration
 
         Returns:
             Tuple of (stages_container, current_stage_text)
         """
-        # Default empty state
-        empty_stages = html.Div([
-            html.I(className="bi bi-hourglass text-muted", style={"fontSize": "24px"}),
-            html.P("Waiting for pipeline to start...", className="text-muted mb-0 mt-2")
-        ], className="text-center py-3")
+        # Check if in visualization mode
+        visualization_mode = config.get("visualization_only", False) if config else False
+
+        # Default empty state - show appropriate message
+        if visualization_mode:
+            viewing_stages = html.Div([
+                html.I(className="bi bi-eye text-info", style={"fontSize": "24px"}),
+                html.P("Viewing previously completed analysis results", className="text-muted mb-0 mt-2")
+            ], className="text-center py-3")
+        else:
+            viewing_stages = html.Div([
+                html.I(className="bi bi-hourglass text-muted", style={"fontSize": "24px"}),
+                html.P("Waiting for pipeline to start...", className="text-muted mb-0 mt-2")
+            ], className="text-center py-3")
 
         if not status:
-            return empty_stages, ""
+            return viewing_stages, ""
 
         pipeline_running = status.get("running", False)
         if not pipeline_running:
             # Check if we have completed stages to show
             stages = status.get("stages", [])
             if not stages:
-                return empty_stages, ""
+                return viewing_stages, ""
 
         try:
             stages = status.get("stages", [])
             current_stage = status.get("current_stage", None)
 
             if not stages:
-                return empty_stages, ""
+                return viewing_stages, ""
 
             # Create stages display
             stages_display = create_pipeline_stages_display(stages, current_stage)
@@ -530,7 +547,7 @@ def register_dashboard_callbacks(app: Dash):
 
         except Exception as e:
             logger.error(f"Error updating pipeline stages: {e}")
-            return empty_stages, ""
+            return viewing_stages, ""
 
     @app.callback(
         [
@@ -646,7 +663,7 @@ def register_dashboard_callbacks(app: Dash):
         ],
         [Input("update-interval", "n_intervals")],
         [State("app-config", "data"), State("backend-status", "data")],
-        prevent_initial_call=True
+        prevent_initial_call=False
     )
     def update_pathogen_alert_panel(
         n_intervals: int,
@@ -715,7 +732,7 @@ def register_dashboard_callbacks(app: Dash):
         ],
         [Input("update-interval", "n_intervals")],
         [State("app-config", "data"), State("backend-status", "data")],
-        prevent_initial_call=True
+        prevent_initial_call=False
     )
     def update_threat_summary(
         n_intervals: int,
@@ -754,10 +771,9 @@ def register_dashboard_callbacks(app: Dash):
                 return safe_icon, safe_style, safe_status, safe_subtitle, safe_card_style, waiting_summary
 
             # Extract species-level detections (vectorized)
-            species_df = kraken_df[
-                (kraken_df["rank"] == "S") &
-                (kraken_df["reads"] >= 5)
-            ]
+            all_species_df = kraken_df[kraken_df["rank"] == "S"]
+            total_species = len(all_species_df[all_species_df["reads"] >= 1])
+            species_df = all_species_df[all_species_df["reads"] >= 5]
             detected_organisms = _species_df_to_organisms(species_df)
 
             # Check for dangerous pathogens using proper taxid mapping
@@ -766,10 +782,11 @@ def register_dashboard_callbacks(app: Dash):
 
             if not dangerous:
                 # Show safe status with summary of screened organisms
+                screened_count = len(detected_organisms)
                 summary = html.Div([
                     html.Div([
                         html.I(className="bi bi-check-circle-fill text-success me-2"),
-                        html.Strong(f"{len(detected_organisms)} organisms screened")
+                        html.Strong(f"{screened_count} of {total_species} species above threshold")
                     ], className="mb-2"),
                     html.Small(
                         "No CDC/WHO priority pathogens detected",
@@ -831,11 +848,15 @@ def register_dashboard_callbacks(app: Dash):
 
     @app.callback(
         Output("dashboard-classification-donut", "figure"),
-        [Input("update-interval", "n_intervals")],
+        [
+            Input("update-interval", "n_intervals"),
+            Input("sample-selector", "value"),
+        ],
         [State("app-config", "data"), State("backend-status", "data")]
     )
     def update_classification_donut(
         n_intervals: int,
+        selected_sample: str,
         config: Dict[str, Any],
         status: Dict[str, Any]
     ):
@@ -843,6 +864,7 @@ def register_dashboard_callbacks(app: Dash):
         Update the classification summary donut chart.
 
         Shows classified vs unclassified reads in a compact visualization.
+        Respects the global sample selector for consistency with other metrics.
         """
         from nanometa_live.app.utils.chart_builders import create_classification_donut
 
@@ -854,7 +876,8 @@ def register_dashboard_callbacks(app: Dash):
             return create_classification_donut(0, 0)
 
         try:
-            kraken_df = load_kraken_data(main_dir, "All Samples")
+            metric_sample = selected_sample if selected_sample else "All Samples"
+            kraken_df = load_kraken_data(main_dir, metric_sample)
 
             if kraken_df.empty:
                 return create_classification_donut(0, 0)
@@ -1281,7 +1304,10 @@ def register_dashboard_callbacks(app: Dash):
         return now, LastUpdatedBadge(timestamp=now, stale=stale)
 
     @app.callback(
-        Output("dashboard-watchlist-collapse", "is_open"),
+        [
+            Output("dashboard-watchlist-collapse", "is_open"),
+            Output("dashboard-watchlist-expand-btn", "children"),
+        ],
         Input("dashboard-watchlist-expand-btn", "n_clicks"),
         State("dashboard-watchlist-collapse", "is_open"),
         prevent_initial_call=True
@@ -1289,8 +1315,14 @@ def register_dashboard_callbacks(app: Dash):
     def toggle_dashboard_watchlist_collapse(n_clicks, is_open):
         """Toggle the expand/collapse state of the watchlist panel."""
         if n_clicks:
-            return not is_open
-        return is_open
+            new_state = not is_open
+        else:
+            new_state = is_open
+        if new_state:
+            btn_children = [html.I(className="bi bi-chevron-up me-1", id="watchlist-expand-icon"), "Collapse"]
+        else:
+            btn_children = [html.I(className="bi bi-chevron-down me-1", id="watchlist-expand-icon"), "Details"]
+        return new_state, btn_children
 
 
 # Helper functions
@@ -1451,15 +1483,18 @@ def _calculate_overall_status(
     # Estimate quality score from data (simplified)
     quality_score = _estimate_quality_score(main_dir, kraken_df)
 
-    # Count organisms (species-level classifications)
+    # Count organisms (species + genus level, >= 1 read, matching Organisms tab)
     organisms_detected = 0
     if not kraken_df.empty:
-        species_df = kraken_df[kraken_df["rank"] == "S"]
-        organisms_detected = len(species_df[species_df["reads"] > 10])
+        org_df = kraken_df[kraken_df["rank"].isin(["S", "G"])]
+        org_df = org_df[org_df["taxid"] > 1]
+        organisms_detected = len(org_df[org_df["reads"] >= 1])
 
     # Determine overall status
     if visualization_only and not pipeline_running:
         overall_status = "viewing"
+    elif pipeline_running and total_reads == 0:
+        overall_status = "starting"  # Pipeline running but no data processed yet
     elif quality_score is not None and quality_score < 60:
         overall_status = "warning"
     elif organisms_detected > 100:
@@ -1595,6 +1630,14 @@ def _generate_status_display(status: str) -> Tuple[Dict, str, str, str, str, str
         Tuple of (style_dict, icon_class, status_text, subtitle_text, label_text, label_icon)
     """
     status_config = {
+        "starting": {
+            "color": "#0d6efd",  # Blue
+            "icon": "bi bi-hourglass-split",
+            "text": "Starting Analysis",
+            "subtitle": "Pipeline is running, waiting for first results...",
+            "label": "STARTING",
+            "label_icon": "bi bi-hourglass-split ms-1"
+        },
         "success": {
             "color": "#28a745",  # Green
             "icon": "bi bi-check-circle",
@@ -1712,8 +1755,9 @@ def _collect_samples_data(main_dir: str, available_samples: List[str]) -> List[D
             if not kraken_df.empty:
                 # Calculate sample metrics from Kraken
                 reads = int(kraken_df["reads"].sum())
-                species_df = kraken_df[kraken_df["rank"] == "S"]
-                organisms = len(species_df[species_df["reads"] > 10])
+                org_df = kraken_df[kraken_df["rank"].isin(["S", "G"])]
+                org_df = org_df[org_df["taxid"] > 1]
+                organisms = len(org_df[org_df["reads"] >= 1])
 
                 # Classification rate calculation
                 unclassified = kraken_df[kraken_df["name"].str.contains("unclassified", case=False, na=False)]
@@ -1840,15 +1884,15 @@ def _generate_alerts(
         reads_str = sample.get("reads", "0")
         reads = int(reads_str.replace(",", "")) if isinstance(reads_str, str) else reads_str
 
-        # Estimate pass rate from quality
+        # Estimate pass rate from quality (values use prefix format like "[+] Good")
         quality = sample.get("quality", "--")
-        if quality == "Excellent":
+        if "Excellent" in quality:
             pass_rate = 95
-        elif quality == "Good":
+        elif "Good" in quality:
             pass_rate = 80
-        elif quality == "Fair":
+        elif "Fair" in quality:
             pass_rate = 65
-        elif quality == "Poor":
+        elif "Poor" in quality:
             pass_rate = 40
         else:
             pass_rate = 100  # Unknown, assume ok
@@ -1860,11 +1904,23 @@ def _generate_alerts(
             "status": sample.get("status", "unknown")
         })
 
-    # Prepare QC stats
+    # Prepare QC stats - use actual classification data from Kraken2
+    # instead of the crude heuristic _estimate_classified_rate
+    actual_classified_rate = 0.0
+    try:
+        kraken_df = load_kraken_data(main_dir, "All Samples")
+        if not kraken_df.empty:
+            classified_reads, unclassified_reads, _ = get_classification_stats(kraken_df)
+            total_kr = classified_reads + unclassified_reads
+            if total_kr > 0:
+                actual_classified_rate = (classified_reads / total_kr) * 100
+    except Exception:
+        actual_classified_rate = _estimate_classified_rate(overall_status.get("organisms_detected", 0))
+
     qc_stats = {
         "total_reads": overall_status.get("total_reads", 0),
         "pass_rate": _estimate_pass_rate_from_quality(overall_status.get("quality_score")),
-        "classified_rate": _estimate_classified_rate(overall_status.get("organisms_detected", 0))
+        "classified_rate": actual_classified_rate
     }
 
     # Load detected organisms for pathogen checking

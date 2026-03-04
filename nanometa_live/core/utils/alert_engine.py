@@ -254,7 +254,7 @@ class AlertEngine:
         if low_yield_samples:
             sample_list = ", ".join([f"{name} ({reads} reads)" for name, reads in low_yield_samples[:3]])
             alerts.append(Alert(
-                severity=AlertSeverity.WARNING,
+                severity=AlertSeverity.INFO,
                 category=AlertCategory.DATA,
                 message=f"Low yield in {len(low_yield_samples)} sample(s): {sample_list}",
                 recommendation="Continue monitoring - yield may increase over time"
@@ -318,7 +318,7 @@ class AlertEngine:
                     ))
 
                 elif threat_level in ["high", "high_risk"]:
-                    severity = AlertSeverity.CRITICAL
+                    severity = AlertSeverity.WARNING
                     display_name = pathogen_name
                     if common_name:
                         display_name = f"{pathogen_name} ({common_name})"
@@ -427,7 +427,7 @@ class AlertEngine:
 
         if pending_files > self.alert_rules["system"]["max_pending_files"]:
             alerts.append(Alert(
-                severity=AlertSeverity.WARNING,
+                severity=AlertSeverity.INFO,
                 category=AlertCategory.SYSTEM,
                 message=f"High number of pending files: {pending_files} files waiting",
                 recommendation="System is processing - this is normal during high data generation",

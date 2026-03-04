@@ -35,6 +35,7 @@ from nanometa_live.app.components.modern_components import EmptyStateMessage
 from nanometa_live.app.utils.callback_helpers import (
     validate_config_and_get_main_dir,
     log_callback_error,
+    get_classification_stats,
 )
 
 
@@ -261,41 +262,91 @@ def register_qc_callbacks(app: Dash):
             # Format time for display
             time_for_display = qc_df["Time"].dt.strftime("%Y-%m-%d %H:%M:%S")
 
-            # Create plots using sample names for bar charts
+            # Shared Plotly layout for consistent QC chart styling
+            _qc_layout = dict(
+                template="plotly_white",
+                height=350,
+                margin=dict(l=50, r=30, t=50, b=60),
+                font=dict(family="Arial, sans-serif", size=12),
+                title_font=dict(size=14, color="#374151"),
+                hovermode="x unified",
+            )
+
+            # Cumulative reads line chart
             cumul_reads_fig = px.line(
                 qc_df,
                 x=time_for_display,
                 y="Cumulative Reads",
                 title="Cumulative Processed Reads",
             )
+            cumul_reads_fig.update_traces(
+                line=dict(color="#0d6efd", width=2.5),
+                fill="tozeroy",
+                fillcolor="rgba(13, 110, 253, 0.08)",
+                hovertemplate="Reads: %{y:,.0f}<extra></extra>",
+            )
+            cumul_reads_fig.update_layout(
+                **_qc_layout,
+                xaxis_title="Processing Time",
+                yaxis_title="Cumulative Reads",
+                yaxis_tickformat=",",
+            )
 
+            # Cumulative base pairs line chart
             cumul_bp_fig = px.line(
                 qc_df,
                 x=time_for_display,
                 y="Cumulative Bp",
                 title="Cumulative Processed Base Pairs",
             )
+            cumul_bp_fig.update_traces(
+                line=dict(color="#198754", width=2.5),
+                fill="tozeroy",
+                fillcolor="rgba(25, 135, 84, 0.08)",
+                hovertemplate="Bases: %{y:,.0f}<extra></extra>",
+            )
+            cumul_bp_fig.update_layout(
+                **_qc_layout,
+                xaxis_title="Processing Time",
+                yaxis_title="Cumulative Base Pairs",
+                yaxis_tickformat=",",
+            )
 
-            # Use sample names for bar charts
+            # Reads per sample bar chart
             reads_fig = px.bar(
                 qc_df, x="Sample", y="Reads", title="Processed Reads per Sample"
             )
+            reads_fig.update_traces(
+                marker_color="#0d6efd",
+                marker_line_width=0,
+                hovertemplate="<b>%{x}</b><br>Reads: %{y:,.0f}<extra></extra>",
+            )
+            reads_fig.update_layout(
+                **_qc_layout,
+                xaxis_title="Sample",
+                yaxis_title="Reads",
+                yaxis_tickformat=",",
+                xaxis_type="category",
+                bargap=0.3,
+            )
 
+            # Base pairs per sample bar chart
             bp_fig = px.bar(
                 qc_df, x="Sample", y="Bp", title="Processed Base Pairs per Sample"
             )
-
-            # Update layout for better appearance
-            for fig in [cumul_reads_fig, cumul_bp_fig, reads_fig, bp_fig]:
-                fig.update_layout(height=350, margin=dict(l=50, r=50, t=50, b=50))
-
-            # Update x-axis labels for bar charts
-            reads_fig.update_xaxes(title_text="Sample")
-            bp_fig.update_xaxes(title_text="Sample")
-
-            # Make bar charts discrete
-            reads_fig.update_xaxes(type="category")
-            bp_fig.update_xaxes(type="category")
+            bp_fig.update_traces(
+                marker_color="#198754",
+                marker_line_width=0,
+                hovertemplate="<b>%{x}</b><br>Base pairs: %{y:,.0f}<extra></extra>",
+            )
+            bp_fig.update_layout(
+                **_qc_layout,
+                xaxis_title="Sample",
+                yaxis_title="Base Pairs",
+                yaxis_tickformat=",",
+                xaxis_type="category",
+                bargap=0.3,
+            )
 
             return cumul_reads_fig, cumul_bp_fig, reads_fig, bp_fig
 
@@ -409,7 +460,7 @@ def register_qc_callbacks(app: Dash):
             if not fastp_found:
                 seqkit_dir = os.path.join(main_dir, "seqkit")
                 if os.path.exists(seqkit_dir):
-                    seqkit_df = load_seqkit_stats(main_dir)
+                    seqkit_df = load_seqkit_stats(main_dir, selected_sample)
                     if not seqkit_df.empty and 'num_seqs' in seqkit_df.columns:
                         tot_passed_reads = int(seqkit_df['num_seqs'].sum())
                         # Use Kraken2 for pre-filter baseline (total classified + unclassified)
@@ -431,38 +482,12 @@ def register_qc_callbacks(app: Dash):
                                 tot_too_short_reads = int(tot_removed_reads * 0.3)
                                 tot_too_many_N_reads = tot_removed_reads - tot_low_quality_reads - tot_too_short_reads
 
-            # Get classification stats from Kraken2 reports
+            # Get classification stats from Kraken2 (sample-filtered)
             classified_reads = 0
             unclassified_reads = 0
-            if os.path.exists(kraken_dir):
-                # Support incremental realtime, nanometanf v1.2+, and legacy file naming
-                kreport_patterns = [
-                    os.path.join(kraken_dir, "*.cumulative.kraken2.report.txt"),  # Incremental realtime mode
-                    os.path.join(kraken_dir, "*.kraken2.report.txt"),  # nanometanf v1.2+
-                    os.path.join(kraken_dir, "*.kreport2.txt"),         # Legacy
-                ]
-                kreport_files = list(dict.fromkeys(
-                    f for pattern in kreport_patterns for f in glob.glob(pattern)
-                ))
-                for kreport_file in kreport_files:
-                    try:
-                        kraken_df = pd.read_csv(
-                            kreport_file,
-                            sep="\t",
-                            header=None,
-                            names=["%", "cumul_reads", "reads", "rank", "taxid", "name"],
-                        )
-
-                        # Unclassified reads are in the first row (taxid 0)
-                        unclassified_row = kraken_df[kraken_df["taxid"] == 0]
-                        if not unclassified_row.empty:
-                            unclassified_reads += int(unclassified_row.iloc[0]["reads"])
-
-                        # Classified reads are the sum of all other rows
-                        classified_reads += int(kraken_df["reads"].sum()) - int(unclassified_row.iloc[0]["reads"]) if not unclassified_row.empty else 0
-                    except (pd.errors.EmptyDataError, pd.errors.ParserError, IOError, KeyError, IndexError, ValueError) as e:
-                        logging.debug(f"Error reading Kraken report {kreport_file}: {e}")
-                        continue
+            kraken_df = load_kraken_data(main_dir, selected_sample)
+            if not kraken_df.empty:
+                classified_reads, unclassified_reads, _ = get_classification_stats(kraken_df)
 
             # Get waiting files
             if os.path.exists(nanopore_dir):
@@ -475,16 +500,20 @@ def register_qc_callbacks(app: Dash):
                 if waiting_files < 0:
                     waiting_files = 0
 
-            # Calculate percentages
+            # When post-filter count exceeds pre-filter baseline (seqkit may count
+            # slightly more reads than kraken2 processed), adjust to avoid impossible %
+            if tot_passed_reads > tot_reads_pre_filt and tot_reads_pre_filt > 0:
+                tot_reads_pre_filt = tot_passed_reads
+                tot_removed_reads = 0
             percentage_passed = 0
             percentage_removed = 0
             if tot_reads_pre_filt > 0:
-                percentage_passed = round(
+                percentage_passed = min(round(
                     (tot_passed_reads * 100) / tot_reads_pre_filt, 1
-                )
-                percentage_removed = round(
+                ), 100.0)
+                percentage_removed = max(round(
                     (tot_removed_reads * 100) / tot_reads_pre_filt, 1
-                )
+                ), 0.0)
 
             percentage_low_quality = 0
             percentage_too_many_N = 0
@@ -752,7 +781,7 @@ def register_qc_callbacks(app: Dash):
 
             # Fallback to seqkit if no FASTP data
             if total_bases == 0:
-                seqkit_df = load_seqkit_stats(main_dir)
+                seqkit_df = load_seqkit_stats(main_dir, selected_sample)
                 if not seqkit_df.empty:
                     source = "seqkit"
                     total_bases = int(seqkit_df['sum_len'].sum()) if 'sum_len' in seqkit_df.columns else 0
@@ -866,7 +895,7 @@ def register_qc_callbacks(app: Dash):
 
             # Fallback to seqkit if no FASTP data
             if mean_length == 0:
-                seqkit_df = load_seqkit_stats(main_dir)
+                seqkit_df = load_seqkit_stats(main_dir, selected_sample)
                 if not seqkit_df.empty:
                     source = "seqkit"
                     mean_length = float(seqkit_df['avg_len'].mean()) if 'avg_len' in seqkit_df.columns else 0.0
@@ -943,7 +972,7 @@ def register_qc_callbacks(app: Dash):
 
             # Fallback to seqkit/Kraken2 if FASTP not found (chopper QC)
             if not fastp_found:
-                seqkit_df = load_seqkit_stats(main_dir)
+                seqkit_df = load_seqkit_stats(main_dir, selected_sample)
                 if not seqkit_df.empty and 'num_seqs' in seqkit_df.columns:
                     tot_passed_reads = int(seqkit_df['num_seqs'].sum())
 
@@ -1029,9 +1058,6 @@ def register_qc_callbacks(app: Dash):
             return empty_state
 
         try:
-            fastp_dir = os.path.join(main_dir, "fastp")
-            kraken_dir = os.path.join(main_dir, "kraken2")
-
             # Initialize metrics
             tot_reads_pre_filt = 0
             tot_passed_reads = 0
@@ -1049,48 +1075,27 @@ def register_qc_callbacks(app: Dash):
                 tot_reads_pre_filt = fastp_stats['total_reads_before']
                 tot_passed_reads = fastp_stats['total_reads_after']
 
+            # Load Kraken2 data once (sample-filtered) for reuse
+            kraken_df = load_kraken_data(main_dir, selected_sample)
+
             # Fallback to seqkit/Kraken2 if FASTP not found
             if tot_passed_reads == 0:
-                seqkit_df = load_seqkit_stats(main_dir)
+                seqkit_df = load_seqkit_stats(main_dir, selected_sample)
                 if not seqkit_df.empty and 'num_seqs' in seqkit_df.columns:
                     tot_passed_reads = int(seqkit_df['num_seqs'].sum())
-                    kraken_df = load_kraken_data(main_dir, selected_sample)
                     if not kraken_df.empty:
-                        root = kraken_df[kraken_df['name'].str.strip() == 'root']
-                        unclassified = kraken_df[kraken_df['name'].str.strip() == 'unclassified']
-                        classified_count = int(root.iloc[0]['cumul_reads']) if not root.empty else 0
-                        unclassified_count = int(unclassified.iloc[0]['cumul_reads']) if not unclassified.empty else 0
+                        classified_count, unclassified_count, _ = get_classification_stats(kraken_df)
                         tot_reads_pre_filt = classified_count + unclassified_count
 
-            # Get classification stats from Kraken2
-            if os.path.exists(kraken_dir):
-                kreport_patterns = [
-                    os.path.join(kraken_dir, "*.cumulative.kraken2.report.txt"),  # Incremental realtime mode
-                    os.path.join(kraken_dir, "*.kraken2.report.txt"),
-                    os.path.join(kraken_dir, "*.kreport2.txt"),
-                ]
-                kreport_files = list(dict.fromkeys(
-                    f for pattern in kreport_patterns for f in glob.glob(pattern)
-                ))
-                for kreport_file in kreport_files:
-                    try:
-                        kraken_df = pd.read_csv(
-                            kreport_file,
-                            sep="\t",
-                            header=None,
-                            names=["%", "cumul_reads", "reads", "rank", "taxid", "name"],
-                        )
-                        unclassified_row = kraken_df[kraken_df["taxid"] == 0]
-                        unclassified_reads = int(unclassified_row.iloc[0]["reads"]) if not unclassified_row.empty else 0
-                        total_reads = int(kraken_df["reads"].sum())
-                        classified_reads += total_reads - unclassified_reads
-                        total_kraken_reads += total_reads
-                    except (pd.errors.EmptyDataError, pd.errors.ParserError, IOError, KeyError, IndexError, ValueError) as e:
-                        logging.debug(f"Error reading Kraken report {kreport_file}: {e}")
-                        continue
+            # Get classification stats from Kraken2 (sample-filtered)
+            if not kraken_df.empty:
+                classified_reads, unclassified_kraken, _ = get_classification_stats(kraken_df)
+                total_kraken_reads = classified_reads + unclassified_kraken
 
-            # Calculate rates
+            # Calculate rates (cap pass_rate at 100% to handle edge cases
+            # where chopper/seqkit totals differ from kraken pre-filter counts)
             pass_rate = (tot_passed_reads / tot_reads_pre_filt * 100) if tot_reads_pre_filt > 0 else 0
+            pass_rate = min(pass_rate, 100.0)
             classification_rate = (classified_reads / total_kraken_reads * 100) if total_kraken_reads > 0 else 0
 
             # If no data, show empty state

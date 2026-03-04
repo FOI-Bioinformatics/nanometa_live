@@ -27,12 +27,11 @@ def create_header(title="Nanometa Live"):
             # Title and logo
             dbc.Col([
                 html.Div([
-                    html.Img(
-                        src="/assets/logo.png",
-                        height="40px",
-                        className="me-2",
-                        alt="Nanometa Live logo"
-                    ),
+                    html.I(className="bi bi-moisture", style={
+                        "fontSize": "28px",
+                        "color": "#0d6efd",
+                        "marginRight": "8px"
+                    }),
                     html.H2(id="header-title", className="mb-0", children=title)
                 ], className="d-flex align-items-center")
             ], width=4),

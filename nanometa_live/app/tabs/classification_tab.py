@@ -322,7 +322,7 @@ def register_classification_callbacks(app: Dash):
 
 def create_placeholder_sankey(message="Waiting for data"):
     """
-    Create a placeholder Sankey plot.
+    Create a placeholder Sankey plot with styled empty state.
 
     Args:
         message: Message to display in the plot
@@ -331,11 +331,25 @@ def create_placeholder_sankey(message="Waiting for data"):
         A Go.Figure object with a placeholder Sankey plot
     """
     placeholder_link = dict(source=[0], target=[1], value=[1])
-    placeholder_node = dict(label=[message, ""], pad=25, thickness=10)
+    placeholder_node = dict(
+        label=[message, ""],
+        pad=25,
+        thickness=10,
+        color=["#E5E7EB", "rgba(0,0,0,0)"],
+    )
 
-    figure = go.Figure(go.Sankey(link=placeholder_link, node=placeholder_node))
+    figure = go.Figure(go.Sankey(
+        link=placeholder_link,
+        node=placeholder_node,
+        textfont=dict(size=13, color="#6B7280", family="Arial, sans-serif"),
+    ))
 
-    figure.update_layout(height=700, margin=dict(l=50, r=50, t=50, b=50))
+    figure.update_layout(
+        height=400,
+        margin=dict(l=50, r=50, t=50, b=50),
+        paper_bgcolor="white",
+        font=dict(family="Arial, sans-serif"),
+    )
 
     return figure
 
@@ -361,8 +375,8 @@ def _recalculate_cumulative_reads(df):
         return {}
 
     result = {}
-    for idx in df.index:
-        row = df.loc[idx]
+    for idx in range(len(df)):
+        row = df.iloc[idx]
         name = row["name"].strip()
         # Use cumul_reads (column 2) - the cumulative/clade reads
         # NOT reads (column 3) which is only direct assignments
@@ -590,6 +604,18 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
     """
     # Use provided color palette or default
     colors = color_palette or TAXONOMY_COLORS
+    # Shared layout for informational empty-state figures
+    _info_layout = dict(
+        height=400,
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+        margin=dict(l=50, r=50, t=50, b=50),
+        font=dict(family="Arial, sans-serif"),
+    )
+
+    # Ensure clean integer index to prevent duplicate-index issues with .loc[]
+    kraken_df = kraken_df.reset_index(drop=True)
+
     # Handle empty dataframe
     if kraken_df.empty:
         fig = go.Figure()
@@ -597,9 +623,9 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
             text="No taxonomic classification data available for this sample.",
             xref="paper", yref="paper",
             x=0.5, y=0.5, showarrow=False,
-            font=dict(size=14)
+            font=dict(size=14, color="#6B7280"),
         )
-        fig.update_layout(title="Sankey Diagram - No Data")
+        fig.update_layout(**_info_layout)
         return fig
 
     # CRITICAL FIX: Find which tax levels actually exist in the data
@@ -618,9 +644,9 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
             text=f"No matching taxonomy ranks found in data.<br>Available ranks: {', '.join(available_ranks)}<br>Try adjusting filter settings.",
             xref="paper", yref="paper",
             x=0.5, y=0.5, showarrow=False,
-            font=dict(size=14)
+            font=dict(size=14, color="#6B7280"),
         )
-        fig.update_layout(title="Sankey Diagram - Insufficient Data")
+        fig.update_layout(**_info_layout)
         return fig
 
     # Sankey requires at least 2 levels to show parent-child relationships
@@ -633,9 +659,9 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
             text=f"Sankey diagram requires at least 2 taxonomy levels.<br>Currently available: {', '.join(available_names)}<br>Try switching to Sunburst view or adjust taxonomy filters.",
             xref="paper", yref="paper",
             x=0.5, y=0.5, showarrow=False,
-            font=dict(size=14)
+            font=dict(size=14, color="#6B7280"),
         )
-        fig.update_layout(title="Sankey Diagram - Insufficient Taxonomy Levels")
+        fig.update_layout(**_info_layout)
         return fig
 
     # CRITICAL FIX: Recalculate cumulative reads on FULL dataframe BEFORE filtering
@@ -657,7 +683,7 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
 
             # Find next domain index
             sliced_df = kraken_df.iloc[start_idx + 1:]
-            next_domains = sliced_df[sliced_df["name"].isin(domains)]
+            next_domains = sliced_df[sliced_df["name"].str.strip().isin(domains)]
             if not next_domains.empty:
                 end_idx = next_domains.index[0]
             else:
@@ -933,16 +959,15 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
 
     # Create explicit X positions for nodes based on taxonomy level
     # This ensures proper column positioning in the Sankey diagram
-    # Domain is set to 70% width to reserve 30% on right for labels
+    # Nodes span 0.001-0.85 with 150px right margin for rightmost labels
     # Iterate through nodes list directly to handle "Other" nodes correctly
     node_x = []
     level_to_x = {}
     for level_idx, level in enumerate(tax_levels):
         # Calculate X position for each level
-        # Nodes span full width 0.001-0.999
-        # Labels default to left side in Plotly; a clientside callback
-        # repositions leftmost-column labels to the right after render
-        x_pos = 0.001 + (level_idx / max(len(tax_levels) - 1, 1)) * 0.998
+        # Nodes span 0.001-0.85, leaving right space for label text
+        # (custom.js repositions rightmost-column labels to the right of nodes)
+        x_pos = 0.001 + (level_idx / max(len(tax_levels) - 1, 1)) * 0.849
         level_to_x[level] = x_pos
 
     for name in nodes:
@@ -1001,30 +1026,27 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
         if name.startswith("__sink_"):
             node_y[i] = 0.999
 
-    # Create the real Sankey figure with hover information
-    # Domain settings:
-    #   - domain.x=[0.0, 0.70]: Reserve 30% on right for labels to extend into
-    #   - domain.y=[0.02, 0.98]: Constrain vertical to prevent top/bottom overflow
-    # Node X positions (0-1) are relative to domain, so nodes span the 70% Sankey area
+    # Create the Sankey figure with enhanced hover information
     figure = go.Figure(
         go.Sankey(
-            arrangement="snap",  # Snap keeps columns aligned while using full width
-            textfont=dict(size=11, color="#1F2937"),
+            arrangement="snap",
+            textfont=dict(size=11, color="#1F2937", family="Arial, sans-serif"),
             domain=dict(
                 x=[0.0, 1.0],
                 y=[0.02, 0.98]
             ),
             node=dict(
                 pad=25,
-                thickness=18,
+                thickness=20,
                 label=node_labels,
                 color=node_colors,
                 customdata=node_customdata,
+                line=dict(color="#E5E7EB", width=0.5),
                 hovertemplate=(
                     "<b>%{label}</b><br>"
-                    "%{customdata[2]}<br>"
+                    "<span style='color:#6B7280'>%{customdata[2]}</span><br>"
                     "Reads: <b>%{customdata[0]:,.0f}</b><br>"
-                    "Percent: <b>%{customdata[1]:.2f}%</b>"
+                    "Proportion: <b>%{customdata[1]:.2f}%</b>"
                     "<extra></extra>"
                 ),
             ),
@@ -1034,8 +1056,8 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
                 value=values,
                 color=link_colors,
                 hovertemplate=(
-                    "%{source.label} -> %{target.label}<br>"
-                    "Reads: <b>%{value:,.0f}</b>"
+                    "<b>%{source.label}</b> &rarr; <b>%{target.label}</b><br>"
+                    "Reads: %{value:,.0f}"
                     "<extra></extra>"
                 ),
             ),
@@ -1071,18 +1093,39 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
             final_height = adaptive_height
             logging.debug(f"Sankey: Invalid height '{chart_height}', falling back to adaptive={final_height}px")
 
+    # Build level legend for Sankey subtitle
+    sankey_legend_items = []
+    for level in tax_levels:
+        color = colors.get(level, "#94A3B8")
+        name = rank_names.get(level, level)
+        sankey_legend_items.append(f"<span style='color:{color}'>&#9632;</span> {name}")
+    sankey_legend_text = "  ".join(sankey_legend_items)
+
     # Layout with dynamic height and balanced margins for labels
     figure.update_layout(
         height=final_height,
         title=dict(
             text="<b>Taxonomic Classification Flow</b>",
-            font=dict(size=20, color="#1F2937"),
+            font=dict(size=18, color="#1F2937", family="Arial, sans-serif"),
             x=0.5,
-            xanchor="center"
+            xanchor="center",
         ),
         paper_bgcolor="white",
         plot_bgcolor="white",
-        margin=dict(l=20, r=20, t=60, b=40),
+        margin=dict(l=20, r=150, t=65, b=50),
+        font=dict(family="Arial, sans-serif"),
+        annotations=[
+            dict(
+                text=sankey_legend_text,
+                x=0.5,
+                y=-0.03,
+                xref="paper",
+                yref="paper",
+                showarrow=False,
+                font=dict(size=11, color="#6B7280"),
+                xanchor="center",
+            )
+        ],
     )
 
     return figure
@@ -1278,6 +1321,9 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, colo
     Returns:
         A go.Figure with the styled Sunburst chart
     """
+    # Ensure clean integer index to prevent duplicate-index issues with .loc[]
+    kraken_df = kraken_df.reset_index(drop=True)
+
     # Use provided color palette or default
     palette = color_palette or TAXONOMY_COLORS
     # Use provided tax_levels or fallback to config
@@ -1450,19 +1496,20 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, colo
         labels=labels,
         parents=parents,
         values=values,
-        branchvalues="remainder",  # CHANGED from "total" - more forgiving
+        branchvalues="remainder",
         marker=dict(
             colors=colors,
-            line=dict(color="white", width=1.5)
+            line=dict(color="white", width=2)
         ),
         textfont=dict(
             size=11,
-            color="white"
+            color="white",
+            family="Arial, sans-serif",
         ),
         insidetextorientation="horizontal",
         hovertemplate=(
             "<b>%{label}</b><br>"
-            "<span style='color: #9CA3AF'>%{customdata[0]}</span><br>"
+            "<span style='color:#9CA3AF'>%{customdata[0]}</span><br>"
             "Reads: <b>%{customdata[1]:,.0f}</b><br>"
             "Of total: <b>%{customdata[2]:.1f}%</b><br>"
             "Of parent: <b>%{percentParent:.1%}</b>"
@@ -1481,13 +1528,13 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, colo
 
     legend_text = " | ".join(legend_items)
 
-    # Update layout with modern styling and increased height
+    # Update layout with refined styling
     fig.update_layout(
         height=850,
-        margin=dict(l=20, r=20, t=80, b=60),
+        margin=dict(l=20, r=20, t=70, b=55),
         title=dict(
             text="<b>Taxonomic Classification</b>",
-            font=dict(size=20, color="#1F2937", family="Arial, sans-serif"),
+            font=dict(size=18, color="#1F2937", family="Arial, sans-serif"),
             x=0.5,
             xanchor="center",
             y=0.97
@@ -1495,7 +1542,6 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, colo
         paper_bgcolor="white",
         plot_bgcolor="white",
         font=dict(family="Arial, sans-serif"),
-        # Add legend as annotation at bottom
         annotations=[
             dict(
                 text=f"<b>Taxonomy Levels:</b> {legend_text}",

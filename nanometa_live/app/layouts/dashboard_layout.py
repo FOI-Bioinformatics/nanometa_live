@@ -39,15 +39,16 @@ from nanometa_live.app.components.watchlist_modal import create_all_modals
 
 def create_dashboard_layout():
     """
-    Create the overview dashboard layout for non-technical users.
+    Create the overview dashboard layout for clinical operators.
 
-    Layout includes:
-    - Run status banner (large traffic light indicator)
-    - Key metrics grid (4 stat cards)
-    - Quality metrics badges
-    - Sample status table
-    - Alert panel
-    - Pathogen report modal
+    Layout is ordered by clinical decision priority:
+    1. Run status banner (is the system running?)
+    2. Pathogen screening + classification (are there threats?)
+    3. Key metrics (how much data, what quality?)
+    4. Sample status table + alerts (per-sample details)
+    5. Active watchlist (what are we monitoring?)
+    6. Quality metrics details (technical details)
+    7. Pipeline stages (only relevant during active runs)
 
     Returns:
         html.Div containing the complete dashboard layout
@@ -55,127 +56,19 @@ def create_dashboard_layout():
     return html.Div([
         # Hidden stores for dashboard state
         dcc.Store(id='dashboard-data-cache', data={}),
-        dcc.Store(id='pathogen-report-data', data={}),
         dcc.Store(id='dashboard-last-updated', data=None),
 
-        # Pathogen Report Modal
-        dbc.Modal([
-            dbc.ModalHeader([
-                dbc.ModalTitle([
-                    html.I(className="bi bi-file-medical me-2"),
-                    html.Span(id="pathogen-modal-title", children="Pathogen Report")
-                ]),
-            ], close_button=True),
-            dbc.ModalBody([
-                # Threat level banner
-                html.Div(id="pathogen-modal-threat-banner", className="mb-3"),
-
-                # Main pathogen info
-                dbc.Row([
-                    dbc.Col([
-                        html.H4(id="pathogen-modal-name", className="mb-1"),
-                        html.P(id="pathogen-modal-common-name", className="text-muted mb-2"),
-                        dbc.Badge(id="pathogen-modal-category", color="secondary", className="me-2"),
-                        dbc.Badge(id="pathogen-modal-bsl", color="info"),
-                    ], md=8),
-                    dbc.Col([
-                        html.Div([
-                            html.H2(id="pathogen-modal-reads", className="mb-0 text-primary"),
-                            html.Small("sequences detected", className="text-muted")
-                        ], className="text-center")
-                    ], md=4)
-                ], className="mb-4"),
-
-                # Detection details
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.I(className="bi bi-bar-chart me-2"),
-                        html.Strong("Detection Details")
-                    ]),
-                    dbc.CardBody([
-                        dbc.Row([
-                            dbc.Col([
-                                html.Label("Abundance", className="text-muted small"),
-                                html.H5(id="pathogen-modal-abundance")
-                            ], md=4),
-                            dbc.Col([
-                                html.Label("Confidence", className="text-muted small"),
-                                html.H5(id="pathogen-modal-confidence")
-                            ], md=4),
-                            dbc.Col([
-                                html.Label("Taxonomy ID", className="text-muted small"),
-                                html.H5(id="pathogen-modal-taxid")
-                            ], md=4),
-                        ])
-                    ])
-                ], className="mb-3"),
-
-                # Action required
-                dbc.Alert([
-                    html.H5([
-                        html.I(className="bi bi-exclamation-diamond me-2"),
-                        "Recommended Action"
-                    ], className="alert-heading"),
-                    html.P(id="pathogen-modal-action", className="mb-0")
-                ], id="pathogen-modal-action-alert", color="warning", className="mb-3"),
-
-                # Notes
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.I(className="bi bi-journal-text me-2"),
-                        html.Strong("Additional Information")
-                    ]),
-                    dbc.CardBody([
-                        html.P(id="pathogen-modal-notes", className="mb-0")
-                    ])
-                ], className="mb-3"),
-
-                # Reference links
-                html.Div([
-                    html.Label("References", className="text-muted small d-block mb-2"),
-                    html.A(
-                        [html.I(className="bi bi-box-arrow-up-right me-1"), "NCBI Taxonomy"],
-                        id="pathogen-modal-ncbi-link",
-                        href="#",
-                        target="_blank",
-                        className="btn btn-outline-secondary btn-sm me-2"
-                    ),
-                    html.A(
-                        [html.I(className="bi bi-box-arrow-up-right me-1"), "CDC Information"],
-                        href="https://www.cdc.gov/niosh/topics/emres/chemagent.html",
-                        target="_blank",
-                        className="btn btn-outline-secondary btn-sm"
-                    )
-                ])
-            ]),
-            dbc.ModalFooter([
-                dbc.Button(
-                    [html.I(className="bi bi-check-lg me-2"), "Acknowledge Alert"],
-                    id="pathogen-modal-acknowledge",
-                    color="success",
-                    className="me-2"
-                ),
-                dbc.Button(
-                    [html.I(className="bi bi-printer me-2"), "Print Report"],
-                    id="pathogen-modal-print",
-                    color="secondary",
-                    outline=True,
-                    className="me-2"
-                ),
-                dbc.Button("Close", id="pathogen-modal-close", color="secondary")
-            ])
-        ], id="pathogen-report-modal", size="lg", is_open=False),
-
-        # Top Status Banner (Large Traffic Light)
+        # =============================================
+        # 1. TOP STATUS BANNER (Large Traffic Light)
+        # =============================================
         dbc.Row([
             dbc.Col([
                 dbc.Card([
                     dbc.CardBody([
                         dbc.Row([
-                            # Large Traffic Light Status Indicator (Enhanced for accessibility)
+                            # Large Traffic Light Status Indicator
                             dbc.Col([
                                 html.Div([
-                                    # Status circle (large traffic light) - 100px for visibility
                                     html.Div(
                                         id="dashboard-status-indicator",
                                         className="dashboard-traffic-light status-idle",
@@ -188,7 +81,6 @@ def create_dashboard_layout():
                                             )
                                         ]
                                     ),
-                                    # Accessible text label below traffic light (for colorblind users)
                                     html.Div(
                                         id="dashboard-status-label",
                                         children=[
@@ -220,11 +112,10 @@ def create_dashboard_layout():
                                 ),
                                 html.P(
                                     id="dashboard-status-subtitle",
-                                    children="Click 'Start Analysis' in Configuration to begin",
+                                    children="Click 'Start Analysis' in the header to begin",
                                     className="text-muted mb-0",
                                     style={"fontSize": "16px"}
                                 ),
-                                # Progress bar (hidden when idle)
                                 html.Div(
                                     id="dashboard-progress-container",
                                     children=[
@@ -270,34 +161,35 @@ def create_dashboard_layout():
                             ], md=4)
                         ], className="align-items-center")
                     ])
-                ], id="dashboard-status-card", className="mb-4", style={"borderWidth": "3px"})
+                ], id="dashboard-status-card", className="mb-3", style={"borderWidth": "3px"})
             ], width=12)
         ]),
 
-        # Pathogen Alert Banner (appears when dangerous pathogens detected)
+        # =============================================
+        # 2. PATHOGEN ALERT BANNER (dynamic, highest priority)
+        # =============================================
         dbc.Row([
             dbc.Col([
                 html.Div(
                     id="dashboard-pathogen-alert-container",
-                    children=[
-                        # Pathogen alerts will be dynamically inserted here
-                        # Initially empty - populated by callback when threats detected
-                    ],
-                    style={"display": "none"},  # Hidden until threats detected
+                    children=[],
+                    style={"display": "none"},
                     role="alert",
                     **{"aria-live": "assertive"}
                 )
             ], width=12)
         ], id="pathogen-alert-row", className="mb-0"),
 
-        # Threat Summary Section (always visible - shows current threat status)
+        # =============================================
+        # 3. THREAT STATUS + PATHOGEN SCREENING + CLASSIFICATION
+        # (Clinical decision: are there threats?)
+        # =============================================
         dbc.Row([
             # Threat Status Indicator
             dbc.Col([
                 dbc.Card([
                     dbc.CardBody([
                         html.Div([
-                            # Large threat indicator icon
                             html.Div(
                                 id="dashboard-threat-indicator",
                                 children=[
@@ -381,61 +273,32 @@ def create_dashboard_layout():
                     ], className="py-1")
                 ], className="h-100")
             ], md=4, className="mb-3")
-        ], className="mb-3"),
+        ], className="mb-2"),
 
-        # Pipeline Stages Progress (Nextflow workflow stages)
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.Div([
-                            html.I(className="bi bi-diagram-3 me-2"),
-                            html.H5("Pipeline Stages", className="mb-0 d-inline"),
-                            html.Span(
-                                id="dashboard-current-stage",
-                                children="",
-                                className="ms-2 text-muted small"
-                            )
-                        ])
-                    ]),
-                    dbc.CardBody([
-                        html.Div(
-                            id="dashboard-stages-container",
-                            children=[
-                                html.Div([
-                                    html.I(className="bi bi-hourglass text-muted", style={"fontSize": "24px"}),
-                                    html.P("Waiting for pipeline to start...", className="text-muted mb-0 mt-2")
-                                ], className="text-center py-3")
-                            ],
-                            style={"minHeight": "60px"}
-                        )
-                    ])
-                ], className="mb-4")
-            ], width=12)
-        ]),
-
-        # Key Metrics Grid (4 cards)
+        # =============================================
+        # 4. KEY METRICS GRID (4 cards) + timestamp
+        # =============================================
         html.Div([
             html.Span(id="dashboard-last-updated-badge", children=[
                 LastUpdatedBadge(timestamp=None)
             ])
-        ], className="text-end mb-2"),
+        ], className="text-end mb-1"),
         dbc.Row([
             # Sequences Processed
             dbc.Col([
                 dbc.Card([
                     dbc.CardBody([
                         html.Div([
-                            html.I(className="bi bi-bar-chart-fill", style={"fontSize": "32px", "color": "#0d6efd"}),
-                        ], className="mb-2"),
-                        html.H2(
+                            html.I(className="bi bi-bar-chart-fill", style={"fontSize": "28px", "color": "#0d6efd"}),
+                        ], className="mb-1"),
+                        html.H3(
                             id="dashboard-sequences-count",
                             children="0",
                             className="mb-0"
                         ),
-                        html.P("DNA Sequences Processed", className="text-muted mb-0")
-                    ], className="text-center py-3")
-                ], className="h-100")
+                        html.P("Sequences", className="text-muted small mb-0")
+                    ], className="text-center py-2")
+                ], className="h-100 dashboard-metric-card")
             ], md=3, className="mb-3"),
 
             # Quality Score
@@ -443,20 +306,20 @@ def create_dashboard_layout():
                 dbc.Card([
                     dbc.CardBody([
                         html.Div([
-                            html.I(className="bi bi-shield-check", style={"fontSize": "32px", "color": "#198754"}),
-                        ], className="mb-2"),
-                        html.H2(
+                            html.I(className="bi bi-shield-check", style={"fontSize": "28px", "color": "#198754"}),
+                        ], className="mb-1"),
+                        html.H3(
                             id="dashboard-quality-score",
                             children="--",
                             className="mb-0"
                         ),
-                        html.P("Quality Score", className="text-muted mb-0"),
+                        html.P("Quality Score", className="text-muted small mb-0"),
                         html.Div(
                             id="dashboard-quality-badge-container",
-                            className="mt-2"
+                            className="mt-1"
                         )
-                    ], className="text-center py-3")
-                ], className="h-100")
+                    ], className="text-center py-2")
+                ], className="h-100 dashboard-metric-card")
             ], md=3, className="mb-3"),
 
             # Organisms Detected
@@ -464,16 +327,16 @@ def create_dashboard_layout():
                 dbc.Card([
                     dbc.CardBody([
                         html.Div([
-                            html.I(className="bi bi-bug-fill", style={"fontSize": "32px", "color": "#6f42c1"}),
-                        ], className="mb-2"),
-                        html.H2(
+                            html.I(className="bi bi-bug-fill", style={"fontSize": "28px", "color": "#6f42c1"}),
+                        ], className="mb-1"),
+                        html.H3(
                             id="dashboard-organisms-count",
                             children="0",
                             className="mb-0"
                         ),
-                        html.P("Organisms Detected", className="text-muted mb-0")
-                    ], className="text-center py-3")
-                ], className="h-100")
+                        html.P("Organisms", className="text-muted small mb-0")
+                    ], className="text-center py-2")
+                ], className="h-100 dashboard-metric-card")
             ], md=3, className="mb-3"),
 
             # Active Alerts
@@ -484,116 +347,23 @@ def create_dashboard_layout():
                             html.I(
                                 id="dashboard-alerts-icon",
                                 className="bi bi-bell",
-                                style={"fontSize": "32px", "color": "#6c757d"}
+                                style={"fontSize": "28px", "color": "#6c757d"}
                             ),
-                        ], className="mb-2"),
-                        html.H2(
+                        ], className="mb-1"),
+                        html.H3(
                             id="dashboard-alerts-count-display",
                             children="0",
                             className="mb-0"
                         ),
-                        html.P("Active Alerts", className="text-muted mb-0")
-                    ], className="text-center py-3")
-                ], id="dashboard-alerts-card", className="h-100")
+                        html.P("Alerts", className="text-muted small mb-0")
+                    ], className="text-center py-2")
+                ], id="dashboard-alerts-card", className="h-100 dashboard-metric-card")
             ], md=3, className="mb-3"),
         ]),
 
-        # Quality Metrics Badges Row
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.H5("Sequencing Quality Metrics", className="mb-0")
-                    ]),
-                    dbc.CardBody([
-                        dbc.Row([
-                            dbc.Col([
-                                html.Div([
-                                    html.Label([
-                                        "Mean Q-Score",
-                                        html.I(
-                                            className="bi bi-info-circle ms-1",
-                                            id="q-score-info",
-                                            style={"cursor": "pointer", "fontSize": "0.8rem"}
-                                        ),
-                                        dbc.Tooltip(
-                                            "Average quality of DNA reads. Higher = better accuracy. Above Q15 is good, above Q20 is excellent.",
-                                            target="q-score-info",
-                                            placement="top"
-                                        )
-                                    ], className="small text-muted d-block mb-1"),
-                                    html.Div(id="dashboard-q-score-badge", children=[
-                                        dbc.Badge("--", color="secondary", className="px-3 py-2", style={"fontSize": "1.1rem"})
-                                    ])
-                                ], className="text-center")
-                            ], md=3),
-                            dbc.Col([
-                                html.Div([
-                                    html.Label([
-                                        "Read Length N50",
-                                        html.I(
-                                            className="bi bi-info-circle ms-1",
-                                            id="n50-info",
-                                            style={"cursor": "pointer", "fontSize": "0.8rem"}
-                                        ),
-                                        dbc.Tooltip(
-                                            "Half of your DNA data comes from reads longer than this value. Higher N50 = longer DNA fragments = better for identification.",
-                                            target="n50-info",
-                                            placement="top"
-                                        )
-                                    ], className="small text-muted d-block mb-1"),
-                                    html.Div(id="dashboard-n50-badge", children=[
-                                        dbc.Badge("--", color="secondary", className="px-3 py-2", style={"fontSize": "1.1rem"})
-                                    ])
-                                ], className="text-center")
-                            ], md=3),
-                            dbc.Col([
-                                html.Div([
-                                    html.Label([
-                                        "Classification Rate",
-                                        html.I(
-                                            className="bi bi-info-circle ms-1",
-                                            id="classification-info",
-                                            style={"cursor": "pointer", "fontSize": "0.8rem"}
-                                        ),
-                                        dbc.Tooltip(
-                                            "Percentage of DNA sequences successfully identified as organisms. Above 70% is typical; lower may indicate novel or degraded samples.",
-                                            target="classification-info",
-                                            placement="top"
-                                        )
-                                    ], className="small text-muted d-block mb-1"),
-                                    html.Div(id="dashboard-classification-badge", children=[
-                                        dbc.Badge("--", color="secondary", className="px-3 py-2", style={"fontSize": "1.1rem"})
-                                    ])
-                                ], className="text-center")
-                            ], md=3),
-                            dbc.Col([
-                                html.Div([
-                                    html.Label([
-                                        "Total Bases",
-                                        html.I(
-                                            className="bi bi-info-circle ms-1",
-                                            id="bases-info",
-                                            style={"cursor": "pointer", "fontSize": "0.8rem"}
-                                        ),
-                                        dbc.Tooltip(
-                                            "Total amount of DNA data generated, measured in base pairs (bp). More data generally improves detection sensitivity.",
-                                            target="bases-info",
-                                            placement="top"
-                                        )
-                                    ], className="small text-muted d-block mb-1"),
-                                    html.Div(id="dashboard-total-bases", children=[
-                                        dbc.Badge("--", color="secondary", className="px-3 py-2", style={"fontSize": "1.1rem"})
-                                    ])
-                                ], className="text-center")
-                            ], md=3)
-                        ], className="align-items-center")
-                    ])
-                ], className="mb-4")
-            ], width=12)
-        ]),
-
-        # Main content area: Sample table (left) and Alerts (right)
+        # =============================================
+        # 5. SAMPLE STATUS TABLE + ALERTS (side by side)
+        # =============================================
         dbc.Row([
             # Sample Status Table
             dbc.Col([
@@ -608,7 +378,7 @@ def create_dashboard_layout():
                                 className="ms-2"
                             )
                         ]),
-                        html.Small("Click a row to view sample details", className="text-muted d-block")
+                        html.Small("Select a row to view sample details in other tabs", className="text-muted d-block")
                     ]),
                     dbc.CardBody([
                         dcc.Loading(
@@ -617,46 +387,40 @@ def create_dashboard_layout():
                             color="#0d6efd",
                             children=[
                                 html.Div(id="dashboard-sample-table-container", children=[
-                                    # Simplified sample table (5 columns for quick scanning)
                                     dash_table.DataTable(
-                                id="dashboard-sample-table",
-                                columns=[
-                                    {"name": "Sample", "id": "sample"},
-                                    {"name": "Status", "id": "status"},
-                                    {"name": "Quality", "id": "quality"},
-                                    {"name": "Reads", "id": "reads"},
-                                    {"name": "Organisms", "id": "organisms"},
-                                ],
-                                data=[],
-                                style_cell={**TABLE_STYLE_CELL, "padding": "12px 16px"},
-                                style_header=TABLE_STYLE_HEADER,
-                                style_data_conditional=status_conditional_style(
-                                    "status", use_border=True
-                                ),
-                                row_selectable="single",
-                                selected_rows=[],
-                                page_action="native",
-                                page_size=8,
-                                sort_action="native",
-                                tooltip_header={
-                                    "quality": "Data quality assessment",
-                                    "reads": "Number of DNA sequences",
-                                    "organisms": "Detected organism count"
-                                },
-                                tooltip_delay=500,
-                                tooltip_duration=3000
-                            ),
-                            # Note about detailed view
-                                    html.Small(
-                                        "Click a row to view detailed sample metrics in other tabs",
-                                        className="text-muted d-block mt-2"
-                                    )
-                                ], style={"minHeight": "350px"})
+                                        id="dashboard-sample-table",
+                                        columns=[
+                                            {"name": "Sample", "id": "sample"},
+                                            {"name": "Status", "id": "status"},
+                                            {"name": "Quality", "id": "quality"},
+                                            {"name": "Reads", "id": "reads"},
+                                            {"name": "Organisms", "id": "organisms"},
+                                        ],
+                                        data=[],
+                                        style_cell={**TABLE_STYLE_CELL, "padding": "10px 14px"},
+                                        style_header=TABLE_STYLE_HEADER,
+                                        style_data_conditional=status_conditional_style(
+                                            "status", use_border=True
+                                        ),
+                                        row_selectable="single",
+                                        selected_rows=[],
+                                        page_action="native",
+                                        page_size=8,
+                                        sort_action="native",
+                                        tooltip_header={
+                                            "quality": "Data quality assessment",
+                                            "reads": "Number of DNA sequences",
+                                            "organisms": "Detected organism count"
+                                        },
+                                        tooltip_delay=500,
+                                        tooltip_duration=3000
+                                    ),
+                                ])
                             ]
-                        )  # end dcc.Loading
+                        )
                     ])
                 ], className="h-100")
-            ], md=8),
+            ], md=7),
 
             # Alerts Panel
             dbc.Col([
@@ -675,17 +439,19 @@ def create_dashboard_layout():
                     dbc.CardBody([
                         html.Div(id="dashboard-alerts-panel", children=[
                             html.Div([
-                                html.I(className="bi bi-check-circle text-success", style={"fontSize": "48px"}),
-                                html.H5("No Active Alerts", className="mt-3 mb-2"),
-                                html.P("System is operating normally", className="text-muted mb-0")
-                            ], className="text-center py-4")
-                        ], style={"maxHeight": "350px", "overflowY": "auto"})
+                                html.I(className="bi bi-check-circle text-success", style={"fontSize": "36px"}),
+                                html.H6("No Active Alerts", className="mt-2 mb-1"),
+                                html.P("System is operating normally", className="text-muted small mb-0")
+                            ], className="text-center py-3")
+                        ], style={"maxHeight": "300px", "overflowY": "auto"})
                     ])
                 ], className="h-100")
-            ], md=4)
-        ], className="mb-4"),
+            ], md=5)
+        ], className="mb-3"),
 
-        # Active Watchlist Panel (expandable)
+        # =============================================
+        # 6. ACTIVE WATCHLIST (default open - critical clinical info)
+        # =============================================
         dbc.Row([
             dbc.Col([
                 dbc.Card([
@@ -712,8 +478,8 @@ def create_dashboard_layout():
                             dbc.Col([
                                 dbc.Button(
                                     [
-                                        html.I(className="bi bi-chevron-down me-1", id="watchlist-expand-icon"),
-                                        "Details"
+                                        html.I(className="bi bi-chevron-up me-1", id="watchlist-expand-icon"),
+                                        "Collapse"
                                     ],
                                     id="dashboard-watchlist-expand-btn",
                                     color="link",
@@ -756,7 +522,7 @@ def create_dashboard_layout():
                             # Active watchlist entries grouped by threat level
                             html.Div(
                                 id="dashboard-watchlist-entries",
-                                style={"maxHeight": "300px", "overflowY": "auto"},
+                                style={"maxHeight": "250px", "overflowY": "auto"},
                                 children=[
                                     html.Div([
                                         html.I(className="bi bi-hourglass text-muted me-2"),
@@ -776,48 +542,172 @@ def create_dashboard_layout():
                                 ], className="text-muted")
                             ])
                         ])
-                    ], id="dashboard-watchlist-collapse", is_open=False)
-                ], className="mb-4")
+                    ], id="dashboard-watchlist-collapse", is_open=True)
+                ], className="mb-3")
             ], width=12)
         ]),
 
         # Watchlist modals
         create_all_modals(id_prefix="dashboard-wl"),
 
-        # Quick Help Section
+        # =============================================
+        # 7. SEQUENCING QUALITY METRICS (technical detail)
+        # =============================================
         dbc.Row([
             dbc.Col([
                 dbc.Card([
+                    dbc.CardHeader([
+                        html.H6("Sequencing Quality Metrics", className="mb-0")
+                    ], className="py-2"),
                     dbc.CardBody([
                         dbc.Row([
                             dbc.Col([
                                 html.Div([
-                                    html.I(className="bi bi-lightbulb text-warning me-2", style={"fontSize": "20px"}),
-                                    html.Strong("Quick Tips: "),
-                                    html.Span(
-                                        "Green = Good | Yellow = Review Needed | Red = Action Required",
-                                        className="text-muted"
-                                    )
-                                ])
-                            ], md=8),
+                                    html.Label([
+                                        "Mean Q-Score",
+                                        html.I(
+                                            className="bi bi-info-circle ms-1",
+                                            id="q-score-info",
+                                            style={"cursor": "pointer", "fontSize": "0.8rem"}
+                                        ),
+                                        dbc.Tooltip(
+                                            "Average quality of DNA reads. Higher = better accuracy. Above Q15 is good, above Q20 is excellent.",
+                                            target="q-score-info",
+                                            placement="top"
+                                        )
+                                    ], className="small text-muted d-block mb-1"),
+                                    html.Div(id="dashboard-q-score-badge", children=[
+                                        dbc.Badge("--", color="secondary", className="px-3 py-2")
+                                    ])
+                                ], className="text-center")
+                            ], md=3),
                             dbc.Col([
-                                dbc.ButtonGroup([
-                                    dbc.Button([
-                                        html.I(className="bi bi-question-circle me-1"),
-                                        "Help"
-                                    ], id="dashboard-help-btn", color="info", outline=True, size="sm"),
-                                    dbc.Button([
-                                        html.I(className="bi bi-arrow-clockwise me-1"),
-                                        "Refresh"
-                                    ], id="dashboard-refresh-btn", color="secondary", outline=True, size="sm")
-                                ], className="float-end")
-                            ], md=4)
-                        ])
-                    ])
-                ], style={"backgroundColor": "#f8f9fa"})
+                                html.Div([
+                                    html.Label([
+                                        "Read Length N50",
+                                        html.I(
+                                            className="bi bi-info-circle ms-1",
+                                            id="n50-info",
+                                            style={"cursor": "pointer", "fontSize": "0.8rem"}
+                                        ),
+                                        dbc.Tooltip(
+                                            "Half of your DNA data comes from reads longer than this value. Higher N50 = longer DNA fragments = better for identification.",
+                                            target="n50-info",
+                                            placement="top"
+                                        )
+                                    ], className="small text-muted d-block mb-1"),
+                                    html.Div(id="dashboard-n50-badge", children=[
+                                        dbc.Badge("--", color="secondary", className="px-3 py-2")
+                                    ])
+                                ], className="text-center")
+                            ], md=3),
+                            dbc.Col([
+                                html.Div([
+                                    html.Label([
+                                        "Classification Rate",
+                                        html.I(
+                                            className="bi bi-info-circle ms-1",
+                                            id="classification-info",
+                                            style={"cursor": "pointer", "fontSize": "0.8rem"}
+                                        ),
+                                        dbc.Tooltip(
+                                            "Percentage of DNA sequences successfully identified as organisms. Above 70% is typical; lower may indicate novel or degraded samples.",
+                                            target="classification-info",
+                                            placement="top"
+                                        )
+                                    ], className="small text-muted d-block mb-1"),
+                                    html.Div(id="dashboard-classification-badge", children=[
+                                        dbc.Badge("--", color="secondary", className="px-3 py-2")
+                                    ])
+                                ], className="text-center")
+                            ], md=3),
+                            dbc.Col([
+                                html.Div([
+                                    html.Label([
+                                        "Total Bases",
+                                        html.I(
+                                            className="bi bi-info-circle ms-1",
+                                            id="bases-info",
+                                            style={"cursor": "pointer", "fontSize": "0.8rem"}
+                                        ),
+                                        dbc.Tooltip(
+                                            "Total amount of DNA data generated, measured in base pairs (bp). More data generally improves detection sensitivity.",
+                                            target="bases-info",
+                                            placement="top"
+                                        )
+                                    ], className="small text-muted d-block mb-1"),
+                                    html.Div(id="dashboard-total-bases", children=[
+                                        dbc.Badge("--", color="secondary", className="px-3 py-2")
+                                    ])
+                                ], className="text-center")
+                            ], md=3)
+                        ], className="align-items-center")
+                    ], className="py-2")
+                ], className="mb-3")
             ], width=12)
-        ])
-    ], className="p-4")
+        ]),
+
+        # =============================================
+        # 8. PIPELINE STAGES (collapsible, less prominent)
+        # =============================================
+        dbc.Row([
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.Div([
+                            html.I(className="bi bi-diagram-3 me-2"),
+                            html.H6("Pipeline Stages", className="mb-0 d-inline"),
+                            html.Span(
+                                id="dashboard-current-stage",
+                                children="",
+                                className="ms-2 text-muted small"
+                            )
+                        ])
+                    ], className="py-2"),
+                    dbc.CardBody([
+                        html.Div(
+                            id="dashboard-stages-container",
+                            children=[
+                                html.Div([
+                                    html.I(className="bi bi-hourglass text-muted", style={"fontSize": "24px"}),
+                                    html.P("Waiting for pipeline to start...", className="text-muted mb-0 mt-2")
+                                ], className="text-center py-3")
+                            ],
+                            style={"minHeight": "50px"}
+                        )
+                    ], className="py-2")
+                ], className="mb-3")
+            ], width=12)
+        ]),
+
+        # =============================================
+        # 9. FOOTER BAR (Help + Refresh + color legend)
+        # =============================================
+        dbc.Row([
+            dbc.Col([
+                html.Div([
+                    html.Small([
+                        html.Span("Status key: ", className="text-muted fw-semibold"),
+                        dbc.Badge("Good", color="success", className="me-1", style={"fontSize": "0.7rem"}),
+                        dbc.Badge("Review", color="warning", className="me-1", style={"fontSize": "0.7rem"}),
+                        dbc.Badge("Action Required", color="danger", className="me-1", style={"fontSize": "0.7rem"}),
+                    ], className="d-flex align-items-center")
+                ])
+            ], md=8),
+            dbc.Col([
+                dbc.ButtonGroup([
+                    dbc.Button([
+                        html.I(className="bi bi-question-circle me-1"),
+                        "Help"
+                    ], id="dashboard-help-btn", color="link", size="sm"),
+                    dbc.Button([
+                        html.I(className="bi bi-arrow-clockwise me-1"),
+                        "Refresh"
+                    ], id="dashboard-refresh-btn", color="link", size="sm")
+                ], className="float-end")
+            ], md=4)
+        ], className="mb-2 px-2")
+    ], className="p-3")
 
 
 def create_pipeline_stages_display(stages: list, current_stage: str = None) -> html.Div:

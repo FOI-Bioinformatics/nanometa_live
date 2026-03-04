@@ -232,7 +232,7 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
                                 clearable=False,
                                 style={"minWidth": "250px", "maxWidth": "400px"},
                                 placeholder="Select sample or barcode...",
-                                persistence=False,
+                                persistence=True,
                                 persistence_type='session'
                             ),
                         ], className="d-flex align-items-center")
@@ -326,8 +326,119 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
                     children=create_preparation_layout(),
                     tabClassName="tab-preparation"
                 )
-            ], id="tabs", active_tab="dashboard-tab"),
+            ], id="tabs", active_tab="dashboard-tab",
+               persistence=True, persistence_type="session"),
         ], id="main-content", role="main"),
+
+        # Pathogen report modal and data store - placed at root level so the
+        # modal is accessible from any tab (Dashboard, Organisms, etc.)
+        dcc.Store(id='pathogen-report-data', data={}),
+        dbc.Modal([
+            dbc.ModalHeader([
+                dbc.ModalTitle([
+                    html.I(className="bi bi-file-medical me-2"),
+                    html.Span(id="pathogen-modal-title", children="Pathogen Report")
+                ]),
+            ], close_button=True),
+            dbc.ModalBody([
+                # Threat level banner
+                html.Div(id="pathogen-modal-threat-banner", className="mb-3"),
+
+                # Main pathogen info
+                dbc.Row([
+                    dbc.Col([
+                        html.H4(id="pathogen-modal-name", className="mb-1"),
+                        html.P(id="pathogen-modal-common-name", className="text-muted mb-2"),
+                        dbc.Badge(id="pathogen-modal-category", color="secondary", className="me-2"),
+                        dbc.Badge(id="pathogen-modal-bsl", color="info"),
+                    ], md=8),
+                    dbc.Col([
+                        html.Div([
+                            html.H2(id="pathogen-modal-reads", className="mb-0 text-primary"),
+                            html.Small("sequences detected", className="text-muted")
+                        ], className="text-center")
+                    ], md=4)
+                ], className="mb-4"),
+
+                # Detection details
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="bi bi-bar-chart me-2"),
+                        html.Strong("Detection Details")
+                    ]),
+                    dbc.CardBody([
+                        dbc.Row([
+                            dbc.Col([
+                                html.Label("Abundance", className="text-muted small"),
+                                html.H5(id="pathogen-modal-abundance")
+                            ], md=4),
+                            dbc.Col([
+                                html.Label("Confidence", className="text-muted small"),
+                                html.H5(id="pathogen-modal-confidence")
+                            ], md=4),
+                            dbc.Col([
+                                html.Label("Taxonomy ID", className="text-muted small"),
+                                html.H5(id="pathogen-modal-taxid")
+                            ], md=4),
+                        ])
+                    ])
+                ], className="mb-3"),
+
+                # Action required
+                dbc.Alert([
+                    html.H5([
+                        html.I(className="bi bi-exclamation-diamond me-2"),
+                        "Recommended Action"
+                    ], className="alert-heading"),
+                    html.P(id="pathogen-modal-action", className="mb-0")
+                ], id="pathogen-modal-action-alert", color="warning", className="mb-3"),
+
+                # Notes
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="bi bi-journal-text me-2"),
+                        html.Strong("Additional Information")
+                    ]),
+                    dbc.CardBody([
+                        html.P(id="pathogen-modal-notes", className="mb-0")
+                    ])
+                ], className="mb-3"),
+
+                # Reference links
+                html.Div([
+                    html.Label("References", className="text-muted small d-block mb-2"),
+                    html.A(
+                        [html.I(className="bi bi-box-arrow-up-right me-1"), "NCBI Taxonomy"],
+                        id="pathogen-modal-ncbi-link",
+                        href="#",
+                        target="_blank",
+                        className="btn btn-outline-secondary btn-sm me-2"
+                    ),
+                    html.A(
+                        [html.I(className="bi bi-box-arrow-up-right me-1"), "CDC Information"],
+                        href="https://www.cdc.gov/niosh/topics/emres/chemagent.html",
+                        target="_blank",
+                        className="btn btn-outline-secondary btn-sm"
+                    )
+                ])
+            ]),
+            dbc.ModalFooter([
+                dbc.Button(
+                    [html.I(className="bi bi-check-lg me-2"), "Acknowledge Alert"],
+                    id="pathogen-modal-acknowledge",
+                    color="success",
+                    className="me-2"
+                ),
+                dbc.Button(
+                    [html.I(className="bi bi-printer me-2"), "Print Report"],
+                    id="pathogen-modal-print",
+                    color="secondary",
+                    outline=True,
+                    className="me-2"
+                ),
+                dbc.Button("Close", id="pathogen-modal-close", color="secondary")
+            ])
+        ], id="pathogen-report-modal", size="lg", is_open=False),
 
         # Toast notification container (for non-blocking feedback)
         html.Div(id="toast-container", className="toast-container"),

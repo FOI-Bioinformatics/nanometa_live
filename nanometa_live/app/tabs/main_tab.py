@@ -232,7 +232,7 @@ def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
             'name': entry.name,
             'reads': detection['reads'] if detection else 0,
             'abundance': detection['abundance'] if detection else 0.0,
-            'detected': detection is not None,
+            'detected': detection is not None and detection['reads'] > 0,
             'category': entry.category,
             'threat_level': entry.threat_level.value if entry.threat_level else 'unknown'
         })
@@ -251,7 +251,7 @@ def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
                 'name': s.get("name", "Unknown"),
                 'reads': detection['reads'] if detection else 0,
                 'abundance': detection['abundance'] if detection else 0.0,
-                'detected': detection is not None,
+                'detected': detection is not None and detection['reads'] > 0,
                 'category': 'custom',
                 'threat_level': 'unknown'
             })
@@ -298,6 +298,7 @@ def register_main_callbacks(app: Dash):
             Output("organism-cards-container", "children"),
             Output("detailed-organism-table", "data"),
             Output("total-organisms-count", "children"),
+            Output("organism-results-count", "children"),
             Output("watched-species-alert-container", "children"),
             Output("watched-organisms-section", "style"),
             Output("watched-organisms-cards", "children"),
@@ -363,7 +364,7 @@ def register_main_callbacks(app: Dash):
         main_dir = validate_config_and_get_main_dir(config)
         if not main_dir:
             return (empty_summary, empty_cards, empty_table, empty_count,
-                    no_alert, hidden_style, empty_watched, watched_count)
+                    empty_count, no_alert, hidden_style, empty_watched, watched_count)
 
         # Set filter defaults
         top_count = top_count or 10
@@ -385,7 +386,7 @@ def register_main_callbacks(app: Dash):
             if kraken_df.empty:
                 logging.debug("Main Results: No Kraken2 data found")
                 return (empty_summary, empty_cards, empty_table, empty_count,
-                        no_alert, hidden_style, empty_watched, watched_count)
+                        empty_count, no_alert, hidden_style, empty_watched, watched_count)
 
             logging.debug(f"Main Results: Loaded {len(kraken_df)} rows from Kraken2 data")
 
@@ -647,6 +648,7 @@ def register_main_callbacks(app: Dash):
                 cards_container,
                 table_data,
                 str(len(filtered_df)),
+                str(len(filtered_df)),
                 alert_banner,
                 watched_style,
                 watched_cards if all_watchlist_species else empty_watched,
@@ -663,7 +665,7 @@ def register_main_callbacks(app: Dash):
                 color="danger",
                 className="text-center"
             )
-            return (error_alert, error_alert, [], "0", None, hidden_style, empty_watched, "0")
+            return (error_alert, error_alert, [], "0", "0", None, hidden_style, empty_watched, "0")
 
     # Sync watchlist from config to main tab store
     @app.callback(
@@ -1018,6 +1020,14 @@ def register_main_callbacks(app: Dash):
 
         # Handle validate button click
         if isinstance(trigger_id, dict) and trigger_id.get("type") == "on-demand-validate":
+            # Guard against false triggers: when new organism cards are created,
+            # Dash pattern-matching callbacks can fire with n_clicks=0 or None.
+            # Only open the modal if a button was actually clicked.
+            if validate_clicks and any(c and c > 0 for c in validate_clicks):
+                pass  # Proceed with modal opening
+            else:
+                return (no_update,) * 11
+
             taxid = trigger_id.get("taxid")
             name = trigger_id.get("name", f"Taxid {taxid}")
 

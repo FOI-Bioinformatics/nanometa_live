@@ -432,6 +432,7 @@ class WatchlistManager:
                         "alert_threshold": p.alert_threshold,
                         "action_required": p.action_required,
                         "notes": p.notes,
+                        "enabled": True,
                     }
                     self._add_entry_from_dict(
                         entry_data,
@@ -547,8 +548,10 @@ class WatchlistManager:
                         existing.names_alt.append(alt_name)
                         self._name_index[alt_name.lower()] = entry.taxid
 
-                # Preserve existing enabled state (don't force enable on merge)
-                # User must explicitly enable entries via Quick enable or toggle
+                # If incoming entry is enabled (e.g. from enable_watchlist),
+                # also enable existing entry for consistent UX
+                if entry.enabled:
+                    existing.enabled = True
 
                 # Check if this is a user override of a builtin
                 if existing.source == WatchlistSource.BUILTIN and source != WatchlistSource.BUILTIN:
@@ -887,6 +890,7 @@ class WatchlistManager:
                 "alert_threshold": p.alert_threshold,
                 "action_required": p.action_required,
                 "notes": p.notes,
+                "enabled": True,
             }
             self._add_entry_from_dict(
                 entry_data,

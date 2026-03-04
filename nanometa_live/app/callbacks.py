@@ -351,17 +351,17 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         prevent_initial_call=True,
     )
     def switch_to_results_tab(notification, current_tab):
-        """Switch to the results tab after starting analysis."""
-        if not notification:
+        """Switch to the Dashboard tab after starting analysis."""
+        if not notification or not isinstance(notification, dict):
             return no_update
 
         if (
             notification.get("title") == "Analysis Started"
             and notification.get("color") == "success"
         ):
-            return "main-tab"
+            return "dashboard-tab"
 
-        return current_tab
+        return no_update
 
     @app.callback(
         [
@@ -713,7 +713,13 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         if not available_samples:
             available_samples = ["All Samples"]
 
-        return [{"label": sample, "value": sample} for sample in available_samples]
+        options = []
+        for sample in available_samples:
+            if sample == "All Samples":
+                options.append({"label": "All Samples (Aggregated)", "value": sample})
+            else:
+                options.append({"label": sample, "value": sample})
+        return options
 
     @app.callback(
         Output("selected-sample", "data"),
@@ -1065,13 +1071,14 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         if not status:
             return no_update, False, no_update
 
-        is_running = status.get("running", False)
+        is_running = bool(status.get("running", False))
 
         # Store current state for next comparison
         new_prev_state = is_running
 
         # Detect completion: was running, now not running
-        if prev_running and not is_running:
+        # Use explicit bool() to guard against truthy non-boolean values in the store
+        if bool(prev_running) and not is_running:
             # Analysis just completed - navigate to dashboard
             # Only if not already on dashboard
             if current_tab != "dashboard-tab":

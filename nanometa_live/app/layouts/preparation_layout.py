@@ -23,30 +23,49 @@ def create_preparation_layout():
         dcc.Store(id="download-cancel-flag", data=False),
         dcc.Store(id="blast-cancel-flag", data=False),
 
-        # Header
+        # Header with workflow context
         dbc.Row([
             dbc.Col([
-                html.H4([
-                    html.I(className="bi bi-box-seam me-2"),
-                    "Preparation"
-                ], className="mb-1"),
+                html.Div([
+                    html.I(className="bi bi-box-seam me-2",
+                           style={"fontSize": "1.3rem"}),
+                    html.H4("Preparation", className="mb-0 d-inline"),
+                ], className="d-flex align-items-center mb-1"),
                 html.P(
                     "Download databases, scan taxid mappings, download genomes, "
-                    "build BLAST databases, and export portable bundles.",
-                    className="text-muted mb-0"
+                    "build BLAST databases, and export portable bundles. "
+                    "Complete these steps before starting analysis.",
+                    className="text-muted mb-0 small"
                 ),
-            ])
+            ], md=8),
+            dbc.Col([
+                html.Div([
+                    html.Small("Setup step 3 of 3", className="text-muted"),
+                    html.Div([
+                        html.Span(className="d-inline-block rounded-circle me-1",
+                                  style={"width": "8px", "height": "8px",
+                                         "backgroundColor": "#28a745"}),
+                        html.Span(className="d-inline-block rounded-circle me-1",
+                                  style={"width": "8px", "height": "8px",
+                                         "backgroundColor": "#28a745"}),
+                        html.Span(className="d-inline-block rounded-circle",
+                                  style={"width": "8px", "height": "8px",
+                                         "backgroundColor": "#007bff"}),
+                    ], className="d-flex align-items-center mt-1"),
+                ], className="text-end"),
+            ], md=4),
         ], className="mb-4 mt-3"),
 
         # Readiness checklist
         dbc.Card([
             dbc.CardHeader([
-                html.H5([
-                    html.I(className="bi bi-clipboard-check me-2"),
-                    "Readiness Checklist"
-                ], className="mb-0 d-inline"),
+                html.Div([
+                    html.I(className="bi bi-clipboard-check me-2",
+                           style={"fontSize": "1.1rem"}),
+                    html.H5("Readiness Checklist", className="mb-0 d-inline"),
+                ], className="d-inline-flex align-items-center"),
                 dbc.Button(
-                    [html.I(className="bi bi-arrow-clockwise me-1"), "Check"],
+                    [html.I(className="bi bi-arrow-clockwise me-1"), "Run Checks"],
                     id="check-readiness-btn",
                     color="outline-primary",
                     size="sm",
@@ -56,8 +75,14 @@ def create_preparation_layout():
             dbc.CardBody([
                 dbc.Spinner(
                     html.Div(id="readiness-results",
-                             children=html.P("Click 'Check' to run readiness checks.",
-                                             className="text-muted")),
+                             children=html.Div([
+                                 html.I(className="bi bi-info-circle text-muted me-2"),
+                                 html.Span(
+                                     "Click 'Run Checks' to verify that all required "
+                                     "components are configured.",
+                                     className="text-muted",
+                                 ),
+                             ], className="d-flex align-items-center")),
                     size="sm",
                     type="border",
                 ),

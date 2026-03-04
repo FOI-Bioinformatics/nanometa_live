@@ -88,6 +88,8 @@ def _create_stats_bar() -> dbc.Card:
                 # Total count
                 dbc.Col([
                     html.Div([
+                        html.I(className="bi bi-list-ul me-2 text-primary",
+                               style={"fontSize": "1.1rem"}),
                         html.Span(
                             "0",
                             id="watchlist-stat-total",
@@ -100,6 +102,8 @@ def _create_stats_bar() -> dbc.Card:
                 # Active count
                 dbc.Col([
                     html.Div([
+                        html.I(className="bi bi-check-circle me-2 text-success",
+                               style={"fontSize": "1.1rem"}),
                         html.Span(
                             "0",
                             id="watchlist-stat-active",
@@ -112,6 +116,8 @@ def _create_stats_bar() -> dbc.Card:
                 # Validated count
                 dbc.Col([
                     html.Div([
+                        html.I(className="bi bi-patch-check me-2 text-info",
+                               style={"fontSize": "1.1rem"}),
                         html.Span(
                             "0",
                             id="watchlist-stat-validated",
@@ -142,6 +148,7 @@ def _create_stats_bar() -> dbc.Card:
                 # API options for validation lookups
                 dbc.Col([
                     html.Span([
+                        html.Small("Databases: ", className="text-muted me-1"),
                         dbc.Checklist(
                             id="watchlist-api-options",
                             options=[
@@ -156,7 +163,8 @@ def _create_stats_bar() -> dbc.Card:
                             persistence=True,
                             persistence_type="session",
                         ),
-                    ], title="Select which taxonomy databases to query when validating species names"),
+                    ], title="Select which taxonomy databases to query when validating species names",
+                       className="d-flex align-items-center"),
                 ], width="auto", className="me-2 d-flex align-items-center"),
 
                 # Validation controls
@@ -171,7 +179,7 @@ def _create_stats_bar() -> dbc.Card:
                 ], width="auto", className="d-flex align-items-center"),
             ], align="center", className="g-0"),
         ], className="py-2"),
-    ], className="mb-3")
+    ], className="mb-3 watchlist-stats-bar")
 
 
 def _create_pathogens_table_section() -> dbc.Card:
@@ -185,13 +193,17 @@ def _create_pathogens_table_section() -> dbc.Card:
         dbc.CardHeader([
             dbc.Row([
                 dbc.Col([
-                    html.H6("Pathogens", className="mb-0 d-inline"),
-                    dbc.Badge(
-                        id="watchlist-pathogen-count",
-                        color="primary",
-                        className="ms-2",
-                        style={"display": "none"},
-                    ),
+                    html.Div([
+                        html.I(className="bi bi-shield-exclamation me-2",
+                               style={"fontSize": "1.1rem"}),
+                        html.H6("Monitored Pathogens", className="mb-0 d-inline"),
+                        dbc.Badge(
+                            id="watchlist-pathogen-count",
+                            color="primary",
+                            className="ms-2",
+                            style={"display": "none"},
+                        ),
+                    ], className="d-flex align-items-center"),
                 ], width=4),
                 dbc.Col([
                     dbc.InputGroup([
@@ -199,7 +211,7 @@ def _create_pathogens_table_section() -> dbc.Card:
                         dbc.Input(
                             id="watchlist-search-input",
                             type="text",
-                            placeholder="Filter pathogens...",
+                            placeholder="Search by name, taxid, or category...",
                             debounce=True,
                         ),
                     ], size="sm"),
@@ -227,17 +239,50 @@ def _create_pathogens_table_section() -> dbc.Card:
             ], align="center"),
         ]),
         dbc.CardBody([
-            # Table header
+            # Table header with tooltip explanations
             html.Div([
                 dbc.Row([
-                    dbc.Col(html.Small("Name", className="fw-bold"), width=3),
+                    dbc.Col(html.Small("Organism", className="fw-bold"), width=3),
                     dbc.Col(html.Small("Threat", className="fw-bold"), width=1),
-                    dbc.Col(html.Small("BSL", className="fw-bold"), width=1),
+                    dbc.Col([
+                        html.Small("BSL", className="fw-bold"),
+                        html.I(className="bi bi-info-circle text-muted ms-1",
+                               id="bsl-header-info",
+                               style={"fontSize": "0.7rem", "cursor": "help"}),
+                        dbc.Tooltip(
+                            "Biosafety level required for handling this organism",
+                            target="bsl-header-info",
+                            placement="top",
+                        ),
+                    ], width=1),
                     dbc.Col(html.Small("Validated", className="fw-bold"), width=1),
-                    dbc.Col(html.Small("Kraken2 Match", className="fw-bold"), width=2),
-                    dbc.Col(html.Small("Genome", className="fw-bold"), width=1),
+                    dbc.Col([
+                        html.Small("DB Match", className="fw-bold"),
+                        html.I(className="bi bi-info-circle text-muted ms-1",
+                               id="dbmatch-header-info",
+                               style={"fontSize": "0.7rem", "cursor": "help"}),
+                        dbc.Tooltip(
+                            "Whether this organism's taxid was found in the "
+                            "Kraken2 database. Run 'Rescan DB' in the Preparation "
+                            "tab to populate this column.",
+                            target="dbmatch-header-info",
+                            placement="top",
+                        ),
+                    ], width=2),
+                    dbc.Col([
+                        html.Small("Ref.", className="fw-bold"),
+                        html.I(className="bi bi-info-circle text-muted ms-1",
+                               id="genome-header-info",
+                               style={"fontSize": "0.7rem", "cursor": "help"}),
+                        dbc.Tooltip(
+                            "Reference genome and BLAST database status for "
+                            "validation. Download genomes in the Preparation tab.",
+                            target="genome-header-info",
+                            placement="top",
+                        ),
+                    ], width=1),
                     dbc.Col(html.Small("Actions", className="fw-bold"), width=3),
-                ], className="py-1 bg-light border-bottom"),
+                ], className="py-2 bg-light border-bottom watchlist-table-header"),
             ]),
 
             # Table body (populated by callback)
@@ -259,10 +304,13 @@ def _create_collapsible_watchlist_files() -> dbc.Accordion:
         dbc.AccordionItem([
             # Quick-start buttons row
             html.Div([
-                html.Small("Quick enable: ", className="text-muted me-2"),
+                html.Div([
+                    html.I(className="bi bi-lightning me-1"),
+                    html.Small("Quick enable: ", className="text-muted"),
+                ], className="d-flex align-items-center me-2"),
                 dbc.ButtonGroup([
                     dbc.Button(
-                        "Clinical",
+                        [html.I(className="bi bi-hospital me-1"), "Clinical"],
                         id="quick-start-clinical",
                         size="sm",
                         color="primary",
@@ -270,7 +318,7 @@ def _create_collapsible_watchlist_files() -> dbc.Accordion:
                         n_clicks=0,
                     ),
                     dbc.Button(
-                        "Food Safety",
+                        [html.I(className="bi bi-cup-straw me-1"), "Food Safety"],
                         id="quick-start-foodborne",
                         size="sm",
                         color="warning",
@@ -278,7 +326,7 @@ def _create_collapsible_watchlist_files() -> dbc.Accordion:
                         n_clicks=0,
                     ),
                     dbc.Button(
-                        "Water",
+                        [html.I(className="bi bi-droplet me-1"), "Water"],
                         id="quick-start-water",
                         size="sm",
                         color="info",
@@ -286,7 +334,7 @@ def _create_collapsible_watchlist_files() -> dbc.Accordion:
                         n_clicks=0,
                     ),
                     dbc.Button(
-                        "Respiratory",
+                        [html.I(className="bi bi-lungs me-1"), "Respiratory"],
                         id="quick-start-respiratory",
                         size="sm",
                         color="secondary",
@@ -294,7 +342,7 @@ def _create_collapsible_watchlist_files() -> dbc.Accordion:
                         n_clicks=0,
                     ),
                     dbc.Button(
-                        "CDC Bioterrorism",
+                        [html.I(className="bi bi-shield-shaded me-1"), "CDC Bioterrorism"],
                         id="quick-start-cdc",
                         size="sm",
                         color="danger",
@@ -302,7 +350,7 @@ def _create_collapsible_watchlist_files() -> dbc.Accordion:
                         n_clicks=0,
                     ),
                     dbc.Button(
-                        "WHO Priority",
+                        [html.I(className="bi bi-globe me-1"), "WHO Priority"],
                         id="quick-start-who",
                         size="sm",
                         color="dark",
@@ -723,7 +771,7 @@ def create_pathogen_row(
         "manual": {"color": "warning", "icon": "bi-pencil-fill", "label": "Manual"},
         "partial": {"color": "warning", "icon": "bi-question-circle-fill", "label": "Partial"},
         "unmapped": {"color": "danger", "icon": "bi-x-circle-fill", "label": "Not Found"},
-        "unknown": {"color": "secondary", "icon": "bi-question-circle", "label": "Unknown"},
+        "unknown": {"color": "light", "icon": "bi-dash-lg", "label": "Not Scanned"},
     }
 
     # Get mapping status and Kraken taxid
@@ -845,7 +893,7 @@ def create_pathogen_row(
             dbc.Col([
                 dbc.ButtonGroup([
                     dbc.Button(
-                        html.I(className="bi bi-pencil"),
+                        [html.I(className="bi bi-pencil me-1"), "Edit"],
                         id={"type": "watchlist-row-edit", "index": taxid},
                         size="sm",
                         color="secondary",
@@ -853,19 +901,21 @@ def create_pathogen_row(
                         title=f"Edit {name}",
                     ),
                     dbc.Button(
-                        html.I(className="bi bi-check2-circle"),
+                        [html.I(className="bi bi-check2-circle me-1"), "Verify"],
                         id={"type": "watchlist-row-validate", "index": taxid},
                         size="sm",
                         color="info",
                         outline=True,
-                        title=f"Validate {name} via API",
+                        title=f"Validate {name} against NCBI/GTDB taxonomy",
                     ),
                     dbc.Button(
-                        html.I(className="bi bi-toggle-on" if enabled else "bi bi-toggle-off"),
+                        [
+                            html.I(className="bi bi-toggle-on" if enabled else "bi bi-toggle-off"),
+                        ],
                         id={"type": "watchlist-row-toggle", "index": taxid},
                         size="sm",
                         color="success" if enabled else "secondary",
-                        outline=True,
+                        outline=not enabled,
                         title=f"{'Disable' if enabled else 'Enable'} {name}",
                     ),
                 ], size="sm"),
