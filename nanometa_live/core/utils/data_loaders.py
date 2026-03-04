@@ -9,6 +9,7 @@ import os
 import glob
 import json
 import logging
+import re
 import time
 import pandas as pd
 from typing import Optional, List, Dict, Any, Tuple
@@ -220,6 +221,76 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
         return None
 
 
+def _deduplicate_batch_files(filepaths: List[str]) -> List[str]:
+    """
+    Deduplicate batch report files that exist in multiple directories.
+
+    The nanometanf pipeline may publish the same batch report to both
+    ``reports/`` and ``batch_reports/`` directories, and ``batch_reports/``
+    may contain two naming conventions (e.g. ``barcode01_batch0`` and
+    ``batch_0``). This function keeps one file per (sample, batch_number)
+    combination, preferring ``batch_reports/`` over ``reports/``.
+
+    Args:
+        filepaths: List of batch report file paths
+
+    Returns:
+        Deduplicated list of file paths
+    """
+    if not filepaths:
+        return filepaths
+
+    # Extract (sample, batch_num) from each path
+    # Patterns: {sample}_batch{N}.kraken2.report.txt or batch_{N}.kraken2.report.txt
+    batch_id_pattern = re.compile(r'(?:(.+?)_batch|batch_)(\d+)\.')
+
+    seen_batches: Dict[Tuple[str, str], str] = {}  # (sample, batch) -> filepath
+
+    for fp in filepaths:
+        basename = os.path.basename(fp)
+        match = batch_id_pattern.search(basename)
+        if not match:
+            # Not a batch file pattern - keep it
+            seen_batches[('_nonbatch_', fp)] = fp
+            continue
+
+        sample_from_name = match.group(1) or ''
+        batch_num = match.group(2)
+
+        # Determine sample from directory structure if not in filename
+        # e.g. kraken2/barcode01/batch_reports/batch_0.kraken2.report.txt
+        if not sample_from_name:
+            parts = fp.replace('\\', '/').split('/')
+            for i, part in enumerate(parts):
+                if part in ('batch_reports', 'reports', 'batches'):
+                    if i > 0:
+                        sample_from_name = parts[i - 1]
+                    break
+
+        batch_key = (sample_from_name, batch_num)
+
+        if batch_key not in seen_batches:
+            seen_batches[batch_key] = fp
+        else:
+            # Prefer batch_reports/ over reports/
+            existing = seen_batches[batch_key]
+            if 'batch_reports' in fp and 'batch_reports' not in existing:
+                seen_batches[batch_key] = fp
+            # Prefer sample-prefixed naming over generic batch_ naming
+            elif (sample_from_name and match.group(1)
+                  and 'batch_reports' in fp == 'batch_reports' in existing):
+                existing_match = batch_id_pattern.search(os.path.basename(existing))
+                if existing_match and not existing_match.group(1):
+                    seen_batches[batch_key] = fp
+
+    result = list(seen_batches.values())
+    if len(result) < len(filepaths):
+        logging.debug(
+            f"Deduplicated batch files: {len(filepaths)} -> {len(result)}"
+        )
+    return result
+
+
 def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFrame:
     """
     Load Kraken2 classification data for specific sample or all samples.
@@ -315,6 +386,8 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
                 ]
                 for pattern in batch_patterns:
                     kreport_files.extend(glob.glob(pattern, recursive=True))
+                # Deduplicate: same batch may appear in reports/ and batch_reports/
+                kreport_files = _deduplicate_batch_files(kreport_files)
 
                 if kreport_files:
                     logging.debug(f"Found {len(kreport_files)} batch Kraken2 reports to aggregate")
@@ -424,7 +497,8 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
             if not sample_files:
                 for pattern in batch_patterns:
                     sample_files.extend(glob.glob(pattern, recursive=True))
-                sample_files = list(dict.fromkeys(os.path.realpath(f) for f in sample_files))
+                # Deduplicate: same batch may appear in reports/ and batch_reports/
+                sample_files = _deduplicate_batch_files(sample_files)
 
         if not sample_files:
             logging.warning(f"No Kraken2 files found for sample {sample}")
