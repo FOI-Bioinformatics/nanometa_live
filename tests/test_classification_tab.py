@@ -90,7 +90,7 @@ class TestClassificationVisualizations:
         assert fig is not None
         assert len(fig.data) == 1
         assert fig.data[0].type == "sankey"
-        assert fig.layout.height == 700
+        assert fig.layout.height == 400
 
     def test_empty_sunburst_creation(self):
         """Test creation of empty Sunburst chart."""

@@ -48,14 +48,15 @@ def register_classification_callbacks(app: Dash):
             List of taxonomy levels corresponding to the preset
         """
         presets = {
-            'all': ['D', 'P', 'C', 'O', 'F', 'G', 'S'],
-            'high': ['D', 'P', 'C'],
-            'mid': ['P', 'C', 'O', 'F'],
-            'detailed': ['F', 'G', 'S'],
-            'species': ['O', 'F', 'G', 'S'],
-            'custom': ['F', 'G', 'S']  # Default for custom
+            'standard': ['P', 'C', 'O', 'F', 'G', 'S'],
+            'overview': ['D', 'P', 'C'],
+            'species_focus': ['F', 'G', 'S'],
+            'clinical': ['F', 'G', 'S'],
+            'full': ['D', 'P', 'C', 'O', 'F', 'G', 'S'],
         }
-        return presets.get(preset, ['F', 'G', 'S'])
+        if preset == 'custom':
+            return no_update
+        return presets.get(preset, ['P', 'C', 'O', 'F', 'G', 'S'])
 
     @app.callback(
         [
@@ -365,11 +366,14 @@ def _recalculate_cumulative_reads(df):
     For single samples: cumul_reads is already correct from Kraken2.
     For aggregated samples: cumul_reads sum is an approximation.
 
+    Uses composite keys f"{rank}_{name}" to avoid collisions when taxa at
+    different ranks share the same stripped name.
+
     Args:
-        df: DataFrame with Kraken2 data including 'name', 'cumul_reads' columns
+        df: DataFrame with Kraken2 data including 'name', 'rank', 'cumul_reads' columns
 
     Returns:
-        Dict mapping taxon name (stripped) to cumulative reads
+        Dict mapping composite key (f"{rank}_{name}") to cumulative reads
     """
     if df.empty:
         return {}
@@ -378,29 +382,33 @@ def _recalculate_cumulative_reads(df):
     for idx in range(len(df)):
         row = df.iloc[idx]
         name = row["name"].strip()
+        rank = row.get("rank", "")
+        composite_key = f"{rank}_{name}"
         # Use cumul_reads (column 2) - the cumulative/clade reads
         # NOT reads (column 3) which is only direct assignments
-        result[name] = row.get("cumul_reads", row.get("reads", 0))
+        result[composite_key] = row.get("cumul_reads", row.get("reads", 0))
 
     return result
 
 
 def _build_parent_map(tax_df, domain_df, tax_levels, node_ids, top_filter):
     """
-    Build a mapping of child node names to their parent node names.
+    Build a mapping of child composite keys to their parent composite keys.
 
     Uses indentation-based hierarchy from Kraken2 format to determine relationships.
     Only includes parents that are in the visualization (passed top_filter).
+    Composite keys use the format f"{rank}_{name}" to avoid collisions between
+    taxa at different ranks that share the same name.
 
     Args:
         tax_df: DataFrame filtered to selected taxonomy levels
         domain_df: Full DataFrame including domain entries for hierarchy traversal
         tax_levels: List of taxonomy levels being displayed
-        node_ids: Dict mapping node name -> node index
+        node_ids: Dict mapping composite key (f"{rank}_{name}") -> node index
         top_filter: Number of top entities at each level
 
     Returns:
-        Dict mapping child node name -> parent node name
+        Dict mapping child composite key -> parent composite key
     """
     parent_map = {}
 
@@ -423,7 +431,8 @@ def _build_parent_map(tax_df, domain_df, tax_levels, node_ids, top_filter):
         for child_name, child_name_full, child_idx in zip(
             child_names_stripped, child_names_full, child_indices
         ):
-            if child_name not in node_ids:
+            child_key = f"{current_level}_{child_name}"
+            if child_key not in node_ids:
                 continue
 
             child_indent = len(child_name_full) - len(child_name_full.lstrip())
@@ -441,8 +450,9 @@ def _build_parent_map(tax_df, domain_df, tax_levels, node_ids, top_filter):
 
                 # Found a row with less indentation
                 if check_indent < child_indent:
-                    if check_rank == parent_level and check_name in node_ids:
-                        parent_map[child_name] = check_name
+                    parent_key = f"{check_rank}_{check_name}"
+                    if check_rank == parent_level and parent_key in node_ids:
+                        parent_map[child_key] = parent_key
                         break
                     elif check_rank in tax_levels and tax_levels.index(check_rank) < tax_levels.index(parent_level):
                         # Hit a higher level without finding parent at expected level
@@ -694,9 +704,13 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
     # Filter dataframe by domains
     domain_df = kraken_df.iloc[domain_indices].copy()
 
+    if domain_df.empty:
+        return None
+
     # Add recalculated cumulative reads to domain_df for sorting and link values
-    domain_df["recalc_cumul"] = domain_df["name"].apply(
-        lambda x: recalc_cumul.get(x.strip(), 0)
+    # Uses composite key f"{rank}_{name}" to match _recalculate_cumulative_reads output
+    domain_df["recalc_cumul"] = domain_df.apply(
+        lambda row: recalc_cumul.get(f"{row['rank']}_{row['name'].strip()}", 0), axis=1
     )
 
     # Add percentage for hover display
@@ -729,12 +743,13 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
         level_pcts = level_df["recalc_pct"].tolist()
 
         for name, cumul_val, pct_val in zip(level_names, level_cumuls, level_pcts):
-            node_ids[name] = node_id
-            nodes.append(name)
+            node_key = f"{level}_{name}"
+            node_ids[node_key] = node_id
+            nodes.append(node_key)
             # Store recalculated cumulative value and percentage for this node
-            node_values[name] = cumul_val
-            node_pcts[name] = pct_val
-            node_ranks[name] = level
+            node_values[node_key] = cumul_val
+            node_pcts[node_key] = pct_val
+            node_ranks[node_key] = level
             node_id += 1
 
     logging.debug(f"Sankey: Created {len(nodes)} nodes across {len(tax_levels)} levels")
@@ -774,11 +789,12 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
         for child_name_full, child_name_stripped, child_cumul, child_idx in zip(
             child_names_full, child_names_stripped, child_cumuls, child_indices
         ):
-            if child_name_stripped not in node_ids:
+            child_key = f"{current_level}_{child_name_stripped}"
+            if child_key not in node_ids:
                 continue
 
             # Get child's recalculated cumulative value
-            child_value = node_values.get(child_name_stripped, child_cumul)
+            child_value = node_values.get(child_key, child_cumul)
 
             # Get child's indentation level (number of leading spaces)
             child_indent = len(child_name_full) - len(child_name_full.lstrip())
@@ -801,16 +817,17 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
                 if check_indent < child_indent:
                     # Is this the parent rank we're looking for?
                     if check_rank == parent_level:
+                        parent_key = f"{parent_level}_{check_name_stripped}"
                         # Is this parent in our visualization (passed max_taxa_per_level)?
-                        if check_name_stripped in node_ids:
+                        if parent_key in node_ids:
                             link_idx = len(links)
-                            links.append((node_ids[check_name_stripped], node_ids[child_name_stripped]))
+                            links.append((node_ids[parent_key], node_ids[child_key]))
                             values.append(child_value)  # Use recalculated cumulative reads
                             # Track parent's outgoing and link indices for scaling
-                            parent_outgoing_sum[check_name_stripped] = parent_outgoing_sum.get(check_name_stripped, 0) + child_value
-                            if check_name_stripped not in parent_link_indices:
-                                parent_link_indices[check_name_stripped] = []
-                            parent_link_indices[check_name_stripped].append(link_idx)
+                            parent_outgoing_sum[parent_key] = parent_outgoing_sum.get(parent_key, 0) + child_value
+                            if parent_key not in parent_link_indices:
+                                parent_link_indices[parent_key] = []
+                            parent_link_indices[parent_key].append(link_idx)
                             parent_found = True
                             break
                     # Stop if we've gone too far up the hierarchy
@@ -822,15 +839,16 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
                 parent_options = tax_df[tax_df["rank"] == parent_level].sort_values("recalc_cumul", ascending=False).head(max_taxa_per_level)
                 if not parent_options.empty:
                     fallback_parent = parent_options.iloc[0]["name"].strip()
-                    if fallback_parent in node_ids:
+                    fallback_key = f"{parent_level}_{fallback_parent}"
+                    if fallback_key in node_ids:
                         link_idx = len(links)
-                        links.append((node_ids[fallback_parent], node_ids[child_name_stripped]))
+                        links.append((node_ids[fallback_key], node_ids[child_key]))
                         values.append(child_value)  # Use recalculated cumulative reads
                         # Track parent's outgoing and link indices for scaling
-                        parent_outgoing_sum[fallback_parent] = parent_outgoing_sum.get(fallback_parent, 0) + child_value
-                        if fallback_parent not in parent_link_indices:
-                            parent_link_indices[fallback_parent] = []
-                        parent_link_indices[fallback_parent].append(link_idx)
+                        parent_outgoing_sum[fallback_key] = parent_outgoing_sum.get(fallback_key, 0) + child_value
+                        if fallback_key not in parent_link_indices:
+                            parent_link_indices[fallback_key] = []
+                        parent_link_indices[fallback_key].append(link_idx)
 
     # SCALING FIX: When children's cumul_reads sum exceeds parent's cumul_reads,
     # scale down the outgoing links proportionally to prevent parent appearing too large.
@@ -932,11 +950,12 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
     logging.debug(f"Sankey: Values (first 5): {values[:5]}")
     logging.debug(f"Sankey: Max source idx: {max(source_indices)}, Max target idx: {max(target_indices)}, Num nodes: {len(nodes)}")
 
-    # Create link colors with transparency (rgba)
-    # Color links based on source node's color
+    # Create link colors with transparency scaled by read proportion
+    # Color links based on TARGET node's color for visual flow continuity
     # Links TO sink nodes are invisible (they carry unaccounted reads)
+    total_value = sum(values) if values else 1
     link_colors = []
-    for link in links:
+    for i, link in enumerate(links):
         source_idx = link[0]
         target_idx = link[1]
         target_name = nodes[target_idx] if target_idx < len(nodes) else ""
@@ -944,31 +963,42 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
         # Links to sink nodes are invisible (carry unaccounted reads)
         if target_name.startswith("__sink_"):
             link_colors.append("rgba(0,0,0,0)")
-        elif source_idx < len(node_colors):
-            source_color = node_colors[source_idx]
-            # Handle both hex and rgba colors
-            if source_color.startswith("rgba"):
-                link_colors.append(source_color)
-            else:
-                # Convert hex to rgba with transparency
-                hex_color = source_color.lstrip("#")
-                r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-                link_colors.append(f"rgba({r},{g},{b},0.4)")
         else:
-            link_colors.append("rgba(150,150,150,0.3)")
+            # Use target node color for visual continuity into the next level
+            color_idx = target_idx if target_idx < len(node_colors) else source_idx
+            base_color = node_colors[color_idx] if color_idx < len(node_colors) else "#3B82F6"
+
+            # Scale opacity by proportion of total reads:
+            # Major links (>5%) get higher opacity, minor links fade out
+            link_pct = (values[i] / total_value * 100) if total_value > 0 else 0
+            if link_pct > 5:
+                opacity = 0.55
+            elif link_pct > 1:
+                opacity = 0.4
+            else:
+                opacity = 0.25
+
+            if base_color.startswith("rgba"):
+                link_colors.append(base_color)
+            elif base_color.startswith("#"):
+                hex_color = base_color.lstrip("#")
+                r, g, b = tuple(int(hex_color[j:j+2], 16) for j in (0, 2, 4))
+                link_colors.append(f"rgba({r},{g},{b},{opacity})")
+            else:
+                link_colors.append(f"rgba(150,150,150,{opacity})")
 
     # Create explicit X positions for nodes based on taxonomy level
-    # This ensures proper column positioning in the Sankey diagram
+    # Each rank has a canonical x-position so that when levels are skipped
+    # (e.g. D-F-S), the visual spacing reflects actual taxonomic distance.
     # Nodes span 0.001-0.85 with 150px right margin for rightmost labels
-    # Iterate through nodes list directly to handle "Other" nodes correctly
+    canonical_x = {
+        "D": 0.001, "P": 0.14, "C": 0.28, "O": 0.42,
+        "F": 0.57, "G": 0.71, "S": 0.85,
+    }
     node_x = []
     level_to_x = {}
-    for level_idx, level in enumerate(tax_levels):
-        # Calculate X position for each level
-        # Nodes span 0.001-0.85, leaving right space for label text
-        # (custom.js repositions rightmost-column labels to the right of nodes)
-        x_pos = 0.001 + (level_idx / max(len(tax_levels) - 1, 1)) * 0.849
-        level_to_x[level] = x_pos
+    for level in tax_levels:
+        level_to_x[level] = canonical_x.get(level, 0.5)
 
     for name in nodes:
         if name.startswith("__sink_"):
@@ -1001,30 +1031,64 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
     logging.debug(f"Sankey: ALL targets: {all_targets}")
     logging.debug(f"Sankey: ALL values: {values}")
 
-    # Build custom data for hover: [reads, percentage, rank_name]
+    # Build custom data for hover: [reads, percentage, rank_name, full_name]
     # Scale padding nodes get empty labels and are hidden from hover
     rank_names = {"D": "Domain", "P": "Phylum", "C": "Class", "O": "Order",
                   "F": "Family", "G": "Genus", "S": "Species"}
     node_customdata = []
     node_labels = []  # Display labels (empty for scale nodes)
 
-    for name in nodes:
-        if name.startswith("__sink_"):
+    MAX_LABEL_LEN = 25  # Truncate long names to reduce label overlap
+    for node_key in nodes:
+        if node_key.startswith("__sink_"):
             # Sink nodes: hidden labels, no hover data
             node_labels.append("")
-            node_customdata.append([0, 0, ""])
+            node_customdata.append([0, 0, "", ""])
         else:
-            node_labels.append(name)
-            reads = node_values.get(name, 0)
-            pct = node_pcts.get(name, 0)
-            rank = node_ranks.get(name, "")
+            # Extract plain display name from composite key (e.g., "P_Pseudomonadota" -> "Pseudomonadota")
+            display_name = node_key.split("_", 1)[1] if "_" in node_key else node_key
+            # Truncate long labels; full name is in hover tooltip via customdata[3]
+            if len(display_name) > MAX_LABEL_LEN:
+                node_labels.append(display_name[:MAX_LABEL_LEN - 1] + "...")
+            else:
+                node_labels.append(display_name)
+            reads = node_values.get(node_key, 0)
+            pct = node_pcts.get(node_key, 0)
+            rank = node_ranks.get(node_key, "")
             rank_name = rank_names.get(rank, rank)
-            node_customdata.append([reads, pct, rank_name])
+            node_customdata.append([reads, pct, rank_name, display_name])
 
-    # Position scale padding nodes at the very bottom (Y near 0.999)
+    # Position sink nodes adjacent to the average Y of their parent nodes
+    # rather than stacking them all at the bottom (0.999)
+    # This keeps unaccounted-read flows visually near their source
     for i, name in enumerate(nodes):
         if name.startswith("__sink_"):
+            sink_level = name.replace("__sink_", "")
+            # Find parent level for this sink (one level above)
+            if sink_level in tax_levels:
+                sink_level_idx = tax_levels.index(sink_level)
+                if sink_level_idx > 0:
+                    parent_level = tax_levels[sink_level_idx - 1]
+                    # Average Y of parent-level nodes that feed this sink
+                    parent_ys = [
+                        node_y[node_ids[n]]
+                        for n in nodes
+                        if node_ranks.get(n) == parent_level and n in node_ids
+                        and not n.startswith("__sink_")
+                    ]
+                    if parent_ys:
+                        # Place sink near bottom of parent range to stay out of the way
+                        node_y[i] = max(parent_ys) + 0.02
+                        node_y[i] = min(node_y[i], 0.999)
+                        continue
+            # Fallback: bottom
             node_y[i] = 0.999
+
+    # Enforce minimum node visibility: nodes with < 0.5% of reads can be
+    # nearly invisible, so set a floor on link values used for rendering
+    max_value = max(values) if values else 1
+    min_visible = max_value * 0.005  # 0.5% of largest link
+    display_values = [max(v, min_visible) if v > 0 else v for v in values]
 
     # Create the Sankey figure with enhanced hover information
     figure = go.Figure(
@@ -1036,14 +1100,16 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
                 y=[0.02, 0.98]
             ),
             node=dict(
-                pad=25,
-                thickness=20,
+                pad=30,
+                thickness=22,
                 label=node_labels,
                 color=node_colors,
                 customdata=node_customdata,
+                x=node_x,
+                y=node_y,
                 line=dict(color="#E5E7EB", width=0.5),
                 hovertemplate=(
-                    "<b>%{label}</b><br>"
+                    "<b>%{customdata[3]}</b><br>"
                     "<span style='color:#6B7280'>%{customdata[2]}</span><br>"
                     "Reads: <b>%{customdata[0]:,.0f}</b><br>"
                     "Proportion: <b>%{customdata[1]:.2f}%</b>"
@@ -1053,10 +1119,10 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
             link=dict(
                 source=all_sources,
                 target=all_targets,
-                value=values,
+                value=display_values,
                 color=link_colors,
                 hovertemplate=(
-                    "<b>%{source.label}</b> &rarr; <b>%{target.label}</b><br>"
+                    "<b>%{source.customdata[3]}</b> &rarr; <b>%{target.customdata[3]}</b><br>"
                     "Reads: %{value:,.0f}"
                     "<extra></extra>"
                 ),
@@ -1364,15 +1430,17 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, colo
     recalc_cumul = _recalculate_cumulative_reads(kraken_df)
 
     # Add recalculated cumulative reads to filtered_df
-    filtered_df["recalc_cumul"] = filtered_df["name"].apply(
-        lambda x: recalc_cumul.get(x.strip(), 0)
+    # Uses composite key f"{rank}_{name}" to match _recalculate_cumulative_reads output
+    filtered_df["recalc_cumul"] = filtered_df.apply(
+        lambda row: recalc_cumul.get(f"{row['rank']}_{row['name'].strip()}", 0), axis=1
     )
 
     # Calculate total reads for percentage calculations (use recalculated root value)
     # Find the domain-level totals for proper percentage base
+    first_level_df = filtered_df[filtered_df["rank"] == tax_levels[0]]
     total_reads = sum(
-        recalc_cumul.get(name.strip(), 0)
-        for name in filtered_df[filtered_df["rank"] == tax_levels[0]]["name"]
+        recalc_cumul.get(f"{row['rank']}_{row['name'].strip()}", 0)
+        for _, row in first_level_df.iterrows()
     ) if tax_levels else 1
     if total_reads == 0:
         total_reads = 1  # Avoid division by zero

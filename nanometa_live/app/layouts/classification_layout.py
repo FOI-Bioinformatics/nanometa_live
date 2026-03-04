@@ -162,47 +162,51 @@ def create_classification_layout() -> html.Div:
                         )
                     ], md=5),
 
-                    # Taxonomy levels selector (for Sankey only)
+                    # Taxonomy levels selector
                     dbc.Col([
                         html.Label("Classification Levels to Show:", className="fw-bold"),
                         html.Div(
                             id='classification-levels-container',
                             children=[
-                                # Quick preset selector
-                                html.Label("Quick Presets:", className="fw-bold mt-2 mb-1", style={"fontSize": "0.9rem"}),
-                                dcc.Dropdown(
+                                # Preset selector with descriptive labels
+                                html.Label("Preset Views:", className="fw-bold mt-2 mb-1", style={"fontSize": "0.9rem"}),
+                                dbc.Select(
                                     id='classification-level-preset',
                                     options=[
-                                        {'label': 'All Levels (D > P > C > O > F > G > S)', 'value': 'all'},
-                                        {'label': 'High-Level Overview (D > P > C)', 'value': 'high'},
-                                        {'label': 'Mid-Level Analysis (P > C > O > F)', 'value': 'mid'},
-                                        {'label': 'Detailed Classification (F > G > S)', 'value': 'detailed'},
-                                        {'label': 'Species Focus (O > F > G > S)', 'value': 'species'},
-                                        {'label': 'Custom (Select below)', 'value': 'custom'}
+                                        {'label': 'Standard (Phylum to Species)', 'value': 'standard'},
+                                        {'label': 'Overview (Domain, Phylum, Class)', 'value': 'overview'},
+                                        {'label': 'Species Focus (Family, Genus, Species)', 'value': 'species_focus'},
+                                        {'label': 'Clinical (Family to Species)', 'value': 'clinical'},
+                                        {'label': 'Full Taxonomy (all 7 levels)', 'value': 'full'},
+                                        {'label': 'Custom (select levels below)', 'value': 'custom'},
                                     ],
-                                    value='all',  # Default to all levels
-                                    className="mb-3",
-                                    clearable=False
+                                    value='standard',
                                 ),
-                                # Manual multi-select for custom filtering
-                                html.Label("Or Select Custom Levels:", className="fw-bold mt-2 mb-1", style={"fontSize": "0.9rem"}),
+                                html.Small(
+                                    "Standard: general analysis. Overview: broad community structure. "
+                                    "Species Focus / Clinical: identification to species level.",
+                                    className="text-muted d-block mt-1 mb-2"
+                                ),
+                                # Manual multi-select for custom level filtering
+                                html.Label("Individual Levels:", className="fw-bold mt-2 mb-1", style={"fontSize": "0.9rem"}),
                                 dcc.Dropdown(
                                     id='classification-levels-input',
                                     options=[
-                                        {'label': 'Domain (Broadest)', 'value': 'D'},
-                                        {'label': 'Phylum', 'value': 'P'},
-                                        {'label': 'Class', 'value': 'C'},
-                                        {'label': 'Order', 'value': 'O'},
-                                        {'label': 'Family', 'value': 'F'},
-                                        {'label': 'Genus', 'value': 'G'},
-                                        {'label': 'Species (Most Specific)', 'value': 'S'}
+                                        {'label': 'D - Domain', 'value': 'D'},
+                                        {'label': 'P - Phylum', 'value': 'P'},
+                                        {'label': 'C - Class', 'value': 'C'},
+                                        {'label': 'O - Order', 'value': 'O'},
+                                        {'label': 'F - Family', 'value': 'F'},
+                                        {'label': 'G - Genus', 'value': 'G'},
+                                        {'label': 'S - Species', 'value': 'S'}
                                     ],
-                                    value=['D', 'P', 'C', 'O', 'F', 'G', 'S'],  # Match 'all' preset
+                                    value=['P', 'C', 'O', 'F', 'G', 'S'],  # Match 'standard' preset
                                     multi=True,
                                     className="mb-2"
                                 ),
                                 html.Small(
-                                    "Tip: Use presets for common views, or select custom levels for specific analysis",
+                                    "Select 'Custom' preset to freely choose levels. "
+                                    "At least 2 levels are needed for Sankey diagrams.",
                                     className="text-muted"
                                 )
                             ]
