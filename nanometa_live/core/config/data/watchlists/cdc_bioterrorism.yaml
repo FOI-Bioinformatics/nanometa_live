@@ -59,50 +59,50 @@ pathogens:
     action_required: "Contact public health authorities. Assess for toxin production."
     notes: "Produces botulinum toxin. Food safety and bioterrorism concern."
 
-  - name: "Variola major"
-    names_alt: ["Variola_major"]
-    taxid_ncbi: 10255
+  - name: "Orthopoxvirus variola"
+    names_alt: ["Variola major", "Variola_major", "Variola virus", "Smallpox virus"]
+    taxid_ncbi: 3431487
     common_name: "Smallpox"
     threat_level: "critical"
     bsl_level: 4
     category: "CDC-A"
     alert_threshold: 1
     action_required: "IMMEDIATE ALERT. Contact CDC immediately. Extreme containment required."
-    notes: "Eradicated disease. Detection requires immediate investigation."
+    notes: "Eradicated disease. Detection requires immediate investigation. Formerly Variola major (taxid 10255)."
 
   # Viral Hemorrhagic Fevers (Category A)
-  - name: "Ebola virus"
-    names_alt: ["Ebolavirus", "Ebola_virus", "Zaire_ebolavirus"]
-    taxid_ncbi: 186538
+  - name: "Orthoebolavirus zairense"
+    names_alt: ["Ebola virus", "Ebolavirus", "Ebola_virus", "Zaire ebolavirus", "Zaire_ebolavirus"]
+    taxid_ncbi: 3052462
     common_name: "Ebola"
     threat_level: "critical"
     bsl_level: 4
     category: "CDC-A"
     alert_threshold: 1
     action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
-    notes: "Viral hemorrhagic fever. High mortality rate. Select agent."
+    notes: "Viral hemorrhagic fever. High mortality rate. Select agent. Formerly Ebola virus (taxid 186538)."
 
-  - name: "Marburg virus"
-    names_alt: ["Marburgvirus", "Marburg_virus", "Marburg_marburgvirus"]
-    taxid_ncbi: 11269
+  - name: "Orthomarburgvirus marburgense"
+    names_alt: ["Marburg virus", "Marburgvirus", "Marburg_virus", "Marburg marburgvirus", "Marburg_marburgvirus"]
+    taxid_ncbi: 3052505
     common_name: "Marburg"
     threat_level: "critical"
     bsl_level: 4
     category: "CDC-A"
     alert_threshold: 1
     action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
-    notes: "Viral hemorrhagic fever. High mortality rate. Select agent."
+    notes: "Viral hemorrhagic fever. High mortality rate. Select agent. Formerly Marburg virus (taxid 11269)."
 
-  - name: "Lassa virus"
-    names_alt: ["Lassa_mammarenavirus", "Lassa_virus"]
-    taxid_ncbi: 11620
+  - name: "Mammarenavirus lassaense"
+    names_alt: ["Lassa virus", "Lassa_virus", "Lassa mammarenavirus", "Lassa_mammarenavirus"]
+    taxid_ncbi: 3052310
     common_name: "Lassa fever"
     threat_level: "critical"
     bsl_level: 4
     category: "CDC-A"
     alert_threshold: 1
     action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
-    notes: "Viral hemorrhagic fever endemic to West Africa. Select agent."
+    notes: "Viral hemorrhagic fever endemic to West Africa. Select agent. Formerly Lassa virus (taxid 11620)."
 
   # Category B - Second Highest Priority
   - name: "Brucella melitensis"
@@ -205,27 +205,27 @@ pathogens:
     notes: "Causative agent of bacillary dysentery. Serotype 1 produces Shiga toxin."
 
   # Category C - Emerging Pathogens
-  - name: "Nipah virus"
-    names_alt: ["Nipah_henipavirus", "Nipah_virus"]
-    taxid_ncbi: 121791
+  - name: "Henipavirus nipahense"
+    names_alt: ["Nipah virus", "Nipah_virus", "Nipah henipavirus", "Nipah_henipavirus"]
+    taxid_ncbi: 3052225
     common_name: "Nipah"
     threat_level: "critical"
     bsl_level: 4
     category: "CDC-C"
     alert_threshold: 1
     action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
-    notes: "Emerging zoonotic virus. High mortality. Endemic in Southeast Asia."
+    notes: "Emerging zoonotic virus. High mortality. Endemic in Southeast Asia. Formerly Nipah virus (taxid 121791)."
 
-  - name: "Hantavirus"
-    names_alt: ["Orthohantavirus", "Sin_Nombre_orthohantavirus"]
-    taxid_ncbi: 1980471
+  - name: "Orthohantavirus hantanense"
+    names_alt: ["Hantavirus", "Hantaan virus", "Hantaan orthohantavirus", "Orthohantavirus", "Sin_Nombre_orthohantavirus"]
+    taxid_ncbi: 3052480
     common_name: "Hantavirus"
     threat_level: "high"
     bsl_level: 3
     category: "CDC-C"
     alert_threshold: 5
     action_required: "Contact public health. Assess for rodent exposure."
-    notes: "Causes hantavirus pulmonary syndrome. Rodent-borne."
+    notes: "Causes hemorrhagic fever with renal syndrome. Rodent-borne. Formerly Hantaan orthohantavirus (taxid 1980471). Sin Nombre orthohantavirus causes HPS in the Americas."
 
   - name: "Mycobacterium tuberculosis"
     names_alt: ["Mycobacterium_tuberculosis"]

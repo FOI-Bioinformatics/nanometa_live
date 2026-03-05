@@ -193,14 +193,15 @@ pathogens:
     chlorine_resistance: "moderate"
     animal_reservoir: false
 
-  - name: "Hepatitis E virus"
+  - name: "Paslahepevirus balayani"
+    names_alt: ["Hepatitis E virus", "Orthohepevirus A"]
     common_name: "Hepatitis E"
-    taxid: 12461
+    taxid: 1678143
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 5
     category: "WHO-Drinking-Water"
-    notes: "Causes hepatitis E. Long persistence, moderate chlorine resistance. Potentially zoonotic."
+    notes: "Causes hepatitis E. Long persistence, moderate chlorine resistance. Potentially zoonotic. Formerly Hepatitis E virus (taxid 12461)."
     persistence: "long"
     chlorine_resistance: "moderate"
     animal_reservoir: true
@@ -217,14 +218,15 @@ pathogens:
     chlorine_resistance: "moderate"
     animal_reservoir: false
 
-  - name: "Hepatitis A virus"
+  - name: "Hepatovirus ahepa"
+    names_alt: ["Hepatitis A virus", "Hepatovirus A"]
     common_name: "Hepatitis A"
-    taxid: 12092
+    taxid: 3407641
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 5
     category: "WHO-Drinking-Water"
-    notes: "Causes hepatitis A. Long persistence, moderate chlorine resistance."
+    notes: "Causes hepatitis A. Long persistence, moderate chlorine resistance. Formerly Hepatitis A virus (taxid 12092)."
     persistence: "long"
     chlorine_resistance: "moderate"
     animal_reservoir: false
