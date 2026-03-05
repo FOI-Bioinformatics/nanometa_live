@@ -493,11 +493,17 @@ def _calculate_hierarchical_y_positions(nodes, node_ids, tax_levels, nodes_per_l
     y_max = 0.999
 
     # Minimum fraction of space per node (prevents tiny nodes from having zero space)
-    MIN_FRACTION = 0.01  # 1% minimum per node
+    MIN_FRACTION = 0.02  # 2% minimum per node for fixed layout readability
+
+    # Minimum gap between adjacent node centers (prevents label overlap)
+    MIN_GAP = 0.03  # 3% of total height
 
     def calculate_proportional_positions(node_list, start_y, end_y):
         """
         Calculate Y positions for nodes proportional to their values.
+
+        With fixed arrangement, positions must be non-overlapping since Plotly
+        will not auto-adjust them. Enforces a minimum gap between nodes.
 
         Args:
             node_list: List of (node_idx, node_name) tuples
@@ -541,6 +547,26 @@ def _calculate_hierarchical_y_positions(nodes, node_ids, tax_levels, nodes_per_l
             y_pos = current_y + allocated_space / 2
             positions.append((idx, name, y_pos))
             current_y += allocated_space
+
+        # Enforce minimum gap between adjacent nodes for fixed layout
+        if len(positions) > 1:
+            for i in range(1, len(positions)):
+                prev_y = positions[i - 1][2]
+                curr_y = positions[i][2]
+                if curr_y - prev_y < MIN_GAP:
+                    # Push this node down to maintain minimum gap
+                    new_y = prev_y + MIN_GAP
+                    positions[i] = (positions[i][0], positions[i][1], new_y)
+
+            # If pushing nodes down caused overflow past end_y, compress all
+            last_y = positions[-1][2]
+            if last_y > end_y:
+                # Redistribute evenly within bounds
+                n = len(positions)
+                step = (end_y - start_y) / (n + 1)
+                for i in range(n):
+                    y_pos = start_y + step * (i + 1)
+                    positions[i] = (positions[i][0], positions[i][1], y_pos)
 
         return positions
 
@@ -729,7 +755,7 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
 
     # Process levels in the order specified (original dev2 algorithm)
     # This creates clean node groups: all Family nodes, then all Genus nodes, then all Species nodes
-    # Plotly's "freeform" arrangement uses this ordering to position nodes correctly
+    # With "fixed" arrangement, explicit x/y positions control layout precisely
     # Sort by recalculated cumulative reads for proper hierarchy representation
     for level in tax_levels:
         level_df = tax_df[tax_df["rank"] == level].sort_values("recalc_cumul", ascending=False)
@@ -871,46 +897,9 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
     if scaled_parents > 0:
         logging.debug(f"Sankey: Scaled down links for {scaled_parents} parents to prevent inflation")
 
-    # Create invisible sink nodes to capture unaccounted reads
-    # This ensures parent nodes have correct visual height (outgoing = cumulative reads)
-    # Without this, filtered children cause parents to appear smaller than they should
-
-    # Step 1: Create one invisible sink node per child level (not first level)
-    sink_nodes = {}  # level -> sink_node_name
-    for level_idx in range(1, len(tax_levels)):
-        level = tax_levels[level_idx]
-        sink_name = f"__sink_{level}"
-        sink_id = len(nodes)
-        nodes.append(sink_name)
-        node_ids[sink_name] = sink_id
-        node_values[sink_name] = 0  # Will accumulate unaccounted reads
-        node_pcts[sink_name] = 0
-        node_ranks[sink_name] = level
-        sink_nodes[level] = sink_name
-
-    # Step 2: For each parent, add invisible link for unaccounted reads
-    sink_links_added = 0
-    for parent_name, outgoing_sum in parent_outgoing_sum.items():
-        parent_value = node_values.get(parent_name, 0)
-        unaccounted = parent_value - outgoing_sum
-
-        if unaccounted > 0:
-            # Find the child level for this parent
-            parent_level = node_ranks.get(parent_name)
-            if parent_level in tax_levels:
-                parent_level_idx = tax_levels.index(parent_level)
-                if parent_level_idx + 1 < len(tax_levels):
-                    child_level = tax_levels[parent_level_idx + 1]
-                    sink_name = sink_nodes.get(child_level)
-
-                    if sink_name and sink_name in node_ids:
-                        # Add invisible link from parent to sink
-                        links.append((node_ids[parent_name], node_ids[sink_name]))
-                        values.append(unaccounted)
-                        node_values[sink_name] += unaccounted
-                        sink_links_added += 1
-
-    logging.debug(f"Sankey: Added {len(sink_nodes)} invisible sink nodes, {sink_links_added} sink links")
+    # Note: Sink nodes removed for fixed arrangement - they caused visual artifacts
+    # when Plotly cannot auto-adjust positions. Parent node heights may not perfectly
+    # match cumulative reads, but the layout is cleaner and more predictable.
 
     # Create figure
     logging.debug(f"Sankey: Created {len(links)} links with values sum={sum(values) if values else 0}")
@@ -929,15 +918,10 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
         nodes_per_level[level] = sum(1 for name in nodes if node_ranks.get(name) == level)
 
     # Assign colors to each node based on their rank
-    # Sink nodes are invisible (capture unaccounted reads from filtered children)
     for name in nodes:
-        if name.startswith("__sink_"):
-            # Invisible sink node - ensures parent heights are correct
-            node_colors.append("rgba(0,0,0,0)")
-        else:
-            level = node_ranks.get(name, "")
-            base_color = colors.get(level, "#3B82F6")
-            node_colors.append(base_color)
+        level = node_ranks.get(name, "")
+        base_color = colors.get(level, "#3B82F6")
+        node_colors.append(base_color)
 
     logging.debug(f"Sankey: Created {len(node_colors)} node colors for {len(nodes)} nodes")
     logging.debug(f"Sankey: First 3 node colors: {node_colors[:3]}")
@@ -952,40 +936,34 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
 
     # Create link colors with transparency scaled by read proportion
     # Color links based on TARGET node's color for visual flow continuity
-    # Links TO sink nodes are invisible (they carry unaccounted reads)
     total_value = sum(values) if values else 1
     link_colors = []
     for i, link in enumerate(links):
         source_idx = link[0]
         target_idx = link[1]
-        target_name = nodes[target_idx] if target_idx < len(nodes) else ""
 
-        # Links to sink nodes are invisible (carry unaccounted reads)
-        if target_name.startswith("__sink_"):
-            link_colors.append("rgba(0,0,0,0)")
+        # Use target node color for visual continuity into the next level
+        color_idx = target_idx if target_idx < len(node_colors) else source_idx
+        base_color = node_colors[color_idx] if color_idx < len(node_colors) else "#3B82F6"
+
+        # Scale opacity by proportion of total reads:
+        # Major links (>5%) get higher opacity, minor links fade out
+        link_pct = (values[i] / total_value * 100) if total_value > 0 else 0
+        if link_pct > 5:
+            opacity = 0.55
+        elif link_pct > 1:
+            opacity = 0.4
         else:
-            # Use target node color for visual continuity into the next level
-            color_idx = target_idx if target_idx < len(node_colors) else source_idx
-            base_color = node_colors[color_idx] if color_idx < len(node_colors) else "#3B82F6"
+            opacity = 0.25
 
-            # Scale opacity by proportion of total reads:
-            # Major links (>5%) get higher opacity, minor links fade out
-            link_pct = (values[i] / total_value * 100) if total_value > 0 else 0
-            if link_pct > 5:
-                opacity = 0.55
-            elif link_pct > 1:
-                opacity = 0.4
-            else:
-                opacity = 0.25
-
-            if base_color.startswith("rgba"):
-                link_colors.append(base_color)
-            elif base_color.startswith("#"):
-                hex_color = base_color.lstrip("#")
-                r, g, b = tuple(int(hex_color[j:j+2], 16) for j in (0, 2, 4))
-                link_colors.append(f"rgba({r},{g},{b},{opacity})")
-            else:
-                link_colors.append(f"rgba(150,150,150,{opacity})")
+        if base_color.startswith("rgba"):
+            link_colors.append(base_color)
+        elif base_color.startswith("#"):
+            hex_color = base_color.lstrip("#")
+            r, g, b = tuple(int(hex_color[j:j+2], 16) for j in (0, 2, 4))
+            link_colors.append(f"rgba({r},{g},{b},{opacity})")
+        else:
+            link_colors.append(f"rgba(150,150,150,{opacity})")
 
     # Create explicit X positions for nodes based on taxonomy level
     # Each rank has a canonical x-position so that when levels are skipped
@@ -1001,15 +979,9 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
         level_to_x[level] = canonical_x.get(level, 0.5)
 
     for name in nodes:
-        if name.startswith("__sink_"):
-            # Sink nodes keep same x as their parent level
-            level = name.replace("__sink_", "")
-            x_pos = level_to_x.get(level, 0.5)
-            node_x.append(x_pos)
-        else:
-            level = node_ranks.get(name, "")
-            x_pos = level_to_x.get(level, 0.5)
-            node_x.append(x_pos)
+        level = node_ranks.get(name, "")
+        x_pos = level_to_x.get(level, 0.5)
+        node_x.append(x_pos)
 
     # Build parent map for hierarchical Y positioning
     parent_map = _build_parent_map(tax_df, domain_df, tax_levels, node_ids, max_taxa_per_level)
@@ -1040,49 +1012,18 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
 
     MAX_LABEL_LEN = 25  # Truncate long names to reduce label overlap
     for node_key in nodes:
-        if node_key.startswith("__sink_"):
-            # Sink nodes: hidden labels, no hover data
-            node_labels.append("")
-            node_customdata.append([0, 0, "", ""])
+        # Extract plain display name from composite key (e.g., "P_Pseudomonadota" -> "Pseudomonadota")
+        display_name = node_key.split("_", 1)[1] if "_" in node_key else node_key
+        # Truncate long labels; full name is in hover tooltip via customdata[3]
+        if len(display_name) > MAX_LABEL_LEN:
+            node_labels.append(display_name[:MAX_LABEL_LEN - 1] + "...")
         else:
-            # Extract plain display name from composite key (e.g., "P_Pseudomonadota" -> "Pseudomonadota")
-            display_name = node_key.split("_", 1)[1] if "_" in node_key else node_key
-            # Truncate long labels; full name is in hover tooltip via customdata[3]
-            if len(display_name) > MAX_LABEL_LEN:
-                node_labels.append(display_name[:MAX_LABEL_LEN - 1] + "...")
-            else:
-                node_labels.append(display_name)
-            reads = node_values.get(node_key, 0)
-            pct = node_pcts.get(node_key, 0)
-            rank = node_ranks.get(node_key, "")
-            rank_name = rank_names.get(rank, rank)
-            node_customdata.append([reads, pct, rank_name, display_name])
-
-    # Position sink nodes adjacent to the average Y of their parent nodes
-    # rather than stacking them all at the bottom (0.999)
-    # This keeps unaccounted-read flows visually near their source
-    for i, name in enumerate(nodes):
-        if name.startswith("__sink_"):
-            sink_level = name.replace("__sink_", "")
-            # Find parent level for this sink (one level above)
-            if sink_level in tax_levels:
-                sink_level_idx = tax_levels.index(sink_level)
-                if sink_level_idx > 0:
-                    parent_level = tax_levels[sink_level_idx - 1]
-                    # Average Y of parent-level nodes that feed this sink
-                    parent_ys = [
-                        node_y[node_ids[n]]
-                        for n in nodes
-                        if node_ranks.get(n) == parent_level and n in node_ids
-                        and not n.startswith("__sink_")
-                    ]
-                    if parent_ys:
-                        # Place sink near bottom of parent range to stay out of the way
-                        node_y[i] = max(parent_ys) + 0.02
-                        node_y[i] = min(node_y[i], 0.999)
-                        continue
-            # Fallback: bottom
-            node_y[i] = 0.999
+            node_labels.append(display_name)
+        reads = node_values.get(node_key, 0)
+        pct = node_pcts.get(node_key, 0)
+        rank = node_ranks.get(node_key, "")
+        rank_name = rank_names.get(rank, rank)
+        node_customdata.append([reads, pct, rank_name, display_name])
 
     # Enforce minimum node visibility: nodes with < 0.5% of reads can be
     # nearly invisible, so set a floor on link values used for rendering
@@ -1093,7 +1034,7 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
     # Create the Sankey figure with enhanced hover information
     figure = go.Figure(
         go.Sankey(
-            arrangement="snap",
+            arrangement="fixed",
             textfont=dict(size=11, color="#1F2937", family="Arial, sans-serif"),
             domain=dict(
                 x=[0.0, 1.0],
@@ -1110,7 +1051,7 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
                 line=dict(color="#E5E7EB", width=0.5),
                 hovertemplate=(
                     "<b>%{customdata[3]}</b><br>"
-                    "<span style='color:#6B7280'>%{customdata[2]}</span><br>"
+                    "Rank: <i>%{customdata[2]}</i><br>"
                     "Reads: <b>%{customdata[0]:,.0f}</b><br>"
                     "Proportion: <b>%{customdata[1]:.2f}%</b>"
                     "<extra></extra>"
@@ -1122,7 +1063,9 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
                 value=display_values,
                 color=link_colors,
                 hovertemplate=(
-                    "<b>%{source.customdata[3]}</b> &rarr; <b>%{target.customdata[3]}</b><br>"
+                    "<b>%{source.customdata[3]}</b> (<i>%{source.customdata[2]}</i>)"
+                    " -> "
+                    "<b>%{target.customdata[3]}</b> (<i>%{target.customdata[2]}</i>)<br>"
                     "Reads: %{value:,.0f}"
                     "<extra></extra>"
                 ),
