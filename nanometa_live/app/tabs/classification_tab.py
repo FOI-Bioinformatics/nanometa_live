@@ -664,6 +664,10 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
         fig.update_layout(**_info_layout)
         return fig
 
+    # Normalize extended PlusPFP ranks (R2->D, K->D, P1-P9->P, etc.)
+    # before any rank-based filtering or grouping
+    kraken_df = normalize_ranks(kraken_df)
+
     # CRITICAL FIX: Find which tax levels actually exist in the data
     available_ranks = kraken_df["rank"].unique().tolist()
     # Filter tax_levels to only those actually present in data
@@ -1238,6 +1242,50 @@ RANK_NAMES = {
     "U": "Unclassified",
 }
 
+# Extended rank normalization for Kraken2 PlusPFP (NCBI extended taxonomy).
+# PlusPFP uses sub-ranks (R2, K, K1-K3, P1-P9, C1-C6, O1-O4, F1-F2, G1-G2, S1)
+# that must be collapsed to the standard 7-level hierarchy for visualization.
+RANK_NORMALIZATION = {
+    "R2": "D",   # Root level 2 (Domain in PlusPFP)
+    "R3": "D",   # Root level 3 (e.g. Opisthokonta)
+    "K": "D",    # Kingdom -> Domain level
+    "K1": "D", "K2": "D", "K3": "D",
+    "P1": "P", "P2": "P", "P3": "P", "P4": "P", "P5": "P",
+    "P6": "P", "P7": "P", "P8": "P", "P9": "P",
+    "C1": "C", "C2": "C", "C3": "C", "C4": "C", "C5": "C", "C6": "C",
+    "O1": "O", "O2": "O", "O3": "O", "O4": "O",
+    "F1": "F", "F2": "F",
+    "G1": "G", "G2": "G",
+    "S1": "S",
+}
+
+# Standard ranks that are already correct (no mapping needed)
+STANDARD_RANKS = {"D", "P", "C", "O", "F", "G", "S", "R", "R1", "U"}
+
+
+def normalize_ranks(df):
+    """
+    Normalize extended Kraken2 PlusPFP ranks to standard taxonomy levels.
+
+    Maps sub-ranks (K, K1-K3, P1-P9, C1-C6, etc.) to their parent standard
+    rank (D, P, C, O, F, G, S). Rows with unmappable ranks (R, R1, U) are
+    left unchanged. Works on a copy of the dataframe.
+
+    Args:
+        df: DataFrame with a 'rank' column containing Kraken2 rank codes
+
+    Returns:
+        DataFrame with normalized rank column; original rank preserved in
+        'original_rank' column for display purposes
+    """
+    if df.empty or "rank" not in df.columns:
+        return df
+
+    result = df.copy()
+    result["original_rank"] = result["rank"]
+    result["rank"] = result["rank"].map(lambda r: RANK_NORMALIZATION.get(r, r))
+    return result
+
 
 def create_empty_sunburst(message="Waiting for data"):
     """
@@ -1332,6 +1380,10 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, colo
     """
     # Ensure clean integer index to prevent duplicate-index issues with .loc[]
     kraken_df = kraken_df.reset_index(drop=True)
+
+    # Normalize extended PlusPFP ranks (R2->D, K->D, P1-P9->P, etc.)
+    # before any rank-based filtering or grouping
+    kraken_df = normalize_ranks(kraken_df)
 
     # Use provided color palette or default
     palette = color_palette or TAXONOMY_COLORS
