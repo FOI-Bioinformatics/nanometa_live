@@ -13,6 +13,91 @@ from dash import html, dcc
 import dash_bootstrap_components as dbc
 
 
+def WorkflowStepper(active_step: int = 1) -> html.Div:
+    """
+    Reusable workflow step indicator for the setup sequence.
+
+    Shows a 4-step horizontal stepper: Configure -> Watchlist -> Prepare -> Analyse.
+    Completed steps are green, the active step is blue, and future steps are grey.
+
+    Args:
+        active_step: Which step is currently active (1-4).
+            1 = Configuration, 2 = Watchlist, 3 = Preparation, 4 = Analyse
+
+    Returns:
+        html.Div containing the step indicator row
+    """
+    steps = [
+        {"num": "1", "label": "Configure"},
+        {"num": "2", "label": "Watchlist"},
+        {"num": "3", "label": "Prepare"},
+        {"num": "4", "label": "Analyse", "icon": "bi-play-fill"},
+    ]
+
+    children = []
+    for i, step in enumerate(steps):
+        step_num = i + 1
+
+        # Determine colours
+        if step_num < active_step:
+            bg = "#28a745"    # success green
+            fg = "white"
+            label_cls = "text-success mt-1 fw-bold"
+        elif step_num == active_step:
+            bg = "#007bff"    # primary blue
+            fg = "white"
+            label_cls = "fw-bold text-primary mt-1"
+        else:
+            bg = "#e9ecef"    # secondary grey
+            fg = "#6c757d"
+            label_cls = "text-muted mt-1"
+
+        # Circle content
+        if step.get("icon") and step_num != active_step and step_num > active_step:
+            circle_content = html.I(className=f"bi {step['icon']}",
+                                    style={"fontSize": "0.8rem"})
+        elif step_num < active_step:
+            circle_content = html.I(className="bi bi-check",
+                                    style={"fontSize": "0.9rem"})
+        else:
+            circle_content = html.Span(step["num"],
+                                       style={"fontSize": "0.8rem", "fontWeight": "bold"})
+
+        circle = html.Div([
+            circle_content,
+        ], className="d-flex align-items-center justify-content-center",
+           style={
+               "width": "28px", "height": "28px",
+               "borderRadius": "50%",
+               "backgroundColor": bg,
+               "color": fg,
+           })
+
+        col = dbc.Col([
+            html.Div([
+                circle,
+                html.Small(step["label"], className=label_cls),
+            ], className="d-flex flex-column align-items-center"),
+        ], className="text-center", width=True)
+
+        children.append(col)
+
+        # Arrow between steps (not after last)
+        if step_num < len(steps):
+            arrow_color = "text-success" if step_num < active_step else "text-muted"
+            arrow = dbc.Col([
+                html.I(className=f"bi bi-chevron-right {arrow_color}",
+                       style={"fontSize": "1.2rem"}),
+            ], width="auto", className="d-flex align-items-center px-0")
+            children.append(arrow)
+
+    return html.Div([
+        dbc.Row(children,
+                className="g-0 align-items-center justify-content-center",
+                style={"maxWidth": "500px", "margin": "0 auto"}),
+    ], className="py-2 mb-3")
+
+
 def StatusCard(
     title: str,
     value: str,

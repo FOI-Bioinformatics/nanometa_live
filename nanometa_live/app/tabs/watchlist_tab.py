@@ -6,10 +6,7 @@ Handles all callback logic for the Watchlist management tab:
 - Pathogens table updates
 - Individual pathogen toggle/edit
 - API validation (manual button)
-- Taxid mapping for Kraken2 database compatibility
 - Add custom species with API lookup
-- Genome downloads with progress tracking (background callbacks)
-- BLAST database building with progress tracking (background callbacks)
 """
 
 import logging
@@ -589,6 +586,16 @@ def register_watchlist_callbacks(app: Dash) -> None:
                 rows.append(create_pathogen_row(entry, i, mapping_info, genome_info))
             except Exception as e:
                 logger.error(f"Failed to create row for taxid {taxid} ({entry.get('name', 'Unknown')}): {e}")
+
+        # Add guidance note when no mapping data is available
+        if not mapping_dict:
+            rows.insert(0, html.Div(
+                html.Small([
+                    html.I(className="bi bi-info-circle me-1"),
+                    "Run 'Rescan DB' in the Preparation tab to check database compatibility",
+                ], className="text-muted"),
+                className="mb-2",
+            ))
 
         count = len(entries)
         return (

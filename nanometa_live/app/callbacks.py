@@ -1110,22 +1110,25 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     # ========================================================================
 
     @app.callback(
-        Output("welcome-modal", "is_open"),
+        [
+            Output("welcome-modal", "is_open"),
+            Output("tabs", "active_tab", allow_duplicate=True),
+        ],
         [
             Input("welcome-shown", "data"),
             Input("close-welcome-modal", "n_clicks"),
         ],
-        prevent_initial_call=False,
+        prevent_initial_call="initial_duplicate",
     )
     def manage_welcome_modal(already_shown, close_clicks):
         """Show the welcome modal on first visit, dismiss on button click."""
         triggered = ctx.triggered_id
         if triggered == "close-welcome-modal":
-            return False
+            return False, "config-tab"
         # Show on first visit only
         if not already_shown:
-            return True
-        return False
+            return True, no_update
+        return False, no_update
 
     @app.callback(
         Output("welcome-shown", "data"),
@@ -1135,3 +1138,25 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     def mark_welcome_shown(_):
         """Persist that the welcome modal has been shown."""
         return True
+
+    # ========================================================================
+    # Step Navigation Buttons
+    # ========================================================================
+
+    @app.callback(
+        Output("tabs", "active_tab", allow_duplicate=True),
+        Input("config-next-watchlist-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def navigate_config_to_watchlist(_):
+        """Navigate from Configuration to Watchlist tab."""
+        return "watchlist-tab"
+
+    @app.callback(
+        Output("tabs", "active_tab", allow_duplicate=True),
+        Input("watchlist-next-preparation-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def navigate_watchlist_to_preparation(_):
+        """Navigate from Watchlist to Preparation tab."""
+        return "preparation-tab"

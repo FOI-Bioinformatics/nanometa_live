@@ -546,7 +546,10 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
                 ], color="info", className="mt-3 mb-0"),
             ]),
             dbc.ModalFooter(
-                dbc.Button("Get Started", id="close-welcome-modal", color="primary")
+                dbc.Button([
+                    "Go to Configuration ",
+                    html.I(className="bi bi-arrow-right ms-1"),
+                ], id="close-welcome-modal", color="primary")
             )
         ], id="welcome-modal", is_open=False, centered=True, size="lg"),
         dcc.Store(id="welcome-shown", storage_type="local", data=False),

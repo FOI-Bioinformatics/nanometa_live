@@ -49,6 +49,15 @@ def register_preparation_callbacks(app):
             checker = ReadinessChecker()
             report = checker.check_readiness(config)
 
+            # Map check names to section IDs for scroll links
+            _section_links = {
+                "Kraken2 Database": "kraken2-db-card",
+                "DB Taxonomy Index": "taxid-mapping-card",
+                "Taxid Mappings": "taxid-mapping-card",
+                "Watchlist Genomes": "genome-downloads-card",
+                "BLAST Databases": "genome-downloads-card",
+            }
+
             rows = []
             for check in report.checks:
                 if check.passed:
@@ -66,14 +75,28 @@ def register_preparation_callbacks(app):
                     Severity.INFO: "info",
                 }.get(check.severity, "secondary")
 
+                row_children = [
+                    icon,
+                    dbc.Badge(check.severity.value.upper(), color=badge_color,
+                              className="me-2", style={"width": "70px"}),
+                    html.Span(check.name, className="fw-semibold me-2"),
+                    html.Span(check.message, className="text-muted"),
+                ]
+
+                # Add "Fix" link for failed checks that map to a section
+                section_id = _section_links.get(check.name)
+                if not check.passed and section_id:
+                    row_children.append(
+                        html.A(
+                            html.Small("Fix"),
+                            href=f"#{section_id}",
+                            className="ms-2 text-decoration-none",
+                            title=f"Scroll to {check.name} section",
+                        )
+                    )
+
                 rows.append(
-                    html.Div([
-                        icon,
-                        dbc.Badge(check.severity.value.upper(), color=badge_color,
-                                  className="me-2", style={"width": "70px"}),
-                        html.Span(check.name, className="fw-semibold me-2"),
-                        html.Span(check.message, className="text-muted"),
-                    ], className="mb-2 d-flex align-items-center")
+                    html.Div(row_children, className="mb-2 d-flex align-items-center")
                 )
 
             summary = report.summary()

@@ -13,6 +13,8 @@ Provides UI for:
 import dash_bootstrap_components as dbc
 from dash import html, dcc
 
+from nanometa_live.app.components.modern_components import WorkflowStepper
+
 
 def create_preparation_layout():
     """Create the Preparation tab layout."""
@@ -23,7 +25,17 @@ def create_preparation_layout():
         dcc.Store(id="download-cancel-flag", data=False),
         dcc.Store(id="blast-cancel-flag", data=False),
 
-        # Header with workflow context
+        # Workflow step indicator
+        WorkflowStepper(active_step=3),
+
+        # Recommended order guidance
+        html.P(
+            "Follow the steps below in order. Start with the Readiness Checklist "
+            "to identify any issues, then address them using the sections below.",
+            className="text-muted small mb-3",
+        ),
+
+        # Header
         dbc.Row([
             dbc.Col([
                 html.Div([
@@ -37,24 +49,8 @@ def create_preparation_layout():
                     "Complete these steps before starting analysis.",
                     className="text-muted mb-0 small"
                 ),
-            ], md=8),
-            dbc.Col([
-                html.Div([
-                    html.Small("Setup step 3 of 3", className="text-muted"),
-                    html.Div([
-                        html.Span(className="d-inline-block rounded-circle me-1",
-                                  style={"width": "8px", "height": "8px",
-                                         "backgroundColor": "#28a745"}),
-                        html.Span(className="d-inline-block rounded-circle me-1",
-                                  style={"width": "8px", "height": "8px",
-                                         "backgroundColor": "#28a745"}),
-                        html.Span(className="d-inline-block rounded-circle",
-                                  style={"width": "8px", "height": "8px",
-                                         "backgroundColor": "#007bff"}),
-                    ], className="d-flex align-items-center mt-1"),
-                ], className="text-end"),
-            ], md=4),
-        ], className="mb-4 mt-3"),
+            ]),
+        ], className="mb-4"),
 
         # Readiness checklist
         dbc.Card([
@@ -90,13 +86,13 @@ def create_preparation_layout():
         ], className="mb-4"),
 
         # Kraken2 Database Download (moved from Configuration tab)
-        _create_kraken_db_download_card(),
+        html.Div(_create_kraken_db_download_card(), id="kraken2-db-card"),
 
         # Taxid Mapping / Rescan DB (moved from Watchlist tab)
-        _create_rescan_db_card(),
+        html.Div(_create_rescan_db_card(), id="taxid-mapping-card"),
 
         # Genome Downloads (moved from Watchlist tab)
-        _create_genome_downloads_card(),
+        html.Div(_create_genome_downloads_card(), id="genome-downloads-card"),
 
         # Run Preparation
         dbc.Card([
@@ -143,101 +139,105 @@ def create_preparation_layout():
             ]),
         ], className="mb-4"),
 
-        # Export / Import
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.H5([
-                            html.I(className="bi bi-box-arrow-up me-2"),
-                            "Export Bundle"
-                        ], className="mb-0"),
-                    ]),
-                    dbc.CardBody([
-                        html.P(
-                            "Package all prepared data into a portable archive. "
-                            "The Kraken2 database is not included (transfer separately).",
-                            className="text-muted small"
-                        ),
-                        dbc.InputGroup([
-                            dbc.InputGroupText("Filename"),
-                            dbc.Input(
-                                id="bundle-export-filename",
-                                value="mobile_lab_bundle.tar.gz",
-                                type="text",
-                            ),
-                        ], className="mb-3"),
-                        dbc.Button(
-                            [html.I(className="bi bi-download me-2"), "Export Bundle"],
-                            id="export-bundle-btn",
-                            color="success",
-                        ),
-                        # Readiness issues area (populated by callback)
-                        html.Div(id="export-readiness-issues", className="mt-3"),
-                        # Force-export controls (hidden by default)
-                        html.Div(
-                            id="export-force-area",
-                            style={"display": "none"},
-                            children=[
-                                dbc.Checkbox(
-                                    id="export-force-check",
-                                    label="I understand the bundle is incomplete",
-                                    value=False,
-                                    className="mb-2",
+        # Export / Import (collapsed by default)
+        dbc.Accordion([
+            dbc.AccordionItem([
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Card([
+                            dbc.CardHeader([
+                                html.H5([
+                                    html.I(className="bi bi-box-arrow-up me-2"),
+                                    "Export Bundle"
+                                ], className="mb-0"),
+                            ]),
+                            dbc.CardBody([
+                                html.P(
+                                    "Package all prepared data into a portable archive. "
+                                    "The Kraken2 database is not included (transfer separately).",
+                                    className="text-muted small"
                                 ),
+                                dbc.InputGroup([
+                                    dbc.InputGroupText("Filename"),
+                                    dbc.Input(
+                                        id="bundle-export-filename",
+                                        value="mobile_lab_bundle.tar.gz",
+                                        type="text",
+                                    ),
+                                ], className="mb-3"),
                                 dbc.Button(
-                                    [html.I(className="bi bi-exclamation-triangle me-2"),
-                                     "Export Incomplete Bundle"],
-                                    id="export-force-btn",
-                                    color="warning",
-                                    disabled=True,
+                                    [html.I(className="bi bi-download me-2"), "Export Bundle"],
+                                    id="export-bundle-btn",
+                                    color="success",
                                 ),
-                            ],
-                        ),
-                        html.Div(id="export-result", className="mt-2"),
-                    ]),
+                                # Readiness issues area (populated by callback)
+                                html.Div(id="export-readiness-issues", className="mt-3"),
+                                # Force-export controls (hidden by default)
+                                html.Div(
+                                    id="export-force-area",
+                                    style={"display": "none"},
+                                    children=[
+                                        dbc.Checkbox(
+                                            id="export-force-check",
+                                            label="I understand the bundle is incomplete",
+                                            value=False,
+                                            className="mb-2",
+                                        ),
+                                        dbc.Button(
+                                            [html.I(className="bi bi-exclamation-triangle me-2"),
+                                             "Export Incomplete Bundle"],
+                                            id="export-force-btn",
+                                            color="warning",
+                                            disabled=True,
+                                        ),
+                                    ],
+                                ),
+                                html.Div(id="export-result", className="mt-2"),
+                            ]),
+                        ]),
+                    ], md=6),
+                    dbc.Col([
+                        dbc.Card([
+                            dbc.CardHeader([
+                                html.H5([
+                                    html.I(className="bi bi-box-arrow-in-down me-2"),
+                                    "Import Bundle"
+                                ], className="mb-0"),
+                            ]),
+                            dbc.CardBody([
+                                html.P(
+                                    "Import a bundle from another machine. "
+                                    "You must also provide the local Kraken2 database path.",
+                                    className="text-muted small"
+                                ),
+                                dbc.InputGroup([
+                                    dbc.InputGroupText("Bundle Path"),
+                                    dbc.Input(
+                                        id="import-bundle-path",
+                                        placeholder="/path/to/bundle.tar.gz",
+                                        type="text",
+                                    ),
+                                ], className="mb-2"),
+                                dbc.InputGroup([
+                                    dbc.InputGroupText("Kraken2 DB"),
+                                    dbc.Input(
+                                        id="import-kraken-db-path",
+                                        placeholder="/path/to/kraken2/db",
+                                        type="text",
+                                    ),
+                                ], className="mb-3"),
+                                dbc.Button(
+                                    [html.I(className="bi bi-upload me-2"), "Import Bundle"],
+                                    id="import-bundle-btn",
+                                    color="info",
+                                ),
+                                html.Div(id="import-result", className="mt-2"),
+                            ]),
+                        ]),
+                    ], md=6),
                 ]),
-            ], md=6),
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.H5([
-                            html.I(className="bi bi-box-arrow-in-down me-2"),
-                            "Import Bundle"
-                        ], className="mb-0"),
-                    ]),
-                    dbc.CardBody([
-                        html.P(
-                            "Import a bundle from another machine. "
-                            "You must also provide the local Kraken2 database path.",
-                            className="text-muted small"
-                        ),
-                        dbc.InputGroup([
-                            dbc.InputGroupText("Bundle Path"),
-                            dbc.Input(
-                                id="import-bundle-path",
-                                placeholder="/path/to/bundle.tar.gz",
-                                type="text",
-                            ),
-                        ], className="mb-2"),
-                        dbc.InputGroup([
-                            dbc.InputGroupText("Kraken2 DB"),
-                            dbc.Input(
-                                id="import-kraken-db-path",
-                                placeholder="/path/to/kraken2/db",
-                                type="text",
-                            ),
-                        ], className="mb-3"),
-                        dbc.Button(
-                            [html.I(className="bi bi-upload me-2"), "Import Bundle"],
-                            id="import-bundle-btn",
-                            color="info",
-                        ),
-                        html.Div(id="import-result", className="mt-2"),
-                    ]),
-                ]),
-            ], md=6),
-        ]),
+            ], title="Export / Import Bundle (Advanced)"),
+        ], start_collapsed=True, className="mb-4"),
 
         # Modals
         _create_genome_download_modal(),

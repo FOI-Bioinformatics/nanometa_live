@@ -679,6 +679,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("processing-mode-input", "value"),
             Output("sample-handling-input", "value"),
             Output("sample-name-input", "value"),
+            Output("config-form-initialized", "data"),
         ],
         Input("refresh-form-trigger", "data"),
         State("app-config", "data"),
@@ -686,7 +687,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     def initialize_form_from_config(refresh_trigger, config):
         """Initialize form fields from the current configuration."""
         if not config:
-            return [no_update] * 26
+            return [no_update] * 28
 
         # Extract values from config
         analysis_name = config.get("analysis_name", "")
@@ -787,6 +788,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             processing_mode,
             sample_handling,
             sample_name,
+            True,  # Mark form as initialized (suppresses first "Modified" badge)
         ]
 
     # Species watchlist management is now handled in the Watchlist tab
@@ -1038,7 +1040,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     def validate_nanopore_directory(path):
         """Provide real-time validation feedback for nanopore directory."""
         if not path or not path.strip():
-            return "", html.Small("Required. Specify the path to your FASTQ files.", className="text-danger")
+            return "", ""
 
         if not os.path.exists(path):
             return (
@@ -1067,7 +1069,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     def validate_kraken_database(path):
         """Provide real-time validation feedback for Kraken2 database."""
         if not path or not path.strip():
-            return "", html.Small("Required. Specify the path to your Kraken2 database.", className="text-danger")
+            return "", ""
 
         if not os.path.exists(path):
             return (
@@ -1325,7 +1327,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
     # Callback: Detect form changes and update modified state
     @app.callback(
-        Output("config-modified", "data", allow_duplicate=True),
+        [
+            Output("config-modified", "data", allow_duplicate=True),
+            Output("config-form-initialized", "data", allow_duplicate=True),
+        ],
         [
             Input("analysis-name-input", "value"),
             Input("nanopore-dir-input", "value"),
@@ -1351,6 +1356,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         [
             State("saved-config-snapshot", "data"),
             State("config-modified", "data"),
+            State("config-form-initialized", "data"),
         ],
         prevent_initial_call=True,
     )
@@ -1360,11 +1366,16 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         min_reads_per_level, memory_mapping, blast_validation, validation_method,
         min_identity, e_value_cutoff, minimap2_preset, minimap2_min_mapq,
         genome_cache_dir, cores, gui_port, clean_temp,
-        saved_snapshot, currently_modified
+        saved_snapshot, currently_modified, form_initialized
     ):
         """Detect when form values differ from saved snapshot."""
+        # After form initialization, the cascading value changes trigger this
+        # callback. Consume the initialized flag and skip the modification check.
+        if form_initialized:
+            return no_update, False
+
         if not saved_snapshot:
-            return no_update
+            return no_update, no_update
 
         # Build current form state for comparison
         current_values = {
@@ -1412,7 +1423,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 is_modified = True
                 break
 
-        return is_modified
+        return is_modified, no_update
 
     # Callback: Mark as not modified after Apply (config matches current form)
     @app.callback(

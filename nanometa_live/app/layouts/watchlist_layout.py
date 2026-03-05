@@ -6,7 +6,6 @@ Provides a dedicated tab for managing species watchlists with:
 - Watchlist file management (enable/disable builtin/user/project)
 - Pathogens table with inline editing
 - API validation controls (manual button)
-- Taxid mapping for Kraken2 database compatibility
 - Add custom species with API lookup
 """
 
@@ -18,6 +17,7 @@ import dash_bootstrap_components as dbc
 from nanometa_live.app.components.taxid_mapping_ui import (
     create_mapping_section,
 )
+from nanometa_live.app.components.modern_components import WorkflowStepper
 
 
 def create_watchlist_layout() -> html.Div:
@@ -34,6 +34,9 @@ def create_watchlist_layout() -> html.Div:
         html.Div containing the complete Watchlist management interface
     """
     return html.Div([
+        # Workflow step indicator
+        WorkflowStepper(active_step=2),
+
         # Stores for state management
         dcc.Store(id="watchlist-tab-state", data={}),
         dcc.Store(id="watchlist-table-refresh", data=0),  # Counter to force table refresh
@@ -49,6 +52,14 @@ def create_watchlist_layout() -> html.Div:
         dbc.Container([
             # Section 1: Stats Bar (compact overview)
             _create_stats_bar(),
+
+            # Brief intro text
+            html.P(
+                "Organisms listed below will be monitored during analysis. "
+                "A default watchlist is pre-enabled. Enable additional watchlists "
+                "or add custom species below.",
+                className="text-muted small mb-2",
+            ),
 
             # Section 2: Pathogens Table (main focus area)
             _create_pathogens_table_section(),
@@ -67,6 +78,22 @@ def create_watchlist_layout() -> html.Div:
         _create_validation_progress_modal(),
         # Taxid mapping modal (for Kraken2 Match badge clicks)
         _create_taxid_mapping_modal_only(),
+
+        # Next step navigation
+        html.Div([
+            html.Hr(className="my-4"),
+            html.Div([
+                dbc.Button([
+                    "Next: Prepare Databases ",
+                    html.I(className="bi bi-arrow-right ms-1"),
+                ],
+                    id="watchlist-next-preparation-btn",
+                    color="primary",
+                    outline=True,
+                    size="lg",
+                ),
+            ], className="text-end"),
+        ]),
 
     ], id="watchlist-tab-content", className="watchlist-tab p-4")
 
@@ -169,13 +196,21 @@ def _create_stats_bar() -> dbc.Card:
 
                 # Validation controls
                 dbc.Col([
-                    dbc.Button(
-                        [html.I(className="bi bi-check2-all me-1"), "Validate All"],
-                        id="watchlist-validate-all-btn",
-                        color="primary",
-                        size="sm",
-                        n_clicks=0,
-                    ),
+                    html.Div([
+                        dbc.Button(
+                            [html.I(className="bi bi-check2-all me-1"), "Verify Taxonomy IDs"],
+                            id="watchlist-validate-all-btn",
+                            color="primary",
+                            size="sm",
+                            n_clicks=0,
+                        ),
+                        dbc.Tooltip(
+                            "Verify that species names and taxonomy IDs are valid "
+                            "in NCBI/GTDB databases",
+                            target="watchlist-validate-all-btn",
+                            placement="bottom",
+                        ),
+                    ]),
                 ], width="auto", className="d-flex align-items-center"),
             ], align="center", className="g-0"),
         ], className="py-2"),

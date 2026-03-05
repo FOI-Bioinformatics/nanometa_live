@@ -12,106 +12,7 @@ from dash import html, dcc
 import dash_bootstrap_components as dbc
 
 from nanometa_live.app.components.config_form import create_config_form
-
-
-def _create_workflow_steps() -> html.Div:
-    """
-    Create a compact workflow step indicator showing where Configuration
-    fits in the setup sequence.
-    """
-    return html.Div([
-        dbc.Row([
-            # Step 1: Configure (current)
-            dbc.Col([
-                html.Div([
-                    html.Div([
-                        html.Span("1", className="step-number-active"),
-                    ], className="d-flex align-items-center justify-content-center",
-                       style={
-                           "width": "28px", "height": "28px",
-                           "borderRadius": "50%",
-                           "backgroundColor": "#007bff",
-                           "color": "white",
-                           "fontSize": "0.8rem",
-                           "fontWeight": "bold",
-                       }),
-                    html.Small("Configure", className="fw-bold text-primary mt-1"),
-                ], className="d-flex flex-column align-items-center"),
-            ], className="text-center", width=True),
-
-            # Arrow
-            dbc.Col([
-                html.I(className="bi bi-chevron-right text-muted",
-                       style={"fontSize": "1.2rem"}),
-            ], width="auto", className="d-flex align-items-center px-0"),
-
-            # Step 2: Watchlist
-            dbc.Col([
-                html.Div([
-                    html.Div([
-                        html.Span("2", className="step-number"),
-                    ], className="d-flex align-items-center justify-content-center",
-                       style={
-                           "width": "28px", "height": "28px",
-                           "borderRadius": "50%",
-                           "backgroundColor": "#e9ecef",
-                           "color": "#6c757d",
-                           "fontSize": "0.8rem",
-                           "fontWeight": "bold",
-                       }),
-                    html.Small("Watchlist", className="text-muted mt-1"),
-                ], className="d-flex flex-column align-items-center"),
-            ], className="text-center", width=True),
-
-            # Arrow
-            dbc.Col([
-                html.I(className="bi bi-chevron-right text-muted",
-                       style={"fontSize": "1.2rem"}),
-            ], width="auto", className="d-flex align-items-center px-0"),
-
-            # Step 3: Preparation
-            dbc.Col([
-                html.Div([
-                    html.Div([
-                        html.Span("3", className="step-number"),
-                    ], className="d-flex align-items-center justify-content-center",
-                       style={
-                           "width": "28px", "height": "28px",
-                           "borderRadius": "50%",
-                           "backgroundColor": "#e9ecef",
-                           "color": "#6c757d",
-                           "fontSize": "0.8rem",
-                           "fontWeight": "bold",
-                       }),
-                    html.Small("Prepare", className="text-muted mt-1"),
-                ], className="d-flex flex-column align-items-center"),
-            ], className="text-center", width=True),
-
-            # Arrow
-            dbc.Col([
-                html.I(className="bi bi-chevron-right text-muted",
-                       style={"fontSize": "1.2rem"}),
-            ], width="auto", className="d-flex align-items-center px-0"),
-
-            # Step 4: Analyse
-            dbc.Col([
-                html.Div([
-                    html.Div([
-                        html.I(className="bi bi-play-fill",
-                               style={"fontSize": "0.8rem"}),
-                    ], className="d-flex align-items-center justify-content-center",
-                       style={
-                           "width": "28px", "height": "28px",
-                           "borderRadius": "50%",
-                           "backgroundColor": "#e9ecef",
-                           "color": "#6c757d",
-                       }),
-                    html.Small("Analyse", className="text-muted mt-1"),
-                ], className="d-flex flex-column align-items-center"),
-            ], className="text-center", width=True),
-        ], className="g-0 align-items-center justify-content-center",
-           style={"maxWidth": "500px", "margin": "0 auto"}),
-    ], className="py-2 mb-3")
+from nanometa_live.app.components.modern_components import WorkflowStepper
 
 
 def create_config_layout():
@@ -124,9 +25,11 @@ def create_config_layout():
     return html.Div([
         # Hidden Store for refresh trigger
         dcc.Store(id="refresh-form-trigger", data=False),
+        # Track whether form has been initialized (to suppress initial "Modified" badge)
+        dcc.Store(id="config-form-initialized", data=False),
 
         # Workflow step indicator
-        _create_workflow_steps(),
+        WorkflowStepper(active_step=1),
 
         # Configuration Status Banner - Shows source and modified state
         html.Div(
@@ -188,89 +91,6 @@ def create_config_layout():
                     className="card-text text-muted small"
                 ),
                 html.Hr(),
-
-                # Configuration quick actions with clear visual hierarchy
-                dbc.Row([
-                    # Primary action (most important) - Use These Settings
-                    dbc.Col([
-                        dbc.Button([
-                            html.I(className="bi bi-check-circle-fill me-2"),
-                            "Apply Settings"
-                        ],
-                            id="apply-config-button",
-                            color="success",
-                            size="lg",
-                            className="w-100"
-                        ),
-                        dbc.Tooltip(
-                            "Apply these settings and start/continue the analysis",
-                            target="apply-config-button",
-                            placement="bottom"
-                        )
-                    ], md=4, className="mb-2"),
-
-                    # Secondary actions (grouped)
-                    dbc.Col([
-                        html.Div([
-                            # Load button
-                            dbc.Button([
-                                html.I(className="bi bi-folder2-open me-1"),
-                                "Load"
-                            ],
-                                id="load-config-button",
-                                color="secondary",
-                                outline=True,
-                                className="me-2"
-                            ),
-                            dbc.Tooltip(
-                                "Load a previously saved configuration",
-                                target="load-config-button",
-                                placement="bottom"
-                            ),
-
-                            # Save button
-                            dbc.Button([
-                                html.I(className="bi bi-save me-1"),
-                                "Save for Later"
-                            ],
-                                id="save-config-button",
-                                color="secondary",
-                                outline=True,
-                                className="me-2"
-                            ),
-                            dbc.Tooltip(
-                                "Save these settings to use again next time",
-                                target="save-config-button",
-                                placement="bottom"
-                            ),
-
-                            # Reset button
-                            dbc.Button([
-                                html.I(className="bi bi-arrow-counterclockwise me-1"),
-                                "Reset"
-                            ],
-                                id="reset-config-button",
-                                color="secondary",
-                                outline=True
-                            ),
-                            dbc.Tooltip(
-                                "Reset all settings to default values",
-                                target="reset-config-button",
-                                placement="bottom"
-                            )
-                        ], className="d-flex align-items-center justify-content-end")
-                    ], md=8, className="mb-2 d-flex align-items-center")
-                ], className="mb-3"),
-
-                # Simplified explanation
-                html.Small([
-                    html.I(className="bi bi-info-circle me-1 text-muted"),
-                    html.Span(
-                        "Click 'Apply Settings' to use these parameters. "
-                        "Use 'Save for Later' to store settings for future sessions.",
-                        className="text-muted",
-                    )
-                ], className="d-block mb-0"),
 
                 # Config file selection modal (initially hidden)
                 dbc.Modal([
@@ -393,5 +213,102 @@ def create_config_layout():
         ),
 
         # Hidden div for storing available configs
-        html.Div(id="available-configs", style={"display": "none"})
+        html.Div(id="available-configs", style={"display": "none"}),
+
+        # Configuration action buttons (below form)
+        dbc.Card(
+            dbc.CardBody([
+                dbc.Row([
+                    # Primary action - Apply Settings
+                    dbc.Col([
+                        dbc.Button([
+                            html.I(className="bi bi-check-circle-fill me-2"),
+                            "Apply Settings"
+                        ],
+                            id="apply-config-button",
+                            color="success",
+                            size="lg",
+                            className="w-100"
+                        ),
+                        dbc.Tooltip(
+                            "Apply these settings and start/continue the analysis",
+                            target="apply-config-button",
+                            placement="top"
+                        )
+                    ], md=4, className="mb-2"),
+
+                    # Secondary actions
+                    dbc.Col([
+                        html.Div([
+                            dbc.Button([
+                                html.I(className="bi bi-folder2-open me-1"),
+                                "Load"
+                            ],
+                                id="load-config-button",
+                                color="secondary",
+                                outline=True,
+                                className="me-2"
+                            ),
+                            dbc.Tooltip(
+                                "Load a previously saved configuration",
+                                target="load-config-button",
+                                placement="top"
+                            ),
+                            dbc.Button([
+                                html.I(className="bi bi-save me-1"),
+                                "Save for Later"
+                            ],
+                                id="save-config-button",
+                                color="secondary",
+                                outline=True,
+                                className="me-2"
+                            ),
+                            dbc.Tooltip(
+                                "Save these settings to use again next time",
+                                target="save-config-button",
+                                placement="top"
+                            ),
+                            dbc.Button([
+                                html.I(className="bi bi-arrow-counterclockwise me-1"),
+                                "Reset"
+                            ],
+                                id="reset-config-button",
+                                color="secondary",
+                                outline=True
+                            ),
+                            dbc.Tooltip(
+                                "Reset all settings to default values",
+                                target="reset-config-button",
+                                placement="top"
+                            )
+                        ], className="d-flex align-items-center justify-content-end")
+                    ], md=8, className="mb-2 d-flex align-items-center")
+                ]),
+                html.Small([
+                    html.I(className="bi bi-info-circle me-1 text-muted"),
+                    html.Span(
+                        "Click 'Apply Settings' to use these parameters. "
+                        "Use 'Save for Later' to store settings for future sessions.",
+                        className="text-muted",
+                    )
+                ], className="d-block mt-2 mb-0"),
+            ]),
+            className="mb-4"
+        ),
+
+        # Next step navigation
+        html.Div([
+            html.Hr(className="my-4"),
+            html.Div([
+                dbc.Button([
+                    "Next: Set up Watchlist ",
+                    html.I(className="bi bi-arrow-right ms-1"),
+                ],
+                    id="config-next-watchlist-btn",
+                    color="primary",
+                    outline=True,
+                    size="lg",
+                ),
+            ], className="text-end"),
+        ]),
     ], className="p-4")

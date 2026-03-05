@@ -80,7 +80,7 @@ def create_config_form():
                             )
                         ]),
                         dbc.Tooltip(
-                            "The directory where nanometanf outputs its results (contains kraken2/, nanoplot/ folders)",
+                            "Directory containing FASTQ files from the nanopore sequencer",
                             target="nanopore-dir-info"
                         ),
                         html.Div(id="nanopore-dir-feedback", className="mt-1")
@@ -215,8 +215,8 @@ def create_config_form():
                             )
                         ]),
                         dbc.Tooltip(
-                            "Directory where Nanometa Live will save exports, reports, and analysis results. "
-                            "Defaults to ~/nanometa_results if not specified.",
+                            "Primary output directory for the analysis pipeline. Contains all results "
+                            "including Kraken2 reports, QC data, and validation output.",
                             target="results-dir-info"
                         ),
                         dbc.FormText(

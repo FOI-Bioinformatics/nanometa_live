@@ -147,6 +147,10 @@ class ReadinessChecker:
                 purpose="on-demand read validation",
             ))
 
+        # === Input/output checks (warning) ===
+        report.checks.append(self._check_input_directory(config))
+        report.checks.append(self._check_disk_space(config))
+
         # === Data completeness (warning) ===
         report.checks.append(self._check_watchlist_genomes(config, home))
         report.checks.append(self._check_blast_dbs(config, home))
@@ -306,6 +310,79 @@ class ReadinessChecker:
             "Container Runtime", False, Severity.CRITICAL,
             f"docker not found in PATH (required by pipeline_profile: {profile})"
         )
+
+    # -- Input/output checks --
+
+    def _check_input_directory(self, config: Dict[str, Any]) -> CheckResult:
+        """Check that the configured input directory exists and has expected content."""
+        nanopore_dir = config.get("nanopore_dir", "")
+        if not nanopore_dir:
+            return CheckResult(
+                "Input Directory", False, Severity.WARNING,
+                "No input directory (nanopore_dir) configured"
+            )
+        p = Path(nanopore_dir)
+        if not p.exists():
+            return CheckResult(
+                "Input Directory", False, Severity.WARNING,
+                f"Input directory does not exist: {p}",
+                details="This is expected if the sequencing run has not started yet"
+            )
+        # Look for FASTQ files or barcode subdirectories
+        fastq_files = list(p.glob("*.fastq*"))
+        barcode_dirs = [d for d in p.iterdir() if d.is_dir() and d.name.startswith("barcode")]
+        if fastq_files or barcode_dirs:
+            content = []
+            if barcode_dirs:
+                content.append(f"{len(barcode_dirs)} barcode dir(s)")
+            if fastq_files:
+                content.append(f"{len(fastq_files)} FASTQ file(s)")
+            return CheckResult(
+                "Input Directory", True, Severity.WARNING,
+                f"Found {', '.join(content)} in {p.name}"
+            )
+        return CheckResult(
+            "Input Directory", False, Severity.WARNING,
+            f"No FASTQ files or barcode directories found in {p.name}",
+            details="This is expected if the sequencing run has not started yet"
+        )
+
+    def _check_disk_space(self, config: Dict[str, Any]) -> CheckResult:
+        """Check available disk space in the output directory."""
+        main_dir = config.get("main_dir", "")
+        if not main_dir:
+            return CheckResult(
+                "Disk Space", False, Severity.WARNING,
+                "No output directory (main_dir) configured"
+            )
+        p = Path(main_dir)
+        # Use the directory itself or its closest existing parent
+        check_path = p
+        while not check_path.exists() and check_path.parent != check_path:
+            check_path = check_path.parent
+        if not check_path.exists():
+            return CheckResult(
+                "Disk Space", False, Severity.WARNING,
+                "Could not determine disk space (path does not exist)"
+            )
+        try:
+            usage = shutil.disk_usage(str(check_path))
+            free_gb = usage.free / (1024 ** 3)
+            if free_gb < 10:
+                return CheckResult(
+                    "Disk Space", False, Severity.WARNING,
+                    f"Low disk space: {free_gb:.1f} GB free in output directory",
+                    details="At least 10 GB recommended for analysis output"
+                )
+            return CheckResult(
+                "Disk Space", True, Severity.WARNING,
+                f"{free_gb:.1f} GB free in output directory"
+            )
+        except OSError as e:
+            return CheckResult(
+                "Disk Space", False, Severity.WARNING,
+                f"Could not check disk space: {e}"
+            )
 
     # -- Data completeness checks --
 
