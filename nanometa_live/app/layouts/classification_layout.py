@@ -174,10 +174,10 @@ def create_classification_layout() -> html.Div:
                                     id='classification-level-preset',
                                     options=[
                                         {'label': 'Standard (Phylum to Species)', 'value': 'standard'},
-                                        {'label': 'Overview (Domain, Phylum, Class)', 'value': 'overview'},
+                                        {'label': 'Overview (Domain, Kingdom, Phylum, Class)', 'value': 'overview'},
                                         {'label': 'Species Focus (Family, Genus, Species)', 'value': 'species_focus'},
                                         {'label': 'Clinical (Family to Species)', 'value': 'clinical'},
-                                        {'label': 'Full Taxonomy (all 7 levels)', 'value': 'full'},
+                                        {'label': 'Full Taxonomy (all 8 levels)', 'value': 'full'},
                                         {'label': 'Custom (select levels below)', 'value': 'custom'},
                                     ],
                                     value='standard',
@@ -193,6 +193,7 @@ def create_classification_layout() -> html.Div:
                                     id='classification-levels-input',
                                     options=[
                                         {'label': 'D - Domain', 'value': 'D'},
+                                        {'label': 'K - Kingdom', 'value': 'K'},
                                         {'label': 'P - Phylum', 'value': 'P'},
                                         {'label': 'C - Class', 'value': 'C'},
                                         {'label': 'O - Order', 'value': 'O'},

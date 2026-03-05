@@ -155,6 +155,7 @@ KRAKEN2_EXPECTED_COLUMNS = ["%", "cumul_reads", "reads", "rank", "taxid", "name"
 KRAKEN2_EXPECTED_COLUMN_COUNT = 6
 
 
+
 def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Optional[pd.DataFrame]:
     """
     Parse and validate a Kraken2 report file.
@@ -213,6 +214,28 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
         # Strip whitespace from name column (Kraken2 uses indentation for hierarchy)
         # but preserve leading spaces for hierarchy visualization
         df["name"] = df["name"].fillna("unknown")
+
+        # Build parent_taxid from indentation-based hierarchy
+        # Uses a stack to track the parent at each indentation depth
+        parent_taxids = []
+        indent_stack = []  # list of (indent_level, taxid) tuples
+        for idx in range(len(df)):
+            name_val = df.iloc[idx]["name"]
+            indent = len(name_val) - len(str(name_val).lstrip())
+            taxid = int(df.iloc[idx]["taxid"])
+
+            # Pop stack entries with indent >= current (siblings or deeper)
+            while indent_stack and indent_stack[-1][0] >= indent:
+                indent_stack.pop()
+
+            if indent_stack:
+                parent_taxids.append(indent_stack[-1][1])
+            else:
+                parent_taxids.append(0)  # root has no parent
+
+            indent_stack.append((indent, taxid))
+
+        df["parent_taxid"] = parent_taxids
 
         return df
 
@@ -424,9 +447,10 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
         # Using vectorized operations instead of iterrows() for O(n) vs O(n*m) performance
         if all_reports:
             taxa_df = pd.concat([
-                report[['taxid', 'rank', 'name']] for report in all_reports
+                report[['taxid', 'rank', 'name', 'parent_taxid']] for report in all_reports
             ], ignore_index=True)
-            # Keep first occurrence of each taxid (preserves original hierarchy order)
+            # Keep first occurrence of each taxid (preserves original hierarchy order
+            # and parent_taxid from the first report that contains this taxon)
             ordered_taxa_df = taxa_df.drop_duplicates(subset='taxid', keep='first')
             ordered_taxa = ordered_taxa_df.to_dict('records')
         else:
@@ -445,7 +469,8 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
                     'reads': agg_dict[taxid]['reads'],
                     'rank': taxon['rank'],
                     'taxid': taxid,
-                    'name': taxon['name']
+                    'name': taxon['name'],
+                    'parent_taxid': taxon['parent_taxid'],
                 })
 
         result_df = pd.DataFrame(result_rows)
@@ -537,9 +562,10 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
         # Using vectorized operations instead of iterrows() for O(n) vs O(n*m) performance
         if all_reports:
             taxa_df = pd.concat([
-                report[['taxid', 'rank', 'name']] for report in all_reports
+                report[['taxid', 'rank', 'name', 'parent_taxid']] for report in all_reports
             ], ignore_index=True)
-            # Keep first occurrence of each taxid (preserves original hierarchy order)
+            # Keep first occurrence of each taxid (preserves original hierarchy order
+            # and parent_taxid from the earliest batch that contains this taxon)
             ordered_taxa_df = taxa_df.drop_duplicates(subset='taxid', keep='first')
             ordered_taxa = ordered_taxa_df.to_dict('records')
         else:
@@ -558,7 +584,8 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
                     'reads': agg_dict[taxid]['reads'],
                     'rank': taxon['rank'],
                     'taxid': taxid,
-                    'name': taxon['name']
+                    'name': taxon['name'],
+                    'parent_taxid': taxon['parent_taxid'],
                 })
 
         result_df = pd.DataFrame(result_rows)

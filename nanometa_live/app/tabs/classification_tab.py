@@ -49,10 +49,10 @@ def register_classification_callbacks(app: Dash):
         """
         presets = {
             'standard': ['P', 'C', 'O', 'F', 'G', 'S'],
-            'overview': ['D', 'P', 'C'],
+            'overview': ['D', 'K', 'P', 'C'],
             'species_focus': ['F', 'G', 'S'],
             'clinical': ['F', 'G', 'S'],
-            'full': ['D', 'P', 'C', 'O', 'F', 'G', 'S'],
+            'full': ['D', 'K', 'P', 'C', 'O', 'F', 'G', 'S'],
         }
         if preset == 'custom':
             return no_update
@@ -145,14 +145,19 @@ def register_classification_callbacks(app: Dash):
             max_taxa = 9999  # Effectively no limit
 
         # Get taxonomy levels with defaults
+        # Canonical ordering includes K (Kingdom) between D and P
+        canonical_order = ["D", "K", "P", "C", "O", "F", "G", "S"]
         all_tax_levels = config.get(
             "taxonomic_hierarchy_letters", ["D", "P", "C", "O", "F", "G", "S"]
         )
+        # Ensure K is always in the allowed set so user can select it even if config omits it
+        if "K" not in all_tax_levels:
+            all_tax_levels = canonical_order
         if not tax_levels:
             tax_levels = config.get("default_hierarchy_letters", ["D", "C", "G", "S"])
 
-        # Keep only valid taxonomy levels in correct order
-        tax_levels = [level for level in all_tax_levels if level in tax_levels]
+        # Keep only valid taxonomy levels in canonical order
+        tax_levels = [level for level in canonical_order if level in tax_levels]
 
         try:
             # Load Kraken2 data (per-sample or aggregated)
@@ -391,28 +396,29 @@ def _recalculate_cumulative_reads(df):
     return result
 
 
-def _build_parent_map(tax_df, domain_df, tax_levels, node_ids, top_filter):
+def _build_parent_map(tax_df, domain_df, tax_levels, node_ids, top_filter,
+                      taxid_to_parent=None, taxid_to_key=None):
     """
     Build a mapping of child composite keys to their parent composite keys.
 
-    Uses indentation-based hierarchy from Kraken2 format to determine relationships.
-    Only includes parents that are in the visualization (passed top_filter).
-    Composite keys use the format f"{rank}_{name}" to avoid collisions between
-    taxa at different ranks that share the same name.
+    Uses taxid-based parent lookup to walk up the taxonomy tree until finding
+    an ancestor at the expected parent level. This is order-independent and
+    works correctly for both single-sample and aggregated data.
 
     Args:
         tax_df: DataFrame filtered to selected taxonomy levels
-        domain_df: Full DataFrame including domain entries for hierarchy traversal
+        domain_df: Full DataFrame (unused, kept for API compatibility)
         tax_levels: List of taxonomy levels being displayed
         node_ids: Dict mapping composite key (f"{rank}_{name}") -> node index
         top_filter: Number of top entities at each level
+        taxid_to_parent: Dict mapping taxid -> parent_taxid
+        taxid_to_key: Dict mapping taxid -> composite key
 
     Returns:
         Dict mapping child composite key -> parent composite key
     """
     parent_map = {}
 
-    # Process from lowest level up to find parents
     for i in range(len(tax_levels) - 1, 0, -1):
         current_level = tax_levels[i]
         parent_level = tax_levels[i - 1]
@@ -423,40 +429,27 @@ def _build_parent_map(tax_df, domain_df, tax_levels, node_ids, top_filter):
             .head(top_filter)
         )
 
-        # Pre-extract data for faster iteration (avoid iterrows overhead)
         child_names_stripped = level_df["name"].str.strip().tolist()
-        child_names_full = level_df["name"].tolist()
-        child_indices = level_df.index.tolist()
+        child_taxids = level_df["taxid"].tolist()
 
-        for child_name, child_name_full, child_idx in zip(
-            child_names_stripped, child_names_full, child_indices
-        ):
+        for child_name, child_taxid in zip(child_names_stripped, child_taxids):
             child_key = f"{current_level}_{child_name}"
             if child_key not in node_ids:
                 continue
 
-            child_indent = len(child_name_full) - len(child_name_full.lstrip())
-
-            # Search backwards through the dataframe for parent
-            for check_idx in range(child_idx - 1, -1, -1):
-                if check_idx not in domain_df.index:
-                    continue
-
-                check_row = domain_df.loc[check_idx]
-                check_rank = check_row["rank"]
-                check_name_full = check_row["name"]
-                check_indent = len(check_name_full) - len(check_name_full.lstrip())
-                check_name = check_name_full.strip()
-
-                # Found a row with less indentation
-                if check_indent < child_indent:
-                    parent_key = f"{check_rank}_{check_name}"
-                    if check_rank == parent_level and parent_key in node_ids:
-                        parent_map[child_key] = parent_key
+            # Walk up the taxid parent chain to find ancestor at parent_level
+            current_taxid = taxid_to_parent.get(int(child_taxid), 0)
+            while current_taxid != 0:
+                ancestor_key = taxid_to_key.get(current_taxid)
+                if ancestor_key is not None:
+                    ancestor_rank = ancestor_key.split("_", 1)[0]
+                    if ancestor_rank == parent_level:
+                        if ancestor_key in node_ids:
+                            parent_map[child_key] = ancestor_key
                         break
-                    elif check_rank in tax_levels and tax_levels.index(check_rank) < tax_levels.index(parent_level):
-                        # Hit a higher level without finding parent at expected level
+                    elif ancestor_rank in tax_levels and tax_levels.index(ancestor_rank) < tax_levels.index(parent_level):
                         break
+                current_taxid = taxid_to_parent.get(current_taxid, 0)
 
     return parent_map
 
@@ -692,7 +685,7 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
     # Sankey requires at least 2 levels to show parent-child relationships
     if len(tax_levels) < 2:
         logging.debug(f"Sankey: Need at least 2 taxonomy levels, only have {len(tax_levels)}: {tax_levels}")
-        rank_names = {"D": "Domain", "P": "Phylum", "C": "Class", "O": "Order", "F": "Family", "G": "Genus", "S": "Species"}
+        rank_names = {"D": "Domain", "K": "Kingdom", "P": "Phylum", "C": "Class", "O": "Order", "F": "Family", "G": "Genus", "S": "Species"}
         available_names = [rank_names.get(r, r) for r in available_ranks]
         fig = go.Figure()
         fig.add_annotation(
@@ -704,9 +697,7 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
         fig.update_layout(**_info_layout)
         return fig
 
-    # CRITICAL FIX: Recalculate cumulative reads on FULL dataframe BEFORE filtering
-    # This ensures the complete taxonomy hierarchy is used for parent-child relationships
-    # Must be done before domain filtering to preserve correct hierarchy
+    # Build cumulative reads lookup (composite key -> reads)
     recalc_cumul = _recalculate_cumulative_reads(kraken_df)
 
     # Calculate total reads for percentage calculation
@@ -714,31 +705,54 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
     if total_reads == 0:
         total_reads = 1
 
-    # Filter by domains
-    domain_indices = []
+    # Build taxid-based parent lookup from the parent_taxid column.
+    # parent_taxid is computed during Kraken2 report parsing from indentation,
+    # making it robust to aggregation reordering.
+    taxid_to_parent = dict(zip(
+        kraken_df["taxid"].astype(int), kraken_df["parent_taxid"].astype(int)
+    ))
+
+    # Build composite-key lookup: taxid -> f"{rank}_{name}"
+    # Used for parent-finding via taxid_to_parent (order-independent).
+    taxid_to_key = {
+        int(tid): f"{rank}_{name.strip()}"
+        for tid, rank, name in zip(
+            kraken_df["taxid"], kraken_df["rank"], kraken_df["name"]
+        )
+    }
+
+    # Filter by domains using taxid subtree membership (order-independent).
+    # Build a children map then do BFS/DFS from each domain taxid downward.
+    children_map: dict = {}
+    for taxid, parent_taxid in taxid_to_parent.items():
+        if parent_taxid not in children_map:
+            children_map[parent_taxid] = []
+        children_map[parent_taxid].append(taxid)
+
+    def _collect_subtree(root_taxid):
+        """Return the set of all taxids at or below root_taxid."""
+        result = set()
+        stack = [root_taxid]
+        while stack:
+            tid = stack.pop()
+            result.add(tid)
+            stack.extend(children_map.get(tid, []))
+        return result
+
+    domain_taxids_set = set()
     for domain in domains:
         domain_rows = kraken_df[kraken_df["name"].str.strip() == domain]
-        if not domain_rows.empty:
-            start_idx = domain_rows.index[0]
+        if domain_rows.empty:
+            continue
+        domain_taxid = int(domain_rows.iloc[0]["taxid"])
+        domain_taxids_set.update(_collect_subtree(domain_taxid))
 
-            # Find next domain index
-            sliced_df = kraken_df.iloc[start_idx + 1:]
-            next_domains = sliced_df[sliced_df["name"].str.strip().isin(domains)]
-            if not next_domains.empty:
-                end_idx = next_domains.index[0]
-            else:
-                end_idx = len(kraken_df)
-
-            domain_indices.extend(range(start_idx, end_idx))
-
-    # Filter dataframe by domains
-    domain_df = kraken_df.iloc[domain_indices].copy()
+    domain_df = kraken_df[kraken_df["taxid"].isin(domain_taxids_set)].copy()
 
     if domain_df.empty:
         return None
 
-    # Add recalculated cumulative reads to domain_df for sorting and link values
-    # Uses composite key f"{rank}_{name}" to match _recalculate_cumulative_reads output
+    # Add cumulative reads to domain_df for sorting and link values
     domain_df["recalc_cumul"] = domain_df.apply(
         lambda row: recalc_cumul.get(f"{row['rank']}_{row['name'].strip()}", 0), axis=1
     )
@@ -794,9 +808,6 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
     parent_outgoing_sum = {}  # parent_name -> sum of outgoing link values
     parent_link_indices = {}  # parent_name -> list of link indices (for scaling)
 
-    # CRITICAL FIX: Use indentation to find parent-child relationships
-    # Kraken2 reports use leading spaces to indicate hierarchy depth
-
     # For each level (except the highest), create links to parent level
     for i in range(len(tax_levels) - 1, 0, -1):
         current_level = tax_levels[i]
@@ -811,74 +822,55 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
         )
 
         # Pre-extract data for faster iteration (avoid iterrows overhead)
-        child_names_full = level_df["name"].tolist()
         child_names_stripped = level_df["name"].str.strip().tolist()
+        child_taxids = level_df["taxid"].tolist()
         child_cumuls = level_df["recalc_cumul"].tolist()
-        child_indices = level_df.index.tolist()
 
-        for child_name_full, child_name_stripped, child_cumul, child_idx in zip(
-            child_names_full, child_names_stripped, child_cumuls, child_indices
+        for child_name_stripped, child_taxid, child_cumul in zip(
+            child_names_stripped, child_taxids, child_cumuls
         ):
             child_key = f"{current_level}_{child_name_stripped}"
             if child_key not in node_ids:
                 continue
 
-            # Get child's recalculated cumulative value
+            # Get child's cumulative value
             child_value = node_values.get(child_key, child_cumul)
 
-            # Get child's indentation level (number of leading spaces)
-            child_indent = len(child_name_full) - len(child_name_full.lstrip())
-
-            # Find parent: nearest entry ABOVE child with less indentation and parent rank
+            # Walk up the taxid parent chain to find the nearest ancestor
+            # at the expected parent_level that is in the visualization.
+            # This is order-independent and works correctly after aggregation.
             parent_found = False
-
-            # Search backwards from child's position in original dataframe
-            for check_idx in range(child_idx - 1, -1, -1):
-                if check_idx not in domain_df.index:
-                    continue
-
-                check_row = domain_df.loc[check_idx]
-                check_rank = check_row["rank"]
-                check_name_full = check_row["name"]
-                check_indent = len(check_name_full) - len(check_name_full.lstrip())
-                check_name_stripped = check_name_full.strip()
-
-                # Parent must have less indentation (shallower level)
-                if check_indent < child_indent:
-                    # Is this the parent rank we're looking for?
-                    if check_rank == parent_level:
-                        parent_key = f"{parent_level}_{check_name_stripped}"
-                        # Is this parent in our visualization (passed max_taxa_per_level)?
-                        if parent_key in node_ids:
+            current_taxid = taxid_to_parent.get(int(child_taxid), 0)
+            while current_taxid != 0:
+                ancestor_key = taxid_to_key.get(current_taxid)
+                if ancestor_key is not None:
+                    ancestor_rank = ancestor_key.split("_", 1)[0]
+                    if ancestor_rank == parent_level:
+                        # Found the right rank - only link if it's in the visualization
+                        if ancestor_key in node_ids:
+                            parent_key = ancestor_key
                             link_idx = len(links)
                             links.append((node_ids[parent_key], node_ids[child_key]))
-                            values.append(child_value)  # Use recalculated cumulative reads
-                            # Track parent's outgoing and link indices for scaling
+                            values.append(child_value)
                             parent_outgoing_sum[parent_key] = parent_outgoing_sum.get(parent_key, 0) + child_value
                             if parent_key not in parent_link_indices:
                                 parent_link_indices[parent_key] = []
                             parent_link_indices[parent_key].append(link_idx)
                             parent_found = True
-                            break
-                    # Stop if we've gone too far up the hierarchy
-                    elif check_rank in tax_levels and tax_levels.index(check_rank) < tax_levels.index(parent_level):
+                        break  # Stop regardless - found the rank, whether visible or not
+                    elif ancestor_rank in tax_levels and tax_levels.index(ancestor_rank) < tax_levels.index(parent_level):
+                        # Reached a displayed rank above parent_level without finding parent
                         break
+                current_taxid = taxid_to_parent.get(current_taxid, 0)
 
-            # If still no parent found, link to first available parent at that level
+            # If no parent found, skip this child - do NOT fallback to an
+            # unrelated parent, as that creates misleading taxonomic links
+            # (e.g. linking Bacillus subtilis to Staphylococcus genus)
             if not parent_found:
-                parent_options = tax_df[tax_df["rank"] == parent_level].sort_values("recalc_cumul", ascending=False).head(max_taxa_per_level)
-                if not parent_options.empty:
-                    fallback_parent = parent_options.iloc[0]["name"].strip()
-                    fallback_key = f"{parent_level}_{fallback_parent}"
-                    if fallback_key in node_ids:
-                        link_idx = len(links)
-                        links.append((node_ids[fallback_key], node_ids[child_key]))
-                        values.append(child_value)  # Use recalculated cumulative reads
-                        # Track parent's outgoing and link indices for scaling
-                        parent_outgoing_sum[fallback_key] = parent_outgoing_sum.get(fallback_key, 0) + child_value
-                        if fallback_key not in parent_link_indices:
-                            parent_link_indices[fallback_key] = []
-                        parent_link_indices[fallback_key].append(link_idx)
+                logging.debug(
+                    f"Sankey: No parent at {parent_level} found for "
+                    f"{child_name_stripped} ({current_level}) - skipping link"
+                )
 
     # SCALING FIX: When children's cumul_reads sum exceeds parent's cumul_reads,
     # scale down the outgoing links proportionally to prevent parent appearing too large.
@@ -904,6 +896,42 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
     # Note: Sink nodes removed for fixed arrangement - they caused visual artifacts
     # when Plotly cannot auto-adjust positions. Parent node heights may not perfectly
     # match cumulative reads, but the layout is cleaner and more predictable.
+
+    # Remove orphan nodes (no incoming or outgoing links) to avoid
+    # disconnected floating nodes in the Sankey diagram
+    connected_indices = set()
+    for src, tgt in links:
+        connected_indices.add(src)
+        connected_indices.add(tgt)
+
+    if connected_indices:
+        # Build mapping from old index to new index
+        old_to_new = {}
+        new_nodes = []
+        new_node_values = {}
+        new_node_pcts = {}
+        new_node_ranks = {}
+        for old_idx, node_key in enumerate(nodes):
+            if old_idx in connected_indices:
+                new_idx = len(new_nodes)
+                old_to_new[old_idx] = new_idx
+                new_nodes.append(node_key)
+                new_node_values[node_key] = node_values.get(node_key, 0)
+                new_node_pcts[node_key] = node_pcts.get(node_key, 0)
+                new_node_ranks[node_key] = node_ranks.get(node_key, "")
+
+        removed = len(nodes) - len(new_nodes)
+        if removed > 0:
+            logging.debug(f"Sankey: Removed {removed} orphan nodes without links")
+            # Remap link indices
+            links = [(old_to_new[s], old_to_new[t]) for s, t in links]
+            # Update node_ids for downstream Y-position calculation
+            node_ids = {key: old_to_new[old_idx] for key, old_idx in node_ids.items()
+                        if old_idx in old_to_new}
+            nodes = new_nodes
+            node_values = new_node_values
+            node_pcts = new_node_pcts
+            node_ranks = new_node_ranks
 
     # Create figure
     logging.debug(f"Sankey: Created {len(links)} links with values sum={sum(values) if values else 0}")
@@ -970,25 +998,28 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
             link_colors.append(f"rgba(150,150,150,{opacity})")
 
     # Create explicit X positions for nodes based on taxonomy level
-    # Each rank has a canonical x-position so that when levels are skipped
-    # (e.g. D-F-S), the visual spacing reflects actual taxonomic distance.
-    # Nodes span 0.001-0.85 with 150px right margin for rightmost labels
-    canonical_x = {
-        "D": 0.001, "P": 0.14, "C": 0.28, "O": 0.42,
-        "F": 0.57, "G": 0.71, "S": 0.85,
-    }
-    node_x = []
+    # Dynamically distribute levels across the available width so that
+    # any subset of levels (e.g. P-C-O-F-G-S) uses the full chart width,
+    # not just the canonical positions designed for all 8 levels.
+    x_min = 0.001
+    x_max = 0.85  # Leave 150px right margin for rightmost labels
+    n_levels = len(tax_levels)
     level_to_x = {}
-    for level in tax_levels:
-        level_to_x[level] = canonical_x.get(level, 0.5)
+    if n_levels == 1:
+        level_to_x[tax_levels[0]] = (x_min + x_max) / 2
+    else:
+        for i, level in enumerate(tax_levels):
+            level_to_x[level] = x_min + (x_max - x_min) * i / (n_levels - 1)
 
+    node_x = []
     for name in nodes:
         level = node_ranks.get(name, "")
         x_pos = level_to_x.get(level, 0.5)
         node_x.append(x_pos)
 
     # Build parent map for hierarchical Y positioning
-    parent_map = _build_parent_map(tax_df, domain_df, tax_levels, node_ids, max_taxa_per_level)
+    parent_map = _build_parent_map(tax_df, domain_df, tax_levels, node_ids, max_taxa_per_level,
+                                   taxid_to_parent=taxid_to_parent, taxid_to_key=taxid_to_key)
     logging.debug(f"Sankey: Built parent map with {len(parent_map)} entries")
 
     # Calculate hierarchical Y positions with proportional spacing based on read counts
@@ -1009,8 +1040,8 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
 
     # Build custom data for hover: [reads, percentage, rank_name, full_name]
     # Scale padding nodes get empty labels and are hidden from hover
-    rank_names = {"D": "Domain", "P": "Phylum", "C": "Class", "O": "Order",
-                  "F": "Family", "G": "Genus", "S": "Species"}
+    rank_names = {"D": "Domain", "K": "Kingdom", "P": "Phylum", "C": "Class",
+                  "O": "Order", "F": "Family", "G": "Genus", "S": "Species"}
     node_customdata = []
     node_labels = []  # Display labels (empty for scale nodes)
 
@@ -1155,6 +1186,7 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
 # Tableau 10 - Scientific publication standard, colorblind-friendly
 COLORS_TABLEAU = {
     "D": "#4E79A7",  # Domain - Steel blue
+    "K": "#A0CBE8",  # Kingdom - Light blue
     "P": "#F28E2B",  # Phylum - Warm orange
     "C": "#E15759",  # Class - Soft red
     "O": "#76B7B2",  # Order - Teal
@@ -1166,6 +1198,7 @@ COLORS_TABLEAU = {
 # Viridis-inspired - Perceptually uniform, excellent for colorblind users
 COLORS_VIRIDIS = {
     "D": "#440154",  # Domain - Deep purple
+    "K": "#3B528B",  # Kingdom - Blue-purple
     "P": "#414487",  # Phylum - Indigo
     "C": "#2A788E",  # Class - Blue-teal
     "O": "#22A884",  # Order - Teal-green
@@ -1177,6 +1210,7 @@ COLORS_VIRIDIS = {
 # ColorBrewer Set2 - Pastel, softer colors for presentations
 COLORS_PASTEL = {
     "D": "#66C2A5",  # Domain - Mint
+    "K": "#B3E2CD",  # Kingdom - Light mint
     "P": "#FC8D62",  # Phylum - Salmon
     "C": "#8DA0CB",  # Class - Periwinkle
     "O": "#E78AC3",  # Order - Pink
@@ -1188,6 +1222,7 @@ COLORS_PASTEL = {
 # ColorBrewer Dark2 - High contrast for projectors/posters
 COLORS_DARK = {
     "D": "#1B9E77",  # Domain - Teal
+    "K": "#66C2A5",  # Kingdom - Mint
     "P": "#D95F02",  # Phylum - Orange
     "C": "#7570B3",  # Class - Purple
     "O": "#E7298A",  # Order - Magenta
@@ -1199,6 +1234,7 @@ COLORS_DARK = {
 # Nature-inspired - Earthy tones for ecological studies
 COLORS_NATURE = {
     "D": "#2D4739",  # Domain - Dark forest
+    "K": "#3D6B52",  # Kingdom - Mid forest
     "P": "#5A8A5C",  # Phylum - Forest green
     "C": "#8CB369",  # Class - Sage
     "O": "#E9C46A",  # Order - Sandy
@@ -1210,6 +1246,7 @@ COLORS_NATURE = {
 # Ocean - Cool blues for marine studies
 COLORS_OCEAN = {
     "D": "#03045E",  # Domain - Navy
+    "K": "#023073",  # Kingdom - Deep navy-blue
     "P": "#023E8A",  # Phylum - Dark blue
     "C": "#0077B6",  # Class - Medium blue
     "O": "#0096C7",  # Order - Bright blue
@@ -1231,6 +1268,7 @@ TAXONOMY_COLORS = COLORS_TABLEAU
 # Full names for taxonomy levels
 RANK_NAMES = {
     "D": "Domain",
+    "K": "Kingdom",
     "P": "Phylum",
     "C": "Class",
     "O": "Order",
@@ -1243,13 +1281,14 @@ RANK_NAMES = {
 }
 
 # Extended rank normalization for Kraken2 PlusPFP (NCBI extended taxonomy).
-# PlusPFP uses sub-ranks (R2, K, K1-K3, P1-P9, C1-C6, O1-O4, F1-F2, G1-G2, S1)
-# that must be collapsed to the standard 7-level hierarchy for visualization.
+# PlusPFP uses sub-ranks (R2, R3, K, K1-K3, P1-P9, C1-C6, O1-O4, F1-F2, G1-G2, S1)
+# that are mapped to the standard 8-level hierarchy (D, K, P, C, O, F, G, S).
+# Kingdom (K) is preserved as a distinct level between Domain and Phylum.
 RANK_NORMALIZATION = {
     "R2": "D",   # Root level 2 (Domain in PlusPFP)
-    "R3": "D",   # Root level 3 (e.g. Opisthokonta)
-    "K": "D",    # Kingdom -> Domain level
-    "K1": "D", "K2": "D", "K3": "D",
+    "R3": "K",   # Root level 3 (e.g. Opisthokonta) -> Kingdom level
+    "K": "K",    # Kingdom stays as Kingdom (separate from Domain)
+    "K1": "K", "K2": "K", "K3": "K",
     "P1": "P", "P2": "P", "P3": "P", "P4": "P", "P5": "P",
     "P6": "P", "P7": "P", "P8": "P", "P9": "P",
     "C1": "C", "C2": "C", "C3": "C", "C4": "C", "C5": "C", "C6": "C",
@@ -1260,16 +1299,17 @@ RANK_NORMALIZATION = {
 }
 
 # Standard ranks that are already correct (no mapping needed)
-STANDARD_RANKS = {"D", "P", "C", "O", "F", "G", "S", "R", "R1", "U"}
+STANDARD_RANKS = {"D", "K", "P", "C", "O", "F", "G", "S", "R", "R1", "U"}
 
 
 def normalize_ranks(df):
     """
     Normalize extended Kraken2 PlusPFP ranks to standard taxonomy levels.
 
-    Maps sub-ranks (K, K1-K3, P1-P9, C1-C6, etc.) to their parent standard
-    rank (D, P, C, O, F, G, S). Rows with unmappable ranks (R, R1, U) are
-    left unchanged. Works on a copy of the dataframe.
+    Maps sub-ranks (K1-K3, P1-P9, C1-C6, etc.) to their parent standard
+    rank (K, P, C, O, F, G, S). K (Kingdom) is kept as a distinct level
+    between D (Domain) and P (Phylum). Rows with unmappable ranks (R, R1, U)
+    are left unchanged. Works on a copy of the dataframe.
 
     Args:
         df: DataFrame with a 'rank' column containing Kraken2 rank codes
@@ -1390,7 +1430,7 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, colo
     # Use provided tax_levels or fallback to config
     if not tax_levels:
         tax_levels = config.get(
-            "taxonomic_hierarchy_letters", ["D", "P", "C", "O", "F", "G", "S"]
+            "taxonomic_hierarchy_letters", ["D", "K", "P", "C", "O", "F", "G", "S"]
         )
         logging.debug(f"Sunburst: No tax_levels provided, using config: {tax_levels}")
     else:
