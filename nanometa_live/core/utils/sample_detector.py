@@ -189,19 +189,18 @@ def detect_samples_from_kraken(kraken_dir: str) -> Set[str]:
         logging.debug(f"Kraken2 directory not found: {kraken_dir}")
         return samples
 
-    # Find all Kraken2 report files (cumulative, nanometanf, and legacy formats)
-    # Search both top-level and subdirectories for flexibility
+    # Find Kraken2 report files at the TOP level only.
+    # Files inside per-sample subdirectories (v1.5 nested structure) are
+    # handled separately below -- we use the directory name as the sample,
+    # not the batch filename (which would produce spurious "batch_0" etc.).
     kreport_patterns = [
         os.path.join(kraken_dir, "*.cumulative.kraken2.report.txt"),  # Incremental mode cumulative
         os.path.join(kraken_dir, "*.kraken2.report.txt"),  # nanometanf v1.2+
         os.path.join(kraken_dir, "*.kreport2.txt"),         # Legacy
-        os.path.join(kraken_dir, "**", "*.cumulative.kraken2.report.txt"),  # In subdirs
-        os.path.join(kraken_dir, "**", "*.kraken2.report.txt"),  # In subdirs
-        os.path.join(kraken_dir, "**", "*.kreport2.txt"),         # Legacy in subdirs
     ]
     kreport_files = []
     for pattern in kreport_patterns:
-        kreport_files.extend(glob.glob(pattern, recursive=True))
+        kreport_files.extend(glob.glob(pattern))
 
     for file_path in kreport_files:
         sample_name = extract_sample_name(file_path)
