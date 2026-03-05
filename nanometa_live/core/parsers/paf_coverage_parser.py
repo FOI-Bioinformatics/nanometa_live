@@ -112,3 +112,38 @@ def parse_paf_coverage(
     return results
 
 
+def aggregate_contig_coverage(
+    coverage_dict: Dict[str, CoverageData],
+) -> CoverageData:
+    """
+    Aggregate per-contig CoverageData into a single concatenated view.
+
+    For genomes assembled into multiple contigs, this concatenates all depth
+    arrays and recomputes summary statistics over the whole genome.
+
+    Args:
+        coverage_dict: Dict mapping contig name to CoverageData (from parse_paf_coverage).
+
+    Returns:
+        Single CoverageData representing the full genome.
+    """
+    if not coverage_dict:
+        return CoverageData(ref_name="(empty)", ref_length=0, depth_array=np.array([], dtype=np.uint32))
+
+    if len(coverage_dict) == 1:
+        return next(iter(coverage_dict.values()))
+
+    # Sort contigs by name for deterministic ordering
+    sorted_contigs = sorted(coverage_dict.values(), key=lambda c: c.ref_name)
+
+    total_length = sum(c.ref_length for c in sorted_contigs)
+    combined_depth = np.concatenate([c.depth_array for c in sorted_contigs])
+    combined_name = f"{sorted_contigs[0].ref_name} (+{len(sorted_contigs) - 1} contigs)"
+
+    return CoverageData(
+        ref_name=combined_name,
+        ref_length=total_length,
+        depth_array=combined_depth,
+    )
+
+

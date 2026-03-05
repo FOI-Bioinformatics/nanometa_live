@@ -45,6 +45,7 @@ class ValidationStatus(Enum):
     CONFIRMED = "confirmed"      # >= 80% reads validated with high identity
     PARTIAL = "partial"          # 50-80% reads validated
     LOW_CONFIDENCE = "low"       # < 50% reads validated
+    UNCERTAIN = "uncertain"      # Backend intermediate status (maps to low_confidence)
     NO_DATA = "no_data"          # No validation data available
     FAILED = "failed"            # Validation process failed
 
@@ -95,14 +96,22 @@ class ValidationResult:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary, handling enum serialization."""
         result = asdict(self)
-        result['status'] = self.status.value
+        # Use status_display so the UI sees "low" for both LOW_CONFIDENCE and UNCERTAIN
+        result['status'] = self.status_display
         return result
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ValidationResult':
         """Create from dictionary, handling status conversion."""
         if 'status' in data and isinstance(data['status'], str):
-            data['status'] = ValidationStatus(data['status'])
+            # Map backend status values that differ from the frontend enum
+            _status_map = {
+                'uncertain': 'uncertain',  # kept as-is (UNCERTAIN enum value)
+                'rejected': 'low',         # backend rejected -> LOW_CONFIDENCE
+            }
+            raw = data['status']
+            data = dict(data)
+            data['status'] = ValidationStatus(_status_map.get(raw, raw))
         return cls(**data)
 
     def determine_status(self) -> ValidationStatus:
@@ -118,6 +127,13 @@ class ValidationResult:
         if self.percent_validated > 0:
             return ValidationStatus.LOW_CONFIDENCE
         return ValidationStatus.NO_DATA
+
+    @property
+    def status_display(self) -> str:
+        """Return a UI-friendly status string, normalising UNCERTAIN -> low."""
+        if self.status == ValidationStatus.UNCERTAIN:
+            return "low"
+        return self.status.value
 
 
 class ValidationParser:
@@ -176,9 +192,14 @@ class ValidationParser:
             return False
 
         # Check for any validation files
-        patterns = ['*.json', '*.blast.txt', '*_blast.txt']
+        patterns = ['*.json', '*.blast.tsv', '*.blast.txt', '*_blast.txt']
         for pattern in patterns:
             if list(self.validation_dir.glob(pattern)):
+                return True
+        # Also check for aggregate JSON one level up (validation/validation_results.json)
+        if self.validation_dir.name != 'validation':
+            parent_agg = self.validation_dir.parent / 'validation_results.json'
+            if parent_agg.exists():
                 return True
         return False
 
@@ -259,13 +280,31 @@ class ValidationParser:
                 result.status = ValidationStatus.NO_DATA
                 return result
 
-            # Read BLAST tabular output
+            # Read BLAST tabular output.
+            # nanometanf BLASTN_VALIDATION uses outfmt 6 with 15 columns:
+            #   qseqid sseqid pident length mismatch gapopen qstart qend
+            #   sstart send evalue bitscore qlen slen qcovs
+            # Legacy files may have only the standard 12 columns.  We
+            # detect the actual column count and assign names accordingly
+            # to avoid misalignment (pandas silently mangles data when
+            # fewer names are given than columns present).
+            _cols_12 = [
+                'qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen',
+                'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore',
+            ]
+            _cols_15 = _cols_12 + ['qlen', 'slen', 'qcovs']
+
+            # Peek at the first line to determine number of fields
+            with open(filepath) as _peek:
+                first_line = _peek.readline()
+            ncols = len(first_line.strip().split('\t'))
+            col_names = _cols_15 if ncols >= 15 else _cols_12
+
             df = pd.read_csv(
                 filepath,
                 sep='\t',
                 header=None,
-                names=['qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen',
-                       'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
+                names=col_names,
             )
 
             if df.empty:
@@ -415,20 +454,27 @@ class ValidationParser:
         if not self.validation_dir or not self.validation_dir.exists():
             return results
 
-        # First, check for nanometanf aggregate JSON (preferred)
-        aggregate_path = self.validation_dir / 'validation_results.json'
-        if aggregate_path.exists():
+        # Build candidate paths for the aggregate JSON, in priority order.
+        # The nanometanf AGGREGATE_VALIDATION_RESULTS module always publishes to
+        # results/validation/validation_results.json regardless of which sub-directory
+        # individual blast/minimap2 files are published to.
+        aggregate_candidates = []
+        # Direct path inside validation_dir (works when validation_dir IS validation/)
+        aggregate_candidates.append(self.validation_dir / 'validation_results.json')
+        # Parent level (works when validation_dir is validation/blast or validation/minimap2)
+        if self.validation_dir.name != 'validation':
+            aggregate_candidates.append(self.validation_dir.parent / 'validation_results.json')
+        # Fallback to results_dir/validation/
+        aggregate_candidates.append(self.results_dir / 'validation' / 'validation_results.json')
+
+        seen_paths = set()
+        for aggregate_path in aggregate_candidates:
+            resolved = str(aggregate_path.resolve()) if aggregate_path.exists() else None
+            if not aggregate_path.exists() or resolved in seen_paths:
+                continue
+            seen_paths.add(resolved)
             aggregate_results = self.parse_nanometanf_aggregate_json(
                 aggregate_path, sample=sample, taxid=taxid
-            )
-            if aggregate_results:
-                return aggregate_results
-
-        # Also check in parent results dir under validation/
-        alt_aggregate = self.results_dir / 'validation' / 'validation_results.json'
-        if alt_aggregate.exists() and alt_aggregate != aggregate_path:
-            aggregate_results = self.parse_nanometanf_aggregate_json(
-                alt_aggregate, sample=sample, taxid=taxid
             )
             if aggregate_results:
                 return aggregate_results
@@ -482,8 +528,13 @@ class ValidationParser:
 
                 if len(parts) >= 2:
                     file_sample = parts[0]
+                    taxid_part = parts[1]
+                    # nanometanf names files with a 'taxid' prefix, e.g.
+                    # barcode01_taxid562.blast.tsv -> taxid_part = "taxid562"
+                    if taxid_part.startswith('taxid'):
+                        taxid_part = taxid_part[5:]
                     try:
-                        file_taxid = int(parts[1])
+                        file_taxid = int(taxid_part)
                     except ValueError:
                         continue
 

@@ -61,10 +61,6 @@ def create_coverage_depth_figure(
 
     fig = go.Figure()
 
-    # Below-threshold shading: draw a second trace clipped at threshold
-    below = np.minimum(y, threshold)
-    above_mask = y >= threshold
-
     fig.add_trace(go.Scatter(
         x=x, y=y,
         mode="lines",
@@ -261,11 +257,14 @@ def create_coverage_stats_summary(coverage: CoverageData) -> dbc.Row:
     return dbc.Row(cols, className="mb-3 g-2")
 
 
-def create_empty_coverage_figure(title: str = "No coverage data") -> go.Figure:
+def create_empty_coverage_figure(
+    title: str = "No coverage data",
+    message: str = "Select a species to view coverage",
+) -> go.Figure:
     """Create a placeholder figure when no data is available."""
     fig = go.Figure()
     fig.add_annotation(
-        text="Select a species to view coverage",
+        text=message,
         xref="paper", yref="paper",
         x=0.5, y=0.5,
         showarrow=False,

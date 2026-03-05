@@ -17,7 +17,7 @@ import plotly.graph_objects as go
 import pandas as pd
 
 from nanometa_live.core.parsers.blast_validation_parser import BlastValidationParser
-from nanometa_live.core.parsers.paf_coverage_parser import parse_paf_coverage, CoverageData
+from nanometa_live.core.parsers.paf_coverage_parser import parse_paf_coverage, aggregate_contig_coverage, CoverageData
 from nanometa_live.app.layouts.validation_layout import (
     create_validation_status_card,
     create_validation_result_card,
@@ -59,7 +59,7 @@ def _compute_summary(results):
             counts["confirmed"] += 1
         elif status == "partial":
             counts["partial"] += 1
-        elif status == "low":
+        elif status in ("low", "uncertain", "rejected"):
             counts["low_confidence"] += 1
         else:
             counts["no_data"] += 1
@@ -89,7 +89,7 @@ def register_validation_callbacks(app: Dash):
             if not config:
                 return {"results": [], "summary": {}, "message": "No configuration loaded"}
 
-            if not config.get("blast_validation", False):
+            if not config.get("blast_validation", True):
                 return {
                     "results": [],
                     "summary": {},
@@ -134,7 +134,9 @@ def register_validation_callbacks(app: Dash):
     def update_blast_summary(data):
         """Render summary card for BLAST results."""
         if not data or not data.get("results"):
-            message = data.get("message", "No validation data available") if data else "No data"
+            message = data.get("message") if data else None
+            if not message:
+                return ""
             return dbc.Alert([
                 html.I(className="bi bi-info-circle me-2"),
                 html.Span(message),
@@ -151,15 +153,53 @@ def register_validation_callbacks(app: Dash):
         )
 
     @app.callback(
-        Output("blast-empty-message", "style"),
+        [
+            Output("blast-empty-message", "style"),
+            Output("blast-empty-message", "children"),
+            Output("blast-results-section", "style"),
+        ],
         Input("validation-data-store", "data"),
     )
     def update_blast_empty_state(data):
-        """Show or hide the BLAST empty-state message."""
-        if not data or not data.get("results"):
-            return {"display": "block"}
+        """Show or hide the BLAST empty-state message, with context-appropriate text."""
+        from nanometa_live.app.components.modern_components import EmptyStateMessage
+
+        hidden = {"display": "none"}
+        visible = {"display": "block"}
+
+        if not data:
+            return visible, EmptyStateMessage(
+                title="No Validation Results",
+                message="Waiting for validation data...",
+                icon="bi-shield-check",
+            ), hidden
+
+        if not data.get("results"):
+            message = data.get("message") or "No BLAST validation results available."
+            # Distinguish disabled vs waiting vs no data
+            if "disabled" in message.lower():
+                title = "Validation Disabled"
+                icon = "bi-shield-x"
+            elif "waiting" in message.lower():
+                title = "Awaiting Results"
+                icon = "bi-hourglass-split"
+            else:
+                title = "No Validation Results"
+                icon = "bi-shield-check"
+            return visible, EmptyStateMessage(
+                title=title,
+                message=message,
+                icon=icon,
+            ), hidden
+
         blast_results = _filter_by_method(data["results"], "blast")
-        return {"display": "none"} if blast_results else {"display": "block"}
+        if blast_results:
+            return hidden, [], visible
+        return visible, EmptyStateMessage(
+            title="No BLAST Results",
+            message="No BLAST read validation results found for the current sample.",
+            icon="bi-shield-check",
+        ), hidden
 
     @app.callback(
         Output("blast-results-container", "children"),
@@ -253,18 +293,25 @@ def register_validation_callbacks(app: Dash):
             else:
                 bar_colors.append("#dc3545")
 
+        # Only include error bars when min/max data is available.
+        # The aggregate JSON path only provides mean identity; min/max
+        # stay at 0 and would produce negative error bar values.
+        has_range = any(mx > 0 for mx in identity_maxs)
+        error_y_cfg = dict(
+            type="data",
+            symmetric=False,
+            array=[max(0, mx - mn) for mn, mx in zip(identity_means, identity_maxs)],
+            arrayminus=[max(0, mn - mi) for mn, mi in zip(identity_means, identity_mins)],
+            color="#6c757d",
+            thickness=1.5,
+            visible=has_range,
+        )
+
         fig = go.Figure()
         fig.add_trace(go.Bar(
             x=species_names,
             y=identity_means,
-            error_y=dict(
-                type="data",
-                symmetric=False,
-                array=[mx - mn for mn, mx in zip(identity_means, identity_maxs)],
-                arrayminus=[mn - mi for mn, mi in zip(identity_means, identity_mins)],
-                color="#6c757d",
-                thickness=1.5,
-            ),
+            error_y=error_y_cfg,
             marker_color=bar_colors,
             marker_line_width=0,
             text=[f"{v:.1f}%" for v in identity_means],
@@ -273,8 +320,9 @@ def register_validation_callbacks(app: Dash):
             hovertemplate=(
                 "<b>%{x}</b><br>"
                 "Mean identity: %{y:.1f}%<br>"
-                "Range: %{customdata[0]:.1f}% - %{customdata[1]:.1f}%"
-                "<extra></extra>"
+                + ("Range: %{customdata[0]:.1f}% - %{customdata[1]:.1f}%" if has_range
+                   else "Min/max range not available")
+                + "<extra></extra>"
             ),
             customdata=list(zip(identity_mins, identity_maxs)),
         ))
@@ -367,7 +415,9 @@ def register_validation_callbacks(app: Dash):
     def update_coverage_summary(data):
         """Render summary card for minimap2 coverage results."""
         if not data or not data.get("results"):
-            message = data.get("message", "No validation data available") if data else "No data"
+            message = data.get("message") if data else None
+            if not message:
+                return ""
             return dbc.Alert([
                 html.I(className="bi bi-info-circle me-2"),
                 html.Span(message),
@@ -375,11 +425,7 @@ def register_validation_callbacks(app: Dash):
 
         cov_results = _filter_by_method(data["results"], "minimap2")
         if not cov_results:
-            return dbc.Alert(
-                "No minimap2 coverage results available.",
-                color="light",
-                className="text-center",
-            )
+            return ""
 
         counts = _compute_summary(cov_results)
         return create_validation_status_card(
@@ -391,15 +437,52 @@ def register_validation_callbacks(app: Dash):
         )
 
     @app.callback(
-        Output("coverage-empty-message", "style"),
+        [
+            Output("coverage-empty-message", "style"),
+            Output("coverage-empty-message", "children"),
+            Output("coverage-controls-section", "style"),
+        ],
         Input("validation-data-store", "data"),
     )
     def update_coverage_empty_state(data):
-        """Show or hide the coverage empty-state message."""
-        if not data or not data.get("results"):
-            return {"display": "block"}
+        """Show or hide the coverage empty-state message and controls, with context-appropriate text."""
+        from nanometa_live.app.components.modern_components import EmptyStateMessage
+
+        hidden = {"display": "none"}
+        visible = {"display": "block"}
+
+        if not data:
+            return visible, EmptyStateMessage(
+                title="No Coverage Data",
+                message="Waiting for validation data...",
+                icon="bi-bar-chart-line",
+            ), hidden
+
+        if not data.get("results"):
+            message = data.get("message") or "No minimap2 coverage data available."
+            if "disabled" in message.lower():
+                title = "Validation Disabled"
+                icon = "bi-shield-x"
+            elif "waiting" in message.lower():
+                title = "Awaiting Results"
+                icon = "bi-hourglass-split"
+            else:
+                title = "No Coverage Data"
+                icon = "bi-bar-chart-line"
+            return visible, EmptyStateMessage(
+                title=title,
+                message=message,
+                icon=icon,
+            ), hidden
+
         cov_results = _filter_by_method(data["results"], "minimap2")
-        return {"display": "none"} if cov_results else {"display": "block"}
+        if cov_results:
+            return hidden, [], visible
+        return visible, EmptyStateMessage(
+            title="No Coverage Data",
+            message="No minimap2 coverage results found. Run the pipeline with minimap2 validation enabled.",
+            icon="bi-bar-chart-line",
+        ), hidden
 
     @app.callback(
         Output("coverage-results-container", "children"),
@@ -440,9 +523,14 @@ def register_validation_callbacks(app: Dash):
             Output("coverage-species-selector", "value"),
         ],
         Input("validation-data-store", "data"),
+        State("coverage-species-selector", "value"),
     )
-    def populate_coverage_selector(data):
-        """Populate species selector from minimap2 validation results."""
+    def populate_coverage_selector(data, current_value):
+        """Populate species selector from minimap2 validation results.
+
+        Preserves the current selection across auto-refresh intervals
+        if the selected key is still present in the updated options.
+        """
         if not data or not data.get("results"):
             return [], None
 
@@ -458,6 +546,10 @@ def register_validation_callbacks(app: Dash):
             seen.add(key)
             label = f"{r.get('species', 'Unknown')} ({r.get('sample_id', '')})"
             options.append({"label": label, "value": key})
+
+        valid_values = {o["value"] for o in options}
+        if current_value and current_value in valid_values:
+            return options, current_value
 
         first_value = options[0]["value"] if options else None
         return options, first_value
@@ -482,6 +574,7 @@ def register_validation_callbacks(app: Dash):
             Output("coverage-cumulative-plot", "figure"),
             Output("coverage-histogram-plot", "figure"),
             Output("coverage-stats-container", "children"),
+            Output("coverage-plots-section", "style"),
         ],
         [
             Input("coverage-species-selector", "value"),
@@ -492,8 +585,11 @@ def register_validation_callbacks(app: Dash):
     def update_coverage_plots(selected_key, min_mapq, config):
         """Load PAF data and render coverage plots."""
         empty = create_empty_coverage_figure
+        hidden = {"display": "none"}
+        visible = {"display": "block"}
+
         if not selected_key:
-            return empty(), empty(), empty(), ""
+            return empty(), empty(), empty(), "", hidden
 
         try:
             min_mapq = int(min_mapq or 0)
@@ -503,18 +599,23 @@ def register_validation_callbacks(app: Dash):
         coverage = _load_real_coverage(selected_key, config, min_mapq)
 
         if coverage is None:
-            return empty(), empty(), empty(), dbc.Alert(
-                "No coverage data found for this species/sample.",
+            no_paf_msg = "No PAF file found for this species/sample. Ensure minimap2 validation ran and results are in validation/minimap2/."
+            no_paf = lambda: create_empty_coverage_figure(
+                title="No coverage data",
+                message=no_paf_msg,
+            )
+            return no_paf(), no_paf(), no_paf(), dbc.Alert(
+                no_paf_msg,
                 color="warning",
                 className="text-center",
-            )
+            ), hidden
 
         depth_fig = create_coverage_depth_figure(coverage)
         cum_fig = create_cumulative_coverage_figure(coverage)
         hist_fig = create_depth_histogram_figure(coverage)
         stats = create_coverage_stats_summary(coverage)
 
-        return depth_fig, cum_fig, hist_fig, stats
+        return depth_fig, cum_fig, hist_fig, stats, visible
 
     @app.callback(
         Output("download-coverage-report", "data"),
@@ -551,7 +652,11 @@ def register_validation_callbacks(app: Dash):
 def _load_real_coverage(
     selected_key: str, config: Optional[dict], min_mapq: int
 ) -> Optional[CoverageData]:
-    """Load coverage from a real PAF file."""
+    """Load coverage from a real PAF file.
+
+    Returns None if no PAF file exists or if the file has no alignments
+    passing the min_mapq filter.
+    """
     if not config:
         return None
 
@@ -559,6 +664,7 @@ def _load_real_coverage(
     if not results_dir:
         return None
 
+    # selected_key format: "{sample_id}_{taxid}" where taxid is numeric
     parts = selected_key.rsplit("_", 1)
     if len(parts) != 2:
         return None
@@ -573,7 +679,12 @@ def _load_real_coverage(
         if paf_path.exists():
             cov_dict = parse_paf_coverage(paf_path, min_mapq=min_mapq)
             if cov_dict:
-                return next(iter(cov_dict.values()))
+                return aggregate_contig_coverage(cov_dict)
+            logger.info(
+                "PAF file found but has no alignments passing min_mapq=%d: %s",
+                min_mapq, paf_path,
+            )
+            return None
 
     return None
 

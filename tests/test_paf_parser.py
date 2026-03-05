@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from nanometa_live.core.parsers.paf_coverage_parser import CoverageData, parse_paf_coverage
+from nanometa_live.core.parsers.paf_coverage_parser import CoverageData, parse_paf_coverage, aggregate_contig_coverage
 
 
 class TestPAFParser:
@@ -95,3 +95,37 @@ class TestPAFParser:
         result = parse_paf_coverage(paf)
 
         assert result == {}
+
+
+class TestAggregateContigCoverage:
+    """Tests for aggregate_contig_coverage functionality."""
+
+    def test_single_contig_passthrough(self) -> None:
+        """A single contig should be returned as-is."""
+        depth = np.array([0, 1, 2, 1, 0], dtype=np.uint32)
+        cov = CoverageData(ref_name="contig1", ref_length=5, depth_array=depth)
+        result = aggregate_contig_coverage({"contig1": cov})
+        assert result.ref_name == "contig1"
+        assert result.ref_length == 5
+        assert np.array_equal(result.depth_array, depth)
+
+    def test_multi_contig_concatenation(self) -> None:
+        """Multiple contigs should be concatenated with correct total length."""
+        cov1 = CoverageData(
+            ref_name="contig1", ref_length=3,
+            depth_array=np.array([1, 1, 0], dtype=np.uint32),
+        )
+        cov2 = CoverageData(
+            ref_name="contig2", ref_length=4,
+            depth_array=np.array([0, 2, 2, 0], dtype=np.uint32),
+        )
+        result = aggregate_contig_coverage({"contig1": cov1, "contig2": cov2})
+        assert result.ref_length == 7
+        assert len(result.depth_array) == 7
+        assert result.breadth == 4 / 7  # 4 positions with depth >= 1
+
+    def test_empty_dict(self) -> None:
+        """An empty dict should return a zero-length CoverageData."""
+        result = aggregate_contig_coverage({})
+        assert result.ref_length == 0
+        assert len(result.depth_array) == 0
