@@ -612,6 +612,22 @@ class GenomeDownloadManager:
                 logger.info(f"Found NCBI RefSeq genome: {accession}")
 
         if not accession:
+            # REST API failed — try direct download by taxid via datasets CLI
+            # (the CLI supports more taxa than the REST API, especially fungi)
+            logger.info(f"No accession found via API, trying direct taxid download for {species_name}...")
+            fasta_path = self._download_ncbi_genome_by_taxid(taxid, species_name)
+            if fasta_path:
+                self._metadata[taxid] = GenomeMetadata(
+                    taxid=taxid,
+                    species_name=species_name,
+                    accession=f"taxid_{taxid}",
+                    source="ncbi_cli",
+                    kingdom=kingdom or "Unknown",
+                    fasta_path=str(fasta_path),
+                    file_size=fasta_path.stat().st_size if fasta_path.exists() else 0,
+                )
+                self._save_metadata()
+                return fasta_path
             msg = f"No genome assembly found for {species_name} (taxid={taxid}) in GTDB or NCBI"
             logger.error(msg)
             self._last_errors[taxid] = msg
@@ -812,6 +828,94 @@ class GenomeDownloadManager:
             return None
         except Exception as e:
             logger.error(f"Download failed for {accession}: {e}")
+            return None
+
+    def _download_ncbi_genome_by_taxid(self, taxid: int, species_name: str) -> Optional[Path]:
+        """
+        Download genome directly by taxid using datasets CLI.
+
+        This bypasses the REST API accession lookup, which fails for some
+        taxa (notably fungi). The datasets CLI supports downloading by
+        taxid and handles reference genome selection internally.
+
+        Args:
+            taxid: NCBI taxonomy ID
+            species_name: Species name (for logging)
+
+        Returns:
+            Path to FASTA file, or None on failure
+        """
+        if not shutil.which("datasets"):
+            logger.error("NCBI 'datasets' CLI not found.")
+            return None
+
+        output_file = self.genomes_dir / f"{taxid}.fasta"
+
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                zip_file = Path(tmpdir) / "genome.zip"
+
+                cmd = [
+                    "datasets", "download", "genome", "taxon",
+                    str(taxid),
+                    "--reference",
+                    "--include", "genome",
+                    "--filename", str(zip_file)
+                ]
+
+                logger.info(f"Downloading genome by taxid for {species_name} (taxid={taxid})...")
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=600
+                )
+
+                if result.returncode != 0:
+                    # Try without --reference flag
+                    logger.info(f"No reference genome, retrying without --reference...")
+                    cmd.remove("--reference")
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=600
+                    )
+
+                if result.returncode != 0:
+                    logger.error(f"Download by taxid failed for {species_name}: {result.stderr}")
+                    return None
+
+                if not zip_file.exists():
+                    logger.error("Downloaded file not found")
+                    return None
+
+                with zipfile.ZipFile(zip_file, 'r') as zf:
+                    fasta_files = [
+                        f for f in zf.namelist()
+                        if f.endswith('.fna') or f.endswith('.fasta')
+                    ]
+
+                    if not fasta_files:
+                        logger.error("No FASTA file found in downloaded archive")
+                        return None
+
+                    fasta_name = fasta_files[0]
+                    temp_fasta = Path(tmpdir) / "genome.fasta"
+
+                    with zf.open(fasta_name) as src, open(temp_fasta, 'wb') as dst:
+                        dst.write(src.read())
+
+                    shutil.move(str(temp_fasta), str(output_file))
+
+                logger.info(f"Downloaded genome by taxid to {output_file}")
+                return output_file
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Download timed out for taxid {taxid}")
+            return None
+        except Exception as e:
+            logger.error(f"Download by taxid failed for {taxid}: {e}")
             return None
 
     def build_blast_db(self, taxid: int) -> bool:
@@ -1304,10 +1408,25 @@ class GenomeDownloadManager:
                                     or meta_dict.get("organism", {}).get("organism_name")
                                 ),
                             )
-                    else:
-                        msg = f"No genome assembly found for {name} (taxid={taxid})"
-                        logger.error(msg)
-                        self._last_errors[taxid] = msg
+
+                    # Fallback: download directly by taxid via CLI
+                    if not path:
+                        logger.info(f"Trying direct taxid download for {name}...")
+                        path = self._download_ncbi_genome_by_taxid(taxid, name)
+                        if path:
+                            self._metadata[taxid] = GenomeMetadata(
+                                taxid=taxid,
+                                species_name=name,
+                                accession=f"taxid_{taxid}",
+                                source="ncbi_cli",
+                                kingdom=kingdom or "Unknown",
+                                fasta_path=str(path),
+                                file_size=path.stat().st_size if path.exists() else 0,
+                            )
+                        else:
+                            msg = f"No genome assembly found for {name} (taxid={taxid})"
+                            logger.error(msg)
+                            self._last_errors[taxid] = msg
 
                 if not path and taxid not in self._last_errors:
                     self._last_errors[taxid] = f"Download failed for {name} (taxid={taxid})"
