@@ -51,6 +51,8 @@ from nanometa_live.app.components.modern_components import (
     AlertBanner,
     SampleStatusBadge,
     EmptyStateMessage,
+    TrendIndicator,
+    DecisionBanner,
     TABLE_STYLE_CELL,
     TABLE_STYLE_HEADER,
     STATUS_COLORS,
@@ -95,6 +97,8 @@ __all__ = [
     "AlertBanner",
     "SampleStatusBadge",
     "EmptyStateMessage",
+    "TrendIndicator",
+    "DecisionBanner",
     # DataTable shared styling
     "TABLE_STYLE_CELL",
     "TABLE_STYLE_HEADER",

@@ -11,6 +11,7 @@ from dash import html, dcc
 import dash_bootstrap_components as dbc
 
 from nanometa_live.app.components.sample_selector import create_sample_selector
+from nanometa_live.app.utils.plotly_theme import CHART_CONFIG
 
 
 def create_classification_layout() -> html.Div:
@@ -230,12 +231,13 @@ def create_classification_layout() -> html.Div:
                         dcc.Graph(
                             id='classification-plot',
                             config={
-                                'displayModeBar': True,
-                                'displaylogo': False,
-                                'modeBarButtonsToRemove': ['lasso2d', 'select2d'],
+                                **CHART_CONFIG,
                                 'toImageButtonOptions': {
                                     'format': 'svg',
-                                    'filename': 'taxonomy_visualization'
+                                    'filename': 'taxonomy_visualization',
+                                    'height': 800,
+                                    'width': 1200,
+                                    'scale': 2,
                                 }
                             },
                             # Height is controlled dynamically via figure.update_layout

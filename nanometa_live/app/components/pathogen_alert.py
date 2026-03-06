@@ -192,6 +192,18 @@ def CriticalPathogenAlert(
                 # Metrics
                 html.Div(metrics, className="mb-3"),
 
+                # Confidence bar
+                html.Div([
+                    html.Small("Confidence", className="text-muted me-2"),
+                    dbc.Progress(
+                        value=100 if confidence == "HIGH" else 60 if confidence == "MEDIUM" else 25,
+                        color="success" if confidence == "HIGH" else "warning" if confidence == "MEDIUM" else "danger",
+                        style={"height": "6px", "flex": "1"},
+                        className="my-1"
+                    ),
+                    html.Small(confidence, className="ms-2 fw-semibold")
+                ], className="d-flex align-items-center mb-3", style={"maxWidth": "300px"}),
+
                 # Recommendation
                 html.Div([
                     html.I(className="bi bi-exclamation-diamond me-2"),
@@ -207,6 +219,8 @@ def CriticalPathogenAlert(
                     [html.I(className="bi bi-file-medical me-2"), "View Report"],
                     color="danger",
                     className="mb-2 w-100",
+                    size="lg",
+                    style={"padding": "10px 24px", "fontWeight": "bold"},
                     id={"type": "pathogen-view-report", "taxid": taxid or 0}
                 ),
                 dbc.Button(
@@ -409,6 +423,29 @@ def PathogenAlertPanel(
 
     # Build the panel
     alerts = []
+
+    # Summary header showing counts by threat level
+    total_detected = len(critical_alerts) + len(high_alerts) + len(watch_alerts)
+    if total_detected > 0:
+        summary_badges = []
+        if critical_alerts:
+            summary_badges.append(
+                dbc.Badge(f"{len(critical_alerts)} Critical", color="danger", className="me-1")
+            )
+        if high_alerts:
+            summary_badges.append(
+                dbc.Badge(f"{len(high_alerts)} High", color="warning", className="me-1")
+            )
+        if watch_alerts:
+            summary_badges.append(
+                dbc.Badge(f"{len(watch_alerts)} Watch", color="info")
+            )
+        alerts.append(
+            html.Div([
+                html.Strong(f"{total_detected} watched species detected: "),
+                *summary_badges,
+            ], className="mb-3")
+        )
 
     # Critical alerts first (most prominent)
     for alert in critical_alerts:

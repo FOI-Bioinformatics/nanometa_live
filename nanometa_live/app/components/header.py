@@ -40,37 +40,50 @@ def create_header(title="Nanometa Live"):
             dbc.Col([
                 html.Div([
                     html.Div([
-                        daq.Indicator(
-                            id="status-indicator",
-                            label="Status",
-                            color="gray",
-                            value=True
-                        ),
+                        # Prominent status badge
+                        html.Div([
+                            daq.Indicator(
+                                id="status-indicator",
+                                label="",
+                                color="gray",
+                                value=True,
+                                style={"marginRight": "8px"}
+                            ),
+                            html.Span(
+                                id="status-text",
+                                className="fw-bold",
+                                children="STANDBY",
+                                role="status",
+                                style={"fontSize": "1.1rem", "letterSpacing": "0.5px"},
+                                **{"aria-live": "polite"}
+                            ),
+                        ], className="d-flex align-items-center me-3"),
+                        # Status detail text
                         html.Span(
-                            id="status-text",
-                            className="ms-2",
-                            children="Idle",
-                            role="status",
-                            **{"aria-live": "polite"}
+                            id="status-details",
+                            className="text-muted small",
+                            children="Click 'Start Analysis' to begin"
                         ),
-                        html.Span(" - ", **{"aria-hidden": "true"}),
-                        html.Span(id="status-details", className="text-muted", children="Click 'Start Analysis' to begin"),
+                        # Elapsed time display (prominent when running)
+                        html.Div([
+                            html.I(className="bi bi-stopwatch me-1"),
+                            html.Span(
+                                id="elapsed-time-display",
+                                children="00:00:00",
+                                style={"fontSize": "1.1rem", "fontWeight": "600"}
+                            ),
+                        ], className="elapsed-time ms-3", id="elapsed-time-container", style={"display": "none"}),
                         # Countdown timer
                         html.Div([
                             html.I(className="bi bi-clock me-1"),
                             html.Span(id="update-countdown", children="Next: --s"),
-                        ], className="update-timer ms-3", style={"fontSize": "0.9rem"}),
-                        # Elapsed time display
-                        html.Div([
-                            html.I(className="bi bi-stopwatch me-1"),
-                            html.Span(id="elapsed-time-display", children="00:00:00"),
-                        ], className="elapsed-time ms-3", id="elapsed-time-container", style={"display": "none"}),
+                        ], className="update-timer ms-3", style={"fontSize": "0.85rem"}),
                         # Pipeline stage display
                         html.Div([
                             html.Span(id="current-pipeline-stage", children=""),
                             html.Span(id="pipeline-progress-text", children="", className="text-muted small ms-2")
                         ], className="pipeline-info ms-3", id="pipeline-stage-container", style={"display": "none"})
-                    ], className="d-flex align-items-center", **{"aria-label": "Analysis status"})
+                    ], className="d-flex align-items-center flex-wrap", **{"aria-label": "Analysis status"})
                 ], className="d-flex justify-content-center h-100")
             ], width=5),
 
@@ -97,9 +110,10 @@ def create_header(title="Nanometa Live"):
                     ),
 
                     dbc.Button(
-                        "Start Analysis",
+                        [html.I(className="bi bi-play-fill me-2"), "Start Analysis"],
                         id="start-stop-button",
                         color="primary",
+                        size="lg",
                         className="me-2"
                     ),
                     dbc.Tooltip(

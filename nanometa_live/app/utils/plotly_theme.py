@@ -76,6 +76,14 @@ COLORWAY_VIRIDIS = [
     "#fde725",
 ]
 
+# Standard chart configuration for dcc.Graph components
+CHART_CONFIG = {
+    "displayModeBar": True,
+    "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"],
+    "displaylogo": False,
+    "toImageButtonOptions": {"format": "png", "height": 800, "width": 1200, "scale": 2}
+}
+
 
 def get_nanometa_template() -> Dict[str, Any]:
     """
@@ -93,7 +101,7 @@ def get_nanometa_template() -> Dict[str, Any]:
             # Font configuration
             "font": {
                 "family": "Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
-                "size": 12,
+                "size": 13,
                 "color": COLORS["gray_700"]
             },
 
@@ -101,7 +109,7 @@ def get_nanometa_template() -> Dict[str, Any]:
             "title": {
                 "font": {
                     "family": "Inter, system-ui, sans-serif",
-                    "size": 18,
+                    "size": 20,
                     "color": COLORS["gray_800"]
                 },
                 "x": 0.5,
@@ -119,7 +127,7 @@ def get_nanometa_template() -> Dict[str, Any]:
                 "zerolinewidth": 1,
                 "linecolor": COLORS["gray_400"],
                 "linewidth": 1,
-                "tickfont": {"size": 11, "color": COLORS["gray_600"]},
+                "tickfont": {"size": 12, "color": COLORS["gray_600"]},
                 "title": {"font": {"size": 13, "color": COLORS["gray_700"]}}
             },
 
@@ -133,7 +141,7 @@ def get_nanometa_template() -> Dict[str, Any]:
                 "zerolinewidth": 1,
                 "linecolor": COLORS["gray_400"],
                 "linewidth": 1,
-                "tickfont": {"size": 11, "color": COLORS["gray_600"]},
+                "tickfont": {"size": 12, "color": COLORS["gray_600"]},
                 "title": {"font": {"size": 13, "color": COLORS["gray_700"]}}
             },
 
@@ -311,6 +319,11 @@ def apply_theme_to_figure(
     fig.update_layout(template=template)
 
     return fig
+
+
+def get_current_template() -> str:
+    """Return the currently active Plotly template name."""
+    return pio.templates.default or "nanometa"
 
 
 def get_threat_color(threat_level: str) -> str:

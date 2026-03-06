@@ -419,6 +419,9 @@ def register_preparation_callbacks(app):
         Output("taxmap-rescan-complete", "data"),
         Output("watchlist-table-refresh", "data", allow_duplicate=True),
         Output("taxmap-rescan-status", "children"),
+        Output("taxmap-rescan-progress-container", "style"),
+        Output("taxmap-rescan-progress", "value"),
+        Output("taxmap-rescan-progress-label", "children"),
         Input("taxmap-rescan-btn", "n_clicks"),
         State("app-config", "data"),
         State("watchlist-table-refresh", "data"),
@@ -430,6 +433,8 @@ def register_preparation_callbacks(app):
         from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
 
         logger.info(f"[RESCAN] run_rescan called: n_clicks={n_clicks}")
+        hide_progress = {"display": "none"}
+        show_progress = {"display": "block"}
 
         if not n_clicks:
             raise PreventUpdate
@@ -459,7 +464,8 @@ def register_preparation_callbacks(app):
 
             if not watchlist_entries:
                 logger.info("No watchlist entries to map")
-                return (None, None, datetime.now().isoformat(), (current_refresh or 0) + 1, "No entries to map")
+                return (None, None, datetime.now().isoformat(), (current_refresh or 0) + 1, "No entries to map",
+                        hide_progress, 0, "")
 
             total = len(watchlist_entries)
             logger.info(f"Processing {total} watchlist entries")
@@ -493,14 +499,54 @@ def register_preparation_callbacks(app):
             now = datetime.now().isoformat()
             new_refresh = (current_refresh or 0) + 1
 
-            status = f"Mapped {len(mappings_dict)} entries" if collection_data else "Complete"
-            logger.info(f"Rescan returning: mappings={len(mappings_dict) if collection_data else 0}, refresh={new_refresh}")
-            return (collection_data, db_info, now, new_refresh, status)
+            mapped_count = len(mappings_dict) if collection_data else 0
+            status = f"Mapped {mapped_count} entries" if collection_data else "Complete"
+            logger.info(f"Rescan returning: mappings={mapped_count}, refresh={new_refresh}")
+            return (collection_data, db_info, now, new_refresh, status,
+                    hide_progress, 100, f"Completed: {mapped_count} mappings")
 
         except Exception as e:
             logger.error(f"Rescan failed: {e}")
             traceback.print_exc()
-            return (no_update, no_update, no_update, no_update, f"Error: {str(e)}")
+            return (no_update, no_update, no_update, no_update, f"Error: {str(e)}",
+                    hide_progress, 0, "")
+
+    # --- Taxid mapping status info display ---
+    @app.callback(
+        Output("taxmap-current-db-type", "children"),
+        Output("taxmap-current-mapping-count", "children"),
+        Output("taxmap-last-scan-time", "children"),
+        Input("taxmap-rescan-complete", "data"),
+        Input("taxmap-database-info", "data"),
+        State("taxmap-collection", "data"),
+    )
+    def update_taxmap_status_info(rescan_time, db_info, collection):
+        """Update the inline status display after rescan or on page load."""
+        # Database type
+        if db_info and db_info.get("type"):
+            db_type = db_info["type"].replace("_", " ").title()
+            db_type_text = f"Database type: {db_type}"
+        else:
+            db_type_text = "No database scanned"
+
+        # Mapping count
+        if collection and isinstance(collection.get("mappings"), dict):
+            count = len(collection["mappings"])
+            count_text = f"{count} species mapped"
+        else:
+            count_text = "0 species mapped"
+
+        # Last scan time
+        if rescan_time:
+            try:
+                dt = datetime.fromisoformat(rescan_time)
+                scan_text = f"Last scan: {dt.strftime('%Y-%m-%d %H:%M:%S')}"
+            except (ValueError, TypeError):
+                scan_text = f"Last scan: {rescan_time}"
+        else:
+            scan_text = "Last scan: Never"
+
+        return db_type_text, count_text, scan_text
 
     # =========================================================================
     # Genome Downloads (moved from watchlist_tab.py)

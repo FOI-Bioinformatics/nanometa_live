@@ -308,6 +308,7 @@ body {
     margin-bottom: 20px;
     border-radius: 5px;
     overflow: hidden;
+    transition: all 0.3s ease;
   }
 
   .card-header {
@@ -1245,8 +1246,8 @@ body {
   }
 
   .elapsed-time {
-    color: var(--dark);
-    font-weight: var(--font-weight-medium);
+    color: var(--status-good);
+    font-weight: var(--font-weight-semibold);
     display: flex;
     align-items: center;
     font-variant-numeric: tabular-nums;
@@ -1842,10 +1843,18 @@ body {
     box-shadow: var(--shadow-lg);
     padding: var(--space-md);
     border-left: 4px solid var(--primary);
-    animation: slideInRight 0.3s ease-out;
+    animation: slideInRight 0.3s ease-out, toastFadeOut 0.5s ease-in 4s forwards;
     display: flex;
     align-items: flex-start;
     gap: var(--space-md);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+
+  @keyframes toastFadeOut {
+    to {
+      opacity: 0;
+      transform: translateX(100%);
+    }
   }
 
   @keyframes slideInRight {
@@ -1928,6 +1937,8 @@ body {
   /* Active tab indicator line */
   .nav-tabs .nav-link.active {
     position: relative;
+    font-weight: var(--font-weight-semibold);
+    color: var(--primary);
   }
 
   .nav-tabs .nav-link.active::after {
@@ -2217,35 +2228,6 @@ body {
     overflow-y: auto;
   }
 
-  /* ============================================
-     PRINT STYLES
-     ============================================ */
-  @media print {
-    .btn, .nav-tabs, .accordion-button, .update-indicator, .live-indicator,
-    .toast-container, .theme-toggle, .refresh-countdown {
-      display: none !important;
-    }
-
-    .card {
-      break-inside: avoid;
-      box-shadow: none !important;
-      border: 1px solid #dee2e6 !important;
-    }
-
-    body {
-      font-size: 12pt;
-      background: white !important;
-    }
-
-    .container-fluid {
-      padding: 0 !important;
-    }
-
-    a[href]:after {
-      content: none !important;
-    }
-  }
-
 /* ============================================
    THREAT SUMMARY INDICATOR
    Always-visible threat status card
@@ -2312,6 +2294,7 @@ body {
 
 .watchlist-file-item:hover {
   background-color: rgba(0, 0, 0, 0.02);
+  cursor: pointer;
 }
 
 /* Enabled/disabled row states */
@@ -2350,6 +2333,7 @@ body {
 
 .nested-pathogen-row:hover {
   background-color: rgba(0, 123, 255, 0.06) !important;
+  cursor: pointer;
 }
 
 /* Chevron icon rotation animation */
@@ -2980,38 +2964,7 @@ body {
 }
 
 
-  /* ============================================
-     PRINT STYLES
-     ============================================ */
-
-  @media print {
-
-    body {
-      font-size: 12pt;
-      line-height: 1.4;
-      background-color: white !important;
-      color: black !important;
-    }
-
-    /* Force light mode for print */
-    * {
-      background-color: white !important;
-      color: black !important;
-    }
-
-    /* Ensure charts print properly */
-    .js-plotly-plot {
-      page-break-inside: avoid;
-      max-width: 100%;
-    }
-
-    /* Show URLs for links */
-    a[href]::after {
-      content: " (" attr(href) ")";
-      font-size: 0.8em;
-      color: #666;
-    }
-  }
+  /* Print styles consolidated into single block below */
 
   /* ============================================
      RESPONSIVE LAYOUT FIXES
@@ -3061,5 +3014,109 @@ body {
     .dash-table-container {
       overflow-x: auto;
       max-width: 100vw;
+    }
+  }
+
+  /* ============================================
+     DECISION-SUPPORT ANIMATIONS
+     ============================================ */
+  .status-running {
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 5px rgba(40, 167, 69, 0.4); }
+    50% { box-shadow: 0 0 20px rgba(40, 167, 69, 0.8); }
+  }
+
+  .pathogen-flash {
+    animation: pathogen-border-flash 1s ease-in-out infinite;
+  }
+
+  @keyframes pathogen-border-flash {
+    0%, 100% { border-color: #dc3545; }
+    50% { border-color: #fd7e14; box-shadow: 0 0 15px rgba(220, 53, 69, 0.5); }
+  }
+
+  .metric-trend-up { color: #28a745; }
+  .metric-trend-down { color: #dc3545; }
+
+  .skeleton-loading {
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  /* Skeleton loading in dark mode */
+  @media (prefers-color-scheme: dark) {
+    .skeleton-loading {
+      background: linear-gradient(90deg, #2d2d44 25%, #3d3d5a 50%, #2d2d44 75%);
+      background-size: 200% 100%;
+    }
+  }
+
+  [data-theme="dark"] .skeleton-loading {
+    background: linear-gradient(90deg, #2d2d44 25%, #3d3d5a 50%, #2d2d44 75%);
+    background-size: 200% 100%;
+  }
+
+  /* ============================================
+     MOBILE/TABLET RESPONSIVENESS
+     ============================================ */
+  @media (max-width: 768px) {
+    .dashboard-metric-card { margin-bottom: 8px; }
+    .header { padding: 10px 15px; }
+    .header h2 { font-size: 1.2rem; }
+    .btn { min-height: 48px; }
+    #sample-selector { min-width: 100% !important; max-width: 100% !important; }
+    .card-body { padding: 12px; }
+    .pathogen-alert-critical { flex-direction: column; }
+    .pathogen-alert-icon-container { margin-bottom: 12px; }
+  }
+
+  /* ============================================
+     PRINT STYLESHEET (consolidated)
+     ============================================ */
+  @media print {
+    /* Hide interactive/nav elements */
+    .header, .footer, .nav-tabs, .theme-toggle,
+    #update-interval, #countdown-tick, .btn,
+    .live-indicator, .skip-to-main, #toast-container,
+    .toast-container, .accordion-button, .update-indicator,
+    .refresh-countdown { display: none !important; }
+
+    .collapse:not(.show) { display: block !important; height: auto !important; }
+
+    .card { break-inside: avoid; box-shadow: none !important; border: 1px solid #dee2e6 !important; }
+
+    body {
+      font-size: 12pt;
+      line-height: 1.4;
+      background: white !important;
+      color: black !important;
+    }
+
+    .container-fluid { padding: 0 !important; }
+
+    body::before {
+      content: "Nanometa Live Report";
+      display: block;
+      text-align: right;
+      font-size: 10px;
+      color: #6c757d !important;
+      margin-bottom: 10px;
+    }
+
+    /* Charts sized for print */
+    .js-plotly-plot {
+      break-inside: avoid;
+      page-break-inside: avoid;
+      max-width: 100%;
     }
   }

@@ -23,6 +23,7 @@ from nanometa_live.app.components.modern_components import (
     N50Badge,
     ClassificationRateBadge,
     MetricsRow,
+    DecisionBanner,
     TABLE_STYLE_CELL,
     TABLE_STYLE_HEADER,
     status_conditional_style,
@@ -77,7 +78,7 @@ def create_dashboard_layout():
                                             html.I(
                                                 id="dashboard-status-icon",
                                                 className="bi bi-pause-circle",
-                                                style={"fontSize": "48px", "color": "white"}
+                                                style={"fontSize": "64px", "color": "white"}
                                             )
                                         ]
                                     ),
@@ -86,7 +87,7 @@ def create_dashboard_layout():
                                         children=[
                                             html.Span(
                                                 id="dashboard-status-label-text",
-                                                children="IDLE",
+                                                children="STANDBY",
                                                 className="fw-bold",
                                                 style={"fontSize": "14px"}
                                             ),
@@ -99,13 +100,13 @@ def create_dashboard_layout():
                                         className="text-center mt-2 text-muted"
                                     )
                                 ], className="d-flex flex-column align-items-center")
-                            ], md=2, className="d-flex align-items-center justify-content-center"),
+                            ], md=3, className="d-flex align-items-center justify-content-center"),
 
                             # Status Text
                             dbc.Col([
                                 html.H3(
                                     id="dashboard-status-text",
-                                    children="System Idle",
+                                    children="STANDBY - Ready to begin",
                                     className="mb-1",
                                     role="status",
                                     **{"aria-live": "polite"}
@@ -115,6 +116,11 @@ def create_dashboard_layout():
                                     children="Click 'Start Analysis' in the header to begin",
                                     className="text-muted mb-0",
                                     style={"fontSize": "16px"}
+                                ),
+                                html.Span(
+                                    id="dashboard-next-update",
+                                    children="",
+                                    className="text-muted small ms-2"
                                 ),
                                 html.Div(
                                     id="dashboard-progress-container",
@@ -181,6 +187,19 @@ def create_dashboard_layout():
         ], id="pathogen-alert-row", className="mb-0"),
 
         # =============================================
+        # 2b. DECISION BANNER (binary safe/action-required)
+        # =============================================
+        dbc.Row([
+            dbc.Col([
+                html.Div(
+                    id="dashboard-decision-banner",
+                    children=[],
+                    className="mb-3"
+                )
+            ], width=12)
+        ]),
+
+        # =============================================
         # 3. THREAT STATUS + PATHOGEN SCREENING + CLASSIFICATION
         # (Clinical decision: are there threats?)
         # =============================================
@@ -212,10 +231,19 @@ def create_dashboard_layout():
                                 id="dashboard-threat-subtitle",
                                 children="No dangerous pathogens detected",
                                 className="text-muted mb-0 small"
+                            ),
+                            html.Span(
+                                id="dashboard-threat-since",
+                                children="",
+                                className="small text-muted"
                             )
                         ], className="text-center")
                     ], className="py-3")
-                ], id="dashboard-threat-card", className="h-100", style={"borderColor": "#28a745", "borderWidth": "2px"})
+                ], id="dashboard-threat-card", className="h-100", style={
+                    "borderColor": "#28a745",
+                    "borderWidth": "2px",
+                    "backgroundColor": "rgba(40, 167, 69, 0.06)"
+                })
             ], md=3, className="mb-3"),
 
             # Pathogen Detection Summary
@@ -224,8 +252,18 @@ def create_dashboard_layout():
                     dbc.CardHeader([
                         html.Div([
                             html.I(className="bi bi-biohazard me-2", style={"color": "#dc3545"}),
-                            html.H6("Pathogen Screening", className="mb-0 d-inline")
-                        ])
+                            html.H6("Pathogen Screening", className="mb-0 d-inline"),
+                            html.Span(
+                                id="dashboard-screening-count",
+                                children="",
+                                className="ms-2 text-muted small"
+                            )
+                        ]),
+                        html.Span(
+                            id="dashboard-last-scan",
+                            children="",
+                            className="text-muted small"
+                        )
                     ], className="py-2"),
                     dbc.CardBody([
                         dcc.Loading(
@@ -237,8 +275,8 @@ def create_dashboard_layout():
                                     id="dashboard-pathogen-summary",
                                     children=[
                                         html.Div([
-                                            html.I(className="bi bi-hourglass text-muted me-2"),
-                                            html.Span("Waiting for classification data...", className="text-muted")
+                                            html.I(className="bi bi-arrow-repeat text-muted me-2"),
+                                            html.Span("Loading screening results...", className="text-muted")
                                         ], className="text-center py-2")
                                     ]
                                 )
@@ -296,6 +334,7 @@ def create_dashboard_layout():
                             children="0",
                             className="mb-0"
                         ),
+                        html.Span(id="dashboard-sequences-trend", children="", className="metric-trend"),
                         html.P("Sequences", className="text-muted small mb-0")
                     ], className="text-center py-2")
                 ], className="h-100 dashboard-metric-card")
@@ -313,6 +352,7 @@ def create_dashboard_layout():
                             children="--",
                             className="mb-0"
                         ),
+                        html.Span(id="dashboard-quality-trend", children="", className="metric-trend"),
                         html.P("Quality Score", className="text-muted small mb-0"),
                         html.Div(
                             id="dashboard-quality-badge-container",
@@ -334,6 +374,7 @@ def create_dashboard_layout():
                             children="0",
                             className="mb-0"
                         ),
+                        html.Span(id="dashboard-organisms-trend", children="", className="metric-trend"),
                         html.P("Organisms", className="text-muted small mb-0")
                     ], className="text-center py-2")
                 ], className="h-100 dashboard-metric-card")
@@ -355,6 +396,7 @@ def create_dashboard_layout():
                             children="0",
                             className="mb-0"
                         ),
+                        html.Span(id="dashboard-alerts-trend", children="", className="metric-trend"),
                         html.P("Alerts", className="text-muted small mb-0")
                     ], className="text-center py-2")
                 ], id="dashboard-alerts-card", className="h-100 dashboard-metric-card")
@@ -395,6 +437,7 @@ def create_dashboard_layout():
                                             {"name": "Quality", "id": "quality"},
                                             {"name": "Reads", "id": "reads"},
                                             {"name": "Organisms", "id": "organisms"},
+                                            {"name": "Last Updated", "id": "last_updated"},
                                         ],
                                         data=[],
                                         style_cell={**TABLE_STYLE_CELL, "padding": "10px 14px"},
@@ -408,9 +451,11 @@ def create_dashboard_layout():
                                         page_size=8,
                                         sort_action="native",
                                         tooltip_header={
+                                            "sample": "Click a row to filter all tabs to this sample",
                                             "quality": "Data quality assessment",
                                             "reads": "Number of DNA sequences",
-                                            "organisms": "Detected organism count"
+                                            "organisms": "Detected organism count",
+                                            "last_updated": "Time of most recent data for this sample"
                                         },
                                         tooltip_delay=500,
                                         tooltip_duration=3000
@@ -825,19 +870,74 @@ def create_alerts_list(alerts_data: list) -> dbc.ListGroup:
         key=lambda x: severity_order.get(x.get("severity", "info"), 2)
     )
 
-    alert_items = []
+    # Group alerts by category
+    category_map = {
+        "pathogen": "Pathogen Alerts",
+        "quality": "Quality Alerts",
+        "pipeline": "Pipeline Alerts",
+    }
+    categories = {}
     for alert in sorted_alerts:
-        severity = alert.get("severity", "info")
-        config = severity_config.get(severity, severity_config["info"])
+        cat = alert.get("category", "pipeline")
+        categories.setdefault(cat, []).append(alert)
 
+    alert_items = []
+    # Render in fixed category order
+    for cat_key in ["pathogen", "quality", "pipeline"]:
+        cat_alerts = categories.pop(cat_key, [])
+        if not cat_alerts:
+            continue
+        cat_label = category_map.get(cat_key, cat_key.title() + " Alerts")
         alert_items.append(
-            dbc.ListGroupItem([
-                html.Div([
-                    html.I(className=f"bi {config['icon']} me-2", style={"color": f"var(--bs-{config['color']})"}),
-                    html.Span(alert.get("message", "Unknown alert")),
-                ]),
-                html.Small(alert.get("timestamp", ""), className="text-muted d-block mt-1")
-            ], className="py-2")
+            dbc.ListGroupItem(
+                html.Small(cat_label, className="fw-bold text-uppercase"),
+                className="py-1 bg-light",
+                style={"letterSpacing": "0.05em"}
+            )
         )
+        for alert in cat_alerts:
+            severity = alert.get("severity", "info")
+            config = severity_config.get(severity, severity_config["info"])
+            is_critical = severity in ("critical", "danger")
+            is_resolved = alert.get("resolved", False)
+
+            item_class = "py-2"
+            if is_critical:
+                item_class += " critical-alert-item"
+            if is_resolved:
+                item_class += " resolved-alert-item"
+
+            alert_items.append(
+                dbc.ListGroupItem([
+                    html.Div([
+                        html.I(className=f"bi {config['icon']} me-2", style={"color": f"var(--bs-{config['color']})"}),
+                        html.Span(alert.get("message", "Unknown alert")),
+                    ]),
+                    html.Small(alert.get("timestamp", ""), className="text-muted d-block mt-1")
+                ], className=item_class)
+            )
+
+    # Any remaining uncategorized alerts
+    for cat_key, cat_alerts in categories.items():
+        cat_label = cat_key.title() + " Alerts"
+        alert_items.append(
+            dbc.ListGroupItem(
+                html.Small(cat_label, className="fw-bold text-uppercase"),
+                className="py-1 bg-light",
+                style={"letterSpacing": "0.05em"}
+            )
+        )
+        for alert in cat_alerts:
+            severity = alert.get("severity", "info")
+            config = severity_config.get(severity, severity_config["info"])
+            alert_items.append(
+                dbc.ListGroupItem([
+                    html.Div([
+                        html.I(className=f"bi {config['icon']} me-2", style={"color": f"var(--bs-{config['color']})"}),
+                        html.Span(alert.get("message", "Unknown alert")),
+                    ]),
+                    html.Small(alert.get("timestamp", ""), className="text-muted d-block mt-1")
+                ], className="py-2")
+            )
 
     return dbc.ListGroup(alert_items, flush=True)

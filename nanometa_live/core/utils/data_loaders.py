@@ -7,12 +7,13 @@ optional sample filtering, supporting both per-sample and aggregated views.
 
 import os
 import glob
+import hashlib
 import json
 import logging
 import re
 import time
 import pandas as pd
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Union
 
 from nanometa_live.core.utils.sample_detector import (
     get_sample_file_mapping,
@@ -34,6 +35,12 @@ FILE_STABILITY_MIN_SIZE_BYTES = 10  # Minimum file size to consider valid
 _kraken_cache: Dict[str, Tuple[float, pd.DataFrame]] = {}
 _fastp_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 _last_cache_cleanup: float = 0.0  # Track last cleanup time
+
+# File mtime/size cache: maps (dir, sample) -> (mtime, size, cached_result)
+# Used for O(stat) freshness checks instead of O(parse)
+_file_mtimes: Dict[str, Tuple[float, int, Any]] = {}
+# Last freshness fingerprint for change detection
+_last_freshness_fingerprint: str = ""
 
 
 def _is_file_stable(filepath: str, wait_ms: int = FILE_STABILITY_CHECK_INTERVAL_MS) -> bool:
@@ -145,9 +152,128 @@ def _cleanup_stale_cache_entries():
 
 def clear_data_cache():
     """Clear all cached data. Call when data is expected to have changed."""
-    global _kraken_cache, _fastp_cache
+    global _kraken_cache, _fastp_cache, _file_mtimes
     _kraken_cache.clear()
     _fastp_cache.clear()
+    _file_mtimes.clear()
+
+
+def _get_dir_latest_mtime(directory: str) -> float:
+    """Return the most recent mtime among files in a directory (non-recursive)."""
+    latest = 0.0
+    try:
+        for entry in os.scandir(directory):
+            if entry.is_file():
+                try:
+                    mt = entry.stat().st_mtime
+                    if mt > latest:
+                        latest = mt
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return latest
+
+
+def _get_path_fingerprint(paths: List[str]) -> Tuple[float, int]:
+    """
+    Compute a (max_mtime, total_size) fingerprint for a list of paths.
+
+    For directories, scans contained files for the latest mtime and total size.
+    For regular files, uses their individual stat values.
+    """
+    combined_mtime = 0.0
+    combined_size = 0
+    for fp in paths:
+        try:
+            st = os.stat(fp)
+        except OSError:
+            continue
+        if os.path.isdir(fp):
+            # Scan directory entries for latest mtime and accumulated size
+            try:
+                for entry in os.scandir(fp):
+                    if entry.is_file():
+                        try:
+                            est = entry.stat()
+                            if est.st_mtime > combined_mtime:
+                                combined_mtime = est.st_mtime
+                            combined_size += est.st_size
+                        except OSError:
+                            pass
+            except OSError:
+                pass
+        else:
+            if st.st_mtime > combined_mtime:
+                combined_mtime = st.st_mtime
+            combined_size += st.st_size
+    return (combined_mtime, combined_size)
+
+
+def _check_mtime_cache(
+    cache_key: str,
+    paths: List[str],
+) -> Optional[Any]:
+    """
+    Check if any of the given paths have changed since the last cached result.
+
+    Compares current mtime and size against stored values. If unchanged,
+    returns the cached result without reparsing. Returns None on cache miss
+    or when data has changed.
+    """
+    if cache_key not in _file_mtimes:
+        return None
+
+    stored_mtime, stored_size, cached_result = _file_mtimes[cache_key]
+    current_mtime, current_size = _get_path_fingerprint(paths)
+
+    if current_mtime == stored_mtime and current_size == stored_size:
+        return cached_result
+
+    return None
+
+
+def _store_mtime_cache(
+    cache_key: str,
+    paths: List[str],
+    result: Any,
+) -> None:
+    """Store a result keyed by the combined mtime/size fingerprint of paths."""
+    mtime, size = _get_path_fingerprint(paths)
+    _file_mtimes[cache_key] = (mtime, size, result)
+
+
+def check_data_freshness(main_dir: str) -> str:
+    """
+    Return a fingerprint string representing the freshness of result data.
+
+    Scans the kraken2/, fastp/, and validation/ subdirectories and hashes
+    the latest file mtimes. A changed fingerprint means new data is available.
+
+    This function is intended to be called once per polling interval by a
+    single centralized callback, rather than having each tab poll independently.
+
+    When data has changed, stale cache entries are cleaned up as a side effect.
+    """
+    global _last_freshness_fingerprint
+
+    main_dir = resolve_analysis_directory(main_dir)
+
+    parts = []
+    for subdir in ("kraken2", "fastp", "validation"):
+        dirpath = os.path.join(main_dir, subdir)
+        mt = _get_dir_latest_mtime(dirpath)
+        parts.append(f"{subdir}:{mt}")
+
+    raw = "|".join(parts)
+    fingerprint = hashlib.md5(raw.encode()).hexdigest()
+
+    # Run cache cleanup only when data has actually changed
+    if fingerprint != _last_freshness_fingerprint:
+        _last_freshness_fingerprint = fingerprint
+        _cleanup_stale_cache_entries()
+
+    return fingerprint
 
 
 # Expected columns for Kraken2 report format
@@ -337,21 +463,29 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
     """
     global _kraken_cache
 
-    # Periodically cleanup stale cache entries to prevent memory leaks
-    _cleanup_stale_cache_entries()
-
     # Auto-resolve to analysis directory if main_dir is base directory
     main_dir = resolve_analysis_directory(main_dir)
 
     # Check cache first
     cache_key = _get_cache_key(main_dir, sample)
+
+    kraken_dir = os.path.join(main_dir, "kraken2")
+
+    # Fast mtime-based check: if the kraken2 directory has not changed,
+    # return the previously cached result without any parsing or TTL lookup
+    mtime_key = f"kraken:{cache_key}"
+    if os.path.isdir(kraken_dir):
+        mtime_cached = _check_mtime_cache(mtime_key, [kraken_dir])
+        if mtime_cached is not None:
+            logging.debug(f"Mtime cache hit for Kraken data: {cache_key}")
+            return mtime_cached.copy()
+
+    # Fall back to TTL-based cache
     if cache_key in _kraken_cache:
         cache_time, cached_df = _kraken_cache[cache_key]
         if _is_cache_valid(cache_time):
             logging.debug(f"Using cached Kraken data for {cache_key}")
             return cached_df.copy()
-
-    kraken_dir = os.path.join(main_dir, "kraken2")
 
     if not os.path.exists(kraken_dir):
         logging.warning(f"Kraken2 directory not found: {kraken_dir}")
@@ -476,6 +610,7 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
         result_df = pd.DataFrame(result_rows)
         # Cache the result
         _kraken_cache[cache_key] = (time.time(), result_df.copy())
+        _store_mtime_cache(mtime_key, [kraken_dir], result_df.copy())
         return result_df
 
     else:
@@ -542,6 +677,7 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
         if len(all_reports) == 1:
             result_df = all_reports[0]
             _kraken_cache[cache_key] = (time.time(), result_df.copy())
+            _store_mtime_cache(mtime_key, [kraken_dir], result_df.copy())
             return result_df
 
         # Otherwise, aggregate multiple batches by taxid - sum reads (direct assignments)
@@ -591,6 +727,7 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
         result_df = pd.DataFrame(result_rows)
         # Cache the result
         _kraken_cache[cache_key] = (time.time(), result_df.copy())
+        _store_mtime_cache(mtime_key, [kraken_dir], result_df.copy())
         return result_df
 
 
@@ -623,6 +760,14 @@ def load_fastp_data(main_dir: str, sample: Optional[str] = None) -> Dict[str, An
     if not os.path.exists(fastp_dir):
         logging.warning(f"FASTP directory not found: {fastp_dir}")
         return _empty_fastp_stats()
+
+    # Fast mtime-based check: skip parsing if fastp directory is unchanged
+    fastp_cache_key = _get_cache_key(main_dir, sample)
+    mtime_key = f"fastp:{fastp_cache_key}"
+    mtime_cached = _check_mtime_cache(mtime_key, [fastp_dir])
+    if mtime_cached is not None:
+        logging.debug(f"Mtime cache hit for FASTP data: {fastp_cache_key}")
+        return mtime_cached.copy() if isinstance(mtime_cached, dict) else mtime_cached
 
     if sample is None or sample == "All Samples":
         # Aggregate all samples
@@ -662,6 +807,7 @@ def load_fastp_data(main_dir: str, sample: Optional[str] = None) -> Dict[str, An
         total_bases_after = aggregated_stats['total_bases_after']
         if total_bases_after > 0:
             aggregated_stats['q30_rate_after'] = _acc_q30_bases / total_bases_after
+        _store_mtime_cache(mtime_key, [fastp_dir], aggregated_stats.copy())
         return aggregated_stats
 
     else:
@@ -710,6 +856,7 @@ def load_fastp_data(main_dir: str, sample: Optional[str] = None) -> Dict[str, An
         total_bases_after = aggregated_stats['total_bases_after']
         if total_bases_after > 0:
             aggregated_stats['q30_rate_after'] = _acc_q30_bases / total_bases_after
+        _store_mtime_cache(mtime_key, [fastp_dir], aggregated_stats.copy())
         return aggregated_stats
 
 

@@ -37,6 +37,65 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         return 30000  # Default 30 seconds
 
     # ========================================================================
+    # Data Fingerprint (change detection for tab-skip optimization)
+    # ========================================================================
+
+    @app.callback(
+        Output('data-fingerprint', 'data'),
+        Input('update-interval', 'n_intervals'),
+        State('app-config', 'data'),
+    )
+    def update_data_fingerprint(n_intervals, config):
+        """Compute a fingerprint of the current data state.
+
+        This fingerprint changes when new results appear, allowing
+        inactive tabs to skip updates when data has not changed.
+        """
+        if not config:
+            return no_update
+        main_dir = config.get('results_output_directory', '') or config.get('main_dir', '')
+        if not main_dir or not os.path.exists(main_dir):
+            return no_update
+        try:
+            from nanometa_live.core.utils.data_loaders import check_data_freshness
+            return check_data_freshness(main_dir)
+        except ImportError:
+            return str(time.time())
+
+    # ========================================================================
+    # Cache Warming (pre-populate on startup with existing results)
+    # ========================================================================
+
+    @app.callback(
+        Output('data-fingerprint', 'data', allow_duplicate=True),
+        Input('app-config', 'data'),
+        prevent_initial_call='initial_duplicate',
+    )
+    def warm_cache_on_startup(config):
+        """Pre-populate the mtime cache when app starts with existing results.
+
+        This avoids a cold-cache penalty on the first polling interval by
+        calling check_data_freshness() as soon as the config is available.
+        """
+        if not config:
+            return no_update
+        main_dir = config.get('results_output_directory', '') or config.get('main_dir', '')
+        if not main_dir or not os.path.exists(main_dir):
+            return no_update
+        # Only warm once
+        if hasattr(warm_cache_on_startup, '_warmed'):
+            return no_update
+        warm_cache_on_startup._warmed = True
+        try:
+            from nanometa_live.core.utils.data_loaders import check_data_freshness
+            fingerprint = check_data_freshness(main_dir)
+            logging.info(f"Cache warmed on startup, fingerprint: {fingerprint[:8]}...")
+            return fingerprint
+        except Exception as e:
+            logging.debug(f"Cache warming failed: {e}")
+            return no_update
+
+    # ========================================================================
     # Taxid Mapping Initialization (for pathogen detection)
     # ========================================================================
     # This runs once on startup to load cached taxid mappings if they exist.
@@ -116,15 +175,15 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     def update_status_display(status, config):
         """Update the status display based on backend status."""
         if not status:
-            return "gray", "Unknown", "Unable to determine backend status"
+            return "gray", "STANDBY", "Unable to determine backend status"
 
         # Check if in visualization-only mode
         if config and config.get("visualization_only", False):
-            return "blue", "Viewing Data", "Visualization mode - displaying existing results (no pipeline execution)"
+            return "blue", "VIEWING", "Visualization mode - displaying existing results"
 
         if status.get("running", False):
             color = "green"
-            text = "Running"
+            text = "RUNNING"
 
             # Create details
             details = [
@@ -141,9 +200,9 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             return color, text, ", ".join(details)
 
         if status.get("pipeline_status") == "error":
-            return "red", "Error", ", ".join(status.get("errors", ["Unknown error"]))
+            return "red", "ERROR", ", ".join(status.get("errors", ["Unknown error"]))
 
-        return "gray", "Idle", "Click 'Start Analysis' to begin processing"
+        return "gray", "STANDBY", "Click 'Start Analysis' to begin processing"
 
     @app.callback(
         [
@@ -670,14 +729,22 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         ],
         Input("update-interval", "n_intervals"),
         State("app-config", "data"),
+        State("data-fingerprint", "data"),
     )
-    def update_available_samples(n_intervals, config):
+    def update_available_samples(n_intervals, config, data_fingerprint):
         """
         Detect and update available samples from nanometanf output.
 
         Scans the output directory for Kraken2, FASTP, and BLAST files
         to automatically detect all available samples/barcodes.
         """
+        # Fingerprint guard - skip if data unchanged
+        if not hasattr(update_available_samples, '_last_fp'):
+            update_available_samples._last_fp = None
+        if data_fingerprint and data_fingerprint == update_available_samples._last_fp:
+            return no_update, no_update
+        update_available_samples._last_fp = data_fingerprint
+
         if not config:
             return ["All Samples"], {}
 

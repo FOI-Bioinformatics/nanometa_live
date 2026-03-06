@@ -40,6 +40,7 @@ from nanometa_live.app.utils.export_utils import (
 
 from nanometa_live.app.utils.plotly_theme import (
     COLORS,
+    CHART_CONFIG,
     DARK_THEME,
     LIGHT_THEME,
     register_templates,

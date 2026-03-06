@@ -14,6 +14,7 @@ from nanometa_live.app.components.modern_components import (
     TABLE_STYLE_CELL,
     TABLE_STYLE_HEADER,
 )
+from nanometa_live.app.utils.plotly_theme import CHART_CONFIG
 
 
 def create_validation_status_card(
@@ -165,7 +166,7 @@ def _create_blast_tab() -> dbc.Tab:
                                 children=[
                                     dcc.Graph(
                                         id="blast-identity-plot",
-                                        config={"displayModeBar": True, "displaylogo": False},
+                                        config=CHART_CONFIG,
                                         style={"height": "400px"},
                                     )
                                 ]
@@ -326,7 +327,7 @@ def _create_coverage_tab() -> dbc.Tab:
                         children=[
                             dcc.Graph(
                                 id="coverage-depth-plot",
-                                config={"displayModeBar": True, "displaylogo": False},
+                                config=CHART_CONFIG,
                                 style={"height": "450px"},
                             )
                         ],
@@ -340,7 +341,7 @@ def _create_coverage_tab() -> dbc.Tab:
                                 children=[
                                     dcc.Graph(
                                         id="coverage-cumulative-plot",
-                                        config={"displayModeBar": True, "displaylogo": False},
+                                        config=CHART_CONFIG,
                                         style={"height": "280px"},
                                     )
                                 ],
@@ -352,7 +353,7 @@ def _create_coverage_tab() -> dbc.Tab:
                                 children=[
                                     dcc.Graph(
                                         id="coverage-histogram-plot",
-                                        config={"displayModeBar": True, "displaylogo": False},
+                                        config=CHART_CONFIG,
                                         style={"height": "280px"},
                                     )
                                 ],

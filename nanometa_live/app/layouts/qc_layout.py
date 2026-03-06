@@ -17,6 +17,7 @@ from nanometa_live.app.components.modern_components import (
     TABLE_STYLE_HEADER,
     status_conditional_style,
 )
+from nanometa_live.app.utils.plotly_theme import CHART_CONFIG
 from nanometa_live.app.components.organism_components import (
     FilteringBreakdownVisual,
     KeyMetricsSummaryCard,
@@ -241,7 +242,7 @@ def create_qc_layout():
                                                 dcc.Graph(
                                                     id="cumul-reads-graph",
                                                     figure=cumul_reads_fig,
-                                                    config={"displayModeBar": True}
+                                                    config=CHART_CONFIG
                                                 ),
                                                 width=6
                                             ),
@@ -249,7 +250,7 @@ def create_qc_layout():
                                                 dcc.Graph(
                                                     id="cumul-bp-graph",
                                                     figure=cumul_bp_fig,
-                                                    config={"displayModeBar": True}
+                                                    config=CHART_CONFIG
                                                 ),
                                                 width=6
                                             )
@@ -268,7 +269,7 @@ def create_qc_layout():
                                                 dcc.Graph(
                                                     id="reads-graph",
                                                     figure=reads_fig,
-                                                    config={"displayModeBar": True}
+                                                    config=CHART_CONFIG
                                                 ),
                                                 width=6
                                             ),
@@ -276,7 +277,7 @@ def create_qc_layout():
                                                 dcc.Graph(
                                                     id="bp-graph",
                                                     figure=bp_fig,
-                                                    config={"displayModeBar": True}
+                                                    config=CHART_CONFIG
                                                 ),
                                                 width=6
                                             )

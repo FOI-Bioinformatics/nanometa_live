@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Dict, Any, List
 
 from dash import Dash, Input, Output, State, callback, ctx, no_update, html
+from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 import plotly.express as px
 
@@ -62,16 +63,29 @@ def register_qc_callbacks(app: Dash):
         [
             State("app-config", "data"),
             State("backend-status", "data"),
+            State("active-tab", "data"),
+            State("data-fingerprint", "data"),
         ],
         prevent_initial_call=False,
     )
-    def load_qc_data_cache(n_intervals, selected_sample, config, status):
+    def load_qc_data_cache(n_intervals, selected_sample, config, status, active_tab, data_fingerprint):
         """
         Load all QC data once per interval and cache it.
 
         This prevents multiple callbacks from redundantly loading the same data.
         Returns a dict with kraken_df and fastp_data for the selected sample.
         """
+        # Tab skip guard - skip interval updates when tab is not active
+        if ctx.triggered_id == 'update-interval' and active_tab != 'qc-tab':
+            raise PreventUpdate
+        # Fingerprint guard - skip if data unchanged on interval tick
+        if ctx.triggered_id == 'update-interval' and not hasattr(load_qc_data_cache, '_last_fp'):
+            load_qc_data_cache._last_fp = None
+        if ctx.triggered_id == 'update-interval':
+            if data_fingerprint and data_fingerprint == load_qc_data_cache._last_fp:
+                raise PreventUpdate
+            load_qc_data_cache._last_fp = data_fingerprint
+
         cache_data = {
             "loaded": False,
             "sample": selected_sample,
@@ -126,17 +140,32 @@ def register_qc_callbacks(app: Dash):
         ],
         [
             Input("update-interval", "n_intervals"),
-            Input("selected-sample", "data"),  # Added sample selection trigger
+            Input("selected-sample", "data"),
         ],
-        [State("app-config", "data"), State("backend-status", "data")],
+        [
+            State("app-config", "data"),
+            State("backend-status", "data"),
+            State("active-tab", "data"),
+            State("data-fingerprint", "data"),
+        ],
     )
-    def update_qc_plots(n_intervals, selected_sample, config, status):
+    def update_qc_plots(n_intervals, selected_sample, config, status, active_tab, data_fingerprint):
         """
         Update the QC plots based on actual processed data from FASTP/Kraken2.
 
         Shows actual reads and base pairs that passed through the pipeline,
         ordered by file modification time to show processing progress.
         """
+        # Tab + fingerprint guard
+        if ctx.triggered_id == 'update-interval':
+            if active_tab != 'qc-tab':
+                raise PreventUpdate
+            if not hasattr(update_qc_plots, '_last_fp'):
+                update_qc_plots._last_fp = None
+            if data_fingerprint and data_fingerprint == update_qc_plots._last_fp:
+                raise PreventUpdate
+            update_qc_plots._last_fp = data_fingerprint
+
         # Default empty plots
         empty_figures = [
             px.line(title="Cumulative Reads"),
@@ -376,12 +405,26 @@ def register_qc_callbacks(app: Dash):
         ],
         [
             Input("update-interval", "n_intervals"),
-            Input("selected-sample", "data"),  # Added sample selection trigger
+            Input("selected-sample", "data"),
         ],
-        [State("app-config", "data"), State("backend-status", "data")],
+        [
+            State("app-config", "data"),
+            State("backend-status", "data"),
+            State("active-tab", "data"),
+            State("data-fingerprint", "data"),
+        ],
     )
-    def update_qc_stats(n_intervals, selected_sample, config, status):
+    def update_qc_stats(n_intervals, selected_sample, config, status, active_tab, data_fingerprint):
         """Update the QC statistics based on the latest data."""
+        # Tab + fingerprint guard
+        if ctx.triggered_id == 'update-interval':
+            if active_tab != 'qc-tab':
+                raise PreventUpdate
+            if not hasattr(update_qc_stats, '_last_fp'):
+                update_qc_stats._last_fp = None
+            if data_fingerprint and data_fingerprint == update_qc_stats._last_fp:
+                raise PreventUpdate
+            update_qc_stats._last_fp = data_fingerprint
         # Default values for when no data is available
         default_values = [
             "Total reads pre-filtering: 0",
@@ -679,16 +722,31 @@ def register_qc_callbacks(app: Dash):
         Output("per-sample-table", "data"),
         [
             Input("update-interval", "n_intervals"),
-            Input("selected-sample", "data"),  # Added sample selection trigger
+            Input("selected-sample", "data"),
         ],
-        [State("app-config", "data"), State("backend-status", "data")],
+        [
+            State("app-config", "data"),
+            State("backend-status", "data"),
+            State("active-tab", "data"),
+            State("data-fingerprint", "data"),
+        ],
     )
-    def update_per_sample_table(n_intervals, selected_sample, config, status):
+    def update_per_sample_table(n_intervals, selected_sample, config, status, active_tab, data_fingerprint):
         """
         Update the per-sample breakdown table with statistics for each barcode.
 
         This table shows individual stats for each detected sample/barcode.
         """
+        # Tab + fingerprint guard
+        if ctx.triggered_id == 'update-interval':
+            if active_tab != 'qc-tab':
+                raise PreventUpdate
+            if not hasattr(update_per_sample_table, '_last_fp'):
+                update_per_sample_table._last_fp = None
+            if data_fingerprint and data_fingerprint == update_per_sample_table._last_fp:
+                raise PreventUpdate
+            update_per_sample_table._last_fp = data_fingerprint
+
         # Check if we have valid config and main_dir
         main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
         if not main_dir or not os.path.exists(main_dir):
@@ -715,9 +773,14 @@ def register_qc_callbacks(app: Dash):
             Input("update-interval", "n_intervals"),
             Input("selected-sample", "data"),
         ],
-        [State("app-config", "data"), State("backend-status", "data")],
+        [
+            State("app-config", "data"),
+            State("backend-status", "data"),
+            State("active-tab", "data"),
+            State("data-fingerprint", "data"),
+        ],
     )
-    def update_base_quality_card(n_intervals, selected_sample, config, status):
+    def update_base_quality_card(n_intervals, selected_sample, config, status, active_tab, data_fingerprint):
         """
         Update the base quality card showing Q20/Q30 rates and optional sparkline.
 
@@ -725,6 +788,16 @@ def register_qc_callbacks(app: Dash):
         - FASTP: q20_bases, q30_bases, total_bases, quality_curves
         - Seqkit (Chopper): Q20(%), Q30(%), sum_len
         """
+        # Tab + fingerprint guard
+        if ctx.triggered_id == 'update-interval':
+            if active_tab != 'qc-tab':
+                raise PreventUpdate
+            if not hasattr(update_base_quality_card, '_last_fp'):
+                update_base_quality_card._last_fp = None
+            if data_fingerprint and data_fingerprint == update_base_quality_card._last_fp:
+                raise PreventUpdate
+            update_base_quality_card._last_fp = data_fingerprint
+
         # Default empty state
         empty_state = EmptyStateMessage(
             title="No Quality Data",
@@ -815,9 +888,14 @@ def register_qc_callbacks(app: Dash):
             Input("update-interval", "n_intervals"),
             Input("selected-sample", "data"),
         ],
-        [State("app-config", "data"), State("backend-status", "data")],
+        [
+            State("app-config", "data"),
+            State("backend-status", "data"),
+            State("active-tab", "data"),
+            State("data-fingerprint", "data"),
+        ],
     )
-    def update_read_statistics_card(n_intervals, selected_sample, config, status):
+    def update_read_statistics_card(n_intervals, selected_sample, config, status, active_tab, data_fingerprint):
         """
         Update the read statistics card showing mean length, N50, and GC content.
 
@@ -825,6 +903,16 @@ def register_qc_callbacks(app: Dash):
         - FASTP: read1_mean_length (before/after), gc_content
         - Seqkit (Chopper): avg_len, N50, GC(%)
         """
+        # Tab + fingerprint guard
+        if ctx.triggered_id == 'update-interval':
+            if active_tab != 'qc-tab':
+                raise PreventUpdate
+            if not hasattr(update_read_statistics_card, '_last_fp'):
+                update_read_statistics_card._last_fp = None
+            if data_fingerprint and data_fingerprint == update_read_statistics_card._last_fp:
+                raise PreventUpdate
+            update_read_statistics_card._last_fp = data_fingerprint
+
         # Default empty state
         empty_state = EmptyStateMessage(
             title="No Read Statistics",
@@ -929,14 +1017,29 @@ def register_qc_callbacks(app: Dash):
             Input("update-interval", "n_intervals"),
             Input("selected-sample", "data"),
         ],
-        [State("app-config", "data"), State("backend-status", "data")],
+        [
+            State("app-config", "data"),
+            State("backend-status", "data"),
+            State("active-tab", "data"),
+            State("data-fingerprint", "data"),
+        ],
     )
-    def update_filtering_breakdown(n_intervals, selected_sample, config, status):
+    def update_filtering_breakdown(n_intervals, selected_sample, config, status, active_tab, data_fingerprint):
         """
         Update the visual filtering breakdown component.
 
         Shows a visual representation of quality filtering statistics.
         """
+        # Tab + fingerprint guard
+        if ctx.triggered_id == 'update-interval':
+            if active_tab != 'qc-tab':
+                raise PreventUpdate
+            if not hasattr(update_filtering_breakdown, '_last_fp'):
+                update_filtering_breakdown._last_fp = None
+            if data_fingerprint and data_fingerprint == update_filtering_breakdown._last_fp:
+                raise PreventUpdate
+            update_filtering_breakdown._last_fp = data_fingerprint
+
         # Default empty state
         empty_state = EmptyStateMessage(
             title="No Filtering Data",
@@ -1035,14 +1138,28 @@ def register_qc_callbacks(app: Dash):
             Input("update-interval", "n_intervals"),
             Input("selected-sample", "data"),
         ],
-        [State("app-config", "data")],
+        [
+            State("app-config", "data"),
+            State("active-tab", "data"),
+            State("data-fingerprint", "data"),
+        ],
     )
-    def update_qc_metrics_summary(n_intervals, selected_sample, config):
+    def update_qc_metrics_summary(n_intervals, selected_sample, config, active_tab, data_fingerprint):
         """
         Update the key metrics summary card with QC data.
 
         Returns a KeyMetricsSummaryCard component matching the QualityScoreIndicator design.
         """
+        # Tab + fingerprint guard
+        if ctx.triggered_id == 'update-interval':
+            if active_tab != 'qc-tab':
+                raise PreventUpdate
+            if not hasattr(update_qc_metrics_summary, '_last_fp'):
+                update_qc_metrics_summary._last_fp = None
+            if data_fingerprint and data_fingerprint == update_qc_metrics_summary._last_fp:
+                raise PreventUpdate
+            update_qc_metrics_summary._last_fp = data_fingerprint
+
         from nanometa_live.app.components.organism_components import KeyMetricsSummaryCard
 
         # Default empty state

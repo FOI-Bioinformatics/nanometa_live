@@ -147,6 +147,9 @@ class CallbackThrottler:
 # Global throttler instance for callbacks (1 second minimum between calls)
 callback_throttler = CallbackThrottler(min_interval_ms=1000)
 
+# Throttler for centralized data-freshness polling (2 second minimum)
+data_update_throttler = CallbackThrottler(min_interval_ms=2000)
+
 
 def is_triggered_by(ctx, trigger_id: str) -> bool:
     """

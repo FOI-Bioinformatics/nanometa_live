@@ -27,6 +27,37 @@ document.addEventListener('click', function(event) {
     }
 });
 
+// Auto-dismiss toasts after animation completes (4s delay + 0.5s fade)
+var toastObserver = new MutationObserver(function(mutations) {
+    mutations.forEach(function(mutation) {
+        mutation.addedNodes.forEach(function(node) {
+            if (node.classList && node.classList.contains('toast-notification')) {
+                setTimeout(function() {
+                    if (node.parentNode) {
+                        node.parentNode.removeChild(node);
+                    }
+                }, 5000);
+            }
+        });
+    });
+});
+
+// Start observing toast container when it exists
+function observeToasts() {
+    var container = document.getElementById('toast-container');
+    if (container) {
+        toastObserver.observe(container, {childList: true});
+    } else {
+        setTimeout(observeToasts, 500);
+    }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', observeToasts);
+} else {
+    observeToasts();
+}
+
 // Keyboard accessibility for toast close
 document.addEventListener('keydown', function(event) {
     if (event.key === 'Escape') {

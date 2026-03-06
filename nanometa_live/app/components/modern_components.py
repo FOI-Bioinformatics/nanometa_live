@@ -322,17 +322,17 @@ def SampleStatusBadge(
         # Returns green badge with "Good" text
     """
     status_config = {
-        "good": {"color": "success", "text": "Good", "icon": "✓"},
-        "review": {"color": "warning", "text": "Needs Review", "icon": "⚠"},
-        "issue": {"color": "danger", "text": "Issue Detected", "icon": "✗"},
-        "processing": {"color": "primary", "text": "Processing", "icon": "⟳"},
-        "idle": {"color": "secondary", "text": "Idle", "icon": "○"}
+        "good": {"color": "success", "text": "Good", "icon_cls": "bi bi-check-circle-fill"},
+        "review": {"color": "warning", "text": "Needs Review", "icon_cls": "bi bi-exclamation-triangle-fill"},
+        "issue": {"color": "danger", "text": "Issue Detected", "icon_cls": "bi bi-x-circle-fill"},
+        "processing": {"color": "primary", "text": "Processing", "icon_cls": "bi bi-arrow-repeat"},
+        "idle": {"color": "secondary", "text": "Idle", "icon_cls": "bi bi-circle"}
     }
 
     config = status_config.get(status, status_config["idle"])
 
     badge_props = {
-        "children": f"{config['icon']} {config['text']}",
+        "children": [html.I(className=config["icon_cls"] + " me-1"), config["text"]],
         "color": config["color"],
         "className": "px-3 py-2"
     }
@@ -432,19 +432,19 @@ def AlertListItem(
 
     color = color_map.get(severity, "info")
 
-    # Icon mapping
-    icon_map = {
-        "success": "✓",
-        "info": "ℹ",
-        "warning": "⚠",
-        "danger": "✗"
+    # Icon mapping using Bootstrap icons
+    icon_cls_map = {
+        "success": "bi bi-check-circle-fill",
+        "info": "bi bi-info-circle-fill",
+        "warning": "bi bi-exclamation-triangle-fill",
+        "danger": "bi bi-x-circle-fill"
     }
 
-    icon = icon_map.get(severity, "ℹ")
+    icon_cls = icon_cls_map.get(severity, "bi bi-info-circle-fill")
 
     content = [
         html.Div([
-            html.Span(icon, className=f"text-{color} me-2 h5 mb-0"),
+            html.I(className=f"{icon_cls} text-{color} me-2 h5 mb-0"),
             html.Span(message, className="alert-message")
         ], className="d-flex align-items-start mb-1")
     ]
@@ -895,3 +895,55 @@ def status_conditional_style(
             rule["borderLeft"] = f"4px solid {border_color}"
         rules.append(rule)
     return rules
+
+
+def TrendIndicator(delta, label=""):
+    """
+    Compact trend indicator showing positive or negative change.
+
+    Args:
+        delta: Numeric change value (positive, negative, or zero)
+        label: Optional label text after the number
+
+    Returns:
+        html.Span with colored arrow and delta value
+    """
+    if delta > 0:
+        return html.Span([
+            html.I(className="bi bi-caret-up-fill me-1"),
+            f"+{delta:,}", " " + label if label else ""
+        ], className="metric-trend-up small")
+    elif delta < 0:
+        return html.Span([
+            html.I(className="bi bi-caret-down-fill me-1"),
+            f"{delta:,}", " " + label if label else ""
+        ], className="metric-trend-down small")
+    else:
+        return html.Span("--", className="text-muted small")
+
+
+def DecisionBanner(safe=True, message=""):
+    """
+    Decision-support banner indicating safe or action-required status.
+
+    Args:
+        safe: If True, shows green safe banner; if False, shows red action-required banner
+        message: Optional message text
+
+    Returns:
+        html.Div with appropriate styling and icon
+    """
+    if safe:
+        return html.Div([
+            html.I(className="bi bi-shield-check me-2", style={"fontSize": "24px"}),
+            html.Strong("SAFE", className="me-2"),
+            html.Span(message or "No action required", className="text-muted")
+        ], className="d-flex align-items-center p-3",
+           style={"backgroundColor": "#d4edda", "borderRadius": "8px", "borderLeft": "4px solid #28a745"})
+    else:
+        return html.Div([
+            html.I(className="bi bi-exclamation-triangle-fill me-2", style={"fontSize": "24px", "color": "#dc3545"}),
+            html.Strong("ACTION REQUIRED", className="me-2 text-danger"),
+            html.Span(message or "Review detected threats", className="text-muted")
+        ], className="d-flex align-items-center p-3",
+           style={"backgroundColor": "#f8d7da", "borderRadius": "8px", "borderLeft": "4px solid #dc3545"})

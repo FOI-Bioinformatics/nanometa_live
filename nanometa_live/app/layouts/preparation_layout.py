@@ -320,6 +320,17 @@ def _create_rescan_db_card() -> dbc.Card:
                     html.Small(id="taxmap-rescan-status", className="ms-2 text-muted"),
                 ], width="auto"),
             ]),
+            # Inline progress bar (hidden by default)
+            html.Div(id="taxmap-rescan-progress-container", style={"display": "none"}, children=[
+                dbc.Progress(id="taxmap-rescan-progress", value=0, striped=True, animated=True, className="mt-2", style={"height": "6px"}),
+                html.Small(id="taxmap-rescan-progress-label", children="", className="text-muted mt-1 d-block"),
+            ]),
+            # Current status display
+            html.Div(id="taxmap-rescan-info", className="mt-3", children=[
+                html.Div([html.I(className="bi bi-database me-2"), html.Span(id="taxmap-current-db-type", children="No database scanned", className="small text-muted")], className="mb-1"),
+                html.Div([html.I(className="bi bi-check2-circle me-2"), html.Span(id="taxmap-current-mapping-count", children="0 species mapped", className="small text-muted")], className="mb-1"),
+                html.Div([html.I(className="bi bi-clock-history me-2"), html.Span(id="taxmap-last-scan-time", children="Last scan: Never", className="small text-muted")]),
+            ]),
         ]),
     ], className="mb-4")
 

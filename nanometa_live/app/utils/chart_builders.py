@@ -21,6 +21,11 @@ from .plotly_theme import (
 )
 
 
+def responsive_height(n_items: int, base: int = 300, per_item: int = 25, max_height: int = 800) -> int:
+    """Calculate responsive chart height based on number of data items."""
+    return min(max_height, base + n_items * per_item)
+
+
 def create_pathogen_abundance_chart(
     organisms: List[Dict[str, Any]],
     watched_species: Optional[List[Dict[str, Any]]] = None,
@@ -72,7 +77,7 @@ def create_pathogen_abundance_chart(
     for org in sorted_organisms:
         # Truncate long names
         name = org.get("name", "Unknown")
-        display_name = name[:35] + "..." if len(name) > 35 else name
+        display_name = name[:45] + "..." if len(name) > 45 else name
         names.append(display_name)
         abundances.append(org.get("abundance", 0))
 
@@ -112,20 +117,39 @@ def create_pathogen_abundance_chart(
         customdata=hover_texts
     ))
 
-    # Add warning indicators for watched species
+    # Add background bands and warning indicators for watched species
+    max_abund = max(abundances) if abundances else 1
     for i, (name, abund, annot) in enumerate(zip(names, abundances, annotations)):
         if annot:
-            fig.add_annotation(
-                x=abund + max(abundances) * 0.02,
-                y=i,
-                text=f"<b>!</b>",
-                showarrow=False,
-                font=dict(size=14, color=get_threat_color(annot.lower())),
-                bgcolor=COLORS["warning_light"],
-                bordercolor=get_threat_color(annot.lower()),
-                borderwidth=2,
-                borderpad=3
+            # Subtle background band to distinguish watched species rows
+            fig.add_shape(
+                type="rect",
+                x0=0, x1=max_abund * 1.15,
+                y0=i - 0.4, y1=i + 0.4,
+                fillcolor=get_threat_color(annot.lower()),
+                opacity=0.07,
+                layer="below",
+                line_width=0,
             )
+            # Threat level badge - prominent for immediate recognition
+            fig.add_annotation(
+                x=abund + max_abund * 0.02,
+                y=i,
+                text=f"<b>{annot}</b>",
+                showarrow=False,
+                font=dict(size=11, color=COLORS["white"], family="Arial Black, Arial, sans-serif"),
+                bgcolor=get_threat_color(annot.lower()),
+                bordercolor=get_threat_color(annot.lower()),
+                borderwidth=1,
+                borderpad=4
+            )
+
+    # Add 1% detection threshold reference line
+    fig.add_vline(
+        x=1.0,
+        line=dict(color=COLORS["gray_400"], width=1, dash="dot"),
+        annotation=dict(text="1% threshold", font=dict(size=9))
+    )
 
     # Layout
     fig.update_layout(
@@ -145,7 +169,7 @@ def create_pathogen_abundance_chart(
             autorange="reversed",
             tickfont=dict(size=11)
         ),
-        height=max(400, len(names) * 30 + 100),
+        height=responsive_height(len(names), base=100, per_item=30, max_height=800),
         margin=dict(l=180, r=60, t=60, b=60),
         showlegend=False
     )
@@ -218,7 +242,7 @@ def create_threat_indicator_panel(
             margin=dict(l=20, r=20, t=30, b=20)
         )
 
-        return fig
+        return apply_theme_to_figure(fig)
 
     # Determine overall threat level
     threat_counts = {"critical": 0, "high": 0, "moderate": 0, "low": 0}
@@ -286,7 +310,7 @@ def create_threat_indicator_panel(
         margin=dict(l=20, r=20, t=30, b=20)
     )
 
-    return fig
+    return apply_theme_to_figure(fig)
 
 
 def create_quality_gauge(
@@ -350,7 +374,14 @@ def create_quality_gauge(
                 "range": [0, 100],
                 "tickwidth": 1,
                 "tickcolor": COLORS["gray_400"],
-                "tickvals": [0, 25, 50, 75, 100]
+                "tickvals": [
+                    thresholds["poor"] / 2,
+                    (thresholds["poor"] + thresholds["fair"]) / 2,
+                    (thresholds["fair"] + thresholds["good"]) / 2,
+                    (thresholds["good"] + 100) / 2
+                ],
+                "ticktext": ["Poor", "Fair", "Good", "Excellent"],
+                "tickfont": {"size": 10}
             },
             "bar": {"color": bar_color, "thickness": 0.6},
             "bgcolor": COLORS["gray_200"],
@@ -371,7 +402,7 @@ def create_quality_gauge(
         font={"family": "Inter, system-ui, sans-serif"}
     )
 
-    return fig
+    return apply_theme_to_figure(fig)
 
 
 def create_realtime_reads_chart(
@@ -578,26 +609,32 @@ def create_classification_donut(
         hovertemplate="<b>%{label}</b><br>Count: %{value:,}<br>%{percent}<extra></extra>"
     ))
 
-    # Center text - larger and more prominent
+    # Animated transitions for smooth data updates
+    fig.update_traces(
+        rotation=90,
+        sort=False
+    )
+
+    # Center text - show percentage with subtitle for operational clarity
     if compact:
         fig.add_annotation(
-            text=f"<b style='font-size:24px'>{classification_rate:.0f}%</b>",
-            x=0.5, y=0.55,
+            text=(
+                f"<b>{classification_rate:.0f}%</b><br>"
+                f"<span style='font-size:9px;color:{COLORS['gray_600']}'>of reads identified</span>"
+            ),
+            x=0.5, y=0.5,
             showarrow=False,
-            font=dict(size=24, color=rate_color)
-        )
-        fig.add_annotation(
-            text=f"<span style='font-size:10px'>classified</span>",
-            x=0.5, y=0.4,
-            showarrow=False,
-            font=dict(size=10, color=COLORS["gray_600"])
+            font=dict(size=28, color=rate_color, family="Arial Black, Arial, sans-serif")
         )
     else:
         fig.add_annotation(
-            text=f"<b>{classification_rate:.1f}%</b><br><span style='font-size:11px;color:{COLORS['gray_600']}'>Classified</span>",
+            text=(
+                f"<b>{classification_rate:.1f}%</b><br>"
+                f"<span style='font-size:11px;color:{COLORS['gray_600']}'>of reads identified</span>"
+            ),
             x=0.5, y=0.5,
             showarrow=False,
-            font=dict(size=20, color=rate_color)
+            font=dict(size=24, color=rate_color, family="Arial Black, Arial, sans-serif")
         )
 
     # Layout optimized for compact card
@@ -612,7 +649,7 @@ def create_classification_donut(
                 y=-0.15,
                 xanchor="center",
                 x=0.5,
-                font=dict(size=10)
+                font=dict(size=11)
             ),
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)"
@@ -623,7 +660,7 @@ def create_classification_donut(
             height=300,
             margin=dict(l=40, r=40, t=60, b=40),
             showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=-0.1, xanchor="center", x=0.5)
+            legend=dict(orientation="h", yanchor="bottom", y=-0.1, xanchor="center", x=0.5, font=dict(size=12))
         )
 
     return apply_theme_to_figure(fig)
@@ -759,7 +796,7 @@ def create_status_summary_cards(
         paper_bgcolor=COLORS["white"]
     )
 
-    return fig
+    return apply_theme_to_figure(fig)
 
 
 def create_multi_sample_heatmap(
@@ -877,6 +914,8 @@ def create_multi_sample_heatmap(
         x=samples,
         y=organism_labels,
         colorscale=colorscale,
+        xgap=1,
+        ygap=1,
         hovertemplate="%{customdata}<extra></extra>",
         customdata=hover_texts,
         colorbar=dict(
@@ -890,8 +929,21 @@ def create_multi_sample_heatmap(
         )
     ))
 
-    # Calculate dynamic height based on number of organisms
-    height = max(400, min(800, len(sorted_organisms) * 25 + 150))
+    # Add row annotations showing mean abundance
+    for i, org in enumerate(sorted_organisms):
+        mean_val = org_mean_abundance[org]
+        fig.add_annotation(
+            x=len(samples),
+            y=i,
+            text=f"{mean_val:.1f}%",
+            showarrow=False,
+            font=dict(size=9, color=COLORS["gray_600"]),
+            xanchor="left",
+            xref="x",
+            yref="y"
+        )
+
+    height = responsive_height(len(sorted_organisms), base=150, per_item=25, max_height=800)
 
     fig.update_layout(
         title=dict(
@@ -1150,7 +1202,7 @@ def create_beta_diversity_heatmap(
             tickfont=dict(size=10),
             autorange="reversed"
         ),
-        height=max(400, len(samples) * 40 + 150),
+        height=responsive_height(len(samples), base=150, per_item=40, max_height=800),
         margin=dict(l=100, r=80, t=60, b=100)
     )
 
@@ -1237,27 +1289,65 @@ def create_diversity_summary_cards(
         paper_bgcolor=COLORS["white"]
     )
 
-    return fig
+    return apply_theme_to_figure(fig)
 
 
-def _create_empty_chart(message: str) -> go.Figure:
-    """Create an empty chart with a message."""
+def _create_empty_chart(message: str, waiting: bool = False) -> go.Figure:
+    """Create an empty chart with a styled message.
+
+    Args:
+        message: Message to display
+        waiting: If True, shows "waiting for data" style; if False, shows "no results" style
+    """
+    # Detect waiting vs no-results from common message patterns
+    is_waiting = waiting or any(
+        w in message.lower() for w in ["waiting", "no data", "no sample"]
+    )
+
+    if is_waiting:
+        icon_text = "&#8987;"  # hourglass
+        subtitle = "Pipeline data will appear here when available"
+        bg_color = COLORS["gray_100"]
+    else:
+        icon_text = "&#8709;"  # empty set
+        subtitle = ""
+        bg_color = COLORS["gray_100"]
+
     fig = go.Figure()
 
+    # Icon
     fig.add_annotation(
-        text=message,
-        x=0.5, y=0.5,
+        text=f"<span style='font-size:28px;color:{COLORS['gray_400']}'>{icon_text}</span>",
+        x=0.5, y=0.62,
+        xref="paper", yref="paper",
+        showarrow=False
+    )
+
+    # Main message
+    fig.add_annotation(
+        text=f"<b>{message}</b>",
+        x=0.5, y=0.42,
         xref="paper", yref="paper",
         showarrow=False,
-        font=dict(size=14, color=COLORS["gray_500"])
+        font=dict(size=14, color=COLORS["gray_600"])
     )
+
+    # Subtitle hint
+    if subtitle:
+        fig.add_annotation(
+            text=subtitle,
+            x=0.5, y=0.28,
+            xref="paper", yref="paper",
+            showarrow=False,
+            font=dict(size=11, color=COLORS["gray_400"])
+        )
 
     fig.update_layout(
         height=200,
         xaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
         yaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
-        paper_bgcolor=COLORS["gray_100"],
-        plot_bgcolor=COLORS["gray_100"]
+        paper_bgcolor=bg_color,
+        plot_bgcolor=bg_color
     )
 
     return fig
