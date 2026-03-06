@@ -26,6 +26,8 @@ from urllib.parse import quote, urlencode
 
 import requests
 
+from nanometa_live.core.utils.offline_cache import get_cache as get_offline_cache
+
 logger = logging.getLogger(__name__)
 
 # Default cache location
@@ -210,6 +212,7 @@ class TaxonomyAPIClient(ABC):
         cache: Optional[TaxonomyCache] = None,
         rate_limit: float = 3.0,
         timeout: int = 30,
+        offline_mode: bool = False,
     ):
         """
         Initialize the API client.
@@ -218,10 +221,12 @@ class TaxonomyAPIClient(ABC):
             cache: TaxonomyCache instance (shared across clients)
             rate_limit: Maximum requests per second
             timeout: Request timeout in seconds
+            offline_mode: If True, skip all network calls and use cached data only
         """
         self.cache = cache or TaxonomyCache()
         self.rate_limit = rate_limit
         self.timeout = timeout
+        self.offline_mode = offline_mode
         self._last_request_time = 0.0
         self._session = requests.Session()
         self._session.headers.update({
@@ -243,6 +248,10 @@ class TaxonomyAPIClient(ABC):
         method: str = "GET",
     ) -> Optional[Dict[str, Any]]:
         """Make an HTTP request with rate limiting."""
+        if self.offline_mode:
+            logger.debug(f"Offline mode: skipping request to {url}")
+            return None
+
         self._rate_limit_wait()
 
         try:
@@ -328,6 +337,16 @@ class NCBIClient(TaxonomyAPIClient):
             logger.debug(f"NCBI cache hit for name: {name}")
             return cached
 
+        # In offline mode, also check OfflineTaxonomyCache before giving up
+        if self.offline_mode:
+            offline_cache = get_offline_cache(offline_mode=True)
+            offline_data = offline_cache.get(name, cache_type="ncbi")
+            if offline_data:
+                logger.debug(f"Offline cache hit for name: {name}")
+                return NCBIResult.from_dict(offline_data) if isinstance(offline_data, dict) else None
+            logger.debug(f"Offline mode: no cached data for {name}")
+            return None
+
         # Search for taxid
         url = f"{self.BASE_URL}/esearch.fcgi"
         params = self._build_params({
@@ -372,6 +391,16 @@ class NCBIClient(TaxonomyAPIClient):
         if cached:
             logger.debug(f"NCBI cache hit for taxid: {taxid}")
             return cached
+
+        # In offline mode, also check OfflineTaxonomyCache before giving up
+        if self.offline_mode:
+            offline_cache = get_offline_cache(offline_mode=True)
+            offline_data = offline_cache.get_ncbi_taxonomy(taxid)
+            if offline_data:
+                logger.debug(f"Offline cache hit for taxid: {taxid}")
+                return NCBIResult.from_dict(offline_data) if isinstance(offline_data, dict) else None
+            logger.debug(f"Offline mode: no cached data for taxid {taxid}")
+            return None
 
         # Get summary
         url = f"{self.BASE_URL}/esummary.fcgi"
@@ -421,6 +450,10 @@ class NCBIClient(TaxonomyAPIClient):
         Returns:
             List of lineage names from domain to species
         """
+        if self.offline_mode:
+            logger.debug(f"Offline mode: skipping lineage fetch for taxid {taxid}")
+            return []
+
         url = f"{self.BASE_URL}/efetch.fcgi"
         params = self._build_params({
             "db": "taxonomy",
@@ -498,6 +531,16 @@ class GTDBClient(TaxonomyAPIClient):
         if cached:
             logger.debug(f"GTDB cache hit for: {name}")
             return cached
+
+        # In offline mode, also check OfflineTaxonomyCache before giving up
+        if self.offline_mode:
+            offline_cache = get_offline_cache(offline_mode=True)
+            offline_data = offline_cache.get_gtdb_taxonomy(name)
+            if offline_data:
+                logger.debug(f"Offline cache hit for GTDB: {name}")
+                return GTDBResult.from_dict(offline_data) if isinstance(offline_data, dict) else None
+            logger.debug(f"Offline mode: no cached GTDB data for {name}")
+            return None
 
         # Format name for GTDB search (replace space with underscore for species)
         search_term = name.replace(" ", "_")
@@ -659,19 +702,25 @@ def get_taxonomy_cache() -> TaxonomyCache:
     return _taxonomy_cache
 
 
-def get_ncbi_client(api_key: Optional[str] = None) -> NCBIClient:
+def get_ncbi_client(api_key: Optional[str] = None, offline_mode: bool = False) -> NCBIClient:
     """Get the NCBI client instance."""
     global _ncbi_client
     if _ncbi_client is None:
         _ncbi_client = NCBIClient(cache=get_taxonomy_cache(), api_key=api_key)
+    # Update offline mode if changed
+    if _ncbi_client.offline_mode != offline_mode:
+        _ncbi_client.offline_mode = offline_mode
     return _ncbi_client
 
 
-def get_gtdb_client() -> GTDBClient:
+def get_gtdb_client(offline_mode: bool = False) -> GTDBClient:
     """Get the GTDB client instance."""
     global _gtdb_client
     if _gtdb_client is None:
         _gtdb_client = GTDBClient(cache=get_taxonomy_cache())
+    # Update offline mode if changed
+    if _gtdb_client.offline_mode != offline_mode:
+        _gtdb_client.offline_mode = offline_mode
     return _gtdb_client
 
 

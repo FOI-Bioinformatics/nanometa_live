@@ -86,6 +86,8 @@ class ConfigLoader:
             "conda_frontend": "mamba",
             "remove_temp_files": True,
             "main_dir": "",
+            # Offline mode: when enabled, skip all network calls and use cached data only
+            "offline_mode": False,
             # Processing mode settings
             "processing_mode": "batch",
             "sample_handling": "by_barcode",
@@ -170,6 +172,12 @@ class ConfigLoader:
                     config["remove_temp_files"].lower() in ["true", "yes", "y", "1"]
             # Ensure final type is boolean
             config["remove_temp_files"] = bool(config["remove_temp_files"])
+
+        # Convert offline_mode to boolean
+        if "offline_mode" in config:
+            if isinstance(config["offline_mode"], str):
+                config["offline_mode"] = config["offline_mode"].lower() in ["true", "yes", "y", "1"]
+            config["offline_mode"] = bool(config["offline_mode"])
 
     def save_config(self, config: Dict[str, Any], filename: Optional[str] = None) -> str:
         """Save a configuration to a file with preserved comments."""

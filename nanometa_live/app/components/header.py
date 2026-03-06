@@ -32,7 +32,14 @@ def create_header(title="Nanometa Live"):
                         "color": "#0d6efd",
                         "marginRight": "8px"
                     }),
-                    html.H2(id="header-title", className="mb-0", children=title)
+                    html.H2(id="header-title", className="mb-0", children=title),
+                    dbc.Badge(
+                        "OFFLINE",
+                        id="offline-mode-badge",
+                        color="warning",
+                        className="ms-2 align-self-center",
+                        style={"display": "none", "fontSize": "0.7rem"}
+                    ),
                 ], className="d-flex align-items-center")
             ], width=4),
 

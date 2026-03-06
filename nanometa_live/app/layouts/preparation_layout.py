@@ -20,10 +20,18 @@ def create_preparation_layout():
     """Create the Preparation tab layout."""
     return dbc.Container([
         # Preparation-local stores
+        dcc.Store(id="wizard-step-state", data={
+            "current_step": 0,
+            "steps": {
+                "0": "pending", "1": "pending", "2": "pending", "3": "pending",
+                "4": "pending", "5": "pending", "6": "pending", "7": "pending",
+            },
+        }),
         dcc.Store(id="prep-job-state", data=None),
         dcc.Store(id="genome-download-progress", data={"current": 0, "total": 0, "status": "idle"}),
         dcc.Store(id="download-cancel-flag", data=False),
         dcc.Store(id="blast-cancel-flag", data=False),
+        dcc.Store(id="genome-import-unrecognized", data=[]),
 
         # Workflow step indicator
         WorkflowStepper(active_step=3),
@@ -94,6 +102,9 @@ def create_preparation_layout():
         # Genome Downloads (moved from Watchlist tab)
         html.Div(_create_genome_downloads_card(), id="genome-downloads-card"),
 
+        # Import Genomes (manual / archive)
+        html.Div(_create_import_genomes_card(), id="import-genomes-card"),
+
         # Run Preparation
         dbc.Card([
             dbc.CardHeader([
@@ -138,6 +149,9 @@ def create_preparation_layout():
                 html.Div(id="prep-result-area", children=[], className="mt-3"),
             ]),
         ], className="mb-4"),
+
+        # Deploy Offline Wizard
+        _create_deploy_wizard_card(),
 
         # Export / Import (collapsed by default)
         dbc.Accordion([
@@ -498,6 +512,114 @@ def _create_genome_downloads_card() -> dbc.Card:
     ], className="mb-4")
 
 
+def _create_import_genomes_card() -> dbc.Card:
+    """
+    Create the manual genome import card.
+
+    Allows importing genome FASTA files from a local directory or archive,
+    with automatic taxid recognition for files named ``{taxid}.fasta``.
+    """
+    return dbc.Card([
+        dbc.CardHeader([
+            html.I(className="bi bi-folder-plus me-2"),
+            html.H5("Import Genomes", className="mb-0 d-inline"),
+        ]),
+        dbc.CardBody([
+            html.P(
+                "Import reference genome FASTA files from a local directory or archive. "
+                "Files named {taxid}.fasta are recognized automatically.",
+                className="text-muted small mb-3"
+            ),
+            dbc.Tabs([
+                dbc.Tab([
+                    dbc.InputGroup([
+                        dbc.InputGroupText("Directory"),
+                        dbc.Input(
+                            id="genome-import-dir-path",
+                            placeholder="/path/to/genomes/",
+                            type="text",
+                        ),
+                    ], className="mt-3 mb-2"),
+                    dbc.Button(
+                        [html.I(className="bi bi-folder2-open me-1"), "Import from Directory"],
+                        id="genome-import-dir-btn",
+                        color="primary",
+                        size="sm",
+                        n_clicks=0,
+                    ),
+                ], label="Directory", tab_id="import-dir"),
+                dbc.Tab([
+                    dcc.Upload(
+                        id="genome-import-archive-upload",
+                        children=html.Div([
+                            html.I(className="bi bi-cloud-upload me-2"),
+                            "Drag and drop or ",
+                            html.A("select archive", className="text-primary"),
+                            html.Br(),
+                            html.Small("(.tar.gz or .zip)", className="text-muted"),
+                        ]),
+                        style={
+                            "width": "100%",
+                            "height": "80px",
+                            "lineHeight": "40px",
+                            "borderWidth": "1px",
+                            "borderStyle": "dashed",
+                            "borderRadius": "5px",
+                            "textAlign": "center",
+                            "paddingTop": "10px",
+                        },
+                        className="mt-3 mb-2",
+                        multiple=False,
+                        max_size=500_000_000,  # 500 MB
+                    ),
+                    dbc.InputGroup([
+                        dbc.InputGroupText("Or path"),
+                        dbc.Input(
+                            id="genome-import-archive-path",
+                            placeholder="/path/to/genomes.tar.gz",
+                            type="text",
+                        ),
+                    ], className="mb-2"),
+                    dbc.Button(
+                        [html.I(className="bi bi-file-earmark-zip me-1"), "Import from Archive"],
+                        id="genome-import-archive-btn",
+                        color="primary",
+                        size="sm",
+                        n_clicks=0,
+                    ),
+                ], label="Archive", tab_id="import-archive"),
+            ], id="genome-import-tabs", active_tab="import-dir"),
+
+            # Import result area
+            html.Div(id="genome-import-result", className="mt-3"),
+
+            # Unrecognized files mapping area (shown when needed)
+            html.Div(
+                id="genome-import-mapping-area",
+                style={"display": "none"},
+                className="mt-3",
+                children=[
+                    html.H6("Unrecognized Files", className="text-warning mb-2"),
+                    html.P(
+                        "The following files could not be matched to a taxid. "
+                        "Enter the NCBI taxonomy ID for each file to import it.",
+                        className="text-muted small",
+                    ),
+                    html.Div(id="genome-import-mapping-table"),
+                    dbc.Button(
+                        [html.I(className="bi bi-check-circle me-1"), "Import Mapped"],
+                        id="genome-import-mapped-btn",
+                        color="success",
+                        size="sm",
+                        className="mt-2",
+                        n_clicks=0,
+                    ),
+                ],
+            ),
+        ]),
+    ], className="mb-4")
+
+
 # =============================================================================
 # MODALS
 # =============================================================================
@@ -675,3 +797,171 @@ def _create_rescan_progress_modal() -> dbc.Modal:
             ]),
         ]),
     ], id="taxmap-rescan-modal", centered=True, backdrop="static", is_open=False)
+
+
+# =============================================================================
+# DEPLOY OFFLINE WIZARD
+# =============================================================================
+
+_WIZARD_STEPS = [
+    {
+        "index": 0,
+        "icon": "bi-list-check",
+        "title": "Select Watchlists",
+        "desc": "Choose which pathogen watchlists to include in the deployment.",
+    },
+    {
+        "index": 1,
+        "icon": "bi-database-check",
+        "title": "Verify Kraken2 DB",
+        "desc": "Confirm the Kraken2 database path is valid and contains required files.",
+    },
+    {
+        "index": 2,
+        "icon": "bi-diagram-3",
+        "title": "Build Taxonomy Index",
+        "desc": "Build the taxonomy index and generate taxid mappings from the database.",
+    },
+    {
+        "index": 3,
+        "icon": "bi-cloud-download",
+        "title": "Download Genomes",
+        "desc": "Download reference genomes for all watchlist entries.",
+    },
+    {
+        "index": 4,
+        "icon": "bi-database-fill-gear",
+        "title": "Build BLAST DBs",
+        "desc": "Build BLAST databases from downloaded reference genomes.",
+    },
+    {
+        "index": 5,
+        "icon": "bi-archive",
+        "title": "Cache Taxonomy",
+        "desc": "Export taxonomy lookup data for offline name resolution.",
+    },
+    {
+        "index": 6,
+        "icon": "bi-clipboard2-check",
+        "title": "Readiness Check",
+        "desc": "Verify that all prerequisites are in place for offline operation.",
+    },
+    {
+        "index": 7,
+        "icon": "bi-box-seam",
+        "title": "Export Bundle",
+        "desc": "Package all prepared data into a portable archive for field deployment.",
+    },
+]
+
+
+def _wizard_step_item(step):
+    """Create a single wizard step accordion item."""
+    idx = step["index"]
+    return dbc.AccordionItem(
+        [
+            html.P(step["desc"], className="text-muted small mb-3"),
+            # Step-specific content placeholder
+            html.Div(id=f"wizard-step-{idx}-content"),
+            # Run button and status
+            dbc.Row([
+                dbc.Col([
+                    dbc.Button(
+                        [html.I(className=f"bi bi-play-circle me-2"), "Run"],
+                        id={"type": "wizard-step-run", "index": idx},
+                        color="primary",
+                        size="sm",
+                        n_clicks=0,
+                    ),
+                ], width="auto"),
+                dbc.Col([
+                    html.Div(
+                        id={"type": "wizard-step-status", "index": idx},
+                        className="d-flex align-items-center",
+                    ),
+                ]),
+            ], align="center", className="mt-2"),
+            # Progress area
+            html.Div(
+                id={"type": "wizard-step-progress", "index": idx},
+                className="mt-2",
+            ),
+        ],
+        title=html.Span([
+            html.I(className=f"bi {step['icon']} me-2"),
+            f"Step {idx + 1}: {step['title']}",
+            html.Span(
+                id={"type": "wizard-step-badge", "index": idx},
+                className="ms-2",
+            ),
+        ]),
+        item_id=f"wizard-step-{idx}",
+    )
+
+
+def _create_deploy_wizard_card() -> dbc.Card:
+    """Create the Deploy Offline wizard card with stepper UI."""
+    return dbc.Card([
+        dbc.CardHeader([
+            html.Div([
+                html.I(className="bi bi-rocket-takeoff me-2",
+                       style={"fontSize": "1.1rem"}),
+                html.H5("Deploy Offline", className="mb-0 d-inline"),
+            ], className="d-inline-flex align-items-center"),
+        ]),
+        dbc.CardBody([
+            html.P(
+                "Step-by-step wizard to prepare a complete offline deployment. "
+                "Each step can be run individually or use 'Run All' to execute "
+                "the full pipeline sequentially.",
+                className="text-muted small mb-3",
+            ),
+            # Overall progress
+            html.Div([
+                html.Div([
+                    html.Small("Overall progress", className="text-muted"),
+                    html.Span(
+                        id="wizard-overall-label",
+                        children="0/8 steps",
+                        className="text-muted small float-end",
+                    ),
+                ]),
+                dbc.Progress(
+                    id="wizard-overall-progress",
+                    value=0,
+                    className="mb-3",
+                    style={"height": "8px"},
+                ),
+            ]),
+            # Run All / Cancel controls
+            dbc.Row([
+                dbc.Col([
+                    dbc.Button(
+                        [html.I(className="bi bi-fast-forward me-2"), "Run All Steps"],
+                        id="wizard-run-all-btn",
+                        color="success",
+                        size="sm",
+                        className="me-2",
+                        n_clicks=0,
+                    ),
+                    dbc.Button(
+                        [html.I(className="bi bi-x-circle me-2"), "Cancel"],
+                        id="wizard-cancel-btn",
+                        color="outline-danger",
+                        size="sm",
+                        style={"display": "none"},
+                        n_clicks=0,
+                    ),
+                ]),
+            ], className="mb-3"),
+            # Result area for Run All
+            html.Div(id="wizard-run-all-result", className="mb-3"),
+            # Step accordion
+            dbc.Accordion(
+                [_wizard_step_item(step) for step in _WIZARD_STEPS],
+                id="wizard-steps-accordion",
+                start_collapsed=True,
+                always_open=True,
+            ),
+        ]),
+    ], className="mb-4")

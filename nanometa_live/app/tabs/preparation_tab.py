@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import dash_bootstrap_components as dbc
-from dash import html, Input, Output, State, callback, no_update, ctx, ALL
+from dash import html, Input, Output, State, callback, no_update, ctx, ALL, MATCH
 from dash.exceptions import PreventUpdate
 
 from nanometa_live.app.app import background_callback_manager
@@ -392,6 +392,185 @@ def register_preparation_callbacks(app):
         except Exception as e:
             logger.error(f"Import failed: {e}", exc_info=True)
             return dbc.Alert(f"Import failed: {e}", color="danger")
+
+    # =========================================================================
+    # Import Genomes (manual directory / archive)
+    # =========================================================================
+
+    @app.callback(
+        Output("genome-import-result", "children"),
+        Output("genome-import-unrecognized", "data"),
+        Output("genome-import-mapping-area", "style"),
+        Output("genome-import-mapping-table", "children"),
+        Input("genome-import-dir-btn", "n_clicks"),
+        State("genome-import-dir-path", "value"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
+    )
+    def import_genomes_from_dir(n_clicks, dir_path, config):
+        """Import genome FASTA files from a directory."""
+        if not n_clicks:
+            raise PreventUpdate
+
+        if not dir_path:
+            return (
+                dbc.Alert("Please provide a directory path.", color="warning"),
+                [], {"display": "none"}, [],
+            )
+
+        if not Path(dir_path).is_dir():
+            return (
+                dbc.Alert(f"Directory not found: {dir_path}", color="danger"),
+                [], {"display": "none"}, [],
+            )
+
+        try:
+            from nanometa_live.core.utils.genome_manager import get_genome_manager
+            cache_dir = config.get("genome_cache_dir") if config else None
+            mgr = get_genome_manager(cache_dir=cache_dir)
+            imported, unrecognized = mgr.import_genomes_from_directory(dir_path)
+
+            alert = dbc.Alert(
+                f"Imported {imported} genome(s). "
+                + (f"{len(unrecognized)} file(s) need manual taxid mapping."
+                   if unrecognized else "All files recognized."),
+                color="success" if not unrecognized else "info",
+            )
+
+            if unrecognized:
+                mapping_rows = _build_mapping_table(unrecognized)
+                return alert, unrecognized, {"display": "block"}, mapping_rows
+
+            return alert, [], {"display": "none"}, []
+
+        except Exception as e:
+            logger.error(f"Genome import failed: {e}", exc_info=True)
+            return (
+                dbc.Alert(f"Import failed: {e}", color="danger"),
+                [], {"display": "none"}, [],
+            )
+
+    @app.callback(
+        Output("genome-import-result", "children", allow_duplicate=True),
+        Output("genome-import-unrecognized", "data", allow_duplicate=True),
+        Output("genome-import-mapping-area", "style", allow_duplicate=True),
+        Output("genome-import-mapping-table", "children", allow_duplicate=True),
+        Input("genome-import-archive-btn", "n_clicks"),
+        State("genome-import-archive-path", "value"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
+    )
+    def import_genomes_from_archive(n_clicks, archive_path, config):
+        """Import genome FASTA files from an archive."""
+        if not n_clicks:
+            raise PreventUpdate
+
+        if not archive_path:
+            return (
+                dbc.Alert("Please provide an archive path.", color="warning"),
+                [], {"display": "none"}, [],
+            )
+
+        if not Path(archive_path).exists():
+            return (
+                dbc.Alert(f"Archive not found: {archive_path}", color="danger"),
+                [], {"display": "none"}, [],
+            )
+
+        try:
+            from nanometa_live.core.utils.genome_manager import get_genome_manager
+            cache_dir = config.get("genome_cache_dir") if config else None
+            mgr = get_genome_manager(cache_dir=cache_dir)
+            imported, unrecognized = mgr.import_genomes_from_archive(archive_path)
+
+            alert = dbc.Alert(
+                f"Imported {imported} genome(s). "
+                + (f"{len(unrecognized)} file(s) need manual taxid mapping."
+                   if unrecognized else "All files recognized."),
+                color="success" if not unrecognized else "info",
+            )
+
+            if unrecognized:
+                mapping_rows = _build_mapping_table(unrecognized)
+                return alert, unrecognized, {"display": "block"}, mapping_rows
+
+            return alert, [], {"display": "none"}, []
+
+        except Exception as e:
+            logger.error(f"Genome archive import failed: {e}", exc_info=True)
+            return (
+                dbc.Alert(f"Import failed: {e}", color="danger"),
+                [], {"display": "none"}, [],
+            )
+
+    @app.callback(
+        Output("genome-import-result", "children", allow_duplicate=True),
+        Output("genome-import-mapping-area", "style", allow_duplicate=True),
+        Input("genome-import-mapped-btn", "n_clicks"),
+        State("genome-import-unrecognized", "data"),
+        State({"type": "genome-taxid-input", "index": ALL}, "value"),
+        State({"type": "genome-taxid-input", "index": ALL}, "id"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
+    )
+    def import_mapped_genomes(n_clicks, unrecognized, taxid_values, taxid_ids, config):
+        """Import unrecognized genome files with user-provided taxid mappings."""
+        if not n_clicks or not unrecognized:
+            raise PreventUpdate
+
+        from nanometa_live.core.utils.genome_manager import get_genome_manager
+        cache_dir = config.get("genome_cache_dir") if config else None
+        mgr = get_genome_manager(cache_dir=cache_dir)
+
+        imported = 0
+        skipped = 0
+        for i, entry in enumerate(unrecognized):
+            if i >= len(taxid_values):
+                break
+            val = taxid_values[i]
+            if not val:
+                skipped += 1
+                continue
+            try:
+                taxid = int(val)
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            if mgr.import_genome_with_taxid(entry["path"], taxid):
+                imported += 1
+            else:
+                skipped += 1
+
+        alert = dbc.Alert(
+            f"Imported {imported} mapped genome(s). {skipped} skipped.",
+            color="success" if imported > 0 else "warning",
+        )
+        return alert, {"display": "none"}
+
+    def _build_mapping_table(unrecognized):
+        """Build a table of unrecognized files for manual taxid mapping."""
+        rows = []
+        for i, entry in enumerate(unrecognized):
+            rows.append(
+                dbc.Row([
+                    dbc.Col(
+                        html.Small(entry["filename"], className="text-truncate"),
+                        md=7,
+                        className="d-flex align-items-center",
+                    ),
+                    dbc.Col(
+                        dbc.Input(
+                            id={"type": "genome-taxid-input", "index": i},
+                            type="number",
+                            placeholder="Taxid",
+                            size="sm",
+                        ),
+                        md=5,
+                    ),
+                ], className="mb-1 g-2")
+            )
+        return rows
 
     # =========================================================================
     # Kraken2 Database Download (moved from config_tab.py)
@@ -1244,5 +1423,316 @@ def register_preparation_callbacks(app):
         Input("retry-preparation-btn", "n_clicks"),
         prevent_initial_call=True,
     )
+
+    # =========================================================================
+    # Deploy Offline Wizard Callbacks
+    # =========================================================================
+
+    from nanometa_live.core.workflow.mobile_lab_preparer import (
+        MobileLabPreparer, PrepStage, STAGE_LABELS, PrepProgress,
+    )
+
+    _WIZARD_STAGE_MAP = {
+        0: [PrepStage.VERIFY_DB],           # Select watchlists (no engine stage, handled locally)
+        1: [PrepStage.VERIFY_DB],           # Verify Kraken2 DB
+        2: [PrepStage.BUILD_INDEX, PrepStage.GENERATE_MAPPINGS],  # Build index + mappings
+        3: [PrepStage.DOWNLOAD_GENOMES],    # Download genomes
+        4: [PrepStage.BUILD_BLAST_DBS],     # Build BLAST DBs
+        5: [PrepStage.CACHE_TAXONOMY],      # Cache taxonomy
+        6: [PrepStage.READINESS_CHECK, PrepStage.CHECK_TOOLS],  # Readiness check
+        7: [],                              # Export bundle (handled separately)
+    }
+
+    @app.callback(
+        Output({"type": "wizard-step-status", "index": ALL}, "children"),
+        Output("wizard-overall-progress", "value"),
+        Output("wizard-overall-label", "children"),
+        Input("wizard-step-state", "data"),
+    )
+    def update_wizard_display(state):
+        """Update wizard step badges and overall progress based on state."""
+        if not state:
+            from dash import no_update
+            return no_update, no_update, no_update
+
+        steps = state.get("steps", {})
+        statuses = []
+        completed = 0
+        total = 8
+
+        for i in range(total):
+            step_status = steps.get(str(i), "pending")
+            if step_status == "done":
+                completed += 1
+                statuses.append(dbc.Badge(
+                    [html.I(className="bi bi-check-circle me-1"), "Done"],
+                    color="success",
+                    className="ms-1",
+                ))
+            elif step_status == "running":
+                statuses.append(dbc.Spinner(
+                    size="sm",
+                    spinner_class_name="ms-1",
+                ))
+            elif step_status == "failed":
+                statuses.append(dbc.Badge(
+                    [html.I(className="bi bi-x-circle me-1"), "Failed"],
+                    color="danger",
+                    className="ms-1",
+                ))
+            else:
+                statuses.append(html.Span())
+
+        pct = (completed / total) * 100
+        label = f"{completed}/{total} steps"
+        return statuses, pct, label
+
+    @app.callback(
+        Output({"type": "wizard-step-progress", "index": MATCH}, "children"),
+        Output("wizard-step-state", "data", allow_duplicate=True),
+        Input({"type": "wizard-step-run", "index": MATCH}, "n_clicks"),
+        State("wizard-step-state", "data"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
+    )
+    def run_wizard_step(n_clicks, wizard_state, config):
+        """Run a single wizard step."""
+        if not n_clicks:
+            raise PreventUpdate
+
+        import json
+        triggered = ctx.triggered_id
+        if not triggered:
+            raise PreventUpdate
+
+        step_idx = triggered["index"]
+        wizard_state = wizard_state or {
+            "current_step": 0,
+            "steps": {str(i): "pending" for i in range(8)},
+        }
+        config = config or {}
+
+        # Mark running
+        wizard_state["steps"][str(step_idx)] = "running"
+
+        try:
+            result_children = _execute_wizard_step(step_idx, config)
+            wizard_state["steps"][str(step_idx)] = "done"
+            return result_children, wizard_state
+        except Exception as e:
+            wizard_state["steps"][str(step_idx)] = "failed"
+            return dbc.Alert(
+                [html.I(className="bi bi-x-circle me-2"), str(e)],
+                color="danger",
+                className="mt-2 py-2",
+            ), wizard_state
+
+    def _execute_wizard_step(step_idx, config):
+        """Execute a wizard step and return result component."""
+        from nanometa_live.core.workflow.mobile_lab_preparer import MobileLabPreparer
+        from nanometa_live.core.workflow.readiness_checker import ReadinessChecker, Severity
+        from nanometa_live.core.workflow.bundle_manager import BundleManager
+
+        # Step 0: Watchlist selection (informational)
+        if step_idx == 0:
+            try:
+                from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
+                wm = get_watchlist_manager()
+                active = wm.get_active_entries()
+                count = len(active) if active else 0
+                if count == 0:
+                    return dbc.Alert(
+                        [html.I(className="bi bi-exclamation-triangle me-2"),
+                         "No watchlist entries enabled. Enable pathogens in the Watchlist tab first."],
+                        color="warning", className="mt-2 py-2",
+                    )
+                return dbc.Alert(
+                    [html.I(className="bi bi-check-circle me-2"),
+                     f"{count} watchlist entries active and ready for deployment."],
+                    color="success", className="mt-2 py-2",
+                )
+            except Exception as e:
+                return dbc.Alert(
+                    [html.I(className="bi bi-info-circle me-2"),
+                     f"Could not load watchlist manager: {e}"],
+                    color="info", className="mt-2 py-2",
+                )
+
+        # Step 1: Verify Kraken2 DB
+        if step_idx == 1:
+            db_path = config.get("kraken_db", "")
+            if not db_path:
+                raise ValueError("No kraken_db path configured")
+            from nanometa_live.core.utils.kraken_utils import verify_kraken_db
+            if not verify_kraken_db(db_path):
+                raise ValueError(f"Invalid Kraken2 database at {db_path}")
+            return dbc.Alert(
+                [html.I(className="bi bi-check-circle me-2"),
+                 f"Kraken2 database verified at: {db_path}"],
+                color="success", className="mt-2 py-2",
+            )
+
+        # Step 2: Build taxonomy index + mappings
+        if step_idx == 2:
+            preparer = MobileLabPreparer(config=config)
+            result = preparer.prepare.__wrapped__ if hasattr(preparer.prepare, '__wrapped__') else None
+            # Run the two stages directly
+            from nanometa_live.core.workflow.mobile_lab_preparer import PreparationResult
+            pr = PreparationResult(success=True)
+            preparer._run_build_index(0, pr, skip_existing=True)
+            preparer._run_generate_mappings(1, pr, skip_existing=True)
+            msgs = []
+            if "build_index" not in pr.stages_failed:
+                msgs.append("Taxonomy index built")
+            if "generate_mappings" not in pr.stages_failed:
+                msgs.append("Taxid mappings generated")
+            if pr.warnings:
+                msgs.extend(pr.warnings)
+            return dbc.Alert(
+                [html.I(className="bi bi-check-circle me-2"),
+                 ". ".join(msgs) + "."],
+                color="success", className="mt-2 py-2",
+            )
+
+        # Step 3: Download genomes
+        if step_idx == 3:
+            preparer = MobileLabPreparer(config=config)
+            from nanometa_live.core.workflow.mobile_lab_preparer import PreparationResult
+            pr = PreparationResult(success=True)
+            preparer._run_download_genomes(0, pr, skip_existing=True)
+            msg = f"Genome download complete. {pr.genomes_downloaded} new genome(s) downloaded."
+            return dbc.Alert(
+                [html.I(className="bi bi-check-circle me-2"), msg],
+                color="success", className="mt-2 py-2",
+            )
+
+        # Step 4: Build BLAST DBs
+        if step_idx == 4:
+            preparer = MobileLabPreparer(config=config)
+            from nanometa_live.core.workflow.mobile_lab_preparer import PreparationResult
+            pr = PreparationResult(success=True)
+            preparer._run_build_blast_dbs(0, pr, skip_existing=True)
+            msg = f"BLAST database build complete. {pr.blast_dbs_built} database(s) built."
+            return dbc.Alert(
+                [html.I(className="bi bi-check-circle me-2"), msg],
+                color="success", className="mt-2 py-2",
+            )
+
+        # Step 5: Cache taxonomy
+        if step_idx == 5:
+            preparer = MobileLabPreparer(config=config)
+            from nanometa_live.core.workflow.mobile_lab_preparer import PreparationResult
+            pr = PreparationResult(success=True)
+            preparer._run_cache_taxonomy(0, pr, skip_existing=False)
+            if pr.warnings:
+                return dbc.Alert(
+                    [html.I(className="bi bi-exclamation-triangle me-2"),
+                     "Taxonomy cache: " + "; ".join(pr.warnings)],
+                    color="warning", className="mt-2 py-2",
+                )
+            return dbc.Alert(
+                [html.I(className="bi bi-check-circle me-2"),
+                 "Taxonomy data cached for offline name resolution."],
+                color="success", className="mt-2 py-2",
+            )
+
+        # Step 6: Readiness check
+        if step_idx == 6:
+            checker = ReadinessChecker()
+            report = checker.check_readiness(config)
+            summary = report.summary()
+            items = []
+            for c in report.checks:
+                if c.passed:
+                    icon_cls = "bi bi-check-circle-fill text-success"
+                elif c.severity == Severity.CRITICAL:
+                    icon_cls = "bi bi-x-octagon-fill text-danger"
+                else:
+                    icon_cls = "bi bi-exclamation-triangle-fill text-warning"
+                items.append(html.Div([
+                    html.I(className=f"{icon_cls} me-2"),
+                    html.Span(c.name, className="fw-semibold me-2"),
+                    html.Span(c.message, className="text-muted small"),
+                ], className="mb-1"))
+
+            color = "success" if report.ready else "danger"
+            header = "System ready for offline operation." if report.ready else "System is NOT ready."
+            return html.Div([
+                dbc.Alert(
+                    [html.I(className="bi bi-clipboard2-check me-2"), header],
+                    color=color, className="mt-2 py-2",
+                ),
+                html.Div(items, className="ms-2 mt-2",
+                         style={"maxHeight": "200px", "overflowY": "auto"}),
+            ])
+
+        # Step 7: Export bundle
+        if step_idx == 7:
+            bm = BundleManager()
+            downloads = Path.home() / "Downloads"
+            downloads.mkdir(exist_ok=True)
+            output_path = downloads / "mobile_lab_bundle.tar.gz"
+            path = bm.export_bundle(str(output_path), config)
+            size_mb = path.stat().st_size / (1024 * 1024)
+            return dbc.Alert(
+                [html.I(className="bi bi-check-circle me-2"),
+                 f"Bundle exported: {path} ({size_mb:.1f} MB)"],
+                color="success", className="mt-2 py-2",
+            )
+
+        raise ValueError(f"Unknown wizard step: {step_idx}")
+
+    # Run All Steps
+    @app.callback(
+        Output("wizard-run-all-result", "children"),
+        Output("wizard-step-state", "data", allow_duplicate=True),
+        Output("wizard-run-all-btn", "disabled"),
+        Input("wizard-run-all-btn", "n_clicks"),
+        State("wizard-step-state", "data"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
+    )
+    def run_all_wizard_steps(n_clicks, wizard_state, config):
+        """Run all wizard steps sequentially."""
+        if not n_clicks:
+            raise PreventUpdate
+
+        config = config or {}
+        wizard_state = wizard_state or {
+            "current_step": 0,
+            "steps": {str(i): "pending" for i in range(8)},
+        }
+
+        results = []
+        all_ok = True
+
+        for step_idx in range(8):
+            wizard_state["steps"][str(step_idx)] = "running"
+            try:
+                _execute_wizard_step(step_idx, config)
+                wizard_state["steps"][str(step_idx)] = "done"
+            except Exception as e:
+                wizard_state["steps"][str(step_idx)] = "failed"
+                results.append(f"Step {step_idx + 1} failed: {e}")
+                all_ok = False
+                # Steps 1-2 are critical, abort on failure
+                if step_idx in (1, 2):
+                    results.append("Aborting: critical step failed.")
+                    break
+
+        if all_ok:
+            alert = dbc.Alert(
+                [html.I(className="bi bi-check-circle me-2"),
+                 "All 8 steps completed. System is ready for offline deployment."],
+                color="success",
+            )
+        else:
+            alert = dbc.Alert([
+                html.I(className="bi bi-exclamation-triangle me-2"),
+                html.Strong("Some steps failed:"),
+                html.Ul([html.Li(r) for r in results]),
+            ], color="warning")
+
+        return alert, wizard_state, False
 
     logger.info("Preparation tab callbacks registered")

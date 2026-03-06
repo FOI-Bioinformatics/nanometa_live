@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ app_name }} Report - {{ generated_at[:10] }}</title>
+<style>
+  /* Reset and base */
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #343a40;
+    background: #ffffff;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Print styles */
+  @media print {
+    body { font-size: 11px; }
+    .page-break { page-break-before: always; }
+    .no-print { display: none !important; }
+    .container { max-width: 100%; padding: 0; }
+    .card { break-inside: avoid; }
+  }
+
+  /* Layout */
+  .container { max-width: 1100px; margin: 0 auto; padding: 24px; }
+
+  /* Typography */
+  h1 { font-size: 1.75rem; font-weight: 700; color: #212529; margin: 0 0 4px 0; }
+  h2 { font-size: 1.25rem; font-weight: 600; color: #343a40; margin: 24px 0 12px 0; border-bottom: 2px solid #dee2e6; padding-bottom: 6px; }
+  h3 { font-size: 1.05rem; font-weight: 600; color: #495057; margin: 16px 0 8px 0; }
+
+  /* Cards */
+  .card {
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    margin-bottom: 16px;
+    background: #ffffff;
+  }
+  .card-header {
+    background: #f8f9fa;
+    padding: 10px 16px;
+    border-bottom: 1px solid #dee2e6;
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+  .card-body { padding: 16px; }
+
+  /* Decision banner */
+  .decision-banner {
+    padding: 16px 24px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    text-align: center;
+  }
+  .banner-safe {
+    background: #d4edda;
+    color: #155724;
+    border: 2px solid #28a745;
+  }
+  .banner-action {
+    background: #f8d7da;
+    color: #721c24;
+    border: 2px solid #dc3545;
+  }
+  .banner-review {
+    background: #fff3cd;
+    color: #856404;
+    border: 2px solid #ffc107;
+  }
+
+  /* Summary grid */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .metric-card {
+    text-align: center;
+    padding: 16px;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    background: #f8f9fa;
+  }
+  .metric-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #007bff;
+    display: block;
+  }
+  .metric-label {
+    font-size: 0.85rem;
+    color: #6c757d;
+    display: block;
+    margin-top: 2px;
+  }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 12px;
+    font-size: 0.9rem;
+  }
+  th, td {
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid #dee2e6;
+  }
+  th {
+    background: #f8f9fa;
+    font-weight: 600;
+    color: #495057;
+    border-bottom: 2px solid #dee2e6;
+  }
+  tr:hover { background: #f8f9fa; }
+
+  /* Threat badges */
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .badge-critical { background: #8b0000; color: #fff; }
+  .badge-high { background: #dc3545; color: #fff; }
+  .badge-moderate { background: #fd7e14; color: #fff; }
+  .badge-low { background: #28a745; color: #fff; }
+  .badge-unknown { background: #6c757d; color: #fff; }
+  .badge-detected { background: #dc3545; color: #fff; }
+  .badge-not-detected { background: #28a745; color: #fff; }
+
+  /* Alert list */
+  .alert-item {
+    padding: 8px 12px;
+    border-left: 4px solid #6c757d;
+    margin-bottom: 6px;
+    background: #f8f9fa;
+    border-radius: 0 4px 4px 0;
+  }
+  .alert-critical { border-left-color: #dc3545; background: #f8d7da; }
+  .alert-warning { border-left-color: #ffc107; background: #fff3cd; }
+  .alert-info { border-left-color: #17a2b8; background: #d1ecf1; }
+  .alert-success { border-left-color: #28a745; background: #d4edda; }
+  .alert-severity {
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    margin-right: 8px;
+  }
+
+  /* Chart container */
+  .chart-container {
+    margin: 12px 0;
+    min-height: 200px;
+  }
+
+  /* Sample section */
+  .sample-section {
+    margin-bottom: 24px;
+  }
+  .sample-section details > summary {
+    cursor: pointer;
+    padding: 8px 12px;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    font-weight: 600;
+    list-style: none;
+  }
+  .sample-section details > summary::-webkit-details-marker { display: none; }
+  .sample-section details > summary::before {
+    content: "+ ";
+    font-weight: 700;
+    margin-right: 4px;
+  }
+  .sample-section details[open] > summary::before { content: "- "; }
+  .sample-section details[open] > summary {
+    border-radius: 6px 6px 0 0;
+    border-bottom: none;
+  }
+  .sample-content {
+    padding: 16px;
+    border: 1px solid #dee2e6;
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+  }
+
+  /* Footer */
+  .report-footer {
+    margin-top: 32px;
+    padding-top: 16px;
+    border-top: 2px solid #dee2e6;
+    font-size: 0.85rem;
+    color: #6c757d;
+  }
+  .footer-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  /* Two-column charts */
+  .chart-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px;
+  }
+</style>
+{% if plotly_cdn_url %}
+<script src="{{ plotly_cdn_url }}"></script>
+{% endif %}
+</head>
+<body>
+
+<div class="container">
+
+  <!-- HEADER -->
+  <header style="margin-bottom: 20px;">
+    <h1>{{ app_name }} - Analysis Report</h1>
+    <p style="color: #6c757d; margin: 0;">
+      Generated: {{ generated_at[:19] | replace("T", " ") }}
+      &middot; {{ data.sample_count }} sample{{ "s" if data.sample_count != 1 else "" }}
+      {% if data.config.get("offline_mode") %}
+      &middot; <span style="color: #fd7e14; font-weight: 600;">Offline Mode</span>
+      {% endif %}
+    </p>
+  </header>
+
+  <!-- DECISION BANNER -->
+  {% set detected_threats = data.watched_results | selectattr("detected") | list %}
+  {% set critical_threats = detected_threats | selectattr("threat_level", "equalto", "critical") | list %}
+  {% set high_threats = detected_threats | selectattr("threat_level", "equalto", "high") | list %}
+
+  {% if critical_threats or high_threats %}
+  <div class="decision-banner banner-action">
+    ACTION REQUIRED - {{ (critical_threats | length) + (high_threats | length) }} high-priority organism{{ "s" if (critical_threats | length) + (high_threats | length) != 1 else "" }} detected
+  </div>
+  {% elif detected_threats %}
+  <div class="decision-banner banner-review">
+    REVIEW RECOMMENDED - {{ detected_threats | length }} watched organism{{ "s" if detected_threats | length != 1 else "" }} detected
+  </div>
+  {% else %}
+  <div class="decision-banner banner-safe">
+    NO WATCHED ORGANISMS DETECTED
+  </div>
+  {% endif %}
+
+  <!-- SUMMARY METRICS -->
+  {% set total_reads = data.classified_total + data.unclassified_total %}
+  {% set class_rate = (data.classified_total / total_reads * 100) if total_reads > 0 else 0 %}
+  <div class="summary-grid">
+    <div class="metric-card">
+      <span class="metric-value">{{ total_reads | format_number }}</span>
+      <span class="metric-label">Total Reads</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-value">{{ class_rate | format_pct }}</span>
+      <span class="metric-label">Classification Rate</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-value">{{ data.sample_count }}</span>
+      <span class="metric-label">Samples</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-value">{{ detected_threats | length }}</span>
+      <span class="metric-label">Watched Organisms Detected</span>
+    </div>
+  </div>
+
+  <!-- OVERALL CLASSIFICATION CHART -->
+  <h2>Classification Summary</h2>
+  <div class="chart-container" id="chart-classification-donut"></div>
+
+  <!-- PATHOGEN SCREENING -->
+  {% if data.watched_results %}
+  <h2>Pathogen Screening</h2>
+  <div class="card">
+    <div class="card-body">
+      <table>
+        <thead>
+          <tr>
+            <th>Species</th>
+            <th>Threat Level</th>
+            <th>Status</th>
+            <th>Reads</th>
+            <th>Abundance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for w in data.watched_results | sort(attribute="threat_level") %}
+          <tr>
+            <td><em>{{ w.name }}</em></td>
+            <td><span class="badge badge-{{ w.threat_level }}">{{ w.threat_level }}</span></td>
+            <td>
+              {% if w.detected %}
+              <span class="badge badge-detected">DETECTED</span>
+              {% else %}
+              <span class="badge badge-not-detected">Not Detected</span>
+              {% endif %}
+            </td>
+            <td>{{ w.reads | format_number }}</td>
+            <td>{{ w.abundance | format_pct }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- QC METRICS -->
+  <h2>Quality Control Metrics</h2>
+  <div class="card">
+    <div class="card-body">
+      <table>
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>QC Source</td>
+            <td>{{ data.qc_summary.get("source", "N/A") }}</td>
+          </tr>
+          <tr>
+            <td>Total Reads</td>
+            <td>{{ data.qc_summary.get("total_reads", 0) | format_number }}</td>
+          </tr>
+          <tr>
+            <td>Total Bases</td>
+            <td>{{ data.qc_summary.get("total_bases", 0) | format_number }}</td>
+          </tr>
+          {% if data.qc_summary.get("pass_rate") %}
+          <tr>
+            <td>QC Pass Rate</td>
+            <td>{{ data.qc_summary.get("pass_rate", 0) | format_pct }}</td>
+          </tr>
+          {% endif %}
+          {% if data.qc_summary.get("avg_read_length") %}
+          <tr>
+            <td>Average Read Length</td>
+            <td>{{ data.qc_summary.get("avg_read_length", 0) | format_number }} bp</td>
+          </tr>
+          {% endif %}
+          {% if data.qc_summary.get("avg_quality") %}
+          <tr>
+            <td>Average Quality Score</td>
+            <td>Q{{ "%.1f" | format(data.qc_summary.get("avg_quality", 0)) }}</td>
+          </tr>
+          {% endif %}
+          {% if data.qc_summary.get("q20_percent") %}
+          <tr>
+            <td>Q20 Bases</td>
+            <td>{{ data.qc_summary.get("q20_percent", 0) | format_pct }}</td>
+          </tr>
+          {% endif %}
+          {% if data.qc_summary.get("q30_percent") %}
+          <tr>
+            <td>Q30 Bases</td>
+            <td>{{ data.qc_summary.get("q30_percent", 0) | format_pct }}</td>
+          </tr>
+          {% endif %}
+          {% if data.qc_summary.get("n50") %}
+          <tr>
+            <td>Read Length N50</td>
+            <td>{{ data.qc_summary.get("n50", 0) | format_number }} bp</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ALERTS -->
+  {% if data.alerts %}
+  <h2>Alerts</h2>
+  <div class="card">
+    <div class="card-body">
+      {% for alert in data.alerts | sort(attribute="priority") %}
+      <div class="alert-item alert-{{ alert.severity }}">
+        <span class="alert-severity">{{ alert.severity }}</span>
+        {{ alert.message }}
+        {% if alert.recommendation %}
+        <br><small style="color: #6c757d;">{{ alert.recommendation }}</small>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- PER-SAMPLE DETAILS -->
+  {% if data.per_sample %}
+  <h2 class="page-break">Sample Details</h2>
+
+  <!-- Per-sample donut grid -->
+  {% if data.per_sample | length > 1 %}
+  <div class="chart-grid">
+    {% for sample in data.per_sample %}
+    <div class="chart-container" id="chart-donut-{{ sample }}"></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% for sample, sdata in data.per_sample.items() %}
+  <div class="sample-section">
+    <details {% if loop.first %}open{% endif %}>
+      <summary>
+        {{ sample }}
+        &mdash;
+        {{ (sdata.classified + sdata.unclassified) | format_number }} reads,
+        {{ sdata.organisms | length }} organisms
+      </summary>
+      <div class="sample-content">
+        <!-- QC summary for this sample -->
+        {% if sdata.qc and sdata.qc.get("total_reads", 0) > 0 %}
+        <h3>Quality Metrics</h3>
+        <table>
+          <tr><th>Metric</th><th>Value</th></tr>
+          <tr><td>Total Reads</td><td>{{ sdata.qc.get("total_reads", 0) | format_number }}</td></tr>
+          <tr><td>Total Bases</td><td>{{ sdata.qc.get("total_bases", 0) | format_number }}</td></tr>
+          {% if sdata.qc.get("pass_rate") %}
+          <tr><td>QC Pass Rate</td><td>{{ sdata.qc.get("pass_rate", 0) | format_pct }}</td></tr>
+          {% endif %}
+          {% if sdata.qc.get("avg_quality") %}
+          <tr><td>Avg Quality</td><td>Q{{ "%.1f" | format(sdata.qc.get("avg_quality", 0)) }}</td></tr>
+          {% endif %}
+        </table>
+        {% endif %}
+
+        <!-- Organism abundance chart -->
+        {% if sdata.organisms %}
+        <h3>Top Organisms</h3>
+        <div class="chart-container" id="chart-organisms-{{ sample }}"></div>
+
+        <table>
+          <thead>
+            <tr><th>Organism</th><th>Rank</th><th>Tax ID</th><th>Reads</th><th>Abundance</th></tr>
+          </thead>
+          <tbody>
+            {% for org in sdata.organisms %}
+            <tr>
+              <td><em>{{ org.name }}</em></td>
+              <td>{{ org.rank }}</td>
+              <td>{{ org.taxid }}</td>
+              <td>{{ org.reads | format_number }}</td>
+              <td>{{ org.abundance | format_pct }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p style="color: #6c757d;">No organisms detected at species or genus level.</p>
+        {% endif %}
+      </div>
+    </details>
+  </div>
+  {% endfor %}
+  {% endif %}
+
+  <!-- FOOTER -->
+  <div class="report-footer">
+    <div class="footer-grid">
+      <div>
+        <strong>Generated by</strong> {{ app_name }}<br>
+        <strong>Date</strong> {{ generated_at[:19] | replace("T", " ") }}<br>
+        <strong>Results directory</strong> {{ data.results_dir }}
+      </div>
+      <div>
+        {% if data.config.get("kraken2_db") %}
+        <strong>Kraken2 Database</strong> {{ data.config.get("kraken2_db", "N/A") }}<br>
+        {% endif %}
+        {% if data.config.get("qc_tool") %}
+        <strong>QC Tool</strong> {{ data.config.get("qc_tool", "N/A") }}<br>
+        {% endif %}
+        <strong>Samples</strong> {{ data.samples | join(", ") if data.samples else "Aggregated" }}
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Plotly.js inline bundle -->
+{% if plotly_js_inline %}
+<script>{{ plotly_js_inline | safe }}</script>
+{% endif %}
+
+<!-- Render charts -->
+<script>
+(function() {
+  var charts = {{ charts | safe }};
+
+  function renderChart(divId, chartKey) {
+    var el = document.getElementById(divId);
+    if (!el || !charts[chartKey]) return;
+    try {
+      var spec = JSON.parse(charts[chartKey]);
+      Plotly.newPlot(el, spec.data, spec.layout, {
+        displayModeBar: false,
+        responsive: true,
+        staticPlot: false
+      });
+    } catch(e) {
+      el.innerHTML = '<p style="color:#6c757d;text-align:center;">Chart could not be rendered.</p>';
+    }
+  }
+
+  // Overall classification donut
+  renderChart('chart-classification-donut', 'classification_donut');
+
+  // Per-sample charts
+  {% for sample in data.per_sample %}
+  renderChart('chart-donut-{{ sample }}', 'donut_{{ sample }}');
+  renderChart('chart-organisms-{{ sample }}', 'organisms_{{ sample }}');
+  {% endfor %}
+})();
+</script>
+
+</body>
+</html>

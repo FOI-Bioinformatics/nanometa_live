@@ -36,7 +36,8 @@ setup(
     entry_points={
         'console_scripts': [
             'nanometa-live=nanometa_live.nanometa_live:main',
-            'nanometa-sim=nanometa_live.nanopore_simulator:nano_sim'
+            'nanometa-sim=nanometa_live.nanopore_simulator:nano_sim',
+            'nanometa-prepare=nanometa_live.cli.prepare:main'
         ]
     },
     install_requires=requirements,

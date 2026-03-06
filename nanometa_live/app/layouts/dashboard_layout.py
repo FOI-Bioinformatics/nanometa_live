@@ -742,6 +742,10 @@ def create_dashboard_layout():
             dbc.Col([
                 dbc.ButtonGroup([
                     dbc.Button([
+                        html.I(className="bi bi-download me-1"),
+                        "Export Results"
+                    ], id="dashboard-export-btn", color="outline-primary", size="sm"),
+                    dbc.Button([
                         html.I(className="bi bi-question-circle me-1"),
                         "Help"
                     ], id="dashboard-help-btn", color="link", size="sm"),
@@ -751,7 +755,41 @@ def create_dashboard_layout():
                     ], id="dashboard-refresh-btn", color="link", size="sm")
                 ], className="float-end")
             ], md=4)
-        ], className="mb-2 px-2")
+        ], className="mb-2 px-2"),
+
+        # Export Results Modal
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle("Export Results")),
+            dbc.ModalBody([
+                dbc.Label("Output Directory"),
+                dbc.Input(
+                    id="export-output-dir",
+                    type="text",
+                    placeholder="Path to export directory...",
+                    className="mb-3"
+                ),
+                dbc.Checkbox(
+                    id="export-include-raw",
+                    label="Include raw data files (kraken2, fastp, validation)",
+                    value=True,
+                    className="mb-3"
+                ),
+                html.Div(id="export-status-message")
+            ]),
+            dbc.ModalFooter([
+                dbc.Button(
+                    "Cancel",
+                    id="export-cancel-btn",
+                    color="secondary",
+                    className="me-2"
+                ),
+                dbc.Button(
+                    [html.I(className="bi bi-download me-1"), "Generate Report"],
+                    id="export-generate-btn",
+                    color="primary"
+                ),
+            ]),
+        ], id="export-modal", is_open=False, centered=True),
     ], className="p-3")
 
 

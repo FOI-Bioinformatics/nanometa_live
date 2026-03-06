@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 import logging
 
 from dash import Dash, Input, Output, State, callback, ctx, no_update, html, ALL, MATCH
+from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 import json
 
@@ -1442,6 +1443,69 @@ def register_dashboard_callbacks(app: Dash):
         return "watchlist-tab"
 
     # Watchlist collapse toggle moved to clientside callback in app.py
+
+    # ---- Export Results callbacks ----
+    @app.callback(
+        Output("export-modal", "is_open"),
+        [Input("dashboard-export-btn", "n_clicks"),
+         Input("export-cancel-btn", "n_clicks"),
+         Input("export-generate-btn", "n_clicks")],
+        State("export-modal", "is_open"),
+        prevent_initial_call=True
+    )
+    def toggle_export_modal(open_clicks, cancel_clicks, gen_clicks, is_open):
+        trigger = ctx.triggered_id
+        if trigger == "dashboard-export-btn":
+            return True
+        if trigger == "export-cancel-btn":
+            return False
+        if trigger == "export-generate-btn":
+            return False  # Close after generation starts
+        return is_open
+
+    @app.callback(
+        Output("export-status-message", "children"),
+        Input("export-generate-btn", "n_clicks"),
+        [State("export-output-dir", "value"),
+         State("export-include-raw", "value"),
+         State("config-store", "data")],
+        prevent_initial_call=True
+    )
+    def generate_export(n_clicks, output_dir, include_raw, config):
+        if not n_clicks or not config:
+            raise PreventUpdate
+
+        if not output_dir or not output_dir.strip():
+            return html.Div(
+                "Please specify an output directory.",
+                className="text-danger"
+            )
+
+        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
+        if not main_dir:
+            return html.Div(
+                "No results directory configured.",
+                className="text-danger"
+            )
+
+        try:
+            from nanometa_live.core.export.report_generator import ReportGenerator
+
+            generator = ReportGenerator(main_dir, config)
+            report_path = generator.generate(
+                output_dir=output_dir.strip(),
+                include_raw=include_raw,
+            )
+            return html.Div([
+                html.I(className="bi bi-check-circle-fill text-success me-2"),
+                f"Report exported to: {report_path}"
+            ], className="text-success mt-2")
+        except Exception as e:
+            logger.error("Export failed: %s", e)
+            return html.Div(
+                f"Export failed: {e}",
+                className="text-danger mt-2"
+            )
 
 
 # Helper functions

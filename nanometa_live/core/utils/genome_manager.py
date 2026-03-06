@@ -84,12 +84,13 @@ class GenomeDownloadManager:
     Caches downloads in ~/.nanometa/genomes/ with metadata tracking.
     """
 
-    def __init__(self, cache_dir: Optional[str] = None):
+    def __init__(self, cache_dir: Optional[str] = None, offline_mode: bool = False):
         """
         Initialize the genome download manager.
 
         Args:
             cache_dir: Base cache directory. Defaults to ~/.nanometa
+            offline_mode: If True, refuse all genome downloads
         """
         if cache_dir is None:
             cache_dir = "~/.nanometa"
@@ -99,6 +100,7 @@ class GenomeDownloadManager:
         self.genomes_dir = self.cache_dir / "genomes"
         self.blast_dir = self.cache_dir / "blast"
         self.metadata_file = self.cache_dir / "genome_metadata.json"
+        self.offline_mode = offline_mode
 
         # Create directories
         self.genomes_dir.mkdir(parents=True, exist_ok=True)
@@ -106,7 +108,7 @@ class GenomeDownloadManager:
 
         # Load existing metadata
         self._metadata: Dict[int, GenomeMetadata] = {}
-        self._last_errors: Dict[int, str] = {}  # taxid → error message
+        self._last_errors: Dict[int, str] = {}  # taxid -> error message
         self._load_metadata()
 
         # Scan for existing genome files without metadata
@@ -548,6 +550,15 @@ class GenomeDownloadManager:
         Returns:
             Path to downloaded FASTA file, or None on failure
         """
+        if self.offline_mode:
+            # In offline mode, return existing genome if available, otherwise refuse
+            if self.has_genome(taxid):
+                return self.get_genome_path(taxid)
+            msg = "Offline mode -- use Import to add genomes"
+            logger.warning(f"{msg} (taxid={taxid}, species={species_name})")
+            self._last_errors[taxid] = msg
+            return None
+
         # Check if already downloaded
         if not force and self.has_genome(taxid):
             logger.info(f"Genome already downloaded for taxid {taxid}")
@@ -1293,6 +1304,22 @@ class GenomeDownloadManager:
         if not entries:
             return {}
 
+        # In offline mode, return only already-downloaded genomes
+        if self.offline_mode:
+            results: Dict[int, Optional[Path]] = {}
+            for entry in entries:
+                taxid = entry.get("taxid", 0)
+                if not taxid:
+                    continue
+                if self.has_genome(taxid):
+                    results[taxid] = self.get_genome_path(taxid)
+                else:
+                    msg = "Offline mode -- use Import to add genomes"
+                    logger.warning(f"{msg} (taxid={taxid})")
+                    self._last_errors[taxid] = msg
+                    results[taxid] = None
+            return results
+
         # Deduplicate and filter already-downloaded
         to_download: List[Dict[str, Any]] = []
         results: Dict[int, Optional[Path]] = {}
@@ -1546,6 +1573,174 @@ class GenomeDownloadManager:
         except Exception as e:
             logger.error(f"Failed to delete genome for taxid {taxid}: {e}")
             return False
+
+    def import_genomes_from_directory(
+        self, source_dir: str
+    ) -> Tuple[int, List[Dict[str, str]]]:
+        """
+        Import genome FASTA files from a local directory.
+
+        Files named ``{taxid}.fasta`` (or ``.fna``, ``.fa``, optionally gzipped)
+        are automatically recognized. Other filenames are returned for the caller
+        to map manually.
+
+        Args:
+            source_dir: Path to directory containing FASTA files.
+
+        Returns:
+            Tuple of (number imported, list of unrecognized file dicts).
+            Each unrecognized dict has keys ``filename`` and ``path``.
+        """
+        src = Path(source_dir)
+        if not src.is_dir():
+            raise ValueError(f"Source directory does not exist: {source_dir}")
+
+        fasta_extensions = {".fasta", ".fna", ".fa"}
+        imported = 0
+        unrecognized: List[Dict[str, str]] = []
+
+        for fpath in sorted(src.iterdir()):
+            if not fpath.is_file():
+                continue
+
+            # Determine if it's a FASTA file (optionally gzipped)
+            name_lower = fpath.name.lower()
+            is_gz = name_lower.endswith(".gz")
+            check_name = name_lower[:-3] if is_gz else name_lower
+            ext = Path(check_name).suffix
+
+            if ext not in fasta_extensions:
+                continue
+
+            # Try to extract taxid from filename
+            stem = Path(check_name).stem
+            try:
+                taxid = int(stem)
+            except ValueError:
+                unrecognized.append({
+                    "filename": fpath.name,
+                    "path": str(fpath),
+                })
+                continue
+
+            # Copy to genomes directory
+            dst = self.genomes_dir / fpath.name
+            if not dst.exists():
+                shutil.copy2(fpath, dst)
+
+            # Create metadata
+            species_name, kingdom = self._resolve_species_name(taxid)
+            self._metadata[taxid] = GenomeMetadata(
+                taxid=taxid,
+                species_name=species_name,
+                accession="manual_import",
+                source="manual",
+                kingdom=kingdom,
+                fasta_path=str(dst),
+                file_size=dst.stat().st_size,
+                is_representative=False,
+            )
+            imported += 1
+            logger.info(f"Imported genome: {fpath.name} (taxid {taxid})")
+
+        if imported > 0:
+            self._save_metadata()
+            # Build BLAST databases for newly imported genomes
+            self._build_missing_blast_dbs()
+
+        logger.info(
+            f"Imported {imported} genome(s), "
+            f"{len(unrecognized)} unrecognized file(s)"
+        )
+        return imported, unrecognized
+
+    def import_genomes_from_archive(
+        self, archive_path: str
+    ) -> Tuple[int, List[Dict[str, str]]]:
+        """
+        Import genome FASTA files from a tar.gz or zip archive.
+
+        Extracts to a temporary directory and delegates to
+        ``import_genomes_from_directory``.
+
+        Args:
+            archive_path: Path to ``.tar.gz`` or ``.zip`` archive.
+
+        Returns:
+            Tuple of (number imported, list of unrecognized file dicts).
+        """
+        archive = Path(archive_path)
+        if not archive.exists():
+            raise ValueError(f"Archive not found: {archive_path}")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+
+            if archive.name.endswith(".tar.gz") or archive.name.endswith(".tgz"):
+                import tarfile as _tarfile
+                with _tarfile.open(str(archive), "r:gz") as tar:
+                    tar.extractall(path=str(tmp))
+            elif archive.name.endswith(".zip"):
+                with zipfile.ZipFile(str(archive), "r") as zf:
+                    zf.extractall(str(tmp))
+            else:
+                raise ValueError(
+                    f"Unsupported archive format: {archive.name}. "
+                    "Use .tar.gz, .tgz, or .zip."
+                )
+
+            # The archive may contain files at the top level or in a subdirectory
+            # Check if there's a single subdirectory containing the files
+            entries = list(tmp.iterdir())
+            if len(entries) == 1 and entries[0].is_dir():
+                extract_dir = entries[0]
+            else:
+                extract_dir = tmp
+
+            return self.import_genomes_from_directory(str(extract_dir))
+
+    def import_genome_with_taxid(self, fasta_path: str, taxid: int) -> bool:
+        """
+        Import a single genome file with an explicit taxid mapping.
+
+        Used by the UI when a user manually maps an unrecognized filename
+        to a taxid.
+
+        Args:
+            fasta_path: Path to the FASTA file.
+            taxid: NCBI taxonomy ID to assign.
+
+        Returns:
+            True if the import succeeded.
+        """
+        src = Path(fasta_path)
+        if not src.exists():
+            logger.error(f"FASTA file not found: {fasta_path}")
+            return False
+
+        # Copy with taxid-based naming
+        suffix = ".fasta.gz" if src.name.endswith(".gz") else ".fasta"
+        dst = self.genomes_dir / f"{taxid}{suffix}"
+        if not dst.exists():
+            shutil.copy2(src, dst)
+
+        species_name, kingdom = self._resolve_species_name(taxid)
+        self._metadata[taxid] = GenomeMetadata(
+            taxid=taxid,
+            species_name=species_name,
+            accession="manual_import",
+            source="manual",
+            kingdom=kingdom,
+            fasta_path=str(dst),
+            file_size=dst.stat().st_size,
+            is_representative=False,
+        )
+        self._save_metadata()
+
+        # Build BLAST DB
+        self.build_blast_db(taxid)
+        logger.info(f"Imported genome {src.name} as taxid {taxid}")
+        return True
 
 
 # Singleton instance

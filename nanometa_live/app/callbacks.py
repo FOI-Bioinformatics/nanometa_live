@@ -37,6 +37,53 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         return 30000  # Default 30 seconds
 
     # ========================================================================
+    # Offline Mode Badge
+    # ========================================================================
+
+    @app.callback(
+        Output("offline-mode-badge", "style"),
+        Input("app-config", "data"),
+    )
+    def toggle_offline_badge(config):
+        """Show or hide the OFFLINE badge based on config."""
+        if config and config.get("offline_mode"):
+            return {"fontSize": "0.7rem"}
+        return {"display": "none", "fontSize": "0.7rem"}
+
+    # ========================================================================
+    # Internet Auto-Detection (startup suggestion)
+    # ========================================================================
+
+    _internet_checked = {"done": False}
+
+    @app.callback(
+        Output("toast-message", "data", allow_duplicate=True),
+        Input("app-config", "data"),
+        prevent_initial_call=False,
+    )
+    def check_internet_on_startup(config):
+        """On first load, check internet and suggest offline mode if unreachable."""
+        if _internet_checked["done"]:
+            return no_update
+        _internet_checked["done"] = True
+
+        if config and config.get("offline_mode"):
+            return no_update
+        try:
+            import requests as req
+            req.get(
+                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/einfo.fcgi",
+                timeout=3,
+            ).raise_for_status()
+            return no_update
+        except Exception:
+            return {
+                "type": "warning",
+                "title": "No Internet Detected",
+                "message": "Consider enabling Offline Mode in Settings.",
+            }
+
+    # ========================================================================
     # Data Fingerprint (change detection for tab-skip optimization)
     # ========================================================================
 
