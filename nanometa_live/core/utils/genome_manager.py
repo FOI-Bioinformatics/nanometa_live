@@ -23,12 +23,14 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 
@@ -1040,6 +1042,356 @@ class GenomeDownloadManager:
             logger.info(f"Updated {updated} genome metadata entries")
 
         return updated
+
+    # ------------------------------------------------------------------
+    # Batch / concurrent download methods
+    # ------------------------------------------------------------------
+
+    def get_kingdoms_batch(self, taxids: List[int]) -> Dict[int, str]:
+        """
+        Fetch kingdoms for multiple taxids in a single NCBI efetch request.
+
+        The efetch API accepts comma-separated IDs, allowing one HTTP
+        round-trip instead of N individual calls.
+
+        Args:
+            taxids: List of NCBI taxonomy IDs.
+
+        Returns:
+            Dict mapping taxid to kingdom string. Missing entries are
+            omitted from the result.
+        """
+        if not taxids:
+            return {}
+
+        results: Dict[int, str] = {}
+
+        # Process in chunks of 200 to stay within URL length limits
+        chunk_size = 200
+        for i in range(0, len(taxids), chunk_size):
+            chunk = taxids[i : i + chunk_size]
+
+            if i > 0:
+                time.sleep(0.5)  # rate-limit between chunks
+
+            try:
+                url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+                params = {
+                    "db": "taxonomy",
+                    "id": ",".join(str(t) for t in chunk),
+                    "retmode": "xml",
+                }
+
+                response = requests.get(url, params=params, timeout=60)
+                response.raise_for_status()
+
+                root = ET.fromstring(response.text)
+
+                for taxon_el in root.findall("Taxon"):
+                    tid_text = taxon_el.findtext("TaxId")
+                    if not tid_text:
+                        continue
+                    tid = int(tid_text)
+
+                    # Parse superkingdom / kingdom from LineageEx
+                    superkingdom = None
+                    kingdom_name = None
+                    lineage_ex = taxon_el.find("LineageEx")
+                    if lineage_ex is not None:
+                        for child in lineage_ex.findall("Taxon"):
+                            rank = child.findtext("Rank", "")
+                            name = child.findtext("ScientificName", "")
+                            if rank == "superkingdom":
+                                superkingdom = name
+                            elif rank == "kingdom":
+                                kingdom_name = name
+
+                    if superkingdom:
+                        if superkingdom == "Eukaryota" and kingdom_name == "Fungi":
+                            results[tid] = "Fungi"
+                        elif superkingdom in ("Bacteria", "Archaea", "Eukaryota", "Viruses"):
+                            results[tid] = superkingdom
+                        continue
+
+                    # Fallback: Lineage text
+                    lineage = taxon_el.findtext("Lineage", "")
+                    if lineage:
+                        parts = [p.strip() for p in lineage.split(";")]
+                        for part in parts[:3]:
+                            if part in ("Bacteria", "Archaea", "Eukaryota", "Viruses"):
+                                results[tid] = part
+                                break
+
+            except Exception as e:
+                logger.error(f"Batch kingdom lookup failed for chunk starting at index {i}: {e}")
+
+        logger.info(f"Batch kingdom lookup: resolved {len(results)}/{len(taxids)} taxids")
+        return results
+
+    def fetch_ncbi_accessions_batch(
+        self, taxids: List[int]
+    ) -> Dict[int, Tuple[str, Dict[str, Any]]]:
+        """
+        Fetch NCBI genome accessions for multiple taxids.
+
+        Uses the NCBI Datasets API, querying in small groups to reduce
+        the number of HTTP requests while staying within API limits.
+
+        Args:
+            taxids: List of NCBI taxonomy IDs.
+
+        Returns:
+            Dict mapping taxid to (accession, report_dict). Missing
+            entries are omitted.
+        """
+        if not taxids:
+            return {}
+
+        results: Dict[int, Tuple[str, Dict[str, Any]]] = {}
+
+        # Query individually but with rate limiting -- the Datasets API
+        # taxon endpoint accepts a single taxid per call.
+        for idx, taxid in enumerate(taxids):
+            if idx > 0:
+                time.sleep(0.5)
+
+            result = self.fetch_ncbi_accession(taxid)
+            if result:
+                results[taxid] = result
+
+        logger.info(
+            f"Batch NCBI accession lookup: found {len(results)}/{len(taxids)} accessions"
+        )
+        return results
+
+    def download_genomes_batch(
+        self,
+        entries: List[Dict[str, Any]],
+        max_workers: int = 3,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    ) -> Dict[int, Optional[Path]]:
+        """
+        Download genomes for multiple watchlist entries concurrently.
+
+        Performs batch kingdom lookups first, then downloads genomes
+        using a thread pool. This is substantially faster than
+        sequential calls to download_genome() for large watchlists.
+
+        Args:
+            entries: List of dicts with 'taxid' and 'name' keys.
+            max_workers: Maximum concurrent downloads (default 3).
+            progress_callback: Optional callback(completed, total, name)
+                invoked after each download finishes.
+
+        Returns:
+            Dict mapping taxid to Path (success) or None (failure).
+        """
+        if not entries:
+            return {}
+
+        # Deduplicate and filter already-downloaded
+        to_download: List[Dict[str, Any]] = []
+        results: Dict[int, Optional[Path]] = {}
+
+        for entry in entries:
+            taxid = entry.get("taxid", 0)
+            if not taxid:
+                continue
+            if self.has_genome(taxid):
+                results[taxid] = self.get_genome_path(taxid)
+            else:
+                to_download.append(entry)
+
+        if not to_download:
+            logger.info("All genomes already downloaded")
+            return results
+
+        total = len(to_download)
+        logger.info(f"Batch download: {total} genomes to download")
+
+        # Step 1: Batch kingdom lookup
+        all_taxids = [e["taxid"] for e in to_download]
+        kingdoms = self.get_kingdoms_batch(all_taxids)
+
+        # Step 2: Group entries by download strategy
+        virus_entries: List[Dict[str, Any]] = []
+        bacteria_entries: List[Dict[str, Any]] = []
+        other_entries: List[Dict[str, Any]] = []
+
+        for entry in to_download:
+            taxid = entry["taxid"]
+            kingdom = kingdoms.get(taxid)
+            entry["_kingdom"] = kingdom  # stash for worker
+            if kingdom == "Viruses":
+                virus_entries.append(entry)
+            elif kingdom in ("Bacteria", "Archaea"):
+                bacteria_entries.append(entry)
+            else:
+                other_entries.append(entry)
+
+        # Step 3: Batch NCBI accession lookup for non-virus entries
+        ncbi_lookup_taxids = [
+            e["taxid"]
+            for e in other_entries
+            if kingdoms.get(e["taxid"]) not in ("Bacteria", "Archaea")
+        ]
+        ncbi_accessions: Dict[int, Tuple[str, Dict[str, Any]]] = {}
+        if ncbi_lookup_taxids:
+            ncbi_accessions = self.fetch_ncbi_accessions_batch(ncbi_lookup_taxids)
+
+        completed = 0
+        lock = __import__("threading").Lock()
+
+        def _download_single(entry: Dict[str, Any]) -> Tuple[int, Optional[Path]]:
+            """Worker function for a single genome download."""
+            nonlocal completed
+            taxid = entry["taxid"]
+            name = entry.get("name", f"taxid {taxid}")
+            kingdom = entry.get("_kingdom")
+
+            self._last_errors.pop(taxid, None)
+
+            path: Optional[Path] = None
+
+            try:
+                if kingdom == "Viruses":
+                    path = self._download_virus_genome(taxid, name)
+                    if path:
+                        self._metadata[taxid] = GenomeMetadata(
+                            taxid=taxid,
+                            species_name=name,
+                            accession=f"virus_taxid_{taxid}",
+                            source="ncbi_virus",
+                            kingdom="Viruses",
+                            fasta_path=str(path),
+                            file_size=path.stat().st_size if path.exists() else 0,
+                        )
+                else:
+                    accession = None
+                    meta_dict: Dict[str, Any] = {}
+                    source = "ncbi"
+
+                    # Bacteria/archaea: try GTDB first
+                    if kingdom in ("Bacteria", "Archaea"):
+                        gtdb_result = self.fetch_gtdb_accession(name)
+                        if gtdb_result:
+                            accession, meta_dict = gtdb_result
+                            source = "gtdb"
+
+                    # Fallback to NCBI
+                    if not accession:
+                        if taxid in ncbi_accessions:
+                            accession, meta_dict = ncbi_accessions[taxid]
+                        else:
+                            ncbi_result = self.fetch_ncbi_accession(taxid)
+                            if ncbi_result:
+                                accession, meta_dict = ncbi_result
+
+                    if accession:
+                        path = self._download_ncbi_genome(accession, taxid)
+                        if path:
+                            self._metadata[taxid] = GenomeMetadata(
+                                taxid=taxid,
+                                species_name=name,
+                                accession=accession,
+                                source=source,
+                                kingdom=kingdom or "Unknown",
+                                fasta_path=str(path),
+                                file_size=path.stat().st_size if path.exists() else 0,
+                                gtdb_taxonomy=meta_dict.get("gtdbTaxonomy"),
+                                ncbi_taxonomy=(
+                                    meta_dict.get("ncbiTaxonomy")
+                                    or meta_dict.get("organism", {}).get("organism_name")
+                                ),
+                            )
+                    else:
+                        msg = f"No genome assembly found for {name} (taxid={taxid})"
+                        logger.error(msg)
+                        self._last_errors[taxid] = msg
+
+                if not path and taxid not in self._last_errors:
+                    self._last_errors[taxid] = f"Download failed for {name} (taxid={taxid})"
+
+            except Exception as e:
+                logger.error(f"Batch download failed for {name} (taxid={taxid}): {e}")
+                self._last_errors[taxid] = str(e)
+
+            with lock:
+                completed += 1
+                if progress_callback:
+                    try:
+                        progress_callback(completed, total, name)
+                    except Exception:
+                        pass
+
+            return taxid, path
+
+        # Step 4: Run downloads concurrently
+        all_entries = virus_entries + bacteria_entries + other_entries
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(_download_single, entry): entry
+                for entry in all_entries
+            }
+            for future in as_completed(futures):
+                taxid, path = future.result()
+                results[taxid] = path
+
+        # Save metadata once at the end
+        self._save_metadata()
+
+        succeeded = sum(1 for p in results.values() if p is not None)
+        logger.info(
+            f"Batch download complete: {succeeded}/{total} succeeded"
+        )
+        return results
+
+    def build_blast_dbs_batch(
+        self, taxids: List[int], max_workers: int = 2
+    ) -> int:
+        """
+        Build BLAST databases for multiple genomes concurrently.
+
+        Args:
+            taxids: List of taxonomy IDs to build databases for.
+            max_workers: Maximum concurrent makeblastdb processes.
+
+        Returns:
+            Number of databases successfully built.
+        """
+        if not shutil.which("makeblastdb"):
+            logger.error("makeblastdb not found. Install BLAST+ toolkit.")
+            return 0
+
+        # Filter to taxids that have genomes but no BLAST DB
+        to_build = [
+            t for t in taxids
+            if self.has_genome(t) and not self.has_blast_db(t)
+        ]
+
+        if not to_build:
+            logger.info("All BLAST databases already built")
+            return 0
+
+        logger.info(f"Building {len(to_build)} BLAST databases (workers={max_workers})")
+        built = 0
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(self.build_blast_db, taxid): taxid
+                for taxid in to_build
+            }
+            for future in as_completed(futures):
+                taxid = futures[future]
+                try:
+                    if future.result():
+                        built += 1
+                except Exception as e:
+                    logger.error(f"BLAST DB build failed for taxid {taxid}: {e}")
+
+        logger.info(f"Built {built}/{len(to_build)} BLAST databases")
+        return built
 
     def delete_genome(self, taxid: int) -> bool:
         """

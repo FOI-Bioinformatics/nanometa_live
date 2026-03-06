@@ -23,7 +23,7 @@ pathogens:
 
   - name: "Burkholderia pseudomallei"
     common_name: "Melioidosis agent"
-    taxid: 28450
+    taxid_ncbi: 28450
     threat_level: "high"
     bsl_level: 3
     alert_threshold: 5
@@ -35,7 +35,7 @@ pathogens:
 
   - name: "Campylobacter jejuni"
     common_name: "Campylobacter gastroenteritis"
-    taxid: 197
+    taxid_ncbi: 197
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 10
@@ -47,7 +47,7 @@ pathogens:
 
   - name: "Campylobacter coli"
     common_name: "Campylobacter gastroenteritis"
-    taxid: 195
+    taxid_ncbi: 195
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 10
@@ -59,7 +59,7 @@ pathogens:
 
   - name: "Escherichia coli"
     common_name: "Diarrhoeagenic E. coli"
-    taxid: 562
+    taxid_ncbi: 562
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 10
@@ -71,7 +71,7 @@ pathogens:
 
   - name: "Francisella tularensis"
     common_name: "Tularemia agent"
-    taxid: 263
+    taxid_ncbi: 263
     threat_level: "critical"
     bsl_level: 3
     alert_threshold: 1
@@ -83,7 +83,7 @@ pathogens:
 
   - name: "Legionella pneumophila"
     common_name: "Legionnaires' disease"
-    taxid: 446
+    taxid_ncbi: 446
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 5
@@ -95,7 +95,7 @@ pathogens:
 
   - name: "Mycobacterium avium"
     common_name: "MAC infection"
-    taxid: 1764
+    taxid_ncbi: 1764
     threat_level: "moderate"
     bsl_level: 2
     alert_threshold: 50
@@ -107,7 +107,7 @@ pathogens:
 
   - name: "Salmonella typhi"
     common_name: "Typhoid fever"
-    taxid: 90370
+    taxid_ncbi: 90370
     threat_level: "high"
     bsl_level: 3
     alert_threshold: 5
@@ -119,7 +119,7 @@ pathogens:
 
   - name: "Salmonella enterica"
     common_name: "Salmonellosis"
-    taxid: 28901
+    taxid_ncbi: 28901
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 10
@@ -131,7 +131,7 @@ pathogens:
 
   - name: "Shigella dysenteriae"
     common_name: "Bacillary dysentery"
-    taxid: 622
+    taxid_ncbi: 622
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 5
@@ -143,7 +143,7 @@ pathogens:
 
   - name: "Vibrio cholerae"
     common_name: "Cholera"
-    taxid: 666
+    taxid_ncbi: 666
     threat_level: "critical"
     bsl_level: 2
     alert_threshold: 1
@@ -159,7 +159,7 @@ pathogens:
 
   - name: "Adenoviridae"
     common_name: "Adenovirus"
-    taxid: 10508
+    taxid_ncbi: 10508
     threat_level: "moderate"
     bsl_level: 2
     alert_threshold: 20
@@ -171,7 +171,7 @@ pathogens:
 
   - name: "Astroviridae"
     common_name: "Astrovirus"
-    taxid: 39733
+    taxid_ncbi: 39733
     threat_level: "moderate"
     bsl_level: 2
     alert_threshold: 20
@@ -183,7 +183,7 @@ pathogens:
 
   - name: "Norovirus"
     common_name: "Norovirus gastroenteritis"
-    taxid: 142786
+    taxid_ncbi: 142786
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 10
@@ -196,7 +196,7 @@ pathogens:
   - name: "Paslahepevirus balayani"
     names_alt: ["Hepatitis E virus", "Orthohepevirus A"]
     common_name: "Hepatitis E"
-    taxid: 1678143
+    taxid_ncbi: 1678143
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 5
@@ -208,7 +208,7 @@ pathogens:
 
   - name: "Enterovirus"
     common_name: "Enteric viruses"
-    taxid: 12059
+    taxid_ncbi: 12059
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 10
@@ -221,7 +221,7 @@ pathogens:
   - name: "Hepatovirus ahepa"
     names_alt: ["Hepatitis A virus", "Hepatovirus A"]
     common_name: "Hepatitis A"
-    taxid: 3407641
+    taxid_ncbi: 3407641
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 5
@@ -233,7 +233,7 @@ pathogens:
 
   - name: "Rotavirus"
     common_name: "Rotavirus gastroenteritis"
-    taxid: 10912
+    taxid_ncbi: 10912
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 10
@@ -249,7 +249,7 @@ pathogens:
 
   - name: "Acanthamoeba"
     common_name: "Acanthamoeba infection"
-    taxid: 5754
+    taxid_ncbi: 5754
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 10
@@ -261,7 +261,7 @@ pathogens:
 
   - name: "Cryptosporidium parvum"
     common_name: "Cryptosporidiosis"
-    taxid: 5807
+    taxid_ncbi: 5807
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 5
@@ -273,7 +273,7 @@ pathogens:
 
   - name: "Cryptosporidium hominis"
     common_name: "Cryptosporidiosis"
-    taxid: 237895
+    taxid_ncbi: 237895
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 5
@@ -285,7 +285,7 @@ pathogens:
 
   - name: "Cyclospora cayetanensis"
     common_name: "Cyclosporiasis"
-    taxid: 88456
+    taxid_ncbi: 88456
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 5
@@ -297,7 +297,7 @@ pathogens:
 
   - name: "Entamoeba histolytica"
     common_name: "Amoebiasis"
-    taxid: 5759
+    taxid_ncbi: 5759
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 5
@@ -309,7 +309,7 @@ pathogens:
 
   - name: "Giardia intestinalis"
     common_name: "Giardiasis"
-    taxid: 5741
+    taxid_ncbi: 5741
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 5
@@ -321,7 +321,7 @@ pathogens:
 
   - name: "Naegleria fowleri"
     common_name: "Primary amoebic meningoencephalitis"
-    taxid: 5763
+    taxid_ncbi: 5763
     threat_level: "critical"
     bsl_level: 3
     alert_threshold: 1
@@ -337,7 +337,7 @@ pathogens:
 
   - name: "Dracunculus medinensis"
     common_name: "Guinea worm"
-    taxid: 318479
+    taxid_ncbi: 318479
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 1

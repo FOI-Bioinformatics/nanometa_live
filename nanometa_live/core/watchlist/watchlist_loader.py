@@ -250,7 +250,7 @@ class WatchlistLoader:
                     entry = WatchlistPathogenEntry(
                         name=p_data.get("name", "Unknown"),
                         names_alt=p_data.get("names_alt", []),
-                        taxid_ncbi=p_data.get("taxid_ncbi"),
+                        taxid_ncbi=p_data.get("taxid_ncbi") or p_data.get("taxid"),
                         common_name=p_data.get("common_name"),
                         threat_level=p_data.get("threat_level", "moderate"),
                         bsl_level=p_data.get("bsl_level"),

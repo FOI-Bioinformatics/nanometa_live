@@ -882,6 +882,7 @@ class WatchlistManager:
             entry_data = {
                 "name": p.name,
                 "names_alt": p.names_alt,
+                "taxid": p.taxid_ncbi,
                 "taxid_ncbi": p.taxid_ncbi,
                 "common_name": p.common_name,
                 "threat_level": p.threat_level,
@@ -997,7 +998,7 @@ class WatchlistManager:
                 existing = self._entries.get(pseudo_taxid)
 
             result.append({
-                "taxid": p.taxid_ncbi or hash(p.name.lower()) % (10**9),
+                "taxid": p.taxid_ncbi or 0,
                 "name": p.name,
                 "common_name": p.common_name,
                 "threat_level": p.threat_level,
