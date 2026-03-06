@@ -755,51 +755,57 @@ def register_preparation_callbacks(app):
         failed_names = []
 
         add_log(f"Found {total} missing genome(s) to download", "info")
-        set_progress((5, f"Downloading {total} genome(s)...", "Preparing downloads", log_entries[-20:], []))
+        set_progress((5, f"Downloading {total} genome(s)...", "Preparing batch downloads", log_entries[-20:], []))
 
-        for i, entry in enumerate(missing):
-            taxid = entry.get("taxid", 0)
-            name = entry.get("name", "Unknown")
-            progress_pct = 5 + int((i / total) * 85)
-
+        # Use batch download for concurrent fetching
+        def progress_cb(completed, total_count, name):
+            nonlocal downloaded, failed
+            pct = 5 + int((completed / max(total_count, 1)) * 80)
             set_progress((
-                progress_pct,
-                f"Downloading {i+1} of {total}",
-                f"Fetching genome for {name}...",
-                add_log(f"Downloading: {name} (taxid: {taxid})"),
-                dbc.Badge(f"{i+1}/{total}", color="primary", className="me-2"),
+                pct,
+                f"Downloading {completed} of {total_count}",
+                f"Fetched {name}",
+                log_entries[-20:],
+                dbc.Badge(f"{completed}/{total_count}", color="primary", className="me-2"),
             ))
 
-            try:
-                path = genome_mgr.download_genome(taxid, name)
+        try:
+            results = genome_mgr.download_genomes_batch(
+                missing, max_workers=3, progress_callback=progress_cb
+            )
+
+            # Log results and count successes/failures
+            successful_taxids = []
+            for entry in missing:
+                taxid = entry.get("taxid", 0)
+                name = entry.get("name", "Unknown")
+                path = results.get(taxid)
                 if path:
                     downloaded += 1
+                    successful_taxids.append(taxid)
                     add_log(f"Downloaded: {name}", "success")
-
-                    set_progress((
-                        progress_pct + 2,
-                        f"Downloading {i+1} of {total}",
-                        f"Building BLAST DB for {name}...",
-                        add_log(f"Building BLAST DB for {name}"),
-                        dbc.Badge(f"{i+1}/{total}", color="primary", className="me-2"),
-                    ))
-
-                    if genome_mgr.build_blast_db(taxid):
-                        add_log(f"BLAST DB built: {name}", "success")
-                    else:
-                        add_log(f"BLAST DB build failed: {name}", "warning")
                 else:
                     failed += 1
                     failed_names.append(name)
                     reason = genome_mgr.get_last_error(taxid) or "Unknown error"
-                    add_log(f"Download failed: {name} — {reason}", "error")
-            except Exception as e:
-                failed += 1
-                failed_names.append(name)
-                add_log(f"Error downloading {name}: {str(e)}", "error")
-                logger.error(f"Download error for {name}: {e}")
+                    add_log(f"Download failed: {name} -- {reason}", "error")
 
-            time.sleep(0.1)
+            # Batch build BLAST databases for all downloaded genomes
+            if successful_taxids:
+                set_progress((
+                    90,
+                    f"Building {len(successful_taxids)} BLAST database(s)...",
+                    "Building BLAST databases",
+                    add_log(f"Building BLAST databases for {len(successful_taxids)} genome(s)"),
+                    dbc.Badge("BLAST", color="info", className="me-2"),
+                ))
+                built = genome_mgr.build_blast_dbs_batch(successful_taxids, max_workers=2)
+                add_log(f"Built {built} BLAST database(s)", "success" if built > 0 else "warning")
+
+        except Exception as e:
+            failed = total
+            add_log(f"Batch download error: {str(e)}", "error")
+            logger.error(f"Batch download error: {e}")
 
         if failed == 0:
             result_text = f"Successfully downloaded {downloaded} genome(s)"
