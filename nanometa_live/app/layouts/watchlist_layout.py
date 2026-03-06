@@ -1338,6 +1338,8 @@ def create_genome_item(genome_meta: Dict[str, Any]) -> html.Div:
     file_size = genome_meta.get("file_size", 0)
     size_mb = round(file_size / (1024 * 1024), 2) if file_size else 0
 
+    source_labels = {"gtdb": "GTDB", "ncbi": "NCBI", "ncbi_virus": "NCBI Virus", "discovered": "Local"}
+    source_label = source_labels.get(source, source.upper())
     source_color = "success" if source == "gtdb" else "primary"
 
     return html.Div([
@@ -1347,7 +1349,7 @@ def create_genome_item(genome_meta: Dict[str, Any]) -> html.Div:
                 html.Small(f" (taxid: {taxid})", className="text-muted"),
             ], width=5),
             dbc.Col([
-                dbc.Badge(source.upper(), color=source_color, className="me-1"),
+                dbc.Badge(source_label, color=source_color, className="me-1"),
                 dbc.Badge(kingdom, color="secondary", className="me-1"),
                 dbc.Badge(
                     "BLAST DB",

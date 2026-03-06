@@ -23,6 +23,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
@@ -337,6 +338,10 @@ class GenomeDownloadManager:
         """
         Determine the kingdom/domain for a taxid using NCBI API.
 
+        Parses the XML response to extract superkingdom from the lineage,
+        avoiding false matches from species names that happen to contain
+        kingdom-level terms.
+
         Args:
             taxid: NCBI taxonomy ID
 
@@ -344,8 +349,7 @@ class GenomeDownloadManager:
             Kingdom name (Bacteria, Archaea, Fungi, Viruses, etc.) or None
         """
         try:
-            # Use NCBI Taxonomy API
-            url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+            url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
             params = {
                 "db": "taxonomy",
                 "id": taxid,
@@ -355,20 +359,55 @@ class GenomeDownloadManager:
             response = requests.get(url, params=params, timeout=30)
             response.raise_for_status()
 
-            # Parse XML to find kingdom/domain
-            content = response.text
+            root = ET.fromstring(response.text)
 
-            # Look for superkingdom/domain in lineage
-            if "Bacteria" in content:
-                return "Bacteria"
-            elif "Archaea" in content:
-                return "Archaea"
-            elif "Fungi" in content:
-                return "Fungi"
-            elif "Viruses" in content or "Viridae" in content:
-                return "Viruses"
-            elif "Eukaryota" in content:
-                return "Eukaryota"
+            # Check LineageEx for superkingdom and kingdom ranks
+            superkingdom = None
+            kingdom_name = None
+            for taxon_el in root.iter("LineageEx"):
+                for child in taxon_el.findall("Taxon"):
+                    rank = child.findtext("Rank", "")
+                    name = child.findtext("ScientificName", "")
+                    if rank == "superkingdom":
+                        superkingdom = name
+                    elif rank == "kingdom":
+                        kingdom_name = name
+
+            if superkingdom:
+                # For Eukaryota, refine to Fungi if kingdom is Fungi
+                if superkingdom == "Eukaryota" and kingdom_name == "Fungi":
+                    return "Fungi"
+                name_map = {
+                    "Bacteria": "Bacteria",
+                    "Archaea": "Archaea",
+                    "Eukaryota": "Eukaryota",
+                    "Viruses": "Viruses",
+                }
+                if superkingdom in name_map:
+                    return name_map[superkingdom]
+
+            # Fallback: check the Lineage text element
+            lineage = root.findtext(".//Lineage", "")
+            if lineage:
+                # Lineage is semicolon-separated, check first few entries
+                parts = [p.strip() for p in lineage.split(";")]
+                for part in parts[:3]:
+                    if part in ("Bacteria", "Archaea", "Eukaryota", "Viruses"):
+                        return part
+
+            # Check Division element as last resort
+            division = root.findtext(".//Division", "")
+            if division:
+                div_lower = division.lower()
+                if div_lower == "bacteria":
+                    return "Bacteria"
+                elif div_lower == "archaea":
+                    return "Archaea"
+                elif div_lower == "viruses":
+                    return "Viruses"
+                elif div_lower in ("fungi", "plants", "primates", "mammals",
+                                   "rodents", "invertebrates", "vertebrates"):
+                    return "Eukaryota"
 
             return None
 
@@ -524,6 +563,28 @@ class GenomeDownloadManager:
             # Still try NCBI directly
         logger.info(f"Downloading genome for {species_name} (taxid={taxid}, kingdom={kingdom})")
 
+        # Viruses: use dedicated virus download path (NCBI genome API
+        # does not index viral genomes - they are nucleotide records)
+        if kingdom == "Viruses":
+            fasta_path = self._download_virus_genome(taxid, species_name)
+            if fasta_path:
+                self._metadata[taxid] = GenomeMetadata(
+                    taxid=taxid,
+                    species_name=species_name,
+                    accession=f"virus_taxid_{taxid}",
+                    source="ncbi_virus",
+                    kingdom="Viruses",
+                    fasta_path=str(fasta_path),
+                    file_size=fasta_path.stat().st_size if fasta_path.exists() else 0,
+                )
+                self._save_metadata()
+                return fasta_path
+            else:
+                msg = f"Virus genome download failed for {species_name} (taxid={taxid})"
+                logger.error(msg)
+                self._last_errors[taxid] = msg
+                return None
+
         accession = None
         metadata = {}
         source = "ncbi"
@@ -576,6 +637,98 @@ class GenomeDownloadManager:
 
         self._last_errors[taxid] = f"NCBI datasets download failed for accession {accession}"
         return None
+
+    def _download_virus_genome(self, taxid: int, species_name: str) -> Optional[Path]:
+        """
+        Download a viral genome using the NCBI datasets virus subcommand.
+
+        The standard NCBI Datasets genome API does not index viral genomes.
+        Viral reference sequences are nucleotide records, not genome assemblies.
+        The datasets CLI provides a dedicated `download virus genome` command.
+
+        Args:
+            taxid: NCBI taxonomy ID
+            species_name: Species name (for logging)
+
+        Returns:
+            Path to downloaded FASTA file, or None on failure
+        """
+        if not shutil.which("datasets"):
+            logger.error(
+                "NCBI 'datasets' CLI not found. "
+                "Install from: https://www.ncbi.nlm.nih.gov/datasets/docs/v2/download-and-install/"
+            )
+            return None
+
+        output_file = self.genomes_dir / f"{taxid}.fasta"
+
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                zip_file = Path(tmpdir) / "virus_genome.zip"
+
+                cmd = [
+                    "datasets", "download", "virus", "genome", "taxon",
+                    str(taxid),
+                    "--refseq",
+                    "--complete-only",
+                    "--include", "genome",
+                    "--filename", str(zip_file)
+                ]
+
+                logger.info(
+                    f"Downloading virus genome for {species_name} "
+                    f"(taxid={taxid}) via datasets CLI..."
+                )
+                logger.debug(f"Running: {' '.join(cmd)}")
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=600
+                )
+
+                if result.returncode != 0:
+                    logger.error(f"Virus genome download failed: {result.stderr}")
+                    return None
+
+                if not zip_file.exists():
+                    logger.error("Downloaded virus archive not found")
+                    return None
+
+                # Extract FASTA from zip
+                # Virus zips use a flat path: ncbi_dataset/data/genomic.fna
+                with zipfile.ZipFile(zip_file, "r") as zf:
+                    fasta_files = [
+                        f for f in zf.namelist()
+                        if f.endswith(".fna") or f.endswith(".fasta")
+                    ]
+
+                    if not fasta_files:
+                        logger.error(
+                            "No FASTA file found in virus genome archive"
+                        )
+                        return None
+
+                    fasta_name = fasta_files[0]
+                    temp_fasta = Path(tmpdir) / "virus_genome.fasta"
+
+                    with zf.open(fasta_name) as src, \
+                            open(temp_fasta, "wb") as dst:
+                        dst.write(src.read())
+
+                    shutil.move(str(temp_fasta), str(output_file))
+
+                logger.info(f"Downloaded virus genome to {output_file}")
+                return output_file
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Virus genome download timed out for taxid {taxid}")
+            return None
+        except Exception as e:
+            logger.error(
+                f"Virus genome download failed for taxid {taxid}: {e}"
+            )
+            return None
 
     def _download_ncbi_genome(self, accession: str, taxid: int) -> Optional[Path]:
         """
@@ -717,7 +870,8 @@ class GenomeDownloadManager:
             return False
 
     def get_all_genomes(self) -> List[GenomeMetadata]:
-        """Get list of all downloaded genomes."""
+        """Get list of all downloaded genomes, including on-disk orphans."""
+        self._scan_existing_genomes()
         return list(self._metadata.values())
 
     def generate_pathogen_genomes_json(
