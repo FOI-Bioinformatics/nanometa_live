@@ -59,7 +59,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     @app.callback(
         Output("toast-message", "data", allow_duplicate=True),
         Input("app-config", "data"),
-        prevent_initial_call=False,
+        prevent_initial_call="initial_duplicate",
     )
     def check_internet_on_startup(config):
         """On first load, check internet and suggest offline mode if unreachable."""
