@@ -1468,7 +1468,7 @@ def register_dashboard_callbacks(app: Dash):
         Input("export-generate-btn", "n_clicks"),
         [State("export-output-dir", "value"),
          State("export-include-raw", "value"),
-         State("config-store", "data")],
+         State("app-config", "data")],
         prevent_initial_call=True
     )
     def generate_export(n_clicks, output_dir, include_raw, config):

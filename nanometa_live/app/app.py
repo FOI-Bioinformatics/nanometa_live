@@ -8,6 +8,7 @@ import os
 import logging
 from typing import Dict, Any
 
+import flask
 import yaml
 import dash
 from dash import Dash, html, dcc, Input, Output, State, ClientsideFunction, DiskcacheManager
@@ -560,6 +561,23 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
 
     # Register all callbacks
     register_callbacks(app, backend_manager)
+
+    # Patch dispatch to handle stale combined-callback requests gracefully.
+    # Dash 4.0's renderer may send requests using a combined output key from
+    # a previous callback graph (e.g. before callbacks were split).  These
+    # keys don't match any entry in callback_map, causing a 500 KeyError on
+    # every interval tick.  Returning an empty JSON response lets the
+    # renderer fall through to the individual (correct) callbacks.
+    _original_dispatch = app.dispatch.__wrapped__ if hasattr(app.dispatch, '__wrapped__') else None
+
+    @app.server.errorhandler(KeyError)
+    def _handle_callback_key_error(error):
+        error_msg = str(error)
+        if "Callback function not found for output" in error_msg:
+            logging.debug("Ignoring stale combined-callback request: %s", error_msg[:120])
+            return flask.jsonify({}), 204
+        # Re-raise non-callback KeyErrors
+        raise error
 
     return app
 
