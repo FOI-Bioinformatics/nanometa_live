@@ -317,14 +317,11 @@ def register_main_callbacks(app: Dash):
             State("tax-rank-filter", "value"),
             State("app-config", "data"),
             State("backend-status", "data"),
-            State("active-tab", "data"),
-            State("data-fingerprint", "data"),
         ],
     )
     def update_main_results(
         n_intervals, apply_clicks, selected_sample, watchlist_store,
-        top_count, min_abundance, tax_ranks, config, status, active_tab,
-        data_fingerprint,
+        top_count, min_abundance, tax_ranks, config, status,
     ):
         """
         Update the main results tab with organism summary, cards, table,
@@ -342,16 +339,6 @@ def register_main_callbacks(app: Dash):
 
         Note: Charts have been moved to Taxonomy tab to reduce redundancy.
         """
-        # Tab skip guard - skip interval updates when tab is not active
-        if ctx.triggered_id == 'update-interval' and active_tab != 'main-tab':
-            raise PreventUpdate
-        # Fingerprint guard - skip if data unchanged on interval tick
-        if ctx.triggered_id == 'update-interval' and not hasattr(update_main_results, '_last_fp'):
-            update_main_results._last_fp = None
-        if ctx.triggered_id == 'update-interval':
-            if data_fingerprint and data_fingerprint == update_main_results._last_fp:
-                raise PreventUpdate
-            update_main_results._last_fp = data_fingerprint
 
         # Default empty returns
         empty_summary = EmptyStateMessage(

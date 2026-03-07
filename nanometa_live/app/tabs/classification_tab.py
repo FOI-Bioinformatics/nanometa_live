@@ -81,8 +81,6 @@ def register_classification_callbacks(app: Dash):
             State("classification-domains-input", "value"),
             State("app-config", "data"),
             State("backend-status", "data"),
-            State("active-tab", "data"),
-            State("data-fingerprint", "data"),
         ],
     )
     def update_classification_plot(
@@ -99,8 +97,6 @@ def register_classification_callbacks(app: Dash):
         domains,          # State
         config,
         status,
-        active_tab,
-        data_fingerprint,
     ):
         """
         Update classification visualization based on view type and filters.
@@ -111,16 +107,6 @@ def register_classification_callbacks(app: Dash):
         Returns:
             Tuple of (figure, info_message_children, graph_style)
         """
-        # Tab skip guard - skip interval updates when tab is not active
-        if ctx.triggered_id == 'update-interval' and active_tab != 'classification-tab':
-            raise PreventUpdate
-        # Fingerprint guard - skip if data unchanged on interval tick
-        if ctx.triggered_id == 'update-interval' and not hasattr(update_classification_plot, '_last_fp'):
-            update_classification_plot._last_fp = None
-        if ctx.triggered_id == 'update-interval':
-            if data_fingerprint and data_fingerprint == update_classification_plot._last_fp:
-                raise PreventUpdate
-            update_classification_plot._last_fp = data_fingerprint
 
         # Style constants for showing/hiding the graph
         graph_visible = {"width": "100%"}

@@ -82,22 +82,10 @@ def register_validation_callbacks(app: Dash):
         Output("validation-data-store", "data"),
         Input("update-interval", "n_intervals"),
         State("app-config", "data"),
-        State("active-tab", "data"),
-        State("data-fingerprint", "data"),
         prevent_initial_call=True,
     )
-    def load_validation_data(n_intervals, config, active_tab, data_fingerprint):
+    def load_validation_data(n_intervals, config):
         """Load validation data from results directory."""
-        # Tab skip guard - skip interval updates when tab is not active
-        if ctx.triggered_id == 'update-interval' and active_tab != 'validation-tab':
-            raise PreventUpdate
-        # Fingerprint guard - skip if data unchanged on interval tick
-        if ctx.triggered_id == 'update-interval' and not hasattr(load_validation_data, '_last_fp'):
-            load_validation_data._last_fp = None
-        if ctx.triggered_id == 'update-interval':
-            if data_fingerprint and data_fingerprint == load_validation_data._last_fp:
-                raise PreventUpdate
-            load_validation_data._last_fp = data_fingerprint
 
         try:
             if not config:

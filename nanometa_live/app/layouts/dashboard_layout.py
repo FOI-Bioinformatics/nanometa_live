@@ -789,7 +789,7 @@ def create_dashboard_layout():
                     color="primary"
                 ),
             ]),
-        ], id="export-modal", is_open=False, centered=True),
+        ], id="report-export-modal", is_open=False, centered=True),
     ], className="p-3")
 
 

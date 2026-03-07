@@ -165,8 +165,6 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
         dcc.Store(id='kraken-databases', data=kraken_databases),
 
         # Performance optimization stores
-        dcc.Store(id='active-tab', data='dashboard-tab'),
-        dcc.Store(id='data-fingerprint', data=''),
         dcc.Store(id='dashboard-computed-data', data={}),
 
         # Configuration state tracking stores
@@ -595,13 +593,6 @@ def register_callbacks(app: Dash, backend_manager: BackendManager):
     register_watchlist_callbacks(app)
     register_validation_callbacks(app)
     register_preparation_callbacks(app)
-
-    # Clientside callback: track active tab (no server round-trip needed)
-    app.clientside_callback(
-        "function(active_tab) { return active_tab; }",
-        Output('active-tab', 'data'),
-        Input('tabs', 'active_tab')
-    )
 
     # Clientside callback: watchlist collapse toggle (pure UI, no server needed)
     app.clientside_callback(

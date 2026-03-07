@@ -1446,11 +1446,11 @@ def register_dashboard_callbacks(app: Dash):
 
     # ---- Export Results callbacks ----
     @app.callback(
-        Output("export-modal", "is_open"),
+        Output("report-export-modal", "is_open"),
         [Input("dashboard-export-btn", "n_clicks"),
          Input("export-cancel-btn", "n_clicks"),
          Input("export-generate-btn", "n_clicks")],
-        State("export-modal", "is_open"),
+        State("report-export-modal", "is_open"),
         prevent_initial_call=True
     )
     def toggle_export_modal(open_clicks, cancel_clicks, gen_clicks, is_open):
