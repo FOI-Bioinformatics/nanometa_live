@@ -23,6 +23,7 @@ from nanometa_live.app.utils.callback_helpers import (
     log_callback_error,
 )
 from nanometa_live.app.components.modern_components import EmptyStateMessage
+from nanometa_live.app.utils.plotly_theme import apply_theme_to_figure
 
 
 def register_classification_callbacks(app: Dash):
@@ -196,17 +197,10 @@ def register_classification_callbacks(app: Dash):
             else:
                 return create_placeholder_sankey(f"Error: {str(e)}"), None, graph_visible
 
-    @app.callback(
-        Output("classification-levels-container", "style"),
-        Input("classification-view-type", "value"),
-    )
-    def toggle_levels_visibility(view_type):
-        """
-        Show taxonomy levels selector for both Sankey and Sunburst views.
-        Both visualizations now support level filtering.
-        """
-        # Both views support taxonomy level selection
-        return {"display": "block"}
+    # NOTE: toggle_levels_visibility callback removed (Dash 4 cleanup).
+    # It always returned {"display": "block"} regardless of input.
+    # The classification-levels-container should have style={"display": "block"}
+    # set directly in the layout instead.
 
     @app.callback(
         Output("classification-help-section", "children"),
@@ -264,6 +258,7 @@ def register_classification_callbacks(app: Dash):
             Input("cancel-classification-export", "n_clicks"),
         ],
         State("classification-export-modal", "is_open"),
+        prevent_initial_call=True,
     )
     def toggle_export_modal(export_clicks, confirm_clicks, cancel_clicks, is_open):
         """Toggle the export modal."""
@@ -760,9 +755,9 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
         return None
 
     # Add cumulative reads to domain_df for sorting and link values
-    domain_df["recalc_cumul"] = domain_df.apply(
-        lambda row: recalc_cumul.get(f"{row['rank']}_{row['name'].strip()}", 0), axis=1
-    )
+    domain_df["recalc_cumul"] = (
+        domain_df["rank"] + "_" + domain_df["name"].str.strip()
+    ).map(recalc_cumul).fillna(0).astype(int)
 
     # Add percentage for hover display
     domain_df["recalc_pct"] = domain_df["recalc_cumul"] / total_reads * 100
@@ -1179,7 +1174,7 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
         ],
     )
 
-    return figure
+    return apply_theme_to_figure(figure)
 
 
 # ============================================================================
@@ -1473,9 +1468,9 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, colo
 
     # Add recalculated cumulative reads to filtered_df
     # Uses composite key f"{rank}_{name}" to match _recalculate_cumulative_reads output
-    filtered_df["recalc_cumul"] = filtered_df.apply(
-        lambda row: recalc_cumul.get(f"{row['rank']}_{row['name'].strip()}", 0), axis=1
-    )
+    filtered_df["recalc_cumul"] = (
+        filtered_df["rank"] + "_" + filtered_df["name"].str.strip()
+    ).map(recalc_cumul).fillna(0).astype(int)
 
     # Calculate total reads for percentage calculations (use recalculated root value)
     # Find the domain-level totals for proper percentage base
@@ -1668,7 +1663,7 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, colo
     )
 
     logging.debug(f"Sunburst: Created chart with {len(ids)} nodes")
-    return fig
+    return apply_theme_to_figure(fig)
 
 
 def filter_by_domains(kraken_df, domains):

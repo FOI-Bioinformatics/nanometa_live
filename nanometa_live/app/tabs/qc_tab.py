@@ -40,6 +40,23 @@ from nanometa_live.app.utils.callback_helpers import (
 )
 
 
+# Module-level cached empty figures to avoid recreating them on every callback
+_EMPTY_QC_FIGURES = None
+
+
+def _get_empty_qc_figures():
+    """Return cached empty QC figures, creating them on first call."""
+    global _EMPTY_QC_FIGURES
+    if _EMPTY_QC_FIGURES is None:
+        _EMPTY_QC_FIGURES = [
+            px.line(title="Cumulative Reads"),
+            px.line(title="Cumulative Base Pairs"),
+            px.bar(title="Reads per Sample"),
+            px.bar(title="Base Pairs per Sample"),
+        ]
+    return _EMPTY_QC_FIGURES
+
+
 def register_qc_callbacks(app: Dash):
     """
     Register callbacks for the QC tab.
@@ -143,18 +160,10 @@ def register_qc_callbacks(app: Dash):
         ordered by file modification time to show processing progress.
         """
 
-        # Default empty plots
-        empty_figures = [
-            px.line(title="Cumulative Reads"),
-            px.line(title="Cumulative Base Pairs"),
-            px.bar(title="Reads per Sample"),
-            px.bar(title="Base Pairs per Sample"),
-        ]
-
         # Check if we have valid config and main_dir
         main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
         if not main_dir or not os.path.exists(main_dir):
-            return empty_figures
+            return _get_empty_qc_figures()
 
         try:
             fastp_dir = os.path.join(main_dir, "fastp")
@@ -601,6 +610,7 @@ def register_qc_callbacks(app: Dash):
         Output("qc-help-modal", "is_open"),
         [Input("qc-help-button", "n_clicks"), Input("close-qc-help", "n_clicks")],
         State("qc-help-modal", "is_open"),
+        prevent_initial_call=True,
     )
     def toggle_qc_help_modal(help_clicks, close_clicks, is_open):
         """Toggle the QC help modal."""
@@ -616,6 +626,7 @@ def register_qc_callbacks(app: Dash):
             Input("cancel-qc-export", "n_clicks"),
         ],
         State("qc-export-modal", "is_open"),
+        prevent_initial_call=True,
     )
     def toggle_qc_export_modal(export_clicks, confirm_clicks, cancel_clicks, is_open):
         """Toggle the QC export modal."""

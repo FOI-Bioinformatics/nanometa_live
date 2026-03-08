@@ -539,7 +539,7 @@ def create_dashboard_layout():
                                             },
                                         ],
                                         rowData=[],
-                                        defaultColDef={"sortable": True, "resizable": True},
+                                        defaultColDef={"sortable": True, "filter": True, "resizable": True},
                                         dashGridOptions={
                                             "pagination": True,
                                             "paginationPageSize": 8,

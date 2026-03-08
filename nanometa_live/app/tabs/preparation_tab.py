@@ -1023,24 +1023,18 @@ def register_preparation_callbacks(app):
         delete_ids: List[Dict],
     ) -> Any:
         """Handle genome deletion."""
-        import json
-        from dash import callback_context
 
-        ctx_cb = callback_context
-        if not ctx_cb.triggered:
+        if not ctx.triggered_id:
             raise PreventUpdate
 
-        trigger = ctx_cb.triggered[0]
-        trigger_value = trigger.get("value")
+        # Check that a button was actually clicked
+        trigger_value = ctx.triggered[0].get("value")
         if not trigger_value or not isinstance(trigger_value, int) or trigger_value < 1:
             raise PreventUpdate
 
-        trigger_prop_id = trigger.get("prop_id", "")
-        try:
-            prop_id_json = trigger_prop_id.rsplit(".", 1)[0]
-            trigger_id = json.loads(prop_id_json)
-            taxid = trigger_id.get("index")
-        except (json.JSONDecodeError, IndexError, AttributeError):
+        # ctx.triggered_id is the dict ID for pattern-matching callbacks
+        taxid = ctx.triggered_id.get("index") if isinstance(ctx.triggered_id, dict) else None
+        if not taxid:
             raise PreventUpdate
 
         if taxid:
@@ -1067,25 +1061,19 @@ def register_preparation_callbacks(app):
         config: Dict,
     ) -> Any:
         """Handle individual genome download from missing list."""
-        import json
-        from dash import callback_context
         from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
 
-        ctx_cb = callback_context
-        if not ctx_cb.triggered:
+        if not ctx.triggered_id:
             raise PreventUpdate
 
-        trigger = ctx_cb.triggered[0]
-        trigger_value = trigger.get("value")
+        # Check that a button was actually clicked
+        trigger_value = ctx.triggered[0].get("value")
         if not trigger_value or not isinstance(trigger_value, int) or trigger_value < 1:
             raise PreventUpdate
 
-        trigger_prop_id = trigger.get("prop_id", "")
-        try:
-            prop_id_json = trigger_prop_id.rsplit(".", 1)[0]
-            trigger_id = json.loads(prop_id_json)
-            taxid = trigger_id.get("index")
-        except (json.JSONDecodeError, IndexError, AttributeError):
+        # ctx.triggered_id is the dict ID for pattern-matching callbacks
+        taxid = ctx.triggered_id.get("index") if isinstance(ctx.triggered_id, dict) else None
+        if not taxid:
             raise PreventUpdate
 
         if taxid:

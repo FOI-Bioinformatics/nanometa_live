@@ -14,7 +14,7 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from dash import Dash, Input, Output, State, callback_context, ALL, MATCH, no_update
+from dash import Dash, Input, Output, State, ctx, ALL, MATCH, no_update
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 from dash import html
@@ -106,11 +106,10 @@ def register_watchlist_callbacks(app: Dash) -> None:
     )
     def quick_start_watchlist(clinical, foodborne, water, respiratory, cdc, who, current_refresh):
         """Toggle a predefined watchlist on/off with one click."""
-        ctx = callback_context
-        if not ctx.triggered:
+        if not ctx.triggered_id:
             raise PreventUpdate
 
-        button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        button_id = ctx.triggered_id
         watchlist_map = {
             "quick-start-clinical": "clinical_pathogens",
             "quick-start-foodborne": "foodborne",
@@ -287,7 +286,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
     )
     def toggle_watchlist_file(values: List[bool], ids: List[Dict], current_refresh: int) -> Tuple[Dict, int]:
         """Handle watchlist file enable/disable toggles."""
-        if not callback_context.triggered:
+        if not ctx.triggered_id:
             raise PreventUpdate
 
         manager = get_watchlist_manager()
@@ -302,7 +301,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         # Return updated state and increment refresh counter
         new_refresh = (current_refresh or 0) + 1
-        return {"last_update": str(callback_context.triggered_id)}, new_refresh
+        return {"last_update": str(ctx.triggered_id)}, new_refresh
 
     # ---------------------------------------------------------------------
     # Watchlist Expand/Collapse
@@ -345,22 +344,16 @@ def register_watchlist_callbacks(app: Dash) -> None:
     )
     def toggle_nested_pathogen(values: List[bool], ids: List[Dict]) -> Dict:
         """Handle individual pathogen enable/disable toggles within watchlist sections."""
-        ctx = callback_context
-        if not ctx.triggered:
+        if not ctx.triggered_id:
             raise PreventUpdate
 
-        # Find which checkbox was changed
-        trigger = ctx.triggered[0]
-        trigger_id = trigger["prop_id"]
-
-        try:
-            import json
-            id_str = trigger_id.split(".")[0]
-            id_dict = json.loads(id_str)
-            taxid = id_dict.get("index")
-            watchlist_id = id_dict.get("watchlist")
-        except Exception:
+        # ctx.triggered_id is already the dict ID for pattern-matching callbacks
+        triggered_id = ctx.triggered_id
+        if not isinstance(triggered_id, dict):
             raise PreventUpdate
+
+        taxid = triggered_id.get("index")
+        watchlist_id = triggered_id.get("watchlist")
 
         if taxid is None:
             raise PreventUpdate
@@ -546,11 +539,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
         current_refresh: int,
     ) -> Tuple[Dict, int]:
         """Enable or disable ALL pathogens in the current watchlist."""
-        ctx = callback_context
-        if not ctx.triggered:
+        if not ctx.triggered_id:
             raise PreventUpdate
-
-        trigger = ctx.triggered[0]["prop_id"]
 
         manager = get_watchlist_manager()
         entries = manager.get_entries_with_toggle_state()
@@ -558,7 +548,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
         if not entries:
             raise PreventUpdate
 
-        enable = "enable-all" in trigger
+        enable = "enable-all" in ctx.triggered_id
 
         for entry in entries:
             taxid = entry.get("taxid")
@@ -587,23 +577,15 @@ def register_watchlist_callbacks(app: Dash) -> None:
     )
     def toggle_pathogen_entry(n_clicks: List[int], ids: List[Dict], current_refresh: int) -> Tuple[Dict, int]:
         """Handle individual pathogen enable/disable toggles."""
-        ctx = callback_context
-        if not ctx.triggered or not any(n_clicks):
+        if not ctx.triggered_id or not any(n_clicks):
             raise PreventUpdate
 
-        # Find which button was clicked
-        trigger = ctx.triggered[0]
-        trigger_id = trigger["prop_id"]
-
-        # Parse the pattern-matching ID
-        import json
-        try:
-            id_str = trigger_id.split(".")[0]
-            id_dict = json.loads(id_str)
-            taxid = id_dict.get("index")
-        except Exception:
+        # ctx.triggered_id is the dict ID for pattern-matching callbacks
+        triggered_id = ctx.triggered_id
+        if not isinstance(triggered_id, dict):
             raise PreventUpdate
 
+        taxid = triggered_id.get("index")
         if taxid is None:
             raise PreventUpdate
 
@@ -670,11 +652,10 @@ def register_watchlist_callbacks(app: Dash) -> None:
         taxmap_collection: Dict,
     ) -> Tuple:
         """Handle the edit modal open/close and save."""
-        ctx = callback_context
-        if not ctx.triggered:
+        if not ctx.triggered_id:
             raise PreventUpdate
 
-        trigger = ctx.triggered[0]["prop_id"]
+        trigger = str(ctx.triggered_id)
 
         # Default return values (13 outputs)
         default_return = (no_update, False, None, "", "", "moderate", "", 10, True, "", "-", "-", "-")
@@ -709,14 +690,11 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         # Open modal for edit
         if any(edit_clicks):
-            # Find which button was clicked
-            import json
-            try:
-                trigger_id_str = trigger.split(".")[0]
-                trigger_id = json.loads(trigger_id_str)
-                taxid = trigger_id.get("index")
-            except Exception:
+            # ctx.triggered_id is already the dict for pattern-matching callbacks
+            triggered_id = ctx.triggered_id
+            if not isinstance(triggered_id, dict):
                 raise PreventUpdate
+            taxid = triggered_id.get("index")
 
             manager = get_watchlist_manager()
             entry = manager.get_entry_by_taxid(taxid)
@@ -797,11 +775,10 @@ def register_watchlist_callbacks(app: Dash) -> None:
         current_refresh: int,
     ) -> Tuple:
         """Handle API validation requests."""
-        ctx = callback_context
-        if not ctx.triggered:
+        if not ctx.triggered_id:
             raise PreventUpdate
 
-        trigger = ctx.triggered[0]["prop_id"]
+        trigger = str(ctx.triggered_id)
         use_ncbi = "ncbi" in (api_options or [])
         use_gtdb = "gtdb" in (api_options or [])
 
@@ -812,17 +789,11 @@ def register_watchlist_callbacks(app: Dash) -> None:
             # Validate ALL pathogens (from stats bar button)
             entries = manager.get_entries_with_toggle_state()
             taxids_to_validate = [e.get("taxid") for e in entries]
-        elif "watchlist-row-validate" in trigger:
+        elif isinstance(ctx.triggered_id, dict) and ctx.triggered_id.get("type") == "watchlist-row-validate":
             # Single row validation
-            import json
-            try:
-                trigger_id_str = trigger.split(".")[0]
-                trigger_id = json.loads(trigger_id_str)
-                taxid = trigger_id.get("index")
-                if taxid:
-                    taxids_to_validate = [taxid]
-            except Exception:
-                raise PreventUpdate
+            taxid = ctx.triggered_id.get("index")
+            if taxid:
+                taxids_to_validate = [taxid]
 
         if not taxids_to_validate:
             raise PreventUpdate
@@ -884,23 +855,18 @@ def register_watchlist_callbacks(app: Dash) -> None:
         validated_ids: List[Dict],
     ) -> Tuple:
         """Show API validation details modal."""
-        ctx = callback_context
-        if not ctx.triggered:
+        if not ctx.triggered_id:
             raise PreventUpdate
 
-        trigger = ctx.triggered[0]["prop_id"]
+        triggered_id = ctx.triggered_id
 
-        if "close" in trigger:
+        if triggered_id == "watchlist-api-modal-close-btn":
             return False, "", html.Div()
 
         if any(validated_clicks):
-            import json
-            try:
-                trigger_id_str = trigger.split(".")[0]
-                trigger_id = json.loads(trigger_id_str)
-                taxid = trigger_id.get("index")
-            except Exception:
+            if not isinstance(triggered_id, dict):
                 raise PreventUpdate
+            taxid = triggered_id.get("index")
 
             manager = get_watchlist_manager()
             entry = manager.get_entry_by_taxid(taxid)
@@ -1008,11 +974,10 @@ def register_watchlist_callbacks(app: Dash) -> None:
         lookup_result: Dict,
     ) -> Tuple:
         """Use API lookup result to populate form."""
-        ctx = callback_context
-        if not ctx.triggered or not lookup_result:
+        if not ctx.triggered_id or not lookup_result:
             raise PreventUpdate
 
-        trigger = ctx.triggered[0]["prop_id"]
+        trigger = str(ctx.triggered_id)
 
         if "ncbi" in trigger and lookup_result.get("ncbi"):
             ncbi = lookup_result["ncbi"]

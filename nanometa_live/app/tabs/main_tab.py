@@ -722,7 +722,7 @@ def register_main_callbacks(app: Dash):
         if not ctx.triggered:
             return is_open, current_format
 
-        trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        trigger_id = ctx.triggered_id
 
         if trigger_id == "export-all-txt":
             return True, "txt"

@@ -72,6 +72,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("close-load-config-modal", "n_clicks"),
         ],
         State("load-config-modal", "is_open"),
+        prevent_initial_call=True,
     )
     def toggle_load_config_modal(load_clicks, close_clicks, is_open):
         """Toggle the load configuration modal."""
@@ -150,15 +151,15 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     )
     def load_selected_config(n_clicks, available_configs_json, data_dir):
         """Load the selected configuration."""
-        if not any(n_clicks) or not ctx.triggered:
+        if not any(n_clicks) or not ctx.triggered_id:
             return no_update, no_update, no_update, no_update
 
-        # Find which button was clicked
-        triggered_id = ctx.triggered[0]["prop_id"]
-        if "index" not in triggered_id:
+        # Find which button was clicked (pattern-matching ID returns a dict)
+        triggered_id = ctx.triggered_id
+        if not isinstance(triggered_id, dict) or "index" not in triggered_id:
             return no_update, no_update, no_update, no_update
 
-        trigger_idx = json.loads(triggered_id.split(".")[0])["index"]
+        trigger_idx = triggered_id["index"]
 
         try:
             configs = json.loads(available_configs_json)
@@ -198,6 +199,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("cancel-save-config", "n_clicks"),
         ],
         State("save-config-modal", "is_open"),
+        prevent_initial_call=True,
     )
     def toggle_save_config_modal(save_clicks, confirm_clicks, cancel_clicks, is_open):
         """Toggle the save configuration modal."""
@@ -1174,15 +1176,15 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     )
     def update_config_source_on_load(n_clicks, available_configs_json):
         """Update config source info when loading from file."""
-        if not any(n_clicks) or not ctx.triggered:
+        if not any(n_clicks) or not ctx.triggered_id:
             return no_update, no_update, no_update
 
-        triggered_id = ctx.triggered[0]["prop_id"]
-        if "index" not in triggered_id:
+        triggered_id = ctx.triggered_id
+        if not isinstance(triggered_id, dict) or "index" not in triggered_id:
             return no_update, no_update, no_update
 
         try:
-            trigger_idx = json.loads(triggered_id.split(".")[0])["index"]
+            trigger_idx = triggered_id["index"]
             configs = json.loads(available_configs_json)
             selected_config = configs[trigger_idx]
 

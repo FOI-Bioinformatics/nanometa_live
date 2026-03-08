@@ -313,7 +313,8 @@ def apply_theme_to_figure(
     Returns:
         Updated Figure with theme applied
     """
-    register_templates()
+    if "nanometa" not in pio.templates:
+        register_templates()
 
     template = "nanometa_dark" if dark_mode else "nanometa"
     fig.update_layout(template=template)

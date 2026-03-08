@@ -216,7 +216,7 @@ def create_qc_layout():
                                 {"field": "classified_rate_num", "hide": True},
                             ],
                             rowData=[],
-                            defaultColDef={"sortable": True, "resizable": True, "minWidth": 100},
+                            defaultColDef={"sortable": True, "filter": True, "resizable": True, "minWidth": 100},
                             dashGridOptions={
                                 "pagination": True,
                                 "paginationPageSize": 10,
