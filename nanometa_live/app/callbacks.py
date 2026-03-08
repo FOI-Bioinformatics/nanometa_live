@@ -198,10 +198,10 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             Output("start-stop-button", "color"),
             Output("start-stop-button", "disabled"),
         ],
-        [Input("backend-status", "data"), Input("app-config", "data")],
+        [Input("backend-status", "data"), Input("app-config", "data"), Input("readiness-state", "data")],
     )
-    def update_control_button(status, config):
-        """Update the start/stop button based on backend status."""
+    def update_control_button(status, config, readiness):
+        """Update the start/stop button based on backend status and readiness."""
         if not status or not config:
             return "Start Analysis", "primary", True
 
@@ -209,64 +209,27 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         if config.get("visualization_only", False):
             return "Start Analysis", "secondary", True
 
-        # Check if configuration is complete
-        required_fields = ["nanopore_output_directory", "kraken_db"]
-        config_complete = all(field in config and config[field] for field in required_fields)
-
         if status.get("running", False):
             return [
                 dbc.Spinner(size="sm", spinner_class_name="me-2"),
                 "Stop Analysis"
             ], "danger", False
 
-        return "Start Analysis", "primary", not config_complete
+        # Gate on readiness checks
+        is_ready = readiness.get("ready", False) if readiness else False
+        return "Start Analysis", "primary", not is_ready
 
     @app.callback(
-        [
-            Output("prepare-data-button", "disabled"),
-            Output("prepare-data-button", "color"),
-            Output("prepare-data-wrapper", "style"),
-        ],
-        Input("app-config", "data"),
+        Output("start-analysis-tooltip", "children"),
+        [Input("app-config", "data"), Input("backend-status", "data")],
     )
-    def update_prepare_button(config):
-        """Update the prepare data button based on config.
-
-        Hides the button entirely when BLAST validation is disabled,
-        since genome preparation is only needed for validation.
-        """
-        if not config:
-            return True, "info", {"display": "inline-block"}
-
-        # Disable in visualization-only mode
-        if config.get("visualization_only", False):
-            return True, "secondary", {"display": "none"}
-
-        # Hide when validation is disabled
-        blast_validation = config.get("blast_validation", True)
-        if isinstance(blast_validation, str):
-            blast_validation = blast_validation.lower() in ["true", "yes", "y", "1"]
-        if not blast_validation:
-            return True, "secondary", {"display": "none"}
-
-        return False, "info", {"display": "inline-block"}
-
-    @app.callback(
-        [
-            Output("prepare-data-tooltip", "children"),
-            Output("start-analysis-tooltip", "children"),
-        ],
-        Input("app-config", "data"),
-    )
-    def update_tooltips(config):
-        """Update button tooltips based on mode."""
+    def update_start_tooltip(config, status):
+        """Update Start/Stop button tooltip based on mode and state."""
         if config and config.get("visualization_only", False):
-            prepare_tip = "Not available in visualization mode"
-            start_tip = "Not available in visualization mode - displaying existing results only"
-            return prepare_tip, start_tip
-
-        return ("Extract taxonomy IDs and prepare validation databases",
-                "Begin processing the nanopore sequence data")
+            return "Not available in visualization mode - displaying existing results only"
+        if status and status.get("running", False):
+            return "Stop the running analysis pipeline"
+        return "Begin processing the nanopore sequence data"
 
     @app.callback(
         Output("header-title", "children"),
@@ -410,301 +373,80 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
 
         return no_update
 
+    # ========================================================================
+    # Readiness Indicator
+    # ========================================================================
+
     @app.callback(
         [
-            Output("prepare-data-modal", "is_open"),
-            Output("prepare-status", "children"),
-            Output("prepare-overall-progress", "value"),
-            Output("close-prepare-modal", "disabled"),
-            Output("cancel-prepare-button", "style"),
-            Output("notification-trigger", "data", allow_duplicate=True),
+            Output("readiness-badge", "children"),
+            Output("readiness-badge", "color"),
+            Output("readiness-state", "data"),
         ],
-        [
-            Input("prepare-data-button", "n_clicks"),
-            Input("close-prepare-modal", "n_clicks"),
-            Input("cancel-prepare-button", "n_clicks"),
-            Input("update-interval", "n_intervals"),
-        ],
-        [
-            State("app-config", "data"),
-            State("prepare-data-modal", "is_open"),
-        ],
-        prevent_initial_call=True,
+        [Input("update-interval", "n_intervals"), Input("app-config", "data")],
     )
-    def manage_data_preparation(
-        prepare_clicks, close_clicks, cancel_clicks, n_intervals,
-        config, is_open
-    ):
-        """
-        Manage the data preparation process:
-        - Start preparation on button click
-        - Update progress during preparation
-        - Close modal when done
-        """
-        try:
-            # Default values for returns
-            no_changes = [no_update, no_update, no_update, no_update, no_update, no_update]
+    def update_readiness_indicator(n_intervals, config):
+        """Update the readiness badge and cached readiness state."""
+        from nanometa_live.core.workflow.readiness_checker import ReadinessChecker
 
-            # Handle modal closing
-            if close_clicks and ctx.triggered_id == "close-prepare-modal":
-                return False, no_update, no_update, no_update, no_update, no_update
-
-            # Handle preparation cancellation
-            if cancel_clicks and ctx.triggered_id == "cancel-prepare-button":
-                try:
-                    # Update backend status if possible
-                    if hasattr(backend_manager, 'prep_status'):
-                        backend_manager.prep_status["running"] = False
-                        backend_manager.prep_status["message"] = "Cancelled by user"
-                except Exception as e:
-                    log_callback_error("manage_data_preparation.cancel", e)
-
-                return False, no_update, no_update, no_update, {"display": "none"}, {
-                    "title": "Cancelled",
-                    "message": "Data preparation was cancelled",
-                    "color": "warning",
-                }
-
-            # Start preparation
-            if prepare_clicks and ctx.triggered_id == "prepare-data-button":
-                if not config:
-                    return no_update, no_update, no_update, no_update, no_update, {
-                        "title": "Error",
-                        "message": "No configuration loaded. Please configure the application first.",
-                        "color": "danger",
-                    }
-
-                # Make sure backend manager has the current config
-                if hasattr(backend_manager, 'config'):
-                    backend_manager.config = config
-
-                # Start the preparation process
-                try:
-                    success, message = backend_manager.prepare_data()
-                    if not success:
-                        return no_update, no_update, no_update, no_update, no_update, {
-                            "title": "Error",
-                            "message": f"Failed to start data preparation: {message}",
-                            "color": "danger",
-                        }
-                except Exception as e:
-                    log_callback_error("manage_data_preparation.start", e, extra_context={"config_keys": list(config.keys()) if config else None})
-                    return no_update, no_update, no_update, no_update, no_update, {
-                        "title": "Error",
-                        "message": f"Exception starting data preparation: {str(e)}",
-                        "color": "danger",
-                    }
-
-                # Preparation started successfully
-                return (
-                    True,  # Open modal
-                    "Starting data preparation...",  # Status message
-                    0,  # Progress value
-                    True,  # Close button disabled
-                    {"display": "block"},  # Cancel button visible
-                    no_update  # No notification
-                )
-
-            # Update progress during preparation
-            if is_open and ctx.triggered_id == "update-interval":
-                try:
-                    status = backend_manager.get_preparation_status()
-                except Exception as e:
-                    log_callback_error("manage_data_preparation.get_status", e)
-                    return (
-                        True,  # Keep modal open
-                        f"Error retrieving status: {str(e)}",  # Show error
-                        0,  # Reset progress
-                        False,  # Enable close button
-                        {"display": "none"},  # Hide cancel button
-                        {
-                            "title": "Error",
-                            "message": f"Error retrieving preparation status: {str(e)}",
-                            "color": "danger",
-                        }
-                    )
-
-                if not status["running"]:
-                    # Preparation finished
-                    if status["errors"]:
-                        # Preparation failed
-                        return (
-                            True,  # Keep modal open
-                            f"Error: {status['errors'][0]}",  # Show first error
-                            100,  # Complete progress
-                            False,  # Enable close button
-                            {"display": "none"},  # Hide cancel button
-                            {
-                                "title": "Error",
-                                "message": f"Data preparation failed: {status['errors'][0]}",
-                                "color": "danger",
-                            }
-                        )
-                    else:
-                        # Preparation succeeded
-                        return (
-                            True,  # Keep modal open
-                            "Data preparation completed successfully!",  # Success message
-                            100,  # Complete progress
-                            False,  # Enable close button
-                            {"display": "none"},  # Hide cancel button
-                            {
-                                "title": "Success",
-                                "message": "Data preparation completed successfully",
-                                "color": "success",
-                            }
-                        )
-                else:
-                    # Preparation still running
-                    return (
-                        True,  # Keep modal open
-                        status.get("message", "Processing..."),  # Current status message
-                        status.get("progress", 0),  # Current progress value
-                        True,  # Keep close button disabled
-                        {"display": "block"},  # Show cancel button
-                        no_update  # No notification
-                    )
-
-            # Default return if no conditions met
-            return no_changes
-
-        except Exception as e:
-            # Global error handler with full traceback
-            log_callback_error("manage_data_preparation", e)
+        if not config:
             return (
-                False,
-                f"Error: {str(e)}",
-                0,
-                False,
-                {"display": "none"},
-                {
-                    "title": "Error",
-                    "message": f"An unexpected error occurred: {str(e)}",
-                    "color": "danger",
-                }
+                [html.I(className="bi bi-dash-circle me-1"), "Not configured"],
+                "secondary",
+                {"ready": False, "checks": [], "message": "No configuration loaded"},
             )
 
-    @app.callback(
-        Output("app-config", "data", allow_duplicate=True),
-        [
-            Input("update-interval", "n_intervals"),
-            Input("prepare-data-modal", "is_open")  # Make this an Input instead of State
-        ],
-        [
-            State("app-config", "data")
-        ],
-        prevent_initial_call=True,
-    )
-    def update_config_after_preparation(n_intervals, modal_open, current_config):
-        """
-        Update the app configuration after data preparation completes.
-        This ensures any taxonomy IDs discovered during preparation are reflected in the UI.
-
-        Uses race condition protection to avoid overwriting concurrent user changes.
-        """
-        from nanometa_live.app.utils.config_manager import (
-            should_skip_stale_update,
-            merge_config_safely,
-        )
-
-        # Skip if recent update from another source (prevents race conditions)
-        if should_skip_stale_update(current_config):
-            return no_update
-
-        # Check if modal just closed (triggered by modal_open changing to False)
-        if ctx.triggered_id == "prepare-data-modal" and not modal_open:
-            status = backend_manager.get_preparation_status()
-
-            # If preparation completed successfully
-            if status["progress"] >= 100 and not status["errors"]:
-                # Merge backend config while preserving internal state
-                return merge_config_safely(current_config, backend_manager.config)
-
-        # Regular interval update while modal is open
-        elif modal_open:
-            status = backend_manager.get_preparation_status()
-
-            # If preparation just completed
-            if not status["running"] and status["progress"] >= 100 and not status["errors"]:
-                # Merge backend config while preserving internal state
-                return merge_config_safely(current_config, backend_manager.config)
-
-        return no_update
-
-    # NOTE: handle_prepare_data_click and open_prepare_data_modal were removed as they
-    # were duplicates of manage_data_preparation. All prepare-data button handling
-    # (including opening the modal, starting preparation, and progress updates) is now
-    # consolidated in manage_data_preparation above.
-
-    @app.callback(
-        [
-            Output("prepare-current-step", "children"),
-            Output("prepare-step-details", "children"),
-            Output("prepare-step-progress", "value"),
-            Output("prepare-status", "children", allow_duplicate=True),
-            Output("prepare-overall-progress", "value", allow_duplicate=True),
-            Output("close-prepare-modal", "disabled", allow_duplicate=True),
-            Output("cancel-prepare-button", "style", allow_duplicate=True),
-        ],
-        Input("update-interval", "n_intervals"),
-        State("prepare-data-modal", "is_open"),
-        prevent_initial_call=True,
-    )
-    def update_preparation_progress(n_intervals, modal_open):
-        """Update the preparation progress modal with latest status"""
-        if not modal_open:
-            return no_update, no_update, no_update, no_update, no_update, no_update, no_update
-
         try:
-            status = backend_manager.get_preparation_status()
+            checker = ReadinessChecker()
+            report = checker.check_readiness(config)
+            summary = report.summary()
 
-            # Determine current step based on progress
-            step_name = "Initializing..."
-            step_details = "Preparing to start"
-            step_progress = 0
-
-            if status["progress"] < 10:
-                step_name = "Starting up"
-                step_details = "Initializing preparation"
-                step_progress = status["progress"] * 10
-            elif status["progress"] < 30:
-                step_name = "Extracting taxonomy IDs"
-                step_details = status.get("message", "Processing taxonomy data")
-                step_progress = (status["progress"] - 10) * 5
-            elif status["progress"] < 50:
-                step_name = "Matching species"
-                step_details = status.get("message", "Finding species in databases")
-                step_progress = (status["progress"] - 30) * 5
-            elif status["progress"] < 70:
-                step_name = "Downloading genomes"
-                step_details = status.get("message", "Retrieving reference genomes")
-                step_progress = (status["progress"] - 50) * 5
-            elif status["progress"] < 90:
-                step_name = "Building BLAST databases"
-                step_details = status.get("message", "Preparing validation databases")
-                step_progress = (status["progress"] - 70) * 5
+            if report.ready:
+                badge_children = [html.I(className="bi bi-check-circle-fill me-1"), "Ready"]
+                badge_color = "success"
             else:
-                step_name = "Finishing up"
-                step_details = status.get("message", "Completing preparation")
-                step_progress = 100
+                n_issues = summary["critical_failures"] + summary["warnings"]
+                badge_children = [
+                    html.I(className="bi bi-exclamation-triangle-fill me-1"),
+                    f"{n_issues} issue{'s' if n_issues != 1 else ''}",
+                ]
+                badge_color = "warning"
 
-            # Format status message
-            if status["errors"]:
-                status_message = f"Error: {status['errors'][0]}"
-            else:
-                status_message = status.get("message", "Processing...")
+            checks_data = []
+            for c in report.checks:
+                checks_data.append({
+                    "name": c.name,
+                    "passed": c.passed,
+                    "severity": c.severity.value,
+                    "message": c.message,
+                })
 
-            # Only enable close button when complete or error
-            close_disabled = status["running"]
-
-            # Hide cancel button when complete
-            cancel_style = {"display": "block" if status["running"] else "none"}
-
-            return step_name, step_details, step_progress, status_message, status["progress"], close_disabled, cancel_style
-
+            return (
+                badge_children,
+                badge_color,
+                {"ready": report.ready, "checks": checks_data, "message": ""},
+            )
         except Exception as e:
-            log_callback_error("update_preparation_progress", e)
-            return "Error", f"Failed to update status: {str(e)}", 0, f"Error: {str(e)}", 0, False, {"display": "none"}
+            logging.error(f"Readiness check failed: {e}")
+            return (
+                [html.I(className="bi bi-dash-circle me-1"), "Unknown"],
+                "secondary",
+                {"ready": False, "checks": [], "message": str(e)},
+            )
+
+    app.clientside_callback(
+        """
+        function(n_clicks, readiness) {
+            if (!n_clicks || !readiness) return dash_clientside.no_update;
+            if (readiness.ready) return dash_clientside.no_update;
+            return "preparation-tab";
+        }
+        """,
+        Output("tabs", "active_tab", allow_duplicate=True),
+        Input("readiness-badge", "n_clicks"),
+        State("readiness-state", "data"),
+        prevent_initial_call=True,
+    )
 
     # ========================================================================
     # Sample Management Callbacks (Multi-sample/Barcode Support)

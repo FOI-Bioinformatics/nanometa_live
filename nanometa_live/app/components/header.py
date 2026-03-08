@@ -97,20 +97,17 @@ def create_header(title="Nanometa Live"):
             # Control buttons
             dbc.Col([
                 html.Div([
+                    # Readiness indicator
                     html.Div(
-                        id="prepare-data-wrapper",
+                        id="readiness-indicator",
                         children=[
-                            dbc.Button(
-                                [html.I(className="bi bi-shield-check me-1"), "Setup Validation"],
-                                id="prepare-data-button",
-                                color="info",
-                                className="me-2"
-                            ),
-                            dbc.Tooltip(
-                                id="prepare-data-tooltip",
-                                children="Download reference genomes and build BLAST databases for read validation",
-                                target="prepare-data-button",
-                                placement="bottom"
+                            dbc.Badge(
+                                [html.I(className="bi bi-check-circle-fill me-1"), "Ready"],
+                                id="readiness-badge",
+                                color="secondary",
+                                className="me-2 align-self-center",
+                                pill=True,
+                                style={"cursor": "pointer", "fontSize": "0.85rem"},
                             ),
                         ],
                         style={"display": "inline-block"}
@@ -129,7 +126,7 @@ def create_header(title="Nanometa Live"):
                         target="start-stop-button",
                         placement="bottom"
                     )
-                ], className="d-flex justify-content-end")
+                ], className="d-flex justify-content-end align-items-center")
             ], width=3)
         ], className="py-3 border-bottom"),
 

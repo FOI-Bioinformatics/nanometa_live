@@ -97,6 +97,39 @@ def create_dashboard_layout():
         ], id="dashboard-help-modal", size="lg", is_open=False),
 
         # =============================================
+        # 0. PRE-FLIGHT CHECKLIST (visible when idle)
+        # =============================================
+        html.Div(
+            id="preflight-container",
+            children=[
+                dbc.Card([
+                    dbc.CardBody([
+                        dbc.Row([
+                            dbc.Col([
+                                html.Div([
+                                    html.I(className="bi bi-clipboard-check me-2", style={"fontSize": "1.3rem"}),
+                                    html.H5("Pre-flight Checklist", className="mb-0 d-inline"),
+                                ], className="d-flex align-items-center"),
+                            ], width=8),
+                            dbc.Col([
+                                dbc.Button(
+                                    [html.I(className="bi bi-arrow-right me-1"), "Go to Preparation"],
+                                    id="preflight-goto-prep",
+                                    color="outline-primary",
+                                    size="sm",
+                                ),
+                            ], width=4, className="text-end"),
+                        ], className="mb-3"),
+                        html.Div(id="preflight-checks-list", children=[
+                            html.Div("Loading readiness checks...", className="text-muted")
+                        ]),
+                    ])
+                ], className="mb-3 border-start border-4 border-info"),
+            ],
+            style={"display": "block"},
+        ),
+
+        # =============================================
         # 1. TOP STATUS BANNER (Large Traffic Light)
         # =============================================
         dbc.Row([

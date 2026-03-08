@@ -200,6 +200,7 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
         dcc.Store(id='toast-message', data=None),
         dcc.Store(id='theme-preference', data='auto'),  # auto, light, dark
         dcc.Store(id='previous-running-state', data=False),  # For detecting analysis completion
+        dcc.Store(id='readiness-state', data={"ready": False, "checks": []}),
 
         # Shared stores for cross-tab communication (Watchlist <-> Preparation)
         dcc.Store(id='taxmap-collection', data=None),
@@ -460,35 +461,6 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
 
         # Toast notification container (for non-blocking feedback)
         html.Div(id="toast-container", className="toast-container"),
-        # Data preparation modal
-        dbc.Modal([
-            dbc.ModalHeader([
-                html.H4("Validation Setup", className="mb-0"),
-                html.Span(id="prepare-step-indicator", className="text-muted ms-3")
-            ], className="d-flex align-items-center"),
-            dbc.ModalBody([
-                # Step progress - Update this section
-                html.Div([
-                    html.H5(id="prepare-current-step", children="Initializing..."),
-                    html.Div(id="prepare-step-details", className="text-muted mb-2"),
-                    dbc.Progress(id="prepare-step-progress", value=0, className="mb-1", striped=True, animated=True),
-                ], className="mb-3"),
-
-                # Overall progress
-                html.Div([
-                    html.H5("Overall Progress"),
-                    dbc.Progress(id="prepare-overall-progress", value=0, className="mb-1", striped=True, animated=True),
-                    html.Div(id="prepare-status", className="mt-2")
-                ]),
-
-                # Error message area
-                html.Div(id="prepare-error-container", className="mt-3")
-            ]),
-            dbc.ModalFooter([
-                dbc.Button("Cancel", id="cancel-prepare-button", color="secondary", className="me-2"),
-                dbc.Button("Close", id="close-prepare-modal", disabled=True)
-            ])
-        ], id="prepare-data-modal", is_open=False, backdrop="static", centered=True, size="lg"),
 
         # Footer
         html.Footer(

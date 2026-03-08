@@ -1564,6 +1564,67 @@ def register_dashboard_callbacks(app: Dash):
             return not is_open
         return is_open
 
+    # -------------------------------------------------
+    # PRE-FLIGHT CHECKLIST
+    # -------------------------------------------------
+    @app.callback(
+        [
+            Output("preflight-checks-list", "children"),
+            Output("preflight-container", "style"),
+        ],
+        [Input("readiness-state", "data"), Input("backend-status", "data")],
+    )
+    def update_preflight_checklist(readiness, status):
+        """Show pre-flight checklist when idle, hide when running."""
+        # Hide when pipeline is running
+        if status and status.get("running", False):
+            return no_update, {"display": "none"}
+
+        if not readiness or not readiness.get("checks"):
+            return [
+                html.Div(
+                    "Configure the application to see readiness checks.",
+                    className="text-muted",
+                )
+            ], {"display": "block"}
+
+        checks = readiness["checks"]
+        items = []
+        for check in checks:
+            passed = check.get("passed", False)
+            severity = check.get("severity", "info")
+            name = check.get("name", "Unknown")
+            message = check.get("message", "")
+
+            if passed:
+                icon_cls = "bi bi-check-circle-fill text-success"
+            elif severity == "critical":
+                icon_cls = "bi bi-x-circle-fill text-danger"
+            else:
+                icon_cls = "bi bi-exclamation-triangle-fill text-warning"
+
+            items.append(
+                html.Div([
+                    html.I(className=f"{icon_cls} me-2"),
+                    html.Span(name, className="fw-semibold me-2"),
+                    html.Span(message, className="text-muted small"),
+                ], className="mb-1")
+            )
+
+        return items, {"display": "block"}
+
+    app.clientside_callback(
+        """
+        function(n_clicks) {
+            if (!n_clicks) return dash_clientside.no_update;
+            return "preparation-tab";
+        }
+        """,
+        Output("tabs", "active_tab", allow_duplicate=True),
+        Input("preflight-goto-prep", "n_clicks"),
+        prevent_initial_call=True,
+    )
+
 
 # Helper functions
 
