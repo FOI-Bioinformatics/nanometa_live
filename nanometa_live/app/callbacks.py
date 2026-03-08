@@ -407,12 +407,12 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 badge_children = [html.I(className="bi bi-check-circle-fill me-1"), "Ready"]
                 badge_color = "success"
             else:
-                n_issues = summary["critical_failures"] + summary["warnings"]
+                n_failed = summary["failed"]
                 badge_children = [
                     html.I(className="bi bi-exclamation-triangle-fill me-1"),
-                    f"{n_issues} issue{'s' if n_issues != 1 else ''}",
+                    f"{summary['passed']}/{summary['total']} checks",
                 ]
-                badge_color = "warning"
+                badge_color = "danger" if summary["critical_failures"] > 0 else "warning"
 
             checks_data = []
             popover_items = []
