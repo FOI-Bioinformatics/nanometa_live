@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import dash_bootstrap_components as dbc
-from dash import html, Input, Output, State, callback, no_update, ctx, ALL, MATCH
+from dash import html, Input, Output, State, callback, no_update, ctx, ALL, MATCH, set_props
 from dash.exceptions import PreventUpdate
 
 from nanometa_live.app.app import background_callback_manager
@@ -126,6 +126,7 @@ def register_preparation_callbacks(app):
         State("prep-options", "value"),
         prevent_initial_call=True,
         background=True,
+        manager=background_callback_manager,
         running=[
             (Output("start-prep-btn", "disabled"), True, False),
             (Output("cancel-prep-btn", "style"), {"display": "inline-block"}, {"display": "none"}),
@@ -1489,7 +1490,6 @@ def register_preparation_callbacks(app):
 
     @app.callback(
         Output({"type": "wizard-step-progress", "index": MATCH}, "children"),
-        Output("wizard-step-state", "data", allow_duplicate=True),
         Input({"type": "wizard-step-run", "index": MATCH}, "n_clicks"),
         State("wizard-step-state", "data"),
         State("app-config", "data"),
@@ -1518,14 +1518,31 @@ def register_preparation_callbacks(app):
         try:
             result_children = _execute_wizard_step(step_idx, config)
             wizard_state["steps"][str(step_idx)] = "done"
-            return result_children, wizard_state
+            set_props("wizard-step-state-relay", {"data": wizard_state})
+            return result_children
         except Exception as e:
             wizard_state["steps"][str(step_idx)] = "failed"
+            set_props("wizard-step-state-relay", {"data": wizard_state})
             return dbc.Alert(
                 [html.I(className="bi bi-x-circle me-2"), str(e)],
                 color="danger",
                 className="mt-2 py-2",
-            ), wizard_state
+            )
+
+    @app.callback(
+        Output("wizard-step-state", "data", allow_duplicate=True),
+        Input("wizard-step-state-relay", "data"),
+        prevent_initial_call=True,
+    )
+    def relay_wizard_step_state(relayed_state):
+        """Forward wizard state from the relay store to the main store.
+
+        This is needed because Dash does not allow mixing pattern-matching
+        (MATCH) outputs with plain-ID outputs in the same callback.
+        """
+        if relayed_state is None:
+            raise PreventUpdate
+        return relayed_state
 
     def _execute_wizard_step(step_idx, config):
         """Execute a wizard step and return result component."""
