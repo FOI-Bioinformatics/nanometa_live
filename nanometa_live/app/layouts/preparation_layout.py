@@ -27,6 +27,10 @@ def create_preparation_layout():
                 "4": "pending", "5": "pending", "6": "pending", "7": "pending",
             },
         }),
+        # Intermediate store: relays wizard-step-state updates from MATCH callbacks
+        # to the plain wizard-step-state store (MATCH and plain IDs cannot be mixed
+        # in a single callback's outputs).
+        dcc.Store(id="wizard-step-state-relay", data=None),
         dcc.Store(id="prep-job-state", data=None),
         dcc.Store(id="genome-download-progress", data={"current": 0, "total": 0, "status": "idle"}),
         dcc.Store(id="download-cancel-flag", data=False),

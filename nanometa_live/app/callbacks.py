@@ -822,10 +822,16 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 "LIVE",
                 f"Updated: {current_time}"
             )
+        elif status and status.get("completed", False):
+            return (
+                "live-indicator-dot offline",
+                "Complete",
+                f"Finished: {current_time}"
+            )
         else:
             return (
                 "live-indicator-dot offline",
-                "Idle",
+                "Standby",
                 f"Last check: {current_time}"
             )
 

@@ -13,6 +13,9 @@ import numpy as np
 import plotly.graph_objects as go
 from dash import dcc, html
 import dash_bootstrap_components as dbc
+from nanometa_live.app.utils.plotly_theme import register_templates
+
+register_templates()
 
 from nanometa_live.core.parsers.paf_coverage_parser import CoverageData
 
@@ -106,7 +109,7 @@ def create_coverage_depth_figure(
             tickformat=",",
         ),
         yaxis=dict(title="Read Depth"),
-        template="plotly_white",
+        template="nanometa",
         height=450,
         margin=dict(l=50, r=30, t=50, b=30),
         font=dict(family="Arial, sans-serif", size=12),
@@ -158,7 +161,7 @@ def create_cumulative_coverage_figure(coverage: CoverageData) -> go.Figure:
         xaxis_title="Minimum Depth",
         yaxis_title="Genome Covered (%)",
         yaxis_range=[0, 105],
-        template="plotly_white",
+        template="nanometa",
         height=280,
         margin=dict(l=50, r=20, t=40, b=40),
         font=dict(family="Arial, sans-serif", size=12),
@@ -215,7 +218,7 @@ def create_depth_histogram_figure(
         xaxis_title="Depth",
         yaxis_title="Positions",
         yaxis_tickformat=",",
-        template="plotly_white",
+        template="nanometa",
         height=280,
         margin=dict(l=50, r=20, t=40, b=40),
         font=dict(family="Arial, sans-serif", size=12),
@@ -272,7 +275,7 @@ def create_empty_coverage_figure(
     )
     fig.update_layout(
         title=dict(text=title, font=dict(size=13, color="#374151")),
-        template="plotly_white",
+        template="nanometa",
         height=300,
         margin=dict(l=50, r=30, t=40, b=30),
         font=dict(family="Arial, sans-serif", size=12),

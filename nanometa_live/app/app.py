@@ -8,10 +8,10 @@ import os
 import logging
 from typing import Dict, Any
 
-import flask
 import yaml
 import dash
 from dash import Dash, html, dcc, Input, Output, State, ClientsideFunction, DiskcacheManager
+from flask import request
 import dash_bootstrap_components as dbc
 import diskcache
 import multiprocess
@@ -149,6 +149,20 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
             {"http-equiv": "Expires", "content": "0"}
         ]
     )
+
+    # Prevent stale browser cache from breaking callbacks after Dash version upgrades.
+    # Dash 4 changed the callback output key format (hash suffixes for allow_duplicate),
+    # so cached Dash 3.x JS will send the wrong output keys, causing 500 errors.
+    # Must cover ALL responses including async JS chunks that lack version fingerprints.
+    @app.server.after_request
+    def add_cache_headers(response):
+        if ('javascript' in response.content_type or
+                request.path.startswith('/_dash-component-suites/') or
+                request.path.startswith('/assets/')):
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+        return response
 
     # Create app layout with tabs
     app.layout = html.Div([
@@ -561,23 +575,6 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
 
     # Register all callbacks
     register_callbacks(app, backend_manager)
-
-    # Patch dispatch to handle stale combined-callback requests gracefully.
-    # Dash 4.0's renderer may send requests using a combined output key from
-    # a previous callback graph (e.g. before callbacks were split).  These
-    # keys don't match any entry in callback_map, causing a 500 KeyError on
-    # every interval tick.  Returning an empty JSON response lets the
-    # renderer fall through to the individual (correct) callbacks.
-    _original_dispatch = app.dispatch.__wrapped__ if hasattr(app.dispatch, '__wrapped__') else None
-
-    @app.server.errorhandler(KeyError)
-    def _handle_callback_key_error(error):
-        error_msg = str(error)
-        if "Callback function not found for output" in error_msg:
-            logging.debug("Ignoring stale combined-callback request: %s", error_msg[:120])
-            return flask.jsonify({}), 204
-        # Re-raise non-callback KeyErrors
-        raise error
 
     return app
 

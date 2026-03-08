@@ -122,7 +122,12 @@ def register_classification_callbacks(app: Dash):
         # Helper to create a minimal empty figure (used when graph is hidden)
         def _empty_figure():
             fig = go.Figure()
-            fig.update_layout(height=50, margin=dict(l=0, r=0, t=0, b=0))
+            fig.update_layout(
+                height=50,
+                margin=dict(l=0, r=0, t=0, b=0),
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False),
+            )
             return fig
 
         # Validate config and get output directory using centralized helper
