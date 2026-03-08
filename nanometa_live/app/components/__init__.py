@@ -53,10 +53,6 @@ from nanometa_live.app.components.modern_components import (
     EmptyStateMessage,
     TrendIndicator,
     DecisionBanner,
-    TABLE_STYLE_CELL,
-    TABLE_STYLE_HEADER,
-    STATUS_COLORS,
-    status_conditional_style,
 )
 from nanometa_live.app.components.organism_components import (
     QualityScoreIndicator,
@@ -99,11 +95,6 @@ __all__ = [
     "EmptyStateMessage",
     "TrendIndicator",
     "DecisionBanner",
-    # DataTable shared styling
-    "TABLE_STYLE_CELL",
-    "TABLE_STYLE_HEADER",
-    "STATUS_COLORS",
-    "status_conditional_style",
     # Organism components
     "QualityScoreIndicator",
     "FilteringBreakdownVisual",

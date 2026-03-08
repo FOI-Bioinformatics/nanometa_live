@@ -253,12 +253,9 @@ def register_dashboard_callbacks(app: Dash):
     )
     def update_dashboard_status(n_intervals, config, status, available_samples):
         """Update dashboard status card (lightweight, always runs)."""
-        idle = _get_idle_dashboard_state()
-        idle_status = idle[:10]
-
         should_load, main_dir = _should_load_data(config, status, available_samples)
         if not should_load:
-            return idle_status + ("dashboard-traffic-light status-idle",)
+            return _get_idle_status()
 
         try:
             available_samples = _resolve_samples(main_dir, available_samples)
@@ -300,17 +297,8 @@ def register_dashboard_callbacks(app: Dash):
             progress_visible = {"display": "block"} if pipeline_running else {"display": "none"}
             progress_value = int((samples_processed / total_samples) * 100) if total_samples > 0 else 0
 
-            # Determine CSS class for status indicator
-            status_css = config.get("css_class", "")
-            # Look up css_class from the status config
-            status_css_map = {
-                "starting": "status-running",
-                "success": "status-running",
-                "viewing": "",
-                "warning": "status-running",
-                "danger": "",
-            }
-            indicator_class = f"dashboard-traffic-light {status_css_map.get(overall_status['status'], '')}"
+            # CSS class from _generate_status_display config
+            indicator_class = f"dashboard-traffic-light {status_results[6]}"
 
             return (
                 status_style, status_icon_class, status_text, status_subtitle,
@@ -319,8 +307,7 @@ def register_dashboard_callbacks(app: Dash):
             )
         except Exception as e:
             logger.error(f"Error updating dashboard status: {e}", exc_info=True)
-            err = _get_error_dashboard_state(str(e))
-            return err[:10] + ("dashboard-traffic-light",)
+            return _get_error_status(str(e))
 
     # ================================================================
     # D3b: Metrics callback (depends on kraken data)
@@ -463,7 +450,7 @@ def register_dashboard_callbacks(app: Dash):
     # ================================================================
     @app.callback(
         [
-            Output("dashboard-sample-table", "data"),
+            Output("dashboard-sample-table", "rowData"),
             Output("dashboard-sample-count", "children"),
         ],
         [
@@ -509,12 +496,9 @@ def register_dashboard_callbacks(app: Dash):
     )
     def update_dashboard_alerts(n_intervals, config, status, available_samples):
         """Update the dashboard alerts panel."""
-        idle = _get_idle_dashboard_state()
-        idle_alerts = idle[18:21]
-
         should_load, main_dir = _should_load_data(config, status, available_samples)
         if not should_load:
-            return idle_alerts
+            return _get_idle_alerts()
 
         try:
             available_samples = _resolve_samples(main_dir, available_samples)
@@ -530,35 +514,31 @@ def register_dashboard_callbacks(app: Dash):
             return alerts_panel, str(len(alerts_data)), alerts_badge_color
         except Exception as e:
             logger.error(f"Error updating dashboard alerts: {e}", exc_info=True)
-            err = _get_error_dashboard_state(str(e))
-            return err[18:21]
+            return _get_error_alerts(str(e))
 
     @app.callback(
         Output("selected-sample", "data", allow_duplicate=True),
-        Input("dashboard-sample-table", "selected_rows"),
-        State("dashboard-sample-table", "data"),
+        Input("dashboard-sample-table", "selectedRows"),
         prevent_initial_call=True
     )
-    def handle_sample_selection(selected_rows: List[int], table_data: List[Dict]) -> str:
+    def handle_sample_selection(selected_rows: List[Dict]) -> str:
         """
-        Handle sample selection from the dashboard table.
+        Handle sample selection from the dashboard AG Grid table.
 
         When a user clicks a sample row, update the selected sample
         so other tabs can show sample-specific data.
 
         Args:
-            selected_rows: List of selected row indices
-            table_data: Current table data
+            selected_rows: List of selected row data dicts from AG Grid
 
         Returns:
             Selected sample name
         """
-        if not selected_rows or not table_data:
+        if not selected_rows:
             return no_update
 
         try:
-            selected_idx = selected_rows[0]
-            selected_sample = table_data[selected_idx]["sample"]
+            selected_sample = selected_rows[0]["sample"]
             logger.info(f"Dashboard: User selected sample {selected_sample}")
             return selected_sample
         except (IndexError, KeyError) as e:
@@ -845,8 +825,8 @@ def register_dashboard_callbacks(app: Dash):
         safe_subtitle = "No dangerous pathogens detected"
         safe_card_style = {"borderColor": "#28a745", "borderWidth": "2px"}
         waiting_summary = html.Div([
-            html.I(className="bi bi-arrow-repeat text-muted me-2"),
-            html.Span("Loading screening results...", className="text-muted")
+            html.I(className="bi bi-shield-check text-muted me-2"),
+            html.Span("Screening begins when analysis starts", className="text-muted")
         ], className="text-center py-2")
 
         no_data_banner = []  # Empty when no data yet
@@ -884,14 +864,21 @@ def register_dashboard_callbacks(app: Dash):
                     # No watchlist active - warn the operator
                     summary = html.Div([
                         html.Div([
-                            html.I(className="bi bi-exclamation-circle text-warning me-2"),
-                            html.Strong("No watchlist activated")
-                        ], className="mb-2"),
-                        html.Small(
-                            "Enable a watchlist in the Watchlist tab to screen for pathogens.",
-                            className="text-muted"
+                            html.I(className="bi bi-exclamation-triangle-fill text-warning me-2",
+                                   style={"fontSize": "1.5rem"}),
+                            html.Strong("No watchlist activated", style={"fontSize": "1.1rem"})
+                        ], className="mb-2 d-flex align-items-center"),
+                        html.P(
+                            "Enable a watchlist in the Watchlist tab to screen for pathogens. "
+                            "Without an active watchlist, pathogen screening is disabled.",
+                            className="text-muted small mb-0"
                         )
-                    ], className="py-1")
+                    ], className="py-2", style={
+                        "backgroundColor": "#fff3cd",
+                        "borderRadius": "6px",
+                        "padding": "12px",
+                        "border": "1px solid #ffc107"
+                    })
                     no_wl_banner = DecisionBanner(safe=True, message="No watchlist active - screening disabled")
                     return safe_icon, safe_style, safe_status, "No watchlist configured", safe_card_style, summary, no_wl_banner
                 else:
@@ -1029,25 +1016,42 @@ def register_dashboard_callbacks(app: Dash):
         ],
         [
             Input({"type": "pathogen-view-report", "taxid": ALL}, "n_clicks"),
-            Input("pathogen-modal-close", "n_clicks")
+            Input("pathogen-modal-close", "n_clicks"),
+            Input("pathogen-modal-acknowledge", "n_clicks"),
         ],
-        [State("pathogen-report-modal", "is_open")],
+        [
+            State("pathogen-report-modal", "is_open"),
+            State("pathogen-report-data", "data"),
+        ],
         prevent_initial_call=True
     )
     def handle_view_report(
         view_clicks: List[Optional[int]],
         close_clicks: Optional[int],
-        is_open: bool
+        ack_clicks: Optional[int],
+        is_open: bool,
+        report_data: dict,
     ):
         """
         Handle 'View Report' button clicks on pathogen alerts.
 
         Opens a modal with detailed pathogen information from the database.
+        Also handles modal close and acknowledge actions.
         """
         triggered = ctx.triggered_id
 
         # Handle close button
         if triggered == "pathogen-modal-close":
+            return [False] + [no_update] * 14
+
+        # Handle acknowledge button - close modal and log acknowledgment
+        if triggered == "pathogen-modal-acknowledge":
+            taxid = report_data.get("taxid", "unknown") if report_data else "unknown"
+            name = report_data.get("name", f"TaxID {taxid}") if report_data else f"TaxID {taxid}"
+            logger.warning(
+                f"PATHOGEN ALERT ACKNOWLEDGED (modal): {name} (TaxID {taxid}) "
+                f"at {datetime.now().isoformat()}"
+            )
             return [False] + [no_update] * 14
 
         # Handle view report buttons
@@ -1507,6 +1511,59 @@ def register_dashboard_callbacks(app: Dash):
                 className="text-danger mt-2"
             )
 
+    # ========================================================================
+    # Pathogen Modal Print (clientside)
+    # ========================================================================
+
+    app.clientside_callback(
+        """
+        function(n_clicks) {
+            if (n_clicks) {
+                window.print();
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("pathogen-modal-print", "n_clicks"),
+        Input("pathogen-modal-print", "n_clicks"),
+        prevent_initial_call=True
+    )
+
+    # ========================================================================
+    # Dashboard Refresh Button
+    # ========================================================================
+
+    @app.callback(
+        Output("update-interval", "n_intervals", allow_duplicate=True),
+        Input("dashboard-refresh-btn", "n_clicks"),
+        State("update-interval", "n_intervals"),
+        prevent_initial_call=True,
+    )
+    def manual_dashboard_refresh(n_clicks, current_n):
+        """Trigger an immediate data refresh by incrementing the interval counter."""
+        if not n_clicks:
+            return no_update
+        return (current_n or 0) + 1
+
+    # ========================================================================
+    # Dashboard Help Modal
+    # ========================================================================
+
+    @app.callback(
+        Output("dashboard-help-modal", "is_open"),
+        [
+            Input("dashboard-help-btn", "n_clicks"),
+            Input("dashboard-help-close", "n_clicks"),
+        ],
+        State("dashboard-help-modal", "is_open"),
+        prevent_initial_call=True,
+    )
+    def toggle_help_modal(open_clicks, close_clicks, is_open):
+        """Open or close the dashboard help modal."""
+        if ctx.triggered_id in ("dashboard-help-btn", "dashboard-help-close"):
+            return not is_open
+        return is_open
+
 
 # Helper functions
 
@@ -1544,26 +1601,18 @@ def _count_input_files(nanopore_dir: str) -> int:
     return count
 
 
-def _get_idle_dashboard_state() -> Tuple:
-    """Return dashboard state when system is idle."""
+def _get_idle_status() -> Tuple:
+    """Return idle state for the status callback (D3a, 11 outputs)."""
     status_style = {
         "width": "80px",
         "height": "80px",
         "borderRadius": "50%",
-        "backgroundColor": "#6c757d",  # Gray
+        "backgroundColor": "#6c757d",
         "display": "flex",
         "alignItems": "center",
         "justifyContent": "center",
         "boxShadow": "0 4px 12px rgba(0,0,0,0.15)"
     }
-
-    # Empty alerts panel
-    empty_alerts = html.Div([
-        html.I(className="bi bi-check-circle text-success", style={"fontSize": "48px"}),
-        html.H5("No Active Alerts", className="mt-3 mb-2"),
-        html.P("System is operating normally", className="text-muted mb-0")
-    ], className="text-center py-4")
-
     return (
         status_style,                          # dashboard-status-indicator style
         "bi bi-pause-circle",                  # dashboard-status-icon className
@@ -1573,41 +1622,24 @@ def _get_idle_dashboard_state() -> Tuple:
         "0 / 0",                              # dashboard-files-processed
         {"display": "none"},                  # dashboard-progress-container style
         0,                                     # dashboard-progress-bar value
-        "STANDBY",                            # dashboard-status-label-text (accessible)
-        "bi bi-pause-fill ms-1",              # dashboard-status-label-icon (accessible)
-        "0",                                   # dashboard-sequences-count
-        "--",                                  # dashboard-quality-score
-        "0",                                   # dashboard-organisms-count
-        "0",                                   # dashboard-alerts-count-display
-        "bi bi-bell",                         # dashboard-alerts-icon className
-        {"fontSize": "32px", "color": "#6c757d"},  # dashboard-alerts-icon style
-        [],                                    # dashboard-sample-table data
-        "0 samples",                          # dashboard-sample-count
-        empty_alerts,                         # dashboard-alerts-panel
-        "0",                                   # dashboard-alerts-count
-        "secondary"                           # dashboard-alerts-count color
+        "STANDBY",                            # dashboard-status-label-text
+        "bi bi-pause-fill ms-1",              # dashboard-status-label-icon
+        "dashboard-traffic-light status-idle", # dashboard-status-indicator className
     )
 
 
-def _get_error_dashboard_state(error_msg: str) -> Tuple:
-    """Return dashboard state when an error occurs."""
+def _get_error_status(error_msg: str) -> Tuple:
+    """Return error state for the status callback (D3a, 11 outputs)."""
     status_style = {
         "width": "80px",
         "height": "80px",
         "borderRadius": "50%",
-        "backgroundColor": "#dc3545",  # Red
+        "backgroundColor": "#dc3545",
         "display": "flex",
         "alignItems": "center",
         "justifyContent": "center",
         "boxShadow": "0 4px 12px rgba(220,53,69,0.4)"
     }
-
-    error_alert = [{
-        "message": f"Error loading dashboard data: {error_msg}",
-        "severity": "danger",
-        "timestamp": "Just now"
-    }]
-
     return (
         status_style,                          # dashboard-status-indicator style
         "bi bi-x-circle",                      # dashboard-status-icon className
@@ -1617,20 +1649,30 @@ def _get_error_dashboard_state(error_msg: str) -> Tuple:
         "0 / 0",                              # dashboard-files-processed
         {"display": "none"},                  # dashboard-progress-container style
         0,                                     # dashboard-progress-bar value
-        "FAULT",                              # dashboard-status-label-text (accessible)
-        "bi bi-x-circle-fill ms-1",           # dashboard-status-label-icon (accessible)
-        "0",                                   # dashboard-sequences-count
-        "--",                                  # dashboard-quality-score
-        "0",                                   # dashboard-organisms-count
-        "1",                                   # dashboard-alerts-count-display
-        "bi bi-bell-fill",                    # dashboard-alerts-icon className
-        {"fontSize": "32px", "color": "#dc3545"},  # dashboard-alerts-icon style
-        [],                                    # dashboard-sample-table data
-        "0 samples",                          # dashboard-sample-count
-        create_alerts_list(error_alert),      # dashboard-alerts-panel
-        "1",                                   # dashboard-alerts-count
-        "danger"                              # dashboard-alerts-count color
+        "FAULT",                              # dashboard-status-label-text
+        "bi bi-x-circle-fill ms-1",           # dashboard-status-label-icon
+        "dashboard-traffic-light",            # dashboard-status-indicator className
     )
+
+
+def _get_idle_alerts() -> Tuple:
+    """Return idle state for the alerts callback (D3d, 3 outputs)."""
+    empty_alerts = html.Div([
+        html.I(className="bi bi-check-circle text-success", style={"fontSize": "48px"}),
+        html.H5("No Active Alerts", className="mt-3 mb-2"),
+        html.P("System is operating normally", className="text-muted mb-0")
+    ], className="text-center py-4")
+    return (empty_alerts, "0", "secondary")
+
+
+def _get_error_alerts(error_msg: str) -> Tuple:
+    """Return error state for the alerts callback (D3d, 3 outputs)."""
+    error_alert = [{
+        "message": f"Error loading dashboard data: {error_msg}",
+        "severity": "danger",
+        "timestamp": "Just now"
+    }]
+    return (create_alerts_list(error_alert), "1", "danger")
 
 
 def _calculate_overall_status(
@@ -1829,7 +1871,7 @@ def _generate_status_display(status: str) -> Tuple[Dict, str, str, str, str, str
             "subtitle": "All systems operating normally",
             "label": "ACTIVE",
             "label_icon": "bi bi-check-circle-fill ms-1",
-            "css_class": "status-running"
+            "css_class": "status-good"
         },
         "viewing": {
             "color": "#17a2b8",  # Teal/Info
@@ -1838,7 +1880,7 @@ def _generate_status_display(status: str) -> Tuple[Dict, str, str, str, str, str
             "subtitle": "Viewing existing results",
             "label": "COMPLETE",
             "label_icon": "bi bi-eye-fill ms-1",
-            "css_class": ""
+            "css_class": "status-good"
         },
         "warning": {
             "color": "#ffc107",  # Amber
@@ -1847,7 +1889,7 @@ def _generate_status_display(status: str) -> Tuple[Dict, str, str, str, str, str
             "subtitle": "Review alerts below",
             "label": "ATTENTION",
             "label_icon": "bi bi-exclamation-triangle-fill ms-1",
-            "css_class": "status-running"
+            "css_class": "status-warning"
         },
         "danger": {
             "color": "#dc3545",  # Red
@@ -1856,21 +1898,21 @@ def _generate_status_display(status: str) -> Tuple[Dict, str, str, str, str, str
             "subtitle": "Immediate action required",
             "label": "FAULT",
             "label_icon": "bi bi-x-circle-fill ms-1",
-            "css_class": ""
+            "css_class": "status-danger"
         }
     }
 
     config = status_config.get(status, status_config["success"])
 
+    # Background color is handled by CSS classes (status-good, status-warning, etc.)
+    # Only set layout properties here to avoid inline vs CSS conflicts
     style = {
         "width": "80px",
         "height": "80px",
         "borderRadius": "50%",
-        "backgroundColor": config["color"],
         "display": "flex",
         "alignItems": "center",
         "justifyContent": "center",
-        "boxShadow": f"0 4px 12px {config['color']}66"
     }
 
     return (
@@ -1879,7 +1921,8 @@ def _generate_status_display(status: str) -> Tuple[Dict, str, str, str, str, str
         config["text"],
         config["subtitle"],
         config["label"],
-        config["label_icon"]
+        config["label_icon"],
+        config["css_class"]
     )
 
 

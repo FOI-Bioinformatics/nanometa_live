@@ -6,14 +6,11 @@ Split into two sub-tabs:
 2. Coverage Validation (minimap2) - genome coverage depth and breadth
 """
 
-from dash import html, dcc, dash_table
+from dash import html, dcc
 import dash_bootstrap_components as dbc
+import dash_ag_grid as dag
 
-from nanometa_live.app.components.modern_components import (
-    EmptyStateMessage,
-    TABLE_STYLE_CELL,
-    TABLE_STYLE_HEADER,
-)
+from nanometa_live.app.components.modern_components import EmptyStateMessage
 from nanometa_live.app.utils.plotly_theme import CHART_CONFIG
 
 
@@ -184,42 +181,40 @@ def _create_blast_tab() -> dbc.Tab:
                             dcc.Loading(
                                 type="circle",
                                 children=[
-                                    dash_table.DataTable(
+                                    dag.AgGrid(
                                         id="blast-stats-table",
-                                        columns=[
-                                            {"name": "Species", "id": "species"},
-                                            {"name": "Sample", "id": "sample_id"},
-                                            {"name": "Total Reads", "id": "total_reads", "type": "numeric"},
-                                            {"name": "Validated", "id": "validated_reads", "type": "numeric"},
-                                            {"name": "Validated %", "id": "percent_validated", "type": "numeric"},
-                                            {"name": "Identity %", "id": "percent_identity_mean", "type": "numeric"},
-                                            {"name": "Coverage", "id": "coverage_breadth", "type": "numeric"},
-                                            {"name": "Status", "id": "status"},
+                                        columnDefs=[
+                                            {"headerName": "Species", "field": "species"},
+                                            {"headerName": "Sample", "field": "sample_id"},
+                                            {"headerName": "Total Reads", "field": "total_reads", "type": "numericColumn"},
+                                            {"headerName": "Validated", "field": "validated_reads", "type": "numericColumn"},
+                                            {"headerName": "Validated %", "field": "percent_validated", "type": "numericColumn"},
+                                            {"headerName": "Identity %", "field": "percent_identity_mean", "type": "numericColumn"},
+                                            {"headerName": "Coverage", "field": "coverage_breadth", "type": "numericColumn"},
+                                            {
+                                                "headerName": "Status",
+                                                "field": "status",
+                                                "cellStyle": {
+                                                    "styleConditions": [
+                                                        {
+                                                            "condition": "params.value === 'confirmed'",
+                                                            "style": {"backgroundColor": "#d4edda", "color": "#155724"},
+                                                        },
+                                                        {
+                                                            "condition": "params.value === 'partial'",
+                                                            "style": {"backgroundColor": "#fff3cd", "color": "#856404"},
+                                                        },
+                                                        {
+                                                            "condition": "params.value === 'low'",
+                                                            "style": {"backgroundColor": "#f8d7da", "color": "#721c24"},
+                                                        },
+                                                    ],
+                                                },
+                                            },
                                         ],
-                                        data=[],
-                                        style_cell=TABLE_STYLE_CELL,
-                                        style_header=TABLE_STYLE_HEADER,
-                                        style_data_conditional=[
-                                            {
-                                                "if": {"filter_query": "{status} = 'confirmed'"},
-                                                "backgroundColor": "#d4edda",
-                                                "color": "#155724"
-                                            },
-                                            {
-                                                "if": {"filter_query": "{status} = 'partial'"},
-                                                "backgroundColor": "#fff3cd",
-                                                "color": "#856404"
-                                            },
-                                            {
-                                                "if": {"filter_query": "{status} = 'low'"},
-                                                "backgroundColor": "#f8d7da",
-                                                "color": "#721c24"
-                                            },
-                                        ],
-                                        page_size=25,
-                                        page_action="native",
-                                        sort_action="native",
-                                        filter_action="native",
+                                        rowData=[],
+                                        defaultColDef={"sortable": True, "filter": True, "resizable": True},
+                                        dashGridOptions={"pagination": True, "paginationPageSize": 25},
                                     )
                                 ]
                             )

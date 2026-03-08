@@ -270,7 +270,7 @@ def register_qc_callbacks(app: Dash):
 
             # Shared Plotly layout for consistent QC chart styling
             _qc_layout = dict(
-                template="plotly_white",
+                template="nanometa",
                 height=350,
                 margin=dict(l=50, r=30, t=50, b=60),
                 font=dict(family="Arial, sans-serif", size=12),
@@ -357,7 +357,7 @@ def register_qc_callbacks(app: Dash):
             return cumul_reads_fig, cumul_bp_fig, reads_fig, bp_fig
 
         except Exception as e:
-            print(f"Error updating QC plots: {e}")
+            logging.error(f"Error updating QC plots: {e}")
             # Return empty plots on error
             error_figures = [
                 px.line(title=f"Error: {str(e)}"),
@@ -582,7 +582,7 @@ def register_qc_callbacks(app: Dash):
             ]
 
         except Exception as e:
-            print(f"Error updating QC stats: {e}")
+            logging.error(f"Error updating QC stats: {e}")
             # Return default values on error
             return [
                 f"Error: {str(e)}",
@@ -685,7 +685,7 @@ def register_qc_callbacks(app: Dash):
             }
 
     @app.callback(
-        Output("per-sample-table", "data"),
+        Output("per-sample-table", "rowData"),
         [
             Input("update-interval", "n_intervals"),
             Input("selected-sample", "data"),
@@ -719,7 +719,7 @@ def register_qc_callbacks(app: Dash):
             return summary_df.to_dict('records')
 
         except Exception as e:
-            print(f"Error updating per-sample table: {e}")
+            logging.error(f"Error updating per-sample table: {e}")
             return []
 
     @app.callback(
@@ -819,7 +819,7 @@ def register_qc_callbacks(app: Dash):
             )
 
         except Exception as e:
-            print(f"Error updating base quality card: {e}")
+            logging.error(f"Error updating base quality card: {e}")
             return dbc.Alert(
                 f"Error loading base quality: {str(e)}",
                 color="danger",
@@ -937,7 +937,7 @@ def register_qc_callbacks(app: Dash):
             )
 
         except Exception as e:
-            print(f"Error updating read statistics card: {e}")
+            logging.error(f"Error updating read statistics card: {e}")
             return dbc.Alert(
                 f"Error loading read statistics: {str(e)}",
                 color="danger",
@@ -1047,7 +1047,7 @@ def register_qc_callbacks(app: Dash):
             )
 
         except Exception as e:
-            print(f"Error updating filtering breakdown: {e}")
+            logging.error(f"Error updating filtering breakdown: {e}")
             return dbc.Alert(
                 f"Error loading filtering statistics: {str(e)}",
                 color="danger",
@@ -1139,5 +1139,91 @@ def register_qc_callbacks(app: Dash):
             )
 
         except Exception as e:
-            print(f"Error updating QC metrics summary: {e}")
+            logging.error(f"Error updating QC metrics summary: {e}")
             return empty_state
+
+    # =========================================================================
+    # QC REPORT EXPORT
+    # =========================================================================
+
+    @app.callback(
+        Output("download-qc-report", "data"),
+        Input("export-qc-report", "n_clicks"),
+        [
+            State("qc-data-cache", "data"),
+            State("selected-sample", "data"),
+            State("app-config", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def export_qc_report(n_clicks, qc_cache, selected_sample, config):
+        """Export QC metrics as a CSV report."""
+        if not n_clicks or not config:
+            return no_update
+
+        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
+        if not main_dir:
+            return no_update
+
+        try:
+            fastp_data = load_fastp_data(main_dir, selected_sample)
+            seqkit_data = load_seqkit_stats(main_dir, selected_sample)
+
+            rows = []
+
+            if fastp_data and fastp_data.get("total_reads_before", 0) > 0:
+                rows.append({
+                    "metric": "Total Reads (pre-filter)",
+                    "value": fastp_data.get("total_reads_before", 0),
+                })
+                rows.append({
+                    "metric": "Total Reads (post-filter)",
+                    "value": fastp_data.get("total_reads_after", 0),
+                })
+                before = fastp_data.get("total_reads_before", 0)
+                after = fastp_data.get("total_reads_after", 0)
+                rate = (after / before * 100) if before > 0 else 0
+                rows.append({
+                    "metric": "Pass Rate (%)",
+                    "value": f"{min(rate, 100.0):.1f}",
+                })
+                rows.append({
+                    "metric": "Q20 Rate (%)",
+                    "value": fastp_data.get("q20_rate", "N/A"),
+                })
+                rows.append({
+                    "metric": "Q30 Rate (%)",
+                    "value": fastp_data.get("q30_rate", "N/A"),
+                })
+                rows.append({
+                    "metric": "GC Content (%)",
+                    "value": fastp_data.get("gc_content", "N/A"),
+                })
+
+            if not seqkit_data.empty:
+                rows.append({
+                    "metric": "SeqKit Total Sequences",
+                    "value": int(seqkit_data["num_seqs"].sum()) if "num_seqs" in seqkit_data.columns else "N/A",
+                })
+                if "avg_len" in seqkit_data.columns:
+                    rows.append({
+                        "metric": "Average Read Length",
+                        "value": f"{seqkit_data['avg_len'].mean():.0f}",
+                    })
+
+            if not rows:
+                return no_update
+
+            df = pd.DataFrame(rows)
+            sample_label = selected_sample if selected_sample and selected_sample != "All Samples" else "all_samples"
+            filename = f"qc_report_{sample_label}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+            return {
+                "content": df.to_csv(index=False),
+                "filename": filename,
+                "type": "text/csv",
+            }
+
+        except Exception as e:
+            logging.error(f"Error exporting QC report: {e}")
+            return no_update

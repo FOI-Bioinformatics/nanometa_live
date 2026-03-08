@@ -161,24 +161,9 @@
         color: var(--dark);
     }
 
-    /* Dropdown menus in dark mode */
-    .Select-menu-outer, .dropdown-menu {
+    /* Dropdown menus in dark mode (Dash 4 uses .dash-dropdown for dcc.Dropdown) */
+    .dash-dropdown .dash-dropdown-menu, .dropdown-menu {
         background-color: var(--card-bg);
-        border-color: var(--card-border);
-    }
-
-    /* Tables in dark mode */
-    .dash-table-container .dash-spreadsheet-inner {
-        background-color: var(--card-bg);
-    }
-
-    .dash-table-container th {
-        background-color: rgba(255, 255, 255, 0.05) !important;
-        color: var(--dark);
-    }
-
-    .dash-table-container td {
-        color: var(--dark);
         border-color: var(--card-border);
     }
 
@@ -522,29 +507,6 @@ body {
     height: 12px;
     border-radius: 50%;
     margin-right: 8px;
-  }
-
-  /* Table styling */
-  .dash-table-container {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  }
-
-  .dash-table-container .dash-spreadsheet-container {
-    border-radius: 5px;
-    overflow: hidden;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  }
-
-  .dash-table-container .dash-spreadsheet-inner th {
-    background-color: #f8f9fa;
-    font-weight: 600;
-    text-align: left;
-    padding: 12px 15px;
-  }
-
-  .dash-table-container .dash-spreadsheet-inner td {
-    padding: 10px 15px;
-    border-bottom: 1px solid #e9ecef;
   }
 
   /* Plot styling */
@@ -959,7 +921,6 @@ body {
   }
 
   .dashboard-metric-card:hover {
-    transform: translateY(-2px);
     box-shadow: var(--shadow-md);
   }
 
@@ -972,16 +933,6 @@ body {
   #dashboard-alerts-card.has-critical-alerts {
     border-left: 3px solid var(--status-danger);
     box-shadow: 0 0 8px rgba(220, 53, 69, 0.15);
-  }
-
-  /* Dashboard sample table row styling */
-  .dash-table-container .dash-spreadsheet-inner tr[data-dash-row] {
-    transition: background-color 0.15s ease-in-out;
-  }
-
-  .dash-table-container .dash-spreadsheet-inner tr[data-dash-row]:hover {
-    background-color: rgba(0, 123, 255, 0.05);
-    cursor: pointer;
   }
 
   /* Alert panel scrollbar styling */
@@ -1188,8 +1139,8 @@ body {
      DASHBOARD STATUS INDICATORS
      ============================================ */
   .status-running {
-    background-color: var(--status-good) !important;
-    animation: pulse 2s ease-in-out infinite;
+    background-color: #0d6efd !important;
+    animation: pulse-blue 2s ease-in-out infinite;
   }
 
   .status-idle {
@@ -1211,6 +1162,15 @@ body {
     }
     50% {
       box-shadow: 0 0 0 15px rgba(40, 167, 69, 0);
+    }
+  }
+
+  @keyframes pulse-blue {
+    0%, 100% {
+      box-shadow: 0 0 0 0 rgba(13, 110, 253, 0.4);
+    }
+    50% {
+      box-shadow: 0 0 0 15px rgba(13, 110, 253, 0);
     }
   }
 
@@ -1518,11 +1478,12 @@ body {
   }
 
   .live-indicator-dot {
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     background-color: var(--status-good);
     animation: livePulse 2s ease-in-out infinite;
+    margin-right: 6px;
   }
 
   @keyframes livePulse {
@@ -1563,28 +1524,6 @@ body {
     display: flex;
     align-items: center;
     gap: var(--space-xs);
-  }
-
-  /* ============================================
-     IMPROVED TABLE STYLING
-     ============================================ */
-  /* Tabular numbers for aligned data */
-  .dash-table-container .dash-spreadsheet-inner td {
-    font-variant-numeric: tabular-nums;
-  }
-
-  /* Zebra striping */
-  .dash-table-container .dash-spreadsheet-inner tr:nth-child(odd) td {
-    background-color: rgba(0, 0, 0, 0.02);
-  }
-
-  .dash-table-container .dash-spreadsheet-inner tr:nth-child(even) td {
-    background-color: var(--card-bg);
-  }
-
-  /* Enhanced row hover */
-  .dash-table-container .dash-spreadsheet-inner tr:hover td {
-    background-color: rgba(0, 123, 255, 0.08) !important;
   }
 
   /* Status icon in tables */
@@ -1676,16 +1615,6 @@ body {
     #sample-selector {
       width: 100% !important;
       max-width: none !important;
-    }
-
-    /* Simplified table for mobile */
-    .dash-table-container {
-      font-size: 12px;
-    }
-
-    .dash-table-container td,
-    .dash-table-container th {
-      padding: 8px 6px;
     }
 
     /* Larger tap targets for checkboxes */
@@ -2017,9 +1946,24 @@ body {
     animation: trafficPulse 2s ease-in-out infinite;
   }
 
+  .dashboard-traffic-light.status-running {
+    background-color: #0d6efd;
+    box-shadow: 0 0 30px rgba(13, 110, 253, 0.4);
+  }
+
+  .dashboard-traffic-light.status-running::before {
+    background-color: #0d6efd;
+    animation: trafficPulse 1.5s ease-in-out infinite;
+  }
+
   .dashboard-traffic-light.status-warning {
     background-color: var(--status-warning);
     box-shadow: 0 0 30px rgba(255, 193, 7, 0.4);
+  }
+
+  .dashboard-traffic-light.status-warning::before {
+    background-color: var(--status-warning);
+    animation: trafficPulse 2.5s ease-in-out infinite;
   }
 
   .dashboard-traffic-light.status-danger {
@@ -2973,7 +2917,7 @@ body {
   /* Mobile: sample selector full width */
   @media (max-width: 576px) {
     .sample-selector-compact,
-    .sample-selector-compact .Select {
+    .sample-selector-compact .dash-dropdown {
       min-width: 100% !important;
       width: 100% !important;
     }
@@ -3010,11 +2954,6 @@ body {
       margin-top: 0.25rem;
     }
 
-    /* Prevent horizontal scroll from wide tables */
-    .dash-table-container {
-      overflow-x: auto;
-      max-width: 100vw;
-    }
   }
 
   /* ============================================

@@ -7,16 +7,12 @@ and processing statistics with multi-sample/barcode support.
 MODERNIZED: Uses visual quality indicators, plain language, and operator-friendly design.
 """
 
-from dash import html, dcc, dash_table
+from dash import html, dcc
 import dash_bootstrap_components as dbc
+import dash_ag_grid as dag
 import plotly.express as px
 
-from nanometa_live.app.components.modern_components import (
-    EmptyStateMessage,
-    TABLE_STYLE_CELL,
-    TABLE_STYLE_HEADER,
-    status_conditional_style,
-)
+from nanometa_live.app.components.modern_components import EmptyStateMessage
 from nanometa_live.app.utils.plotly_theme import CHART_CONFIG
 from nanometa_live.app.components.organism_components import (
     FilteringBreakdownVisual,
@@ -45,6 +41,8 @@ def create_qc_layout():
     return html.Div([
         # Centralized QC data cache - loaded once per interval cycle
         dcc.Store(id="qc-data-cache", data={}),
+        # Download component for QC report export
+        dcc.Download(id="download-qc-report"),
 
         # KEY METRICS SUMMARY CARD
         # Provides at-a-glance overview of key QC metrics (non-sticky, matching QualityScoreIndicator style)
@@ -149,56 +147,81 @@ def create_qc_layout():
                         html.Small("Quality metrics for each sample/barcode", className="text-muted ms-2")
                     ]),
                     dbc.CardBody([
-                        dash_table.DataTable(
+                        dag.AgGrid(
                             id="per-sample-table",
-                            columns=[
-                                {"name": "Sample", "id": "sample"},
-                                {"name": "Reads", "id": "reads", "type": "numeric", "format": {"specifier": ","}},
-                                {"name": "Quality", "id": "mean_quality"},
-                                {"name": "Classified", "id": "classified_rate"},
-                                {"name": "Status", "id": "status"},
-                                # Hidden numeric column for proper filtering
-                                {"name": "", "id": "classified_rate_num", "type": "numeric", "hideable": True},
-                            ],
-                            hidden_columns=["classified_rate_num"],
-                            data=[],
-                            style_cell={**TABLE_STYLE_CELL, "minWidth": "100px"},
-                            style_header=TABLE_STYLE_HEADER,
-                            style_data_conditional=[
-                                # Classification rate highlights (80%+ is good)
-                                # Uses classified_rate_num (hidden numeric column) for filtering
+                            columnDefs=[
+                                {"headerName": "Sample", "field": "sample"},
                                 {
-                                    "if": {
-                                        "filter_query": "{classified_rate_num} >= 80",
-                                        "column_id": "classified_rate"
+                                    "headerName": "Reads",
+                                    "field": "reads",
+                                    "type": "numericColumn",
+                                    "valueFormatter": {"function": "d3.format(',')(params.value)"},
+                                },
+                                {
+                                    "headerName": "Quality",
+                                    "field": "mean_quality",
+                                    "headerTooltip": "Average quality score (Q15+ is good)",
+                                    "cellStyle": {
+                                        "styleConditions": [
+                                            {
+                                                "condition": "params.value >= 15",
+                                                "style": {"backgroundColor": "#d4edda", "color": "#155724"},
+                                            },
+                                            {
+                                                "condition": "params.value >= 10 && params.value < 15",
+                                                "style": {"backgroundColor": "#fff3cd", "color": "#856404"},
+                                            },
+                                            {
+                                                "condition": "params.value < 10",
+                                                "style": {"backgroundColor": "#f8d7da", "color": "#721c24"},
+                                            },
+                                        ],
                                     },
-                                    "backgroundColor": "#d4edda",
-                                    "color": "#155724",
-                                    "fontWeight": "bold"
-                                },
-                                # Quality score thresholds
-                                {
-                                    "if": {"filter_query": "{mean_quality} >= 15", "column_id": "mean_quality"},
-                                    "backgroundColor": "#d4edda", "color": "#155724"
                                 },
                                 {
-                                    "if": {"filter_query": "{mean_quality} >= 10 && {mean_quality} < 15", "column_id": "mean_quality"},
-                                    "backgroundColor": "#fff3cd", "color": "#856404"
+                                    "headerName": "Classified",
+                                    "field": "classified_rate",
+                                    "headerTooltip": "Percentage of reads successfully classified",
+                                    "cellStyle": {
+                                        "styleConditions": [
+                                            {
+                                                "condition": "params.data && params.data.classified_rate_num >= 80",
+                                                "style": {"backgroundColor": "#d4edda", "color": "#155724", "fontWeight": "bold"},
+                                            },
+                                        ],
+                                    },
                                 },
                                 {
-                                    "if": {"filter_query": "{mean_quality} < 10", "column_id": "mean_quality"},
-                                    "backgroundColor": "#f8d7da", "color": "#721c24"
+                                    "headerName": "Status",
+                                    "field": "status",
+                                    "headerTooltip": "Overall sample quality assessment",
+                                    "cellStyle": {
+                                        "styleConditions": [
+                                            {
+                                                "condition": "params.value && (params.value.indexOf('Complete') >= 0 || params.value.indexOf('Good') >= 0)",
+                                                "style": {"backgroundColor": "#d4edda", "color": "#155724", "fontWeight": "bold"},
+                                            },
+                                            {
+                                                "condition": "params.value && (params.value.indexOf('Processing') >= 0 || params.value.indexOf('Review') >= 0)",
+                                                "style": {"backgroundColor": "#fff3cd", "color": "#856404", "fontWeight": "bold"},
+                                            },
+                                            {
+                                                "condition": "params.value && (params.value.indexOf('Error') >= 0 || params.value.indexOf('Issue') >= 0)",
+                                                "style": {"backgroundColor": "#f8d7da", "color": "#721c24", "fontWeight": "bold"},
+                                            },
+                                        ],
+                                    },
                                 },
-                            ] + status_conditional_style("status"),
-                            tooltip_header={
-                                "mean_quality": "Average quality score (Q15+ is good)",
-                                "classified_rate": "Percentage of reads successfully classified",
-                                "status": "Overall sample quality assessment"
+                                # Hidden numeric column still in data for classified_rate styling
+                                {"field": "classified_rate_num", "hide": True},
+                            ],
+                            rowData=[],
+                            defaultColDef={"sortable": True, "resizable": True, "minWidth": 100},
+                            dashGridOptions={
+                                "pagination": True,
+                                "paginationPageSize": 10,
+                                "tooltipShowDelay": 500,
                             },
-                            tooltip_delay=500,
-                            tooltip_duration=3000,
-                            page_size=10,
-                            sort_action="native"
                         ),
                         html.Small(
                             "Detailed metrics available in Technical Statistics section below",

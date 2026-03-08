@@ -8,18 +8,15 @@ MODERNIZED: Uses visual organism cards, watched species section, alert banners,
 and operator-friendly design with progressive disclosure.
 """
 
-from dash import html, dcc, dash_table
+from dash import html, dcc
 import dash_bootstrap_components as dbc
+import dash_ag_grid as dag
 
 from nanometa_live.app.components.organism_components import (
     OrganismCard,
     OrganismSummaryCard,
 )
-from nanometa_live.app.components.modern_components import (
-    EmptyStateMessage,
-    TABLE_STYLE_CELL,
-    TABLE_STYLE_HEADER,
-)
+from nanometa_live.app.components.modern_components import EmptyStateMessage
 
 
 def create_main_layout():
@@ -240,28 +237,27 @@ def create_main_layout():
                         "Most operators can use the visual cards above for easier interpretation.",
                         className="text-muted mb-3"
                     ),
-                    dash_table.DataTable(
+                    dag.AgGrid(
                         id="detailed-organism-table",
-                        columns=[
-                            {"name": "Organism Name", "id": "name"},
-                            {"name": "Taxonomy ID", "id": "taxid"},
-                            {"name": "Rank", "id": "rank"},
-                            {"name": "DNA Sequences", "id": "reads", "type": "numeric", "format": {"specifier": ","}},
-                            {"name": "Abundance (%)", "id": "abundance"}
-                        ],
-                        data=[],
-                        style_cell=TABLE_STYLE_CELL,
-                        style_header=TABLE_STYLE_HEADER,
-                        style_data_conditional=[
+                        columnDefs=[
+                            {"headerName": "Organism Name", "field": "name"},
+                            {"headerName": "Taxonomy ID", "field": "taxid"},
+                            {"headerName": "Rank", "field": "rank"},
                             {
-                                "if": {"column_id": "abundance"},
-                                "fontWeight": "bold"
-                            }
+                                "headerName": "DNA Sequences",
+                                "field": "reads",
+                                "type": "numericColumn",
+                                "valueFormatter": {"function": "d3.format(',')(params.value)"},
+                            },
+                            {
+                                "headerName": "Abundance (%)",
+                                "field": "abundance",
+                                "cellStyle": {"fontWeight": "bold"},
+                            },
                         ],
-                        page_size=25,
-                        page_action="native",
-                        sort_action="native",
-                        filter_action="native"
+                        rowData=[],
+                        defaultColDef={"sortable": True, "filter": True, "resizable": True},
+                        dashGridOptions={"pagination": True, "paginationPageSize": 25},
                     )
                 ])
             ], title="Detailed Data Table (Advanced)")

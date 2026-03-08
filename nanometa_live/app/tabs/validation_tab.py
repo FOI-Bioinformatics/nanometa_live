@@ -338,7 +338,7 @@ def register_validation_callbacks(app: Dash):
             yaxis_title="Identity (%)",
             yaxis_range=[0, 108],
             showlegend=False,
-            template="plotly_white",
+            template="nanometa",
             margin=dict(l=50, r=30, t=50, b=100),
             font=dict(family="Arial, sans-serif", size=12),
             bargap=0.3,
@@ -356,7 +356,7 @@ def register_validation_callbacks(app: Dash):
         return fig
 
     @app.callback(
-        Output("blast-stats-table", "data"),
+        Output("blast-stats-table", "rowData"),
         Input("validation-data-store", "data"),
     )
     def update_blast_table(data):

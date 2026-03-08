@@ -9,8 +9,9 @@ MODERNIZED: Simplified metrics, large traffic light status, prominent alerts,
 operator-friendly sample table.
 """
 
-from dash import html, dcc, dash_table
+from dash import html, dcc
 import dash_bootstrap_components as dbc
+import dash_ag_grid as dag
 
 from nanometa_live.app.components.modern_components import (
     StatusCard,
@@ -24,9 +25,6 @@ from nanometa_live.app.components.modern_components import (
     ClassificationRateBadge,
     MetricsRow,
     DecisionBanner,
-    TABLE_STYLE_CELL,
-    TABLE_STYLE_HEADER,
-    status_conditional_style,
 )
 from nanometa_live.app.components.pathogen_alert import (
     PathogenAlertPanel,
@@ -59,6 +57,45 @@ def create_dashboard_layout():
         dcc.Store(id='dashboard-data-cache', data={}),
         dcc.Store(id='dashboard-last-updated', data=None),
 
+        # Help modal for dashboard usage
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle("Dashboard Help")),
+            dbc.ModalBody([
+                html.H5("Status Traffic Light"),
+                html.P(
+                    "The large status indicator shows the overall state of the analysis run. "
+                    "Green means all systems are operating normally, amber indicates items "
+                    "that may need review, and red signals critical findings or errors."
+                ),
+                html.H5("Alert Severity Levels"),
+                html.Ul([
+                    html.Li([html.Strong("Critical (red): "), "High-risk pathogen detected or system error requiring immediate action."]),
+                    html.Li([html.Strong("Warning (amber): "), "Potential concern such as a moderate-risk organism or quality issue."]),
+                    html.Li([html.Strong("Info (blue): "), "Informational notice, no action required."]),
+                ]),
+                html.H5("Key Metrics"),
+                html.P(
+                    "The metrics bar shows total reads processed, quality pass rate, "
+                    "classification rate, and the number of active samples. These update "
+                    "automatically at each refresh interval."
+                ),
+                html.H5("Sample Selection"),
+                html.P(
+                    "Click a row in the sample table to filter all dashboard panels to "
+                    "that specific sample or barcode. Click again to deselect and return "
+                    "to the combined view."
+                ),
+                html.H5("Refresh"),
+                html.P(
+                    "Data refreshes automatically based on the configured interval. "
+                    "Use the Refresh button to trigger an immediate update."
+                ),
+            ]),
+            dbc.ModalFooter(
+                dbc.Button("Close", id="dashboard-help-close", color="secondary")
+            ),
+        ], id="dashboard-help-modal", size="lg", is_open=False),
+
         # =============================================
         # 1. TOP STATUS BANNER (Large Traffic Light)
         # =============================================
@@ -89,12 +126,12 @@ def create_dashboard_layout():
                                                 id="dashboard-status-label-text",
                                                 children="STANDBY",
                                                 className="fw-bold",
-                                                style={"fontSize": "14px"}
+                                                style={"fontSize": "18px", "letterSpacing": "1px"}
                                             ),
                                             html.I(
                                                 id="dashboard-status-label-icon",
                                                 className="bi bi-pause-fill ms-1",
-                                                style={"fontSize": "14px"}
+                                                style={"fontSize": "18px"}
                                             )
                                         ],
                                         className="text-center mt-2 text-muted"
@@ -251,8 +288,8 @@ def create_dashboard_layout():
                 dbc.Card([
                     dbc.CardHeader([
                         html.Div([
-                            html.I(className="bi bi-biohazard me-2", style={"color": "#dc3545"}),
-                            html.H6("Pathogen Screening", className="mb-0 d-inline"),
+                            html.I(className="bi bi-biohazard me-2", style={"color": "#dc3545", "fontSize": "1.2rem"}),
+                            html.H5("Pathogen Screening", className="mb-0 d-inline"),
                             html.Span(
                                 id="dashboard-screening-count",
                                 children="",
@@ -276,7 +313,7 @@ def create_dashboard_layout():
                                     children=[
                                         html.Div([
                                             html.I(className="bi bi-arrow-repeat text-muted me-2"),
-                                            html.Span("Loading screening results...", className="text-muted")
+                                            html.Span("Screening begins when analysis starts", className="text-muted")
                                         ], className="text-center py-2")
                                     ]
                                 )
@@ -292,7 +329,7 @@ def create_dashboard_layout():
                     dbc.CardHeader([
                         html.Div([
                             html.I(className="bi bi-pie-chart me-2"),
-                            html.H6("Classification", className="mb-0 d-inline")
+                            html.H5("Classification", className="mb-0 d-inline")
                         ])
                     ], className="py-2"),
                     dbc.CardBody([
@@ -304,7 +341,7 @@ def create_dashboard_layout():
                                 dcc.Graph(
                                     id="dashboard-classification-donut",
                                     config={"displayModeBar": False},
-                                    style={"height": "180px"}
+                                    style={"height": "200px"}
                                 )
                             ]
                         )
@@ -429,36 +466,87 @@ def create_dashboard_layout():
                             color="#0d6efd",
                             children=[
                                 html.Div(id="dashboard-sample-table-container", children=[
-                                    dash_table.DataTable(
+                                    dag.AgGrid(
                                         id="dashboard-sample-table",
-                                        columns=[
-                                            {"name": "Sample", "id": "sample"},
-                                            {"name": "Status", "id": "status"},
-                                            {"name": "Quality", "id": "quality"},
-                                            {"name": "Reads", "id": "reads"},
-                                            {"name": "Organisms", "id": "organisms"},
-                                            {"name": "Last Updated", "id": "last_updated"},
+                                        columnDefs=[
+                                            {
+                                                "headerName": "Sample",
+                                                "field": "sample",
+                                                "headerTooltip": "Click a row to filter all tabs to this sample",
+                                            },
+                                            {
+                                                "headerName": "Status",
+                                                "field": "status",
+                                                "headerTooltip": "Sample processing status",
+                                                "cellStyle": {
+                                                    "styleConditions": [
+                                                        {
+                                                            "condition": "params.value && params.value.indexOf('Complete') >= 0",
+                                                            "style": {"backgroundColor": "#d4edda", "color": "#155724", "fontWeight": "bold", "borderLeft": "4px solid #28a745"},
+                                                        },
+                                                        {
+                                                            "condition": "params.value && params.value.indexOf('Good') >= 0",
+                                                            "style": {"backgroundColor": "#d4edda", "color": "#155724", "fontWeight": "bold", "borderLeft": "4px solid #28a745"},
+                                                        },
+                                                        {
+                                                            "condition": "params.value && params.value.indexOf('Processing') >= 0",
+                                                            "style": {"backgroundColor": "#fff3cd", "color": "#856404", "fontWeight": "bold", "borderLeft": "4px solid #ffc107"},
+                                                        },
+                                                        {
+                                                            "condition": "params.value && params.value.indexOf('Review') >= 0",
+                                                            "style": {"backgroundColor": "#fff3cd", "color": "#856404", "fontWeight": "bold", "borderLeft": "4px solid #ffc107"},
+                                                        },
+                                                        {
+                                                            "condition": "params.value && params.value.indexOf('Error') >= 0",
+                                                            "style": {"backgroundColor": "#f8d7da", "color": "#721c24", "fontWeight": "bold", "borderLeft": "4px solid #dc3545"},
+                                                        },
+                                                        {
+                                                            "condition": "params.value && params.value.indexOf('Issue') >= 0",
+                                                            "style": {"backgroundColor": "#f8d7da", "color": "#721c24", "fontWeight": "bold", "borderLeft": "4px solid #dc3545"},
+                                                        },
+                                                    ],
+                                                },
+                                            },
+                                            {
+                                                "headerName": "Quality",
+                                                "field": "quality",
+                                                "headerTooltip": "Data quality assessment",
+                                            },
+                                            {
+                                                "headerName": "Reads",
+                                                "field": "reads",
+                                                "headerTooltip": "Number of DNA sequences",
+                                            },
+                                            {
+                                                "headerName": "Organisms",
+                                                "field": "organisms",
+                                                "headerTooltip": "Detected organism count",
+                                            },
+                                            {
+                                                "headerName": "Bases",
+                                                "field": "bases",
+                                                "headerTooltip": "Total base pairs sequenced",
+                                            },
+                                            {
+                                                "headerName": "N50",
+                                                "field": "n50",
+                                                "headerTooltip": "Read length N50 (half of data from reads longer than this)",
+                                            },
+                                            {
+                                                "headerName": "Class. Rate",
+                                                "field": "class_rate",
+                                                "headerTooltip": "Percentage of reads classified to an organism",
+                                            },
                                         ],
-                                        data=[],
-                                        style_cell={**TABLE_STYLE_CELL, "padding": "10px 14px"},
-                                        style_header=TABLE_STYLE_HEADER,
-                                        style_data_conditional=status_conditional_style(
-                                            "status", use_border=True
-                                        ),
-                                        row_selectable="single",
-                                        selected_rows=[],
-                                        page_action="native",
-                                        page_size=8,
-                                        sort_action="native",
-                                        tooltip_header={
-                                            "sample": "Click a row to filter all tabs to this sample",
-                                            "quality": "Data quality assessment",
-                                            "reads": "Number of DNA sequences",
-                                            "organisms": "Detected organism count",
-                                            "last_updated": "Time of most recent data for this sample"
+                                        rowData=[],
+                                        defaultColDef={"sortable": True, "resizable": True},
+                                        dashGridOptions={
+                                            "pagination": True,
+                                            "paginationPageSize": 8,
+                                            "rowSelection": {"mode": "singleRow"},
+                                            "tooltipShowDelay": 500,
                                         },
-                                        tooltip_delay=500,
-                                        tooltip_duration=3000
+                                        style={"width": "100%"},
                                     ),
                                 ])
                             ]
@@ -488,7 +576,7 @@ def create_dashboard_layout():
                                 html.H6("No Active Alerts", className="mt-2 mb-1"),
                                 html.P("System is operating normally", className="text-muted small mb-0")
                             ], className="text-center py-3")
-                        ], style={"maxHeight": "300px", "overflowY": "auto"})
+                        ], style={"maxHeight": "450px", "overflowY": "auto"})
                     ])
                 ], className="h-100")
             ], md=5)
@@ -576,13 +664,13 @@ def create_dashboard_layout():
                                 ]
                             ),
 
-                            # Footer with link to config
+                            # Footer with link to watchlist tab
                             html.Div([
                                 html.Hr(className="my-2"),
                                 html.Small([
-                                    html.I(className="bi bi-gear me-1"),
+                                    html.I(className="bi bi-star me-1"),
                                     "Manage watchlists in the ",
-                                    html.A("Configuration", href="#", id="dashboard-goto-config-link"),
+                                    html.A("Watchlist", href="#", id="dashboard-goto-config-link"),
                                     " tab"
                                 ], className="text-muted")
                             ])
@@ -602,7 +690,7 @@ def create_dashboard_layout():
             dbc.Col([
                 dbc.Card([
                     dbc.CardHeader([
-                        html.H6("Sequencing Quality Metrics", className="mb-0")
+                        html.H5("Sequencing Quality Metrics", className="mb-0")
                     ], className="py-2"),
                     dbc.CardBody([
                         dbc.Row([
@@ -733,9 +821,9 @@ def create_dashboard_layout():
                 html.Div([
                     html.Small([
                         html.Span("Status key: ", className="text-muted fw-semibold"),
-                        dbc.Badge("Good", color="success", className="me-1", style={"fontSize": "0.7rem"}),
-                        dbc.Badge("Review", color="warning", className="me-1", style={"fontSize": "0.7rem"}),
-                        dbc.Badge("Action Required", color="danger", className="me-1", style={"fontSize": "0.7rem"}),
+                        dbc.Badge("Good", color="success", className="me-1", style={"fontSize": "0.8rem"}),
+                        dbc.Badge("Review", color="warning", className="me-1", style={"fontSize": "0.8rem"}),
+                        dbc.Badge("Action Required", color="danger", className="me-1", style={"fontSize": "0.8rem"}),
                     ], className="d-flex align-items-center")
                 ])
             ], md=8),

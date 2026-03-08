@@ -297,7 +297,7 @@ def register_main_callbacks(app: Dash):
         [
             Output("organism-summary-container", "children"),
             Output("organism-cards-container", "children"),
-            Output("detailed-organism-table", "data"),
+            Output("detailed-organism-table", "rowData"),
             Output("total-organisms-count", "children"),
             Output("organism-results-count", "children"),
             Output("watched-species-alert-container", "children"),
@@ -707,6 +707,7 @@ def register_main_callbacks(app: Dash):
         [
             Input("export-all-txt", "n_clicks"),
             Input("export-all-csv", "n_clicks"),
+            Input("export-all-xlsx", "n_clicks"),
             Input("confirm-export", "n_clicks"),
             Input("cancel-export", "n_clicks"),
         ],
@@ -716,7 +717,7 @@ def register_main_callbacks(app: Dash):
         ],
         prevent_initial_call=True,
     )
-    def toggle_export_modal(pdf_clicks, csv_clicks, confirm_clicks, cancel_clicks, is_open, current_format):
+    def toggle_export_modal(txt_clicks, csv_clicks, xlsx_clicks, confirm_clicks, cancel_clicks, is_open, current_format):
         """Toggle the export modal and pre-select format based on button clicked."""
         if not ctx.triggered:
             return is_open, current_format
@@ -724,13 +725,12 @@ def register_main_callbacks(app: Dash):
         trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
 
         if trigger_id == "export-all-txt":
-            # Open modal with text report pre-selected
             return True, "txt"
         elif trigger_id == "export-all-csv":
-            # Open modal with CSV pre-selected
             return True, "csv"
+        elif trigger_id == "export-all-xlsx":
+            return True, "xlsx"
         elif trigger_id in ["confirm-export", "cancel-export"]:
-            # Close modal
             return False, current_format
 
         return is_open, current_format
@@ -741,7 +741,7 @@ def register_main_callbacks(app: Dash):
         [
             State("export-format-select", "value"),
             State("export-filename", "value"),
-            State("detailed-organism-table", "data"),
+            State("detailed-organism-table", "rowData"),
             State("app-config", "data"),
         ],
         prevent_initial_call=True,
