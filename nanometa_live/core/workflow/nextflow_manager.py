@@ -413,6 +413,7 @@ class NextflowManager:
 
             try:
                 logging.info("Stopping Nextflow pipeline...")
+                self._user_stopped = True
 
                 if self.process and self.process.poll() is None:
                     # Try graceful termination
@@ -457,6 +458,7 @@ class NextflowManager:
         Args:
             cmd: Nextflow command as list of arguments
         """
+        self._user_stopped = False
         try:
             log_file = os.path.join(self.log_dir, "nextflow.log")
             logging.info(f"Nextflow output will be logged to: {log_file}")
@@ -483,13 +485,17 @@ class NextflowManager:
                 exit_code = self.process.wait()
 
                 if exit_code != 0:
-                    # Read the log file to extract the actual error message
-                    error_details = self._extract_error_from_log(log_file)
-                    error_msg = f"Nextflow exited with code {exit_code}"
-                    if error_details:
-                        error_msg = f"{error_msg}: {error_details}"
-                    self.status["errors"].append(error_msg)
-                    logging.error(error_msg)
+                    if getattr(self, '_user_stopped', False):
+                        # User-initiated stop: non-zero exit is expected
+                        logging.info(f"Nextflow stopped by user (exit code {exit_code})")
+                    else:
+                        # Actual pipeline failure
+                        error_details = self._extract_error_from_log(log_file)
+                        error_msg = f"Nextflow exited with code {exit_code}"
+                        if error_details:
+                            error_msg = f"{error_msg}: {error_details}"
+                        self.status["errors"].append(error_msg)
+                        logging.error(error_msg)
                 else:
                     logging.info("Nextflow completed successfully")
 
@@ -907,6 +913,7 @@ class NextflowExecutor:
         if not self.running:
             return False, "Workflow is not running"
 
+        self._user_stopped = True
         try:
             if self.process:
                 self.process.terminate()

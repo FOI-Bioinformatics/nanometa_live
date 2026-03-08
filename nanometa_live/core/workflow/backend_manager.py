@@ -400,7 +400,12 @@ class BackendManager:
         with self._status_lock:
             self.status["running"] = False
             self.status["pipeline_status"] = "stopped"
+            self.status["errors"] = []  # Clear errors from user-initiated stop
             self.status["last_update"] = time.time()
+
+        # Clear workflow manager errors from the expected non-zero exit
+        if hasattr(self.workflow_manager, 'status'):
+            self.workflow_manager.status["errors"] = []
 
         logging.info("Backend stopped successfully")
         return True, "Backend stopped successfully"
