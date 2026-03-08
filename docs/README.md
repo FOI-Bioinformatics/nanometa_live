@@ -25,6 +25,17 @@
 | [Migration Guide](MIGRATION_GUIDE_V2.md) | Upgrading from v1.x |
 | [Validation Walkthrough](validation-walkthrough-checklist.md) | Validation feature checklist |
 
+## Design Plans
+
+| Plan | Status |
+|------|--------|
+| [Validation Design](plans/2026-01-30-validation-design.md) | Completed |
+| [Validation Implementation](plans/2026-01-30-validation-implementation.md) | Completed |
+| [Validation Tab Redesign](plans/2026-01-31-validation-tab-redesign.md) | Completed |
+| [UX Improvements](plans/2026-03-02-ux-improvements-design.md) | Completed |
+| [Offline Deployment](plans/2026-03-06-offline-deployment-design.md) | Implemented |
+| [E2E Testing Fixes](plans/2026-03-07-e2e-testing-fixes.md) | Completed |
+
 ## Archive
 
 Historical implementation documents are in the [archive/](archive/) subdirectory.

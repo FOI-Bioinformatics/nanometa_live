@@ -12,10 +12,11 @@ Nanometa Live provides real-time monitoring and visualization of taxonomic class
 - **Real-time Monitoring**: Watch classification results update as sequencing progresses
 - **Interactive Visualizations**: Sankey diagrams and sunburst charts for taxonomic exploration
 - **Multi-sample Support**: Analyze barcoded/multiplexed sequencing runs
-- **Species Tracking**: Configure alerts for organisms of interest
-- **Watchlist System**: Built-in and custom pathogen watchlists with threat levels and action guidance
-- **Validation**: BLAST and minimap2 coverage validation of detected organisms
-- **Quality Control**: Monitor read quality and filtering statistics
+- **Pathogen Screening**: Built-in watchlists (Clinical Pathogens, CDC Bioterrorism, WHO Priority, Foodborne, Respiratory, Water Safety) with threat-level alerts and action guidance
+- **Decision Support**: Traffic-light status indicators, severity-matched alerts, and confidence scoring for clinical operators
+- **Validation**: BLAST identity scores and minimap2 coverage validation of detected organisms
+- **Quality Control**: Nanopore-calibrated QC metrics with per-sample filtering statistics
+- **Offline Deployment**: Preparation wizard for air-gapped field labs with bundle export/import
 - **GUI-based Control**: Start/stop analysis and configure settings from the web interface
 
 ## Quick Start
@@ -41,17 +42,31 @@ pip install -e .
 
 ### Running the Dashboard
 
-**Visualization mode** (view existing results):
 ```bash
-python -m nanometa_live.app --main_dir /path/to/nanometanf/output
-```
+# Launch the dashboard
+nanometa-live
 
-**Full analysis mode** (run pipeline from GUI):
-```bash
-python -m nanometa_live.app --config config.yaml
+# Or with a specific config
+nanometa-live --config config.yaml
 ```
 
 Then open http://localhost:8050 in your browser.
+
+### Offline Deployment
+
+```bash
+# Prepare a deployment bundle (with internet)
+nanometa-prepare deploy \
+  --watchlists clinical_pathogens,cdc_bioterrorism \
+  --db /path/to/kraken_db \
+  --output /Volumes/USB/deployment_bundle
+
+# Import bundle on air-gapped machine
+nanometa-prepare import --bundle /Volumes/USB/deployment_bundle
+
+# Verify readiness
+nanometa-prepare check --db /path/to/kraken_db
+```
 
 ## Usage
 
@@ -78,14 +93,14 @@ Key settings in the Configuration tab:
 
 | Tab | Purpose |
 |-----|---------|
-| **Dashboard** | Overview with status indicators and alerts |
-| **Organisms** | Detected organisms with abundance and confidence indicators |
-| **Quality Control** | Quality metrics and filtering statistics |
-| **Taxonomy** | Interactive Sankey/Sunburst visualizations |
-| **Validation** | BLAST identity scores and minimap2 coverage plots |
-| **Watchlist** | Pathogen watchlist management and monitoring |
-| **Configuration** | Analysis settings and pipeline control |
-| **Preparation** | Pre-run setup and genome preparation |
+| **Dashboard** | Run status, pathogen alerts, sample summary, classification overview |
+| **Organisms** | Detected organisms with abundance, confidence, and watchlist flags |
+| **Quality Control** | Nanopore-calibrated quality metrics and filtering statistics |
+| **Taxonomy** | Interactive Sankey flow and sunburst charts for taxonomic exploration |
+| **Validation** | BLAST identity scores and minimap2 genome coverage plots |
+| **Watchlist** | Built-in pathogen watchlists (Clinical, CDC, WHO, Foodborne, Respiratory, Water) |
+| **Configuration** | Analysis settings, pipeline control, save/load configurations |
+| **Preparation** | Offline deployment wizard, genome import, readiness checks |
 
 ## Documentation
 
@@ -116,8 +131,8 @@ python -m nanometa_live.app \
 ## Requirements
 
 ```
-dash>=2.0.0
-dash-bootstrap-components>=1.0.0
+dash>=4.0.0
+dash-bootstrap-components>=2.0.0
 plotly>=5.0.0
 pandas>=1.3.0
 pyyaml>=5.4
