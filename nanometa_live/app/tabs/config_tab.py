@@ -5,6 +5,7 @@ This module defines the callbacks for the configuration tab, which allows
 users to configure the application before starting the analysis.
 """
 
+import logging
 import os
 import json
 import base64
@@ -576,7 +577,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 "color": "danger",
             }, True
 
-        return config, "Use These Settings", {
+        return config, "Apply Settings", {
             "title": "Changes Applied",
             "message": f"Configuration changes have been applied. Analysis name: {analysis_name}",
             "color": "success",
@@ -588,8 +589,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         function(n_clicks) {
             if (n_clicks) {
                 setTimeout(function() {
-                    return "Apply Changes";
-                }, 1000);
+                    dash_clientside.set_props("apply-config-button", {children: "Apply Settings"});
+                }, 2000);
             }
             return window.dash_clientside.no_update;
         }
@@ -605,7 +606,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         function(is_open) {
             if (is_open) {
                 setTimeout(function() {
-                    return false;
+                    dash_clientside.set_props("config-feedback-alert", {is_open: false});
                 }, 3000);
             }
             return window.dash_clientside.no_update;
@@ -617,7 +618,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     )
 
     # REMOVED: Auto-update callback that was causing duplicate updates
-    # Now users must explicitly click "Apply Changes" to commit form changes to config
+    # Now users must explicitly click "Apply Settings" to commit form changes to config
     # This provides better UX with explicit user control over when changes are applied
 
     # Toggle pipeline source fields based on source type selection
