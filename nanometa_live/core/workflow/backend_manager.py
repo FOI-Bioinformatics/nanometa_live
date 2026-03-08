@@ -459,16 +459,20 @@ class BackendManager:
         try:
             nanopore_dir = self.config.get("nanopore_output_directory", "")
 
-            # Count files in nanopore directory
+            # Count files in nanopore directory (including barcode subdirs)
             waiting_files = 0
+            extensions = (".fastq", ".fastq.gz", ".fq", ".fq.gz")
             if os.path.exists(nanopore_dir):
-                waiting_files = len(
-                    [
-                        f
-                        for f in os.listdir(nanopore_dir)
-                        if f.endswith((".fastq", ".fastq.gz"))
-                    ]
-                )
+                for f in os.listdir(nanopore_dir):
+                    if f.endswith(extensions):
+                        waiting_files += 1
+                # Also count files in barcode subdirectories
+                for subdir in os.listdir(nanopore_dir):
+                    subdir_path = os.path.join(nanopore_dir, subdir)
+                    if os.path.isdir(subdir_path) and subdir.startswith("barcode"):
+                        for f in os.listdir(subdir_path):
+                            if f.endswith(extensions):
+                                waiting_files += 1
 
             # Update status with waiting files
             # Processed files comes from workflow_manager status

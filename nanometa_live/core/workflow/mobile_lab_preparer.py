@@ -173,7 +173,7 @@ class MobileLabPreparer:
 
     # -- Individual stage implementations --
 
-    def _run_verify_db(self, idx: int, result: PreparationResult, skip: bool):
+    def _run_verify_db(self, idx: int, result: PreparationResult, skip_existing: bool):
         from nanometa_live.core.utils.kraken_utils import verify_kraken_db
         db_path = self.config.get("kraken_db", "")
         if not db_path:
@@ -197,7 +197,7 @@ class MobileLabPreparer:
             if not success:
                 logger.warning(f"Could not generate inspect.txt: {msg}")
 
-    def _run_build_index(self, idx: int, result: PreparationResult, skip: bool):
+    def _run_build_index(self, idx: int, result: PreparationResult, skip_existing: bool):
         from nanometa_live.core.taxonomy.taxid_mapping import (
             TaxidMapper, get_database_hash
         )
@@ -205,7 +205,7 @@ class MobileLabPreparer:
         db_hash = get_database_hash(db_path)
         index_file = self.home / "mappings" / f"{db_hash}_index.pkl"
 
-        if skip and index_file.exists():
+        if skip_existing and index_file.exists():
             self._report(PrepStage.BUILD_INDEX, idx, "Index already exists", 100.0)
             return
 
@@ -214,14 +214,14 @@ class MobileLabPreparer:
         mapper.load_database()
         self._report(PrepStage.BUILD_INDEX, idx, "Index built", 100.0)
 
-    def _run_generate_mappings(self, idx: int, result: PreparationResult, skip: bool):
+    def _run_generate_mappings(self, idx: int, result: PreparationResult, skip_existing: bool):
         from nanometa_live.core.taxonomy.taxid_mapping import (
             TaxidMapper, get_database_hash, get_mapping_cache_path
         )
         db_path = self.config.get("kraken_db", "")
         cache_path = get_mapping_cache_path(db_path)
 
-        if skip and cache_path.exists():
+        if skip_existing and cache_path.exists():
             self._report(PrepStage.GENERATE_MAPPINGS, idx,
                          "Mappings already exist", 100.0)
             return
@@ -240,7 +240,7 @@ class MobileLabPreparer:
         mapper.load_database()
         mapper.generate_mappings(entries)
 
-    def _run_download_genomes(self, idx: int, result: PreparationResult, skip: bool):
+    def _run_download_genomes(self, idx: int, result: PreparationResult, skip_existing: bool):
         from nanometa_live.core.utils.genome_manager import get_genome_manager
         manager = get_genome_manager(str(self.home))
         entries = self._get_watchlist_entries()
@@ -258,7 +258,7 @@ class MobileLabPreparer:
             self._report(PrepStage.DOWNLOAD_GENOMES, idx,
                          f"({i+1}/{total}) {name}", pct)
 
-            if skip and manager.has_genome(taxid):
+            if skip_existing and manager.has_genome(taxid):
                 continue
             if taxid:
                 path = manager.download_genome(taxid, name)
@@ -267,7 +267,7 @@ class MobileLabPreparer:
 
         result.genomes_downloaded = downloaded
 
-    def _run_build_blast_dbs(self, idx: int, result: PreparationResult, skip: bool):
+    def _run_build_blast_dbs(self, idx: int, result: PreparationResult, skip_existing: bool):
         from nanometa_live.core.utils.genome_manager import get_genome_manager
         manager = get_genome_manager(str(self.home))
         self._report(PrepStage.BUILD_BLAST_DBS, idx,
@@ -275,7 +275,7 @@ class MobileLabPreparer:
         built = manager.build_missing_blast_dbs()
         result.blast_dbs_built = built
 
-    def _run_cache_taxonomy(self, idx: int, result: PreparationResult, skip: bool):
+    def _run_cache_taxonomy(self, idx: int, result: PreparationResult, skip_existing: bool):
         self._report(PrepStage.CACHE_TAXONOMY, idx,
                      "Exporting taxonomy cache snapshot", 50.0)
         try:
@@ -287,7 +287,7 @@ class MobileLabPreparer:
         except Exception as e:
             result.warnings.append(f"Taxonomy cache export: {e}")
 
-    def _run_check_tools(self, idx: int, result: PreparationResult, skip: bool):
+    def _run_check_tools(self, idx: int, result: PreparationResult, skip_existing: bool):
         import shutil
         # Tools that run locally (not inside pipeline containers).
         # kraken2 and fastp run inside Nextflow containers, not checked here.
@@ -325,7 +325,7 @@ class MobileLabPreparer:
             if not shutil.which(tool):
                 result.warnings.append(f"Tool not found: {tool} (needed for {purpose})")
 
-    def _run_readiness_check(self, idx: int, result: PreparationResult, skip: bool):
+    def _run_readiness_check(self, idx: int, result: PreparationResult, skip_existing: bool):
         from nanometa_live.core.workflow.readiness_checker import ReadinessChecker
         self._report(PrepStage.READINESS_CHECK, idx,
                      "Running final readiness check", 50.0)

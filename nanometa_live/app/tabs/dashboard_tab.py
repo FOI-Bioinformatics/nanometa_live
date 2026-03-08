@@ -47,6 +47,7 @@ from nanometa_live.app.components.pathogen_alert import (
     PathogenAlertPanel,
     CriticalPathogenAlert,
     HighRiskPathogenAlert,
+    WatchedSpeciesAlert,
     ThreatSummaryIndicator
 )
 
@@ -283,9 +284,13 @@ def register_dashboard_callbacks(app: Dash):
 
             if pipeline_running:
                 if total_input_files > 0:
-                    files_processed = f"{files_processed_count} / {total_input_files}"
+                    # Cap processed count: batch stats can sum across batches,
+                    # exceeding the actual number of input files
+                    capped_processed = min(files_processed_count, total_input_files)
+                    files_processed = f"{capped_processed} / {total_input_files}"
                 elif files_waiting > 0:
-                    files_processed = f"{files_processed_count} / {files_waiting}"
+                    capped_processed = min(files_processed_count, files_waiting)
+                    files_processed = f"{capped_processed} / {files_waiting}"
                 else:
                     files_processed = f"{files_processed_count} / ?"
             else:
@@ -2318,8 +2323,10 @@ def _create_pathogen_alert_panel(
 
         # Build alert components
         alert_components = []
+        watch_components = []
         critical_count = 0
         high_count = 0
+        watch_count = 0
 
         for detection in dangerous_detections:
             threat_level = detection.get("threat_level", "moderate")
@@ -2355,19 +2362,43 @@ def _create_pathogen_alert_panel(
                         recommendation=action
                     )
                 )
+            else:
+                # Moderate / watched species
+                watch_count += 1
+                watch_components.append(
+                    WatchedSpeciesAlert(
+                        pathogen_name=pathogen_name,
+                        read_count=reads,
+                        abundance_pct=abundance,
+                        taxid=taxid
+                    )
+                )
 
-        if not alert_components:
+        if not alert_components and not watch_components:
             return html.Div(), {"display": "none"}
 
         # Create summary header if multiple threats
+        total_count = critical_count + high_count + watch_count
         header = None
-        if critical_count + high_count > 1:
+        if total_count > 1:
             header = html.Div([
                 html.H4([
                     html.I(className="bi bi-exclamation-triangle-fill me-2"),
-                    f"{critical_count + high_count} PATHOGENS DETECTED"
+                    f"{total_count} WATCHED ORGANISMS DETECTED"
                 ], className="text-danger mb-0 fw-bold")
             ], className="mb-3")
+
+        # Add watched species section with header if present
+        if watch_components:
+            alert_components.append(
+                html.Div([
+                    html.H6([
+                        html.I(className="bi bi-eye me-2"),
+                        f"Watched Species ({watch_count})"
+                    ], className="text-muted mb-2 mt-3")
+                ])
+            )
+            alert_components.extend(watch_components)
 
         # Combine into panel
         panel = html.Div([
