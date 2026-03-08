@@ -382,11 +382,12 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             Output("readiness-badge", "children"),
             Output("readiness-badge", "color"),
             Output("readiness-state", "data"),
+            Output("readiness-popover-body", "children"),
         ],
         [Input("update-interval", "n_intervals"), Input("app-config", "data")],
     )
     def update_readiness_indicator(n_intervals, config):
-        """Update the readiness badge and cached readiness state."""
+        """Update the readiness badge, popover details, and cached readiness state."""
         from nanometa_live.core.workflow.readiness_checker import ReadinessChecker
 
         if not config:
@@ -394,6 +395,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 [html.I(className="bi bi-dash-circle me-1"), "Not configured"],
                 "secondary",
                 {"ready": False, "checks": [], "message": "No configuration loaded"},
+                html.Div("Load a configuration to see readiness checks.", className="text-muted small"),
             )
 
         try:
@@ -413,6 +415,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 badge_color = "warning"
 
             checks_data = []
+            popover_items = []
             for c in report.checks:
                 checks_data.append({
                     "name": c.name,
@@ -420,11 +423,32 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                     "severity": c.severity.value,
                     "message": c.message,
                 })
+                if c.passed:
+                    icon_cls = "bi bi-check-circle-fill text-success"
+                elif c.severity.value == "critical":
+                    icon_cls = "bi bi-x-circle-fill text-danger"
+                else:
+                    icon_cls = "bi bi-exclamation-triangle-fill text-warning"
+                popover_items.append(
+                    html.Div([
+                        html.I(className=f"{icon_cls} me-2"),
+                        html.Span(c.name, className="small"),
+                    ], className="mb-1", title=c.message)
+                )
+
+            popover_content = html.Div(popover_items, style={"maxHeight": "300px", "overflowY": "auto"})
+            if not report.ready:
+                popover_content = html.Div([
+                    popover_content,
+                    html.Hr(className="my-2"),
+                    html.Div("Click badge to go to Preparation tab", className="text-muted small fst-italic"),
+                ])
 
             return (
                 badge_children,
                 badge_color,
                 {"ready": report.ready, "checks": checks_data, "message": ""},
+                popover_content,
             )
         except Exception as e:
             logging.error(f"Readiness check failed: {e}")
@@ -432,6 +456,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 [html.I(className="bi bi-dash-circle me-1"), "Unknown"],
                 "secondary",
                 {"ready": False, "checks": [], "message": str(e)},
+                html.Div(f"Error: {str(e)}", className="text-danger small"),
             )
 
     app.clientside_callback(

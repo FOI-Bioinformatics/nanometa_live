@@ -97,7 +97,7 @@ def create_header(title="Nanometa Live"):
             # Control buttons
             dbc.Col([
                 html.Div([
-                    # Readiness indicator
+                    # Readiness indicator with hover details
                     html.Div(
                         id="readiness-indicator",
                         children=[
@@ -108,6 +108,19 @@ def create_header(title="Nanometa Live"):
                                 className="me-2 align-self-center",
                                 pill=True,
                                 style={"cursor": "pointer", "fontSize": "0.85rem"},
+                            ),
+                            dbc.Popover(
+                                id="readiness-popover",
+                                target="readiness-badge",
+                                trigger="hover",
+                                placement="bottom",
+                                children=[
+                                    dbc.PopoverHeader("Readiness Checks"),
+                                    dbc.PopoverBody(
+                                        id="readiness-popover-body",
+                                        children="Loading...",
+                                    ),
+                                ],
                             ),
                         ],
                         style={"display": "inline-block"}
