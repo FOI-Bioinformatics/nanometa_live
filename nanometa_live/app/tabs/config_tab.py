@@ -749,8 +749,12 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             # Shorthand for remote branch
             pipeline_source_type = "remote"
             pipeline_branch = "master" if pipeline_source == "main" else pipeline_source
+        elif pipeline_source.startswith("local:"):
+            # Explicit local: prefix convention
+            pipeline_source_type = "local"
+            pipeline_local_path = pipeline_source[len("local:"):]
         elif os.path.isdir(pipeline_source):
-            # Local path
+            # Local path without prefix
             pipeline_source_type = "local"
             pipeline_local_path = pipeline_source
         else:

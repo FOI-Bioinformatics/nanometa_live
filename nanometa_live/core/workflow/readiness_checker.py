@@ -506,6 +506,9 @@ class ReadinessChecker:
                 "Pipeline Source", False, Severity.INFO,
                 "No pipeline source configured"
             )
+        # Strip "local:" prefix if present (used by nextflow_manager convention)
+        if source.startswith("local:"):
+            source = source[len("local:"):]
         # Local path (doesn't look like a remote URI)
         if not source.startswith(("http://", "https://", "remote")):
             p = Path(source)
