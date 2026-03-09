@@ -34,6 +34,12 @@ def parse_arguments():
     )
 
     parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host to bind the server to (default: 127.0.0.1, use 0.0.0.0 for network access)",
+    )
+
+    parser.add_argument(
         "--port",
         type=int,
         default=8050,
@@ -140,7 +146,7 @@ def main():
 
     # Start the Dash server
     logging.info(f"Starting Nanometa Live v{__version__} server on port {args.port}")
-    app.run(host="0.0.0.0", port=args.port, debug=args.debug)
+    app.run(host=args.host, port=args.port, debug=args.debug)
 
 
 if __name__ == "__main__":
