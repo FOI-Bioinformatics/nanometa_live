@@ -221,7 +221,9 @@ def create_config_form():
                                 {"label": "Conda", "value": "conda"},
                                 {"label": "Local (no containers)", "value": "standard"}
                             ],
-                            value="docker"
+                            value="docker",
+                            persistence=True,
+                            persistence_type="session",
                         ),
                         dbc.Tooltip(
                             "How pipeline tools (Kraken2, fastp, etc.) are run. "
@@ -596,6 +598,68 @@ def create_config_form():
                                 className="text-muted small"
                             )
                         ], className="mt-2")
+                    ])
+                ], className="mb-3"),
+
+                # Pipeline Options
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="bi bi-sliders2 me-2"),
+                        html.Strong("Pipeline Options")
+                    ], className="py-2"),
+                    dbc.CardBody([
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Label("QC Tool", html_for="qc-tool-input"),
+                                dbc.Select(
+                                    id="qc-tool-input",
+                                    options=[
+                                        {"label": "fastp (recommended)", "value": "fastp"},
+                                        {"label": "chopper", "value": "chopper"},
+                                    ],
+                                    value="fastp"
+                                ),
+                                dbc.FormText("Quality control tool for read filtering")
+                            ], md=4),
+                            dbc.Col([
+                                dbc.Switch(
+                                    id="skip-nanoplot-input",
+                                    label="Skip NanoPlot",
+                                    value=False,
+                                    className="mt-3"
+                                ),
+                                dbc.FormText("Skip NanoPlot QC report generation (faster)")
+                            ], md=4),
+                            dbc.Col([
+                                dbc.Switch(
+                                    id="kraken2-incremental-input",
+                                    label="Incremental classification",
+                                    value=True,
+                                    className="mt-3"
+                                ),
+                                dbc.FormText("Cumulative Kraken2 reports in realtime mode")
+                            ], md=4),
+                        ], className="mb-3"),
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Switch(
+                                    id="enable-krona-input",
+                                    label="Enable Krona plots",
+                                    value=False,
+                                    className="mt-1"
+                                ),
+                                dbc.FormText("Generate interactive Krona taxonomy charts")
+                            ], md=4),
+                            dbc.Col([
+                                dbc.Switch(
+                                    id="enable-nanopore-stats-input",
+                                    label="Nanopore stats in MultiQC",
+                                    value=False,
+                                    className="mt-1"
+                                ),
+                                dbc.FormText("Include nanopore-specific metrics in MultiQC report")
+                            ], md=4),
+                        ]),
                     ])
                 ], className="mb-3"),
 

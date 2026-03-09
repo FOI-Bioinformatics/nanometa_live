@@ -275,6 +275,12 @@ class ReadinessChecker:
         """Check container runtime matching the pipeline_profile setting."""
         profile = config.get("pipeline_profile", "docker")
 
+        if profile == "standard":
+            return CheckResult(
+                "Container Runtime", True, Severity.INFO,
+                "Local profile: no container runtime required"
+            )
+
         if profile == "conda":
             path = shutil.which("conda")
             if path:

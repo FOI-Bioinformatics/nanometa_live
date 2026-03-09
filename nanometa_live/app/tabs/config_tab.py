@@ -23,6 +23,58 @@ from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.config.config_loader import ConfigLoader
 
 
+def _build_config_list_items(configs):
+    """Build ListGroupItem components for a list of config metadata dicts."""
+    items = []
+    for i, config in enumerate(configs):
+        timestamp = config.get("timestamp", "Unknown")
+        try:
+            dt = datetime.fromisoformat(timestamp)
+            timestamp = dt.strftime("%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            pass
+
+        filename = config.get("filename", "Unknown")
+        is_autosave = filename == "last-session.yaml"
+
+        buttons = [
+            dbc.Button(
+                "Load",
+                id={"type": "load-config-item", "index": i},
+                color="primary",
+                size="sm",
+                className="me-1",
+            ),
+        ]
+        if not is_autosave:
+            buttons.append(
+                dbc.Button(
+                    html.I(className="bi bi-trash"),
+                    id={"type": "delete-config-item", "index": i},
+                    color="danger",
+                    outline=True,
+                    size="sm",
+                    title="Delete this preset",
+                )
+            )
+
+        display_name = config.get("name", "Unnamed Configuration")
+        if is_autosave:
+            display_name = "Last Session (auto-saved)"
+
+        items.append(dbc.ListGroupItem(
+            [
+                html.Div([
+                    html.H5(display_name, className="mb-1"),
+                    html.Small(f"Created: {timestamp}", className="text-muted"),
+                ]),
+                html.Div(buttons, className="d-flex align-items-center"),
+            ],
+            className="d-flex justify-content-between align-items-center",
+        ))
+    return items
+
+
 def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     """
     Register callbacks for the configuration tab.
@@ -99,43 +151,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         if not configs:
             return [html.P("No saved configurations found.")]
 
-        config_list = []
-        for i, config in enumerate(configs):
-            timestamp = config.get("timestamp", "Unknown")
-            try:
-                # Try to parse ISO format timestamp
-                dt = datetime.fromisoformat(timestamp)
-                timestamp = dt.strftime("%Y-%m-%d %H:%M:%S")
-            except (ValueError, TypeError):
-                pass  # Keep original timestamp string if parsing fails
-
-            config_item = dbc.ListGroupItem(
-                [
-                    html.Div(
-                        [
-                            html.H5(
-                                config.get("name", "Unnamed Configuration"),
-                                className="mb-1",
-                            ),
-                            html.Small(f"Created: {timestamp}", className="text-muted"),
-                        ]
-                    ),
-                    html.P(
-                        f"Filename: {config.get('filename', 'Unknown')}",
-                        className="mb-1",
-                    ),
-                    dbc.Button(
-                        "Load",
-                        id={"type": "load-config-item", "index": i},
-                        color="primary",
-                        size="sm",
-                    ),
-                ],
-                className="d-flex justify-content-between align-items-center",
-            )
-            config_list.append(config_item)
-
-        return [dbc.ListGroup(config_list)]
+        return [dbc.ListGroup(_build_config_list_items(configs))]
 
     @app.callback(
         [
@@ -186,6 +202,75 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 {
                     "title": "Error",
                     "message": f"Failed to load configuration: {str(e)}",
+                    "color": "danger",
+                },
+                no_update,
+            )
+
+    @app.callback(
+        [
+            Output("load-config-list", "children", allow_duplicate=True),
+            Output("notification-trigger", "data", allow_duplicate=True),
+            Output("available-configs", "children", allow_duplicate=True),
+        ],
+        Input({"type": "delete-config-item", "index": dash.ALL}, "n_clicks"),
+        State("available-configs", "children"),
+        State("app-data-dir", "data"),
+        prevent_initial_call=True,
+    )
+    def delete_selected_config(n_clicks, available_configs_json, data_dir):
+        """Delete the selected configuration preset."""
+        if not n_clicks or not any(n_clicks) or not ctx.triggered_id:
+            return no_update, no_update, no_update
+
+        triggered_id = ctx.triggered_id
+        if not isinstance(triggered_id, dict) or "index" not in triggered_id:
+            return no_update, no_update, no_update
+
+        trigger_idx = triggered_id["index"]
+
+        try:
+            configs = json.loads(available_configs_json)
+            selected_config = configs[trigger_idx]
+
+            config_loader = ConfigLoader(os.path.join(data_dir, "configs"))
+            deleted = config_loader.delete_config(selected_config["path"])
+
+            if deleted:
+                # Re-populate the list and sync the available-configs store
+                updated_configs = config_loader.get_available_configs()
+                updated_json = json.dumps(updated_configs)
+                if not updated_configs:
+                    list_children = [html.P("No saved configurations found.")]
+                else:
+                    list_children = [dbc.ListGroup(
+                        _build_config_list_items(updated_configs)
+                    )]
+                return (
+                    list_children,
+                    {
+                        "title": "Configuration Deleted",
+                        "message": f"Deleted: {selected_config.get('name', 'Unknown')}",
+                        "color": "info",
+                    },
+                    updated_json,
+                )
+            else:
+                return (
+                    no_update,
+                    {
+                        "title": "Cannot Delete",
+                        "message": "The auto-save configuration cannot be deleted.",
+                        "color": "warning",
+                    },
+                    no_update,
+                )
+        except Exception as e:
+            return (
+                no_update,
+                {
+                    "title": "Error",
+                    "message": f"Failed to delete configuration: {str(e)}",
                     "color": "danger",
                 },
                 no_update,
@@ -334,6 +419,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             State("processing-mode-input", "value"),
             State("sample-handling-input", "value"),
             State("sample-name-input", "value"),
+            State("qc-tool-input", "value"),
+            State("skip-nanoplot-input", "value"),
+            State("kraken2-incremental-input", "value"),
+            State("enable-krona-input", "value"),
+            State("enable-nanopore-stats-input", "value"),
             State("app-config", "data"),
         ],
         prevent_initial_call=True,
@@ -367,6 +457,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         processing_mode,
         sample_handling,
         sample_name,
+        qc_tool,
+        skip_nanoplot,
+        kraken2_incremental,
+        enable_krona,
+        enable_nanopore_stats,
         current_config,
     ):
         """Apply configuration changes with validation."""
@@ -568,6 +663,18 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         if sample_name is not None:
             config["sample_name"] = sample_name if sample_name.strip() else "sample"
 
+        # Pipeline options
+        if qc_tool is not None:
+            config["qc_tool"] = qc_tool
+        if skip_nanoplot is not None:
+            config["skip_nanoplot"] = bool(skip_nanoplot)
+        if kraken2_incremental is not None:
+            config["kraken2_enable_incremental"] = bool(kraken2_incremental)
+        if enable_krona is not None:
+            config["enable_krona_plots"] = bool(enable_krona)
+        if enable_nanopore_stats is not None:
+            config["enable_nanopore_stats_mqc"] = bool(enable_nanopore_stats)
+
         # Note: Species watchlist is now managed via the Watchlist tab
         # and WatchlistManager, not through this config form
 
@@ -682,10 +789,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("memory-mapping-input", "value"),
             Output("blast-validation-input", "value"),
             Output("validation-method-input", "value"),
-            Output("min-identity-input", "value"),
-            Output("e-value-cutoff-input", "value"),
             Output("minimap2-preset-input", "value"),
             Output("minimap2-min-mapq-input", "value"),
+            Output("min-identity-input", "value"),
+            Output("e-value-cutoff-input", "value"),
             Output("genome-cache-dir-input", "value"),
             Output("cores-input", "value"),
             Output("gui-port-input", "value"),
@@ -697,6 +804,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("processing-mode-input", "value"),
             Output("sample-handling-input", "value"),
             Output("sample-name-input", "value"),
+            Output("qc-tool-input", "value"),
+            Output("skip-nanoplot-input", "value"),
+            Output("kraken2-incremental-input", "value"),
+            Output("enable-krona-input", "value"),
+            Output("enable-nanopore-stats-input", "value"),
             Output("config-form-initialized", "data"),
         ],
         Input("refresh-form-trigger", "data"),
@@ -705,7 +817,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     def initialize_form_from_config(refresh_trigger, config):
         """Initialize form fields from the current configuration."""
         if not config:
-            return [no_update] * 28
+            return [no_update] * 33
 
         # Extract values from config
         analysis_name = config.get("analysis_name", "")
@@ -782,6 +894,13 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         sample_handling = config.get("sample_handling", "single_sample")
         sample_name = config.get("sample_name", "sample")
 
+        # Pipeline options
+        qc_tool = config.get("qc_tool", "fastp")
+        skip_nanoplot = bool(config.get("skip_nanoplot", False))
+        kraken2_incremental = bool(config.get("kraken2_enable_incremental", True))
+        enable_krona = bool(config.get("enable_krona_plots", False))
+        enable_nanopore_stats = bool(config.get("enable_nanopore_stats_mqc", False))
+
         return [
             analysis_name,
             nanopore_dir,
@@ -810,6 +929,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             processing_mode,
             sample_handling,
             sample_name,
+            qc_tool,
+            skip_nanoplot,
+            kraken2_incremental,
+            enable_krona,
+            enable_nanopore_stats,
             True,  # Mark form as initialized (suppresses first "Modified" badge)
         ]
 
@@ -1374,6 +1498,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("cores-input", "value"),
             Input("gui-port-input", "value"),
             Input("clean-temp-input", "value"),
+            Input("qc-tool-input", "value"),
+            Input("skip-nanoplot-input", "value"),
+            Input("kraken2-incremental-input", "value"),
+            Input("enable-krona-input", "value"),
+            Input("enable-nanopore-stats-input", "value"),
         ],
         [
             State("saved-config-snapshot", "data"),
@@ -1388,6 +1517,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         min_reads_per_level, memory_mapping, blast_validation, validation_method,
         min_identity, e_value_cutoff, minimap2_preset, minimap2_min_mapq,
         genome_cache_dir, cores, gui_port, clean_temp,
+        qc_tool, skip_nanoplot, kraken2_incremental, enable_krona, enable_nanopore_stats,
         saved_snapshot, currently_modified, form_initialized
     ):
         """Detect when form values differ from saved snapshot."""
