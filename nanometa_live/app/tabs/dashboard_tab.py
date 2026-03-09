@@ -831,12 +831,16 @@ def register_dashboard_callbacks(app: Dash):
             Output("dashboard-pathogen-summary", "children"),
             Output("dashboard-decision-banner", "children"),
         ],
-        [Input("update-interval", "n_intervals")],
+        [
+            Input("update-interval", "n_intervals"),
+            Input("watchlist-tab-state", "data"),
+        ],
         [State("app-config", "data"), State("backend-status", "data")],
         prevent_initial_call=False
     )
     def update_threat_summary(
         n_intervals: int,
+        watchlist_state: Dict,
         config: Dict[str, Any],
         status: Dict[str, Any]
     ) -> Tuple:
@@ -887,6 +891,8 @@ def register_dashboard_callbacks(app: Dash):
                 # Check if watchlist is actually active
                 watched_species = _get_active_watchlist_entries(config)
                 screened_count = len(detected_organisms)
+                logger.debug(f"Pathogen screening: {len(watched_species)} active watchlist entries, "
+                             f"{screened_count} organisms screened")
 
                 if not watched_species:
                     # No watchlist active - warn the operator
