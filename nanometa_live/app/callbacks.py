@@ -269,8 +269,16 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             title = notification_data.get("title", "Notification")
             color = notification_data.get("color", "primary")
 
+            # Render multi-line messages as separate lines
+            if isinstance(message, str) and "\n" in message:
+                message_content = html.Div([
+                    html.Div(line, className="mb-1") for line in message.split("\n") if line.strip()
+                ])
+            else:
+                message_content = message
+
             notification = dbc.Toast(
-                message,
+                message_content,
                 id=f"notification-{int(time.time())}",
                 header=title,
                 is_open=True,

@@ -35,26 +35,6 @@ def create_config_form():
                 ], className="d-flex align-items-center")
             ]),
             dbc.CardBody([
-                # Analysis Name
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Label([
-                            "Analysis Name ",
-                            html.I(className="bi bi-info-circle text-muted", id="analysis-name-info")
-                        ], html_for="analysis-name-input"),
-                        dbc.Input(
-                            id="analysis-name-input",
-                            type="text",
-                            placeholder="My Nanopore Analysis",
-                            className="mb-2"
-                        ),
-                        dbc.Tooltip(
-                            "Give your analysis a descriptive name for easy reference",
-                            target="analysis-name-info"
-                        )
-                    ], md=12)
-                ], className="mb-3"),
-
                 # Data Directory
                 dbc.Row([
                     dbc.Col([
@@ -220,9 +200,38 @@ def create_config_form():
                             target="results-dir-info"
                         ),
                         dbc.FormText(
-                            "Where to save exported reports, PDFs, and analysis summaries",
+                            "Where to save analysis results and reports",
                             className="text-muted"
                         )
+                    ], md=12)
+                ], className="mb-4"),
+
+                # Pipeline Profile (essential - determines how pipeline runs)
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Label([
+                            "Pipeline Profile ",
+                            html.I(className="bi bi-info-circle text-muted ms-1", id="profile-info")
+                        ], html_for="pipeline-profile-input"),
+                        dbc.Select(
+                            id="pipeline-profile-input",
+                            options=[
+                                {"label": "Docker (Recommended)", "value": "docker"},
+                                {"label": "Singularity", "value": "singularity"},
+                                {"label": "Conda", "value": "conda"},
+                                {"label": "Local (no containers)", "value": "standard"}
+                            ],
+                            value="docker"
+                        ),
+                        dbc.Tooltip(
+                            "How pipeline tools (Kraken2, fastp, etc.) are run. "
+                            "Docker: Best for most users, requires Docker Desktop. "
+                            "Singularity: For HPC clusters. "
+                            "Conda: If Docker is unavailable. "
+                            "Local: Tools must already be installed in your PATH.",
+                            target="profile-info"
+                        ),
+                        dbc.FormText("How to run pipeline tools (requires Docker Desktop, Conda, or local install)")
                     ], md=12)
                 ], className="mb-4"),
 
@@ -241,7 +250,10 @@ def create_config_form():
                     dbc.CardBody([
                         dbc.Row([
                             dbc.Col([
-                                dbc.Label("Update Interval (seconds)", html_for="update-interval-input"),
+                                dbc.Label([
+                                    "Update Interval (seconds) ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1", id="update-interval-info")
+                                ], html_for="update-interval-input"),
                                 dbc.Input(
                                     id="update-interval-input",
                                     type="number",
@@ -250,10 +262,19 @@ def create_config_form():
                                     step=5,
                                     value=30
                                 ),
-                                dbc.FormText("How often to refresh data (5-300 seconds)")
+                                dbc.FormText("How often the dashboard refreshes (5-300 seconds)"),
+                                dbc.Tooltip(
+                                    "Controls how frequently the dashboard charts and tables update. "
+                                    "Lower values show results faster but increase CPU usage. "
+                                    "Different from Check Interval which controls pipeline file scanning.",
+                                    target="update-interval-info"
+                                )
                             ], md=6),
                             dbc.Col([
-                                dbc.Label("Alert Threshold (reads)", html_for="danger-threshold-input"),
+                                dbc.Label([
+                                    "Alert Threshold (reads) ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1", id="alert-threshold-info")
+                                ], html_for="danger-threshold-input"),
                                 dbc.Input(
                                     id="danger-threshold-input",
                                     type="number",
@@ -261,7 +282,13 @@ def create_config_form():
                                     step=10,
                                     value=100
                                 ),
-                                dbc.FormText("Minimum reads to trigger species alert")
+                                dbc.FormText("Minimum reads before an organism triggers a dashboard alert"),
+                                dbc.Tooltip(
+                                    "When an organism reaches this many classified reads, "
+                                    "it will appear in the dashboard alerts panel. "
+                                    "Lower values are more sensitive but may produce false alerts.",
+                                    target="alert-threshold-info"
+                                )
                             ], md=6)
                         ])
                     ])
@@ -373,28 +400,25 @@ def create_config_form():
                         dbc.Row([
                             dbc.Col([
                                 dbc.Label([
-                                    "Pipeline Profile ",
-                                    html.I(className="bi bi-info-circle text-muted ms-1", id="profile-info")
-                                ], html_for="pipeline-profile-input"),
-                                dbc.Select(
-                                    id="pipeline-profile-input",
-                                    options=[
-                                        {"label": "Docker (Recommended)", "value": "docker"},
-                                        {"label": "Singularity", "value": "singularity"},
-                                        {"label": "Conda", "value": "conda"},
-                                        {"label": "Local (no containers)", "value": "standard"}
-                                    ],
-                                    value="docker"
+                                    "Analysis Name ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1", id="analysis-name-info")
+                                ], html_for="analysis-name-input"),
+                                dbc.Input(
+                                    id="analysis-name-input",
+                                    type="text",
+                                    placeholder="My Nanopore Analysis",
                                 ),
-                                dbc.FormText("Container/environment system for tools"),
+                                dbc.FormText("Optional label for this analysis run"),
                                 dbc.Tooltip(
-                                    "Docker: Best for most users. Singularity: HPC clusters. "
-                                    "Conda: If Docker unavailable. Local: Tools must be in PATH.",
-                                    target="profile-info"
+                                    "Give your analysis a descriptive name for easy reference",
+                                    target="analysis-name-info"
                                 )
                             ], md=6),
                             dbc.Col([
-                                dbc.Label("Check Interval (seconds)", html_for="check-interval-input"),
+                                dbc.Label([
+                                    "Check Interval (seconds) ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1", id="check-interval-info")
+                                ], html_for="check-interval-input"),
                                 dbc.Input(
                                     id="check-interval-input",
                                     type="number",
@@ -403,12 +427,21 @@ def create_config_form():
                                     step=5,
                                     value=15
                                 ),
-                                dbc.FormText("How often to check for new data")
+                                dbc.FormText("How often the pipeline checks for new input files"),
+                                dbc.Tooltip(
+                                    "Controls how frequently the Nextflow pipeline scans for new FASTQ files. "
+                                    "Lower values detect files faster but use more resources. "
+                                    "Different from the dashboard Update Interval which controls GUI refresh.",
+                                    target="check-interval-info"
+                                )
                             ], md=6)
                         ], className="mb-3"),
                         dbc.Row([
                             dbc.Col([
-                                dbc.Label("Minimum Reads per Level", html_for="min-reads-per-level-input"),
+                                dbc.Label([
+                                    "Minimum Reads per Level ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1", id="min-reads-info")
+                                ], html_for="min-reads-per-level-input"),
                                 dbc.Input(
                                     id="min-reads-per-level-input",
                                     type="number",
@@ -416,16 +449,31 @@ def create_config_form():
                                     step=1,
                                     value=10
                                 ),
-                                dbc.FormText("Filter low-abundance taxa")
+                                dbc.FormText("Hide organisms with fewer reads than this threshold"),
+                                dbc.Tooltip(
+                                    "Organisms with fewer classified reads than this value are filtered "
+                                    "from the taxonomy visualizations (Sankey, sunburst). "
+                                    "Higher values reduce noise but may hide low-abundance species.",
+                                    target="min-reads-info"
+                                )
                             ], md=6),
                             dbc.Col([
-                                dbc.Switch(
-                                    id="memory-mapping-input",
-                                    label="Use memory mapping for Kraken2",
-                                    value=True,
-                                    className="mt-3"
-                                ),
-                                dbc.FormText("Reduces RAM usage but may be slower")
+                                html.Div([
+                                    dbc.Switch(
+                                        id="memory-mapping-input",
+                                        label="Use memory mapping for Kraken2",
+                                        value=True,
+                                        className="mt-3"
+                                    ),
+                                    html.I(className="bi bi-info-circle text-muted ms-1", id="memory-mapping-info"),
+                                ], className="d-flex align-items-center"),
+                                dbc.FormText("Reduces RAM usage but may be slower"),
+                                dbc.Tooltip(
+                                    "When enabled, Kraken2 reads the database from disk instead of loading "
+                                    "it entirely into RAM. Recommended for large databases (>8 GB) or "
+                                    "systems with limited memory.",
+                                    target="memory-mapping-info"
+                                )
                             ], md=6)
                         ])
                     ])
@@ -472,7 +520,10 @@ def create_config_form():
                                 )
                             ], md=3),
                             dbc.Col([
-                                dbc.Label("E-value Cutoff", html_for="e-value-cutoff-input"),
+                                dbc.Label([
+                                    "E-value Cutoff ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1", id="evalue-info")
+                                ], html_for="e-value-cutoff-input"),
                                 dbc.Input(
                                     id="e-value-cutoff-input",
                                     type="number",
@@ -480,6 +531,12 @@ def create_config_form():
                                     max=1,
                                     step=0.001,
                                     value=0.01
+                                ),
+                                dbc.Tooltip(
+                                    "BLAST E-value threshold for sequence matches. "
+                                    "Lower values are stricter (fewer false positives). "
+                                    "0.01 is a good default; use 0.001 for higher confidence.",
+                                    target="evalue-info"
                                 )
                             ], md=3)
                         ]),
@@ -498,7 +555,10 @@ def create_config_form():
                                 dbc.FormText("Alignment preset for minimap2")
                             ], md=6),
                             dbc.Col([
-                                dbc.Label("Min Mapping Quality", html_for="minimap2-min-mapq-input"),
+                                dbc.Label([
+                                    "Min Mapping Quality (MAPQ) ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1", id="mapq-info")
+                                ], html_for="minimap2-min-mapq-input"),
                                 dbc.Input(
                                     id="minimap2-min-mapq-input",
                                     type="number",
@@ -507,7 +567,13 @@ def create_config_form():
                                     step=1,
                                     value=30
                                 ),
-                                dbc.FormText("Minimum MAPQ to count as mapped")
+                                dbc.FormText("Scale 0-60: higher = more confident alignments"),
+                                dbc.Tooltip(
+                                    "Mapping quality score (0-60) indicating alignment confidence. "
+                                    "Reads below this threshold are excluded from validation. "
+                                    "30 is a good default; use 0 to include all alignments.",
+                                    target="mapq-info"
+                                )
                             ], md=6)
                         ], className="mt-3"),
                         dbc.Row([

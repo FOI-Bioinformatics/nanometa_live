@@ -467,7 +467,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         if errors:
             return no_update, no_update, {
                 "title": "Validation Error",
-                "message": " | ".join(errors),
+                "message": "\n".join(f"- {e}" for e in errors),
                 "color": "danger",
             }, True
 
@@ -575,7 +575,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         if errors:
             return no_update, no_update, {
                 "title": "Validation Error",
-                "message": " | ".join(errors),
+                "message": "\n".join(f"- {e}" for e in errors),
                 "color": "danger",
             }, True
 
