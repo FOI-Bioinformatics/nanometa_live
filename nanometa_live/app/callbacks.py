@@ -173,10 +173,14 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             color = "green"
             text = "RUNNING"
 
-            # Create details
+            # Cap files_processed: batch stats can sum across batches,
+            # exceeding the actual number of input files
+            total_files = status.get("files_waiting", 0)
+            raw_processed = status.get("files_processed", 0)
+            files_processed = min(raw_processed, total_files) if total_files > 0 else raw_processed
+
             details = [
-                f"Files processed: {status.get('files_processed', 0)}",
-                f"Files waiting: {status.get('files_waiting', 0)}",
+                f"Files processed: {files_processed} / {total_files}",
             ]
 
             if status.get("last_update"):
