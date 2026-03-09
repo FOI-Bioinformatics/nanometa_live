@@ -315,11 +315,11 @@ class ReadinessChecker:
 
     def _check_input_directory(self, config: Dict[str, Any]) -> CheckResult:
         """Check that the configured input directory exists and has expected content."""
-        nanopore_dir = config.get("nanopore_dir", "")
+        nanopore_dir = config.get("nanopore_output_directory") or config.get("nanopore_dir", "")
         if not nanopore_dir:
             return CheckResult(
                 "Input Directory", False, Severity.WARNING,
-                "No input directory (nanopore_dir) configured"
+                "No input directory configured"
             )
         p = Path(nanopore_dir)
         if not p.exists():
@@ -349,11 +349,11 @@ class ReadinessChecker:
 
     def _check_disk_space(self, config: Dict[str, Any]) -> CheckResult:
         """Check available disk space in the output directory."""
-        main_dir = config.get("main_dir", "")
+        main_dir = config.get("results_output_directory") or config.get("main_dir", "")
         if not main_dir:
             return CheckResult(
                 "Disk Space", False, Severity.WARNING,
-                "No output directory (main_dir) configured"
+                "No output directory configured"
             )
         p = Path(main_dir)
         # Use the directory itself or its closest existing parent
@@ -501,13 +501,24 @@ class ReadinessChecker:
 
     def _check_pipeline_cached(self, config: Dict[str, Any]) -> CheckResult:
         source = config.get("pipeline_source", "")
-        if source and not source.startswith("remote"):
+        if not source:
+            return CheckResult(
+                "Pipeline Source", False, Severity.INFO,
+                "No pipeline source configured"
+            )
+        # Local path (doesn't look like a remote URI)
+        if not source.startswith(("http://", "https://", "remote")):
             p = Path(source)
             if p.exists():
                 return CheckResult(
                     "Pipeline Source", True, Severity.INFO,
                     f"Local pipeline at {p}"
                 )
+            return CheckResult(
+                "Pipeline Source", False, Severity.WARNING,
+                f"Local pipeline path does not exist: {p}"
+            )
+        # Remote source
         return CheckResult(
             "Pipeline Source", False, Severity.INFO,
             "Pipeline source is remote (requires network for first run)"
