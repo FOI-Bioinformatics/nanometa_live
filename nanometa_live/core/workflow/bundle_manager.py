@@ -19,7 +19,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -168,10 +167,11 @@ class BundleManager:
                 manifest["checksums"]["genome_metadata.json"] = _file_md5(meta_dst)
 
             # Save config (with kraken_db as placeholder)
+            from nanometa_live.core.config.config_loader import ConfigLoader
             bundle_config = dict(config)
             bundle_config["kraken_db"] = "${KRAKEN_DB}"
-            with open(staging / "config.yaml", "w") as f:
-                yaml.safe_dump(bundle_config, f, default_flow_style=False)
+            bundle_loader = ConfigLoader(str(staging))
+            bundle_loader.save_config(bundle_config, "config.yaml")
 
             # Generate README
             readme_content = _README_TEMPLATE.format(
@@ -346,13 +346,13 @@ class BundleManager:
             config_path = home / "config.yaml"
             if config_path.exists():
                 try:
-                    with open(config_path) as f:
-                        cfg = yaml.safe_load(f) or {}
+                    from nanometa_live.core.config.config_loader import ConfigLoader
+                    import_loader = ConfigLoader(str(home))
+                    cfg = import_loader.load_config(str(config_path))
                     cfg["offline_mode"] = True
                     if kraken_db_path:
                         cfg["kraken_db"] = kraken_db_path
-                    with open(config_path, "w") as f:
-                        yaml.safe_dump(cfg, f, default_flow_style=False)
+                    import_loader.save_config(cfg, "config.yaml")
                     logger.info("Set offline_mode=True in config")
                 except Exception as e:
                     result["warnings"].append(f"Could not update config: {e}")
