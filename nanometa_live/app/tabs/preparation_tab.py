@@ -679,11 +679,19 @@ def register_preparation_callbacks(app):
             now = datetime.now().isoformat()
             new_refresh = (current_refresh or 0) + 1
 
-            mapped_count = len(mappings_dict) if collection_data else 0
-            status = f"Mapped {mapped_count} entries" if collection_data else "Complete"
-            logger.info(f"Rescan returning: mappings={mapped_count}, refresh={new_refresh}")
+            stats = mapper.get_statistics()
+            mapped_count = stats.get("mapped_exact", 0) + stats.get("mapped_fuzzy", 0) + stats.get("mapped_manual", 0)
+            unmapped_count = stats.get("unmapped", 0)
+            total_count = stats.get("total_entries", 0)
+            if unmapped_count > 0:
+                status = f"Mapped {mapped_count}/{total_count} entries ({unmapped_count} not in database)"
+                progress_label = f"Completed: {mapped_count} mapped, {unmapped_count} not in database"
+            else:
+                status = f"Mapped {mapped_count} entries"
+                progress_label = f"Completed: {mapped_count} mappings"
+            logger.info(f"Rescan returning: mapped={mapped_count}, unmapped={unmapped_count}, refresh={new_refresh}")
             return (collection_data, db_info, now, new_refresh, status,
-                    hide_progress, 100, f"Completed: {mapped_count} mappings")
+                    hide_progress, 100, progress_label)
 
         except Exception as e:
             logger.error(f"Rescan failed: {e}")
@@ -709,10 +717,19 @@ def register_preparation_callbacks(app):
         else:
             db_type_text = "No database scanned"
 
-        # Mapping count
+        # Mapping count (with unmapped info)
         if collection and isinstance(collection.get("mappings"), dict):
-            count = len(collection["mappings"])
-            count_text = f"{count} species mapped"
+            mappings = collection["mappings"]
+            total = len(mappings)
+            unmapped = sum(
+                1 for m in mappings.values()
+                if isinstance(m, dict) and m.get("confidence") == "unmapped"
+            )
+            mapped = total - unmapped
+            if unmapped > 0:
+                count_text = f"{mapped}/{total} mapped ({unmapped} not in database)"
+            else:
+                count_text = f"{mapped} species mapped"
         else:
             count_text = "0 species mapped"
 

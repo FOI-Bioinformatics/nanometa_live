@@ -264,24 +264,41 @@ class WatchlistEntry:
 
 # Built-in category definitions
 BUILTIN_CATEGORIES = {
+    # Federal Select Agent categories (cdc_bioterrorism.yaml)
+    "select_agents_tier1": {
+        "name": "Select Agents (Tier 1)",
+        "description": "Highest risk select agents and toxins",
+        "filter": lambda p: p.category and "Tier1" in p.category
+    },
+    "select_agents_hhs": {
+        "name": "HHS Select Agents",
+        "description": "HHS-regulated select agents",
+        "filter": lambda p: p.category and "HHS-SA" in p.category
+    },
+    "select_agents_overlap": {
+        "name": "Overlap Select Agents",
+        "description": "USDA/HHS overlap select agents",
+        "filter": lambda p: p.category and "Overlap-SA" in p.category
+    },
+    # Legacy CDC categories (pathogens.yaml built-in database)
     "cdc_category_a": {
         "name": "CDC Category A",
-        "description": "Highest priority bioterrorism agents",
+        "description": "Highest priority bioterrorism agents (legacy)",
         "filter": lambda p: p.category == "CDC-A"
     },
     "cdc_category_b": {
         "name": "CDC Category B",
-        "description": "Second highest priority agents",
+        "description": "Second highest priority agents (legacy)",
         "filter": lambda p: p.category == "CDC-B"
     },
     "cdc_category_c": {
         "name": "CDC Category C",
-        "description": "Emerging threat agents",
+        "description": "Emerging threat agents (legacy)",
         "filter": lambda p: p.category == "CDC-C"
     },
     "who_priority": {
         "name": "WHO Priority Pathogens",
-        "description": "WHO priority pathogens for antimicrobial resistance",
+        "description": "WHO 2024 priority pathogens for antimicrobial resistance",
         "filter": lambda p: p.category and "WHO" in p.category
     },
     "foodborne": {

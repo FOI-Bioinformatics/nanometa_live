@@ -113,6 +113,9 @@ def register_watchlist_callbacks(app: Dash) -> None:
             Input("quick-start-respiratory", "n_clicks"),
             Input("quick-start-cdc", "n_clicks"),
             Input("quick-start-who", "n_clicks"),
+            Input("quick-start-nosocomial", "n_clicks"),
+            Input("quick-start-wastewater", "n_clicks"),
+            Input("quick-start-zoonotic", "n_clicks"),
         ],
         [
             State("watchlist-table-refresh", "data"),
@@ -120,7 +123,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
         ],
         prevent_initial_call=True,
     )
-    def quick_start_watchlist(clinical, foodborne, water, respiratory, cdc, who, current_refresh, current_config):
+    def quick_start_watchlist(clinical, foodborne, water, respiratory, cdc, who, nosocomial, wastewater, zoonotic, current_refresh, current_config):
         """Toggle a predefined watchlist on/off with one click."""
         if not ctx.triggered_id:
             raise PreventUpdate
@@ -133,6 +136,9 @@ def register_watchlist_callbacks(app: Dash) -> None:
             "quick-start-respiratory": "respiratory",
             "quick-start-cdc": "cdc_bioterrorism",
             "quick-start-who": "who_priority",
+            "quick-start-nosocomial": "nosocomial_eskape",
+            "quick-start-wastewater": "wastewater_surveillance",
+            "quick-start-zoonotic": "zoonotic_one_health",
         }
 
         wl_id = watchlist_map.get(button_id)
@@ -201,6 +207,12 @@ def register_watchlist_callbacks(app: Dash) -> None:
             Output("quick-start-cdc", "outline"),
             Output("quick-start-who", "color"),
             Output("quick-start-who", "outline"),
+            Output("quick-start-nosocomial", "color"),
+            Output("quick-start-nosocomial", "outline"),
+            Output("quick-start-wastewater", "color"),
+            Output("quick-start-wastewater", "outline"),
+            Output("quick-start-zoonotic", "color"),
+            Output("quick-start-zoonotic", "outline"),
         ],
         [
             Input("watchlist-tab-state", "data"),
@@ -226,6 +238,9 @@ def register_watchlist_callbacks(app: Dash) -> None:
             ("respiratory", "secondary"),
             ("cdc_bioterrorism", "danger"),
             ("who_priority", "dark"),
+            ("nosocomial_eskape", "danger"),
+            ("wastewater_surveillance", "info"),
+            ("zoonotic_one_health", "success"),
         ]
 
         results = []
@@ -270,6 +285,9 @@ def register_watchlist_callbacks(app: Dash) -> None:
             "respiratory",
             "cdc_bioterrorism",
             "who_priority",
+            "nosocomial_eskape",
+            "wastewater_surveillance",
+            "zoonotic_one_health",
         ]
         _order_map = {wl_id: i for i, wl_id in enumerate(_BUILTIN_ORDER)}
         builtin.sort(key=lambda wl: _order_map.get(wl.get("id", ""), 999))
