@@ -1056,6 +1056,8 @@ def register_dashboard_callbacks(app: Dash):
         [
             State("pathogen-report-modal", "is_open"),
             State("pathogen-report-data", "data"),
+            State("app-config", "data"),
+            State("sample-selector", "value"),
         ],
         prevent_initial_call=True
     )
@@ -1065,6 +1067,8 @@ def register_dashboard_callbacks(app: Dash):
         ack_clicks: Optional[int],
         is_open: bool,
         report_data: dict,
+        config: dict,
+        selected_sample: str,
     ):
         """
         Handle 'View Report' button clicks on pathogen alerts.
@@ -1096,6 +1100,28 @@ def register_dashboard_callbacks(app: Dash):
             return [no_update] * 15
 
         taxid = triggered.get("taxid", 0)
+
+        # Look up actual read count and abundance from Kraken2 data
+        from nanometa_live.core.utils.data_loaders import load_kraken_data
+        organism_reads = "N/A"
+        organism_abundance = "N/A"
+        organism_name = None
+        organism_rank = None
+        try:
+            main_dir = config.get("main_dir", "") if config else ""
+            if main_dir:
+                kraken_df = load_kraken_data(main_dir, selected_sample)
+                if not kraken_df.empty and taxid:
+                    match = kraken_df[kraken_df["taxid"] == int(taxid)]
+                    if not match.empty:
+                        row = match.iloc[0]
+                        organism_reads = f"{int(row.get('reads', 0)):,}"
+                        pct = row.get("%", 0)
+                        organism_abundance = f"{pct:.1f}%"
+                        organism_name = str(row.get("name", "")).strip()
+                        organism_rank = str(row.get("rank", ""))
+        except Exception as e:
+            logger.debug(f"Kraken2 lookup for taxid {taxid}: {e}")
 
         # Get pathogen details - try multiple lookup strategies
         from nanometa_live.core.utils.pathogen_database import get_pathogen_by_taxid
@@ -1147,30 +1173,33 @@ def register_dashboard_callbacks(app: Dash):
                 logger.debug(f"Watchlist lookup failed: {e}")
 
         if not pathogen:
-            # Show modal with limited info
+            # Show modal with actual Kraken2 data when available
+            display_name = organism_name or f"TaxID: {taxid}"
             return [
                 True,  # is_open
-                f"Unknown Organism (TaxID: {taxid})",  # name
-                "Not in pathogen database",  # common_name
-                "Unknown",  # category
+                display_name,  # name
+                "Not in pathogen watchlist",  # common_name
+                organism_rank or "Unknown",  # category
                 "Unknown",  # bsl
-                "N/A",  # reads
-                "N/A",  # abundance
-                "N/A",  # confidence
+                organism_reads,  # reads
+                organism_abundance,  # abundance
+                "HIGH" if organism_reads != "N/A" else "N/A",  # confidence
                 str(taxid),  # taxid
                 "Follow standard laboratory biosafety protocols",  # action
                 "secondary",  # alert color
-                "This organism is not in the pathogen database. It may be a custom watchlist entry or a newly detected species.",  # notes
+                "This organism is not in any active watchlist. Review classification results for context.",  # notes
                 f"https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id={ncbi_taxid}",  # ncbi link
                 html.Div([
-                    html.I(className="bi bi-question-circle me-2"),
-                    "Unknown Threat Level"
+                    html.I(className="bi bi-info-circle me-2"),
+                    "Not on watchlist"
                 ], className="alert alert-secondary text-center py-2"),  # threat banner
                 {"taxid": taxid, "ncbi_taxid": ncbi_taxid}  # store data
             ]
 
         # Determine threat level styling
-        threat_level = pathogen.threat_level.value
+        threat_level = pathogen.threat_level
+        if hasattr(threat_level, 'value'):
+            threat_level = threat_level.value
         threat_colors = {
             "critical": ("danger", "#8b0000", "bi-radioactive"),
             "high": ("warning", "#dc3545", "bi-exclamation-triangle-fill"),
@@ -1189,7 +1218,10 @@ def register_dashboard_callbacks(app: Dash):
            style={"borderLeft": f"5px solid {banner_color}"})
 
         # BSL badge text
-        bsl_text = f"BSL-{pathogen.bsl.value}" if pathogen.bsl else "BSL Unknown"
+        bsl_val = pathogen.bsl
+        if hasattr(bsl_val, 'value'):
+            bsl_val = bsl_val.value
+        bsl_text = f"BSL-{bsl_val}" if bsl_val else "BSL Unknown"
 
         # Confidence based on typical detection (placeholder - would be populated from actual data)
         confidence = "HIGH" if taxid else "UNKNOWN"
@@ -1200,14 +1232,14 @@ def register_dashboard_callbacks(app: Dash):
             pathogen.common_name or "No common name",  # common_name
             pathogen.category or "Uncategorized",  # category
             bsl_text,  # bsl
-            "See alert",  # reads (would need to pass from alert data)
-            "See alert",  # abundance
+            organism_reads,  # reads
+            organism_abundance,  # abundance
             confidence,  # confidence
-            str(pathogen.taxid),  # taxid
+            str(ncbi_taxid),  # taxid
             pathogen.action_required,  # action
             alert_color,  # alert color
             pathogen.notes or "No additional notes available.",  # notes
-            f"https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id={pathogen.taxid}",  # ncbi link
+            f"https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id={ncbi_taxid}",  # ncbi link
             threat_banner,  # threat banner
             {"taxid": taxid, "name": pathogen.name, "threat_level": threat_level}  # store data
         ]
