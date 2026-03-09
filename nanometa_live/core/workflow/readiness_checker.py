@@ -23,6 +23,7 @@ Tool location logic:
 import logging
 import os
 import shutil
+import subprocess
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -149,9 +150,11 @@ class ReadinessChecker:
 
         # === Input/output checks (warning) ===
         report.checks.append(self._check_input_directory(config))
+        report.checks.append(self._check_output_directory(config))
         report.checks.append(self._check_disk_space(config))
 
         # === Data completeness (warning) ===
+        report.checks.append(self._check_watchlist_active(config))
         report.checks.append(self._check_watchlist_genomes(config, home))
         report.checks.append(self._check_blast_dbs(config, home))
 
@@ -301,14 +304,30 @@ class ReadinessChecker:
 
         # Default: docker
         path = shutil.which("docker")
-        if path:
+        if not path:
             return CheckResult(
-                "Container Runtime", True, Severity.CRITICAL,
-                f"docker available at {path} (profile: {profile})"
+                "Container Runtime", False, Severity.CRITICAL,
+                f"docker not found in PATH (required by pipeline_profile: {profile})"
+            )
+        # Verify Docker daemon is running (not just binary installed)
+        try:
+            result = subprocess.run(
+                ["docker", "info"],
+                capture_output=True, timeout=5,
+            )
+            if result.returncode != 0:
+                return CheckResult(
+                    "Container Runtime", False, Severity.CRITICAL,
+                    "Docker installed but daemon is not running (start Docker Desktop)",
+                )
+        except (subprocess.TimeoutExpired, OSError):
+            return CheckResult(
+                "Container Runtime", False, Severity.CRITICAL,
+                "Docker installed but daemon check timed out",
             )
         return CheckResult(
-            "Container Runtime", False, Severity.CRITICAL,
-            f"docker not found in PATH (required by pipeline_profile: {profile})"
+            "Container Runtime", True, Severity.CRITICAL,
+            f"docker running (profile: {profile})"
         )
 
     # -- Input/output checks --
@@ -345,6 +364,37 @@ class ReadinessChecker:
             "Input Directory", False, Severity.WARNING,
             f"No FASTQ files or barcode directories found in {p.name}",
             details="This is expected if the sequencing run has not started yet"
+        )
+
+    def _check_output_directory(self, config: Dict[str, Any]) -> CheckResult:
+        """Check that the configured output directory exists or can be created."""
+        main_dir = config.get("results_output_directory") or config.get("main_dir", "")
+        if not main_dir:
+            return CheckResult(
+                "Output Directory", False, Severity.WARNING,
+                "No output directory configured"
+            )
+        p = Path(main_dir)
+        if p.exists():
+            if os.access(str(p), os.W_OK):
+                return CheckResult(
+                    "Output Directory", True, Severity.WARNING,
+                    f"Output directory exists: {p.name}"
+                )
+            return CheckResult(
+                "Output Directory", False, Severity.WARNING,
+                f"Output directory not writable: {p}",
+            )
+        # Check if the parent exists (directory can be created)
+        parent = p.parent
+        if parent.exists() and os.access(str(parent), os.W_OK):
+            return CheckResult(
+                "Output Directory", True, Severity.WARNING,
+                f"Output directory will be created: {p.name}",
+            )
+        return CheckResult(
+            "Output Directory", False, Severity.WARNING,
+            f"Cannot create output directory (parent does not exist): {p}",
         )
 
     def _check_disk_space(self, config: Dict[str, Any]) -> CheckResult:
@@ -385,6 +435,35 @@ class ReadinessChecker:
             )
 
     # -- Data completeness checks --
+
+    def _check_watchlist_active(self, config: Dict[str, Any]) -> CheckResult:
+        """Check whether at least one watchlist is enabled for pathogen screening."""
+        try:
+            from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
+            wm = get_watchlist_manager()
+            active = wm.get_active_entries()
+            if active:
+                count = len(active)
+                return CheckResult(
+                    "Watchlist Active", True, Severity.WARNING,
+                    f"{count} pathogen(s) enabled for screening"
+                )
+            return CheckResult(
+                "Watchlist Active", False, Severity.WARNING,
+                "No watchlist enabled - enable pathogens in the Watchlist tab"
+            )
+        except Exception:
+            # Check config for watchlist section as fallback
+            wl = config.get("watchlist", {})
+            if isinstance(wl, dict) and wl.get("enabled_watchlists"):
+                return CheckResult(
+                    "Watchlist Active", True, Severity.WARNING,
+                    "Watchlist configured (not yet loaded)"
+                )
+            return CheckResult(
+                "Watchlist Active", False, Severity.WARNING,
+                "No watchlist enabled - enable pathogens in the Watchlist tab"
+            )
 
     def _check_watchlist_genomes(self, config: Dict[str, Any], home: Path) -> CheckResult:
         try:
