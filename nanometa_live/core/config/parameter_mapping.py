@@ -353,7 +353,7 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Get processing mode and sample handling configuration
     processing_mode = config.get("processing_mode", "batch")
-    sample_handling = config.get("sample_handling", "single_sample")
+    sample_handling = config.get("sample_handling", "by_barcode")
     sample_name = config.get("sample_name", "sample")
 
     logging.info(f"Processing mode: {processing_mode}, Sample handling: {sample_handling}")
