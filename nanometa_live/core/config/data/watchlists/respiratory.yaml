@@ -99,6 +99,17 @@ pathogens:
     action_required: "Report to public health. Water system assessment."
     notes: "Environmental pathogen. Associated with cooling towers and plumbing."
 
+  - name: "Staphylococcus aureus"
+    names_alt: ["Staphylococcus_aureus"]
+    taxid_ncbi: 1280
+    common_name: "S. aureus pneumonia"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 15
+    action_required: "Assess for MRSA. Post-influenza bacterial pneumonia risk."
+    notes: "Community and hospital-acquired pneumonia. MRSA strains are high priority."
+
   - name: "Klebsiella pneumoniae"
     names_alt: ["Klebsiella_pneumoniae"]
     taxid_ncbi: 573
@@ -109,6 +120,17 @@ pathogens:
     alert_threshold: 15
     action_required: "Monitor for carbapenem resistance."
     notes: "Healthcare-associated pneumonia. Rising resistance."
+
+  - name: "Acinetobacter baumannii"
+    names_alt: ["Acinetobacter_baumannii"]
+    taxid_ncbi: 470
+    common_name: "A. baumannii"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 10
+    action_required: "Monitor for carbapenem resistance. Ventilator-associated pneumonia assessment."
+    notes: "WHO critical priority. Major cause of ventilator-associated pneumonia."
 
   - name: "Pseudomonas aeruginosa"
     names_alt: ["Pseudomonas_aeruginosa"]
@@ -143,6 +165,17 @@ pathogens:
     action_required: "Endemic area assessment. Antifungal consideration."
     notes: "Dimorphic fungus. Endemic to southwestern US and parts of Central/South America."
 
+  - name: "Coccidioides posadasii"
+    names_alt: ["Coccidioides_posadasii"]
+    taxid_ncbi: 199306
+    common_name: "Valley fever"
+    threat_level: "high"
+    bsl_level: 3
+    category: "Respiratory"
+    alert_threshold: 10
+    action_required: "Endemic area assessment. Antifungal consideration."
+    notes: "Dimorphic fungus. More geographically widespread than C. immitis."
+
   - name: "Histoplasma capsulatum"
     names_alt: ["Histoplasma_capsulatum"]
     taxid_ncbi: 5037
@@ -154,13 +187,46 @@ pathogens:
     action_required: "Endemic area assessment. Bird/bat exposure history."
     notes: "Dimorphic fungus. Endemic to Ohio and Mississippi River valleys."
 
+  - name: "Blastomyces dermatitidis"
+    names_alt: ["Blastomyces_dermatitidis"]
+    taxid_ncbi: 5039
+    common_name: "Blastomycosis"
+    threat_level: "high"
+    bsl_level: 3
+    category: "Respiratory"
+    alert_threshold: 10
+    action_required: "Endemic area assessment. Antifungal consideration."
+    notes: "Dimorphic fungus. Endemic to Great Lakes region and Mississippi/Ohio River valleys."
+
   - name: "Aspergillus fumigatus"
     names_alt: ["Aspergillus_fumigatus"]
-    taxid_ncbi: 746128
+    taxid_ncbi: 5085
     common_name: "Aspergillosis"
     threat_level: "high"
     bsl_level: 2
     category: "Respiratory"
     alert_threshold: 15
     action_required: "Assess immunocompromised status. Environmental mold assessment."
-    notes: "Opportunistic mold. Invasive aspergillosis in immunocompromised."
+    notes: "Using taxid 5085 for broader Kraken2 database compatibility."
+
+  - name: "Corynebacterium diphtheriae"
+    names_alt: ["Corynebacterium_diphtheriae"]
+    taxid_ncbi: 1717
+    common_name: "Diphtheria"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 5
+    action_required: "Report to public health. Droplet precautions. Contact tracing. Antitoxin assessment."
+    notes: "Vaccine-preventable. Re-emerging in under-vaccinated populations. Toxin-mediated disease."
+
+  - name: "Pneumocystis jirovecii"
+    names_alt: ["Pneumocystis_jirovecii", "Pneumocystis_carinii"]
+    taxid_ncbi: 42068
+    common_name: "PCP"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 10
+    action_required: "Assess immunocompromised status. HIV testing if not known positive."
+    notes: "Causes Pneumocystis pneumonia (PCP) in immunocompromised. Key AIDS-defining illness."

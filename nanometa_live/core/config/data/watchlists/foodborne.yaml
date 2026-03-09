@@ -68,6 +68,17 @@ pathogens:
     action_required: "Poultry source assessment. Report to public health."
     notes: "Most common bacterial cause of foodborne diarrhea."
 
+  - name: "Campylobacter coli"
+    names_alt: ["Campylobacter_coli"]
+    taxid_ncbi: 195
+    common_name: "Campylobacter"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 10
+    action_required: "Poultry/pork source assessment. Report to public health."
+    notes: "Second most common Campylobacter species in human illness."
+
   - name: "Vibrio cholerae"
     names_alt: ["Vibrio_cholerae"]
     taxid_ncbi: 666
@@ -149,12 +160,56 @@ pathogens:
     names_alt: ["Shigella_sonnei"]
     taxid_ncbi: 624
     common_name: "Shigellosis"
-    threat_level: "moderate"
+    threat_level: "high"
     bsl_level: 2
     category: "Foodborne"
     alert_threshold: 20
     action_required: "Food handler assessment. Report to public health."
     notes: "Very low infectious dose. Person-to-person transmission."
+
+  - name: "Shigella flexneri"
+    names_alt: ["Shigella_flexneri"]
+    taxid_ncbi: 623
+    common_name: "Shigellosis"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 15
+    action_required: "Food handler assessment. Report to public health."
+    notes: "Globally most prevalent Shigella species. Very low infectious dose."
+
+  - name: "Shigella dysenteriae"
+    names_alt: ["Shigella_dysenteriae"]
+    taxid_ncbi: 622
+    common_name: "Bacillary dysentery"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 10
+    action_required: "Severe dysentery assessment. Report to public health."
+    notes: "Produces Shiga toxin. High severity. Very low infectious dose."
+
+  - name: "Staphylococcus aureus"
+    names_alt: ["Staphylococcus_aureus"]
+    taxid_ncbi: 1280
+    common_name: "S. aureus"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 15
+    action_required: "Food handler hygiene assessment. Temperature control."
+    notes: "Produces heat-stable enterotoxins. Common in dairy and meat products."
+
+  - name: "Norovirus"
+    names_alt: ["Norwalk virus"]
+    taxid_ncbi: 142786
+    common_name: "Norovirus"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 10
+    action_required: "Food handler exclusion. Environmental decontamination."
+    notes: "Leading cause of foodborne illness outbreaks. Very low infectious dose. Highly persistent on surfaces."
 
   # Parasites (not bacterial but included for food safety)
   - name: "Cyclospora cayetanensis"
@@ -167,3 +222,25 @@ pathogens:
     alert_threshold: 10
     action_required: "Fresh produce source assessment. Import tracing."
     notes: "Associated with fresh berries and herbs. Requires prolonged treatment."
+
+  - name: "Cryptosporidium parvum"
+    names_alt: ["Cryptosporidium_parvum"]
+    taxid_ncbi: 5807
+    common_name: "Cryptosporidiosis"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 10
+    action_required: "Fresh produce/water source assessment. Report to public health."
+    notes: "Chlorine-resistant protozoan. Associated with fresh produce and water."
+
+  - name: "Toxoplasma gondii"
+    names_alt: ["Toxoplasma_gondii"]
+    taxid_ncbi: 5811
+    common_name: "Toxoplasmosis"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Foodborne"
+    alert_threshold: 10
+    action_required: "High risk for pregnant women and immunocompromised. Meat source assessment."
+    notes: "Second leading cause of foodborne death in the US. Associated with undercooked meat."

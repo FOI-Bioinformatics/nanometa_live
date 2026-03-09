@@ -11,6 +11,7 @@ metadata:
   description: "Waterborne pathogens from WHO Guidelines for Drinking-Water Quality Table 7.1"
   source: "WHO Guidelines for Drinking-Water Quality, 4th edition, 2022"
   category: "drinking_water"
+  reference: "https://www.ncbi.nlm.nih.gov/books/NBK579466/table/ch7.tab1/"
 
 # Health significance: High, Moderate, Low
 # Persistence: Short (<1 week), Moderate (1 week-1 month), Long (>1 month), May multiply
@@ -96,7 +97,7 @@ pathogens:
   - name: "Mycobacterium avium"
     common_name: "MAC infection"
     taxid_ncbi: 1764
-    threat_level: "moderate"
+    threat_level: "low"
     bsl_level: 2
     alert_threshold: 50
     category: "WHO-Drinking-Water"
@@ -105,11 +106,12 @@ pathogens:
     chlorine_resistance: "high"
     animal_reservoir: false
 
-  - name: "Salmonella typhi"
+  - name: "Salmonella enterica serovar Typhi"
+    names_alt: ["Salmonella_typhi", "Salmonella Typhi"]
     common_name: "Typhoid fever"
     taxid_ncbi: 90370
     threat_level: "high"
-    bsl_level: 3
+    bsl_level: 2
     alert_threshold: 5
     category: "WHO-Drinking-Water"
     notes: "Causes typhoid fever. Moderate persistence, low chlorine resistance."
@@ -221,12 +223,12 @@ pathogens:
   - name: "Hepatovirus ahepa"
     names_alt: ["Hepatitis A virus", "Hepatovirus A"]
     common_name: "Hepatitis A"
-    taxid_ncbi: 3407641
+    taxid_ncbi: 12092
     threat_level: "high"
     bsl_level: 2
     alert_threshold: 5
     category: "WHO-Drinking-Water"
-    notes: "Causes hepatitis A. Long persistence, moderate chlorine resistance. Formerly Hepatitis A virus (taxid 12092)."
+    notes: "ICTV 2024 binomial. Using taxid 12092 (Hepatovirus A) for Kraken2 database compatibility."
     persistence: "long"
     chlorine_resistance: "moderate"
     animal_reservoir: false
@@ -239,6 +241,30 @@ pathogens:
     alert_threshold: 10
     category: "WHO-Drinking-Water"
     notes: "Major cause of childhood diarrhea. Long persistence, moderate chlorine resistance."
+    persistence: "long"
+    chlorine_resistance: "moderate"
+    animal_reservoir: false
+
+  - name: "Sapovirus"
+    common_name: "Sapovirus gastroenteritis"
+    taxid_ncbi: 95341
+    threat_level: "moderate"
+    bsl_level: 2
+    alert_threshold: 20
+    category: "WHO-Drinking-Water"
+    notes: "Causes gastroenteritis outbreaks. Listed in WHO Table 7.1. Long persistence, moderate chlorine resistance."
+    persistence: "long"
+    chlorine_resistance: "moderate"
+    animal_reservoir: false
+
+  - name: "Parechovirus"
+    common_name: "Parechovirus infection"
+    taxid_ncbi: 45247
+    threat_level: "moderate"
+    bsl_level: 2
+    alert_threshold: 20
+    category: "WHO-Drinking-Water"
+    notes: "Causes gastroenteritis and respiratory illness. Listed in WHO Table 7.1 alongside enteroviruses. Long persistence, moderate chlorine resistance."
     persistence: "long"
     chlorine_resistance: "moderate"
     animal_reservoir: false
@@ -307,7 +333,8 @@ pathogens:
     chlorine_resistance: "high"
     animal_reservoir: false
 
-  - name: "Giardia intestinalis"
+  - name: "Giardia duodenalis"
+    names_alt: ["Giardia_intestinalis", "Giardia_lamblia"]
     common_name: "Giardiasis"
     taxid_ncbi: 5741
     threat_level: "high"

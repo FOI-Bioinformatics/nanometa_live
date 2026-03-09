@@ -1,0 +1,123 @@
+# Agricultural / Plant Pathogens Watchlist
+# Organisms of significance for agricultural biosecurity and phytosanitary surveillance
+
+version: "2.0"
+taxonomy_support: ["ncbi", "gtdb"]
+
+metadata:
+  name: "Agricultural / Plant Pathogens"
+  description: "Plant pathogens and oomycetes of regulatory and agricultural significance, for use in phytosanitary and biosecurity laboratories"
+  source: "USDA/EPPO"
+  reference: "USDA APHIS and EPPO quarantine organism lists"
+  notes: "For agricultural biosecurity and phytosanitary laboratories. Standard Kraken2 databases may have limited coverage of plant pathogens; custom database builds may be required."
+
+pathogens:
+  - name: "Ralstonia solanacearum"
+    names_alt: ["Ralstonia_solanacearum", "bacterial wilt agent", "brown rot"]
+    taxid_ncbi: 305
+    common_name: "Bacterial wilt"
+    threat_level: "critical"
+    bsl_level: 1
+    category: "Agricultural"
+    alert_threshold: 5
+    action_required: "Quarantine affected plant material. Report to national plant protection organization. Restrict movement of soil and water from affected area."
+    notes: "Causes bacterial wilt in over 200 plant species. EPPO A2 quarantine pest. Species complex with broad host range across Solanaceae and other families."
+
+  - name: "Xylella fastidiosa"
+    names_alt: ["Xylella_fastidiosa", "Pierce disease agent", "olive quick decline"]
+    taxid_ncbi: 2371
+    common_name: "Xylella"
+    threat_level: "critical"
+    bsl_level: 1
+    category: "Agricultural"
+    alert_threshold: 3
+    action_required: "Immediate quarantine. Report to plant protection authority. Eradication or containment measures as per regional legislation."
+    notes: "Xylem-limited bacterium transmitted by sharpshooter leafhoppers. Causes Pierce disease of grapevine and olive quick decline syndrome. EPPO A2 quarantine pest with severe economic impact."
+
+  - name: "Xanthomonas citri"
+    names_alt: ["Xanthomonas_citri", "Xanthomonas citri pv. citri", "citrus canker agent"]
+    taxid_ncbi: 346
+    common_name: "Citrus canker"
+    threat_level: "high"
+    bsl_level: 1
+    category: "Agricultural"
+    alert_threshold: 10
+    action_required: "Quarantine citrus material. Report to plant protection authority. Assess for eradication feasibility."
+    notes: "Causes citrus bacterial canker. Subject to quarantine regulations in many citrus-producing regions. Wind-driven rain facilitates spread."
+
+  - name: "Erwinia amylovora"
+    names_alt: ["Erwinia_amylovora", "fire blight agent"]
+    taxid_ncbi: 552
+    common_name: "Fire blight"
+    threat_level: "high"
+    bsl_level: 1
+    category: "Agricultural"
+    alert_threshold: 10
+    action_required: "Remove and destroy affected plant tissue. Report to plant protection authority. Restrict movement of host plant material."
+    notes: "Causes fire blight of pome fruit (apple, pear). EPPO A2 quarantine pest in regions where it is not yet established. Spread is favored by warm, humid conditions."
+
+  - name: "Candidatus Liberibacter asiaticus"
+    names_alt: ["Candidatus_Liberibacter_asiaticus", "HLB agent", "citrus greening agent", "CLas"]
+    taxid_ncbi: 537021
+    common_name: "Citrus greening (HLB)"
+    threat_level: "critical"
+    bsl_level: 1
+    category: "Agricultural"
+    alert_threshold: 3
+    action_required: "Quarantine affected trees. Psyllid vector control. Report to plant protection authority. Assess for regional eradication or management."
+    notes: "Causative agent of Huanglongbing (citrus greening), the most destructive disease of citrus worldwide. Unculturable bacterium; metagenomic approaches may aid early detection."
+
+  - name: "Phytophthora infestans"
+    names_alt: ["Phytophthora_infestans", "late blight agent", "potato blight"]
+    taxid_ncbi: 4787
+    common_name: "Late blight"
+    threat_level: "high"
+    bsl_level: 1
+    category: "Agricultural"
+    alert_threshold: 10
+    action_required: "Fungicide application assessment. Genotype determination for fungicide resistance. Notify regional advisory services."
+    notes: "Oomycete causing late blight of potato and tomato. Historically responsible for the Irish potato famine. Requires Kraken2 databases with oomycete references."
+
+  - name: "Phytophthora ramorum"
+    names_alt: ["Phytophthora_ramorum", "sudden oak death agent", "ramorum blight"]
+    taxid_ncbi: 164328
+    common_name: "Sudden oak death"
+    threat_level: "high"
+    bsl_level: 1
+    category: "Agricultural"
+    alert_threshold: 10
+    action_required: "Quarantine affected material. Report to plant protection authority. Restrict movement of host plants and soil."
+    notes: "Oomycete causing sudden oak death and ramorum blight. Regulated quarantine pest in the EU and North America. Broad host range across woody ornamentals."
+
+  - name: "Fusarium oxysporum"
+    names_alt: ["Fusarium_oxysporum", "Fusarium wilt agent", "Panama disease"]
+    taxid_ncbi: 5507
+    common_name: "Fusarium wilt"
+    threat_level: "moderate"
+    bsl_level: 1
+    category: "Agricultural"
+    alert_threshold: 15
+    action_required: "Determine forma specialis and race. Assess biosecurity implications for tropical race 4 (TR4) in banana production."
+    notes: "Species complex with host-specific formae speciales. F. oxysporum f. sp. cubense tropical race 4 is a particular concern for global banana production."
+
+  - name: "Puccinia graminis"
+    names_alt: ["Puccinia_graminis", "stem rust", "wheat rust", "black rust"]
+    taxid_ncbi: 5297
+    common_name: "Wheat stem rust"
+    threat_level: "high"
+    bsl_level: 1
+    category: "Agricultural"
+    alert_threshold: 10
+    action_required: "Race identification. Assess cultivar resistance. Report Ug99 lineage detections to global rust monitoring network."
+    notes: "Obligate biotrophic fungus causing stem rust of wheat and barley. The Ug99 race group poses a threat to global wheat production. Requires fungal reference databases."
+
+  - name: "Magnaporthe oryzae"
+    names_alt: ["Magnaporthe_oryzae", "Pyricularia oryzae", "rice blast agent"]
+    taxid_ncbi: 318829
+    common_name: "Rice blast"
+    threat_level: "high"
+    bsl_level: 1
+    category: "Agricultural"
+    alert_threshold: 10
+    action_required: "Race identification. Assess cultivar resistance profile. Fungicide resistance monitoring."
+    notes: "Causes rice blast, the most economically significant disease of rice globally. Also affects wheat (wheat blast). Requires fungal reference databases for Kraken2 classification."

@@ -26,12 +26,12 @@ pathogens:
     names_alt: ["Klebsiella_pneumoniae"]
     taxid_ncbi: 573
     common_name: "K. pneumoniae"
-    threat_level: "high"
+    threat_level: "critical"
     bsl_level: 2
     category: "Clinical"
-    alert_threshold: 15
-    action_required: "Monitor for carbapenem/ESBL resistance. Infection control."
-    notes: "Opportunistic pathogen. Carbapenem-resistant strains are critical."
+    alert_threshold: 10
+    action_required: "Monitor for carbapenem/ESBL resistance. Infection control alert."
+    notes: "WHO 2024 critical priority. Carbapenem-resistant and ESBL-producing strains."
 
   - name: "Pseudomonas aeruginosa"
     names_alt: ["Pseudomonas_aeruginosa"]
@@ -58,7 +58,7 @@ pathogens:
   - name: "Enterococcus faecium"
     names_alt: ["Enterococcus_faecium"]
     taxid_ncbi: 1352
-    common_name: "VRE"
+    common_name: "E. faecium"
     threat_level: "high"
     bsl_level: 2
     category: "Clinical"
@@ -99,6 +99,39 @@ pathogens:
     action_required: "Monitor for carbapenem resistance. Infection control alert."
     notes: "Multi-drug resistant nosocomial pathogen."
 
+  - name: "Mycobacterium tuberculosis"
+    names_alt: ["Mycobacterium_tuberculosis"]
+    taxid_ncbi: 1773
+    common_name: "Tuberculosis"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "Clinical"
+    alert_threshold: 5
+    action_required: "Airborne precautions. TB reporting required. Assess for drug resistance."
+    notes: "Leading infectious disease killer globally. WHO 2024 critical priority."
+
+  - name: "Candida auris"
+    names_alt: ["Candida_auris"]
+    taxid_ncbi: 498019
+    common_name: "C. auris"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 5
+    action_required: "Contact precautions. Enhanced environmental cleaning. Report to public health."
+    notes: "CDC urgent threat. Multi-drug resistant fungus. High nosocomial transmission risk."
+
+  - name: "Enterobacter cloacae"
+    names_alt: ["Enterobacter_cloacae"]
+    taxid_ncbi: 550
+    common_name: "Enterobacter"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 15
+    action_required: "Monitor for cephalosporin/carbapenem resistance."
+    notes: "ESKAPE pathogen. Intrinsic AmpC beta-lactamase. WHO high priority."
+
   - name: "Escherichia coli"
     names_alt: ["Escherichia_coli"]
     taxid_ncbi: 562
@@ -131,3 +164,36 @@ pathogens:
     alert_threshold: 20
     action_required: "Source tracking. Report to public health."
     notes: "Enteric fever and gastroenteritis."
+
+  - name: "Streptococcus pyogenes"
+    names_alt: ["Streptococcus_pyogenes", "Group A Streptococcus", "GAS"]
+    taxid_ncbi: 1314
+    common_name: "Group A Strep"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 15
+    action_required: "Monitor for macrolide resistance. Assess for invasive disease."
+    notes: "Causes pharyngitis, necrotizing fasciitis, streptococcal toxic shock. iGAS surge in multiple countries. WHO 2024 medium priority."
+
+  - name: "Streptococcus agalactiae"
+    names_alt: ["Streptococcus_agalactiae", "Group B Streptococcus", "GBS"]
+    taxid_ncbi: 1311
+    common_name: "Group B Strep"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 20
+    action_required: "Monitor for penicillin resistance. Neonatal screening."
+    notes: "Key neonatal pathogen. WHO 2024 medium priority for penicillin-resistant strains."
+
+  - name: "Neisseria meningitidis"
+    names_alt: ["Neisseria_meningitidis"]
+    taxid_ncbi: 487
+    common_name: "Meningococcus"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 10
+    action_required: "Droplet precautions. Report to public health. Contact prophylaxis."
+    notes: "Causes bacterial meningitis and septicemia. Vaccine-preventable."

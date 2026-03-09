@@ -1,0 +1,173 @@
+# Wastewater Surveillance Watchlist
+# Pathogen targets for wastewater-based epidemiology (WBE)
+# Covers viral, bacterial, fungal, and parasitic organisms detectable in wastewater
+
+version: "2.0"
+taxonomy_support: ["ncbi", "gtdb"]
+
+metadata:
+  name: "Wastewater Surveillance"
+  description: "Pathogen targets for wastewater-based epidemiology and environmental monitoring"
+  source: "Public Health/WBE"
+  reference: "Wastewater-based epidemiology pathogen targets"
+  database_note: "Viral agents require PlusPF or PlusPFP Kraken2 database for detection"
+
+pathogens:
+  # =========================================================================
+  # Viral targets
+  # =========================================================================
+
+  - name: "Betacoronavirus pandemicum"
+    names_alt: ["SARS-CoV-2", "Severe acute respiratory syndrome coronavirus 2"]
+    taxid_ncbi: 2697049
+    common_name: "SARS-CoV-2"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "Wastewater"
+    alert_threshold: 5
+    action_required: "Report elevated levels to public health. Assess trend data for community transmission indicators."
+    notes: "Wastewater surveillance for SARS-CoV-2 has been established as a reliable indicator of community prevalence. Viral RNA shedding in feces permits detection several days before clinical case reporting."
+
+  - name: "Poliovirus"
+    names_alt: ["Enterovirus C", "Poliovirus 1", "Poliovirus 2", "Poliovirus 3"]
+    taxid_ncbi: 12080
+    common_name: "Polio"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Wastewater"
+    alert_threshold: 5
+    action_required: "Report immediately to public health authorities. Global Polio Eradication Initiative notification required."
+    notes: "Environmental surveillance of poliovirus in wastewater is a cornerstone of the global eradication program. Detection may indicate silent circulation in partially vaccinated populations."
+
+  - name: "Influenzavirus A"
+    names_alt: ["Influenza A virus", "Alphainfluenzavirus influenzae"]
+    taxid_ncbi: 11320
+    common_name: "Influenza A"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Wastewater"
+    alert_threshold: 10
+    action_required: "Report to public health. Correlate with clinical influenza surveillance data."
+    notes: "Wastewater influenza A monitoring can provide early warning of seasonal epidemics and may detect novel subtypes circulating in the community prior to clinical recognition."
+
+  - name: "Norovirus"
+    names_alt: ["Norwalk virus", "Norovirus GII"]
+    taxid_ncbi: 142786
+    common_name: "Norovirus"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Wastewater"
+    alert_threshold: 10
+    action_required: "Correlate with gastroenteritis outbreak reports. Assess wastewater treatment efficacy."
+    notes: "Leading cause of acute gastroenteritis outbreaks. Environmentally stable and resistant to many disinfectants. Wastewater levels correlate with community gastroenteritis burden."
+
+  - name: "Orthopoxvirus monkeypox"
+    names_alt: ["Monkeypox virus", "mpox virus", "MPXV"]
+    taxid_ncbi: 3431483
+    common_name: "Mpox"
+    threat_level: "high"
+    bsl_level: 3
+    category: "Wastewater"
+    alert_threshold: 10
+    action_required: "Report to public health. Correlate with clinical mpox case data."
+    notes: "Wastewater detection of mpox virus DNA has been demonstrated as a supplementary surveillance tool. Viral DNA shedding may occur through skin lesion washing and fecal excretion."
+
+  - name: "Respiratory syncytial virus"
+    names_alt: ["RSV", "Orthopneumovirus hominis", "Human respiratory syncytial virus"]
+    taxid_ncbi: 12814
+    common_name: "RSV"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Wastewater"
+    alert_threshold: 20
+    action_required: "Correlate with pediatric respiratory illness surveillance data."
+    notes: "Wastewater RSV detection can supplement clinical surveillance for seasonal respiratory illness trends. Particularly relevant for pediatric and elderly populations."
+
+  - name: "Rotavirus"
+    names_alt: ["Rotavirus A", "Human rotavirus"]
+    taxid_ncbi: 10912
+    common_name: "Rotavirus"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Wastewater"
+    alert_threshold: 20
+    action_required: "Monitor trends. Assess vaccination program coverage in the catchment area."
+    notes: "Environmental surveillance of rotavirus in wastewater can indicate community circulation levels and may support evaluation of vaccination program effectiveness."
+
+  - name: "Hepatovirus A"
+    names_alt: ["Hepatitis A virus", "HAV"]
+    taxid_ncbi: 12092
+    common_name: "Hepatitis A"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Wastewater"
+    alert_threshold: 10
+    action_required: "Report to public health. Assess source water contamination risk."
+    notes: "Fecal-oral transmission. Wastewater detection may indicate community circulation before clinical cases are reported. Relevant for source water protection and shellfish harvesting areas."
+
+  # =========================================================================
+  # Bacterial targets
+  # =========================================================================
+
+  - name: "Salmonella enterica"
+    names_alt: ["Salmonella_enterica"]
+    taxid_ncbi: 28901
+    common_name: "Salmonella"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Wastewater"
+    alert_threshold: 10
+    action_required: "Correlate with clinical salmonellosis reports. Monitor for antimicrobial resistance markers."
+    notes: "Wastewater Salmonella surveillance can complement clinical reporting and may detect circulating serotypes, including antimicrobial-resistant strains, at the population level."
+
+  - name: "Campylobacter jejuni"
+    names_alt: ["Campylobacter_jejuni"]
+    taxid_ncbi: 197
+    common_name: "Campylobacter"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Wastewater"
+    alert_threshold: 10
+    action_required: "Correlate with clinical gastroenteritis surveillance. Assess agricultural runoff contribution."
+    notes: "Leading bacterial cause of gastroenteritis. Wastewater detection may reflect both human and agricultural sources, supporting One Health surveillance approaches."
+
+  # =========================================================================
+  # Parasitic targets
+  # =========================================================================
+
+  - name: "Cryptosporidium parvum"
+    names_alt: ["Cryptosporidium_parvum"]
+    taxid_ncbi: 5807
+    common_name: "Cryptosporidium"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Wastewater"
+    alert_threshold: 10
+    action_required: "Assess source water contamination risk. Review wastewater treatment efficacy for oocyst removal."
+    notes: "Oocysts are resistant to chlorination. Wastewater surveillance is relevant for source water protection and drinking water safety. Zoonotic and anthroponotic transmission."
+
+  - name: "Giardia duodenalis"
+    names_alt: ["Giardia_duodenalis", "Giardia intestinalis", "Giardia lamblia"]
+    taxid_ncbi: 5741
+    common_name: "Giardia"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Wastewater"
+    alert_threshold: 20
+    action_required: "Monitor trends. Assess source water protection measures."
+    notes: "Cysts are environmentally resistant and may persist through conventional water treatment. Wastewater levels can indicate community prevalence of giardiasis."
+
+  # =========================================================================
+  # Fungal targets
+  # =========================================================================
+
+  - name: "Candida auris"
+    names_alt: ["Candida_auris"]
+    taxid_ncbi: 498019
+    common_name: "C. auris"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Wastewater"
+    alert_threshold: 10
+    action_required: "Report to public health. Assess healthcare facility contribution to catchment."
+    notes: "Environmental detection of C. auris in wastewater is an emerging surveillance approach. Multi-drug resistant fungus with potential for environmental persistence and community spread."

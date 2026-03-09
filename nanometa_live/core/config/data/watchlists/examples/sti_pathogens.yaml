@@ -1,0 +1,134 @@
+# STI Pathogens Watchlist
+# Organisms associated with sexually transmitted infections for surveillance purposes
+
+version: "2.0"
+taxonomy_support: ["ncbi", "gtdb"]
+
+metadata:
+  name: "STI Pathogens"
+  description: "Organisms commonly associated with sexually transmitted infections, intended for STI surveillance and screening workflows"
+  source: "WHO/CDC STI surveillance"
+  reference: "https://www.who.int/news-room/fact-sheets/detail/sexually-transmitted-infections-(stis)"
+  notes: "Some organisms (Chlamydia, Treponema) are intracellular with small genomes and may yield low Kraken2 read counts in shotgun metagenomics."
+
+pathogens:
+  - name: "Neisseria gonorrhoeae"
+    names_alt: ["Neisseria_gonorrhoeae", "gonococcus", "GC"]
+    taxid_ncbi: 485
+    common_name: "Gonorrhea"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "STI"
+    alert_threshold: 5
+    action_required: "Antimicrobial susceptibility testing recommended. Report to public health. Monitor for ceftriaxone resistance."
+    notes: "Leading bacterial STI globally. Increasing antimicrobial resistance is a substantial public health concern."
+
+  - name: "Chlamydia trachomatis"
+    names_alt: ["Chlamydia_trachomatis", "chlamydia"]
+    taxid_ncbi: 813
+    common_name: "Chlamydia"
+    threat_level: "high"
+    bsl_level: 2
+    category: "STI"
+    alert_threshold: 10
+    action_required: "Partner notification and treatment. Report to public health."
+    notes: "Most common bacterial STI. Obligate intracellular pathogen with a small genome; metagenomic detection sensitivity may be limited."
+
+  - name: "Treponema pallidum"
+    names_alt: ["Treponema_pallidum", "syphilis spirochete"]
+    taxid_ncbi: 160
+    common_name: "Syphilis"
+    threat_level: "high"
+    bsl_level: 2
+    category: "STI"
+    alert_threshold: 5
+    action_required: "Stage assessment. Partner notification. Report to public health. Screen for congenital syphilis risk."
+    notes: "Causative agent of syphilis. Cannot be cultured in vitro. Metagenomic reads may be sparse due to low organism burden in clinical samples."
+
+  - name: "Mycoplasma genitalium"
+    names_alt: ["Mycoplasma_genitalium", "M. genitalium", "Mgen"]
+    taxid_ncbi: 2097
+    common_name: "M. genitalium"
+    threat_level: "high"
+    bsl_level: 2
+    category: "STI"
+    alert_threshold: 10
+    action_required: "Resistance-guided therapy recommended. Test for macrolide resistance mutations."
+    notes: "Emerging STI pathogen with one of the smallest known bacterial genomes. Macrolide and fluoroquinolone resistance are increasing."
+
+  - name: "Haemophilus ducreyi"
+    names_alt: ["Haemophilus_ducreyi", "chancroid"]
+    taxid_ncbi: 730
+    common_name: "Chancroid"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "STI"
+    alert_threshold: 15
+    action_required: "Clinical assessment for genital ulcer disease. Partner notification."
+    notes: "Causative agent of chancroid. Predominantly found in tropical regions. Facilitates HIV transmission."
+
+  - name: "Klebsiella granulomatis"
+    names_alt: ["Klebsiella_granulomatis", "Calymmatobacterium granulomatis", "donovanosis"]
+    taxid_ncbi: 205921
+    common_name: "Donovanosis"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "STI"
+    alert_threshold: 15
+    action_required: "Prolonged antibiotic therapy. Monitor for treatment response."
+    notes: "Causes granuloma inguinale (donovanosis). Rare in developed countries but endemic in parts of the tropics."
+
+  - name: "Ureaplasma urealyticum"
+    names_alt: ["Ureaplasma_urealyticum"]
+    taxid_ncbi: 2130
+    common_name: "Ureaplasma"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "STI"
+    alert_threshold: 20
+    action_required: "Assess clinical significance in context. May be commensal in some individuals."
+    notes: "Associated with non-gonococcal urethritis and adverse pregnancy outcomes. Interpretation requires clinical correlation as it may be part of normal urogenital flora."
+
+  - name: "Trichomonas vaginalis"
+    names_alt: ["Trichomonas_vaginalis", "trichomoniasis", "trich"]
+    taxid_ncbi: 5722
+    common_name: "Trichomoniasis"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "STI"
+    alert_threshold: 15
+    action_required: "Partner treatment. Assess for metronidazole resistance if treatment failure."
+    notes: "Eukaryotic parasite. Most prevalent non-viral STI globally. Requires a Kraken2 database that includes protozoa."
+
+  - name: "Human alphaherpesvirus 2"
+    names_alt: ["Human_alphaherpesvirus_2", "HSV-2", "herpes simplex virus 2", "HHV-2"]
+    taxid_ncbi: 10310
+    common_name: "Genital herpes (HSV-2)"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "STI"
+    alert_threshold: 10
+    action_required: "Antiviral therapy assessment. Patient counseling on transmission risk."
+    notes: "Primary cause of genital herpes. Lifelong latent infection with periodic reactivation."
+
+  - name: "Human alphaherpesvirus 1"
+    names_alt: ["Human_alphaherpesvirus_1", "HSV-1", "herpes simplex virus 1", "HHV-1"]
+    taxid_ncbi: 10298
+    common_name: "Herpes (HSV-1)"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "STI"
+    alert_threshold: 15
+    action_required: "Assess anatomical site of infection. Antiviral therapy if indicated."
+    notes: "Increasingly recognized as a cause of genital herpes in addition to orolabial disease."
+
+  - name: "Human papillomavirus"
+    names_alt: ["Human_papillomavirus", "HPV"]
+    taxid_ncbi: 10566
+    common_name: "HPV"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "STI"
+    alert_threshold: 15
+    action_required: "Assess for high-risk genotypes (16, 18). Refer for cervical screening if appropriate."
+    notes: "Family of over 200 related viruses. High-risk genotypes are associated with cervical and other anogenital cancers. Detection at genus level; genotype-level resolution may require additional analysis."
