@@ -92,6 +92,9 @@ class ConfigLoader:
             "processing_mode": "batch",
             "sample_handling": "by_barcode",
             "sample_name": "sample",
+            # Pipeline execution settings
+            "pipeline_profile": "docker",
+            "pipeline_source": "remote:master",
             # Batch settings (for realtime mode, batch_size=1 processes files immediately)
             "batch_size": 1,
             "min_batch_size": 1,
@@ -123,6 +126,12 @@ class ConfigLoader:
             if config is None:
                 logging.warning(f"Configuration file {config_path} is empty, using defaults")
                 config = self.create_default_config()
+
+            # Merge with defaults so missing keys get default values
+            defaults = self.create_default_config()
+            for key, value in defaults.items():
+                if key not in config:
+                    config[key] = value
 
             # Update timestamp for tracking
             config["timestamp"] = datetime.datetime.now().isoformat()
