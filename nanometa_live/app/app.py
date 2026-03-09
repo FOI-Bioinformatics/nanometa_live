@@ -494,7 +494,7 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
                                              "display": "inline-flex", "alignItems": "center", "justifyContent": "center"}),
                             html.Strong("Configure"),
                         ], className="d-flex align-items-center mb-1"),
-                        html.P("Go to the Configuration tab and set your input directory and Kraken2 database.",
+                        html.P("Go to the Configuration tab and set your input directory and Kraken2 database. Settings are saved automatically between sessions.",
                                className="text-muted small ms-4 mb-3"),
                     ]),
                     html.Div([

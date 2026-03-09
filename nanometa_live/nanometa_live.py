@@ -30,7 +30,7 @@ def parse_arguments():
     )
 
     parser.add_argument(
-        "--config", help="Path to an existing configuration file to load on startup"
+        "--config", help="Path to a configuration file to load on startup (overrides auto-loaded last session)"
     )
 
     parser.add_argument(
@@ -113,9 +113,18 @@ def main():
             logging.error(f"Failed to load configuration from {args.config}: {e}")
             config = config_loader.create_default_config()
     else:
-        # Always create a default config first, don't automatically load the most recent
-        config = config_loader.create_default_config()
-        logging.info("Created default configuration")
+        # Try to load last session config
+        last_session = os.path.join(data_dir, "configs", "last-session.yaml")
+        if os.path.exists(last_session):
+            try:
+                config = config_loader.load_config(last_session)
+                logging.info(f"Loaded last session configuration from {last_session}")
+            except Exception as e:
+                logging.warning(f"Failed to load last session config: {e}")
+                config = config_loader.create_default_config()
+        else:
+            config = config_loader.create_default_config()
+            logging.info("Created default configuration (no previous session found)")
 
     # Sync CLI port argument to config so GUI shows correct value
     config["gui_port"] = args.port

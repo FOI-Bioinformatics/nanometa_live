@@ -126,6 +126,15 @@ def create_header(title="Nanometa Live"):
                         style={"display": "inline-block"}
                     ),
 
+                    dbc.Badge(
+                        "Auto-saved",
+                        id="config-status-badge",
+                        color="success",
+                        className="me-2 align-self-center",
+                        pill=True,
+                        style={"fontSize": "0.75rem", "display": "none"}
+                    ),
+
                     dbc.Button(
                         [html.I(className="bi bi-play-fill me-2"), "Start Analysis"],
                         id="start-stop-button",

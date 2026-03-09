@@ -10,7 +10,9 @@ Handles all callback logic for the Watchlist management tab:
 """
 
 import logging
+import os
 import time
+import yaml
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -32,6 +34,17 @@ from nanometa_live.app.layouts.watchlist_layout import (
     create_missing_genome_item,
 )
 logger = logging.getLogger(__name__)
+
+
+def _save_last_session(config: Dict[str, Any]) -> None:
+    """Save config to last-session.yaml for persistence across restarts."""
+    try:
+        last_session_path = os.path.expanduser("~/.nanometa/configs/last-session.yaml")
+        os.makedirs(os.path.dirname(last_session_path), exist_ok=True)
+        with open(last_session_path, "w") as f:
+            yaml.safe_dump(config, f, default_flow_style=False)
+    except Exception:
+        logger.debug("Could not save last-session.yaml", exc_info=True)
 
 
 def register_watchlist_callbacks(app: Dash) -> None:
@@ -92,6 +105,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
             Output("watchlist-tab-state", "data", allow_duplicate=True),
             Output("watchlist-table-refresh", "data", allow_duplicate=True),
             Output("quick-start-feedback", "children"),
+            Output("app-config", "data", allow_duplicate=True),
         ],
         [
             Input("quick-start-clinical", "n_clicks"),
@@ -101,10 +115,13 @@ def register_watchlist_callbacks(app: Dash) -> None:
             Input("quick-start-cdc", "n_clicks"),
             Input("quick-start-who", "n_clicks"),
         ],
-        State("watchlist-table-refresh", "data"),
+        [
+            State("watchlist-table-refresh", "data"),
+            State("app-config", "data"),
+        ],
         prevent_initial_call=True,
     )
-    def quick_start_watchlist(clinical, foodborne, water, respiratory, cdc, who, current_refresh):
+    def quick_start_watchlist(clinical, foodborne, water, respiratory, cdc, who, current_refresh, current_config):
         """Toggle a predefined watchlist on/off with one click."""
         if not ctx.triggered_id:
             raise PreventUpdate
@@ -139,7 +156,6 @@ def register_watchlist_callbacks(app: Dash) -> None:
                         html.I(className="bi bi-x-circle text-secondary me-1"),
                         f"Disabled {wl_id.replace('_', ' ').title()} ({count} entries removed)"
                     ], className="text-secondary")
-                    return {"last_update": f"disable-{wl_id}"}, new_refresh, feedback
                 else:
                     # Enable the watchlist
                     manager.enable_watchlist(wl_id)
@@ -149,7 +165,14 @@ def register_watchlist_callbacks(app: Dash) -> None:
                         html.I(className="bi bi-check-circle text-success me-1"),
                         f"Enabled {wl_id.replace('_', ' ').title()} ({count} pathogens)"
                     ], className="text-success")
-                    return {"last_update": f"enable-{wl_id}"}, new_refresh, feedback
+
+                # Sync watchlist state to app-config and save to disk
+                updated_config = dict(current_config) if current_config else {}
+                updated_config["watchlist"] = manager.export_config()
+                _save_last_session(updated_config)
+
+                action = "disable" if is_enabled else "enable"
+                return {"last_update": f"{action}-{wl_id}"}, new_refresh, feedback, updated_config
 
             except Exception as e:
                 logger.warning(f"Failed to toggle watchlist {wl_id}: {e}")
@@ -157,7 +180,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
                     html.I(className="bi bi-exclamation-triangle text-warning me-1"),
                     f"Error toggling watchlist: {str(e)}"
                 ], className="text-warning")
-                return no_update, no_update, feedback
+                return no_update, no_update, feedback, no_update
 
         raise PreventUpdate
 
@@ -276,15 +299,17 @@ def register_watchlist_callbacks(app: Dash) -> None:
         [
             Output("watchlist-tab-state", "data", allow_duplicate=True),
             Output("watchlist-table-refresh", "data", allow_duplicate=True),
+            Output("app-config", "data", allow_duplicate=True),
         ],
         Input({"type": "watchlist-file-toggle", "index": ALL}, "value"),
         [
             State({"type": "watchlist-file-toggle", "index": ALL}, "id"),
             State("watchlist-table-refresh", "data"),
+            State("app-config", "data"),
         ],
         prevent_initial_call=True,
     )
-    def toggle_watchlist_file(values: List[bool], ids: List[Dict], current_refresh: int) -> Tuple[Dict, int]:
+    def toggle_watchlist_file(values: List[bool], ids: List[Dict], current_refresh: int, current_config: Optional[Dict]) -> Tuple[Dict, int, Dict]:
         """Handle watchlist file enable/disable toggles."""
         if not ctx.triggered_id:
             raise PreventUpdate
@@ -299,9 +324,14 @@ def register_watchlist_callbacks(app: Dash) -> None:
                 else:
                     manager.disable_watchlist(wl_id)
 
+        # Sync watchlist state to app-config and save to disk
+        updated_config = dict(current_config) if current_config else {}
+        updated_config["watchlist"] = manager.export_config()
+        _save_last_session(updated_config)
+
         # Return updated state and increment refresh counter
         new_refresh = (current_refresh or 0) + 1
-        return {"last_update": str(ctx.triggered_id)}, new_refresh
+        return {"last_update": str(ctx.triggered_id)}, new_refresh, updated_config
 
     # ---------------------------------------------------------------------
     # Watchlist Expand/Collapse
@@ -337,12 +367,18 @@ def register_watchlist_callbacks(app: Dash) -> None:
     # ---------------------------------------------------------------------
 
     @app.callback(
-        Output("watchlist-tab-state", "data", allow_duplicate=True),
+        [
+            Output("watchlist-tab-state", "data", allow_duplicate=True),
+            Output("app-config", "data", allow_duplicate=True),
+        ],
         Input({"type": "watchlist-nested-pathogen-toggle", "index": ALL, "watchlist": ALL}, "value"),
-        State({"type": "watchlist-nested-pathogen-toggle", "index": ALL, "watchlist": ALL}, "id"),
+        [
+            State({"type": "watchlist-nested-pathogen-toggle", "index": ALL, "watchlist": ALL}, "id"),
+            State("app-config", "data"),
+        ],
         prevent_initial_call=True,
     )
-    def toggle_nested_pathogen(values: List[bool], ids: List[Dict]) -> Dict:
+    def toggle_nested_pathogen(values: List[bool], ids: List[Dict], current_config: Optional[Dict]) -> Tuple[Dict, Dict]:
         """Handle individual pathogen enable/disable toggles within watchlist sections."""
         if not ctx.triggered_id:
             raise PreventUpdate
@@ -363,7 +399,13 @@ def register_watchlist_callbacks(app: Dash) -> None:
             if id_info.get("index") == taxid and id_info.get("watchlist") == watchlist_id:
                 manager = get_watchlist_manager()
                 manager.toggle_entry(taxid, value)
-                return {"last_update": f"nested-toggle-{taxid}"}
+
+                # Sync watchlist state to app-config and save to disk
+                updated_config = dict(current_config) if current_config else {}
+                updated_config["watchlist"] = manager.export_config()
+                _save_last_session(updated_config)
+
+                return {"last_update": f"nested-toggle-{taxid}"}, updated_config
 
         raise PreventUpdate
 

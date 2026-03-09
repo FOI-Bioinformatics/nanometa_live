@@ -264,7 +264,7 @@ def create_config_layout():
                                 className="me-2"
                             ),
                             dbc.Tooltip(
-                                "Save these settings to use again next time",
+                                "Save these settings as a named preset you can load later",
                                 target="save-config-button",
                                 placement="top"
                             ),
@@ -288,7 +288,8 @@ def create_config_layout():
                     html.I(className="bi bi-info-circle me-1 text-muted"),
                     html.Span(
                         "Click 'Apply Settings' to use these parameters. "
-                        "Use 'Save for Later' to store settings for future sessions.",
+                        "Settings are saved automatically and restored on next launch. "
+                        "Use 'Save for Later' to store named presets.",
                         className="text-muted",
                     )
                 ], className="d-block mt-2 mb-0"),

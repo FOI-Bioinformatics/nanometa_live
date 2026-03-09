@@ -579,6 +579,21 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 "color": "danger",
             }, True
 
+        # Auto-save config to last-session.yaml for session persistence
+        try:
+            from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
+            save_config = dict(config)
+            # Include current watchlist state if loaded
+            manager = get_watchlist_manager()
+            if manager._loaded:
+                save_config["watchlist"] = manager.export_config()
+            config_dir = os.path.expanduser("~/.nanometa/configs")
+            loader = ConfigLoader(config_dir)
+            loader.save_config(save_config, "last-session.yaml")
+            logging.debug("Auto-saved configuration to last-session.yaml")
+        except Exception as e:
+            logging.warning(f"Failed to auto-save configuration: {e}")
+
         return config, "Apply Settings", {
             "title": "Changes Applied",
             "message": f"Configuration changes have been applied. Analysis name: {analysis_name}",
