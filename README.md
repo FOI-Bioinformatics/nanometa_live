@@ -12,7 +12,7 @@ Nanometa Live provides real-time monitoring and visualization of taxonomic class
 - **Real-time Monitoring**: Watch classification results update as sequencing progresses
 - **Interactive Visualizations**: Sankey diagrams and sunburst charts for taxonomic exploration
 - **Multi-sample Support**: Analyze barcoded/multiplexed sequencing runs
-- **Pathogen Screening**: Built-in watchlists (Clinical Pathogens, CDC Bioterrorism, WHO Priority, Foodborne, Respiratory, Water Safety) with threat-level alerts and action guidance
+- **Pathogen Screening**: 9 built-in watchlists (Clinical Pathogens, Federal Select Agents, WHO Priority, Foodborne, Respiratory, Water Safety, Nosocomial/ESKAPE, Wastewater Surveillance, Zoonotic One Health) with threat-level alerts and action guidance
 - **Decision Support**: Traffic-light status indicators, severity-matched alerts, and confidence scoring for clinical operators
 - **Validation**: BLAST identity scores and minimap2 coverage validation of detected organisms
 - **Quality Control**: Nanopore-calibrated QC metrics with per-sample filtering statistics
@@ -98,7 +98,7 @@ Key settings in the Configuration tab:
 | **Quality Control** | Nanopore-calibrated quality metrics and filtering statistics |
 | **Taxonomy** | Interactive Sankey flow and sunburst charts for taxonomic exploration |
 | **Validation** | BLAST identity scores and minimap2 genome coverage plots |
-| **Watchlist** | Built-in pathogen watchlists (Clinical, CDC, WHO, Foodborne, Respiratory, Water) |
+| **Watchlist** | 9 built-in pathogen watchlists with quick-start buttons and custom import |
 | **Configuration** | Analysis settings, pipeline control, save/load configurations |
 | **Preparation** | Offline deployment wizard, genome import, readiness checks |
 
@@ -132,10 +132,14 @@ python -m nanometa_live.app \
 
 ```
 dash>=4.0.0
-dash-bootstrap-components>=2.0.0
-plotly>=5.0.0
-pandas>=1.3.0
-pyyaml>=5.4
+dash-ag-grid>=31.0.0
+dash-bootstrap-components>=1.7.1
+plotly>=6.0.0
+pandas>=2.2.3
+ruamel.yaml>=0.18.10
+biopython>=1.85
+psutil>=6.0.0
+diskcache>=5.6.0
 ```
 
 For pipeline execution:

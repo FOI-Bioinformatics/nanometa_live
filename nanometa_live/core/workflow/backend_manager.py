@@ -12,8 +12,12 @@ import sys
 import time
 import json
 import logging
+import platform
 import threading
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # Windows: file locking not available
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Tuple, IO
 from pathlib import Path
@@ -174,12 +178,13 @@ class BackendManager:
             self._lock_fd = open(lock_file, 'w')
 
             # Try to acquire exclusive, non-blocking lock
-            fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if fcntl:
+                fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
 
             # Write lock info for debugging
             lock_info = {
                 "pid": os.getpid(),
-                "hostname": os.uname().nodename,
+                "hostname": platform.node(),
                 "user": os.environ.get("USER", "unknown"),
                 "acquired_at": datetime.now().isoformat(),
                 "data_dir": self.data_dir
@@ -225,7 +230,8 @@ class BackendManager:
         """
         if self._lock_fd:
             try:
-                fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_UN)
+                if fcntl:
+                    fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_UN)
                 self._lock_fd.close()
                 logging.info("Released lock on results directory")
             except Exception as e:

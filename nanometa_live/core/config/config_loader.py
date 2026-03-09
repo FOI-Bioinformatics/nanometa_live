@@ -12,6 +12,8 @@ It provides functionality to:
 import os
 import logging
 import datetime
+
+logger = logging.getLogger(__name__)
 import glob
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Union
@@ -285,6 +287,34 @@ class ConfigLoader:
         configs.sort(key=lambda x: x["timestamp"], reverse=True)
 
         return configs
+
+    def delete_config(self, config_path: str) -> bool:
+        """
+        Delete a saved configuration file.
+
+        The auto-save file (last-session.yaml) cannot be deleted through
+        this method to prevent accidental loss of session state.
+
+        Args:
+            config_path: Path to the configuration file to delete.
+
+        Returns:
+            True if the file was deleted, False otherwise.
+        """
+        path = Path(config_path)
+        if path.name == "last-session.yaml":
+            logger.warning("Cannot delete the auto-save configuration")
+            return False
+        if not path.exists():
+            logger.warning(f"Config file not found: {config_path}")
+            return False
+        try:
+            path.unlink()
+            logger.info(f"Deleted config: {path.name}")
+            return True
+        except OSError as e:
+            logger.error(f"Failed to delete config {path.name}: {e}")
+            return False
 
     def get_most_recent_config(self) -> Optional[Dict[str, Any]]:
         """

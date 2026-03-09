@@ -1,4 +1,4 @@
-dash>=2.18.2
+dash>=4.0.0
 dash-ag-grid>=31.0.0
 dash-bootstrap-components>=1.7.1
 dash-daq>=0.6.0
@@ -10,7 +10,6 @@ biopython>=1.85
 tqdm>=4.67.1
 pyfastx>=2.2.0
 flask>=3.1.0
-scipy>=1.10.0
 requests>=2.32.3
 diskcache>=5.6.0
 psutil>=6.0.0  # Required for Dash DiskcacheManager
