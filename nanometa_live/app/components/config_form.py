@@ -286,9 +286,8 @@ def create_config_form():
                                 ], className="mt-2"),
                             ], md=12),
                         ]),
-                        # Hidden inputs to maintain backward compatibility
+                        # Hidden input to maintain backward compatibility
                         dbc.Input(id="kraken-taxonomy-input", type="hidden", value="gtdb"),
-                        dbc.Input(id="watchlist-taxonomy-mode", type="hidden", value="auto"),
                     ])
                 ], className="mb-3"),
 

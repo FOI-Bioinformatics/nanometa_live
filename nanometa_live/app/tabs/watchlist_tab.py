@@ -12,7 +12,6 @@ Handles all callback logic for the Watchlist management tab:
 import logging
 import os
 import time
-import yaml
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -39,10 +38,10 @@ logger = logging.getLogger(__name__)
 def _save_last_session(config: Dict[str, Any]) -> None:
     """Save config to last-session.yaml for persistence across restarts."""
     try:
-        last_session_path = os.path.expanduser("~/.nanometa/configs/last-session.yaml")
-        os.makedirs(os.path.dirname(last_session_path), exist_ok=True)
-        with open(last_session_path, "w") as f:
-            yaml.safe_dump(config, f, default_flow_style=False)
+        from nanometa_live.core.config.config_loader import ConfigLoader
+        config_dir = os.path.expanduser("~/.nanometa/configs")
+        loader = ConfigLoader(config_dir)
+        loader.save_config(config, "last-session.yaml")
     except Exception:
         logger.debug("Could not save last-session.yaml", exc_info=True)
 

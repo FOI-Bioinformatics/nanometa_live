@@ -79,6 +79,8 @@ class ConfigLoader:
             "e_val_cutoff": 0.01,
             "validation_hit_rate_threshold": 0.5,
             "validation_identity_threshold": 90.0,
+            "minimap2_preset": "map-ont",
+            "minimap2_min_mapq": 30,
             # Genome cache directory for downloaded reference genomes
             "genome_cache_dir": os.path.join(os.path.expanduser("~"), ".nanometa"),
             "external_kraken2_db": "",
@@ -86,6 +88,14 @@ class ConfigLoader:
             "conda_frontend": "mamba",
             "remove_temp_files": True,
             "main_dir": "",
+            # QC and analysis tools
+            "qc_tool": "fastp",
+            "skip_nanoplot": False,
+            # Kraken2 realtime incremental classification
+            "kraken2_enable_incremental": True,
+            # Visualization options
+            "enable_krona_plots": False,
+            "enable_nanopore_stats_mqc": False,
             # Offline mode: when enabled, skip all network calls and use cached data only
             "offline_mode": False,
             # Processing mode settings
@@ -95,6 +105,8 @@ class ConfigLoader:
             # Pipeline execution settings
             "pipeline_profile": "docker",
             "pipeline_source": "remote:master",
+            # Realtime mode settings
+            "max_file_age_minutes": 1000000,
             # Batch settings (for realtime mode, batch_size=1 processes files immediately)
             "batch_size": 1,
             "min_batch_size": 1,
