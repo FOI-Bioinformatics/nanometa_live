@@ -384,7 +384,7 @@ def create_dashboard_layout():
         ], className="mb-2"),
 
         # =============================================
-        # 4. KEY METRICS GRID (4 cards) + timestamp
+        # 4. KEY METRICS GRID (5 cards) + timestamp
         # =============================================
         html.Div([
             html.Span(id="dashboard-last-updated-badge", children=[
@@ -392,6 +392,24 @@ def create_dashboard_layout():
             ])
         ], className="text-end mb-1"),
         dbc.Row([
+            # Input Files
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.Div([
+                            html.I(className="bi bi-files", style={"fontSize": "28px", "color": "#6c757d"}),
+                        ], className="mb-1"),
+                        html.H3(
+                            id="dashboard-total-files-count",
+                            children="0",
+                            className="mb-0"
+                        ),
+                        html.Span(id="dashboard-total-files-trend", children="", className="metric-trend"),
+                        html.P("Input Files", className="text-muted small mb-0")
+                    ], className="text-center py-2")
+                ], className="h-100 dashboard-metric-card")
+            ], className="mb-3"),
+
             # Sequences Processed
             dbc.Col([
                 dbc.Card([
@@ -408,7 +426,7 @@ def create_dashboard_layout():
                         html.P("Sequences", className="text-muted small mb-0")
                     ], className="text-center py-2")
                 ], className="h-100 dashboard-metric-card")
-            ], md=3, className="mb-3"),
+            ], className="mb-3"),
 
             # Quality Score
             dbc.Col([
@@ -430,7 +448,7 @@ def create_dashboard_layout():
                         )
                     ], className="text-center py-2")
                 ], className="h-100 dashboard-metric-card")
-            ], md=3, className="mb-3"),
+            ], className="mb-3"),
 
             # Organisms Detected
             dbc.Col([
@@ -448,7 +466,7 @@ def create_dashboard_layout():
                         html.P("Organisms", className="text-muted small mb-0")
                     ], className="text-center py-2")
                 ], className="h-100 dashboard-metric-card")
-            ], md=3, className="mb-3"),
+            ], className="mb-3"),
 
             # Active Alerts
             dbc.Col([
@@ -470,7 +488,7 @@ def create_dashboard_layout():
                         html.P("Alerts", className="text-muted small mb-0")
                     ], className="text-center py-2")
                 ], id="dashboard-alerts-card", className="h-100 dashboard-metric-card")
-            ], md=3, className="mb-3"),
+            ], className="mb-3"),
         ]),
 
         # =============================================

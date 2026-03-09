@@ -319,6 +319,8 @@ def register_dashboard_callbacks(app: Dash):
     # ================================================================
     @app.callback(
         [
+            Output("dashboard-total-files-count", "children"),
+            Output("dashboard-total-files-trend", "children"),
             Output("dashboard-sequences-count", "children"),
             Output("dashboard-quality-score", "children"),
             Output("dashboard-organisms-count", "children"),
@@ -345,17 +347,31 @@ def register_dashboard_callbacks(app: Dash):
     def update_dashboard_metrics(n_intervals, selected_dashboard_sample, config, status, available_samples, prev_cache):
         """Update dashboard metric cards (sequences, quality, organisms, alerts icon)."""
         empty_trend = ""
-        idle_metrics = ("0", "--", "0", "0", "bi bi-bell", {"fontSize": "32px", "color": "#6c757d"},
+        idle_metrics = ("0", empty_trend,
+                        "0", "--", "0", "0", "bi bi-bell", {"fontSize": "32px", "color": "#6c757d"},
                         empty_trend, empty_trend, empty_trend, empty_trend, prev_cache or {})
 
         should_load, main_dir = _should_load_data(config, status, available_samples)
         if not should_load:
+            # Still show total files count even when idle
+            nanopore_dir = config.get("nanopore_output_directory") or config.get("nanopore_dir", "") if config else ""
+            if nanopore_dir:
+                total_files = _count_input_files(nanopore_dir)
+                idle_with_files = (str(total_files), empty_trend,
+                                   "0", "--", "0", "0", "bi bi-bell", {"fontSize": "32px", "color": "#6c757d"},
+                                   empty_trend, empty_trend, empty_trend, empty_trend, prev_cache or {})
+                return idle_with_files
             return idle_metrics
 
         try:
             available_samples = _resolve_samples(main_dir, available_samples)
             pipeline_running = status.get("running", False)
             metric_sample = selected_dashboard_sample if selected_dashboard_sample else "All Samples"
+
+            # Count total input files
+            nanopore_dir = config.get("nanopore_output_directory") or config.get("nanopore_dir", "") if config else ""
+            total_files = _count_input_files(nanopore_dir) if nanopore_dir else 0
+            total_files_display = str(total_files)
 
             overall_status = _calculate_overall_status(main_dir, config, available_samples, pipeline_running)
 
@@ -421,6 +437,10 @@ def register_dashboard_callbacks(app: Dash):
             except (ValueError, TypeError):
                 cur_organisms = 0
 
+            # Total files trend
+            prev_files = prev_cache.get("total_files", 0)
+            files_trend = TrendIndicator(total_files - prev_files, "files") if total_files != prev_files and prev_files > 0 else ""
+
             # Only show trends when we have previous data to compare against
             if prev_reads > 0 or prev_organisms > 0:
                 seq_trend = TrendIndicator(cur_reads - prev_reads, "reads") if cur_reads != prev_reads else ""
@@ -433,6 +453,7 @@ def register_dashboard_callbacks(app: Dash):
 
             # Update cache with current values
             new_cache = {
+                "total_files": total_files,
                 "reads": cur_reads,
                 "quality": cur_quality,
                 "organisms": cur_organisms,
@@ -440,6 +461,7 @@ def register_dashboard_callbacks(app: Dash):
             }
 
             return (
+                total_files_display, files_trend,
                 sequences_count, quality_score, organisms_count,
                 alerts_count_display, alerts_icon_class, alerts_icon_style,
                 seq_trend, quality_trend, org_trend, alerts_trend, new_cache,
@@ -447,7 +469,8 @@ def register_dashboard_callbacks(app: Dash):
         except Exception as e:
             logger.error(f"Error updating dashboard metrics: {e}", exc_info=True)
             empty_trend = ""
-            return ("0", "--", "0", "1", "bi bi-bell-fill", {"fontSize": "32px", "color": "#dc3545"},
+            return ("0", empty_trend,
+                    "0", "--", "0", "1", "bi bi-bell-fill", {"fontSize": "32px", "color": "#dc3545"},
                     empty_trend, empty_trend, empty_trend, empty_trend, prev_cache or {})
 
     # ================================================================
