@@ -6,15 +6,18 @@ for installing and running the Nanometa Live application.
 """
 
 from setuptools import setup, find_packages
-import os, re
 
 
 from nanometa_live import __version__
 
 
-# Read requirements.txt for dependencies
+# Read requirements.txt for dependencies, filtering comments and blank lines
 with open('requirements.txt', 'r') as f:
-    requirements = f.read().splitlines()
+    requirements = [
+        line.split('#')[0].strip()
+        for line in f
+        if line.strip() and not line.strip().startswith('#')
+    ]
 
 setup(
     name="Nanometa_Live",
@@ -39,6 +42,9 @@ setup(
     entry_points={
         'console_scripts': [
             'nanometa-live=nanometa_live.nanometa_live:main',
+            # Deprecated: nanometa-sim is superseded by nanorunner.
+            # Retained as a stub that prints a deprecation notice.
+            # Remove this entry point in a future release.
             'nanometa-sim=nanometa_live.nanopore_simulator:nano_sim',
             'nanometa-prepare=nanometa_live.cli.prepare:main'
         ]

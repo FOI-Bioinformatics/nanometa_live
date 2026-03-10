@@ -25,6 +25,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Upload validation feedback with detailed error messages
 
 ### Changed
+- `nanometa-sim` deprecated in favour of nanorunner (stub prints notice and exits)
 - Default server binding from 0.0.0.0 to 127.0.0.1 (security)
 - Dash version requirement from >=2.18.2 to >=4.0.0
 - README requirements section updated to match actual dependencies
@@ -34,6 +35,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `nanometa_demo.py` commands use list form instead of `shell=True`
 
 ### Fixed
+- `setup.py` install_requires failing due to unfiltered comments from requirements.txt
+- Pathogen modal using wrong config key for results directory
+- Redundant `_collect_samples_data()` calls (3-5x per tick reduced to 1x via status cache)
+- Watchlist toggle state not persisted across restarts (now saved to `~/.nanometa/`)
 - `delete_config()` using undefined logger variable
 - `fcntl` import crash on Windows
 - `os.uname()` crash on Windows (replaced with `platform.node()`)
@@ -46,6 +51,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 - Unused `scipy` dependency
+- `pyfastx` dependency (only used by deprecated nanometa-sim)
 
 ## [0.6.1] - 2026-03-08
 

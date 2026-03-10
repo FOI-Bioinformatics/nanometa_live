@@ -249,8 +249,10 @@ def register_dashboard_callbacks(app: Dash):
             available_samples = _resolve_samples(main_dir, available_samples)
             pipeline_running = status.get("running", False)
             overall_status = _calculate_overall_status(main_dir, config, available_samples, pipeline_running)
-            # Include main_dir so downstream callbacks don't need to recompute it
+            # Include main_dir and samples_data so downstream callbacks don't recompute
             overall_status["_main_dir"] = main_dir
+            overall_status["_samples_data"] = _collect_samples_data(main_dir, available_samples)
+            overall_status["_available_samples"] = available_samples
             return overall_status
         except Exception as e:
             logger.error(f"Error computing overall status cache: {e}", exc_info=True)
@@ -415,8 +417,8 @@ def register_dashboard_callbacks(app: Dash):
                 quality_score = str(overall_status['quality_score']) if overall_status['quality_score'] else "--"
                 organisms_count = str(overall_status['organisms_detected'])
 
-            # Alerts count for icon (lightweight - just count)
-            samples_data = _collect_samples_data(main_dir, available_samples)
+            # Alerts count for icon (lightweight - read cached samples_data)
+            samples_data = overall_status.get("_samples_data", [])
             alerts_data = _generate_alerts(overall_status, main_dir, config, samples_data)
             alerts_count_val = len(alerts_data)
             alerts_count_display = str(alerts_count_val)
@@ -504,23 +506,16 @@ def register_dashboard_callbacks(app: Dash):
             Output("dashboard-sample-count", "children"),
         ],
         [
-            Input("update-interval", "n_intervals"),
+            Input("dashboard-overall-status-cache", "data"),
         ],
-        [
-            State("app-config", "data"),
-            State("backend-status", "data"),
-            State("available-samples", "data"),
-        ]
     )
-    def update_dashboard_sample_table(n_intervals, config, status, available_samples):
-        """Update the dashboard sample table."""
-        should_load, main_dir = _should_load_data(config, status, available_samples)
-        if not should_load:
+    def update_dashboard_sample_table(overall_status):
+        """Update the dashboard sample table using cached samples data."""
+        if not overall_status:
             return [], "0 samples"
 
         try:
-            available_samples = _resolve_samples(main_dir, available_samples)
-            samples_data = _collect_samples_data(main_dir, available_samples)
+            samples_data = overall_status.get("_samples_data", [])
             return samples_data, f"{len(samples_data)} samples"
         except Exception as e:
             logger.error(f"Error updating dashboard sample table: {e}", exc_info=True)
@@ -550,9 +545,8 @@ def register_dashboard_callbacks(app: Dash):
 
         try:
             main_dir = overall_status.get("_main_dir", "")
-            available_samples = _resolve_samples(main_dir, available_samples)
 
-            samples_data = _collect_samples_data(main_dir, available_samples)
+            samples_data = overall_status.get("_samples_data", [])
             alerts_data = _generate_alerts(overall_status, main_dir, config, samples_data)
 
             alerts_panel = create_alerts_list(alerts_data)
@@ -1127,7 +1121,7 @@ def register_dashboard_callbacks(app: Dash):
         organism_name = None
         organism_rank = None
         try:
-            main_dir = config.get("main_dir", "") if config else ""
+            main_dir = (config.get("results_output_directory", "") or config.get("main_dir", "")) if config else ""
             if main_dir:
                 kraken_df = load_kraken_data(main_dir, selected_sample)
                 if not kraken_df.empty and taxid:

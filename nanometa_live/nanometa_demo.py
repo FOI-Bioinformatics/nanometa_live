@@ -110,8 +110,10 @@ def main():
         except subprocess.CalledProcessError as e:
             logging.error(f"Failed to execute: {command}. Error: {e}")
 
+    # Note: nanometa-sim has been deprecated in favour of nanorunner.
+    # The demo now uses nanorunner to simulate sequencing output.
     commands = [
-        ["nanometa-sim", "-i", fastq_dir, "-o", live_dir],
+        ["nanorunner", "generate", "--input-dir", fastq_dir, "--output-dir", live_dir],
         ["nanometa-live", "-p", args.path],
     ]
 

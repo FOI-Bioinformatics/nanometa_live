@@ -18,6 +18,7 @@ with a single, unified approach.
 """
 
 import logging
+import os
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
@@ -434,6 +435,9 @@ class WatchlistManager:
                     self.enable_watchlist(wl_id)
             logger.info(f"Re-enabled {len(pre_enabled)} pre-existing watchlists: {pre_enabled}")
 
+        # Restore per-entry enabled/disabled state from previous session
+        self._restore_toggle_state()
+
         self._loaded = True
         logger.info(f"WatchlistManager loaded {len(self._entries)} entries "
                    f"(taxonomy mode: {self._taxonomy_mode})")
@@ -774,14 +778,15 @@ class WatchlistManager:
         return False
 
     def toggle_entry(self, taxid: int, enabled: bool) -> bool:
-        """Enable or disable an entry."""
+        """Enable or disable an entry and persist state to disk."""
         if taxid in self._entries:
             self._entries[taxid].enabled = enabled
+            self._save_toggle_state()
             return True
         return False
 
     def toggle_category(self, category: str, enabled: bool) -> int:
-        """Enable or disable all entries in a category."""
+        """Enable or disable all entries in a category and persist state."""
         if category not in BUILTIN_CATEGORIES:
             return 0
 
@@ -801,11 +806,51 @@ class WatchlistManager:
         else:
             self._enabled_categories.discard(category)
 
+        if count > 0:
+            self._save_toggle_state()
+
         return count
 
     def get_enabled_categories(self) -> Set[str]:
         """Get the set of enabled builtin categories."""
         return self._enabled_categories.copy()
+
+    @staticmethod
+    def _toggle_state_path() -> Path:
+        """Path to the toggle state persistence file."""
+        return Path(os.path.expanduser("~/.nanometa/watchlist_toggle_state.yaml"))
+
+    def _save_toggle_state(self) -> None:
+        """Save disabled taxid set to disk for persistence across restarts."""
+        try:
+            disabled = [taxid for taxid, entry in self._entries.items() if not entry.enabled]
+            state_path = self._toggle_state_path()
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(state_path, "w") as f:
+                yaml.dump({"disabled_taxids": disabled}, f, default_flow_style=False)
+        except Exception as e:
+            logger.debug(f"Could not save toggle state: {e}")
+
+    def _restore_toggle_state(self) -> None:
+        """Restore disabled taxid set from disk after loading entries."""
+        try:
+            state_path = self._toggle_state_path()
+            if not state_path.exists():
+                return
+            with open(state_path) as f:
+                data = yaml.safe_load(f) or {}
+            disabled = set(data.get("disabled_taxids", []))
+            if not disabled:
+                return
+            count = 0
+            for taxid in disabled:
+                if taxid in self._entries:
+                    self._entries[taxid].enabled = False
+                    count += 1
+            if count:
+                logger.info(f"Restored toggle state: {count} entries disabled from previous session")
+        except Exception as e:
+            logger.debug(f"Could not restore toggle state: {e}")
 
     # -------------------------------------------------------------------------
     # New methods for YAML-based watchlists and multi-taxonomy support

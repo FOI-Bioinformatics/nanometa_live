@@ -328,6 +328,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         try:
             # Create a new config object with all current settings
             new_config = dict(config)  # Create a copy
+            new_config["analysis_name"] = config_name
 
             # Save the config using the ConfigLoader
             config_loader = ConfigLoader(os.path.join(data_dir, "configs"))
@@ -551,6 +552,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 errors.append("CPU Cores must be at least 1")
 
         if gui_port is not None:
+            gui_port = int(gui_port)
             if gui_port < 1024 or gui_port > 65535:
                 errors.append("GUI Port must be between 1024-65535")
 

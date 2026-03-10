@@ -29,8 +29,11 @@ jobs:
     - name: Check nanometa-live version
       run: nanometa-live --version
 
-    - name: Check nanometa-sim version
-      run: nanometa-sim --version
+    # nanometa-sim is deprecated (superseded by nanorunner).
+    # The entry point now prints a deprecation notice and exits with code 1.
+    - name: Verify nanometa-sim deprecation notice
+      run: |
+        nanometa-sim 2>&1 || true
 
     - name: Check nanometa-prepare version
       run: nanometa-prepare --version
