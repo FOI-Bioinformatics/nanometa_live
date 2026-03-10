@@ -44,6 +44,12 @@ def parse_arguments():
     )
 
     parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host to bind the server to (default: 127.0.0.1, use 0.0.0.0 for network access)",
+    )
+
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Run in debug mode with more verbose output",
@@ -101,7 +107,7 @@ def main():
         app = create_app(config, data_dir, backend_manager)
 
         # Start server
-        app.run(host="0.0.0.0", port=args.port, debug=args.debug)
+        app.run(host=args.host, port=args.port, debug=args.debug)
 
     else:
         # Full mode - use the main nanometa_live entry point

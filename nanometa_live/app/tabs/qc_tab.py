@@ -649,11 +649,22 @@ def register_qc_callbacks(app: Dash):
 
         try:
             # Determine export directory
+            main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
             if export_dir:
                 export_path = export_dir
             else:
-                main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
                 export_path = os.path.join(main_dir, "reports")
+
+            # Path traversal protection: ensure export path is within main_dir
+            if main_dir:
+                resolved_export = os.path.realpath(export_path)
+                resolved_base = os.path.realpath(main_dir)
+                if not resolved_export.startswith(resolved_base + os.sep) and resolved_export != resolved_base:
+                    return {
+                        "title": "Export Failed",
+                        "message": "Export directory must be within the results directory.",
+                        "color": "danger",
+                    }
 
             # Create directory if it doesn't exist
             os.makedirs(export_path, exist_ok=True)

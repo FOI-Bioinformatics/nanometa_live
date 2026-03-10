@@ -1030,11 +1030,15 @@ def register_dashboard_callbacks(app: Dash):
             if kraken_df.empty:
                 return create_classification_donut(0, 0)
 
-            # Calculate classified vs unclassified
-            total_reads = int(kraken_df["reads"].sum())
+            # Calculate classified vs unclassified using cumul_reads
+            # In Kraken2 reports, taxid 0 (unclassified) and taxid 1 (root)
+            # have cumul_reads values that represent total unclassified and
+            # classified reads respectively. Using these top-level cumulative
+            # counts is the standard approach for Kraken2 report parsing.
             unclassified_row = kraken_df[kraken_df["taxid"] == 0]
-            unclassified = int(unclassified_row.iloc[0]["reads"]) if not unclassified_row.empty else 0
-            classified = total_reads - unclassified
+            unclassified = int(unclassified_row.iloc[0]["cumul_reads"]) if not unclassified_row.empty else 0
+            root_row = kraken_df[kraken_df["taxid"] == 1]
+            classified = int(root_row.iloc[0]["cumul_reads"]) if not root_row.empty else 0
 
             return create_classification_donut(classified, unclassified)
 

@@ -350,6 +350,7 @@ class WatchlistManager:
 
     def __init__(self):
         """Initialize the watchlist manager."""
+        self._lock = threading.Lock()
         self._entries: Dict[int, WatchlistEntry] = {}
         self._name_index: Dict[str, int] = {}  # name.lower() -> taxid
         self._enabled_categories: Set[str] = set()
@@ -371,6 +372,11 @@ class WatchlistManager:
         Args:
             config: Application configuration dictionary
         """
+        with self._lock:
+            self._load_config_locked(config)
+
+    def _load_config_locked(self, config: Dict[str, Any]) -> None:
+        """Internal load_config implementation (caller must hold self._lock)."""
         # Preserve watchlists that were already enabled via enable_watchlist()
         # before load_config was called (race condition with Dash callbacks).
         pre_enabled = set(self._enabled_watchlists)
@@ -432,7 +438,7 @@ class WatchlistManager:
         if pre_enabled:
             for wl_id in pre_enabled:
                 if wl_id not in self._enabled_watchlists:
-                    self.enable_watchlist(wl_id)
+                    self._enable_watchlist_locked(wl_id)
             logger.info(f"Re-enabled {len(pre_enabled)} pre-existing watchlists: {pre_enabled}")
 
         # Restore per-entry enabled/disabled state from previous session
@@ -758,58 +764,62 @@ class WatchlistManager:
 
     def add_custom_entry(self, entry_data: Dict[str, Any]) -> WatchlistEntry:
         """Add a custom entry to the watchlist."""
-        self._add_entry_from_dict(entry_data, WatchlistSource.USER)
-        taxid = entry_data.get("taxid") or hash(entry_data.get("name", "").lower()) % (10**9)
-        return self._entries.get(taxid)
+        with self._lock:
+            self._add_entry_from_dict(entry_data, WatchlistSource.USER)
+            taxid = entry_data.get("taxid") or hash(entry_data.get("name", "").lower()) % (10**9)
+            return self._entries.get(taxid)
 
     def remove_entry(self, taxid: int) -> bool:
         """Remove an entry from the watchlist."""
-        if taxid in self._entries:
-            entry = self._entries[taxid]
-            # Don't allow removing builtin entries, just disable them
-            if entry.source == WatchlistSource.BUILTIN:
-                entry.enabled = False
-                return True
-            else:
-                del self._entries[taxid]
-                # Remove from name index
-                self._name_index = {k: v for k, v in self._name_index.items() if v != taxid}
-                return True
-        return False
+        with self._lock:
+            if taxid in self._entries:
+                entry = self._entries[taxid]
+                # Don't allow removing builtin entries, just disable them
+                if entry.source == WatchlistSource.BUILTIN:
+                    entry.enabled = False
+                    return True
+                else:
+                    del self._entries[taxid]
+                    # Remove from name index
+                    self._name_index = {k: v for k, v in self._name_index.items() if v != taxid}
+                    return True
+            return False
 
     def toggle_entry(self, taxid: int, enabled: bool) -> bool:
         """Enable or disable an entry and persist state to disk."""
-        if taxid in self._entries:
-            self._entries[taxid].enabled = enabled
-            self._save_toggle_state()
-            return True
-        return False
+        with self._lock:
+            if taxid in self._entries:
+                self._entries[taxid].enabled = enabled
+                self._save_toggle_state()
+                return True
+            return False
 
     def toggle_category(self, category: str, enabled: bool) -> int:
         """Enable or disable all entries in a category and persist state."""
-        if category not in BUILTIN_CATEGORIES:
-            return 0
+        with self._lock:
+            if category not in BUILTIN_CATEGORIES:
+                return 0
 
-        count = 0
-        cat_filter = BUILTIN_CATEGORIES[category]["filter"]
+            count = 0
+            cat_filter = BUILTIN_CATEGORIES[category]["filter"]
 
-        for entry in self._entries.values():
-            # Convert to pathogen entry for filter check
-            if entry.source == WatchlistSource.BUILTIN:
-                pathogen = entry.to_pathogen_entry()
-                if cat_filter(pathogen):
-                    entry.enabled = enabled
-                    count += 1
+            for entry in self._entries.values():
+                # Convert to pathogen entry for filter check
+                if entry.source == WatchlistSource.BUILTIN:
+                    pathogen = entry.to_pathogen_entry()
+                    if cat_filter(pathogen):
+                        entry.enabled = enabled
+                        count += 1
 
-        if enabled:
-            self._enabled_categories.add(category)
-        else:
-            self._enabled_categories.discard(category)
+            if enabled:
+                self._enabled_categories.add(category)
+            else:
+                self._enabled_categories.discard(category)
 
-        if count > 0:
-            self._save_toggle_state()
+            if count > 0:
+                self._save_toggle_state()
 
-        return count
+            return count
 
     def get_enabled_categories(self) -> Set[str]:
         """Get the set of enabled builtin categories."""
@@ -942,6 +952,11 @@ class WatchlistManager:
         Returns:
             Number of entries added
         """
+        with self._lock:
+            return self._enable_watchlist_locked(watchlist_id)
+
+    def _enable_watchlist_locked(self, watchlist_id: str) -> int:
+        """Internal enable_watchlist (caller must hold self._lock)."""
         if watchlist_id in self._enabled_watchlists:
             return 0  # Already enabled
 
@@ -988,42 +1003,43 @@ class WatchlistManager:
         Returns:
             Number of entries affected
         """
-        if watchlist_id not in self._enabled_watchlists:
-            return 0  # Already disabled
+        with self._lock:
+            if watchlist_id not in self._enabled_watchlists:
+                return 0  # Already disabled
 
-        count = 0
-        entries_to_remove = []
+            count = 0
+            entries_to_remove = []
 
-        for taxid, entry in list(self._entries.items()):
-            # Check both legacy watchlist_id and new watchlist_ids set
-            has_this_watchlist = (
-                watchlist_id in entry.watchlist_ids or
-                entry.watchlist_id == watchlist_id
-            )
+            for taxid, entry in list(self._entries.items()):
+                # Check both legacy watchlist_id and new watchlist_ids set
+                has_this_watchlist = (
+                    watchlist_id in entry.watchlist_ids or
+                    entry.watchlist_id == watchlist_id
+                )
 
-            if has_this_watchlist:
-                # Remove this watchlist from the entry's sources
-                entry.watchlist_ids.discard(watchlist_id)
-                if entry.watchlist_id == watchlist_id:
-                    entry.watchlist_id = None
+                if has_this_watchlist:
+                    # Remove this watchlist from the entry's sources
+                    entry.watchlist_ids.discard(watchlist_id)
+                    if entry.watchlist_id == watchlist_id:
+                        entry.watchlist_id = None
 
-                count += 1
+                    count += 1
 
-                # Check if entry still has other sources
-                if not entry.watchlist_ids:
-                    # No remaining sources - remove entry from table
-                    # Entry will be re-added when watchlist is enabled again
-                    entries_to_remove.append(taxid)
-                # else: Entry still active from other watchlists
+                    # Check if entry still has other sources
+                    if not entry.watchlist_ids:
+                        # No remaining sources - remove entry from table
+                        # Entry will be re-added when watchlist is enabled again
+                        entries_to_remove.append(taxid)
+                    # else: Entry still active from other watchlists
 
-        # Remove entries with no remaining sources
-        for taxid in entries_to_remove:
-            del self._entries[taxid]
-            self._name_index = {k: v for k, v in self._name_index.items() if v != taxid}
+            # Remove entries with no remaining sources
+            for taxid in entries_to_remove:
+                del self._entries[taxid]
+                self._name_index = {k: v for k, v in self._name_index.items() if v != taxid}
 
-        self._enabled_watchlists.discard(watchlist_id)
-        logger.info(f"Disabled watchlist {watchlist_id}: {count} entries affected")
-        return count
+            self._enabled_watchlists.discard(watchlist_id)
+            logger.info(f"Disabled watchlist {watchlist_id}: {count} entries affected")
+            return count
 
     def get_enabled_watchlists(self) -> Set[str]:
         """Get the set of enabled watchlist IDs."""
@@ -1116,18 +1132,19 @@ class WatchlistManager:
         Returns:
             True if updated successfully
         """
-        if taxid not in self._entries:
-            return False
+        with self._lock:
+            if taxid not in self._entries:
+                return False
 
-        entry = self._entries[taxid]
+            entry = self._entries[taxid]
 
-        # Store original if not already overridden
-        if not entry.user_override:
-            entry.original_threshold = entry.alert_threshold
-            entry.user_override = True
+            # Store original if not already overridden
+            if not entry.user_override:
+                entry.original_threshold = entry.alert_threshold
+                entry.user_override = True
 
-        entry.alert_threshold = threshold
-        return True
+            entry.alert_threshold = threshold
+            return True
 
     def export_config(self) -> Dict[str, Any]:
         """Export the current watchlist configuration."""
@@ -1519,15 +1536,18 @@ class WatchlistManager:
         return alerts
 
 
-# Module-level singleton instance
+# Module-level singleton instance with thread-safe initialization.
 _watchlist_manager: Optional[WatchlistManager] = None
+_wm_lock = threading.Lock()
 
 
 def get_watchlist_manager() -> WatchlistManager:
-    """Get the global watchlist manager instance."""
+    """Get the global watchlist manager instance (thread-safe)."""
     global _watchlist_manager
     if _watchlist_manager is None:
-        _watchlist_manager = WatchlistManager()
+        with _wm_lock:
+            if _watchlist_manager is None:
+                _watchlist_manager = WatchlistManager()
     return _watchlist_manager
 
 

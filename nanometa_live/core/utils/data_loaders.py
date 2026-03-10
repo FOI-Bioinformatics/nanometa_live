@@ -51,37 +51,32 @@ def _is_file_stable(filepath: str, wait_ms: int = FILE_STABILITY_CHECK_INTERVAL_
     Check if a file is stable (not currently being written to).
 
     In real-time mode, Nextflow may still be writing to files when the dashboard
-    polls for updates. This function checks if the file size is stable over a
-    short interval, indicating the write operation has completed.
+    polls for updates. This function checks whether the file's modification time
+    is older than a threshold, indicating the write operation has completed.
+    This avoids blocking the callback thread with sleep calls.
 
     Args:
         filepath: Path to the file to check
-        wait_ms: Milliseconds to wait between size checks (default: 200ms)
+        wait_ms: Age threshold in milliseconds; the file's mtime must be at
+            least this old to be considered stable (default: 200ms)
 
     Returns:
-        True if file exists, has content, and size is stable; False otherwise
+        True if file exists, has content, and mtime is sufficiently old; False otherwise
     """
     try:
-        if not os.path.exists(filepath):
-            return False
-
-        # Get initial size
-        size1 = os.path.getsize(filepath)
+        stat_result = os.stat(filepath)
 
         # File must have minimum content
-        if size1 < FILE_STABILITY_MIN_SIZE_BYTES:
-            logging.debug(f"File too small ({size1} bytes), may be incomplete: {filepath}")
+        if stat_result.st_size < FILE_STABILITY_MIN_SIZE_BYTES:
+            logging.debug(f"File too small ({stat_result.st_size} bytes), may be incomplete: {filepath}")
             return False
 
-        # Wait and check again
-        time.sleep(wait_ms / 1000.0)
+        # File is stable if its mtime is older than the threshold
+        age_seconds = time.time() - stat_result.st_mtime
+        threshold_seconds = max(wait_ms / 1000.0, 1.0)
 
-        # Get size after wait
-        size2 = os.path.getsize(filepath)
-
-        # File is stable if size hasn't changed
-        if size1 != size2:
-            logging.debug(f"File size changed ({size1} -> {size2}), still being written: {filepath}")
+        if age_seconds < threshold_seconds:
+            logging.debug(f"File modified {age_seconds:.2f}s ago, may still be written: {filepath}")
             return False
 
         return True
