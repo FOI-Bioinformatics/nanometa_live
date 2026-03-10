@@ -655,7 +655,13 @@ class TaxidMapper:
             try:
                 start_time = time.time()
                 with open(cache_path, 'rb') as f:
-                    self._index = pickle.load(f)
+                    loaded = pickle.load(f)
+                # Validate loaded object is the expected type (self-generated cache)
+                if not isinstance(loaded, DatabaseTaxonomyIndex):
+                    raise TypeError(
+                        f"Cached index has unexpected type: {type(loaded).__name__}"
+                    )
+                self._index = loaded
                 load_time = time.time() - start_time
                 logger.info(
                     f"Loaded cached database index: {len(self._index.by_taxid)} nodes "

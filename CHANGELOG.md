@@ -23,6 +23,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Custom watchlist persistence to `~/.nanometa/watchlists/` on import
 - Custom watchlist delete button (user-created watchlists only)
 - Upload validation feedback with detailed error messages
+- `openpyxl` dependency for XLSX export
+- `pipeline_profile` and `qc_tool` settings in default config.yaml
 
 ### Changed
 - `nanometa-sim` deprecated in favour of nanorunner (stub prints notice and exits)
@@ -39,6 +41,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Pathogen modal using wrong config key for results directory
 - Redundant `_collect_samples_data()` calls (3-5x per tick reduced to 1x via status cache)
 - Watchlist toggle state not persisted across restarts (now saved to `~/.nanometa/`)
+- Pickle cache loading with type validation to reject corrupted or tampered caches
 - `delete_config()` using undefined logger variable
 - `fcntl` import crash on Windows
 - `os.uname()` crash on Windows (replaced with `platform.node()`)

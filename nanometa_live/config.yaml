@@ -248,6 +248,18 @@ e_val_cutoff: 0.01
 local_package_management: None
 conda_frontend: "mamba"
 
+## PIPELINE PROFILE ##
+# Description: Nextflow execution profile controlling how tools are run.
+# Options: "docker", "singularity", "conda"
+# Default: "docker"
+pipeline_profile: "docker"
+
+## QC TOOL ##
+# Description: Quality control tool used for read filtering.
+# Options: "chopper", "fastp"
+# Default: "chopper"
+qc_tool: "chopper"
+
 ## REMOVE TEMP FILES ##
 # Description: Option to remove temporary files created during workflow execution.
 # Note: Keeping temporary files can be useful for debugging but may consume significant disk space.
