@@ -1162,7 +1162,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def handle_upload(contents: str, filename: str) -> Tuple:
-        """Handle watchlist file upload."""
+        """Handle watchlist file upload — validates, persists, and loads."""
         if not contents or not filename:
             raise PreventUpdate
 
@@ -1170,36 +1170,147 @@ def register_watchlist_callbacks(app: Dash) -> None:
             import base64
             import tempfile
             from pathlib import Path
+            from nanometa_live.core.watchlist.watchlist_loader import get_watchlist_loader
 
             # Decode the file
             content_type, content_string = contents.split(",")
             decoded = base64.b64decode(content_string)
 
-            # Save to temp file
+            # Save to temp file for validation
             with tempfile.NamedTemporaryFile(
                 mode="wb",
                 suffix=Path(filename).suffix,
                 delete=False,
             ) as f:
                 f.write(decoded)
-                temp_path = f.name
+                temp_path = Path(f.name)
 
-            # Load the watchlist
+            # Validate and persist to ~/.nanometa/watchlists/
+            loader = get_watchlist_loader()
+            is_valid, errors = loader.validate_file(temp_path)
+
+            if not is_valid:
+                temp_path.unlink(missing_ok=True)
+                error_list = html.Ul(
+                    [html.Li(e, className="small") for e in errors],
+                    className="mb-0 ps-3"
+                )
+                return (
+                    no_update,
+                    dbc.Alert([
+                        html.Strong("Invalid watchlist file"),
+                        error_list,
+                    ], color="danger", duration=10000),
+                )
+
+            # Persist: copy to user watchlist directory
+            success, message = loader.import_watchlist(temp_path, destination="user")
+            temp_path.unlink(missing_ok=True)
+
+            if not success:
+                return (
+                    no_update,
+                    dbc.Alert(f"Import failed: {message}", color="danger", duration=8000),
+                )
+
+            # Load into active session
             manager = get_watchlist_manager()
-            manager._load_custom_yaml_file(temp_path)
+            watchlist_id = Path(filename).stem
+            dest_dir = Path.home() / ".nanometa" / "watchlists"
+            dest_file = dest_dir / filename
+            if dest_file.exists():
+                manager._load_custom_yaml_file(str(dest_file))
 
-            # Clean up
-            Path(temp_path).unlink(missing_ok=True)
+            # Count pathogens for feedback
+            pathogens = loader.load_watchlist(watchlist_id)
+            count = len(pathogens) if pathogens else 0
 
             return (
                 {"last_update": f"upload-{filename}"},
-                dbc.Alert(f"Loaded: {filename}", color="success", duration=3000),
+                dbc.Alert([
+                    html.Div([
+                        html.I(className="bi bi-check-circle me-2"),
+                        html.Strong(f"Imported: {filename}"),
+                    ]),
+                    html.Small(
+                        f"{count} pathogens added. Saved to ~/.nanometa/watchlists/",
+                        className="text-muted d-block mt-1",
+                    ),
+                ], color="success", duration=8000),
             )
 
         except Exception as e:
             return (
                 no_update,
-                dbc.Alert(f"Upload failed: {e}", color="danger", duration=5000),
+                dbc.Alert(f"Upload failed: {e}", color="danger", duration=8000),
+            )
+
+    # -----------------------------------------------------------------
+    # Delete custom watchlist
+    # -----------------------------------------------------------------
+
+    @app.callback(
+        [
+            Output("watchlist-tab-state", "data", allow_duplicate=True),
+            Output("watchlist-upload-feedback", "children", allow_duplicate=True),
+        ],
+        Input({"type": "watchlist-file-delete", "index": ALL}, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def handle_delete_watchlist(n_clicks_list):
+        """Delete a custom (user) watchlist file and remove from session."""
+        if not n_clicks_list or not any(n_clicks_list):
+            raise PreventUpdate
+
+        triggered = ctx.triggered_id
+        if not isinstance(triggered, dict):
+            raise PreventUpdate
+
+        watchlist_id = triggered.get("index", "")
+        if not watchlist_id:
+            raise PreventUpdate
+
+        from pathlib import Path
+        from nanometa_live.core.watchlist.watchlist_loader import get_watchlist_loader
+
+        # Only allow deleting user watchlists
+        loader = get_watchlist_loader()
+        watchlists = loader.discover_watchlists()
+        target = None
+        for wl in watchlists:
+            if wl.id == watchlist_id and wl.source == "user":
+                target = wl
+                break
+
+        if not target:
+            return (
+                no_update,
+                dbc.Alert("Only custom watchlists can be deleted.", color="warning", duration=5000),
+            )
+
+        try:
+            # Disable in manager first
+            manager = get_watchlist_manager()
+            manager.disable_watchlist(watchlist_id)
+
+            # Delete the file
+            target.file_path.unlink(missing_ok=True)
+
+            # Clear loader cache so it's no longer discovered
+            loader._cached_watchlists.pop(watchlist_id, None)
+            loader._loaded_pathogens.pop(watchlist_id, None)
+
+            return (
+                {"last_update": f"delete-{watchlist_id}"},
+                dbc.Alert([
+                    html.I(className="bi bi-trash me-2"),
+                    f"Removed: {target.name}",
+                ], color="info", duration=5000),
+            )
+        except Exception as e:
+            return (
+                no_update,
+                dbc.Alert(f"Delete failed: {e}", color="danger", duration=5000),
             )
 
     # NOTE: handle_file_view callback removed - watchlist-filter-watchlist component

@@ -476,7 +476,7 @@ class WatchlistManager:
 
         if not is_valid:
             logger.warning(f"Invalid watchlist file {file_path}: {errors}")
-            return
+            raise ValueError(f"Invalid watchlist: {'; '.join(errors)}")
 
         try:
             with open(path, 'r', encoding='utf-8') as f:
