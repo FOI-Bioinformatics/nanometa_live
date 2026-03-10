@@ -18,8 +18,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Pipeline crash detection in backend monitor (failed processes, unexpected termination)
 - Realtime timeout enforcement (`realtime_timeout_minutes` now functional)
 - Dashboard status cache (`dcc.Store`) to avoid redundant per-tick computation
-- Path traversal protection in `delete_config()`
+- Path traversal protection in `delete_config()` and QC export callbacks
 - Thread-safe locking on data loader caches and 7 singleton factories
+- Thread-safe double-checked locking on `get_watchlist_manager()` singleton
+- Thread-safe `_lock` on `WatchlistManager` entry mutations
 - Custom watchlist persistence to `~/.nanometa/watchlists/` on import
 - Custom watchlist delete button (user-created watchlists only)
 - Upload validation feedback with detailed error messages
@@ -35,6 +37,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Default QC tool aligned to `chopper` across all config sources
 - CI workflow updated: actions v4/v5, Python 3.12, removed nonexistent entry points
 - `nanometa_demo.py` commands use list form instead of `shell=True`
+- `_is_file_stable()` replaced blocking sleep with mtime-based check (non-blocking)
 
 ### Fixed
 - `setup.py` install_requires failing due to unfiltered comments from requirements.txt
@@ -51,6 +54,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Mutable cached Plotly figures in QC tab leaking state across requests
 - `setup.py` `package_data` missing watchlist and pathogen YAML data files
 - `MANIFEST.in` missing data files and `requirements.txt` for sdist builds
+- Dashboard donut chart using `reads` column instead of `cumul_reads` (double-counting)
+- `__main__.py` hardcoding `host="0.0.0.0"` bypassing localhost security default
 
 ### Removed
 - Unused `scipy` dependency
