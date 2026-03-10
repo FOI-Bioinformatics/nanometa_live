@@ -12,15 +12,13 @@ Includes on-demand BLAST validation for unexpected organisms discovered during
 analysis that are not on the pre-configured watchlist.
 """
 
-import os
 import logging
 import pandas as pd
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import List
 
 import dash
-from dash import Dash, Input, Output, State, callback, ctx, no_update, html, dcc
-from dash.exceptions import PreventUpdate
+from dash import Dash, Input, Output, State, ctx, no_update, html
 import dash_bootstrap_components as dbc
 
 from nanometa_live.core.utils.data_loaders import load_kraken_data, load_blast_validation_data

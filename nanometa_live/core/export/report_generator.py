@@ -240,7 +240,6 @@ class ReportGenerator:
                 dash_dir / "dcc" / "plotly.min.js",
                 dash_dir / "dcc" / "async-plotlyjs.js",
             ]
-            import importlib.resources
             # Also check plotly's own bundled JS
             import plotly
             plotly_dir = Path(plotly.__file__).parent

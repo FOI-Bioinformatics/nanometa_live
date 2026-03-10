@@ -6,7 +6,6 @@ users to configure the application before starting the analysis.
 """
 
 import os
-from typing import Dict, Any
 
 from dash import html, dcc
 import dash_bootstrap_components as dbc

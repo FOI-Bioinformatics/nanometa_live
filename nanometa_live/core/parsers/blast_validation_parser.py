@@ -27,12 +27,10 @@ Expected nanometanf validation JSON output structure:
 Author: Nanometa Live Development Team
 """
 
-import os
 import json
-import glob
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 import pandas as pd

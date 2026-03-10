@@ -8,9 +8,8 @@ import os
 import logging
 import requests
 import tarfile
-import time
 import shutil
-from typing import Optional, Tuple, Dict, Any, Callable
+from typing import Optional, Tuple, Dict, Callable
 
 
 def download_and_prepare_kraken_database(

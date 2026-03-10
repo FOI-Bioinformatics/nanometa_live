@@ -8,7 +8,7 @@ Provides modal dialogs for:
 - Viewing pathogen details
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 

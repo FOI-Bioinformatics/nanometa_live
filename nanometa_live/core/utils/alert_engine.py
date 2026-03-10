@@ -5,7 +5,7 @@ This module provides intelligent alert generation, prioritization, and tracking
 for non-technical operators (first responders, laboratory personnel).
 """
 
-from typing import List, Dict, Optional, Tuple, Any
+from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 from enum import Enum
 import logging
@@ -13,8 +13,6 @@ import threading
 
 from nanometa_live.core.utils.pathogen_database import (
     check_for_dangerous_pathogens,
-    get_pathogen_by_taxid,
-    ThreatLevel
 )
 
 logger = logging.getLogger(__name__)

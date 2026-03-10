@@ -11,7 +11,7 @@ coverage from minimap2 PAF alignments:
 
 import numpy as np
 import plotly.graph_objects as go
-from dash import dcc, html
+from dash import html
 import dash_bootstrap_components as dbc
 from nanometa_live.app.utils.plotly_theme import register_templates
 

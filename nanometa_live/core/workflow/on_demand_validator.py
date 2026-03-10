@@ -17,15 +17,14 @@ Workflow:
 
 import json
 import logging
-import os
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
-from nanometa_live.core.utils.read_extractor import ReadExtractor, ExtractionResult
+from nanometa_live.core.utils.read_extractor import ReadExtractor
 
 
 logger = logging.getLogger(__name__)

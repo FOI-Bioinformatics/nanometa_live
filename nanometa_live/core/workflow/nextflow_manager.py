@@ -7,7 +7,6 @@ workflow manager while maintaining a compatible interface.
 """
 
 import os
-import sys
 import json
 import time
 import glob
@@ -15,7 +14,6 @@ import logging
 import subprocess
 import threading
 import re
-from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 
 from nanometa_live.core.config.parameter_mapping import (

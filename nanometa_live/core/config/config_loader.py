@@ -16,7 +16,7 @@ import datetime
 logger = logging.getLogger(__name__)
 import glob
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List
 
 # Use ruamel.yaml for comment preservation
 from ruamel.yaml import YAML

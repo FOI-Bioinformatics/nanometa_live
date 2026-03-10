@@ -13,12 +13,10 @@ taxonomy ID mapping system.
 """
 
 import logging
-import re
 import subprocess
-from dataclasses import field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional
 
 from nanometa_live.core.taxonomy.taxid_mapping import (
     DatabaseTaxonomyIndex,

@@ -10,7 +10,6 @@ Features:
 - Optimal update interval estimation
 """
 
-import os
 import re
 import logging
 import time

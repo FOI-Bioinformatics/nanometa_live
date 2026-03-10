@@ -8,16 +8,12 @@ users to configure the application before starting the analysis.
 import logging
 import os
 import json
-import base64
-import tempfile
-from typing import Dict, Any, List
 from datetime import datetime
 
 import dash
-from dash import Dash, Input, Output, State, callback, ctx, no_update
+from dash import Dash, Input, Output, State, ctx, no_update
 import dash_bootstrap_components as dbc
 from dash import html
-from ruamel.yaml import YAML
 
 from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.config.config_loader import ConfigLoader

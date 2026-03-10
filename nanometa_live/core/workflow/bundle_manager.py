@@ -392,7 +392,6 @@ class BundleManager:
         """Copy built-in watchlist YAMLs to the bundle."""
         try:
             from nanometa_live.core.config.data import watchlists as wl_pkg
-            import importlib.resources as pkg_resources
 
             wl_path = Path(wl_pkg.__file__).parent
             dst_dir.mkdir(parents=True, exist_ok=True)

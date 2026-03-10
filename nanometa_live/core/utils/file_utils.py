@@ -12,8 +12,7 @@ import gzip
 import tarfile
 import hashlib
 import tempfile
-from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import List, Optional
 import requests
 from tqdm.auto import tqdm
 

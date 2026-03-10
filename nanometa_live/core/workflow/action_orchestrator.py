@@ -6,7 +6,7 @@ in high-pressure situations. Designed for first responders and laboratory
 personnel who need clear, actionable guidance.
 """
 
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime

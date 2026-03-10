@@ -12,7 +12,6 @@ Handles:
 """
 
 import logging
-import os
 import time
 import traceback
 from datetime import datetime
@@ -609,7 +608,6 @@ def register_preparation_callbacks(app):
     )
     def run_rescan(n_clicks, config, current_refresh):
         """Callback for Kraken2 database rescan."""
-        import sys
         from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
 
         logger.info(f"[RESCAN] run_rescan called: n_clicks={n_clicks}")
@@ -1435,7 +1433,7 @@ def register_preparation_callbacks(app):
     # =========================================================================
 
     from nanometa_live.core.workflow.mobile_lab_preparer import (
-        MobileLabPreparer, PrepStage, STAGE_LABELS, PrepProgress,
+        MobileLabPreparer, PrepStage,
     )
 
     _WIZARD_STAGE_MAP = {
@@ -1505,7 +1503,6 @@ def register_preparation_callbacks(app):
         if not n_clicks:
             raise PreventUpdate
 
-        import json
         triggered = ctx.triggered_id
         if not triggered:
             raise PreventUpdate

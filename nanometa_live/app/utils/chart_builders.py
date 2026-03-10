@@ -7,16 +7,13 @@ to non-expert operators.
 """
 
 import plotly.graph_objects as go
-import plotly.express as px
 from plotly.subplots import make_subplots
-import pandas as pd
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 import numpy as np
 
 from .plotly_theme import (
     COLORS,
     get_threat_color,
-    get_status_color,
     apply_theme_to_figure
 )
 

@@ -8,9 +8,6 @@ This module defines a simplified two-mode configuration interface:
 Species watchlist management is handled in the dedicated Watchlist tab.
 """
 
-import os
-from typing import Dict, Any
-
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 

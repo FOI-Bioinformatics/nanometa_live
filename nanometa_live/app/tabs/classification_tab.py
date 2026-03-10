@@ -10,14 +10,12 @@ import logging
 import pandas as pd
 from typing import Optional
 
-from dash import Dash, Input, Output, State, ctx, no_update, html
-from dash.exceptions import PreventUpdate
+from dash import Dash, Input, Output, State, no_update, html
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import plotly.express as px
 
 from nanometa_live.core.utils.data_loaders import load_kraken_data
-from nanometa_live.core.utils.sample_detector import get_available_samples
 from nanometa_live.app.utils.callback_helpers import (
     validate_config_and_get_main_dir,
     log_callback_error,

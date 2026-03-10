@@ -11,7 +11,6 @@ Handles all callback logic for the Watchlist management tab:
 
 import logging
 import os
-import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 

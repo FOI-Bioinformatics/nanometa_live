@@ -5,9 +5,7 @@ This module provides functions for validating configuration settings
 to ensure they are appropriate for the application.
 """
 
-import os
-import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 
 
 def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:

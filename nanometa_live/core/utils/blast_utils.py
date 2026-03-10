@@ -8,7 +8,7 @@ and validation in the Nanometa Live application.
 import os
 import logging
 import subprocess
-from typing import Dict, Any, List, Optional, Tuple, Union, NoReturn
+from typing import Dict, Any, List, Optional, Union
 
 
 def build_blast_databases(

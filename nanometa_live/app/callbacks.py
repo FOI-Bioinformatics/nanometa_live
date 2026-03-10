@@ -8,14 +8,11 @@ and components of the application.
 import os
 import logging
 import time
-import json
-from typing import Dict, Any
 
 from dash import Dash, Input, Output, State, callback, ctx, html, no_update
 import dash_bootstrap_components as dbc
 
 from nanometa_live.core.workflow.backend_manager import BackendManager
-from nanometa_live.core.config.config_loader import ConfigLoader
 from nanometa_live.core.utils.sample_detector import get_available_samples, get_sample_file_mapping
 from nanometa_live.app.utils.callback_helpers import log_callback_error
 

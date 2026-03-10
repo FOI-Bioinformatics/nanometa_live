@@ -12,7 +12,6 @@ from typing import Optional
 from datetime import datetime
 
 from dash import Dash, Input, Output, State, ctx, no_update, html, ALL
-from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import pandas as pd

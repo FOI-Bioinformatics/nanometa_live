@@ -16,7 +16,7 @@ import glob
 import csv
 import re
 import logging
-from typing import Dict, Any, Tuple, Optional, List
+from typing import Dict, Any, Tuple, List
 
 from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
 from nanometa_live.core.utils.genome_manager import get_genome_manager

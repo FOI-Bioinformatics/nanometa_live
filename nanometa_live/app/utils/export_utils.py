@@ -10,12 +10,10 @@ Supported formats:
 - Krona: Interactive HTML visualization
 """
 
-import os
 import json
 import logging
 from datetime import datetime
-from typing import Optional, Dict, List, Any
-from io import StringIO
+from typing import Optional
 
 import pandas as pd
 

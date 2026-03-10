@@ -5,15 +5,11 @@ This module provides utility functions for data handling and processing
 used by the application.
 """
 
-import os
-import sys
 import logging
 import json
 import requests
-import csv
 import pandas as pd
-import numpy as np
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Dict, Any, List, Optional, Tuple
 
 
 def read_species_from_file(filename: str) -> Optional[List[str]]:

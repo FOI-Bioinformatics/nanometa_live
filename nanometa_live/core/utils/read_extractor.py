@@ -7,9 +7,8 @@ and retrieves their sequences from the original FASTQ files.
 
 import gzip
 import logging
-import os
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple, Callable
+from typing import Dict, List, Optional, Set, Callable
 from dataclasses import dataclass
 
 

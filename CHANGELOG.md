@@ -15,16 +15,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Log rotation (10MB main, 5MB API, with backups)
 - Configuration documentation for watchlist v2.0 format
 - Python 3.12 classifier in setup.py
+- Pipeline crash detection in backend monitor (failed processes, unexpected termination)
+- Realtime timeout enforcement (`realtime_timeout_minutes` now functional)
+- Dashboard status cache (`dcc.Store`) to avoid redundant per-tick computation
+- Path traversal protection in `delete_config()`
+- Thread-safe locking on data loader caches and 7 singleton factories
+- Custom watchlist persistence to `~/.nanometa/watchlists/` on import
+- Custom watchlist delete button (user-created watchlists only)
+- Upload validation feedback with detailed error messages
 
 ### Changed
 - Default server binding from 0.0.0.0 to 127.0.0.1 (security)
 - Dash version requirement from >=2.18.2 to >=4.0.0
 - README requirements section updated to match actual dependencies
+- `create_nextflow_config()` respects `pipeline_profile` setting (docker/singularity/conda)
+- Default QC tool aligned to `chopper` across all config sources
+- CI workflow updated: actions v4/v5, Python 3.12, removed nonexistent entry points
+- `nanometa_demo.py` commands use list form instead of `shell=True`
 
 ### Fixed
 - `delete_config()` using undefined logger variable
 - `fcntl` import crash on Windows
 - `os.uname()` crash on Windows (replaced with `platform.node()`)
+- Organism details modal showing "Unknown Organism" for non-watchlist species
+- 3 circular callback dependencies (app-config self-reference, pathogen print, config alert)
+- Parser double-counting from overlapping glob patterns and missing per-sample dedup
+- Mutable cached Plotly figures in QC tab leaking state across requests
+- `setup.py` `package_data` missing watchlist and pathogen YAML data files
+- `MANIFEST.in` missing data files and `requirements.txt` for sdist builds
 
 ### Removed
 - Unused `scipy` dependency

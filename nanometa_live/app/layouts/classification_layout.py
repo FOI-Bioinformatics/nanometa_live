@@ -10,7 +10,6 @@ MODERNIZED: Added explanatory text, help sections, and operator-friendly guidanc
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 
-from nanometa_live.app.components.sample_selector import create_sample_selector
 from nanometa_live.app.utils.plotly_theme import CHART_CONFIG
 
 

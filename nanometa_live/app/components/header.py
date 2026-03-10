@@ -5,7 +5,7 @@ This module defines the header component that appears at the top of the applicat
 containing the title, status indicators, and control buttons.
 """
 
-from dash import html, dcc
+from dash import html
 import dash_bootstrap_components as dbc
 import dash_daq as daq
 

@@ -8,8 +8,7 @@ triggers occur simultaneously (e.g., interval + sample change + tab switch).
 import time
 import threading
 import logging
-from typing import Dict, Any, Optional, Callable
-from functools import wraps
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 

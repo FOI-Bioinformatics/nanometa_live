@@ -14,10 +14,9 @@ import re
 import threading
 import time
 import pandas as pd
-from typing import Optional, List, Dict, Any, Tuple, Union
+from typing import Optional, List, Dict, Any, Tuple
 
 from nanometa_live.core.utils.sample_detector import (
-    get_sample_file_mapping,
     get_available_samples,
     resolve_analysis_directory
 )

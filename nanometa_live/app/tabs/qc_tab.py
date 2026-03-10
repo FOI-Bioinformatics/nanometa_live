@@ -8,15 +8,12 @@ and processing statistics with multi-sample/barcode support.
 import os
 import logging
 import pandas as pd
-import numpy as np
 import time
 import json
 import glob
 from datetime import datetime
-from typing import Dict, Any, List
 
-from dash import Dash, Input, Output, State, callback, ctx, no_update, html
-from dash.exceptions import PreventUpdate
+from dash import Dash, Input, Output, State, no_update
 import dash_bootstrap_components as dbc
 import plotly.express as px
 

@@ -11,7 +11,7 @@ Components:
 - Mapping Controls - Re-scan, export/import buttons
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from dash import html, dcc
 import dash_bootstrap_components as dbc

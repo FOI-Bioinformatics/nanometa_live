@@ -7,11 +7,9 @@ be used by scripts that need to run the pipeline programmatically.
 """
 
 import os
-import sys
-import time
 import logging
 import subprocess
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Tuple
 
 
 def run_pipeline(config_path: str, cores: int = 1, dryrun: bool = False) -> bool:

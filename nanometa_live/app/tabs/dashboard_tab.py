@@ -10,13 +10,12 @@ import os
 import glob
 import pandas as pd
 from typing import Dict, Any, List, Tuple, Optional
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 
-from dash import Dash, Input, Output, State, callback, ctx, no_update, html, ALL, MATCH
+from dash import Dash, Input, Output, State, ctx, no_update, html, ALL
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
-import json
 
 from nanometa_live.core.utils.data_loaders import (
     load_kraken_data,
@@ -24,7 +23,7 @@ from nanometa_live.core.utils.data_loaders import (
     load_seqkit_stats,
     get_qc_stats
 )
-from nanometa_live.core.utils.alert_engine import get_alert_engine, AlertCategory
+from nanometa_live.core.utils.alert_engine import get_alert_engine
 from nanometa_live.core.utils.pathogen_database import check_for_dangerous_pathogens
 from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
 from nanometa_live.app.utils.callback_helpers import (

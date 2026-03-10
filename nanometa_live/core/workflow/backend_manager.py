@@ -8,7 +8,6 @@ This module manages the backend processes for the application, including:
 """
 
 import os
-import sys
 import time
 import json
 import logging
@@ -19,9 +18,7 @@ try:
 except ImportError:
     fcntl = None  # Windows: file locking not available
 from datetime import datetime
-from typing import Dict, Any, Optional, List, Tuple, IO
-from pathlib import Path
-import subprocess
+from typing import Dict, Any, Optional, Tuple, IO
 
 from nanometa_live.core.workflow.nextflow_manager import NextflowManager
 

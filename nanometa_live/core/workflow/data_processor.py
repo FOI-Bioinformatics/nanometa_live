@@ -7,9 +7,8 @@ transforming raw output into the formats needed for visualization.
 
 import os
 import pandas as pd
-import numpy as np
 import logging
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Tuple
 
 
 class DataProcessor:
