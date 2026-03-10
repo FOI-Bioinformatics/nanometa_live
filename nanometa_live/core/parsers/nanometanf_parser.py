@@ -335,27 +335,61 @@ class NanometanfOutputParser:
         Combine Kraken2 reports from all samples.
 
         Aggregates classification results across all samples in the pipeline run.
+        Prioritizes cumulative reports over standard reports to avoid
+        double-counting reads from both batch and cumulative sources.
 
         Returns:
             DataFrame with aggregated Kraken2 reports, indexed by sample name
         """
         all_reports = []
 
-        # Find all Kraken2 report files
-        report_patterns = ['*.kreport2.txt', '*.kreport2', '*.kraken2.report.txt', '*_kraken2.report', '*.report']
-        report_files = []
+        # First, check for cumulative reports (preferred in realtime mode).
+        # These already contain aggregated data per sample, so loading both
+        # a cumulative and a standard report would double-count reads.
+        cumulative_files = list(self.kraken2_dir.glob('*.cumulative.kraken2.report.txt'))
 
-        for pattern in report_patterns:
-            report_files.extend(self.kraken2_dir.glob(pattern))
+        if cumulative_files:
+            report_files = cumulative_files
+            logger.debug(f"Using {len(cumulative_files)} cumulative Kraken2 reports")
+        else:
+            # Fall back to standard report patterns
+            report_patterns = [
+                '*.kreport2.txt', '*.kreport2', '*.kraken2.report.txt',
+                '*_kraken2.report', '*.report',
+            ]
+            report_files_set: set = set()
+            for pattern in report_patterns:
+                for f in self.kraken2_dir.glob(pattern):
+                    # Exclude batch files -- they are subsets of cumulative/standard reports
+                    basename = f.name
+                    if '_batch' not in basename and '.batch_' not in basename and not basename.startswith('batch_'):
+                        report_files_set.add(f.resolve())
+            report_files = list(report_files_set)
 
         if not report_files:
             logger.warning("No Kraken2 reports found")
             return pd.DataFrame()
 
+        # Deduplicate by resolved path to avoid loading the same file twice
+        # when multiple glob patterns match the same file
+        seen_paths: set = set()
+        seen_samples: set = set()
+
         for report_file in report_files:
+            resolved = report_file.resolve()
+            if resolved in seen_paths:
+                continue
+            seen_paths.add(resolved)
+
             # Extract sample name from filename
             sample_name = report_file.stem
-            sample_name = re.sub(r'\.(kreport2|kraken2\.report|report)$', '', sample_name)
+            sample_name = re.sub(r'\.(cumulative\.kraken2\.report|kreport2|kraken2\.report|report)$', '', sample_name)
+
+            # Only load one report per sample to prevent double-counting
+            if sample_name in seen_samples:
+                logger.debug(f"Skipping duplicate report for sample {sample_name}: {report_file}")
+                continue
+            seen_samples.add(sample_name)
 
             try:
                 df = self.parse_kraken_report(sample_name)
@@ -496,18 +530,30 @@ class NanometanfOutputParser:
         """
         all_reports = []
 
-        # Find all FASTP JSON files
-        json_files = list(self.fastp_dir.glob('*.fastp.json')) + \
-                     list(self.fastp_dir.glob('*_fastp.json'))
+        # Find all FASTP JSON files, deduplicating by resolved path to avoid
+        # counting the same file twice when matched by multiple patterns
+        json_files_set: set = set()
+        for pattern in ['*.fastp.json', '*_fastp.json']:
+            for f in self.fastp_dir.glob(pattern):
+                json_files_set.add(f.resolve())
+        json_files = [Path(f) for f in json_files_set]
 
         if not json_files:
             logger.warning("No FASTP reports found")
             return pd.DataFrame()
 
+        seen_samples: set = set()
+
         for json_file in json_files:
             # Extract sample name from filename
             sample_name = json_file.stem
             sample_name = re.sub(r'(_fastp|\.fastp)$', '', sample_name)
+
+            # Only load one report per sample to prevent double-counting
+            if sample_name in seen_samples:
+                logger.debug(f"Skipping duplicate FASTP report for sample {sample_name}")
+                continue
+            seen_samples.add(sample_name)
 
             try:
                 data = self.parse_fastp_report(sample_name)
@@ -668,9 +714,12 @@ class NanometanfOutputParser:
         Returns:
             Dictionary with validation statistics including hit counts and identity metrics
         """
-        # Find all BLAST result files
-        blast_files = list(self.blast_dir.glob('*.blast.txt')) + \
-                      list(self.blast_dir.glob('*_blast.txt'))
+        # Find all BLAST result files, deduplicating by resolved path
+        blast_files_set: set = set()
+        for pattern in ['*.blast.txt', '*_blast.txt']:
+            for f in self.blast_dir.glob(pattern):
+                blast_files_set.add(f.resolve())
+        blast_files = [Path(f) for f in blast_files_set]
 
         if not blast_files:
             logger.warning("No BLAST results found")

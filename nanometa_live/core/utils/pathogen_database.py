@@ -19,6 +19,7 @@ References:
 """
 
 import logging
+import threading
 from typing import Any, Dict, List, Optional
 
 # Import classes and functions from the new loader module for backward compatibility
@@ -54,16 +55,20 @@ __all__ = [
 ]
 
 
-# Module-level database instance (lazy-loaded)
+# Module-level database instance (lazy-loaded, thread-safe)
 _database: Optional[PathogenDatabase] = None
+_database_lock = threading.Lock()
 
 
 def _get_database() -> PathogenDatabase:
-    """Get the module-level database instance, initializing if needed."""
+    """Get the module-level database instance, initializing if needed (thread-safe)."""
     global _database
-    if _database is None:
-        _database = get_pathogen_database()
-    return _database
+    if _database is not None:
+        return _database
+    with _database_lock:
+        if _database is None:
+            _database = get_pathogen_database()
+        return _database
 
 
 def get_all_dangerous_pathogens(

@@ -9,6 +9,7 @@ from typing import List, Dict, Optional, Tuple, Any
 from datetime import datetime, timedelta
 from enum import Enum
 import logging
+import threading
 
 from nanometa_live.core.utils.pathogen_database import (
     check_for_dangerous_pathogens,
@@ -519,18 +520,22 @@ class AlertEngine:
             self.alert_history.clear()
 
 
-# Global alert engine instance
+# Global alert engine instance -- protected by lock against concurrent initialization.
 _alert_engine = None
+_alert_engine_lock = threading.Lock()
 
 
 def get_alert_engine() -> AlertEngine:
     """
-    Get or create the global alert engine instance.
+    Get or create the global alert engine instance (thread-safe).
 
     Returns:
         AlertEngine instance
     """
     global _alert_engine
-    if _alert_engine is None:
-        _alert_engine = AlertEngine()
-    return _alert_engine
+    if _alert_engine is not None:
+        return _alert_engine
+    with _alert_engine_lock:
+        if _alert_engine is None:
+            _alert_engine = AlertEngine()
+        return _alert_engine

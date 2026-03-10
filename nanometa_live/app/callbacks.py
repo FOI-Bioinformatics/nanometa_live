@@ -91,10 +91,11 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
 
     @app.callback(
         Output("app-config", "data", allow_duplicate=True),
-        Input("app-config", "data"),
-        prevent_initial_call="initial_duplicate",
+        Input("update-interval", "n_intervals"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
     )
-    def initialize_taxid_mappings(config):
+    def initialize_taxid_mappings(_n_intervals, config):
         """
         Load cached taxid mappings on startup for proper pathogen detection.
 
@@ -193,6 +194,9 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
 
         if status.get("pipeline_status") == "error":
             return "red", "ERROR", ", ".join(status.get("errors", ["Unknown error"]))
+
+        if status.get("pipeline_status") == "completed":
+            return "blue", "Complete", "Pipeline finished successfully"
 
         return "gray", "STANDBY", "Click 'Start Analysis' to begin processing"
 

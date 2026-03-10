@@ -15,6 +15,7 @@ Strategies (in priority order):
 """
 
 import logging
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -746,13 +747,17 @@ class CompositeMatchStrategy:
         return unique_alternatives[:limit]
 
 
-# Default strategy instance
+# Default strategy instance -- protected by lock against concurrent initialization.
 _default_strategy: Optional[CompositeMatchStrategy] = None
+_default_strategy_lock = threading.Lock()
 
 
 def get_match_strategy(fuzzy_threshold: float = 0.85) -> CompositeMatchStrategy:
-    """Get the default match strategy."""
+    """Get the default match strategy (thread-safe)."""
     global _default_strategy
-    if _default_strategy is None:
-        _default_strategy = CompositeMatchStrategy(fuzzy_threshold=fuzzy_threshold)
-    return _default_strategy
+    if _default_strategy is not None:
+        return _default_strategy
+    with _default_strategy_lock:
+        if _default_strategy is None:
+            _default_strategy = CompositeMatchStrategy(fuzzy_threshold=fuzzy_threshold)
+        return _default_strategy

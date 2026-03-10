@@ -14,6 +14,7 @@ Scoring is based on:
 """
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional
@@ -311,13 +312,17 @@ class ConfidenceScorer:
         ]
 
 
-# Default scorer instance
+# Default scorer instance -- protected by lock against concurrent initialization.
 _scorer: Optional[ConfidenceScorer] = None
+_scorer_lock = threading.Lock()
 
 
 def get_confidence_scorer() -> ConfidenceScorer:
-    """Get the default ConfidenceScorer instance."""
+    """Get the default ConfidenceScorer instance (thread-safe)."""
     global _scorer
-    if _scorer is None:
-        _scorer = ConfidenceScorer()
-    return _scorer
+    if _scorer is not None:
+        return _scorer
+    with _scorer_lock:
+        if _scorer is None:
+            _scorer = ConfidenceScorer()
+        return _scorer

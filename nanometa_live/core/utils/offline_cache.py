@@ -16,6 +16,7 @@ import os
 import time
 import hashlib
 import logging
+import threading
 from pathlib import Path
 from typing import Dict, Optional, Any, List
 from dataclasses import dataclass, asdict
@@ -508,13 +509,14 @@ class OfflineTaxonomyCache:
         return stats
 
 
-# Global cache instance
+# Global cache instance -- protected by lock against concurrent initialization.
 _cache_instance: Optional[OfflineTaxonomyCache] = None
+_cache_instance_lock = threading.Lock()
 
 
 def get_cache(offline_mode: bool = False) -> OfflineTaxonomyCache:
     """
-    Get the global cache instance.
+    Get the global cache instance (thread-safe).
 
     Args:
         offline_mode: Whether to enable offline mode
@@ -524,13 +526,17 @@ def get_cache(offline_mode: bool = False) -> OfflineTaxonomyCache:
     """
     global _cache_instance
 
-    if _cache_instance is None:
-        _cache_instance = OfflineTaxonomyCache(offline_mode=offline_mode)
-    elif offline_mode != _cache_instance.offline_mode:
-        # Update offline mode if changed
-        _cache_instance.offline_mode = offline_mode
+    if _cache_instance is not None:
+        if offline_mode != _cache_instance.offline_mode:
+            _cache_instance.offline_mode = offline_mode
+        return _cache_instance
 
-    return _cache_instance
+    with _cache_instance_lock:
+        if _cache_instance is None:
+            _cache_instance = OfflineTaxonomyCache(offline_mode=offline_mode)
+        elif offline_mode != _cache_instance.offline_mode:
+            _cache_instance.offline_mode = offline_mode
+        return _cache_instance
 
 
 def cached_api_call(cache_type: str = "species", ttl: Optional[int] = None):

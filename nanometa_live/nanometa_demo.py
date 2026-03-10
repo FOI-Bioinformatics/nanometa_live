@@ -105,14 +105,14 @@ def main():
 
     def runner_command(command):
         try:
-            subprocess.run(command, shell=True, check=True)
+            subprocess.run(command, check=True)
             logging.info(f"Successfully executed: {command}")
         except subprocess.CalledProcessError as e:
             logging.error(f"Failed to execute: {command}. Error: {e}")
 
     commands = [
-        f"nanometa-sim -i {fastq_dir} -o {live_dir}",
-        f"nanometa-live -p {args.path}",
+        ["nanometa-sim", "-i", fastq_dir, "-o", live_dir],
+        ["nanometa-live", "-p", args.path],
     ]
 
     with ThreadPoolExecutor() as executor:

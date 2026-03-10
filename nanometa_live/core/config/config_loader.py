@@ -91,7 +91,7 @@ class ConfigLoader:
             "remove_temp_files": True,
             "main_dir": "",
             # QC and analysis tools
-            "qc_tool": "fastp",
+            "qc_tool": "chopper",
             "skip_nanoplot": False,
             # Kraken2 realtime incremental classification
             "kraken2_enable_incremental": True,
@@ -301,7 +301,11 @@ class ConfigLoader:
         Returns:
             True if the file was deleted, False otherwise.
         """
-        path = Path(config_path)
+        path = Path(config_path).resolve()
+        allowed_dir = Path(self.config_dir).resolve()
+        if not str(path).startswith(str(allowed_dir) + os.sep) and path != allowed_dir:
+            logger.warning(f"Path traversal blocked: {config_path} is outside {self.config_dir}")
+            return False
         if path.name == "last-session.yaml":
             logger.warning("Cannot delete the auto-save configuration")
             return False

@@ -1,3 +1,7 @@
 #misc
 include README.md
 include LICENSE
+include requirements.txt
+
+# Data files
+recursive-include nanometa_live/core/config/data *.yaml

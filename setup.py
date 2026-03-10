@@ -30,7 +30,10 @@ setup(
         'nanometa_live': [
             'config.yaml',
             'kraken2_databases.yaml',
-            'app/assets/*'
+            'app/assets/*',
+            'core/config/data/*.yaml',
+            'core/config/data/watchlists/*.yaml',
+            'core/config/data/watchlists/examples/*.yaml',
         ]
     },
     entry_points={

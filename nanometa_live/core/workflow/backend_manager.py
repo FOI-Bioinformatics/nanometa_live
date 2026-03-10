@@ -441,7 +441,13 @@ class BackendManager:
                         self.status["errors"].append(err)
                         existing.add(err)
             elif self.status.get("running"):
+                # Pipeline subprocess stopped but backend still marked running.
+                # The monitor thread will handle the detailed status transition;
+                # report as "stopping" until the monitor thread completes its check.
                 self.status["pipeline_status"] = "stopping"
+            elif self.status.get("pipeline_status") == "completed":
+                # Preserve completed status (set by monitor thread)
+                pass
             else:
                 self.status["pipeline_status"] = "stopped"
 
@@ -496,27 +502,102 @@ class BackendManager:
         """Monitor the status of the backend processes in a separate thread."""
         logging.info("Status monitoring thread started")
 
+        # Determine realtime timeout from config (in minutes, converted to seconds)
+        timeout_seconds = None
+        if self.config:
+            timeout_minutes = self.config.get("realtime_timeout_minutes")
+            if timeout_minutes:
+                timeout_seconds = int(timeout_minutes) * 60
+                logging.info(
+                    f"Realtime timeout enforcement enabled: {timeout_minutes} minutes"
+                )
+
+        start_time = time.time()
+
         while self.status.get("running"):
             try:
+                # Check realtime timeout
+                if timeout_seconds is not None:
+                    elapsed = time.time() - start_time
+                    if elapsed >= timeout_seconds:
+                        logging.warning(
+                            f"Realtime timeout reached after "
+                            f"{elapsed / 60:.1f} minutes, stopping pipeline"
+                        )
+                        with self._status_lock:
+                            self.status["running"] = False
+                            self.status["pipeline_status"] = "stopped"
+                            self.status["errors"].append(
+                                f"Pipeline stopped: realtime timeout "
+                                f"({int(timeout_seconds / 60)} minutes) reached"
+                            )
+                        # Stop the underlying Nextflow process
+                        try:
+                            self.workflow_manager.stop()
+                        except Exception as e:
+                            logging.error(f"Error stopping pipeline after timeout: {e}")
+                        break
+
                 # Get workflow manager status
                 workflow_status = self.workflow_manager.get_status()
 
                 # Thread-safe status update
                 with self._status_lock:
-                    # Update status based on workflow status
-                    if (
-                        not workflow_status.get("running")
-                        and len(workflow_status.get("errors", [])) > 0
-                    ):
-                        self.status["pipeline_status"] = "error"
-                        # Deduplicate to avoid unbounded growth from repeated polling
-                        existing = set(self.status["errors"])
-                        for err in workflow_status.get("errors", []):
-                            if err not in existing:
-                                self.status["errors"].append(err)
-                                existing.add(err)
-                        self.status["running"] = False
-                        logging.error("Pipeline encountered errors, stopping")
+                    # Detect pipeline termination (crash or completion)
+                    if not workflow_status.get("running"):
+                        workflow_errors = workflow_status.get("errors", [])
+
+                        if len(workflow_errors) > 0:
+                            # Pipeline terminated with errors
+                            self.status["pipeline_status"] = "error"
+                            existing = set(self.status["errors"])
+                            for err in workflow_errors:
+                                if err not in existing:
+                                    self.status["errors"].append(err)
+                                    existing.add(err)
+                            self.status["running"] = False
+                            logging.error("Pipeline encountered errors, stopping")
+
+                        else:
+                            # Pipeline terminated without errors (normal completion
+                            # or undetected crash). Check if it completed
+                            # successfully by looking at process counts.
+                            processes_failed = workflow_status.get("processes_failed", 0)
+                            processes_complete = workflow_status.get("processes_complete", 0)
+
+                            if processes_failed > 0:
+                                # Pipeline had failed processes but no explicit error
+                                self.status["pipeline_status"] = "error"
+                                self.status["errors"].append(
+                                    f"Pipeline terminated with {processes_failed} "
+                                    f"failed process(es)"
+                                )
+                                self.status["running"] = False
+                                logging.error(
+                                    f"Pipeline terminated with {processes_failed} "
+                                    f"failed processes"
+                                )
+
+                            elif processes_complete > 0:
+                                # Pipeline completed successfully
+                                self.status["pipeline_status"] = "completed"
+                                self.status["running"] = False
+                                logging.info("Pipeline completed successfully")
+
+                            else:
+                                # Pipeline terminated unexpectedly with no
+                                # completed processes and no errors -- likely a
+                                # crash during startup or configuration
+                                self.status["pipeline_status"] = "error"
+                                self.status["errors"].append(
+                                    "Pipeline process terminated unexpectedly. "
+                                    "Check the Nextflow log for details."
+                                )
+                                self.status["running"] = False
+                                logging.error(
+                                    "Pipeline process terminated unexpectedly "
+                                    "(no completed processes, no errors reported)"
+                                )
 
                     # Update process information
                     self.status["processes_running"] = workflow_status.get("processes_running", 0)

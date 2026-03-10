@@ -17,6 +17,7 @@ NCBI conventions:
 
 import logging
 import re
+import threading
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -149,7 +150,9 @@ class NameNormalizer:
         self._serovar_pattern = re.compile(r'\s+[A-Z]\d+(?::[A-Z]?\d+)*(?:\s|$)', re.IGNORECASE)
         self._subspecies_pattern = re.compile(r'\s+subsp\.\s+(\S+)', re.IGNORECASE)
         # Cache for normalized names (dict-based with size limit)
+        # Protected by _cache_lock for thread safety in concurrent Dash callbacks.
         self._cache: Dict[str, NormalizedName] = {}
+        self._cache_lock = threading.Lock()
         self._cache_size = cache_size
 
     def normalize(self, name: str) -> NormalizedName:
@@ -165,9 +168,10 @@ class NameNormalizer:
         if not name or not isinstance(name, str):
             return NormalizedName(original="", canonical="")
 
-        # Check cache first
-        if name in self._cache:
-            return self._cache[name]
+        # Check cache first (thread-safe)
+        with self._cache_lock:
+            if name in self._cache:
+                return self._cache[name]
 
         original = name.strip()
         taxonomy_hints = []
@@ -207,9 +211,10 @@ class NameNormalizer:
             taxonomy_hints=taxonomy_hints
         )
 
-        # Cache the result (with size limit)
-        if len(self._cache) < self._cache_size:
-            self._cache[name] = result
+        # Cache the result (with size limit, thread-safe)
+        with self._cache_lock:
+            if len(self._cache) < self._cache_size:
+                self._cache[name] = result
 
         return result
 
@@ -394,13 +399,17 @@ class NameNormalizer:
         return False
 
 
-# Singleton instance
+# Singleton instance -- protected by lock against concurrent initialization.
 _normalizer: Optional[NameNormalizer] = None
+_normalizer_lock = threading.Lock()
 
 
 def get_name_normalizer() -> NameNormalizer:
-    """Get the global NameNormalizer instance."""
+    """Get the global NameNormalizer instance (thread-safe)."""
     global _normalizer
-    if _normalizer is None:
-        _normalizer = NameNormalizer()
-    return _normalizer
+    if _normalizer is not None:
+        return _normalizer
+    with _normalizer_lock:
+        if _normalizer is None:
+            _normalizer = NameNormalizer()
+        return _normalizer

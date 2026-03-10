@@ -18,6 +18,7 @@ with a single, unified approach.
 """
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -36,26 +37,34 @@ from nanometa_live.core.config.pathogen_loader import (
 logger = logging.getLogger(__name__)
 
 # Import taxonomy and loader (with lazy initialization to avoid circular imports)
+# Protected by lock for thread-safe lazy initialization.
 _taxonomy_matcher = None
 _watchlist_loader = None
+_lazy_init_lock = threading.Lock()
 
 
 def _get_taxonomy_matcher():
-    """Lazy import of TaxonomyMatcher."""
+    """Lazy import of TaxonomyMatcher (thread-safe)."""
     global _taxonomy_matcher
-    if _taxonomy_matcher is None:
-        from .taxonomy_matcher import get_taxonomy_matcher
-        _taxonomy_matcher = get_taxonomy_matcher()
-    return _taxonomy_matcher
+    if _taxonomy_matcher is not None:
+        return _taxonomy_matcher
+    with _lazy_init_lock:
+        if _taxonomy_matcher is None:
+            from .taxonomy_matcher import get_taxonomy_matcher
+            _taxonomy_matcher = get_taxonomy_matcher()
+        return _taxonomy_matcher
 
 
 def _get_watchlist_loader():
-    """Lazy import of WatchlistLoader."""
+    """Lazy import of WatchlistLoader (thread-safe)."""
     global _watchlist_loader
-    if _watchlist_loader is None:
-        from .watchlist_loader import get_watchlist_loader
-        _watchlist_loader = get_watchlist_loader()
-    return _watchlist_loader
+    if _watchlist_loader is not None:
+        return _watchlist_loader
+    with _lazy_init_lock:
+        if _watchlist_loader is None:
+            from .watchlist_loader import get_watchlist_loader
+            _watchlist_loader = get_watchlist_loader()
+        return _watchlist_loader
 
 
 class WatchlistSource(Enum):

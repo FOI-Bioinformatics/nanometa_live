@@ -227,7 +227,38 @@ def register_dashboard_callbacks(app: Dash):
         return available_samples
 
     # ================================================================
-    # D3a: Status callback (lightweight, always runs)
+    # D3-pre: Compute overall status once, cache in dcc.Store
+    # ================================================================
+    @app.callback(
+        Output("dashboard-overall-status-cache", "data"),
+        [
+            Input("update-interval", "n_intervals"),
+        ],
+        [
+            State("app-config", "data"),
+            State("backend-status", "data"),
+            State("available-samples", "data"),
+        ]
+    )
+    def compute_overall_status_cache(n_intervals, config, status, available_samples):
+        """Compute overall status once per interval and cache for other callbacks."""
+        should_load, main_dir = _should_load_data(config, status, available_samples)
+        if not should_load:
+            return None
+
+        try:
+            available_samples = _resolve_samples(main_dir, available_samples)
+            pipeline_running = status.get("running", False)
+            overall_status = _calculate_overall_status(main_dir, config, available_samples, pipeline_running)
+            # Include main_dir so downstream callbacks don't need to recompute it
+            overall_status["_main_dir"] = main_dir
+            return overall_status
+        except Exception as e:
+            logger.error(f"Error computing overall status cache: {e}", exc_info=True)
+            return None
+
+    # ================================================================
+    # D3a: Status callback (lightweight, reads cached overall status)
     # ================================================================
     @app.callback(
         [
@@ -244,25 +275,20 @@ def register_dashboard_callbacks(app: Dash):
             Output("dashboard-status-indicator", "className"),
         ],
         [
-            Input("update-interval", "n_intervals"),
+            Input("dashboard-overall-status-cache", "data"),
         ],
         [
             State("app-config", "data"),
             State("backend-status", "data"),
-            State("available-samples", "data"),
         ]
     )
-    def update_dashboard_status(n_intervals, config, status, available_samples):
-        """Update dashboard status card (lightweight, always runs)."""
-        should_load, main_dir = _should_load_data(config, status, available_samples)
-        if not should_load:
+    def update_dashboard_status(overall_status, config, status):
+        """Update dashboard status card using cached overall status."""
+        if not overall_status:
             return _get_idle_status()
 
         try:
-            available_samples = _resolve_samples(main_dir, available_samples)
-            pipeline_running = status.get("running", False)
-
-            overall_status = _calculate_overall_status(main_dir, config, available_samples, pipeline_running)
+            pipeline_running = status.get("running", False) if status else False
 
             status_results = _generate_status_display(overall_status["status"])
             status_style = status_results[0]
@@ -272,11 +298,11 @@ def register_dashboard_callbacks(app: Dash):
             status_label_text = status_results[4]
             status_label_icon = status_results[5]
 
-            start_time = status.get("start_time")
+            start_time = status.get("start_time") if status else None
             time_elapsed = _format_time_elapsed(start_time)
 
-            files_processed_count = status.get('files_processed', 0)
-            files_waiting = status.get('files_waiting', 0)
+            files_processed_count = status.get('files_processed', 0) if status else 0
+            files_waiting = status.get('files_waiting', 0) if status else 0
             samples_processed = overall_status.get('samples_processed', 0)
             total_samples = overall_status.get('total_samples', 0)
             nanopore_dir = config.get('nanopore_output_directory', '')
@@ -315,7 +341,7 @@ def register_dashboard_callbacks(app: Dash):
             return _get_error_status(str(e))
 
     # ================================================================
-    # D3b: Metrics callback (depends on kraken data)
+    # D3b: Metrics callback (reads cached overall status)
     # ================================================================
     @app.callback(
         [
@@ -334,7 +360,7 @@ def register_dashboard_callbacks(app: Dash):
             Output("dashboard-data-cache", "data"),
         ],
         [
-            Input("update-interval", "n_intervals"),
+            Input("dashboard-overall-status-cache", "data"),
             Input("sample-selector", "value"),
         ],
         [
@@ -344,15 +370,14 @@ def register_dashboard_callbacks(app: Dash):
             State("dashboard-data-cache", "data"),
         ]
     )
-    def update_dashboard_metrics(n_intervals, selected_dashboard_sample, config, status, available_samples, prev_cache):
-        """Update dashboard metric cards (sequences, quality, organisms, alerts icon)."""
+    def update_dashboard_metrics(overall_status, selected_dashboard_sample, config, status, available_samples, prev_cache):
+        """Update dashboard metric cards using cached overall status."""
         empty_trend = ""
         idle_metrics = ("0", empty_trend,
                         "0", "--", "0", "0", "bi bi-bell", {"fontSize": "32px", "color": "#6c757d"},
                         empty_trend, empty_trend, empty_trend, empty_trend, prev_cache or {})
 
-        should_load, main_dir = _should_load_data(config, status, available_samples)
-        if not should_load:
+        if not overall_status:
             # Still show total files count even when idle
             nanopore_dir = config.get("nanopore_output_directory") or config.get("nanopore_dir", "") if config else ""
             if nanopore_dir:
@@ -364,16 +389,14 @@ def register_dashboard_callbacks(app: Dash):
             return idle_metrics
 
         try:
+            main_dir = overall_status.get("_main_dir", "")
             available_samples = _resolve_samples(main_dir, available_samples)
-            pipeline_running = status.get("running", False)
             metric_sample = selected_dashboard_sample if selected_dashboard_sample else "All Samples"
 
             # Count total input files
             nanopore_dir = config.get("nanopore_output_directory") or config.get("nanopore_dir", "") if config else ""
             total_files = _count_input_files(nanopore_dir) if nanopore_dir else 0
             total_files_display = str(total_files)
-
-            overall_status = _calculate_overall_status(main_dir, config, available_samples, pipeline_running)
 
             # Calculate metric values based on selected sample
             if metric_sample and metric_sample != "All Samples":
@@ -505,7 +528,7 @@ def register_dashboard_callbacks(app: Dash):
             return [], "0 samples"
 
     # ================================================================
-    # D3d: Alerts panel callback
+    # D3d: Alerts panel callback (reads cached overall status)
     # ================================================================
     @app.callback(
         [
@@ -514,25 +537,22 @@ def register_dashboard_callbacks(app: Dash):
             Output("dashboard-alerts-count", "color"),
         ],
         [
-            Input("update-interval", "n_intervals"),
+            Input("dashboard-overall-status-cache", "data"),
         ],
         [
             State("app-config", "data"),
-            State("backend-status", "data"),
             State("available-samples", "data"),
         ]
     )
-    def update_dashboard_alerts(n_intervals, config, status, available_samples):
-        """Update the dashboard alerts panel."""
-        should_load, main_dir = _should_load_data(config, status, available_samples)
-        if not should_load:
+    def update_dashboard_alerts(overall_status, config, available_samples):
+        """Update the dashboard alerts panel using cached overall status."""
+        if not overall_status:
             return _get_idle_alerts()
 
         try:
+            main_dir = overall_status.get("_main_dir", "")
             available_samples = _resolve_samples(main_dir, available_samples)
-            pipeline_running = status.get("running", False)
 
-            overall_status = _calculate_overall_status(main_dir, config, available_samples, pipeline_running)
             samples_data = _collect_samples_data(main_dir, available_samples)
             alerts_data = _generate_alerts(overall_status, main_dir, config, samples_data)
 
@@ -1590,7 +1610,7 @@ def register_dashboard_callbacks(app: Dash):
             return window.dash_clientside.no_update;
         }
         """,
-        Output("pathogen-modal-print", "n_clicks"),
+        Output("pathogen-report-data", "data", allow_duplicate=True),
         Input("pathogen-modal-print", "n_clicks"),
         prevent_initial_call=True
     )

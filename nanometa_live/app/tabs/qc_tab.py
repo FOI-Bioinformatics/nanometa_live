@@ -40,21 +40,18 @@ from nanometa_live.app.utils.callback_helpers import (
 )
 
 
-# Module-level cached empty figures to avoid recreating them on every callback
-_EMPTY_QC_FIGURES = None
-
-
 def _get_empty_qc_figures():
-    """Return cached empty QC figures, creating them on first call."""
-    global _EMPTY_QC_FIGURES
-    if _EMPTY_QC_FIGURES is None:
-        _EMPTY_QC_FIGURES = [
-            px.line(title="Cumulative Reads"),
-            px.line(title="Cumulative Base Pairs"),
-            px.bar(title="Reads per Sample"),
-            px.bar(title="Base Pairs per Sample"),
-        ]
-    return _EMPTY_QC_FIGURES
+    """Return fresh empty QC figures for placeholder display.
+
+    Creates new figure objects on each call to prevent mutable state
+    from being shared across callback invocations or browser sessions.
+    """
+    return [
+        px.line(title="Cumulative Reads"),
+        px.line(title="Cumulative Base Pairs"),
+        px.bar(title="Reads per Sample"),
+        px.bar(title="Base Pairs per Sample"),
+    ]
 
 
 def register_qc_callbacks(app: Dash):

@@ -56,6 +56,7 @@ def create_dashboard_layout():
         # Hidden stores for dashboard state
         dcc.Store(id='dashboard-data-cache', data={}),
         dcc.Store(id='dashboard-last-updated', data=None),
+        dcc.Store(id='dashboard-overall-status-cache', data=None),
 
         # Help modal for dashboard usage
         dbc.Modal([

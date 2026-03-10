@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import re
+import threading
 import time
 import pandas as pd
 from typing import Optional, List, Dict, Any, Tuple, Union
@@ -31,7 +32,10 @@ CACHE_CLEANUP_INTERVAL_SECONDS = 60  # Run cleanup every 60 seconds
 FILE_STABILITY_CHECK_INTERVAL_MS = 200  # Wait time between size checks
 FILE_STABILITY_MIN_SIZE_BYTES = 10  # Minimum file size to consider valid
 
-# Module-level cache storage
+# Module-level cache storage -- protected by _cache_lock for thread safety.
+# Dash/Flask runs callbacks concurrently in multiple threads, so all reads
+# and writes to these shared dicts must be serialized.
+_cache_lock = threading.Lock()
 _kraken_cache: Dict[str, Tuple[float, pd.DataFrame]] = {}
 _fastp_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 _last_cache_cleanup: float = 0.0  # Track last cleanup time
@@ -105,8 +109,10 @@ def _cleanup_stale_cache_entries():
 
     This function is called periodically to remove expired entries.
     It also enforces a maximum cache size by removing oldest entries.
+
+    Caller must hold _cache_lock.
     """
-    global _kraken_cache, _fastp_cache, _last_cache_cleanup
+    global _last_cache_cleanup
 
     current_time = time.time()
 
@@ -152,10 +158,10 @@ def _cleanup_stale_cache_entries():
 
 def clear_data_cache():
     """Clear all cached data. Call when data is expected to have changed."""
-    global _kraken_cache, _fastp_cache, _file_mtimes
-    _kraken_cache.clear()
-    _fastp_cache.clear()
-    _file_mtimes.clear()
+    with _cache_lock:
+        _kraken_cache.clear()
+        _fastp_cache.clear()
+        _file_mtimes.clear()
 
 
 def _get_dir_latest_mtime(directory: str) -> float:
@@ -220,11 +226,15 @@ def _check_mtime_cache(
     Compares current mtime and size against stored values. If unchanged,
     returns the cached result without reparsing. Returns None on cache miss
     or when data has changed.
-    """
-    if cache_key not in _file_mtimes:
-        return None
 
-    stored_mtime, stored_size, cached_result = _file_mtimes[cache_key]
+    Thread-safe: acquires _cache_lock for the dict lookup.
+    """
+    with _cache_lock:
+        if cache_key not in _file_mtimes:
+            return None
+        stored_mtime, stored_size, cached_result = _file_mtimes[cache_key]
+
+    # Filesystem stat is done outside the lock (I/O should not block other threads)
     current_mtime, current_size = _get_path_fingerprint(paths)
 
     if current_mtime == stored_mtime and current_size == stored_size:
@@ -240,7 +250,8 @@ def _store_mtime_cache(
 ) -> None:
     """Store a result keyed by the combined mtime/size fingerprint of paths."""
     mtime, size = _get_path_fingerprint(paths)
-    _file_mtimes[cache_key] = (mtime, size, result)
+    with _cache_lock:
+        _file_mtimes[cache_key] = (mtime, size, result)
 
 
 def check_data_freshness(main_dir: str) -> str:
@@ -269,9 +280,10 @@ def check_data_freshness(main_dir: str) -> str:
     fingerprint = hashlib.md5(raw.encode()).hexdigest()
 
     # Run cache cleanup only when data has actually changed
-    if fingerprint != _last_freshness_fingerprint:
-        _last_freshness_fingerprint = fingerprint
-        _cleanup_stale_cache_entries()
+    with _cache_lock:
+        if fingerprint != _last_freshness_fingerprint:
+            _last_freshness_fingerprint = fingerprint
+            _cleanup_stale_cache_entries()
 
     return fingerprint
 
@@ -461,8 +473,6 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
         >>> # Load specific sample
         >>> df = load_kraken_data("/path/to/results", "barcode01")
     """
-    global _kraken_cache
-
     # Auto-resolve to analysis directory if main_dir is base directory
     main_dir = resolve_analysis_directory(main_dir)
 
@@ -481,11 +491,12 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
             return mtime_cached.copy()
 
     # Fall back to TTL-based cache
-    if cache_key in _kraken_cache:
-        cache_time, cached_df = _kraken_cache[cache_key]
-        if _is_cache_valid(cache_time):
-            logging.debug(f"Using cached Kraken data for {cache_key}")
-            return cached_df.copy()
+    with _cache_lock:
+        if cache_key in _kraken_cache:
+            cache_time, cached_df = _kraken_cache[cache_key]
+            if _is_cache_valid(cache_time):
+                logging.debug(f"Using cached Kraken data for {cache_key}")
+                return cached_df.copy()
 
     if not os.path.exists(kraken_dir):
         logging.warning(f"Kraken2 directory not found: {kraken_dir}")
@@ -553,6 +564,26 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
             logging.warning("No Kraken2 report files found")
             return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
 
+        # Deduplicate by sample name: if multiple files resolve to the same
+        # sample (e.g. top-level and subdir copies), keep only the first to
+        # prevent double-counting reads across duplicate report files.
+        seen_samples = set()
+        deduplicated_files = []
+        for kreport_file in kreport_files:
+            basename = os.path.basename(kreport_file)
+            sample_name = re.sub(
+                r'\.(cumulative\.kraken2\.report|kraken2\.report|kreport2)\.txt$',
+                '', basename
+            )
+            if sample_name in seen_samples:
+                logging.debug(
+                    f"Skipping duplicate report for sample {sample_name}: {kreport_file}"
+                )
+                continue
+            seen_samples.add(sample_name)
+            deduplicated_files.append(kreport_file)
+        kreport_files = deduplicated_files
+
         all_reports = []
         for kreport_file in kreport_files:
             df = _parse_kraken2_report(kreport_file)
@@ -609,7 +640,8 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
 
         result_df = pd.DataFrame(result_rows)
         # Cache the result
-        _kraken_cache[cache_key] = (time.time(), result_df.copy())
+        with _cache_lock:
+            _kraken_cache[cache_key] = (time.time(), result_df.copy())
         _store_mtime_cache(mtime_key, [kraken_dir], result_df.copy())
         return result_df
 
@@ -726,7 +758,8 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
 
         result_df = pd.DataFrame(result_rows)
         # Cache the result
-        _kraken_cache[cache_key] = (time.time(), result_df.copy())
+        with _cache_lock:
+            _kraken_cache[cache_key] = (time.time(), result_df.copy())
         _store_mtime_cache(mtime_key, [kraken_dir], result_df.copy())
         return result_df
 

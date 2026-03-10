@@ -496,7 +496,7 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         "e_val_cutoff": config.get("e_val_cutoff", 0.01),
 
         # QC settings
-        "qc_tool": config.get("qc_tool", "fastp"),
+        "qc_tool": config.get("qc_tool", "chopper"),
         "skip_fastp": False,
         "skip_nanoplot": config.get("skip_nanoplot", False),
 
@@ -646,6 +646,46 @@ def create_nextflow_config(config: Dict[str, Any]) -> str:
     blast_cores = config.get("blast_cores", 2)
     validation_cores = config.get("validation_cores", 2)
 
+    # Determine execution profile for container/environment settings
+    profile = config.get("pipeline_profile", "docker")
+
+    # Build profile-specific configuration block
+    if profile == "singularity" or profile == "apptainer":
+        profile_block = f"""// Singularity configuration
+singularity {{
+    enabled = true
+    autoMounts = true
+}}
+
+// Docker configuration
+docker {{
+    enabled = false
+}}
+"""
+    elif profile == "conda":
+        profile_block = """// Conda profile selected - no container runtime configured
+docker {{
+    enabled = false
+}}
+
+singularity {{
+    enabled = false
+}}
+"""
+    else:
+        # Default: docker
+        profile_block = f"""// Docker configuration
+docker {{
+    enabled = true
+    runOptions = '-u $(id -u):$(id -g)'
+}}
+
+// Singularity configuration
+singularity {{
+    enabled = false
+}}
+"""
+
     # Generate config content
     config_content = f"""// Custom Nextflow configuration for Nanometa Live
 // Auto-generated from Nanometa Live configuration
@@ -701,18 +741,7 @@ process {{
     }}
 }}
 
-// Docker configuration
-docker {{
-    enabled = true
-    runOptions = '-u $(id -u):$(id -g)'
-}}
-
-// Singularity configuration
-singularity {{
-    enabled = false
-    autoMounts = true
-}}
-"""
+{profile_block}"""
 
     return config_content
 

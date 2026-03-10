@@ -736,7 +736,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             return window.dash_clientside.no_update;
         }
         """,
-        Output("config-feedback-alert", "is_open", allow_duplicate=True),
+        Output("config-form-initialized", "data", allow_duplicate=True),
         Input("config-feedback-alert", "is_open"),
         prevent_initial_call=True,
     )
@@ -895,7 +895,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         sample_name = config.get("sample_name", "sample")
 
         # Pipeline options
-        qc_tool = config.get("qc_tool", "fastp")
+        qc_tool = config.get("qc_tool", "chopper")
         skip_nanoplot = bool(config.get("skip_nanoplot", False))
         kraken2_incremental = bool(config.get("kraken2_enable_incremental", True))
         enable_krona = bool(config.get("enable_krona_plots", False))
