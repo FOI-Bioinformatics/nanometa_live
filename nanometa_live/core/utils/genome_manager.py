@@ -150,6 +150,17 @@ class GenomeDownloadManager:
         except Exception as e:
             logger.warning(f"Failed to resolve species name for taxid {taxid}: {e}")
 
+        # Fall back to watchlist name if NCBI lookup failed
+        try:
+            from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
+            wm = get_watchlist_manager()
+            entry = wm.get_entry_by_taxid(taxid)
+            if entry and entry.name:
+                logger.info(f"Using watchlist name for taxid {taxid}: {entry.name}")
+                return entry.name, "Unknown"
+        except Exception:
+            pass
+
         return f"Unknown (taxid {taxid})", "Unknown"
 
     def _scan_existing_genomes(self) -> None:

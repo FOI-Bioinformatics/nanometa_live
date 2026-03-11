@@ -1368,6 +1368,17 @@ def create_genome_item(genome_meta: Dict[str, Any]) -> html.Div:
     """
     taxid = genome_meta.get("taxid", 0)
     species = genome_meta.get("species_name", "Unknown")
+
+    # Fall back to watchlist name if stored name is unresolved
+    if species.startswith("Unknown") and taxid:
+        from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
+        try:
+            wm = get_watchlist_manager()
+            entry = wm.get_entry_by_taxid(taxid)
+            if entry and entry.name:
+                species = entry.name
+        except Exception:
+            pass
     accession = genome_meta.get("accession", "")
     source = genome_meta.get("source", "ncbi")
     kingdom = genome_meta.get("kingdom", "Unknown")

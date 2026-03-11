@@ -659,7 +659,7 @@ def register_preparation_callbacks(app):
                 mappings_dict = {}
                 for mapping in mappings_list:
                     ncbi_tid = mapping.get("ncbi_taxid")
-                    if ncbi_tid:
+                    if ncbi_tid is not None:
                         mappings_dict[str(ncbi_tid)] = mapping
                 collection_data["mappings"] = mappings_dict
                 logger.info(f"Rescan complete: {len(mappings_dict)} mappings prepared")
