@@ -194,6 +194,21 @@ class DatabaseTaxonomyNode:
             "abundance_percent": self.abundance_percent
         }
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "DatabaseTaxonomyNode":
+        """Create from dictionary."""
+        return cls(
+            taxid=data["taxid"],
+            name=data["name"],
+            rank=data["rank"],
+            parent_taxid=data.get("parent_taxid"),
+            name_normalized=data.get("name_normalized", ""),
+            name_gtdb_style=data.get("name_gtdb_style", ""),
+            clade_reads=data.get("clade_reads", 0),
+            direct_reads=data.get("direct_reads", 0),
+            abundance_percent=data.get("abundance_percent", 0.0),
+        )
+
 
 @dataclass
 class DatabaseTaxonomyIndex:
@@ -300,6 +315,58 @@ class DatabaseTaxonomyIndex:
     def invalidate_caches(self) -> None:
         """Clear internal caches (call after modifying nodes)."""
         self._species_cache = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "version": "1.0",
+            "database_path": self.database_path,
+            "database_type": self.database_type.value,
+            "total_nodes": self.total_nodes,
+            "species_count": self.species_count,
+            "built_at": self.built_at.isoformat() if self.built_at else None,
+            "inspect_file_path": self.inspect_file_path,
+            "nodes": [node.to_dict() for node in self.by_taxid.values()],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "DatabaseTaxonomyIndex":
+        """Reconstruct index from dictionary.
+
+        Rebuilds all lookup indices (by_name, by_name_gtdb, by_prefix)
+        from the serialized node list rather than storing them
+        redundantly.
+        """
+        db_type_str = data.get("database_type", "unknown")
+        index = cls(
+            database_path=data.get("database_path", ""),
+            database_type=DatabaseTaxonomyType(db_type_str),
+            total_nodes=data.get("total_nodes", 0),
+            species_count=data.get("species_count", 0),
+            built_at=(
+                datetime.fromisoformat(data["built_at"])
+                if data.get("built_at") else None
+            ),
+            inspect_file_path=data.get("inspect_file_path"),
+        )
+
+        # Reconstruct nodes and indices
+        for node_data in data.get("nodes", []):
+            node = DatabaseTaxonomyNode.from_dict(node_data)
+            index.by_taxid[node.taxid] = node
+
+            # Rebuild by_name index
+            if node.name_normalized:
+                index.by_name.setdefault(node.name_normalized, []).append(node.taxid)
+
+            # Rebuild by_name_gtdb index
+            if node.name_gtdb_style:
+                index.by_name_gtdb.setdefault(node.name_gtdb_style, []).append(node.taxid)
+
+        # Rebuild prefix index
+        index.build_prefix_index()
+
+        return index
 
     def get_by_taxid(self, taxid: int) -> Optional[DatabaseTaxonomyNode]:
         """Get a node by its taxid."""
@@ -640,28 +707,38 @@ class TaxidMapper:
         Returns:
             True if database loaded successfully
         """
-        import pickle
         import time
 
         self._database_path = database_path
         db_hash = get_database_hash(database_path)
 
-        # Use pickle for faster serialization (vs JSON)
-        cache_path = self._cache_dir / f"{db_hash}_index.pkl"
+        # Use JSON for safe serialization (pickle is not used due to
+        # arbitrary code execution risk during deserialization)
+        cache_path = self._cache_dir / f"{db_hash}_index.json"
+
+        # Remove any legacy pickle cache files to prevent accidental
+        # loading by older code versions
+        legacy_pkl = self._cache_dir / f"{db_hash}_index.pkl"
+        if legacy_pkl.exists():
+            try:
+                legacy_pkl.unlink()
+                logger.info(f"Removed legacy pickle cache: {legacy_pkl}")
+            except OSError as e:
+                logger.warning(f"Could not remove legacy pickle cache: {e}")
+
         index_loaded = False
 
         if not force_rebuild and cache_path.exists():
-            # Load cached index from pickle
+            # Load cached index from JSON
             try:
                 start_time = time.time()
-                with open(cache_path, 'rb') as f:
-                    loaded = pickle.load(f)
-                # Validate loaded object is the expected type (self-generated cache)
-                if not isinstance(loaded, DatabaseTaxonomyIndex):
+                with open(cache_path, 'r') as f:
+                    data = json.load(f)
+                if not isinstance(data, dict):
                     raise TypeError(
-                        f"Cached index has unexpected type: {type(loaded).__name__}"
+                        f"Cached index has unexpected format: {type(data).__name__}"
                     )
-                self._index = loaded
+                self._index = DatabaseTaxonomyIndex.from_dict(data)
                 load_time = time.time() - start_time
                 logger.info(
                     f"Loaded cached database index: {len(self._index.by_taxid)} nodes "
@@ -683,10 +760,10 @@ class TaxidMapper:
                     f"Built database index: {len(self._index.by_taxid)} nodes "
                     f"in {build_time:.2f}s"
                 )
-                # Save to cache for next time
+                # Save to JSON cache for next time
                 try:
-                    with open(cache_path, 'wb') as f:
-                        pickle.dump(self._index, f, protocol=pickle.HIGHEST_PROTOCOL)
+                    with open(cache_path, 'w') as f:
+                        json.dump(self._index.to_dict(), f)
                     logger.info(f"Saved database index to cache: {cache_path}")
                 except Exception as e:
                     logger.warning(f"Failed to cache database index: {e}")
