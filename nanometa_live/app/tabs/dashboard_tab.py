@@ -1988,15 +1988,16 @@ def _count_processed_samples(main_dir: str, samples: List[str]) -> int:
     return count
 
 
-def _generate_status_display(status: str) -> Tuple[Dict, str, str, str, str, str]:
+def _generate_status_display(status: str) -> Tuple[Dict, str, str, str, str, str, str]:
     """
-    Generate status indicator style, icon, text, subtitle, label text, and label icon.
+    Generate status indicator style, icon, text, subtitle, label text, label icon, and CSS class.
 
     Args:
-        status: "success", "viewing", "warning", or "danger"
+        status: "starting", "success", "viewing", "warning", or "danger"
 
     Returns:
-        Tuple of (style_dict, icon_class, status_text, subtitle_text, label_text, label_icon)
+        Tuple of (style_dict, icon_class, status_text, subtitle_text,
+                  label_text, label_icon, css_class)
     """
     status_config = {
         "starting": {

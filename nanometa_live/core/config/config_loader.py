@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 # Use ruamel.yaml for comment preservation
-from ruamel.yaml import YAML
+from ruamel.yaml import YAML, constructor as yaml_constructor
 
 
 class ConfigLoader:
@@ -35,8 +35,12 @@ class ConfigLoader:
         self.config_dir = config_dir
         os.makedirs(config_dir, exist_ok=True)
 
-        # Initialize ruamel.yaml
+        # Initialize ruamel.yaml with round-trip mode for comment preservation,
+        # but use SafeConstructor to prevent processing of arbitrary YAML tags
+        # (e.g. !!python/object) which could be a security concern with
+        # user-supplied configuration files.
         self.yaml = YAML()
+        self.yaml.Constructor = yaml_constructor.SafeConstructor
         self.yaml.preserve_quotes = True
         self.yaml.indent(mapping=2, sequence=4, offset=2)
 

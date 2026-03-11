@@ -6,6 +6,7 @@ pandas>=2.2.3
 numpy>=1.22.0  # CVE-2021-34141 fix requires >=1.22.0
 plotly>=6.0.0
 ruamel.yaml>=0.18.10
+PyYAML>=6.0.1  # Used by watchlist_loader, pathogen_loader, and other modules
 biopython>=1.85
 tqdm>=4.67.1
 flask>=3.1.0

@@ -513,14 +513,15 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # Add validation species if configured (from Watchlist or legacy config)
     if has_species and validation_taxids:
-        # Convert list to comma-separated string (Nextflow expects string, not array)
+        # Convert to comma-separated string for taxids_to_validate (schema type: string)
         if isinstance(validation_taxids, list):
             taxids_str = ",".join(str(t) for t in validation_taxids)
         else:
             taxids_str = str(validation_taxids)
 
-        params["priority_samples"] = taxids_str
-        params["taxids_to_validate"] = taxids_str  # For VALIDATION subworkflow
+        # priority_samples must be a list for Nextflow (.size(), .any{}, .join())
+        params["priority_samples"] = [str(t) for t in validation_taxids]
+        params["taxids_to_validate"] = taxids_str  # For VALIDATION subworkflow (string)
         logging.info(f"Configured {len(validation_taxids)} species for validation")
 
         # Add pathogen_genomes JSON path if available

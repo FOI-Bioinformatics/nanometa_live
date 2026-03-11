@@ -476,7 +476,11 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
     kraken_dir = os.path.join(main_dir, "kraken2")
 
     # Fast mtime-based check: if the kraken2 directory has not changed,
-    # return the previously cached result without any parsing or TTL lookup
+    # return the previously cached result without any parsing or TTL lookup.
+    # NOTE: .copy() on cache hits is intentional. Multiple Dash callbacks may
+    # receive the same DataFrame concurrently; without copy, any callback that
+    # modifies the frame (e.g. filtering, adding columns) would corrupt the
+    # shared cached object. The copy cost is modest relative to the I/O saved.
     mtime_key = f"kraken:{cache_key}"
     if os.path.isdir(kraken_dir):
         mtime_cached = _check_mtime_cache(mtime_key, [kraken_dir])

@@ -13,7 +13,7 @@ import json
 import glob
 from datetime import datetime
 
-from dash import Dash, Input, Output, State, no_update
+from dash import Dash, Input, Output, State, html, no_update
 import dash_bootstrap_components as dbc
 import plotly.express as px
 
@@ -430,6 +430,7 @@ def register_qc_callbacks(app: Dash):
 
             processed_files = 0
             waiting_files = 0
+            chopper_estimated = False
 
             # Get batch statistics for read counts
             if os.path.exists(batch_stats_dir):
@@ -485,14 +486,16 @@ def register_qc_callbacks(app: Dash):
                             unclassified_total = int(unclassified.iloc[0]['cumul_reads']) if not unclassified.empty else 0
                             tot_reads_pre_filt = classified_total + unclassified_total
 
-                            # Estimate removal reasons (chopper doesn't provide breakdown)
-                            # Use same estimation as FilteringBreakdownVisual for consistency
+                            # Chopper does not produce a per-category breakdown
+                            # of removed reads. The proportions below are rough
+                            # estimates only and are labelled as such in the UI.
                             if tot_reads_pre_filt > 0:
                                 tot_removed_reads = max(0, tot_reads_pre_filt - tot_passed_reads)
                                 # Approximate distribution: 60% quality, 30% length, 10% complexity
                                 tot_low_quality_reads = int(tot_removed_reads * 0.6)
                                 tot_too_short_reads = int(tot_removed_reads * 0.3)
                                 tot_too_many_N_reads = tot_removed_reads - tot_low_quality_reads - tot_too_short_reads
+                                chopper_estimated = True
 
             # Get classification stats from Kraken2 (sample-filtered)
             classified_reads = 0
@@ -559,9 +562,12 @@ def register_qc_callbacks(app: Dash):
                 f"Total reads removed: {tot_removed_reads:,} ({percentage_removed}%)"
             )
 
-            low_quality = f"Too low quality: {tot_low_quality_reads:,} ({percentage_low_quality}%)"
-            too_short = f"Too short: {tot_too_short_reads:,} ({percentage_too_short}%)"
-            low_complexity = f"Too low complexity: {tot_too_many_N_reads:,} ({percentage_too_many_N}%)"
+            # When chopper is used, the per-category breakdown is an
+            # approximation (chopper does not report these individually).
+            est = " (est.)" if chopper_estimated else ""
+            low_quality = f"Too low quality{est}: {tot_low_quality_reads:,} ({percentage_low_quality}%)"
+            too_short = f"Too short{est}: {tot_too_short_reads:,} ({percentage_too_short}%)"
+            low_complexity = f"Too low complexity{est}: {tot_too_many_N_reads:,} ({percentage_too_many_N}%)"
 
             classified = (
                 f"Classified reads: {classified_reads:,} ({percentage_classified}%)"
@@ -999,6 +1005,7 @@ def register_qc_callbacks(app: Dash):
             tot_low_quality_reads = 0
             tot_too_many_N_reads = 0
             tot_too_short_reads = 0
+            chopper_estimated = False
 
             # Get filtering stats from FASTP (sample-filtered)
             fastp_found = False
@@ -1031,12 +1038,15 @@ def register_qc_callbacks(app: Dash):
                         tot_reads_pre_filt = classified_reads + unclassified_reads
 
                         if tot_reads_pre_filt > 0:
-                            # Estimate removal reasons (chopper doesn't provide breakdown)
+                            # Chopper does not produce a per-category breakdown
+                            # of removed reads. The proportions below are rough
+                            # estimates only and are labelled as such in the UI.
                             removed = max(0, tot_reads_pre_filt - tot_passed_reads)
                             # Approximate distribution (60% quality, 30% length, 10% complexity)
                             tot_low_quality_reads = int(removed * 0.6)
                             tot_too_short_reads = int(removed * 0.3)
                             tot_too_many_N_reads = removed - tot_low_quality_reads - tot_too_short_reads
+                            chopper_estimated = True
 
             # If we have no data, show empty state
             if tot_reads_pre_filt == 0:
@@ -1056,11 +1066,21 @@ def register_qc_callbacks(app: Dash):
                 removal_reasons = {"low_quality": 0, "too_short": 0, "low_complexity": 0}
 
             # Generate filtering breakdown component
-            return FilteringBreakdownVisual(
+            breakdown = FilteringBreakdownVisual(
                 total_reads=tot_reads_pre_filt,
                 passed_reads=tot_passed_reads,
                 removal_reasons=removal_reasons
             )
+            if chopper_estimated:
+                return html.Div([
+                    breakdown,
+                    html.Small(
+                        "Removal breakdown is estimated (chopper does not "
+                        "report per-category statistics).",
+                        className="text-muted fst-italic mt-1 d-block"
+                    )
+                ])
+            return breakdown
 
         except Exception as e:
             logging.error(f"Error updating filtering breakdown: {e}")

@@ -8,7 +8,15 @@ for installing and running the Nanometa Live application.
 from setuptools import setup, find_packages
 
 
-from nanometa_live import __version__
+# Read version from __init__.py without importing the package, which would
+# fail during installation before dependencies are available.
+def _read_version() -> str:
+    import re
+    with open("nanometa_live/__init__.py") as f:
+        match = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', f.read(), re.M)
+        if match:
+            return match.group(1)
+        raise RuntimeError("Unable to find __version__ in nanometa_live/__init__.py")
 
 
 # Read requirements.txt for dependencies, filtering comments and blank lines
@@ -21,7 +29,7 @@ with open('requirements.txt', 'r') as f:
 
 setup(
     name="Nanometa_Live",
-    version=__version__,
+    version=_read_version(),
     description="Real-time metagenomic analysis with a user-friendly interface",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
