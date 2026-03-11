@@ -205,16 +205,30 @@ class GenomeDownloadManager:
             # Create metadata entry for discovered genome with resolved species name
             logger.info(f"Discovered existing genome file: {fasta_file.name} (taxid: {taxid})")
 
-            # Resolve species name from NCBI
+            # Resolve species name from NCBI (falls back to watchlist)
             species_name, kingdom = self._resolve_species_name(taxid)
+
+            # Infer source from kingdom when possible
+            source = "discovered"
+            if kingdom == "Viruses":
+                source = "ncbi_virus"
+            elif kingdom in ("Bacteria", "Archaea"):
+                source = "gtdb"
+
+            # Check if a BLAST DB already exists on disk
+            blast_db_path = None
+            existing_blast = self.get_blast_db_path(taxid)
+            if existing_blast:
+                blast_db_path = str(existing_blast)
 
             self._metadata[taxid] = GenomeMetadata(
                 taxid=taxid,
                 species_name=species_name,
                 accession="discovered",
-                source="discovered",
+                source=source,
                 kingdom=kingdom,
                 fasta_path=str(fasta_file),
+                blast_db_path=blast_db_path,
                 file_size=fasta_file.stat().st_size,
                 is_representative=False,
             )
@@ -233,21 +247,30 @@ class GenomeDownloadManager:
 
         This runs automatically after loading/scanning genomes to ensure
         all downloaded genomes have corresponding BLAST databases.
+        Also syncs metadata for existing BLAST DBs that lack blast_db_path.
         """
         # Check if makeblastdb is available
-        if not shutil.which("makeblastdb"):
+        has_makeblastdb = bool(shutil.which("makeblastdb"))
+        if not has_makeblastdb:
             logger.debug("makeblastdb not found, skipping auto-build of BLAST databases")
-            return
 
         built = 0
+        synced = 0
         for taxid, meta in self._metadata.items():
             # Check if genome file exists
             genome_path = Path(meta.fasta_path)
             if not genome_path.exists():
                 continue
 
-            # Check if BLAST database already exists
+            # Check if BLAST database already exists on disk
             if self.has_blast_db(taxid):
+                # Sync metadata if it lacks the blast_db_path
+                if meta.blast_db_path is None:
+                    meta.blast_db_path = str(self.get_blast_db_path(taxid))
+                    synced += 1
+                continue
+
+            if not has_makeblastdb:
                 continue
 
             # Build BLAST database
@@ -255,6 +278,9 @@ class GenomeDownloadManager:
             if self.build_blast_db(taxid):
                 built += 1
 
+        if synced > 0:
+            logger.info(f"Synced blast_db_path for {synced} existing BLAST databases")
+            self._save_metadata()
         if built > 0:
             logger.info(f"Built {built} missing BLAST databases")
 

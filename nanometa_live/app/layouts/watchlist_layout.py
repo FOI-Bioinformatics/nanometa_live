@@ -1383,10 +1383,20 @@ def create_genome_item(genome_meta: Dict[str, Any]) -> html.Div:
     source = genome_meta.get("source", "ncbi")
     kingdom = genome_meta.get("kingdom", "Unknown")
     has_blast = genome_meta.get("blast_db_path") is not None
+    # Also check filesystem if metadata lacks blast_db_path
+    if not has_blast and taxid:
+        try:
+            from nanometa_live.core.utils.genome_manager import get_genome_manager
+            has_blast = get_genome_manager().has_blast_db(taxid)
+        except Exception:
+            pass
     file_size = genome_meta.get("file_size", 0)
     size_mb = round(file_size / (1024 * 1024), 2) if file_size else 0
 
-    source_labels = {"gtdb": "GTDB", "ncbi": "NCBI", "ncbi_virus": "NCBI Virus", "discovered": "Local"}
+    source_labels = {
+        "gtdb": "GTDB", "ncbi": "NCBI", "ncbi_virus": "NCBI Virus",
+        "ncbi_cli": "NCBI", "discovered": "Local",
+    }
     source_label = source_labels.get(source, source.upper())
     source_color = "success" if source == "gtdb" else "primary"
 
