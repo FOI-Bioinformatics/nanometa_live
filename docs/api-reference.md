@@ -6,9 +6,14 @@ Reference documentation for Nanometa Live's Python APIs.
 
 ### `nanometa_live.core.utils.data_loaders`
 
+`data_loaders.py` is a re-export hub. The actual implementation lives in
+category-specific modules: `classification_loaders`, `qc_loaders`,
+`validation_loaders`, `loader_utils`, and `canonical_loaders`. All public
+functions are importable from either `data_loaders` or the sub-module directly.
+
 #### `load_kraken_data(main_dir, sample=None)`
 
-Load Kraken2 classification results.
+Load Kraken2 classification results (implemented in `classification_loaders.py`).
 
 ```python
 from nanometa_live.core.utils.data_loaders import load_kraken_data
@@ -56,6 +61,9 @@ stats = load_fastp_data("/path/to/results", sample="barcode01")
 ## Sample Detection
 
 ### `nanometa_live.core.utils.sample_detector`
+
+Uses manifest-based detection (reads a pipeline manifest file if present) with
+glob-based fallback for backward compatibility.
 
 #### `get_available_samples(main_dir)`
 

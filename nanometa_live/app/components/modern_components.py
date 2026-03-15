@@ -55,19 +55,19 @@ def WorkflowStepper(active_step: int = 1) -> html.Div:
         # Circle content
         if step.get("icon") and step_num != active_step and step_num > active_step:
             circle_content = html.I(className=f"bi {step['icon']}",
-                                    style={"fontSize": "0.8rem"})
+                                    style={"fontSize": "1rem"})
         elif step_num < active_step:
             circle_content = html.I(className="bi bi-check",
-                                    style={"fontSize": "0.9rem"})
+                                    style={"fontSize": "1.1rem"})
         else:
             circle_content = html.Span(step["num"],
-                                       style={"fontSize": "0.8rem", "fontWeight": "bold"})
+                                       style={"fontSize": "1rem", "fontWeight": "bold"})
 
         circle = html.Div([
             circle_content,
         ], className="d-flex align-items-center justify-content-center",
            style={
-               "width": "28px", "height": "28px",
+               "width": "40px", "height": "40px",
                "borderRadius": "50%",
                "backgroundColor": bg,
                "color": fg,
@@ -789,7 +789,7 @@ def LastUpdatedBadge(
     Returns:
         html.Span with "Updated: HH:MM:SS" or stale warning
     """
-    props = {"className": "text-muted small", "style": {"fontSize": "0.75rem"}}
+    props = {"className": "text-muted small", "style": {"fontSize": "0.875rem"}}
     if badge_id:
         props["id"] = badge_id
 

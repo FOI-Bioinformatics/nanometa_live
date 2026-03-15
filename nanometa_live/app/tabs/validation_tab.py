@@ -330,11 +330,11 @@ def register_validation_callbacks(app: Dash):
 
         fig.update_layout(
             title=dict(
-                text="Sequence Identity by Species (BLAST)",
+                text="Match Quality by Species",
                 font=dict(size=14, color="#374151"),
             ),
             xaxis_title="Species",
-            yaxis_title="Identity (%)",
+            yaxis_title="Match Quality (%)",
             yaxis_range=[0, 108],
             showlegend=False,
             template="nanometa",
@@ -347,7 +347,7 @@ def register_validation_callbacks(app: Dash):
             line_dash="dash",
             line_color="#6c757d",
             line_width=1,
-            annotation_text="90% threshold",
+            annotation_text="90% minimum for confidence",
             annotation_position="top right",
             annotation_font_size=10,
             annotation_font_color="#6c757d",
@@ -704,11 +704,11 @@ def _create_empty_identity_plot() -> go.Figure:
     )
     fig.update_layout(
         title=dict(
-            text="Sequence Identity by Species",
+            text="Match Quality by Species",
             font=dict(size=14, color="#374151"),
         ),
         xaxis_title="Species",
-        yaxis_title="Identity (%)",
+        yaxis_title="Match Quality (%)",
         template="plotly_white",
         height=350,
         margin=dict(l=50, r=30, t=50, b=60),

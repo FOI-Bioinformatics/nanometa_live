@@ -80,7 +80,7 @@ def create_validation_status_card(
 def _create_blast_tab() -> dbc.Tab:
     """Create the Read Validation (BLAST) sub-tab."""
     return dbc.Tab(
-        label="Read Validation (BLAST)",
+        label="Sequence Matching",
         tab_id="blast-tab",
         children=html.Div([
             # Summary container
@@ -154,8 +154,8 @@ def _create_blast_tab() -> dbc.Tab:
                     dbc.Accordion([
                         dbc.AccordionItem([
                             html.P(
-                                "Distribution of sequence identity scores for validated reads. "
-                                "Higher identity indicates more confident matches to reference genomes.",
+                                "How closely the sample DNA matches each species' reference genome. "
+                                "Scores above 95% are strong matches; below 90% should be treated with caution.",
                                 className="text-muted mb-3",
                             ),
                             dcc.Loading(
@@ -168,14 +168,15 @@ def _create_blast_tab() -> dbc.Tab:
                                     )
                                 ]
                             )
-                        ], title="Identity Distribution")
+                        ], title="Match Quality Chart (Advanced)")
                     ], start_collapsed=True, className="mb-4"),
 
                     # Stats table (collapsible)
                     dbc.Accordion([
                         dbc.AccordionItem([
                             html.P(
-                                "Detailed BLAST validation metrics for each pathogen.",
+                                "Full numerical results for each species checked. "
+                                "Use for reporting or technical review.",
                                 className="text-muted mb-3",
                             ),
                             dcc.Loading(
@@ -186,11 +187,16 @@ def _create_blast_tab() -> dbc.Tab:
                                         columnDefs=[
                                             {"headerName": "Species", "field": "species"},
                                             {"headerName": "Sample", "field": "sample_id"},
-                                            {"headerName": "Total Reads", "field": "total_reads", "type": "numericColumn"},
-                                            {"headerName": "Validated", "field": "validated_reads", "type": "numericColumn"},
-                                            {"headerName": "Validated %", "field": "percent_validated", "type": "numericColumn"},
-                                            {"headerName": "Identity %", "field": "percent_identity_mean", "type": "numericColumn"},
-                                            {"headerName": "Coverage", "field": "coverage_breadth", "type": "numericColumn"},
+                                            {"headerName": "Total Seqs", "field": "total_reads", "type": "numericColumn",
+                                             "headerTooltip": "Total sequences classified as this species"},
+                                            {"headerName": "Confirmed", "field": "validated_reads", "type": "numericColumn",
+                                             "headerTooltip": "Sequences confirmed by reference comparison"},
+                                            {"headerName": "Confirmed %", "field": "percent_validated", "type": "numericColumn",
+                                             "headerTooltip": "Percentage of sequences confirmed. 80%+ is strong evidence."},
+                                            {"headerName": "Match %", "field": "percent_identity_mean", "type": "numericColumn",
+                                             "headerTooltip": "How closely sequences match the reference. 95%+ is a strong match."},
+                                            {"headerName": "Genome Covered", "field": "coverage_breadth", "type": "numericColumn",
+                                             "headerTooltip": "Percentage of the reference genome covered by sequences"},
                                             {
                                                 "headerName": "Status",
                                                 "field": "status",
@@ -218,7 +224,7 @@ def _create_blast_tab() -> dbc.Tab:
                                     )
                                 ]
                             )
-                        ], title="Detailed Validation Statistics")
+                        ], title="Detailed Results Table (Advanced)")
                     ], start_collapsed=True, className="mb-4"),
                 ]
             ),
@@ -232,7 +238,7 @@ def _create_blast_tab() -> dbc.Tab:
 def _create_coverage_tab() -> dbc.Tab:
     """Create the Coverage Validation (minimap2) sub-tab."""
     return dbc.Tab(
-        label="Coverage Validation (minimap2)",
+        label="Genome Coverage",
         tab_id="coverage-tab",
         children=html.Div([
             # Summary container
@@ -268,7 +274,7 @@ def _create_coverage_tab() -> dbc.Tab:
                         ], md=6),
                         dbc.Col([
                             dbc.Label([
-                                "Min MapQ filter:",
+                                "Confidence filter:",
                                 dbc.Badge(
                                     "?",
                                     color="secondary",
@@ -278,8 +284,9 @@ def _create_coverage_tab() -> dbc.Tab:
                                     style={"cursor": "pointer", "fontSize": "0.7rem"},
                                 ),
                                 dbc.Tooltip(
-                                    "Minimum mapping quality score (0-60). Higher values require more confident alignments. "
-                                    "0 = include all alignments. 20+ recommended for reliable coverage estimates.",
+                                    "Filter out low-confidence alignments. "
+                                    "0 = show everything, 20+ = show only reliable matches. "
+                                    "Increase this value if you see noisy results.",
                                     target="mapq-help-badge",
                                     placement="top",
                                 ),
@@ -378,11 +385,12 @@ def create_validation_layout() -> html.Div:
     """
     return html.Div([dbc.Container([
         # Page title
-        html.H4("Pathogen Validation Results", className="mb-3"),
+        html.H4("Species Confirmation Results", className="mb-3"),
         html.P(
-            "Validation compares classified reads against reference genomes to confirm "
-            "identification accuracy. Use the tabs below to view BLAST read-level results "
-            "or minimap2 coverage analysis.",
+            "This page checks whether the organisms identified by the classifier are "
+            "correct by comparing the DNA sequences against known reference genomes. "
+            "Species marked 'Confirmed' have strong evidence; 'Partial' or 'Low Confidence' "
+            "results should be interpreted with caution.",
             className="text-muted mb-4",
         ),
 
@@ -404,70 +412,71 @@ def create_validation_layout() -> html.Div:
 
         # Help Section (outside tabs)
         dbc.Card([
-            dbc.CardHeader(html.H5("Understanding Validation Results", className="mb-0")),
+            dbc.CardHeader(html.H5("Understanding This Page", className="mb-0")),
             dbc.CardBody([
                 dbc.Row([
                     dbc.Col([
-                        html.H6("Status Indicators", className="fw-bold mb-2"),
+                        html.H6("What The Status Means", className="fw-bold mb-2"),
                         html.Ul([
                             html.Li([
                                 html.Span(
                                     html.I(className="bi bi-check-circle-fill text-success me-2"),
                                 ),
                                 html.Strong("Confirmed: "),
-                                "80%+ reads validated with 90%+ identity"
+                                "Strong match to a known reference genome. High confidence this organism is present."
                             ]),
                             html.Li([
                                 html.Span(
                                     html.I(className="bi bi-exclamation-circle-fill text-warning me-2"),
                                 ),
                                 html.Strong("Partial: "),
-                                "50-80% reads validated"
+                                "Some evidence, but not conclusive. May need more sequencing data or could be a related species."
                             ]),
                             html.Li([
                                 html.Span(
                                     html.I(className="bi bi-x-circle-fill text-danger me-2"),
                                 ),
                                 html.Strong("Low Confidence: "),
-                                "Less than 50% reads validated"
+                                "Weak match. The identification may be incorrect - treat with caution."
                             ]),
                             html.Li([
                                 html.Span(
                                     html.I(className="bi bi-question-circle-fill text-secondary me-2"),
                                 ),
                                 html.Strong("No Data: "),
-                                "Validation not performed or failed"
+                                "Confirmation check has not run yet or no reference genome is available."
                             ])
                         ])
                     ], md=6),
                     dbc.Col([
-                        html.H6("Key Metrics", className="fw-bold mb-2"),
+                        html.H6("What To Do", className="fw-bold mb-2"),
                         html.Ul([
                             html.Li([
-                                html.Strong("Validated %: "),
-                                "Percentage of Kraken2 reads confirmed by BLAST"
+                                html.Strong("Confirmed species: "),
+                                "Proceed with confidence. Report and act on findings."
                             ]),
                             html.Li([
-                                html.Strong("Identity %: "),
-                                "Average sequence similarity to reference genome"
+                                html.Strong("Partial match: "),
+                                "Continue sequencing for more data, or verify with an alternative method."
                             ]),
                             html.Li([
-                                html.Strong("Coverage: "),
-                                "Fraction of reference genome covered by reads"
+                                html.Strong("Low confidence: "),
+                                "Do not rely on this identification. Re-sequence or use a different "
+                                "detection method before taking action."
                             ]),
                             html.Li([
-                                html.Strong("Depth: "),
-                                "Average number of reads per genome position"
-                            ])
+                                html.Strong("No data: "),
+                                "Wait for the pipeline to finish, or check that validation is enabled "
+                                "in the Configuration tab."
+                            ]),
                         ])
                     ], md=6)
                 ]),
                 html.Hr(),
                 html.P([
-                    html.Strong("Note: "),
-                    "Validation results help distinguish true pathogen presence from ",
-                    "potential misclassification. Even confirmed results should be ",
-                    "interpreted in clinical context."
+                    html.Strong("Important: "),
+                    "Even confirmed results should be interpreted alongside other evidence. "
+                    "Validation reduces false positives but does not replace clinical judgment."
                 ], className="text-muted mb-0")
             ])
         ], className="mb-4", style={"backgroundColor": "#f8f9fa"}),
@@ -544,6 +553,15 @@ def create_validation_result_card(
 
     config = status_config.get(status, status_config["no_data"])
 
+    # Plain-language explanation for the status
+    status_explanation = {
+        "confirmed": "Strong match to reference genome",
+        "partial": "Some evidence, may need more data",
+        "low": "Weak match - treat with caution",
+        "no_data": "Confirmation not yet available",
+        "failed": "Check did not complete",
+    }
+
     return dbc.Card([
         dbc.CardHeader([
             dbc.Row([
@@ -557,39 +575,41 @@ def create_validation_result_card(
                         color=config["color"],
                         className="float-end"
                     ),
-                    dbc.Badge(
-                        validation_method.upper() if validation_method != "blast" else "BLAST",
-                        color="info" if validation_method == "minimap2" else "warning",
-                        className="float-end me-1",
-                        style={"fontSize": "0.7rem"}
-                    )
                 ], md=4, className="text-end")
             ])
         ], className=f"py-2 {config['border']}"),
         dbc.CardBody([
+            # Status explanation
+            html.Div([
+                html.Small(
+                    status_explanation.get(status, ""),
+                    className=f"text-{config['color']}",
+                    style={"fontSize": "12px", "fontWeight": "500"}
+                )
+            ], className="mb-2"),
             dbc.Row([
                 dbc.Col([
                     html.Div([
-                        html.Small("Validated", className="text-muted d-block"),
+                        html.Small("Confirmed", className="text-muted d-block"),
                         html.Strong(f"{percent_validated:.1f}%", style={"fontSize": "1.2rem"})
                     ])
                 ], md=3),
                 dbc.Col([
                     html.Div([
-                        html.Small("Identity", className="text-muted d-block"),
+                        html.Small("Match Quality", className="text-muted d-block"),
                         html.Strong(f"{percent_identity:.1f}%", style={"fontSize": "1.2rem"})
                     ])
                 ], md=3),
                 dbc.Col([
                     html.Div([
-                        html.Small("Reads", className="text-muted d-block"),
+                        html.Small("Sequences", className="text-muted d-block"),
                         html.Strong(f"{validated_reads:,}/{total_reads:,}", style={"fontSize": "1.1rem"})
                     ])
                 ], md=3),
                 dbc.Col([
                     html.Div([
                         html.Small(
-                            "MapQ" if validation_method == "minimap2" else "Coverage",
+                            "Alignment Score" if validation_method == "minimap2" else "Genome Covered",
                             className="text-muted d-block"
                         ),
                         html.Strong(
@@ -610,7 +630,6 @@ def create_validation_result_card(
         ]),
         dbc.CardFooter([
             html.Small([
-                html.Span(f"TaxID: {taxid}", className="me-3"),
                 html.Span(f"Sample: {sample_id}", className="me-3") if sample_id else "",
             ], className="text-muted d-inline"),
             dbc.Button(

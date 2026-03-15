@@ -10,6 +10,8 @@ Provides UI for:
 - Exporting/importing portable bundles for offline field operation
 """
 
+from pathlib import Path
+
 import dash_bootstrap_components as dbc
 from dash import html, dcc
 
@@ -40,13 +42,6 @@ def create_preparation_layout():
         # Workflow step indicator
         WorkflowStepper(active_step=3),
 
-        # Recommended order guidance
-        html.P(
-            "Follow the steps below in order. Start with the Readiness Checklist "
-            "to identify any issues, then address them using the sections below.",
-            className="text-muted small mb-3",
-        ),
-
         # Header
         dbc.Row([
             dbc.Col([
@@ -56,13 +51,22 @@ def create_preparation_layout():
                     html.H4("Preparation", className="mb-0 d-inline"),
                 ], className="d-flex align-items-center mb-1"),
                 html.P(
-                    "Download databases, scan taxid mappings, download genomes, "
-                    "build BLAST databases, and export portable bundles. "
-                    "Complete these steps before starting analysis.",
+                    "Verify that everything is ready before you start analysis. "
+                    "Run the checklist first, then address any issues it finds.",
                     className="text-muted mb-0 small"
                 ),
             ]),
-        ], className="mb-4"),
+        ], className="mb-3"),
+
+        # Recommended order guidance
+        dbc.Alert([
+            html.I(className="bi bi-signpost-2 me-2"),
+            html.Strong("Recommended order: "),
+            html.Span("1) Run the Readiness Checklist below. "),
+            html.Span("2) Fix any issues it reports. "),
+            html.Span("3) If needed, download a species database. "),
+            html.Span("4) If using confirmation testing, download reference genomes."),
+        ], color="light", className="small py-2 mb-3 border"),
 
         # Readiness checklist
         dbc.Card([
@@ -71,30 +75,42 @@ def create_preparation_layout():
                     html.I(className="bi bi-clipboard-check me-2",
                            style={"fontSize": "1.1rem"}),
                     html.H5("Readiness Checklist", className="mb-0 d-inline"),
-                ], className="d-inline-flex align-items-center"),
+                    html.I(
+                        id="readiness-collapse-icon",
+                        className="bi bi-chevron-down ms-2",
+                        style={"fontSize": "0.9rem", "cursor": "pointer"},
+                    ),
+                ], className="d-inline-flex align-items-center",
+                   id="readiness-header-toggle",
+                   role="button",
+                   style={"cursor": "pointer"}),
                 dbc.Button(
-                    [html.I(className="bi bi-arrow-clockwise me-1"), "Run Checks"],
+                    [html.I(className="bi bi-arrow-clockwise me-1"), "Check Everything"],
                     id="check-readiness-btn",
-                    color="outline-primary",
+                    color="primary",
                     size="sm",
                     className="float-end",
                 ),
             ]),
-            dbc.CardBody([
-                dbc.Spinner(
-                    html.Div(id="readiness-results",
-                             children=html.Div([
-                                 html.I(className="bi bi-info-circle text-muted me-2"),
-                                 html.Span(
-                                     "Click 'Run Checks' to verify that all required "
-                                     "components are configured.",
-                                     className="text-muted",
-                                 ),
-                             ], className="d-flex align-items-center")),
-                    size="sm",
-                    type="border",
-                ),
-            ]),
+            dbc.Collapse(
+                dbc.CardBody([
+                    dbc.Spinner(
+                        html.Div(id="readiness-results",
+                                 children=html.Div([
+                                     html.I(className="bi bi-info-circle text-muted me-2"),
+                                     html.Span(
+                                         "Click 'Check Everything' above to verify your setup. "
+                                         "This will check directories, databases, and required software.",
+                                         className="text-muted",
+                                     ),
+                                 ], className="d-flex align-items-center")),
+                        size="sm",
+                        type="border",
+                    ),
+                ]),
+                id="readiness-collapse",
+                is_open=True,
+            ),
         ], className="mb-4"),
 
         # Kraken2 Database Download (moved from Configuration tab)
@@ -119,8 +135,9 @@ def create_preparation_layout():
             ]),
             dbc.CardBody([
                 html.P(
-                    "Build taxonomy index, generate taxid mappings, download "
-                    "reference genomes, and build BLAST databases.",
+                    "Run all preparation steps automatically: verify the database, "
+                    "check organism mappings, download reference genomes, and build "
+                    "search indexes.",
                     className="text-muted"
                 ),
                 dbc.Checklist(
@@ -171,10 +188,28 @@ def create_preparation_layout():
                             ]),
                             dbc.CardBody([
                                 html.P(
-                                    "Package all prepared data into a portable archive. "
-                                    "The Kraken2 database is not included (transfer separately).",
+                                    "Package all prepared data into a portable archive for "
+                                    "transfer to a field computer. The species database is not "
+                                    "included due to size -- transfer it separately.",
                                     className="text-muted small"
                                 ),
+                                dbc.InputGroup([
+                                    dbc.InputGroupText("Save to"),
+                                    dbc.Input(
+                                        id="bundle-export-directory",
+                                        value=str(Path.home() / "Downloads"),
+                                        type="text",
+                                        placeholder="/path/to/save/directory",
+                                    ),
+                                    dbc.Button(
+                                        html.I(className="bi bi-folder2-open"),
+                                        id="bundle-export-browse-btn",
+                                        color="secondary",
+                                        outline=True,
+                                        n_clicks=0,
+                                        title="Browse for directory",
+                                    ),
+                                ], className="mb-2"),
                                 dbc.InputGroup([
                                     dbc.InputGroupText("Filename"),
                                     dbc.Input(
@@ -225,7 +260,8 @@ def create_preparation_layout():
                             dbc.CardBody([
                                 html.P(
                                     "Import a bundle from another machine. "
-                                    "You must also provide the local Kraken2 database path.",
+                                    "You must also provide the path to the species database "
+                                    "on this computer.",
                                     className="text-muted small"
                                 ),
                                 dbc.InputGroup([
@@ -237,10 +273,10 @@ def create_preparation_layout():
                                     ),
                                 ], className="mb-2"),
                                 dbc.InputGroup([
-                                    dbc.InputGroupText("Kraken2 DB"),
+                                    dbc.InputGroupText("Species DB"),
                                     dbc.Input(
                                         id="import-kraken-db-path",
-                                        placeholder="/path/to/kraken2/db",
+                                        placeholder="/path/to/species/database",
                                         type="text",
                                     ),
                                 ], className="mb-3"),
@@ -261,6 +297,7 @@ def create_preparation_layout():
         _create_genome_download_modal(),
         _create_blast_build_modal(),
         _create_rescan_progress_modal(),
+        _create_remove_all_confirm_modal(),
 
     ], fluid=True, className="py-3")
 
@@ -274,11 +311,12 @@ def _create_kraken_db_download_card() -> dbc.Card:
     return dbc.Card([
         dbc.CardHeader([
             html.I(className="bi bi-database-down me-2"),
-            html.H5("Download External Kraken2 Database", className="mb-0 d-inline"),
+            html.H5("Download Species Identification Database", className="mb-0 d-inline"),
         ]),
         dbc.CardBody([
             html.P(
-                "Download a pre-built Kraken2 database. The database path will be "
+                "Download a pre-built species database. This is the reference library "
+                "used to identify organisms in your samples. The file path will be "
                 "set automatically after download completes.",
                 className="text-muted small mb-3"
             ),
@@ -315,12 +353,13 @@ def _create_rescan_db_card() -> dbc.Card:
     return dbc.Card([
         dbc.CardHeader([
             html.I(className="bi bi-arrow-repeat me-2"),
-            html.H5("Taxid Mapping (Rescan Database)", className="mb-0 d-inline"),
+            html.H5("Verify Watchlist Against Database", className="mb-0 d-inline"),
         ]),
         dbc.CardBody([
             html.P(
-                "Scan the Kraken2 database to map watchlist pathogen taxids to database entries. "
-                "This is needed for accurate detection when using GTDB or custom databases.",
+                "Check that each organism on your watchlist can be found in the species "
+                "database. This step ensures accurate detection, especially when using "
+                "specialised databases.",
                 className="text-muted small mb-3"
             ),
             dbc.Row([
@@ -328,12 +367,12 @@ def _create_rescan_db_card() -> dbc.Card:
                     dbc.Button(
                         [
                             html.I(id="taxmap-rescan-icon", className="bi bi-arrow-repeat me-1"),
-                            html.Span(id="taxmap-rescan-text", children="Rescan DB"),
+                            html.Span(id="taxmap-rescan-text", children="Scan Database"),
                         ],
                         id="taxmap-rescan-btn",
                         color="primary",
                         n_clicks=0,
-                        title="Re-scan Kraken2 database for taxid mappings",
+                        title="Scan the species database to verify watchlist organisms are present",
                     ),
                     html.Small(id="taxmap-rescan-status", className="ms-2 text-muted"),
                 ], width="auto"),
@@ -345,8 +384,8 @@ def _create_rescan_db_card() -> dbc.Card:
             ]),
             # Current status display
             html.Div(id="taxmap-rescan-info", className="mt-3", children=[
-                html.Div([html.I(className="bi bi-database me-2"), html.Span(id="taxmap-current-db-type", children="No database scanned", className="small text-muted")], className="mb-1"),
-                html.Div([html.I(className="bi bi-check2-circle me-2"), html.Span(id="taxmap-current-mapping-count", children="0 species mapped", className="small text-muted")], className="mb-1"),
+                html.Div([html.I(className="bi bi-database me-2"), html.Span(id="taxmap-current-db-type", children="No database scanned yet", className="small text-muted")], className="mb-1"),
+                html.Div([html.I(className="bi bi-check2-circle me-2"), html.Span(id="taxmap-current-mapping-count", children="0 organisms matched", className="small text-muted")], className="mb-1"),
                 html.Div([html.I(className="bi bi-clock-history me-2"), html.Span(id="taxmap-last-scan-time", children="Last scan: Never", className="small text-muted")]),
             ]),
         ]),
@@ -363,7 +402,7 @@ def _create_genome_downloads_card() -> dbc.Card:
     return dbc.Card([
         dbc.CardHeader([
             html.I(className="bi bi-file-earmark-medical me-2"),
-            html.H5("Genome Downloads for BLAST Validation", className="mb-0 d-inline"),
+            html.H5("Reference Genomes for Confirmation Testing", className="mb-0 d-inline"),
         ]),
         dbc.CardBody([
             # Status overview row
@@ -395,7 +434,7 @@ def _create_genome_downloads_card() -> dbc.Card:
                             id="genome-stat-blast",
                             className="h5 mb-0 text-info"
                         ),
-                        html.Small(" with BLAST DB", className="text-muted ms-1"),
+                        html.Small(" with search index", className="text-muted ms-1"),
                     ], className="d-flex align-items-baseline"),
                 ], width="auto", className="me-3"),
                 dbc.Col([
@@ -428,13 +467,22 @@ def _create_genome_downloads_card() -> dbc.Card:
                             n_clicks=0,
                         ),
                         dbc.Button(
-                            [html.I(className="bi bi-database me-1"), "Build BLAST DBs"],
+                            [html.I(className="bi bi-database me-1"), "Build Search Index"],
                             id="genome-build-blast-btn",
                             color="success",
                             outline=True,
                             size="sm",
                             n_clicks=0,
-                            title="Build BLAST databases for downloaded genomes",
+                            title="Build search indexes from downloaded reference genomes for confirmation testing",
+                        ),
+                        dbc.Button(
+                            [html.I(className="bi bi-trash me-1"), "Remove All"],
+                            id="genome-remove-all-btn",
+                            color="danger",
+                            outline=True,
+                            size="sm",
+                            n_clicks=0,
+                            title="Delete all downloaded genomes and BLAST databases",
                         ),
                     ], size="sm"),
                 ], width="auto"),
@@ -446,8 +494,8 @@ def _create_genome_downloads_card() -> dbc.Card:
             html.Div([
                 html.Small([
                     html.I(className="bi bi-info-circle me-1"),
-                    "Reference genomes are used for BLAST validation of detected pathogens. "
-                    "Bacteria/Archaea genomes are downloaded from GTDB, other organisms from NCBI RefSeq.",
+                    "Reference genomes are used to double-check species identifications. "
+                    "Bacterial genomes are downloaded from GTDB, other organisms from NCBI.",
                 ], className="text-muted"),
             ], className="mb-3"),
 
@@ -530,8 +578,8 @@ def _create_import_genomes_card() -> dbc.Card:
         ]),
         dbc.CardBody([
             html.P(
-                "Import reference genome FASTA files from a local directory or archive. "
-                "Files named {taxid}.fasta are recognized automatically.",
+                "Import reference genome files from a local folder or archive. "
+                "Files named with their taxonomy ID (e.g. 562.fasta) are recognised automatically.",
                 className="text-muted small mb-3"
             ),
             dbc.Tabs([
@@ -605,8 +653,9 @@ def _create_import_genomes_card() -> dbc.Card:
                 children=[
                     html.H6("Unrecognized Files", className="text-warning mb-2"),
                     html.P(
-                        "The following files could not be matched to a taxid. "
-                        "Enter the NCBI taxonomy ID for each file to import it.",
+                        "The following files could not be matched to a known organism. "
+                        "Enter the NCBI taxonomy ID for each file to import it "
+                        "(find IDs at ncbi.nlm.nih.gov/taxonomy).",
                         className="text-muted small",
                     ),
                     html.Div(id="genome-import-mapping-table"),
@@ -803,6 +852,44 @@ def _create_rescan_progress_modal() -> dbc.Modal:
     ], id="taxmap-rescan-modal", centered=True, backdrop="static", is_open=False)
 
 
+def _create_remove_all_confirm_modal() -> dbc.Modal:
+    """Confirmation dialog for removing all downloaded genomes."""
+    return dbc.Modal([
+        dbc.ModalHeader([
+            dbc.ModalTitle([
+                html.I(className="bi bi-exclamation-triangle-fill text-danger me-2"),
+                "Remove All Genomes",
+            ]),
+        ]),
+        dbc.ModalBody([
+            html.P(
+                "This will permanently delete all downloaded genome FASTA files "
+                "and their BLAST databases.",
+                className="mb-2",
+            ),
+            html.P(
+                "Taxid mappings and watchlist configuration will not be affected.",
+                className="text-muted mb-0",
+            ),
+            html.Div(id="genome-remove-all-count", className="mt-2 fw-bold"),
+        ]),
+        dbc.ModalFooter([
+            dbc.Button(
+                "Cancel",
+                id="genome-remove-all-cancel-btn",
+                color="secondary",
+                n_clicks=0,
+            ),
+            dbc.Button(
+                [html.I(className="bi bi-trash me-1"), "Remove All"],
+                id="genome-remove-all-confirm-btn",
+                color="danger",
+                n_clicks=0,
+            ),
+        ]),
+    ], id="genome-remove-all-modal", centered=True, is_open=False)
+
+
 # =============================================================================
 # DEPLOY OFFLINE WIZARD
 # =============================================================================
@@ -812,43 +899,43 @@ _WIZARD_STEPS = [
         "index": 0,
         "icon": "bi-list-check",
         "title": "Select Watchlists",
-        "desc": "Choose which pathogen watchlists to include in the deployment.",
+        "desc": "Choose which organism watchlists to include in the field deployment.",
     },
     {
         "index": 1,
         "icon": "bi-database-check",
-        "title": "Verify Kraken2 DB",
-        "desc": "Confirm the Kraken2 database path is valid and contains required files.",
+        "title": "Verify Species Database",
+        "desc": "Confirm the species identification database is valid and accessible.",
     },
     {
         "index": 2,
         "icon": "bi-diagram-3",
-        "title": "Build Taxonomy Index",
-        "desc": "Build the taxonomy index and generate taxid mappings from the database.",
+        "title": "Build Organism Index",
+        "desc": "Build the organism lookup index so watchlist species can be matched.",
     },
     {
         "index": 3,
         "icon": "bi-cloud-download",
-        "title": "Download Genomes",
-        "desc": "Download reference genomes for all watchlist entries.",
+        "title": "Download Reference Genomes",
+        "desc": "Download reference genomes for confirmation testing of detected organisms.",
     },
     {
         "index": 4,
         "icon": "bi-database-fill-gear",
-        "title": "Build BLAST DBs",
-        "desc": "Build BLAST databases from downloaded reference genomes.",
+        "title": "Build Search Indexes",
+        "desc": "Build search indexes from reference genomes for confirmation testing.",
     },
     {
         "index": 5,
         "icon": "bi-archive",
-        "title": "Cache Taxonomy",
-        "desc": "Export taxonomy lookup data for offline name resolution.",
+        "title": "Cache Organism Names",
+        "desc": "Save organism name lookup data so names resolve without internet access.",
     },
     {
         "index": 6,
         "icon": "bi-clipboard2-check",
         "title": "Readiness Check",
-        "desc": "Verify that all prerequisites are in place for offline operation.",
+        "desc": "Verify that everything is in place for offline operation.",
     },
     {
         "index": 7,

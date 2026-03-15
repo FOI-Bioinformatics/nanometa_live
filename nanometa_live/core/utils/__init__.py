@@ -9,21 +9,6 @@ from nanometa_live.core.utils.file_utils import *
 from nanometa_live.core.utils.data_utils import *
 from nanometa_live.core.utils.blast_utils import *
 from nanometa_live.core.utils.kraken_utils import *
-from nanometa_live.core.utils.diversity_metrics import (
-    # Alpha diversity functions
-    AlphaDiversity,
-    calculate_shannon_index,
-    calculate_simpson_index,
-    calculate_chao1,
-    calculate_pielou_evenness,
-    calculate_alpha_diversity,
-    # Beta diversity functions
-    calculate_bray_curtis,
-    calculate_jaccard,
-    build_abundance_matrix,
-    calculate_beta_diversity_matrix,
-    get_diversity_summary,
-)
 from nanometa_live.core.utils.offline_cache import (
     OfflineTaxonomyCache,
     CacheEntry,

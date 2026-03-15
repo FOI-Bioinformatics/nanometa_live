@@ -100,15 +100,15 @@ def create_coverage_depth_figure(
 
     fig.update_layout(
         title=dict(
-            text=f"Genome Coverage Depth - {coverage.ref_name}",
+            text=f"How deeply each part of the genome is covered - {coverage.ref_name}",
             font=dict(size=14, color="#374151"),
         ),
         xaxis=dict(
-            title="Genome Position (bp)",
+            title="Position along genome",
             rangeslider=dict(visible=True, thickness=0.06),
             tickformat=",",
         ),
-        yaxis=dict(title="Read Depth"),
+        yaxis=dict(title="Number of overlapping sequences"),
         template="nanometa",
         height=450,
         margin=dict(l=50, r=30, t=50, b=30),
@@ -157,9 +157,9 @@ def create_cumulative_coverage_figure(coverage: CoverageData) -> go.Figure:
     ))
 
     fig.update_layout(
-        title=dict(text="Cumulative Coverage", font=dict(size=13, color="#374151")),
-        xaxis_title="Minimum Depth",
-        yaxis_title="Genome Covered (%)",
+        title=dict(text="How much of the genome is covered at each depth", font=dict(size=13, color="#374151")),
+        xaxis_title="Minimum number of overlapping sequences",
+        yaxis_title="Genome covered (%)",
         yaxis_range=[0, 105],
         template="nanometa",
         height=280,
@@ -214,9 +214,9 @@ def create_depth_histogram_figure(
     )
 
     fig.update_layout(
-        title=dict(text="Depth Distribution", font=dict(size=13, color="#374151")),
-        xaxis_title="Depth",
-        yaxis_title="Positions",
+        title=dict(text="Distribution of coverage depth across the genome", font=dict(size=13, color="#374151")),
+        xaxis_title="Number of overlapping sequences",
+        yaxis_title="Number of genome positions",
         yaxis_tickformat=",",
         template="nanometa",
         height=280,
@@ -229,35 +229,72 @@ def create_depth_histogram_figure(
     return fig
 
 
-def create_coverage_stats_summary(coverage: CoverageData) -> dbc.Row:
+def create_coverage_stats_summary(coverage: CoverageData) -> html.Div:
     """
     Create a row of summary statistics for coverage data.
+
+    Uses plain-language labels so that non-expert operators can
+    interpret the results without bioinformatics knowledge.
 
     Args:
         coverage: CoverageData object.
 
     Returns:
-        dbc.Row with stat badges.
+        html.Div with stat badges and an interpretation line.
     """
     items = [
-        ("Breadth", f"{coverage.breadth * 100:.1f}%"),
-        ("Mean Depth", f"{coverage.mean_depth:.1f}x"),
-        ("Median Depth", f"{coverage.median_depth:.1f}x"),
-        ("Max Depth", f"{coverage.max_depth:,}x"),
-        ("Genome Length", f"{coverage.ref_length:,} bp"),
+        ("Genome Covered", f"{coverage.breadth * 100:.1f}%",
+         "Percentage of the reference genome with at least one matching sequence"),
+        ("Avg. Depth", f"{coverage.mean_depth:.1f}x",
+         "Average number of sequences covering each position"),
+        ("Typical Depth", f"{coverage.median_depth:.1f}x",
+         "Median depth - less affected by outlier regions"),
+        ("Peak Depth", f"{coverage.max_depth:,}x",
+         "Maximum depth at any single position"),
+        ("Genome Size", f"{coverage.ref_length:,} bp",
+         "Total length of the reference genome"),
     ]
 
     cols = []
-    for label, value in items:
+    for label, value, tooltip_text in items:
         cols.append(dbc.Col(
             html.Div([
                 html.Small(label, className="text-muted d-block"),
                 html.Strong(value),
-            ], className="text-center"),
+            ], className="text-center",
+               title=tooltip_text),
             className="col",
         ))
 
-    return dbc.Row(cols, className="mb-3 g-2")
+    # Add interpretation line
+    breadth_pct = coverage.breadth * 100
+    if breadth_pct >= 80 and coverage.mean_depth >= 10:
+        interp_color = "success"
+        interp_text = "Good coverage - species identification is well-supported by the data."
+    elif breadth_pct >= 50 or coverage.mean_depth >= 5:
+        interp_color = "warning"
+        interp_text = ("Partial coverage - some evidence supports this identification, "
+                       "but more sequencing data would strengthen confidence.")
+    elif breadth_pct > 0:
+        interp_color = "danger"
+        interp_text = ("Low coverage - insufficient data to confirm this species. "
+                       "Continue sequencing or verify with an alternative method.")
+    else:
+        interp_color = "secondary"
+        interp_text = "No coverage detected for this reference genome."
+
+    return html.Div([
+        dbc.Row(cols, className="mb-2 g-2"),
+        dbc.Alert(
+            [
+                html.I(className=f"bi bi-{'check-circle' if interp_color == 'success' else 'exclamation-triangle' if interp_color in ('warning', 'danger') else 'info-circle'}-fill me-2"),
+                html.Span(interp_text),
+            ],
+            color=interp_color,
+            className="mb-0 py-2",
+            style={"fontSize": "13px"},
+        ),
+    ])
 
 
 def create_empty_coverage_figure(

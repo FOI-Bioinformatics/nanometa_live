@@ -144,7 +144,7 @@ def create_header(title="Nanometa Live"):
                     ),
                     dbc.Tooltip(
                         id="start-analysis-tooltip",
-                        children="Begin processing the nanopore sequence data",
+                        children="Begin analysing DNA samples for organisms of interest",
                         target="start-stop-button",
                         placement="bottom"
                     )

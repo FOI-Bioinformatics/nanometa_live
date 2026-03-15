@@ -81,16 +81,6 @@ from nanometa_live.app.utils.config_manager import (
     ConfigUpdateManager,
 )
 
-from nanometa_live.app.utils.error_handler import (
-    ErrorCategory,
-    ActionableError,
-    get_actionable_error,
-    create_error_toast,
-    log_and_create_alert,
-    get_pipeline_error,
-    PIPELINE_ERROR_MESSAGES,
-)
-
 __all__ = [
     # Error logging
     'log_callback_error',
@@ -154,12 +144,4 @@ __all__ = [
     'should_skip_stale_update',
     'merge_config_safely',
     'ConfigUpdateManager',
-    # Error handling
-    'ErrorCategory',
-    'ActionableError',
-    'get_actionable_error',
-    'create_error_toast',
-    'log_and_create_alert',
-    'get_pipeline_error',
-    'PIPELINE_ERROR_MESSAGES',
 ]

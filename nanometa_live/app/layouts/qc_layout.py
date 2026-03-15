@@ -67,8 +67,18 @@ def create_qc_layout():
 
         html.Hr(className="my-3"),
 
+        # ACTION GUIDANCE BANNER - shown dynamically by callback
+        html.Div(id="qc-action-guidance-container", className="mb-3"),
+
         # LEVEL 1: Base Quality and Read Statistics Cards (NEW)
-        html.H4("Sequencing Quality", className="mb-3"),
+        html.H4([
+            "Sequencing Quality",
+            html.Small(
+                " - How good is the raw data from the sequencer?",
+                className="text-muted fw-normal",
+                style={"fontSize": "14px"}
+            ),
+        ], className="mb-3"),
         dbc.Row([
             dbc.Col([
                 dcc.Loading(
@@ -119,7 +129,14 @@ def create_qc_layout():
         html.Hr(className="my-3"),
 
         # LEVEL 2: Filtering Breakdown (Visual Bar Chart)
-        html.H4("Quality Filtering Breakdown", className="mb-3"),
+        html.H4([
+            "Quality Filtering Breakdown",
+            html.Small(
+                " - How many sequences passed quality checks?",
+                className="text-muted fw-normal",
+                style={"fontSize": "14px"}
+            ),
+        ], className="mb-3"),
         dcc.Loading(
             id="loading-filtering-breakdown",
             type="circle",
@@ -138,7 +155,14 @@ def create_qc_layout():
         html.Hr(className="my-3"),
 
         # LEVEL 3: Per-Sample Quality Table
-        html.H4("Per-Sample Quality", className="mb-3"),
+        html.H4([
+            "Per-Sample Quality",
+            html.Small(
+                " - Individual results for each barcode/sample",
+                className="text-muted fw-normal",
+                style={"fontSize": "14px"}
+            ),
+        ], className="mb-3"),
         dbc.Row([
             dbc.Col([
                 dbc.Card([
@@ -152,15 +176,16 @@ def create_qc_layout():
                             columnDefs=[
                                 {"headerName": "Sample", "field": "sample"},
                                 {
-                                    "headerName": "Reads",
+                                    "headerName": "Sequences",
                                     "field": "reads",
+                                    "headerTooltip": "Number of DNA sequence fragments in this sample",
                                     "type": "numericColumn",
                                     "valueFormatter": {"function": "d3.format(',')(params.value)"},
                                 },
                                 {
-                                    "headerName": "Quality",
+                                    "headerName": "Avg. Quality",
                                     "field": "mean_quality",
-                                    "headerTooltip": "Average quality score (Q15+ is good)",
+                                    "headerTooltip": "Average quality score per read. Green (15+) = Good, Yellow (10-15) = Fair, Red (<10) = Poor. Higher is better.",
                                     "cellStyle": {
                                         "styleConditions": [
                                             {
@@ -179,9 +204,9 @@ def create_qc_layout():
                                     },
                                 },
                                 {
-                                    "headerName": "Classified",
+                                    "headerName": "Identified",
                                     "field": "classified_rate",
-                                    "headerTooltip": "Percentage of reads successfully classified",
+                                    "headerTooltip": "Percentage of sequences matched to a known organism. 80%+ is good for environmental samples.",
                                     "cellStyle": {
                                         "styleConditions": [
                                             {
@@ -194,7 +219,7 @@ def create_qc_layout():
                                 {
                                     "headerName": "Status",
                                     "field": "status",
-                                    "headerTooltip": "Overall sample quality assessment",
+                                    "headerTooltip": "Overall assessment: Good = data is usable, Review = check results carefully, Issue = may need re-sequencing",
                                     "cellStyle": {
                                         "styleConditions": [
                                             {
@@ -361,33 +386,64 @@ def create_qc_layout():
 
         # Help Section
         dbc.Card([
-            dbc.CardHeader(html.H5("Need Help?", className="mb-0")),
+            dbc.CardHeader(html.H5("Understanding This Page", className="mb-0")),
             dbc.CardBody([
-                html.P("Common Quality Issues:", className="fw-bold mb-2"),
-                html.Ul([
-                    html.Li([
-                        html.Strong("Low Quality Sequences: "),
-                        "Contains too many uncertain bases (poor signal from sequencer)"
-                    ]),
-                    html.Li([
-                        html.Strong("Too Short: "),
-                        "DNA fragments below minimum length (< 15 base pairs)"
-                    ]),
-                    html.Li([
-                        html.Strong("Low Complexity: "),
-                        "Repetitive sequences that may be artifacts (e.g., AAAAAAA...)"
-                    ])
-                ], className="mb-3"),
-                html.P([
-                    html.Strong("What to do if quality is low: "),
-                    "Check sequencing conditions, flow cell health, and sample quality. "
-                    "Consider re-running critical samples if pass rate is below 60%."
-                ], className="mb-3"),
+                dbc.Row([
+                    dbc.Col([
+                        html.P("Key Terms:", className="fw-bold mb-2"),
+                        html.Ul([
+                            html.Li([
+                                html.Strong("Pass Rate: "),
+                                "Percentage of sequences that are high enough quality to analyze. ",
+                                "Above 80% is normal."
+                            ]),
+                            html.Li([
+                                html.Strong("Q20 / Q30: "),
+                                "Measures of base accuracy. Q20 = 99% accurate, Q30 = 99.9% accurate. ",
+                                "For nanopore: Q20 above 65% and Q30 above 45% are good."
+                            ]),
+                            html.Li([
+                                html.Strong("N50: "),
+                                "A measure of sequence length. Half of all data is in sequences ",
+                                "this long or longer. Higher = better. Above 2,000 bp is good."
+                            ]),
+                            html.Li([
+                                html.Strong("GC Content: "),
+                                "The proportion of G and C bases. Should be 40-60% for most samples."
+                            ]),
+                        ], className="mb-0"),
+                    ], md=6),
+                    dbc.Col([
+                        html.P("What To Do:", className="fw-bold mb-2"),
+                        html.Ul([
+                            html.Li([
+                                html.Strong("Pass rate below 60%: "),
+                                "Check flow cell health, sample purity, and loading concentration. ",
+                                "Consider re-sequencing critical samples."
+                            ]),
+                            html.Li([
+                                html.Strong("Low Q20/Q30: "),
+                                "May indicate an old or damaged flow cell, or poor library prep. ",
+                                "Results can still be usable - check organism identification confidence."
+                            ]),
+                            html.Li([
+                                html.Strong("Short sequences (low N50): "),
+                                "DNA may be degraded. Consider fresh extraction if possible."
+                            ]),
+                            html.Li([
+                                html.Strong("Everything looks good: "),
+                                "Proceed to the Organisms or Validation tabs to review findings."
+                            ]),
+                        ], className="mb-0"),
+                    ], md=6),
+                ]),
+                html.Hr(className="my-3"),
                 dbc.Button(
-                    "View Detailed Help",
+                    "View Full Technical Details",
                     id="qc-help-button",
                     color="info",
-                    outline=True
+                    outline=True,
+                    size="sm"
                 )
             ])
         ], className="mb-4", style={"backgroundColor": "#f8f9fa"}),

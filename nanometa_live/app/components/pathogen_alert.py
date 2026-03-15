@@ -18,8 +18,8 @@ THREAT_LEVELS = {
         "bg_color": "#f8d7da",
         "border_color": "#8b0000",
         "icon": "bi-radioactive",
-        "description": "Dangerous pathogen requiring immediate action",
-        "action": "Contact biosafety officer immediately"
+        "description": "Dangerous organism requiring immediate action",
+        "action": "Contact your safety officer immediately"
     },
     "high": {
         "label": "HIGH RISK",
@@ -27,8 +27,8 @@ THREAT_LEVELS = {
         "bg_color": "#f8d7da",
         "border_color": "#dc3545",
         "icon": "bi-exclamation-triangle-fill",
-        "description": "Significant pathogen of concern",
-        "action": "Follow laboratory biosafety protocols"
+        "description": "High-risk organism of concern",
+        "action": "Follow your safety protocols"
     },
     "moderate": {
         "label": "WATCH",
@@ -106,7 +106,7 @@ def CriticalPathogenAlert(
     # Build metric badges
     metrics = [
         dbc.Badge(
-            f"{read_count:,} sequences",
+            f"{read_count:,} DNA matches",
             color="light",
             text_color="dark",
             className="me-2"
@@ -194,7 +194,7 @@ def CriticalPathogenAlert(
 
                 # Confidence bar
                 html.Div([
-                    html.Small("Confidence", className="text-muted me-2"),
+                    html.Small("Detection certainty", className="text-muted me-2"),
                     dbc.Progress(
                         value=100 if confidence == "HIGH" else 60 if confidence == "MEDIUM" else 25,
                         color="success" if confidence == "HIGH" else "warning" if confidence == "MEDIUM" else "danger",
@@ -289,8 +289,8 @@ def HighRiskPathogenAlert(
                     )
                 ]),
                 html.Small([
-                    f"{read_count:,} sequences | ",
-                    f"{abundance_pct:.2f}% abundance | ",
+                    f"{read_count:,} DNA matches | ",
+                    f"{abundance_pct:.2f}% of sample | ",
                     f"{confidence} confidence"
                 ], className="text-muted")
             ], className="flex-grow-1"),
@@ -348,7 +348,7 @@ def WatchedSpeciesAlert(
                     style={"color": threat["color"]}
                 ),
                 html.Span(pathogen_name, style={"fontStyle": "italic"}),
-                html.Span(f" - {read_count:,} reads", className="text-muted ms-2")
+                html.Span(f" - {read_count:,} matches", className="text-muted ms-2")
             ], className="flex-grow-1"),
             dbc.Button(
                 [html.I(className="bi bi-file-text me-1"), "Details"],

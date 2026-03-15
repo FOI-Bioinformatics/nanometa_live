@@ -271,7 +271,7 @@ def _create_quick_add_section(id_prefix: str) -> html.Div:
                 dbc.Input(
                     id=f"{id_prefix}-quick-input",
                     type="text",
-                    placeholder="Species name or taxid...",
+                    placeholder="Species name or database ID...",
                     debounce=True
                 ),
                 dbc.Button(
@@ -429,11 +429,16 @@ def _create_species_row(entry: Dict[str, Any], id_prefix: str) -> html.Div:
             # Threshold
             dbc.Col([
                 dbc.Badge(
-                    f"T:{threshold}",
+                    [html.I(className="bi bi-bell me-1"), str(threshold)],
                     color=threat_colors.get(threat_level, "secondary"),
                     pill=True,
                     className="small",
                     id={"type": f"{id_prefix}-threshold-badge", "index": taxid}
+                ),
+                dbc.Tooltip(
+                    f"Alert triggers after {threshold} DNA matches",
+                    target={"type": f"{id_prefix}-threshold-badge", "index": taxid},
+                    placement="top",
                 ),
             ], width=2, className="text-center"),
 

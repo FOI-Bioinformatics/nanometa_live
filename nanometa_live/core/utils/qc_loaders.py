@@ -1,0 +1,677 @@
+"""
+QC data loaders for Nanometa Live.
+
+Functions for loading quality control statistics from fastp, NanoPlot,
+and seqkit outputs, with support for sample filtering and aggregation.
+"""
+
+import glob
+import json
+import logging
+import os
+import re
+import pandas as pd
+from typing import Any, Dict, List, Optional
+
+from nanometa_live.core.utils.canonical_loaders import load_canonical_qc_stats
+from nanometa_live.core.utils.sample_detector import (
+    get_available_samples,
+    resolve_analysis_directory
+)
+from nanometa_live.core.utils.loader_utils import (
+    _fastp_cache,
+    _cache_lock,
+    _get_cache_key,
+    _check_mtime_cache,
+    _store_mtime_cache,
+)
+
+
+def _empty_fastp_stats() -> Dict[str, int]:
+    """Return empty FASTP statistics dictionary."""
+    return {
+        'total_reads_before': 0,
+        'total_reads_after': 0,
+        'total_bases_before': 0,
+        'total_bases_after': 0,
+        'passed_filter': 0,
+        'low_quality': 0,
+        'too_short': 0,
+        'too_many_N': 0,
+        'q30_rate_after': 0.0,
+    }
+
+
+def _empty_nanoplot_stats() -> Dict[str, Any]:
+    """Return empty NanoPlot statistics dictionary."""
+    return {
+        'mean_read_length': 0.0,
+        'mean_read_quality': 0.0,
+        'median_read_length': 0.0,
+        'median_read_quality': 0.0,
+        'number_of_reads': 0,
+        'read_length_n50': 0,
+        'total_bases': 0,
+        'source': 'none'
+    }
+
+
+def load_fastp_data(main_dir: str, sample: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Load FASTP statistics for specific sample or all samples.
+
+    Args:
+        main_dir: Main nanometanf output directory
+        sample: Sample name, or None/"All Samples" for aggregated data
+
+    Returns:
+        Dictionary with aggregated FASTP statistics:
+        {
+            'total_reads_before': int,
+            'total_reads_after': int,
+            'total_bases_before': int,
+            'total_bases_after': int,
+            'passed_filter': int,
+            'low_quality': int,
+            'too_short': int,
+            'too_many_N': int
+        }
+    """
+    # Auto-resolve to analysis directory if needed
+    main_dir = resolve_analysis_directory(main_dir)
+
+    # Try canonical format first (waterfall pattern)
+    if sample is not None and sample != "All Samples":
+        canonical = load_canonical_qc_stats(main_dir, sample)
+        if canonical is not None:
+            logging.debug("Using canonical QC stats for %s", sample)
+            return canonical
+
+    fastp_dir = os.path.join(main_dir, "fastp")
+
+    if not os.path.exists(fastp_dir):
+        logging.warning(f"FASTP directory not found: {fastp_dir}")
+        return _empty_fastp_stats()
+
+    # Fast mtime-based check: skip parsing if fastp directory is unchanged
+    fastp_cache_key = _get_cache_key(main_dir, sample)
+    mtime_key = f"fastp:{fastp_cache_key}"
+    mtime_cached = _check_mtime_cache(mtime_key, [fastp_dir])
+    if mtime_cached is not None:
+        logging.debug(f"Mtime cache hit for FASTP data: {fastp_cache_key}")
+        return mtime_cached.copy() if isinstance(mtime_cached, dict) else mtime_cached
+
+    if sample is None or sample == "All Samples":
+        # Aggregate all samples
+        fastp_files = glob.glob(os.path.join(fastp_dir, "*.fastp.json"))
+
+        if not fastp_files:
+            logging.warning("No FASTP files found")
+            return _empty_fastp_stats()
+
+        aggregated_stats = _empty_fastp_stats()
+        _acc_q30_bases = 0
+
+        for fastp_file in fastp_files:
+            try:
+                with open(fastp_file, 'r') as f:
+                    fastp_data = json.load(f)
+
+                summary = fastp_data.get("summary", {})
+                before = summary.get("before_filtering", {})
+                after = summary.get("after_filtering", {})
+                filtering = fastp_data.get("filtering_result", {})
+
+                aggregated_stats['total_reads_before'] += before.get("total_reads", 0)
+                aggregated_stats['total_reads_after'] += after.get("total_reads", 0)
+                aggregated_stats['total_bases_before'] += before.get("total_bases", 0)
+                aggregated_stats['total_bases_after'] += after.get("total_bases", 0)
+                aggregated_stats['passed_filter'] += filtering.get("passed_filter_reads", 0)
+                aggregated_stats['low_quality'] += filtering.get("low_quality_reads", 0)
+                aggregated_stats['too_short'] += filtering.get("too_short_reads", 0)
+                aggregated_stats['too_many_N'] += filtering.get("too_many_N_reads", 0)
+                _acc_q30_bases += after.get("q30_bases", 0)
+
+            except Exception as e:
+                logging.error(f"Error reading {fastp_file}: {e}")
+                continue
+
+        total_bases_after = aggregated_stats['total_bases_after']
+        if total_bases_after > 0:
+            aggregated_stats['q30_rate_after'] = _acc_q30_bases / total_bases_after
+        _store_mtime_cache(mtime_key, [fastp_dir], aggregated_stats.copy())
+        return aggregated_stats
+
+    else:
+        # Load specific sample - may have multiple batch files to combine
+        sample_patterns = [
+            os.path.join(fastp_dir, f"{sample}.fastp.json"),
+            os.path.join(fastp_dir, f"{sample}_*.fastp.json")
+        ]
+
+        sample_files = []
+        for pattern in sample_patterns:
+            sample_files.extend(glob.glob(pattern))
+
+        if not sample_files:
+            logging.warning(f"No FASTP files found for sample {sample}")
+            return _empty_fastp_stats()
+
+        # Aggregate stats from all batch files
+        aggregated_stats = _empty_fastp_stats()
+        _acc_q30_bases = 0
+
+        for sample_file in sample_files:
+            try:
+                with open(sample_file, 'r') as f:
+                    fastp_data = json.load(f)
+
+                summary = fastp_data.get("summary", {})
+                before = summary.get("before_filtering", {})
+                after = summary.get("after_filtering", {})
+                filtering = fastp_data.get("filtering_result", {})
+
+                aggregated_stats['total_reads_before'] += before.get("total_reads", 0)
+                aggregated_stats['total_reads_after'] += after.get("total_reads", 0)
+                aggregated_stats['total_bases_before'] += before.get("total_bases", 0)
+                aggregated_stats['total_bases_after'] += after.get("total_bases", 0)
+                aggregated_stats['passed_filter'] += filtering.get("passed_filter_reads", 0)
+                aggregated_stats['low_quality'] += filtering.get("low_quality_reads", 0)
+                aggregated_stats['too_short'] += filtering.get("too_short_reads", 0)
+                aggregated_stats['too_many_N'] += filtering.get("too_many_N_reads", 0)
+                _acc_q30_bases += after.get("q30_bases", 0)
+
+            except Exception as e:
+                logging.error(f"Error reading {sample_file}: {e}")
+                continue
+
+        total_bases_after = aggregated_stats['total_bases_after']
+        if total_bases_after > 0:
+            aggregated_stats['q30_rate_after'] = _acc_q30_bases / total_bases_after
+        _store_mtime_cache(mtime_key, [fastp_dir], aggregated_stats.copy())
+        return aggregated_stats
+
+
+def load_batch_stats(main_dir: str, sample: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Load real-time batch statistics, optionally filtered by sample.
+
+    Args:
+        main_dir: Main nanometanf output directory
+        sample: Sample name to filter by, or None/"All Samples" for all batches
+
+    Returns:
+        List of batch statistics dictionaries
+    """
+    batch_stats_dir = os.path.join(main_dir, "realtime_batch_stats")
+
+    if not os.path.exists(batch_stats_dir):
+        logging.warning(f"Batch statistics directory not found: {batch_stats_dir}")
+        return []
+
+    batch_files = sorted(glob.glob(os.path.join(batch_stats_dir, "batch_*.json")))
+
+    if not batch_files:
+        logging.warning("No batch statistics files found")
+        return []
+
+    all_batches = []
+
+    for batch_file in batch_files:
+        try:
+            with open(batch_file, 'r') as f:
+                batch_data = json.load(f)
+
+            # If sample filtering is requested, check if this batch contains the sample
+            # Note: Batch files may not have sample-level detail, so we include all for now
+            # This can be enhanced if batch files include per-sample breakdown
+            all_batches.append(batch_data)
+
+        except Exception as e:
+            logging.error(f"Error reading {batch_file}: {e}")
+            continue
+
+    return all_batches
+
+
+def load_nanoplot_stats(main_dir: str, sample: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Load NanoPlot statistics for quality metrics, with seqkit fallback.
+
+    nanometanf produces: nanoplot/<sample>/NanoStats.txt or nanoplot/NanoStats.txt
+    Falls back to seqkit stats when NanoPlot data is unavailable.
+
+    Args:
+        main_dir: Main nanometanf output directory
+        sample: Sample name, or None/"All Samples" for aggregated data
+
+    Returns:
+        Dictionary with quality statistics:
+        {
+            'mean_read_length': float,
+            'mean_read_quality': float,
+            'median_read_length': float,
+            'median_read_quality': float,
+            'number_of_reads': int,
+            'read_length_n50': int,
+            'total_bases': int,
+            'source': str  # 'nanoplot' or 'seqkit'
+        }
+    """
+    nanoplot_dir = os.path.join(main_dir, "nanoplot")
+    nanostats_files = []
+
+    if os.path.exists(nanoplot_dir):
+        # Find NanoStats.txt files
+        if sample is None or sample == "All Samples":
+            # Look for NanoStats.txt in subdirectories or root
+            for pattern in [
+                os.path.join(nanoplot_dir, "*/NanoStats.txt"),
+                os.path.join(nanoplot_dir, "NanoStats.txt")
+            ]:
+                nanostats_files.extend(glob.glob(pattern))
+        else:
+            # Look for sample-specific NanoStats
+            sample_patterns = [
+                os.path.join(nanoplot_dir, sample, "NanoStats.txt"),
+                os.path.join(nanoplot_dir, f"{sample}_NanoStats.txt"),
+                os.path.join(nanoplot_dir, f"{sample}/NanoStats.txt")
+            ]
+            for pattern in sample_patterns:
+                if os.path.exists(pattern):
+                    nanostats_files.append(pattern)
+
+    if not nanostats_files:
+        # Fall back to seqkit stats when NanoPlot data unavailable
+        logging.debug("No NanoStats.txt files found, falling back to seqkit")
+        return _load_seqkit_as_nanoplot_stats(main_dir, sample)
+
+    # Parse and aggregate stats
+    aggregated = _empty_nanoplot_stats()
+    file_count = 0
+
+    for stats_file in nanostats_files:
+        try:
+            stats = _parse_nanostats_file(stats_file)
+            if stats:
+                file_count += 1
+                aggregated['number_of_reads'] += stats.get('number_of_reads', 0)
+                aggregated['total_bases'] += stats.get('total_bases', 0)
+                # For averages, we'll recalculate after summing
+                aggregated['mean_read_length'] += stats.get('mean_read_length', 0)
+                aggregated['mean_read_quality'] += stats.get('mean_read_quality', 0)
+                aggregated['read_length_n50'] = max(
+                    aggregated['read_length_n50'],
+                    stats.get('read_length_n50', 0)
+                )
+        except Exception as e:
+            logging.error(f"Error parsing {stats_file}: {e}")
+            continue
+
+    # Average the mean values
+    if file_count > 0:
+        aggregated['mean_read_length'] /= file_count
+        aggregated['mean_read_quality'] /= file_count
+        aggregated['source'] = 'nanoplot'
+
+    return aggregated
+
+
+def _parse_nanostats_file(filepath: str) -> Dict[str, Any]:
+    """
+    Parse a NanoStats.txt file.
+
+    Args:
+        filepath: Path to NanoStats.txt file
+
+    Returns:
+        Dictionary with parsed statistics
+    """
+    stats = _empty_nanoplot_stats()
+
+    try:
+        with open(filepath, 'r') as f:
+            content = f.read()
+
+        # Parse key metrics from NanoStats format
+        # Note: Numbers may have comma separators (e.g., "3,911.7")
+        patterns = {
+            'mean_read_length': r'Mean read length:\s*([\d,]+\.?\d*)',
+            'mean_read_quality': r'Mean read quality:\s*([\d,]+\.?\d*)',
+            'median_read_length': r'Median read length:\s*([\d,]+\.?\d*)',
+            'median_read_quality': r'Median read quality:\s*([\d,]+\.?\d*)',
+            'number_of_reads': r'Number of reads:\s*([\d,]+\.?\d*)',
+            'read_length_n50': r'Read length N50:\s*([\d,]+\.?\d*)',
+            'total_bases': r'Total bases:\s*([\d,]+\.?\d*)'
+        }
+
+        for key, pattern in patterns.items():
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                value = match.group(1).replace(',', '')
+                if key in ['mean_read_length', 'mean_read_quality',
+                           'median_read_length', 'median_read_quality']:
+                    stats[key] = float(value)
+                else:
+                    stats[key] = int(float(value))
+
+        return stats
+
+    except Exception as e:
+        logging.error(f"Error parsing NanoStats file {filepath}: {e}")
+        return _empty_nanoplot_stats()
+
+
+def _load_seqkit_as_nanoplot_stats(main_dir: str, sample: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Load seqkit statistics and convert to NanoPlot-compatible format.
+
+    This is a fallback when NanoPlot data is unavailable (e.g., nanopore pipelines
+    using chopper for QC instead of NanoPlot).
+
+    Args:
+        main_dir: Main nanometanf output directory
+        sample: Sample name, or None/"All Samples" for aggregated data
+
+    Returns:
+        Dictionary with quality statistics in NanoPlot format
+    """
+    seqkit_df = load_seqkit_stats(main_dir, sample)
+
+    if seqkit_df.empty:
+        logging.debug("No seqkit data available for fallback")
+        return _empty_nanoplot_stats()
+
+    # Aggregate seqkit stats
+    total_reads = int(seqkit_df['num_seqs'].sum()) if 'num_seqs' in seqkit_df.columns else 0
+    total_bases = int(seqkit_df['sum_len'].sum()) if 'sum_len' in seqkit_df.columns else 0
+    mean_length = float(seqkit_df['avg_len'].mean()) if 'avg_len' in seqkit_df.columns else 0.0
+    n50 = int(seqkit_df['N50'].max()) if 'N50' in seqkit_df.columns else 0
+
+    # Use AvgQual from seqkit as mean_read_quality (Phred scale)
+    mean_quality = float(seqkit_df['AvgQual'].mean()) if 'AvgQual' in seqkit_df.columns else 0.0
+
+    # Estimate median from Q2 (second quartile = median)
+    median_length = float(seqkit_df['Q2'].mean()) if 'Q2' in seqkit_df.columns else mean_length
+
+    logging.debug(f"Seqkit fallback: {total_reads} reads, {total_bases} bases, Q={mean_quality:.1f}")
+
+    return {
+        'mean_read_length': mean_length,
+        'mean_read_quality': mean_quality,
+        'median_read_length': median_length,
+        'median_read_quality': mean_quality,  # Seqkit doesn't provide median quality
+        'number_of_reads': total_reads,
+        'read_length_n50': n50,
+        'total_bases': total_bases,
+        'source': 'seqkit',
+        # Additional seqkit-specific metrics
+        'q20_percent': float(seqkit_df['Q20(%)'].mean()) if 'Q20(%)' in seqkit_df.columns else 0.0,
+        'q30_percent': float(seqkit_df['Q30(%)'].mean()) if 'Q30(%)' in seqkit_df.columns else 0.0,
+        'gc_percent': float(seqkit_df['GC(%)'].mean()) if 'GC(%)' in seqkit_df.columns else 0.0
+    }
+
+
+def load_seqkit_stats(main_dir: str, sample: Optional[str] = None) -> pd.DataFrame:
+    """
+    Load seqkit sequence statistics (used when QC tool is chopper).
+
+    nanometanf produces: seqkit/<sample>.tsv
+    Columns: file, format, type, num_seqs, sum_len, min_len, avg_len, max_len
+
+    Args:
+        main_dir: Main nanometanf output directory
+        sample: Sample name, or None/"All Samples" for aggregated data
+
+    Returns:
+        DataFrame with seqkit statistics
+    """
+    seqkit_dir = os.path.join(main_dir, "seqkit")
+
+    if not os.path.exists(seqkit_dir):
+        logging.debug(f"Seqkit directory not found: {seqkit_dir}")
+        return pd.DataFrame()
+
+    if sample is None or sample == "All Samples":
+        # Load all TSV files
+        tsv_files = glob.glob(os.path.join(seqkit_dir, "*.tsv"))
+    else:
+        # Load specific sample
+        sample_patterns = [
+            os.path.join(seqkit_dir, f"{sample}.tsv"),
+            os.path.join(seqkit_dir, f"{sample}_*.tsv")
+        ]
+        tsv_files = []
+        for pattern in sample_patterns:
+            tsv_files.extend(glob.glob(pattern))
+
+    if not tsv_files:
+        logging.debug("No seqkit TSV files found")
+        return pd.DataFrame()
+
+    all_stats = []
+    for tsv_file in tsv_files:
+        try:
+            df = pd.read_csv(tsv_file, sep='\t')
+            # Add sample column from filename
+            sample_name = os.path.basename(tsv_file).replace('.tsv', '')
+            df['sample'] = sample_name
+            all_stats.append(df)
+        except Exception as e:
+            logging.error(f"Error reading seqkit file {tsv_file}: {e}")
+            continue
+
+    if not all_stats:
+        return pd.DataFrame()
+
+    combined = pd.concat(all_stats, ignore_index=True)
+    return combined
+
+
+def get_sample_statistics_summary(main_dir: str) -> pd.DataFrame:
+    """
+    Get summary statistics for all samples (for per-barcode breakdown table).
+
+    Supports both FASTP (when using fastp QC tool) and NanoPlot/Kraken2
+    fallback (when using chopper QC tool).
+
+    Returns:
+        DataFrame with columns: sample, reads, base_pairs, pass_rate,
+                               classified, unclassified, classified_rate, unclassified_rate,
+                               mean_quality, n50
+    """
+    # Import here to avoid circular imports (classification_loaders uses loader_utils too)
+    from nanometa_live.core.utils.classification_loaders import load_kraken_data
+
+    # Auto-resolve to analysis directory if needed
+    main_dir = resolve_analysis_directory(main_dir)
+
+    samples = get_available_samples(main_dir)
+    summary_data = []
+
+    for sample in samples:
+        if sample == "All Samples":
+            continue
+
+        # Initialize variables
+        total_reads = 0
+        total_bases = 0
+        pass_rate = None  # N/A when using chopper
+        mean_quality = 0
+        n50 = 0
+        classified = 0
+        unclassified = 0
+        classified_rate = 0
+        unclassified_rate = 0
+
+        # Try FASTP stats first
+        fastp_stats = load_fastp_data(main_dir, sample)
+        reads_before = fastp_stats.get('total_reads_before', 0)
+        reads_after = fastp_stats.get('total_reads_after', 0)
+        bases_after = fastp_stats.get('total_bases_after', 0)
+
+        if reads_after > 0:
+            # FASTP data is available
+            total_reads = reads_after
+            total_bases = bases_after
+            pass_rate = round((reads_after / reads_before * 100), 1) if reads_before > 0 else 0
+            # Estimate mean quality from q30 rate
+            q30_rate = fastp_stats.get('q30_rate_after', 0)
+            if q30_rate > 0:
+                mean_quality = round(10 + 25 * q30_rate, 1)
+        else:
+            # Fall back to NanoPlot stats (used when chopper is the QC tool)
+            # First try sample-specific NanoPlot stats
+            nanoplot_stats = load_nanoplot_stats(main_dir, sample)
+            if nanoplot_stats.get('number_of_reads', 0) == 0:
+                # If no per-sample stats, try root NanoStats.txt
+                # This handles cases where nanometanf produces aggregated stats
+                nanoplot_stats = load_nanoplot_stats(main_dir, None)
+
+            if nanoplot_stats.get('number_of_reads', 0) > 0:
+                total_reads = nanoplot_stats['number_of_reads']
+                total_bases = nanoplot_stats.get('total_bases', 0)
+                mean_quality = nanoplot_stats.get('mean_read_quality', 0)
+                n50 = nanoplot_stats.get('read_length_n50', 0)
+
+        # Get Kraken2 stats for this sample
+        kraken_df = load_kraken_data(main_dir, sample)
+
+        if not kraken_df.empty:
+            total_kraken_reads = int(kraken_df['reads'].sum())
+            unclassified_row = kraken_df[kraken_df['taxid'] == 0]
+            unclassified = int(unclassified_row.iloc[0]['reads']) if not unclassified_row.empty else 0
+            classified = total_kraken_reads - unclassified
+
+            # If we still don't have total_reads, use Kraken2 total
+            if total_reads == 0:
+                total_reads = total_kraken_reads
+
+            classified_rate = round((classified / total_kraken_reads * 100), 1) if total_kraken_reads > 0 else 0
+            unclassified_rate = round((unclassified / total_kraken_reads * 100), 1) if total_kraken_reads > 0 else 0
+
+        # Format pass_rate for display
+        pass_rate_display = pass_rate if pass_rate is not None else "N/A"
+
+        # Determine sample status based on quality metrics
+        # Status logic: Good classification (>70%) + reasonable quality = OK
+        # Using Unicode icons for WCAG 1.4.1 compliance (not relying on color alone)
+        if total_reads == 0:
+            status = "○ No Data"
+        elif classified_rate >= 70:
+            status = "✓ Complete"
+        elif classified_rate >= 50:
+            status = "⚠ Review"
+        else:
+            status = "✗ Issue"
+
+        # Format classified_rate for display
+        classified_rate_display = f"{classified_rate}%"
+
+        summary_data.append({
+            'sample': sample,
+            'reads': total_reads,
+            'base_pairs': total_bases,
+            'pass_rate': pass_rate_display,
+            'mean_quality': round(mean_quality, 1) if mean_quality > 0 else "N/A",
+            'n50': n50 if n50 > 0 else "N/A",
+            'classified': classified,
+            'unclassified': unclassified,
+            'classified_rate': classified_rate_display,
+            'classified_rate_num': classified_rate,  # Numeric value for filtering
+            'unclassified_rate': unclassified_rate,
+            'status': status
+        })
+
+    return pd.DataFrame(summary_data)
+
+
+def get_qc_stats(main_dir: str, sample: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get QC statistics from available sources (fastp, seqkit, or nanoplot).
+
+    This is a unified interface that tries multiple sources and returns
+    the best available data.
+
+    Args:
+        main_dir: Main nanometanf output directory
+        sample: Sample name, or None/"All Samples" for aggregated data
+
+    Returns:
+        Dictionary with unified QC statistics
+    """
+    # Try canonical format first (waterfall pattern)
+    if sample is not None and sample != "All Samples":
+        canonical = load_canonical_qc_stats(main_dir, sample)
+        if canonical is not None:
+            logging.debug("Using canonical QC stats via get_qc_stats for %s", sample)
+            return {
+                'source': 'canonical',
+                'total_reads': canonical.get('total_reads_after', 0),
+                'total_bases': canonical.get('total_bases_after', 0),
+                'reads_before_filter': canonical.get('total_reads_before', 0),
+                'pass_rate': (canonical['total_reads_after'] /
+                             canonical['total_reads_before'] * 100
+                             if canonical.get('total_reads_before', 0) > 0 else 0),
+                'low_quality': canonical.get('low_quality', 0),
+                'too_short': canonical.get('too_short', 0),
+                **canonical,
+            }
+
+    # Try fastp first
+    fastp_stats = load_fastp_data(main_dir, sample)
+    if fastp_stats.get('total_reads_before', 0) > 0:
+        return {
+            'source': 'fastp',
+            'total_reads': fastp_stats['total_reads_after'],
+            'total_bases': fastp_stats['total_bases_after'],
+            'reads_before_filter': fastp_stats['total_reads_before'],
+            'pass_rate': (fastp_stats['total_reads_after'] /
+                         fastp_stats['total_reads_before'] * 100
+                         if fastp_stats['total_reads_before'] > 0 else 0),
+            'low_quality': fastp_stats['low_quality'],
+            'too_short': fastp_stats['too_short'],
+            **fastp_stats
+        }
+
+    # Try seqkit (used with chopper)
+    seqkit_df = load_seqkit_stats(main_dir, sample)
+    if not seqkit_df.empty:
+        total_reads = seqkit_df['num_seqs'].sum() if 'num_seqs' in seqkit_df.columns else 0
+        total_bases = seqkit_df['sum_len'].sum() if 'sum_len' in seqkit_df.columns else 0
+        avg_len = seqkit_df['avg_len'].mean() if 'avg_len' in seqkit_df.columns else 0
+
+        # Extract Q20% and Q30% from seqkit stats (very useful quality metrics)
+        q20_pct = seqkit_df['Q20(%)'].mean() if 'Q20(%)' in seqkit_df.columns else 0
+        q30_pct = seqkit_df['Q30(%)'].mean() if 'Q30(%)' in seqkit_df.columns else 0
+        avg_qual = seqkit_df['AvgQual'].mean() if 'AvgQual' in seqkit_df.columns else 0
+        n50 = seqkit_df['N50'].mean() if 'N50' in seqkit_df.columns else 0
+
+        return {
+            'source': 'seqkit',
+            'total_reads': int(total_reads),
+            'total_bases': int(total_bases),
+            'avg_read_length': float(avg_len),
+            'min_read_length': int(seqkit_df['min_len'].min()) if 'min_len' in seqkit_df.columns else 0,
+            'max_read_length': int(seqkit_df['max_len'].max()) if 'max_len' in seqkit_df.columns else 0,
+            'q20_percent': float(q20_pct),
+            'q30_percent': float(q30_pct),
+            'avg_quality': float(avg_qual),
+            'n50': int(n50)
+        }
+
+    # Try nanoplot
+    nanoplot_stats = load_nanoplot_stats(main_dir, sample)
+    if nanoplot_stats.get('number_of_reads', 0) > 0:
+        return {
+            'source': 'nanoplot',
+            'total_reads': nanoplot_stats['number_of_reads'],
+            'total_bases': nanoplot_stats['total_bases'],
+            'avg_read_length': nanoplot_stats['mean_read_length'],
+            'mean_quality': nanoplot_stats['mean_read_quality'],
+            'read_length_n50': nanoplot_stats['read_length_n50'],
+            **nanoplot_stats
+        }
+
+    # No data available
+    return {'source': 'none', 'total_reads': 0, 'total_bases': 0}

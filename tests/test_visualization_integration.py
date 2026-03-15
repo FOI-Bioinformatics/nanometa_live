@@ -12,7 +12,8 @@ from pathlib import Path
 
 # Import core functions
 from nanometa_live.core.utils.data_loaders import load_kraken_data
-from nanometa_live.app.tabs.classification_tab import filter_by_domains, create_sankey_data, create_sunburst_data
+from nanometa_live.app.tabs.classification_tab import create_sankey_data, create_sunburst_data
+from nanometa_live.app.tabs.kraken2_helpers import filter_by_domains
 
 # Import validation function from local conftest
 import sys

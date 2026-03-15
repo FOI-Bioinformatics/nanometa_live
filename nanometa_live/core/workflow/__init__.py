@@ -10,7 +10,6 @@ with standalone scripts but is not imported by default.
 """
 
 from nanometa_live.core.workflow.backend_manager import BackendManager
-from nanometa_live.core.workflow.data_processor import DataProcessor
 from nanometa_live.core.workflow.pipeline_runner import run_pipeline
 from nanometa_live.core.workflow.on_demand_validator import (
     OnDemandValidator,
@@ -26,7 +25,6 @@ from nanometa_live.core.workflow.bundle_manager import BundleManager
 
 __all__ = [
     "BackendManager",
-    "DataProcessor",
     "run_pipeline",
     "OnDemandValidator",
     "ValidationJob",

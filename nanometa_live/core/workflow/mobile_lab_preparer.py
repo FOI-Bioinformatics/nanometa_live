@@ -210,8 +210,8 @@ class MobileLabPreparer:
             return
 
         self._report(PrepStage.BUILD_INDEX, idx, "Loading database taxonomy", 30.0)
-        mapper = TaxidMapper(db_path)
-        mapper.load_database()
+        mapper = TaxidMapper()
+        mapper.load_database(db_path)
         self._report(PrepStage.BUILD_INDEX, idx, "Index built", 100.0)
 
     def _run_generate_mappings(self, idx: int, result: PreparationResult, skip_existing: bool):
@@ -236,8 +236,8 @@ class MobileLabPreparer:
 
         self._report(PrepStage.GENERATE_MAPPINGS, idx,
                       f"Mapping {len(entries)} entries", 30.0)
-        mapper = TaxidMapper(db_path)
-        mapper.load_database()
+        mapper = TaxidMapper()
+        mapper.load_database(db_path)
         mapper.generate_mappings(entries)
 
     def _run_download_genomes(self, idx: int, result: PreparationResult, skip_existing: bool):

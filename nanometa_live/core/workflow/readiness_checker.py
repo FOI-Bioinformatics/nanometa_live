@@ -207,8 +207,9 @@ class ReadinessChecker:
                 "DB Taxonomy Index", False, Severity.CRITICAL,
                 "Could not compute database hash"
             )
-        index_file = home / "mappings" / f"{db_hash}_index.pkl"
-        if index_file.exists():
+        index_file_json = home / "mappings" / f"{db_hash}_index.json"
+        index_file_pkl = home / "mappings" / f"{db_hash}_index.pkl"
+        if index_file_json.exists() or index_file_pkl.exists():
             return CheckResult(
                 "DB Taxonomy Index", True, Severity.CRITICAL,
                 "Taxonomy index found"

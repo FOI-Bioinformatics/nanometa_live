@@ -20,6 +20,7 @@ Usage:
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -71,6 +72,30 @@ class GenomeMetadata:
     def from_dict(cls, data: Dict[str, Any]) -> "GenomeMetadata":
         """Create from dictionary."""
         return cls(**data)
+
+
+def _extract_fasta_accession(fasta_path: Path) -> Optional[str]:
+    """Extract the first accession from a FASTA file header.
+
+    Parses the first line of the FASTA file and extracts common NCBI
+    accession patterns (e.g. NC_003461.1, GCF_000009045.1).
+
+    Returns:
+        Accession string, or None if no recognisable accession found.
+    """
+    accession_pattern = re.compile(
+        r'((?:NC|NZ|NW|NT|AC|GCF|GCA)_[A-Z]*\d+(?:\.\d+)?)'
+    )
+    try:
+        with open(fasta_path, 'r') as f:
+            header = f.readline(1024)
+        if header.startswith('>'):
+            match = accession_pattern.search(header)
+            if match:
+                return match.group(1)
+    except (OSError, UnicodeDecodeError):
+        pass
+    return None
 
 
 class GenomeDownloadManager:
@@ -215,6 +240,9 @@ class GenomeDownloadManager:
             elif kingdom in ("Bacteria", "Archaea"):
                 source = "gtdb"
 
+            # Try to extract a real accession from the FASTA header
+            discovered_accession = _extract_fasta_accession(fasta_file) or "discovered"
+
             # Check if a BLAST DB already exists on disk
             blast_db_path = None
             existing_blast = self.get_blast_db_path(taxid)
@@ -224,7 +252,7 @@ class GenomeDownloadManager:
             self._metadata[taxid] = GenomeMetadata(
                 taxid=taxid,
                 species_name=species_name,
-                accession="discovered",
+                accession=discovered_accession,
                 source=source,
                 kingdom=kingdom,
                 fasta_path=str(fasta_file),
@@ -616,12 +644,12 @@ class GenomeDownloadManager:
         # Viruses: use dedicated virus download path (NCBI genome API
         # does not index viral genomes - they are nucleotide records)
         if kingdom == "Viruses":
-            fasta_path = self._download_virus_genome(taxid, species_name)
+            fasta_path, virus_accession = self._download_virus_genome(taxid, species_name)
             if fasta_path:
                 self._metadata[taxid] = GenomeMetadata(
                     taxid=taxid,
                     species_name=species_name,
-                    accession=f"virus_taxid_{taxid}",
+                    accession=virus_accession or f"virus_taxid_{taxid}",
                     source="ncbi_virus",
                     kingdom="Viruses",
                     fasta_path=str(fasta_path),
@@ -663,12 +691,12 @@ class GenomeDownloadManager:
             # REST API failed — try direct download by taxid via datasets CLI
             # (the CLI supports more taxa than the REST API, especially fungi)
             logger.info(f"No accession found via API, trying direct taxid download for {species_name}...")
-            fasta_path = self._download_ncbi_genome_by_taxid(taxid, species_name)
+            fasta_path, cli_accession = self._download_ncbi_genome_by_taxid(taxid, species_name)
             if fasta_path:
                 self._metadata[taxid] = GenomeMetadata(
                     taxid=taxid,
                     species_name=species_name,
-                    accession=f"taxid_{taxid}",
+                    accession=cli_accession or f"taxid_{taxid}",
                     source="ncbi_cli",
                     kingdom=kingdom or "Unknown",
                     fasta_path=str(fasta_path),
@@ -704,7 +732,7 @@ class GenomeDownloadManager:
         self._last_errors[taxid] = f"NCBI datasets download failed for accession {accession}"
         return None
 
-    def _download_virus_genome(self, taxid: int, species_name: str) -> Optional[Path]:
+    def _download_virus_genome(self, taxid: int, species_name: str) -> Tuple[Optional[Path], Optional[str]]:
         """
         Download a viral genome using the NCBI datasets virus subcommand.
 
@@ -717,14 +745,14 @@ class GenomeDownloadManager:
             species_name: Species name (for logging)
 
         Returns:
-            Path to downloaded FASTA file, or None on failure
+            Tuple of (path to FASTA, accession) or (None, None) on failure
         """
         if not shutil.which("datasets"):
             logger.error(
                 "NCBI 'datasets' CLI not found. "
                 "Install from: https://www.ncbi.nlm.nih.gov/datasets/docs/v2/download-and-install/"
             )
-            return None
+            return None, None
 
         output_file = self.genomes_dir / f"{taxid}.fasta"
 
@@ -755,11 +783,11 @@ class GenomeDownloadManager:
 
                 if result.returncode != 0:
                     logger.error(f"Virus genome download failed: {result.stderr}")
-                    return None
+                    return None, None
 
                 if not zip_file.exists():
                     logger.error("Downloaded virus archive not found")
-                    return None
+                    return None, None
 
                 # Extract FASTA from zip
                 # Virus zips use a flat path: ncbi_dataset/data/genomic.fna
@@ -773,7 +801,7 @@ class GenomeDownloadManager:
                         logger.error(
                             "No FASTA file found in virus genome archive"
                         )
-                        return None
+                        return None, None
 
                     fasta_name = fasta_files[0]
                     temp_fasta = Path(tmpdir) / "virus_genome.fasta"
@@ -784,17 +812,21 @@ class GenomeDownloadManager:
 
                     shutil.move(str(temp_fasta), str(output_file))
 
-                logger.info(f"Downloaded virus genome to {output_file}")
-                return output_file
+                accession = _extract_fasta_accession(output_file)
+                logger.info(
+                    f"Downloaded virus genome to {output_file} "
+                    f"(accession={accession or 'unknown'})"
+                )
+                return output_file, accession
 
         except subprocess.TimeoutExpired:
             logger.error(f"Virus genome download timed out for taxid {taxid}")
-            return None
+            return None, None
         except Exception as e:
             logger.error(
                 f"Virus genome download failed for taxid {taxid}: {e}"
             )
-            return None
+            return None, None
 
     def _download_ncbi_genome(self, accession: str, taxid: int) -> Optional[Path]:
         """
@@ -878,7 +910,7 @@ class GenomeDownloadManager:
             logger.error(f"Download failed for {accession}: {e}")
             return None
 
-    def _download_ncbi_genome_by_taxid(self, taxid: int, species_name: str) -> Optional[Path]:
+    def _download_ncbi_genome_by_taxid(self, taxid: int, species_name: str) -> Tuple[Optional[Path], Optional[str]]:
         """
         Download genome directly by taxid using datasets CLI.
 
@@ -891,11 +923,11 @@ class GenomeDownloadManager:
             species_name: Species name (for logging)
 
         Returns:
-            Path to FASTA file, or None on failure
+            Tuple of (path to FASTA, accession) or (None, None) on failure
         """
         if not shutil.which("datasets"):
             logger.error("NCBI 'datasets' CLI not found.")
-            return None
+            return None, None
 
         output_file = self.genomes_dir / f"{taxid}.fasta"
 
@@ -932,11 +964,11 @@ class GenomeDownloadManager:
 
                 if result.returncode != 0:
                     logger.error(f"Download by taxid failed for {species_name}: {result.stderr}")
-                    return None
+                    return None, None
 
                 if not zip_file.exists():
                     logger.error("Downloaded file not found")
-                    return None
+                    return None, None
 
                 with zipfile.ZipFile(zip_file, 'r') as zf:
                     fasta_files = [
@@ -946,7 +978,7 @@ class GenomeDownloadManager:
 
                     if not fasta_files:
                         logger.error("No FASTA file found in downloaded archive")
-                        return None
+                        return None, None
 
                     fasta_name = fasta_files[0]
                     temp_fasta = Path(tmpdir) / "genome.fasta"
@@ -956,15 +988,19 @@ class GenomeDownloadManager:
 
                     shutil.move(str(temp_fasta), str(output_file))
 
-                logger.info(f"Downloaded genome by taxid to {output_file}")
-                return output_file
+                accession = _extract_fasta_accession(output_file)
+                logger.info(
+                    f"Downloaded genome by taxid to {output_file} "
+                    f"(accession={accession or 'unknown'})"
+                )
+                return output_file, accession
 
         except subprocess.TimeoutExpired:
             logger.error(f"Download timed out for taxid {taxid}")
-            return None
+            return None, None
         except Exception as e:
             logger.error(f"Download by taxid failed for {taxid}: {e}")
-            return None
+            return None, None
 
     def build_blast_db(self, taxid: int) -> bool:
         """
@@ -1611,6 +1647,21 @@ class GenomeDownloadManager:
             logger.error(f"Failed to delete genome for taxid {taxid}: {e}")
             return False
 
+    def delete_all_genomes(self) -> int:
+        """
+        Delete all downloaded genomes and their BLAST databases.
+
+        Returns:
+            Number of genomes deleted.
+        """
+        taxids = list(self._metadata.keys())
+        deleted = 0
+        for taxid in taxids:
+            if self.delete_genome(taxid):
+                deleted += 1
+        logger.info(f"Deleted {deleted}/{len(taxids)} genomes")
+        return deleted
+
     def import_genomes_from_directory(
         self, source_dir: str
     ) -> Tuple[int, List[Dict[str, str]]]:
@@ -1784,7 +1835,10 @@ class GenomeDownloadManager:
 _genome_manager: Optional[GenomeDownloadManager] = None
 
 
-def get_genome_manager(cache_dir: Optional[str] = None) -> GenomeDownloadManager:
+def get_genome_manager(
+    cache_dir: Optional[str] = None,
+    offline_mode: Optional[bool] = None,
+) -> GenomeDownloadManager:
     """
     Get the GenomeDownloadManager instance.
 
@@ -1792,6 +1846,7 @@ def get_genome_manager(cache_dir: Optional[str] = None) -> GenomeDownloadManager
         cache_dir: Optional cache directory. If provided and different from
                    current manager's cache_dir, a new instance is created.
                    Defaults to ~/.nanometa if not specified.
+        offline_mode: If provided, update the instance's offline_mode flag.
 
     Returns:
         GenomeDownloadManager instance
@@ -1806,12 +1861,23 @@ def get_genome_manager(cache_dir: Optional[str] = None) -> GenomeDownloadManager
 
     # Check if we need to create a new instance
     if _genome_manager is None:
-        _genome_manager = GenomeDownloadManager(cache_dir=cache_dir)
+        _genome_manager = GenomeDownloadManager(
+            cache_dir=cache_dir,
+            offline_mode=bool(offline_mode) if offline_mode is not None else False,
+        )
     elif cache_dir is not None:
         # Check if cache_dir differs from current instance
         current_cache = _genome_manager.cache_dir
         if normalized_cache and normalized_cache != current_cache:
             logger.info(f"Reinitializing genome manager with new cache_dir: {cache_dir}")
-            _genome_manager = GenomeDownloadManager(cache_dir=cache_dir)
+            _genome_manager = GenomeDownloadManager(
+                cache_dir=cache_dir,
+                offline_mode=bool(offline_mode) if offline_mode is not None else _genome_manager.offline_mode,
+            )
+
+    # Update offline_mode on existing instance if explicitly provided
+    if offline_mode is not None and _genome_manager.offline_mode != offline_mode:
+        _genome_manager.offline_mode = offline_mode
+        logger.info(f"Genome manager offline_mode updated to {offline_mode}")
 
     return _genome_manager

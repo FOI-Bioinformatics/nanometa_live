@@ -7,6 +7,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Canonical waterfall loading pattern (`canonical_loaders.py`): tries pre-computed JSON first, falls back to raw file parsing
+- Manifest-based sample detection in `sample_detector.py` with glob fallback for backward compatibility
+- `kraken2_helpers.py` module extracted from `classification_tab.py` (375 LOC of Kraken2-specific logic)
 - 3 new built-in watchlists: Nosocomial/ESKAPE, Wastewater Surveillance, Zoonotic One Health
 - 3 example custom watchlists: STI Pathogens, Neglected Tropical Diseases, Agricultural Plant
 - Quick-start buttons for all 9 built-in watchlists
@@ -27,8 +30,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Upload validation feedback with detailed error messages
 - `openpyxl` dependency for XLSX export
 - `pipeline_profile` and `qc_tool` settings in default config.yaml
+- "Remove All" button for bulk genome deletion with confirmation dialog
 
 ### Changed
+- `data_loaders.py` refactored from monolithic module (1,630 LOC) to re-export hub backed by `classification_loaders.py`, `qc_loaders.py`, `validation_loaders.py`, and `loader_utils.py`
+- `sample_detector.py` updated to manifest-based detection with glob fallback
 - `nanometa-sim` deprecated in favour of nanorunner (stub prints notice and exits)
 - Default server binding from 0.0.0.0 to 127.0.0.1 (security)
 - Dash version requirement from >=2.18.2 to >=4.0.0
@@ -40,6 +46,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `_is_file_stable()` replaced blocking sleep with mtime-based check (non-blocking)
 
 ### Fixed
+- Genome accession column showing placeholders (`virus_taxid_*`, `taxid_*`, `discovered`) instead of real NCBI accessions
+- Offline deploy crash: `TaxidMapper.load_database()` called without required `database_path` argument
+- `offline_mode` not propagated to API clients (NCBI, GTDB, genome manager) — network calls attempted in air-gapped mode
 - `setup.py` install_requires failing due to unfiltered comments from requirements.txt
 - Pathogen modal using wrong config key for results directory
 - Redundant `_collect_samples_data()` calls (3-5x per tick reduced to 1x via status cache)
@@ -58,6 +67,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `__main__.py` hardcoding `host="0.0.0.0"` bypassing localhost security default
 
 ### Removed
+- Plugin system (`core/plugins/`) - unused scaffolding
+- `core/utils/taxonomy_validator.py` - unused
+- `core/utils/diversity_metrics.py` - unused
+- `core/workflow/container_cacher.py` - unused
+- `core/workflow/action_orchestrator.py` - unused
+- `core/workflow/data_processor.py` - unused
+- `app/utils/error_handler.py` - unused
+- `nanopore_simulator.py`, `nanometa_demo.py` - replaced by nanorunner
+- `generate_demo_data.py`, `verify_visualizations.py` (repo root) - unused scripts
+- `DATA_SOURCE_REGISTRY` scaffolding from `sample_detector.py`
+- 211 lines of dead CSS from `styles.css`
 - Unused `scipy` dependency
 - `pyfastx` dependency (only used by deprecated nanometa-sim)
 

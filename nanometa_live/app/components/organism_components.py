@@ -407,17 +407,25 @@ def OrganismCard(
             # Read count
             read_count_text,
 
-            # Confidence badge
+            # Confidence badge with explanatory tooltip
             html.Div([
                 dbc.Badge([
                     html.I(className=f"bi bi-{confidence_icon} me-1"),
                     confidence_label
                 ],
                     color=confidence_color,
-                    className="me-2"
+                    className="me-2",
+                    id={"type": "confidence-badge", "taxid": taxid or 0},
+                ),
+                dbc.Tooltip(
+                    "Based on the number of matching DNA sequences. "
+                    "More sequences means higher confidence that this organism "
+                    "is truly present in the sample.",
+                    target={"type": "confidence-badge", "taxid": taxid or 0},
+                    placement="top",
                 ),
                 html.Small(
-                    f"Rank: {_rank_to_plain_language(rank)}",
+                    f"Identified at {_rank_to_plain_language(rank)} level",
                     className="text-muted"
                 ) if rank and not is_undetected else None
             ], className="mb-2"),
@@ -498,13 +506,21 @@ def OrganismSummaryCard(
                 dbc.Col([
                     html.Div([
                         html.H2(f"{total_reads:,}", className="mb-0", style={"color": "var(--primary)"}),
-                        html.P("DNA Sequences", className="text-muted mb-0")
+                        html.P("DNA Sequences Analyzed", className="text-muted mb-0")
                     ], className="text-center")
                 ], md=3),
                 dbc.Col([
                     html.Div([
                         html.H2(f"{classification_rate:.1f}%", className="mb-0", style={"color": "var(--status-good)"}),
-                        html.P("Classification Rate", className="text-muted mb-0")
+                        html.P("Sequences Identified", className="text-muted mb-0",
+                               id="summary-classification-rate"),
+                        dbc.Tooltip(
+                            "Percentage of DNA sequences that could be matched to a known organism. "
+                            "Higher is better. Values below 50% may indicate database limitations "
+                            "or novel organisms.",
+                            target="summary-classification-rate",
+                            placement="bottom",
+                        ),
                     ], className="text-center")
                 ], md=3),
                 dbc.Col([
@@ -1266,7 +1282,12 @@ def BaseQualityCard(
         # Header
         html.Div([
             html.I(className="bi bi-speedometer2 me-2", style={"color": "#495057"}),
-            html.Span("Base Quality", style={"fontWeight": "600", "fontSize": "14px"})
+            html.Span("Base Quality", style={"fontWeight": "600", "fontSize": "14px"}),
+            html.Small(
+                " - How accurate is each letter of the DNA sequence?",
+                className="text-muted",
+                style={"fontSize": "11px", "fontWeight": "400"}
+            ),
         ], className="mb-3"),
 
         # Metrics row
@@ -1275,6 +1296,10 @@ def BaseQualityCard(
             html.Div([
                 html.Div([
                     html.Span("Q20+", style={"fontWeight": "600", "fontSize": "12px", "color": "#495057"}),
+                    html.Span(
+                        " (99% accurate)",
+                        style={"fontSize": "10px", "color": "#6c757d", "fontWeight": "400"}
+                    ),
                 ]),
                 html.Div([
                     html.I(className=f"bi bi-{q20_colors['icon']} me-1",
@@ -1297,7 +1322,14 @@ def BaseQualityCard(
                     "height": "6px",
                     "marginTop": "4px"
                 }),
-                html.Small("bases >= Q20", className="text-muted", style={"fontSize": "10px"})
+                html.Small(
+                    "Good" if q20_rate >= 65 else "Fair" if q20_rate >= 50 else "Poor",
+                    style={
+                        "fontSize": "10px",
+                        "fontWeight": "600",
+                        "color": q20_colors["bg"]
+                    }
+                )
             ], className="text-center", style={"flex": "1"}),
 
             # Divider
@@ -1312,6 +1344,10 @@ def BaseQualityCard(
             html.Div([
                 html.Div([
                     html.Span("Q30+", style={"fontWeight": "600", "fontSize": "12px", "color": "#495057"}),
+                    html.Span(
+                        " (99.9% accurate)",
+                        style={"fontSize": "10px", "color": "#6c757d", "fontWeight": "400"}
+                    ),
                 ]),
                 html.Div([
                     html.I(className=f"bi bi-{q30_colors['icon']} me-1",
@@ -1334,7 +1370,14 @@ def BaseQualityCard(
                     "height": "6px",
                     "marginTop": "4px"
                 }),
-                html.Small("bases >= Q30", className="text-muted", style={"fontSize": "10px"})
+                html.Small(
+                    "Good" if q30_rate >= 45 else "Fair" if q30_rate >= 30 else "Poor",
+                    style={
+                        "fontSize": "10px",
+                        "fontWeight": "600",
+                        "color": q30_colors["bg"]
+                    }
+                )
             ], className="text-center", style={"flex": "1"}),
 
             # Divider
@@ -1466,7 +1509,12 @@ def ReadStatisticsCard(
         # Header
         html.Div([
             html.I(className="bi bi-rulers me-2", style={"color": "#495057"}),
-            html.Span("Read Statistics", style={"fontWeight": "600", "fontSize": "14px"})
+            html.Span("Read Statistics", style={"fontWeight": "600", "fontSize": "14px"}),
+            html.Small(
+                " - How long are the DNA sequences?",
+                className="text-muted",
+                style={"fontSize": "11px", "fontWeight": "400"}
+            ),
         ], className="mb-3"),
 
         # Metrics row
@@ -1501,6 +1549,10 @@ def ReadStatisticsCard(
             html.Div([
                 html.Div([
                     html.Span("N50", style={"fontWeight": "600", "fontSize": "12px", "color": "#495057"}),
+                    html.Span(
+                        " (length metric)",
+                        style={"fontSize": "10px", "color": "#6c757d", "fontWeight": "400"}
+                    ),
                 ]),
                 html.Div([
                     html.I(className=f"bi bi-{n50_colors['icon']} me-1",
@@ -1516,9 +1568,13 @@ def ReadStatisticsCard(
                     html.Span(" bp", style={"fontSize": "12px", "color": "#6c757d"}) if n50 is not None else None
                 ]),
                 html.Small(
-                    f"{n50:,} bp" if n50 is not None else "FASTP QC mode",
-                    className="text-muted",
-                    style={"fontSize": "10px"}
+                    ("Good" if n50 >= 2000 else "Fair" if n50 >= 1000 else "Short")
+                    if n50 is not None else "Not available (FASTP mode)",
+                    style={
+                        "fontSize": "10px",
+                        "fontWeight": "600" if n50 is not None else "400",
+                        "color": n50_colors["bg"] if n50 is not None else "#6c757d"
+                    }
                 )
             ], className="text-center", style={"flex": "1"}),
 

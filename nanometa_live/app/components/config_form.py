@@ -27,7 +27,7 @@ def create_config_form():
                 html.Div([
                     html.I(className="bi bi-gear-fill me-2", style={"fontSize": "20px"}),
                     html.H5("Essential Settings", className="mb-0 d-inline"),
-                    dbc.Badge("Required", color="danger", className="ms-2",
+                    dbc.Badge("Start here", color="primary", className="ms-2",
                               style={"fontSize": "0.7rem", "verticalAlign": "middle"})
                 ], className="d-flex align-items-center")
             ]),
@@ -57,7 +57,8 @@ def create_config_form():
                             )
                         ]),
                         dbc.Tooltip(
-                            "Directory containing FASTQ files from the nanopore sequencer",
+                            "The folder where your sequencer writes data files. "
+                            "Look for a folder containing .fastq or .fastq.gz files.",
                             target="nanopore-dir-info"
                         ),
                         html.Div(id="nanopore-dir-feedback", className="mt-1")
@@ -140,7 +141,7 @@ def create_config_form():
                 dbc.Row([
                     dbc.Col([
                         dbc.Label([
-                            "Kraken2 Database ",
+                            "Species Identification Database ",
                             html.Span("*", className="text-danger"),
                             html.I(className="bi bi-info-circle text-muted ms-1", id="kraken-db-info")
                         ], html_for="kraken-db-input"),
@@ -161,7 +162,8 @@ def create_config_form():
                             )
                         ]),
                         dbc.Tooltip(
-                            "Path to Kraken2 database directory (must contain hash.k2d, opts.k2d, and taxo.k2d)",
+                            "Folder containing the Kraken2 reference database used to identify organisms. "
+                            "If you do not have one, download it from the Preparation tab.",
                             target="kraken-db-info"
                         ),
                         html.Div(id="kraken-db-feedback", className="mt-1")
@@ -192,8 +194,9 @@ def create_config_form():
                             )
                         ]),
                         dbc.Tooltip(
-                            "Primary output directory for the analysis pipeline. Contains all results "
-                            "including Kraken2 reports, QC data, and validation output.",
+                            "Where the analysis saves its output files (species reports, "
+                            "quality data, and validation results). Defaults to a folder "
+                            "in your home directory if left empty.",
                             target="results-dir-info"
                         ),
                         dbc.FormText(
@@ -438,7 +441,7 @@ def create_config_form():
                         dbc.Row([
                             dbc.Col([
                                 dbc.Label([
-                                    "Minimum Reads per Level ",
+                                    "Minimum Detection Count ",
                                     html.I(className="bi bi-info-circle text-muted ms-1", id="min-reads-info")
                                 ], html_for="min-reads-per-level-input"),
                                 dbc.Input(
@@ -448,11 +451,11 @@ def create_config_form():
                                     step=1,
                                     value=10
                                 ),
-                                dbc.FormText("Hide organisms with fewer reads than this threshold"),
+                                dbc.FormText("Hide organisms detected fewer times than this"),
                                 dbc.Tooltip(
-                                    "Organisms with fewer classified reads than this value are filtered "
-                                    "from the taxonomy visualizations (Sankey, sunburst). "
-                                    "Higher values reduce noise but may hide low-abundance species.",
+                                    "Organisms detected fewer times than this value are hidden "
+                                    "from the classification charts. Higher values reduce noise "
+                                    "but may hide rare species. Default: 10.",
                                     target="min-reads-info"
                                 )
                             ], md=6),
@@ -460,17 +463,19 @@ def create_config_form():
                                 html.Div([
                                     dbc.Switch(
                                         id="memory-mapping-input",
-                                        label="Use memory mapping for Kraken2",
+                                        label="Low-memory mode",
                                         value=True,
                                         className="mt-3"
                                     ),
                                     html.I(className="bi bi-info-circle text-muted ms-1", id="memory-mapping-info"),
+                                    dbc.Badge("Recommended", color="success", className="ms-2",
+                                              style={"fontSize": "0.65rem"}),
                                 ], className="d-flex align-items-center"),
-                                dbc.FormText("Reduces RAM usage but may be slower"),
+                                dbc.FormText("Uses less memory; recommended for laptops and field computers"),
                                 dbc.Tooltip(
-                                    "When enabled, Kraken2 reads the database from disk instead of loading "
-                                    "it entirely into RAM. Recommended for large databases (>8 GB) or "
-                                    "systems with limited memory.",
+                                    "When enabled, the species database is read from disk instead of "
+                                    "being loaded entirely into memory. Recommended for portable "
+                                    "computers and large databases.",
                                     target="memory-mapping-info"
                                 )
                             ], md=6)
@@ -482,33 +487,56 @@ def create_config_form():
                 dbc.Card([
                     dbc.CardHeader([
                         html.I(className="bi bi-shield-check me-2"),
-                        html.Strong("Pathogen Validation")
+                        html.Strong("Confirmation Testing"),
+                        html.I(className="bi bi-info-circle text-muted ms-2",
+                               id="validation-section-info",
+                               style={"fontSize": "0.85rem", "cursor": "help"}),
+                        dbc.Tooltip(
+                            "After initial species identification, confirmation testing "
+                            "compares DNA sequences against known reference genomes to "
+                            "verify results. This reduces false positives.",
+                            target="validation-section-info",
+                        ),
                     ], className="py-2"),
                     dbc.CardBody([
                         dbc.Row([
                             dbc.Col([
                                 dbc.Switch(
                                     id="blast-validation-input",
-                                    label="Enable validation",
+                                    label="Enable confirmation testing",
                                     value=False
                                 ),
-                                dbc.FormText("Validate detected species against reference genomes")
+                                dbc.FormText("Double-check detected species against reference genomes")
                             ], md=3),
                             dbc.Col([
-                                dbc.Label("Method", html_for="validation-method-input"),
+                                dbc.Label([
+                                    "Confirmation Method ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1",
+                                           id="validation-method-info"),
+                                ], html_for="validation-method-input"),
                                 dcc.Dropdown(
                                     id="validation-method-input",
                                     options=[
-                                        {"label": "BLAST (per-read validation)", "value": "blast"},
-                                        {"label": "minimap2 (mapping statistics)", "value": "minimap2"},
-                                        {"label": "Both (validation + mapping)", "value": "both"}
+                                        {"label": "Sequence search (thorough)", "value": "blast"},
+                                        {"label": "Genome alignment (fast)", "value": "minimap2"},
+                                        {"label": "Both (recommended)", "value": "both"}
                                     ],
                                     value="both",
                                     clearable=False
+                                ),
+                                dbc.Tooltip(
+                                    "Sequence search (BLAST) checks individual DNA reads against "
+                                    "a reference. Genome alignment (minimap2) maps reads to a full "
+                                    "genome. Using both gives the highest confidence.",
+                                    target="validation-method-info"
                                 )
                             ], md=3),
                             dbc.Col([
-                                dbc.Label("Min Identity (%)", html_for="min-identity-input"),
+                                dbc.Label([
+                                    "Min. Similarity (%) ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1",
+                                           id="min-identity-info"),
+                                ], html_for="min-identity-input"),
                                 dbc.Input(
                                     id="min-identity-input",
                                     type="number",
@@ -516,11 +544,18 @@ def create_config_form():
                                     max=100,
                                     step=1,
                                     value=90
+                                ),
+                                dbc.FormText("90% is recommended"),
+                                dbc.Tooltip(
+                                    "How closely a DNA sequence must match the reference "
+                                    "to count as a confirmed identification. "
+                                    "90% is a good default for nanopore data.",
+                                    target="min-identity-info"
                                 )
                             ], md=3),
                             dbc.Col([
                                 dbc.Label([
-                                    "E-value Cutoff ",
+                                    "Strictness Filter ",
                                     html.I(className="bi bi-info-circle text-muted ms-1", id="evalue-info")
                                 ], html_for="e-value-cutoff-input"),
                                 dbc.Input(
@@ -531,31 +566,42 @@ def create_config_form():
                                     step=0.001,
                                     value=0.01
                                 ),
+                                dbc.FormText("0.01 is recommended"),
                                 dbc.Tooltip(
-                                    "BLAST E-value threshold for sequence matches. "
+                                    "Controls how strict sequence matching is. "
                                     "Lower values are stricter (fewer false positives). "
-                                    "0.01 is a good default; use 0.001 for higher confidence.",
+                                    "0.01 is recommended for most uses.",
                                     target="evalue-info"
                                 )
                             ], md=3)
                         ]),
                         dbc.Row([
                             dbc.Col([
-                                dbc.Label("minimap2 Preset", html_for="minimap2-preset-input"),
+                                dbc.Label([
+                                    "Sequencing Platform ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1",
+                                           id="minimap2-preset-info"),
+                                ], html_for="minimap2-preset-input"),
                                 dbc.Select(
                                     id="minimap2-preset-input",
                                     options=[
-                                        {"label": "map-ont (Oxford Nanopore)", "value": "map-ont"},
-                                        {"label": "map-hifi (PacBio HiFi)", "value": "map-hifi"},
-                                        {"label": "map-pb (PacBio CLR)", "value": "map-pb"}
+                                        {"label": "Oxford Nanopore (default)", "value": "map-ont"},
+                                        {"label": "PacBio HiFi", "value": "map-hifi"},
+                                        {"label": "PacBio CLR", "value": "map-pb"}
                                     ],
                                     value="map-ont"
                                 ),
-                                dbc.FormText("Alignment preset for minimap2")
+                                dbc.FormText("Select your sequencing instrument type"),
+                                dbc.Tooltip(
+                                    "Choose the sequencing technology that produced your data. "
+                                    "This adjusts alignment sensitivity to match the error profile "
+                                    "of your instrument.",
+                                    target="minimap2-preset-info"
+                                )
                             ], md=6),
                             dbc.Col([
                                 dbc.Label([
-                                    "Min Mapping Quality (MAPQ) ",
+                                    "Alignment Confidence ",
                                     html.I(className="bi bi-info-circle text-muted ms-1", id="mapq-info")
                                 ], html_for="minimap2-min-mapq-input"),
                                 dbc.Input(
@@ -566,32 +612,41 @@ def create_config_form():
                                     step=1,
                                     value=30
                                 ),
-                                dbc.FormText("Scale 0-60: higher = more confident alignments"),
+                                dbc.FormText("30 is recommended (scale 0-60)"),
                                 dbc.Tooltip(
-                                    "Mapping quality score (0-60) indicating alignment confidence. "
-                                    "Reads below this threshold are excluded from validation. "
-                                    "30 is a good default; use 0 to include all alignments.",
+                                    "Minimum confidence score (0-60) for genome alignments. "
+                                    "Higher values keep only highly confident matches. "
+                                    "30 is recommended; use 0 to accept all.",
                                     target="mapq-info"
                                 )
                             ], md=6)
                         ], className="mt-3"),
                         dbc.Row([
                             dbc.Col([
-                                dbc.Label("Genome Cache Directory", html_for="genome-cache-dir-input"),
+                                dbc.Label([
+                                    "Reference Genome Storage ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1",
+                                           id="genome-cache-info"),
+                                ], html_for="genome-cache-dir-input"),
                                 dbc.Input(
                                     id="genome-cache-dir-input",
                                     type="text",
                                     value="~/.nanometa",
                                     placeholder="Path to genome cache (default: ~/.nanometa)"
                                 ),
-                                dbc.FormText("Location for downloaded reference genomes")
+                                dbc.FormText("Where downloaded reference genomes are stored on this computer"),
+                                dbc.Tooltip(
+                                    "Folder where reference genomes are cached locally. "
+                                    "These are downloaded once and reused across analyses.",
+                                    target="genome-cache-info"
+                                )
                             ], md=12)
                         ], className="mt-3"),
                         html.Div([
                             html.I(className="bi bi-info-circle me-2"),
                             html.Span(
-                                "Genomes are downloaded automatically for enabled watchlist pathogens. "
-                                "Enable pathogens in the Watchlist tab and download genomes before starting.",
+                                "Reference genomes are downloaded in the Preparation tab. "
+                                "Enable the organisms you want to monitor in the Watchlist tab first.",
                                 className="text-muted small"
                             )
                         ], className="mt-2")
@@ -602,12 +657,16 @@ def create_config_form():
                 dbc.Card([
                     dbc.CardHeader([
                         html.I(className="bi bi-sliders2 me-2"),
-                        html.Strong("Pipeline Options")
+                        html.Strong("Analysis Options")
                     ], className="py-2"),
                     dbc.CardBody([
                         dbc.Row([
                             dbc.Col([
-                                dbc.Label("QC Tool", html_for="qc-tool-input"),
+                                dbc.Label([
+                                    "Quality Filter ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1",
+                                           id="qc-tool-info"),
+                                ], html_for="qc-tool-input"),
                                 dbc.Select(
                                     id="qc-tool-input",
                                     options=[
@@ -616,45 +675,52 @@ def create_config_form():
                                     ],
                                     value="fastp"
                                 ),
-                                dbc.FormText("Quality control tool for read filtering")
+                                dbc.FormText("Tool used to filter out low-quality DNA sequences"),
+                                dbc.Tooltip(
+                                    "Filters low-quality DNA sequences before species "
+                                    "identification. fastp is recommended for most users.",
+                                    target="qc-tool-info"
+                                )
                             ], md=4),
                             dbc.Col([
                                 dbc.Switch(
                                     id="skip-nanoplot-input",
-                                    label="Skip NanoPlot",
+                                    label="Skip detailed QC report",
                                     value=False,
                                     className="mt-3"
                                 ),
-                                dbc.FormText("Skip NanoPlot QC report generation (faster)")
+                                dbc.FormText("Makes analysis faster but produces fewer quality details")
                             ], md=4),
                             dbc.Col([
                                 dbc.Switch(
                                     id="kraken2-incremental-input",
-                                    label="Incremental classification",
+                                    label="Running totals in live mode",
                                     value=True,
                                     className="mt-3"
                                 ),
-                                dbc.FormText("Cumulative Kraken2 reports in realtime mode")
+                                dbc.FormText("Show cumulative species counts during live sequencing"),
+                                dbc.Badge("Recommended", color="success",
+                                          style={"fontSize": "0.6rem", "verticalAlign": "middle"}),
                             ], md=4),
                         ], className="mb-3"),
                         dbc.Row([
                             dbc.Col([
                                 dbc.Switch(
                                     id="enable-krona-input",
-                                    label="Enable Krona plots",
+                                    label="Generate interactive taxonomy charts",
                                     value=False,
                                     className="mt-1"
                                 ),
-                                dbc.FormText("Generate interactive Krona taxonomy charts")
+                                dbc.FormText("Creates browsable species classification charts (slower)")
                             ], md=4),
                             dbc.Col([
                                 dbc.Switch(
                                     id="enable-nanopore-stats-input",
-                                    label="Nanopore stats in MultiQC",
+                                    label="Include sequencing quality summary",
                                     value=False,
                                     className="mt-1"
                                 ),
-                                dbc.FormText("Include nanopore-specific metrics in MultiQC report")
+                                dbc.FormText("Adds sequencer-specific metrics to the combined report")
                             ], md=4),
                         ]),
                     ])
@@ -680,7 +746,7 @@ def create_config_form():
                                 dbc.FormText("Number of processing threads")
                             ], md=4),
                             dbc.Col([
-                                dbc.Label("GUI Port", html_for="gui-port-input"),
+                                dbc.Label("Dashboard Port", html_for="gui-port-input"),
                                 dbc.Input(
                                     id="gui-port-input",
                                     type="number",
@@ -689,7 +755,7 @@ def create_config_form():
                                     step=1,
                                     value=8050
                                 ),
-                                dbc.FormText("Web interface port")
+                                dbc.FormText("Network port for this web interface (default: 8050)")
                             ], md=4),
                             dbc.Col([
                                 dbc.Switch(
@@ -703,7 +769,7 @@ def create_config_form():
                         ])
                     ])
                 ])
-            ], title="Advanced Settings (Optional)")
+            ], title="Advanced Settings -- only change if you know what you need")
         ], start_collapsed=True, className="mb-4"),
 
     ])

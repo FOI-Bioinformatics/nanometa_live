@@ -76,15 +76,15 @@ def create_dashboard_layout():
                 ]),
                 html.H5("Key Metrics"),
                 html.P(
-                    "The metrics bar shows total reads processed, quality pass rate, "
-                    "classification rate, and the number of active samples. These update "
-                    "automatically at each refresh interval."
+                    "The metrics bar shows total DNA sequences processed, data quality, "
+                    "how many species were identified, and the number of active alerts. "
+                    "These update automatically at each refresh interval."
                 ),
                 html.H5("Sample Selection"),
                 html.P(
-                    "Click a row in the sample table to filter all dashboard panels to "
-                    "that specific sample or barcode. Click again to deselect and return "
-                    "to the combined view."
+                    "Click a row in the sample table to view details for a single sample. "
+                    "All charts and metrics will update to show that sample's data. "
+                    "Click again to return to the combined view of all samples."
                 ),
                 html.H5("Refresh"),
                 html.P(
@@ -110,7 +110,15 @@ def create_dashboard_layout():
                                 html.Div([
                                     html.I(className="bi bi-clipboard-check me-2", style={"fontSize": "1.3rem"}),
                                     html.H5("Pre-flight Checklist", className="mb-0 d-inline"),
-                                ], className="d-flex align-items-center"),
+                                    html.I(
+                                        id="preflight-collapse-icon",
+                                        className="bi bi-chevron-up ms-2",
+                                        style={"fontSize": "0.9rem", "cursor": "pointer",
+                                               "transition": "transform 0.2s"},
+                                    ),
+                                ], className="d-flex align-items-center",
+                                   id="preflight-collapse-toggle",
+                                   style={"cursor": "pointer"}),
                             ], width=8),
                             dbc.Col([
                                 dbc.Button(
@@ -121,9 +129,13 @@ def create_dashboard_layout():
                                 ),
                             ], width=4, className="text-end"),
                         ], className="mb-3"),
-                        html.Div(id="preflight-checks-list", children=[
-                            html.Div("Loading readiness checks...", className="text-muted")
-                        ]),
+                        dbc.Collapse(
+                            html.Div(id="preflight-checks-list", children=[
+                                html.Div("Loading readiness checks...", className="text-muted")
+                            ]),
+                            id="preflight-collapse",
+                            is_open=True,
+                        ),
                     ])
                 ], className="mb-3 border-start border-4 border-info"),
             ],
@@ -322,8 +334,8 @@ def create_dashboard_layout():
                 dbc.Card([
                     dbc.CardHeader([
                         html.Div([
-                            html.I(className="bi bi-biohazard me-2", style={"color": "#dc3545", "fontSize": "1.2rem"}),
-                            html.H5("Pathogen Screening", className="mb-0 d-inline"),
+                            html.I(className="bi bi-shield-exclamation me-2", style={"color": "#6c757d", "fontSize": "1.2rem"}),
+                            html.H5("Threat Screening", className="mb-0 d-inline"),
                             html.Span(
                                 id="dashboard-screening-count",
                                 children="",
@@ -406,7 +418,14 @@ def create_dashboard_layout():
                             className="mb-0"
                         ),
                         html.Span(id="dashboard-total-files-trend", children="", className="metric-trend"),
-                        html.P("Input Files", className="text-muted small mb-0")
+                        html.P("Input Files", className="text-muted small mb-0",
+                       id="metric-label-input-files"),
+                dbc.Tooltip(
+                    "Number of raw DNA sequence files waiting to be processed.",
+                    target="metric-label-input-files",
+                    placement="bottom",
+                    delay={"show": 500, "hide": 100}
+                )
                     ], className="text-center py-2")
                 ], className="h-100 dashboard-metric-card")
             ], className="mb-3"),
@@ -424,7 +443,14 @@ def create_dashboard_layout():
                             className="mb-0"
                         ),
                         html.Span(id="dashboard-sequences-trend", children="", className="metric-trend"),
-                        html.P("Sequences", className="text-muted small mb-0")
+                        html.P("DNA Sequences", className="text-muted small mb-0",
+                               id="metric-label-sequences"),
+                        dbc.Tooltip(
+                            "Total number of DNA fragments processed so far. More sequences generally improve detection accuracy.",
+                            target="metric-label-sequences",
+                            placement="bottom",
+                            delay={"show": 500, "hide": 100}
+                        )
                     ], className="text-center py-2")
                 ], className="h-100 dashboard-metric-card")
             ], className="mb-3"),
@@ -442,7 +468,14 @@ def create_dashboard_layout():
                             className="mb-0"
                         ),
                         html.Span(id="dashboard-quality-trend", children="", className="metric-trend"),
-                        html.P("Quality Score", className="text-muted small mb-0"),
+                        html.P("Data Quality", className="text-muted small mb-0",
+                               id="metric-label-quality"),
+                        dbc.Tooltip(
+                            "Overall data quality score (0-100). Higher means more reliable results. Above 75 is good.",
+                            target="metric-label-quality",
+                            placement="bottom",
+                            delay={"show": 500, "hide": 100}
+                        ),
                         html.Div(
                             id="dashboard-quality-badge-container",
                             className="mt-1"
@@ -464,7 +497,14 @@ def create_dashboard_layout():
                             className="mb-0"
                         ),
                         html.Span(id="dashboard-organisms-trend", children="", className="metric-trend"),
-                        html.P("Organisms", className="text-muted small mb-0")
+                        html.P("Species Found", className="text-muted small mb-0",
+                               id="metric-label-organisms"),
+                        dbc.Tooltip(
+                            "Number of distinct species and genera detected in the sample(s). Includes bacteria, viruses, and other microorganisms.",
+                            target="metric-label-organisms",
+                            placement="bottom",
+                            delay={"show": 500, "hide": 100}
+                        )
                     ], className="text-center py-2")
                 ], className="h-100 dashboard-metric-card")
             ], className="mb-3"),
@@ -533,27 +573,19 @@ def create_dashboard_layout():
                                                 "cellStyle": {
                                                     "styleConditions": [
                                                         {
-                                                            "condition": "params.value && params.value.indexOf('Complete') >= 0",
+                                                            "condition": "params.value === 'Complete'",
                                                             "style": {"backgroundColor": "#d4edda", "color": "#155724", "fontWeight": "bold", "borderLeft": "4px solid #28a745"},
                                                         },
                                                         {
-                                                            "condition": "params.value && params.value.indexOf('Good') >= 0",
-                                                            "style": {"backgroundColor": "#d4edda", "color": "#155724", "fontWeight": "bold", "borderLeft": "4px solid #28a745"},
+                                                            "condition": "params.value === 'Processing'",
+                                                            "style": {"backgroundColor": "#cce5ff", "color": "#004085", "fontWeight": "bold", "borderLeft": "4px solid #0d6efd"},
                                                         },
                                                         {
-                                                            "condition": "params.value && params.value.indexOf('Processing') >= 0",
+                                                            "condition": "params.value === 'Needs Review'",
                                                             "style": {"backgroundColor": "#fff3cd", "color": "#856404", "fontWeight": "bold", "borderLeft": "4px solid #ffc107"},
                                                         },
                                                         {
-                                                            "condition": "params.value && params.value.indexOf('Review') >= 0",
-                                                            "style": {"backgroundColor": "#fff3cd", "color": "#856404", "fontWeight": "bold", "borderLeft": "4px solid #ffc107"},
-                                                        },
-                                                        {
-                                                            "condition": "params.value && params.value.indexOf('Error') >= 0",
-                                                            "style": {"backgroundColor": "#f8d7da", "color": "#721c24", "fontWeight": "bold", "borderLeft": "4px solid #dc3545"},
-                                                        },
-                                                        {
-                                                            "condition": "params.value && params.value.indexOf('Issue') >= 0",
+                                                            "condition": "params.value === 'Error' || params.value === 'Issue Detected'",
                                                             "style": {"backgroundColor": "#f8d7da", "color": "#721c24", "fontWeight": "bold", "borderLeft": "4px solid #dc3545"},
                                                         },
                                                     ],
@@ -565,29 +597,29 @@ def create_dashboard_layout():
                                                 "headerTooltip": "Data quality assessment",
                                             },
                                             {
-                                                "headerName": "Reads",
+                                                "headerName": "Sequences",
                                                 "field": "reads",
-                                                "headerTooltip": "Number of DNA sequences",
+                                                "headerTooltip": "Number of DNA sequence fragments analysed",
                                             },
                                             {
-                                                "headerName": "Organisms",
+                                                "headerName": "Species",
                                                 "field": "organisms",
-                                                "headerTooltip": "Detected organism count",
+                                                "headerTooltip": "Number of distinct species and genera detected",
                                             },
                                             {
-                                                "headerName": "Bases",
+                                                "headerName": "Data Size",
                                                 "field": "bases",
-                                                "headerTooltip": "Total base pairs sequenced",
+                                                "headerTooltip": "Total amount of DNA data in this sample",
                                             },
                                             {
-                                                "headerName": "N50",
+                                                "headerName": "Fragment Length",
                                                 "field": "n50",
-                                                "headerTooltip": "Read length N50 (half of data from reads longer than this)",
+                                                "headerTooltip": "Typical DNA fragment length (longer is better for identification)",
                                             },
                                             {
-                                                "headerName": "Class. Rate",
+                                                "headerName": "ID Rate",
                                                 "field": "class_rate",
-                                                "headerTooltip": "Percentage of reads classified to an organism",
+                                                "headerTooltip": "Percentage of DNA sequences successfully identified as an organism",
                                             },
                                         ],
                                         rowData=[],
@@ -711,7 +743,7 @@ def create_dashboard_layout():
                                 children=[
                                     html.Div([
                                         html.I(className="bi bi-hourglass text-muted me-2"),
-                                        html.Span("Configure watchlist in Settings tab", className="text-muted")
+                                        html.Span("Enable a watchlist in the Watchlist tab to begin screening", className="text-muted")
                                     ], className="text-center py-3")
                                 ]
                             ),
@@ -742,21 +774,22 @@ def create_dashboard_layout():
             dbc.Col([
                 dbc.Card([
                     dbc.CardHeader([
-                        html.H5("Sequencing Quality Metrics", className="mb-0")
+                        html.H5("Detailed Quality Indicators", className="mb-0")
                     ], className="py-2"),
                     dbc.CardBody([
                         dbc.Row([
                             dbc.Col([
                                 html.Div([
                                     html.Label([
-                                        "Mean Q-Score",
+                                        "Read Accuracy",
                                         html.I(
                                             className="bi bi-info-circle ms-1",
                                             id="q-score-info",
                                             style={"cursor": "pointer", "fontSize": "0.8rem"}
                                         ),
                                         dbc.Tooltip(
-                                            "Average quality of DNA reads. Higher = better accuracy. Above Q15 is good, above Q20 is excellent.",
+                                            "Average accuracy of DNA reads. Higher means fewer errors. "
+                                            "Q15 or above is good, Q20 or above is excellent.",
                                             target="q-score-info",
                                             placement="top"
                                         )
@@ -769,14 +802,14 @@ def create_dashboard_layout():
                             dbc.Col([
                                 html.Div([
                                     html.Label([
-                                        "Read Length N50",
+                                        "Fragment Length",
                                         html.I(
                                             className="bi bi-info-circle ms-1",
                                             id="n50-info",
                                             style={"cursor": "pointer", "fontSize": "0.8rem"}
                                         ),
                                         dbc.Tooltip(
-                                            "Half of your DNA data comes from reads longer than this value. Higher N50 = longer DNA fragments = better for identification.",
+                                            "Typical length of DNA fragments. Longer fragments are better for accurate species identification.",
                                             target="n50-info",
                                             placement="top"
                                         )
@@ -789,14 +822,15 @@ def create_dashboard_layout():
                             dbc.Col([
                                 html.Div([
                                     html.Label([
-                                        "Classification Rate",
+                                        "Identification Rate",
                                         html.I(
                                             className="bi bi-info-circle ms-1",
                                             id="classification-info",
                                             style={"cursor": "pointer", "fontSize": "0.8rem"}
                                         ),
                                         dbc.Tooltip(
-                                            "Percentage of DNA sequences successfully identified as organisms. Above 70% is typical; lower may indicate novel or degraded samples.",
+                                            "How many DNA sequences were successfully matched to a known organism. "
+                                            "Above 70% is typical. Lower values may indicate unknown or degraded material.",
                                             target="classification-info",
                                             placement="top"
                                         )
@@ -809,14 +843,14 @@ def create_dashboard_layout():
                             dbc.Col([
                                 html.Div([
                                     html.Label([
-                                        "Total Bases",
+                                        "Total Data",
                                         html.I(
                                             className="bi bi-info-circle ms-1",
                                             id="bases-info",
                                             style={"cursor": "pointer", "fontSize": "0.8rem"}
                                         ),
                                         dbc.Tooltip(
-                                            "Total amount of DNA data generated, measured in base pairs (bp). More data generally improves detection sensitivity.",
+                                            "Total amount of DNA data produced by the sequencer. More data generally means more reliable detection.",
                                             target="bases-info",
                                             placement="top"
                                         )

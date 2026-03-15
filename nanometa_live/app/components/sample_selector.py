@@ -49,7 +49,8 @@ def create_sample_selector(include_label: bool = True, width_md: int = 6) -> dbc
             className="mb-3",
             placeholder="Select a sample...",
             persistence=True,  # Remember selection across page reloads
-            persistence_type='session'
+            persistence_type='session',
+            style={"minHeight": "44px", "fontSize": "16px"}
         )
     )
 
@@ -84,9 +85,10 @@ def create_compact_sample_selector(selector_id: str = "sample-selector-compact")
             clearable=False,
             className="sample-selector-compact",
             persistence=True,
-            persistence_type='session'
+            persistence_type='session',
+            style={"minHeight": "44px", "fontSize": "16px"}
         )
-    ], className="sample-selector-compact", style={'display': 'inline-block'})
+    ], className="sample-selector-compact", style={'display': 'inline-block', 'minWidth': '250px'})
 
 
 def create_sample_info_badge(sample_count: int = 0) -> dbc.Badge:

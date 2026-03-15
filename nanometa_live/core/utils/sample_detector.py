@@ -3,51 +3,14 @@ Sample detection utilities for Nanometa Live v2.0.
 
 This module provides functions to automatically detect available samples
 from nanometanf output files, supporting both barcoded and non-barcoded runs.
-
-Data sources are registered in DATA_SOURCE_REGISTRY so that adding a new
-output type (e.g. assembly) only requires adding an entry to the registry
-and a corresponding detection function -- no need to touch the aggregation
-logic in get_available_samples() or get_sample_file_mapping().
 """
 
 import os
 import glob
 import logging
-from typing import List, Dict, Set, Optional, Callable
+from typing import List, Dict, Set
 
-
-# ---------------------------------------------------------------------------
-# Data Source Registry
-# ---------------------------------------------------------------------------
-# Each entry maps a directory name to its detection function (added below)
-# and optional file patterns for sample-to-file mapping.
-#
-# To add a new data source:
-#   1. Write a ``detect_samples_from_<tool>(dir) -> Set[str]`` function.
-#   2. Add an entry to DATA_SOURCE_REGISTRY.
-# ---------------------------------------------------------------------------
-
-class DataSourceEntry:
-    """Description of one pipeline output directory for sample detection."""
-
-    def __init__(
-        self,
-        directory: str,
-        detect_fn: Optional[Callable[[str], Set[str]]] = None,
-        file_patterns: Optional[List[str]] = None,
-    ):
-        self.directory = directory
-        self.detect_fn = detect_fn
-        # Glob patterns relative to the directory (used by get_sample_file_mapping).
-        # The placeholder ``{sample}`` is replaced with the actual sample name.
-        self.file_patterns = file_patterns or []
-
-    def __repr__(self) -> str:
-        return f"DataSourceEntry(directory={self.directory!r})"
-
-
-# Registry populated after detection functions are defined (see bottom of module).
-DATA_SOURCE_REGISTRY: List[DataSourceEntry] = []
+from nanometa_live.core.utils.canonical_loaders import load_manifest
 
 
 def resolve_analysis_directory(main_dir: str) -> str:
@@ -372,6 +335,17 @@ def get_available_samples(main_dir: str) -> List[str]:
     """
     # Auto-resolve to analysis directory if needed
     main_dir = resolve_analysis_directory(main_dir)
+
+    # Try manifest-based detection first (canonical format)
+    manifest = load_manifest(main_dir)
+    if manifest is not None:
+        manifest_samples = manifest.get("samples", [])
+        if manifest_samples:
+            logging.debug(
+                "Using manifest-based sample detection: %d samples",
+                len(manifest_samples),
+            )
+            return ["All Samples"] + sorted(manifest_samples)
 
     all_samples = set()
 

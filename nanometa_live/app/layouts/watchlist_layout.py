@@ -48,26 +48,31 @@ def create_watchlist_layout() -> html.Div:
         # taxmap-export-download, genome-status-data, genome-download-complete,
         # blast-build-complete are shared stores defined in app.py
 
-        # Main content - Simplified 4-section layout
+        # Main content - Simplified layout with prominent quick-start
         dbc.Container([
             # Section 1: Stats Bar (compact overview)
             _create_stats_bar(),
 
             # Brief intro text
-            html.P(
-                "Organisms listed below will be monitored during analysis. "
-                "A default watchlist is pre-enabled. Enable additional watchlists "
-                "or add custom species below.",
-                className="text-muted small mb-2",
-            ),
+            html.Div([
+                html.P([
+                    html.I(className="bi bi-lightbulb me-2 text-info"),
+                    "Choose which organisms to watch for. Select a pre-built list below, "
+                    "or add individual species. Enabled organisms will trigger alerts "
+                    "when detected during analysis.",
+                ], className="text-muted small mb-1"),
+            ], className="mb-2"),
 
-            # Section 2: Pathogens Table (main focus area)
+            # Section 2: Quick-Start (promoted from collapsed section)
+            _create_quick_start_section(),
+
+            # Section 3: Pathogens Table (main focus area)
             _create_pathogens_table_section(),
 
-            # Section 3: Watchlist Files (collapsible)
+            # Section 4: Watchlist Files (collapsible)
             _create_collapsible_watchlist_files(),
 
-            # Section 4: Add Custom Species (collapsible)
+            # Section 5: Add Custom Species (collapsible)
             _create_collapsible_add_species(),
 
         ], fluid=True, className="p-3"),
@@ -217,6 +222,122 @@ def _create_stats_bar() -> dbc.Card:
     ], className="mb-3 watchlist-stats-bar")
 
 
+def _create_quick_start_section() -> dbc.Card:
+    """
+    Create a prominent quick-start card with watchlist presets.
+
+    Elevated from the collapsed Watchlist Files section so that users
+    see it immediately. Each button has a short description.
+    """
+    preset_groups = [
+        {
+            "id": "quick-start-clinical",
+            "icon": "bi bi-hospital",
+            "label": "Clinical Pathogens",
+            "desc": "Common hospital infections",
+            "color": "primary",
+        },
+        {
+            "id": "quick-start-foodborne",
+            "icon": "bi bi-cup-straw",
+            "label": "Food Safety",
+            "desc": "Foodborne illness organisms",
+            "color": "warning",
+        },
+        {
+            "id": "quick-start-water",
+            "icon": "bi bi-droplet",
+            "label": "Drinking Water",
+            "desc": "WHO water quality targets",
+            "color": "info",
+        },
+        {
+            "id": "quick-start-respiratory",
+            "icon": "bi bi-lungs",
+            "label": "Respiratory",
+            "desc": "Airborne and respiratory pathogens",
+            "color": "secondary",
+        },
+        {
+            "id": "quick-start-cdc",
+            "icon": "bi bi-shield-shaded",
+            "label": "Select Agents",
+            "desc": "CDC/USDA regulated agents",
+            "color": "danger",
+        },
+        {
+            "id": "quick-start-who",
+            "icon": "bi bi-globe",
+            "label": "WHO Priority",
+            "desc": "WHO priority pathogens list",
+            "color": "dark",
+        },
+        {
+            "id": "quick-start-nosocomial",
+            "icon": "bi bi-building",
+            "label": "Nosocomial",
+            "desc": "Hospital-acquired (ESKAPE)",
+            "color": "danger",
+        },
+        {
+            "id": "quick-start-wastewater",
+            "icon": "bi bi-moisture",
+            "label": "Wastewater",
+            "desc": "Wastewater surveillance panel",
+            "color": "info",
+        },
+        {
+            "id": "quick-start-zoonotic",
+            "icon": "bi bi-bug",
+            "label": "Zoonotic",
+            "desc": "Animal-to-human pathogens",
+            "color": "success",
+        },
+    ]
+
+    preset_cols = []
+    for p in preset_groups:
+        preset_cols.append(
+            dbc.Col([
+                dbc.Button(
+                    [
+                        html.I(className=f"{p['icon']} me-1"),
+                        html.Span(p["label"], className="d-block small fw-bold"),
+                    ],
+                    id=p["id"],
+                    size="sm",
+                    color=p["color"],
+                    outline=True,
+                    n_clicks=0,
+                    className="w-100 py-2",
+                    title=p["desc"],
+                ),
+                html.Small(p["desc"], className="text-muted d-block text-center",
+                           style={"fontSize": "0.7rem", "lineHeight": "1.2", "marginTop": "2px"}),
+            ], xs=6, sm=4, md=3, lg=2, xl=True, className="mb-2 px-1")
+        )
+
+    return dbc.Card([
+        dbc.CardHeader([
+            html.Div([
+                html.I(className="bi bi-lightning-fill me-2 text-warning",
+                       style={"fontSize": "1.1rem"}),
+                html.H6("Quick Start -- Select a Watchlist", className="mb-0 d-inline"),
+            ], className="d-flex align-items-center"),
+        ]),
+        dbc.CardBody([
+            html.P(
+                "Click a button to enable or disable a pre-built watchlist. "
+                "Active lists are shown with a solid background.",
+                className="text-muted small mb-2",
+            ),
+            dbc.Row(preset_cols, className="g-1"),
+            html.Div(id="quick-start-feedback", className="mt-2 small"),
+        ]),
+    ], className="mb-3",
+       style={"borderLeft": "4px solid var(--bs-warning)"})
+
+
 def _create_pathogens_table_section() -> dbc.Card:
     """
     Create the pathogens table section.
@@ -260,6 +381,7 @@ def _create_pathogens_table_section() -> dbc.Card:
                             color="success",
                             outline=True,
                             n_clicks=0,
+                            title="Enable all listed organisms (may take a moment with large lists)",
                         ),
                         dbc.Button(
                             [html.I(className="bi bi-toggle-off me-1"), "Disable All"],
@@ -268,6 +390,7 @@ def _create_pathogens_table_section() -> dbc.Card:
                             color="secondary",
                             outline=True,
                             n_clicks=0,
+                            title="Disable all listed organisms",
                         ),
                     ], size="sm"),
                 ], width=4, className="text-end"),
@@ -278,28 +401,40 @@ def _create_pathogens_table_section() -> dbc.Card:
             html.Div([
                 dbc.Row([
                     dbc.Col(html.Small("Organism", className="fw-bold"), width=3),
-                    dbc.Col(html.Small("Threat", className="fw-bold"), width=1),
+                    dbc.Col(html.Small("Risk", className="fw-bold"), width=1),
                     dbc.Col([
-                        html.Small("BSL", className="fw-bold"),
+                        html.Small("Safety", className="fw-bold"),
                         html.I(className="bi bi-info-circle text-muted ms-1",
                                id="bsl-header-info",
                                style={"fontSize": "0.7rem", "cursor": "help"}),
                         dbc.Tooltip(
-                            "Biosafety level required for handling this organism",
+                            "Biosafety containment level required for handling "
+                            "this organism (BSL-1 = low risk, BSL-4 = highest risk)",
                             target="bsl-header-info",
                             placement="top",
                         ),
                     ], width=1),
-                    dbc.Col(html.Small("Validated", className="fw-bold"), width=1),
                     dbc.Col([
-                        html.Small("DB Match", className="fw-bold"),
+                        html.Small("Verified", className="fw-bold"),
+                        html.I(className="bi bi-info-circle text-muted ms-1",
+                               id="validated-header-info",
+                               style={"fontSize": "0.7rem", "cursor": "help"}),
+                        dbc.Tooltip(
+                            "Whether this organism's name and ID have been checked "
+                            "against public taxonomy databases (NCBI/GTDB)",
+                            target="validated-header-info",
+                            placement="top",
+                        ),
+                    ], width=1),
+                    dbc.Col([
+                        html.Small("In Database", className="fw-bold"),
                         html.I(className="bi bi-info-circle text-muted ms-1",
                                id="dbmatch-header-info",
                                style={"fontSize": "0.7rem", "cursor": "help"}),
                         dbc.Tooltip(
-                            "Whether this organism's taxid was found in the "
-                            "Kraken2 database. Run 'Rescan DB' in the Preparation "
-                            "tab to populate this column.",
+                            "Whether this organism was found in the species "
+                            "identification database. If 'Not Scanned', run "
+                            "'Rescan DB' in the Preparation tab.",
                             target="dbmatch-header-info",
                             placement="top",
                         ),
@@ -310,8 +445,8 @@ def _create_pathogens_table_section() -> dbc.Card:
                                id="genome-header-info",
                                style={"fontSize": "0.7rem", "cursor": "help"}),
                         dbc.Tooltip(
-                            "Reference genome and BLAST database status for "
-                            "validation. Download genomes in the Preparation tab.",
+                            "Reference genome status. Genomes are used for "
+                            "confirmation testing. Download them in the Preparation tab.",
                             target="genome-header-info",
                             placement="top",
                         ),
@@ -337,94 +472,6 @@ def _create_collapsible_watchlist_files() -> dbc.Accordion:
     """
     return dbc.Accordion([
         dbc.AccordionItem([
-            # Quick-start buttons row
-            html.Div([
-                html.Div([
-                    html.I(className="bi bi-lightning me-1"),
-                    html.Small("Quick enable: ", className="text-muted"),
-                ], className="d-flex align-items-center me-2"),
-                dbc.ButtonGroup([
-                    dbc.Button(
-                        [html.I(className="bi bi-hospital me-1"), "Clinical"],
-                        id="quick-start-clinical",
-                        size="sm",
-                        color="primary",
-                        outline=True,
-                        n_clicks=0,
-                    ),
-                    dbc.Button(
-                        [html.I(className="bi bi-cup-straw me-1"), "Food Safety"],
-                        id="quick-start-foodborne",
-                        size="sm",
-                        color="warning",
-                        outline=True,
-                        n_clicks=0,
-                    ),
-                    dbc.Button(
-                        [html.I(className="bi bi-droplet me-1"), "Water"],
-                        id="quick-start-water",
-                        size="sm",
-                        color="info",
-                        outline=True,
-                        n_clicks=0,
-                    ),
-                    dbc.Button(
-                        [html.I(className="bi bi-lungs me-1"), "Respiratory"],
-                        id="quick-start-respiratory",
-                        size="sm",
-                        color="secondary",
-                        outline=True,
-                        n_clicks=0,
-                    ),
-                    dbc.Button(
-                        [html.I(className="bi bi-shield-shaded me-1"), "Select Agents"],
-                        id="quick-start-cdc",
-                        size="sm",
-                        color="danger",
-                        outline=True,
-                        n_clicks=0,
-                    ),
-                    dbc.Button(
-                        [html.I(className="bi bi-globe me-1"), "WHO Priority"],
-                        id="quick-start-who",
-                        size="sm",
-                        color="dark",
-                        outline=True,
-                        n_clicks=0,
-                    ),
-                ], size="sm"),
-                html.Span(" ", className="mx-1"),
-                dbc.ButtonGroup([
-                    dbc.Button(
-                        [html.I(className="bi bi-building me-1"), "Nosocomial"],
-                        id="quick-start-nosocomial",
-                        size="sm",
-                        color="danger",
-                        outline=True,
-                        n_clicks=0,
-                    ),
-                    dbc.Button(
-                        [html.I(className="bi bi-moisture me-1"), "Wastewater"],
-                        id="quick-start-wastewater",
-                        size="sm",
-                        color="info",
-                        outline=True,
-                        n_clicks=0,
-                    ),
-                    dbc.Button(
-                        [html.I(className="bi bi-bug me-1"), "Zoonotic"],
-                        id="quick-start-zoonotic",
-                        size="sm",
-                        color="success",
-                        outline=True,
-                        n_clicks=0,
-                    ),
-                ], size="sm"),
-                html.Div(id="quick-start-feedback", className="ms-2 small d-inline"),
-            ], className="mb-3 d-flex align-items-center flex-wrap"),
-
-            html.Hr(className="my-2"),
-
             # Watchlist files
             dbc.Row([
                 dbc.Col([
@@ -533,11 +580,21 @@ def _create_collapsible_add_species() -> dbc.Accordion:
                     ),
                 ], md=4),
                 dbc.Col([
-                    dbc.Label("Taxid (optional)", className="small"),
+                    dbc.Label([
+                        "Taxonomy ID ",
+                        html.I(className="bi bi-info-circle text-muted",
+                               id="add-taxid-info",
+                               style={"fontSize": "0.7rem", "cursor": "help"}),
+                        dbc.Tooltip(
+                            "Optional numeric identifier from the NCBI taxonomy database. "
+                            "If unsure, leave blank and use the Lookup button.",
+                            target="add-taxid-info",
+                        ),
+                    ], className="small"),
                     dbc.Input(
                         id="watchlist-add-taxid",
                         type="number",
-                        placeholder="NCBI taxid",
+                        placeholder="e.g. 1639",
                         size="sm",
                     ),
                 ], md=2),
@@ -631,15 +688,15 @@ def _create_entry_edit_modal() -> dbc.Modal:
                 dbc.CardBody([
                     dbc.Row([
                         dbc.Col([
-                            html.Small("NCBI Taxid", className="text-muted d-block"),
+                            html.Small("Reference ID", className="text-muted d-block"),
                             html.Code(id="watchlist-edit-ncbi-taxid", children="-"),
                         ], width=4),
                         dbc.Col([
-                            html.Small("Kraken2 Taxid", className="text-muted d-block"),
+                            html.Small("Database ID", className="text-muted d-block"),
                             html.Code(id="watchlist-edit-kraken-taxid", children="-"),
                         ], width=4),
                         dbc.Col([
-                            html.Small("Kraken2 Name", className="text-muted d-block"),
+                            html.Small("Name in Database", className="text-muted d-block"),
                             html.Span(
                                 id="watchlist-edit-kraken-name",
                                 children="-",
@@ -682,15 +739,26 @@ def _create_entry_edit_modal() -> dbc.Modal:
                     ),
                 ], width=3),
                 dbc.Col([
-                    dbc.Label("BSL Level"),
+                    dbc.Label([
+                        "Safety Level ",
+                        html.I(className="bi bi-info-circle text-muted",
+                               id="edit-bsl-info",
+                               style={"fontSize": "0.8rem", "cursor": "help"}),
+                        dbc.Tooltip(
+                            "Biosafety containment level. BSL-1 = minimal risk, "
+                            "BSL-4 = highest risk (e.g. Ebola). Determines lab "
+                            "handling procedures.",
+                            target="edit-bsl-info",
+                        ),
+                    ]),
                     dbc.Select(
                         id="watchlist-edit-bsl",
                         options=[
-                            {"label": "N/A", "value": ""},
-                            {"label": "BSL-1", "value": "1"},
-                            {"label": "BSL-2", "value": "2"},
-                            {"label": "BSL-3", "value": "3"},
-                            {"label": "BSL-4", "value": "4"},
+                            {"label": "Not specified", "value": ""},
+                            {"label": "BSL-1 (Minimal risk)", "value": "1"},
+                            {"label": "BSL-2 (Moderate risk)", "value": "2"},
+                            {"label": "BSL-3 (High risk)", "value": "3"},
+                            {"label": "BSL-4 (Extreme risk)", "value": "4"},
                         ],
                     ),
                 ], width=3),
@@ -872,7 +940,8 @@ def create_pathogen_row(
                         className="text-muted",
                     ),
                 ]),
-                html.Small(f"Taxid: {taxid}", className="text-muted"),
+                html.Small(f"ID: {taxid}", className="text-muted",
+                           title="NCBI Taxonomy identifier"),
             ], width=3),
 
             # Threat level

@@ -406,8 +406,10 @@ def register_main_callbacks(app: Dash):
             # Exclude unclassified and root
             filtered_df = filtered_df[filtered_df['taxid'] > 1]
 
-            # Sort by reads and take top N
-            filtered_df = filtered_df.sort_values('reads', ascending=False).head(top_count)
+            # Sort by cumulative reads (node + all descendants) and take top N.
+            # For genus-level entries cumul_reads captures all species underneath,
+            # which is consistent with the abundance percentage shown on each card.
+            filtered_df = filtered_df.sort_values('cumul_reads', ascending=False).head(top_count)
 
             # Count unique organisms at species/genus level
             species_df = kraken_df[kraken_df['rank'].isin(['S', 'G'])]
@@ -552,7 +554,7 @@ def register_main_callbacks(app: Dash):
             # Extract columns as lists for fast iteration
             names = non_watched_df['name'].str.strip().tolist()
             abundances = non_watched_df['%'].astype(float).tolist()
-            read_counts = non_watched_df['reads'].astype(int).tolist()
+            read_counts = non_watched_df['cumul_reads'].astype(int).tolist()
             taxids = non_watched_df['taxid'].astype(int).tolist()
             ranks = non_watched_df['rank'].tolist()
 
@@ -627,11 +629,13 @@ def register_main_callbacks(app: Dash):
                 )
 
             # Create table data (vectorized)
+            # Use cumul_reads for consistency with the organism cards and
+            # the abundance percentage, which both reflect cumulative counts.
             table_df = pd.DataFrame({
                 'name': filtered_df['name'].str.strip(),
                 'taxid': filtered_df['taxid'].astype(int),
                 'rank': filtered_df['rank'],
-                'reads': filtered_df['reads'].astype(int),
+                'reads': filtered_df['cumul_reads'].astype(int),
                 'abundance': filtered_df['%'].astype(float).round(2)
             })
             table_data = table_df.to_dict('records')

@@ -44,9 +44,9 @@ def _get_empty_qc_figures():
     from being shared across callback invocations or browser sessions.
     """
     return [
-        px.line(title="Cumulative Reads"),
+        px.line(title="Cumulative Sequences"),
         px.line(title="Cumulative Base Pairs"),
-        px.bar(title="Reads per Sample"),
+        px.bar(title="Sequences per Sample"),
         px.bar(title="Base Pairs per Sample"),
     ]
 
@@ -253,9 +253,9 @@ def register_qc_callbacks(app: Dash):
             if not sample_data:
                 message = "No processed data available.<br>Plots will appear once FASTP or Kraken2 analysis is complete."
                 empty_figures = [
-                    px.line(title="Cumulative Reads").add_annotation(text=message, showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5),
+                    px.line(title="Cumulative Sequences").add_annotation(text=message, showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5),
                     px.line(title="Cumulative Base Pairs").add_annotation(text=message, showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5),
-                    px.bar(title="Reads per Sample").add_annotation(text=message, showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5),
+                    px.bar(title="Sequences per Sample").add_annotation(text=message, showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5),
                     px.bar(title="Base Pairs per Sample").add_annotation(text=message, showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5),
                 ]
                 return empty_figures
@@ -286,18 +286,18 @@ def register_qc_callbacks(app: Dash):
                 qc_df,
                 x=time_for_display,
                 y="Cumulative Reads",
-                title="Cumulative Processed Reads",
+                title="Cumulative Processed Sequences",
             )
             cumul_reads_fig.update_traces(
                 line=dict(color="#0d6efd", width=2.5),
                 fill="tozeroy",
                 fillcolor="rgba(13, 110, 253, 0.08)",
-                hovertemplate="Reads: %{y:,.0f}<extra></extra>",
+                hovertemplate="Sequences: %{y:,.0f}<extra></extra>",
             )
             cumul_reads_fig.update_layout(
                 **_qc_layout,
                 xaxis_title="Processing Time",
-                yaxis_title="Cumulative Reads",
+                yaxis_title="Cumulative Sequences",
                 yaxis_tickformat=",",
             )
 
@@ -323,17 +323,17 @@ def register_qc_callbacks(app: Dash):
 
             # Reads per sample bar chart
             reads_fig = px.bar(
-                qc_df, x="Sample", y="Reads", title="Processed Reads per Sample"
+                qc_df, x="Sample", y="Reads", title="Sequences per Sample"
             )
             reads_fig.update_traces(
                 marker_color="#0d6efd",
                 marker_line_width=0,
-                hovertemplate="<b>%{x}</b><br>Reads: %{y:,.0f}<extra></extra>",
+                hovertemplate="<b>%{x}</b><br>Sequences: %{y:,.0f}<extra></extra>",
             )
             reads_fig.update_layout(
                 **_qc_layout,
                 xaxis_title="Sample",
-                yaxis_title="Reads",
+                yaxis_title="Sequences",
                 yaxis_tickformat=",",
                 xaxis_type="category",
                 bargap=0.3,
@@ -1263,3 +1263,136 @@ def register_qc_callbacks(app: Dash):
         except Exception as e:
             logging.error(f"Error exporting QC report: {e}")
             return no_update
+
+    # =========================================================================
+    # ACTION GUIDANCE BANNER
+    # Provides plain-language next-step guidance based on current QC metrics.
+    # =========================================================================
+
+    @app.callback(
+        Output("qc-action-guidance-container", "children"),
+        [
+            Input("update-interval", "n_intervals"),
+            Input("selected-sample", "data"),
+        ],
+        [
+            State("app-config", "data"),
+        ],
+    )
+    def update_qc_action_guidance(n_intervals, selected_sample, config):
+        """
+        Generate a contextual action guidance banner based on QC metrics.
+
+        Translates raw metrics into plain-language recommendations for
+        operators who may not have bioinformatics expertise.
+        """
+
+        main_dir = (
+            config.get("results_output_directory", "")
+            or config.get("main_dir", "")
+            if config
+            else ""
+        )
+        if not main_dir or not os.path.exists(main_dir):
+            return ""
+
+        try:
+            # Gather metrics
+            tot_reads_pre_filt = 0
+            tot_passed_reads = 0
+            classified_reads = 0
+            total_kraken_reads = 0
+
+            fastp_stats = load_fastp_data(main_dir, selected_sample)
+            if fastp_stats.get("total_reads_after", 0) > 0:
+                tot_reads_pre_filt = fastp_stats["total_reads_before"]
+                tot_passed_reads = fastp_stats["total_reads_after"]
+
+            kraken_df = load_kraken_data(main_dir, selected_sample)
+
+            if tot_passed_reads == 0:
+                seqkit_data = load_seqkit_stats(main_dir, selected_sample)
+                if not seqkit_data.empty and "num_seqs" in seqkit_data.columns:
+                    tot_passed_reads = int(seqkit_data["num_seqs"].sum())
+                    if not kraken_df.empty:
+                        c, u, _ = get_classification_stats(kraken_df)
+                        tot_reads_pre_filt = c + u
+
+            if not kraken_df.empty:
+                classified_reads, unclassified_reads, _ = get_classification_stats(kraken_df)
+                total_kraken_reads = classified_reads + unclassified_reads
+
+            if tot_reads_pre_filt == 0 and total_kraken_reads == 0:
+                return ""
+
+            pass_rate = min(
+                (tot_passed_reads / tot_reads_pre_filt * 100) if tot_reads_pre_filt > 0 else 0,
+                100.0,
+            )
+            classification_rate = (
+                (classified_reads / total_kraken_reads * 100) if total_kraken_reads > 0 else 0
+            )
+
+            # Determine guidance level and message
+            issues = []
+            if pass_rate < 60:
+                issues.append(
+                    "Pass rate is below 60% - consider checking flow cell health "
+                    "and sample quality. Re-sequencing may be needed for reliable results."
+                )
+            elif pass_rate < 75:
+                issues.append(
+                    "Pass rate is moderate. Results are usable but quality could be improved."
+                )
+
+            if classification_rate < 40 and total_kraken_reads > 100:
+                issues.append(
+                    "Less than 40% of sequences could be identified. This may indicate "
+                    "the sample contains organisms not in the database, or that sequencing "
+                    "quality is limiting identification."
+                )
+
+            if tot_reads_pre_filt < 1000 and tot_reads_pre_filt > 0:
+                issues.append(
+                    "Fewer than 1,000 total sequences. Continue sequencing for "
+                    "more reliable results, especially for low-abundance organisms."
+                )
+
+            if not issues:
+                # All good
+                if tot_reads_pre_filt > 0:
+                    return dbc.Alert(
+                        [
+                            html.I(className="bi bi-check-circle-fill me-2"),
+                            html.Strong("Data quality looks good. "),
+                            html.Span(
+                                "Proceed to the Organisms or Validation tabs to review findings."
+                            ),
+                        ],
+                        color="success",
+                        className="mb-0",
+                        dismissable=True,
+                    )
+                return ""
+
+            # Build warning/danger alert
+            severity = "danger" if pass_rate < 60 or classification_rate < 40 else "warning"
+            icon = "exclamation-triangle-fill" if severity == "warning" else "x-circle-fill"
+
+            return dbc.Alert(
+                [
+                    html.I(className=f"bi bi-{icon} me-2"),
+                    html.Strong("Action needed: " if severity == "danger" else "Review recommended: "),
+                    html.Ul(
+                        [html.Li(issue) for issue in issues],
+                        className="mb-0 mt-2",
+                    ),
+                ],
+                color=severity,
+                className="mb-0",
+                dismissable=True,
+            )
+
+        except Exception as e:
+            logging.error(f"Error generating QC action guidance: {e}")
+            return ""

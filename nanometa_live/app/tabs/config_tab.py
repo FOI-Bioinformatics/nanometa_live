@@ -348,17 +348,34 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             }
 
     @app.callback(
+        Output("reset-config-modal", "is_open"),
+        [
+            Input("reset-config-button", "n_clicks"),
+            Input("reset-config-cancel", "n_clicks"),
+            Input("reset-config-confirm", "n_clicks"),
+        ],
+        State("reset-config-modal", "is_open"),
+        prevent_initial_call=True,
+    )
+    def toggle_reset_modal(open_clicks, cancel_clicks, confirm_clicks, is_open):
+        """Open/close the reset confirmation modal."""
+        trigger = ctx.triggered_id
+        if trigger == "reset-config-button":
+            return True
+        return False
+
+    @app.callback(
         [
             Output("app-config", "data", allow_duplicate=True),
             Output("notification-trigger", "data", allow_duplicate=True),
             Output("refresh-form-trigger", "data", allow_duplicate=True),
         ],
-        Input("reset-config-button", "n_clicks"),
+        Input("reset-config-confirm", "n_clicks"),
         State("app-data-dir", "data"),
         prevent_initial_call=True,
     )
     def reset_config(n_clicks, data_dir):
-        """Reset the configuration to defaults."""
+        """Reset the configuration to defaults after user confirms."""
         if not n_clicks:
             return no_update, no_update, no_update
 
@@ -368,7 +385,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
             return default_config, {
                 "title": "Configuration Reset",
-                "message": "Configuration has been reset to defaults",
+                "message": "All settings have been restored to defaults",
                 "color": "info",
             }, True  # Trigger form refresh
         except Exception as e:
@@ -1389,7 +1406,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("config-source", "data", allow_duplicate=True),
             Output("config-modified", "data", allow_duplicate=True),
         ],
-        Input("reset-config-button", "n_clicks"),
+        Input("reset-config-confirm", "n_clicks"),
         prevent_initial_call=True,
     )
     def update_config_source_on_reset(n_clicks):

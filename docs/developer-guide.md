@@ -6,7 +6,7 @@ Architecture, extension points, and contribution guidelines for Nanometa Live.
 
 ### Technology Stack
 
-- **Frontend**: Dash 2.x + Plotly + Dash Bootstrap Components
+- **Frontend**: Dash 4.x + Plotly 6.x + Dash Bootstrap Components + dash-ag-grid
 - **Data Processing**: Pandas, NumPy
 - **Backend**: nanometanf (Nextflow pipeline)
 - **Configuration**: YAML files
@@ -43,6 +43,7 @@ nanometa_live/
 │   │   ├── classification_tab.py
 │   │   ├── config_tab.py
 │   │   ├── dashboard_tab.py
+│   │   ├── kraken2_helpers.py     # Kraken2-specific logic
 │   │   ├── main_tab.py
 │   │   ├── preparation_tab.py
 │   │   ├── qc_tab.py
@@ -53,7 +54,6 @@ nanometa_live/
 │   │   ├── chart_builders.py
 │   │   ├── config_manager.py
 │   │   ├── debounce.py
-│   │   ├── error_handler.py
 │   │   ├── export_utils.py
 │   │   └── plotly_theme.py
 │   └── assets/
@@ -74,12 +74,16 @@ nanometa_live/
 │   │   ├── taxid_mapping.py
 │   │   └── taxonomy_api.py
 │   ├── utils/
-│   │   ├── sample_detector.py
-│   │   ├── data_loaders.py
+│   │   ├── data_loaders.py         # Re-export hub
+│   │   ├── classification_loaders.py  # Kraken2 loading
+│   │   ├── qc_loaders.py           # FASTP/SeqKit/NanoPlot loading
+│   │   ├── validation_loaders.py   # BLAST/minimap2 loading
+│   │   ├── loader_utils.py         # Shared cache utilities
+│   │   ├── canonical_loaders.py    # Waterfall loading pattern
+│   │   ├── sample_detector.py      # Manifest-based sample detection
 │   │   ├── genome_manager.py
 │   │   ├── read_extractor.py
 │   │   ├── alert_engine.py
-│   │   ├── diversity_metrics.py
 │   │   └── ...
 │   ├── watchlist/
 │   │   ├── watchlist_loader.py
@@ -90,7 +94,9 @@ nanometa_live/
 │       ├── nextflow_manager.py
 │       ├── on_demand_validator.py
 │       ├── pipeline_runner.py
-│       └── ...
+│       ├── bundle_manager.py
+│       ├── mobile_lab_preparer.py
+│       └── readiness_checker.py
 └── docs/
 ```
 
@@ -155,10 +161,13 @@ Converts GUI config to Nextflow parameters:
 
 ### Data Loaders (`core/utils/data_loaders.py`)
 
-Load and aggregate output data:
-- `load_kraken_data()` - Parse Kraken2 reports
-- `load_fastp_data()` - Parse FASTP JSON
-- Sample-aware with aggregation support
+Re-export hub that provides backward-compatible imports. The actual loading logic
+is split across category-specific modules:
+- `classification_loaders.py` - Kraken2 report parsing (`load_kraken_data()`)
+- `qc_loaders.py` - FASTP/SeqKit/NanoPlot QC loading (`load_fastp_data()`, `load_nanoplot_stats()`)
+- `validation_loaders.py` - BLAST/minimap2 validation loading (`load_validation_data()`)
+- `canonical_loaders.py` - Waterfall loading: tries canonical JSON first, falls back to raw files
+- `loader_utils.py` - Shared cache, file stability checks, and mtime tracking
 
 ## Adding a New Tab
 
@@ -292,8 +301,12 @@ app.clientside_callback(
 
 ## Adding a New Data Loader
 
+Place new loaders in the appropriate category-specific module under `core/utils/`,
+or create a new module if the data type does not fit an existing category.
+Then re-export the function from `data_loaders.py` for backward compatibility.
+
 ```python
-# core/utils/data_loaders.py
+# core/utils/my_loaders.py
 
 def load_my_data(main_dir: str, sample: str = None) -> pd.DataFrame:
     """
@@ -309,7 +322,6 @@ def load_my_data(main_dir: str, sample: str = None) -> pd.DataFrame:
     data_dir = os.path.join(main_dir, "my_output")
 
     if sample is None or sample == "All Samples":
-        # Aggregate all samples
         files = glob.glob(os.path.join(data_dir, "*.txt"))
         dfs = [pd.read_csv(f, sep="\t") for f in files]
         if not dfs:
@@ -317,11 +329,16 @@ def load_my_data(main_dir: str, sample: str = None) -> pd.DataFrame:
         combined = pd.concat(dfs, ignore_index=True)
         return combined.groupby("key").agg({"value": "sum"})
     else:
-        # Single sample
         sample_file = os.path.join(data_dir, f"{sample}.txt")
         if os.path.exists(sample_file):
             return pd.read_csv(sample_file, sep="\t")
         return pd.DataFrame()
+```
+
+Then add the re-export in `data_loaders.py`:
+
+```python
+from nanometa_live.core.utils.my_loaders import load_my_data  # noqa: F401
 ```
 
 ## Testing

@@ -88,6 +88,9 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
 
     @app.callback(
         Output("app-config", "data", allow_duplicate=True),
+        Output("taxmap-collection", "data", allow_duplicate=True),
+        Output("taxmap-database-info", "data", allow_duplicate=True),
+        Output("taxmap-rescan-complete", "data", allow_duplicate=True),
         Input("update-interval", "n_intervals"),
         State("app-config", "data"),
         prevent_initial_call=True,
@@ -99,20 +102,21 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         This callback runs once when the app-config is first set and loads
         any cached mappings for the configured Kraken2 database. This enables
         proper pathogen detection with GTDB databases where taxids differ from
-        NCBI taxids.
+        NCBI taxids, and populates the Dash stores so the Preparation tab
+        shows correct status on first visit.
         """
         from nanometa_live.app.utils.config_manager import atomic_config_update
 
         if not config:
-            return no_update
+            return no_update, no_update, no_update, no_update
 
         kraken_db = config.get("kraken_db", "")
         if not kraken_db or not os.path.exists(kraken_db):
-            return no_update
+            return no_update, no_update, no_update, no_update
 
         # Only initialize once per session
         if config.get("_taxid_mapping_initialized"):
-            return no_update
+            return no_update, no_update, no_update, no_update
 
         try:
             from nanometa_live.core.taxonomy.taxid_mapping import (
@@ -120,6 +124,10 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 TaxidMappingCollection,
                 set_mapping_collection,
             )
+
+            collection_data = no_update
+            db_info = no_update
+            rescan_time = no_update
 
             # Check if cached mappings exist for this database
             cache_path = get_mapping_cache_path(kraken_db)
@@ -132,16 +140,34 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                         f"{collection.mapped_exact} exact, {collection.mapped_fuzzy} fuzzy"
                     )
 
+                    # Populate Dash stores for Preparation tab display
+                    coll_dict = collection.to_dict()
+                    collection_data = {
+                        "mappings": {
+                            str(m["ncbi_taxid"]): m
+                            for m in coll_dict.get("mappings", [])
+                        },
+                        "statistics": coll_dict.get("statistics", {}),
+                    }
+                    db_info = {
+                        "type": collection.database_type.value,
+                        "hash": collection.database_hash,
+                        "path": collection.database_path,
+                    }
+                    rescan_time = collection.updated_at.isoformat()
+
             # Use atomic update to properly track version
-            return atomic_config_update(
+            updated_config = atomic_config_update(
                 config,
                 {"_taxid_mapping_initialized": True},
                 source="initialize_taxid_mappings"
             )
 
+            return updated_config, collection_data, db_info, rescan_time
+
         except Exception as e:
             logging.debug(f"Could not load taxid mappings: {e}")
-            return no_update
+            return no_update, no_update, no_update, no_update
 
     @app.callback(
         Output("backend-status", "data"), Input("update-interval", "n_intervals")

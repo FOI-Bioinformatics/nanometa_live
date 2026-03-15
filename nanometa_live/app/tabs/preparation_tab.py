@@ -33,6 +33,7 @@ def register_preparation_callbacks(app):
     # --- Readiness check ---
     @app.callback(
         Output("readiness-results", "children"),
+        Output("readiness-collapse", "is_open"),
         Input("check-readiness-btn", "n_clicks"),
         State("app-config", "data"),
         prevent_initial_call=True,
@@ -109,11 +110,30 @@ def register_preparation_callbacks(app):
                 className="mb-3",
             )
 
-            return html.Div([header] + rows)
+            # Collapse the checklist if all checks pass (no issues to review)
+            has_issues = not report.ready
+            return html.Div([header] + rows), has_issues
 
         except Exception as e:
             logger.error(f"Readiness check failed: {e}", exc_info=True)
-            return dbc.Alert(f"Error: {e}", color="danger")
+            return dbc.Alert(f"Error: {e}", color="danger"), True
+
+    # --- Toggle readiness checklist collapse ---
+    app.clientside_callback(
+        """
+        function(n_clicks, is_open) {
+            if (!n_clicks) { return [window.dash_clientside.no_update, window.dash_clientside.no_update]; }
+            var new_state = !is_open;
+            var icon_class = new_state ? "bi bi-chevron-down ms-2" : "bi bi-chevron-right ms-2";
+            return [new_state, icon_class];
+        }
+        """,
+        Output("readiness-collapse", "is_open", allow_duplicate=True),
+        Output("readiness-collapse-icon", "className"),
+        Input("readiness-header-toggle", "n_clicks"),
+        State("readiness-collapse", "is_open"),
+        prevent_initial_call=True,
+    )
 
     # --- Start Preparation ---
     @app.callback(
@@ -232,16 +252,71 @@ def register_preparation_callbacks(app):
     # --- Export Bundle ---
 
     @app.callback(
+        Output("bundle-export-directory", "value"),
+        Input("bundle-export-browse-btn", "n_clicks"),
+        State("bundle-export-directory", "value"),
+        prevent_initial_call=True,
+    )
+    def browse_export_directory(n_clicks, current_dir):
+        """Open a native folder picker dialog."""
+        if not n_clicks:
+            raise PreventUpdate
+        import platform
+        import subprocess as _sp
+        initial = current_dir if current_dir and Path(current_dir).exists() else str(Path.home())
+        try:
+            if platform.system() == "Darwin":
+                script = (
+                    f'set theFolder to POSIX path of '
+                    f'(choose folder with prompt "Select export directory" '
+                    f'default location POSIX file "{initial}")\n'
+                    f'return theFolder'
+                )
+                result = _sp.run(
+                    ["osascript", "-e", script],
+                    capture_output=True, text=True, timeout=120,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout.strip().rstrip("/")
+            elif platform.system() == "Linux":
+                result = _sp.run(
+                    ["zenity", "--file-selection", "--directory",
+                     "--title=Select export directory",
+                     f"--filename={initial}/"],
+                    capture_output=True, text=True, timeout=120,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout.strip()
+            else:
+                # Windows
+                script = (
+                    'Add-Type -AssemblyName System.Windows.Forms; '
+                    '$d = New-Object System.Windows.Forms.FolderBrowserDialog; '
+                    f'$d.SelectedPath = "{initial}"; '
+                    'if ($d.ShowDialog() -eq "OK") { $d.SelectedPath }'
+                )
+                result = _sp.run(
+                    ["powershell", "-Command", script],
+                    capture_output=True, text=True, timeout=120,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout.strip()
+        except Exception as e:
+            logger.warning(f"Folder picker unavailable: {e}")
+        raise PreventUpdate
+
+    @app.callback(
         Output("export-readiness-issues", "children"),
         Output("export-force-area", "style"),
         Output("export-result", "children"),
         Output("export-force-check", "value"),
         Input("export-bundle-btn", "n_clicks"),
+        State("bundle-export-directory", "value"),
         State("bundle-export-filename", "value"),
         State("app-config", "data"),
         prevent_initial_call=True,
     )
-    def export_bundle(n_clicks, filename, config):
+    def export_bundle(n_clicks, directory, filename, config):
         """Check readiness, then export or show issues."""
         if not n_clicks:
             raise PreventUpdate
@@ -267,7 +342,7 @@ def register_preparation_callbacks(app):
 
         # All checks pass — export immediately
         if not critical and not warnings:
-            result = _run_export(config, filename)
+            result = _run_export(config, filename, directory)
             return html.Div(), {"display": "none"}, result, False
 
         # Build issue list
@@ -318,23 +393,28 @@ def register_preparation_callbacks(app):
     @app.callback(
         Output("export-result", "children", allow_duplicate=True),
         Input("export-force-btn", "n_clicks"),
+        State("bundle-export-directory", "value"),
         State("bundle-export-filename", "value"),
         State("app-config", "data"),
         prevent_initial_call=True,
     )
-    def force_export_bundle(n_clicks, filename, config):
+    def force_export_bundle(n_clicks, directory, filename, config):
         """Export bundle after user acknowledged warnings."""
         if not n_clicks:
             raise PreventUpdate
-        return _run_export(config, filename)
+        return _run_export(config, filename, directory)
 
-    def _run_export(config, filename=None):
+    def _run_export(config, filename=None, directory=None):
         """Perform the actual bundle export. Returns an Alert component."""
         try:
             from nanometa_live.core.workflow.bundle_manager import BundleManager
-            downloads = Path.home() / "Downloads"
-            downloads.mkdir(exist_ok=True)
-            output_path = downloads / (filename or "mobile_lab_bundle.tar.gz")
+            export_dir = Path(directory) if directory else Path.home() / "Downloads"
+            if not export_dir.exists():
+                return dbc.Alert(
+                    f"Directory does not exist: {export_dir}",
+                    color="danger",
+                )
+            output_path = export_dir / (filename or "mobile_lab_bundle.tar.gz")
 
             manager = BundleManager()
             path = manager.export_bundle(str(output_path), config)
@@ -375,9 +455,13 @@ def register_preparation_callbacks(app):
             result = manager.import_bundle(bundle_path, kraken_db_path)
 
             if result["success"]:
+                # Bundle import enables offline_mode — propagate to singletons
+                from nanometa_live.app.app import _init_offline_mode
+                _init_offline_mode(True)
+
                 children = [
                     html.I(className="bi bi-check-circle me-2"),
-                    "Bundle imported.",
+                    "Bundle imported. Offline mode activated.",
                 ]
                 if result["warnings"]:
                     children.append(html.Br())
@@ -563,7 +647,7 @@ def register_preparation_callbacks(app):
                         dbc.Input(
                             id={"type": "genome-taxid-input", "index": i},
                             type="number",
-                            placeholder="Taxid",
+                            placeholder="Database ID",
                             size="sm",
                         ),
                         md=5,
@@ -594,8 +678,8 @@ def register_preparation_callbacks(app):
 
     @app.callback(
         Output("taxmap-collection", "data", allow_duplicate=True),
-        Output("taxmap-database-info", "data"),
-        Output("taxmap-rescan-complete", "data"),
+        Output("taxmap-database-info", "data", allow_duplicate=True),
+        Output("taxmap-rescan-complete", "data", allow_duplicate=True),
         Output("watchlist-table-refresh", "data", allow_duplicate=True),
         Output("taxmap-rescan-status", "children"),
         Output("taxmap-rescan-progress-container", "style"),
@@ -678,7 +762,8 @@ def register_preparation_callbacks(app):
             new_refresh = (current_refresh or 0) + 1
 
             stats = mapper.get_statistics()
-            mapped_count = stats.get("mapped_exact", 0) + stats.get("mapped_fuzzy", 0) + stats.get("mapped_manual", 0)
+            mapped_count = (stats.get("mapped_exact", 0) + stats.get("mapped_fuzzy", 0)
+                            + stats.get("mapped_manual", 0) + stats.get("mapped_partial", 0))
             unmapped_count = stats.get("unmapped", 0)
             total_count = stats.get("total_entries", 0)
             if unmapped_count > 0:
@@ -1060,6 +1145,49 @@ def register_preparation_callbacks(app):
             return datetime.now().isoformat()
 
         raise PreventUpdate
+
+    # -----------------------------------------------------------------
+    # Remove All Genomes (confirmation modal + action)
+    # -----------------------------------------------------------------
+
+    @app.callback(
+        [
+            Output("genome-remove-all-modal", "is_open"),
+            Output("genome-remove-all-count", "children"),
+        ],
+        Input("genome-remove-all-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def open_remove_all_modal(n_clicks):
+        if not n_clicks:
+            raise PreventUpdate
+        from nanometa_live.core.utils.genome_manager import get_genome_manager
+        genome_mgr = get_genome_manager()
+        count = len(genome_mgr.get_all_genomes())
+        return True, f"{count} genome(s) and associated BLAST databases will be deleted."
+
+    @app.callback(
+        [
+            Output("genome-remove-all-modal", "is_open", allow_duplicate=True),
+            Output("genome-download-complete", "data", allow_duplicate=True),
+        ],
+        [
+            Input("genome-remove-all-confirm-btn", "n_clicks"),
+            Input("genome-remove-all-cancel-btn", "n_clicks"),
+        ],
+        prevent_initial_call=True,
+    )
+    def handle_remove_all(confirm_clicks, cancel_clicks):
+        if not ctx.triggered_id:
+            raise PreventUpdate
+        if ctx.triggered_id == "genome-remove-all-cancel-btn":
+            return False, no_update
+        # Confirmed — delete all
+        from nanometa_live.core.utils.genome_manager import get_genome_manager
+        genome_mgr = get_genome_manager()
+        deleted = genome_mgr.delete_all_genomes()
+        logger.info(f"Removed all genomes ({deleted} deleted)")
+        return False, datetime.now().isoformat()
 
     @app.callback(
         Output("genome-download-complete", "data", allow_duplicate=True),
@@ -1685,19 +1813,9 @@ def register_preparation_callbacks(app):
                          style={"maxHeight": "200px", "overflowY": "auto"}),
             ])
 
-        # Step 7: Export bundle
+        # Step 7: Export bundle (uses ~/Downloads as default)
         if step_idx == 7:
-            bm = BundleManager()
-            downloads = Path.home() / "Downloads"
-            downloads.mkdir(exist_ok=True)
-            output_path = downloads / "mobile_lab_bundle.tar.gz"
-            path = bm.export_bundle(str(output_path), config)
-            size_mb = path.stat().st_size / (1024 * 1024)
-            return dbc.Alert(
-                [html.I(className="bi bi-check-circle me-2"),
-                 f"Bundle exported: {path} ({size_mb:.1f} MB)"],
-                color="success", className="mt-2 py-2",
-            )
+            return _run_export(config)
 
         raise ValueError(f"Unknown wizard step: {step_idx}")
 

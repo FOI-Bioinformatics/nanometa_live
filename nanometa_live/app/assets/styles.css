@@ -839,29 +839,6 @@ body {
   /* ============================================
      ACCESSIBILITY ENHANCEMENTS
      ============================================ */
-  /* Focus visible for keyboard navigation */
-  *:focus-visible {
-    outline: 3px solid var(--primary);
-    outline-offset: 2px;
-    border-radius: var(--radius-sm);
-  }
-
-  /* Skip to main content link */
-  .skip-to-main {
-    position: absolute;
-    top: -40px;
-    left: 0;
-    background: var(--primary);
-    color: white;
-    padding: var(--space-sm) var(--space-md);
-    text-decoration: none;
-    z-index: var(--z-modal);
-  }
-
-  .skip-to-main:focus {
-    top: 0;
-  }
-
   /* Screen reader only content */
   .sr-only {
     position: absolute;
@@ -991,35 +968,6 @@ body {
 
   .sample-selector-compact {
     min-width: 200px;
-  }
-
-  .species-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-xs);
-    padding: var(--space-sm) var(--space-md);
-    background-color: var(--primary);
-    color: white;
-    border-radius: var(--radius-full);
-    margin: var(--space-xs);
-    font-size: var(--font-size-sm);
-    transition: all var(--transition-fast);
-  }
-
-  .species-tag:hover {
-    background-color: #0056b3;
-    transform: scale(1.02);
-  }
-
-  .species-tag-remove {
-    cursor: pointer;
-    padding: 2px 4px;
-    border-radius: var(--radius-full);
-    transition: background-color var(--transition-fast);
-  }
-
-  .species-tag-remove:hover {
-    background-color: rgba(255, 255, 255, 0.3);
   }
 
   /* ============================================
@@ -1331,73 +1279,9 @@ body {
     border-left-color: #ffc107;
   }
 
-  .config-mode-toggle {
-    display: inline-flex;
-    gap: var(--space-sm);
-    padding: var(--space-xs);
-    background-color: var(--status-neutral-bg);
-    border-radius: var(--radius-full);
-  }
-
-  .config-mode-btn {
-    padding: var(--space-sm) var(--space-md);
-    border-radius: var(--radius-full);
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    font-weight: var(--font-weight-medium);
-  }
-
-  .config-mode-btn.active {
-    background-color: var(--primary);
-    color: white;
-  }
-
-  .config-mode-btn:hover:not(.active) {
-    background-color: rgba(0, 123, 255, 0.1);
-  }
-
-  /* Database selector card */
-  .database-card {
-    border: 2px solid var(--status-neutral-border);
-    border-radius: var(--radius-md);
-    padding: var(--space-md);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-  }
-
-  .database-card:hover {
-    border-color: var(--primary);
-    background-color: rgba(0, 123, 255, 0.05);
-  }
-
-  .database-card.selected {
-    border-color: var(--primary);
-    background-color: rgba(0, 123, 255, 0.1);
-  }
-
   /* ============================================
      QC TAB VISUAL IMPROVEMENTS
      ============================================ */
-  .quality-gauge-container {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
-
-  .quality-score-display {
-    font-size: 3rem;
-    font-weight: var(--font-weight-bold);
-    line-height: 1;
-  }
-
-  .quality-interpretation {
-    font-size: var(--font-size-lg);
-    font-weight: var(--font-weight-medium);
-    margin-top: var(--space-sm);
-  }
-
   .filtering-breakdown-bar {
     height: 40px;
     border-radius: var(--radius-md);
@@ -1639,68 +1523,6 @@ body {
 
     #dashboard-sample-table {
       font-size: 13px;
-    }
-  }
-
-  /* ============================================
-     SKELETON LOADING STATES
-     ============================================ */
-  .skeleton {
-    background: linear-gradient(90deg,
-      var(--status-neutral-bg) 25%,
-      rgba(255, 255, 255, 0.5) 50%,
-      var(--status-neutral-bg) 75%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite linear;
-    border-radius: var(--radius-md);
-  }
-
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-  }
-
-  .skeleton-text {
-    height: 1em;
-    margin-bottom: 0.5em;
-    border-radius: var(--radius-sm);
-  }
-
-  .skeleton-text-sm {
-    height: 0.75em;
-    width: 60%;
-  }
-
-  .skeleton-text-lg {
-    height: 1.5em;
-    width: 80%;
-  }
-
-  .skeleton-card {
-    height: 120px;
-    border-radius: var(--radius-lg);
-  }
-
-  .skeleton-circle {
-    border-radius: 50%;
-  }
-
-  .skeleton-metric {
-    height: 3rem;
-    width: 5rem;
-    margin: 0 auto;
-  }
-
-  /* Dark mode skeleton */
-  @media (prefers-color-scheme: dark) {
-    .skeleton {
-      background: linear-gradient(90deg,
-        var(--status-neutral-bg) 25%,
-        rgba(255, 255, 255, 0.1) 50%,
-        var(--status-neutral-bg) 75%
-      );
-      background-size: 200% 100%;
     }
   }
 
@@ -2959,15 +2781,6 @@ body {
   /* ============================================
      DECISION-SUPPORT ANIMATIONS
      ============================================ */
-  .status-running {
-    animation: pulse-glow 2s ease-in-out infinite;
-  }
-
-  @keyframes pulse-glow {
-    0%, 100% { box-shadow: 0 0 5px rgba(40, 167, 69, 0.4); }
-    50% { box-shadow: 0 0 20px rgba(40, 167, 69, 0.8); }
-  }
-
   .pathogen-flash {
     animation: pathogen-border-flash 1s ease-in-out infinite;
   }
@@ -2979,31 +2792,6 @@ body {
 
   .metric-trend-up { color: #28a745; }
   .metric-trend-down { color: #dc3545; }
-
-  .skeleton-loading {
-    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-    border-radius: 4px;
-  }
-
-  @keyframes shimmer {
-    0% { background-position: -200% 0; }
-    100% { background-position: 200% 0; }
-  }
-
-  /* Skeleton loading in dark mode */
-  @media (prefers-color-scheme: dark) {
-    .skeleton-loading {
-      background: linear-gradient(90deg, #2d2d44 25%, #3d3d5a 50%, #2d2d44 75%);
-      background-size: 200% 100%;
-    }
-  }
-
-  [data-theme="dark"] .skeleton-loading {
-    background: linear-gradient(90deg, #2d2d44 25%, #3d3d5a 50%, #2d2d44 75%);
-    background-size: 200% 100%;
-  }
 
   /* ============================================
      MOBILE/TABLET RESPONSIVENESS
@@ -3058,4 +2846,677 @@ body {
       page-break-inside: avoid;
       max-width: 100%;
     }
+  }
+
+  /* ============================================
+     FIELD DEPLOYMENT READINESS - v1.0
+     For gloved hands, small screens, low light,
+     time pressure. Soldiers & first-responders.
+     ============================================ */
+
+  /* ---- 1. TOUCH TARGET ENFORCEMENT ---- */
+  /* All interactive elements minimum 44x44px (WCAG 2.5.8) */
+
+  /* Nav tabs - larger for gloved tapping */
+  .nav-tabs .nav-link {
+    min-height: 48px;
+    padding: 12px 20px;
+    font-size: var(--font-size-base);
+  }
+
+  /* Dropdowns - larger touch area */
+  .dash-dropdown .Select-control,
+  .dash-dropdown input,
+  .dash-dropdown .Select-value {
+    min-height: 44px !important;
+  }
+
+  /* Form controls - gloved-friendly sizing */
+  .form-control,
+  .form-select,
+  input[type="number"],
+  input[type="text"],
+  select,
+  textarea {
+    min-height: 44px;
+    font-size: var(--font-size-base);
+    padding: 8px 12px;
+  }
+
+  /* Checkboxes and radio buttons - enlarged for gloves */
+  .form-check-input {
+    width: 1.5em;
+    height: 1.5em;
+    margin-top: 0.15em;
+  }
+
+  .form-check-label {
+    font-size: var(--font-size-base);
+    padding-left: 0.25em;
+    line-height: 1.5em;
+  }
+
+  /* dbc.RadioItems / dbc.Checklist items - touch-friendly spacing */
+  .form-check {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    margin-bottom: 4px;
+  }
+
+  /* Accordion buttons - larger touch target */
+  .accordion-button {
+    min-height: 48px;
+    font-size: var(--font-size-base);
+    padding: 12px 20px;
+  }
+
+  /* Badge buttons and pill badges - minimum tap size */
+  .badge[style*="cursor: pointer"],
+  .badge.cursor-pointer,
+  #readiness-badge {
+    min-height: 36px;
+    min-width: 36px;
+    padding: 8px 12px !important;
+    font-size: 0.85rem !important;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /* Kraken2 match badge - field-operable size */
+  .kraken2-match-badge {
+    min-height: 36px;
+    min-width: 44px;
+    padding: 8px 12px;
+    font-size: 0.85rem;
+  }
+
+  /* Small buttons upgraded for touch */
+  .btn-sm {
+    min-height: 40px;
+    padding: 6px 16px;
+    font-size: var(--font-size-sm);
+  }
+
+  /* Toast close button */
+  .toast-close {
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* AG Grid pagination buttons */
+  .ag-paging-button {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+
+  /* Adjacent interactive element spacing */
+  .btn + .btn,
+  .form-check + .form-check {
+    margin-left: 8px;
+  }
+
+  /* ---- 2. FONT SIZE ENFORCEMENT ---- */
+  /* Body text minimum 16px, labels minimum 14px */
+
+  /* Footer - was 0.8rem, field minimum 14px */
+  .footer {
+    font-size: var(--font-size-sm);
+  }
+
+  /* Form help text - was 0.875rem, keep but ensure readability */
+  .form-text {
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+  }
+
+  /* Tab group labels - was 0.6rem, unreadable in field */
+  .tab-group-start::before {
+    font-size: 0.7rem;
+    letter-spacing: 0.8px;
+  }
+
+  /* QC metric labels - was xs (12px), field minimum */
+  .qc-metric-label {
+    font-size: var(--font-size-sm);
+  }
+
+  /* Last-update and similar small metadata */
+  .last-update,
+  .live-indicator {
+    font-size: var(--font-size-sm);
+  }
+
+  /* Stat card labels */
+  .stat-card-label,
+  .metric-card-label {
+    font-size: var(--font-size-sm);
+  }
+
+  /* Alert messages - ensure readability */
+  .alert-modern-message {
+    font-size: var(--font-size-base);
+  }
+
+  /* Status badge text */
+  .status-badge {
+    font-size: var(--font-size-sm);
+  }
+
+  /* Validation progress log - was 12px, hard to read */
+  #validation-progress-log {
+    font-size: var(--font-size-sm) !important;
+  }
+
+  /* ---- 3. CONTRAST FIXES (WCAG AA) ---- */
+
+  /* Warning text on light bg: #ffc107 is only ~1.2:1 on white */
+  /* Use darker amber for ALL text-warning usage */
+  .text-warning {
+    color: #b38600 !important;
+  }
+
+  /* Warning button: ensure text is readable on amber bg */
+  .btn-warning {
+    color: #212529;
+  }
+
+  .btn-warning:hover {
+    color: #212529;
+  }
+
+  /* Muted text - ensure 4.5:1 on both themes */
+  .text-muted {
+    color: #5a6370 !important;
+  }
+
+  /* Form text uses muted - same fix */
+  .form-text {
+    color: #5a6370;
+  }
+
+  /* Secondary color text on white bg */
+  .text-secondary {
+    color: #545b62 !important;
+  }
+
+  /* Config section title - was #495057, slightly improve */
+  .config-section-title {
+    color: #343a40;
+  }
+
+  /* ---- 4. COLOR-BLIND SAFE INDICATORS ---- */
+  /* Supplement color with shape/text/pattern */
+
+  /* Status dots - add border shapes to distinguish */
+  .status-dot {
+    border: 2px solid transparent;
+  }
+
+  /* Good status dot: circle with checkmark border */
+  .status-icon.status-good::before,
+  .status-dot.status-good {
+    border-radius: 50%;
+    border: 2px solid var(--status-good);
+  }
+
+  /* Warning status dot: diamond shape via rotation */
+  .status-icon.status-warning::before,
+  .status-dot.status-warning {
+    border-radius: 2px;
+    transform: rotate(45deg);
+    border: 2px solid var(--status-warning);
+  }
+
+  /* Danger status dot: triangle shape (square with clipped corners) */
+  .status-icon.status-danger::before,
+  .status-dot.status-danger {
+    border-radius: 0;
+    border: 2px solid var(--status-danger);
+  }
+
+  /* Traffic light - add text overlay for color-blind users */
+  .dashboard-traffic-light {
+    font-weight: var(--font-weight-bold);
+    font-size: var(--font-size-sm);
+    color: white;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  }
+
+  /* Filtering breakdown segments - add pattern overlay for distinction */
+  .filtering-segment-passed {
+    background-image: none;
+  }
+
+  .filtering-segment-low-quality {
+    background-image: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 4px,
+      rgba(255, 255, 255, 0.15) 4px,
+      rgba(255, 255, 255, 0.15) 8px
+    );
+  }
+
+  .filtering-segment-too-short {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 4px,
+      rgba(255, 255, 255, 0.15) 4px,
+      rgba(255, 255, 255, 0.15) 8px
+    );
+  }
+
+  .filtering-segment-low-complexity {
+    background-image: repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 4px,
+      rgba(255, 255, 255, 0.2) 4px,
+      rgba(255, 255, 255, 0.2) 8px
+    );
+  }
+
+  /* ---- 5. DARK MODE PARITY ---- */
+  /* Ensure [data-theme="dark"] matches @media (prefers-color-scheme: dark) */
+
+  [data-theme="dark"] {
+    --status-neutral-bg: #2d2d44;
+    --status-neutral-border: #404060;
+    --status-good-bg: #0d3320;
+    --status-good-border: #1a5a3c;
+    --status-warning-bg: #3d3218;
+    --status-warning-border: #5a4a20;
+    --status-danger-bg: #3d1a20;
+    --status-danger-border: #5a2530;
+    --status-info-bg: #163040;
+    --status-info-border: #204560;
+  }
+
+  [data-theme="dark"] body,
+  [data-theme="dark"] {
+    background-color: var(--body-bg);
+    color: var(--dark);
+  }
+
+  [data-theme="dark"] .card {
+    background-color: var(--card-bg);
+    border-color: var(--card-border);
+  }
+
+  [data-theme="dark"] .card-header {
+    background-color: rgba(255, 255, 255, 0.05);
+    border-color: var(--card-border);
+  }
+
+  [data-theme="dark"] .header {
+    background-color: var(--card-bg);
+    border-bottom: 1px solid var(--card-border);
+  }
+
+  [data-theme="dark"] .footer {
+    background-color: var(--card-bg);
+    border-top: 1px solid var(--card-border);
+    color: var(--dark);
+  }
+
+  [data-theme="dark"] .form-control,
+  [data-theme="dark"] .form-select,
+  [data-theme="dark"] input,
+  [data-theme="dark"] select,
+  [data-theme="dark"] textarea {
+    background-color: var(--status-neutral-bg);
+    border-color: var(--card-border);
+    color: var(--dark);
+  }
+
+  [data-theme="dark"] .form-control:focus,
+  [data-theme="dark"] .form-select:focus {
+    background-color: var(--status-neutral-bg);
+    border-color: var(--primary);
+    color: var(--dark);
+  }
+
+  [data-theme="dark"] .dash-dropdown .dash-dropdown-menu,
+  [data-theme="dark"] .dropdown-menu {
+    background-color: var(--card-bg);
+    border-color: var(--card-border);
+  }
+
+  [data-theme="dark"] .alert-info {
+    background-color: var(--status-info-bg);
+    border-color: var(--status-info-border);
+    color: #7dd3fc;
+  }
+
+  [data-theme="dark"] .alert-warning {
+    background-color: var(--status-warning-bg);
+    border-color: var(--status-warning-border);
+    color: #fcd34d;
+  }
+
+  [data-theme="dark"] .alert-danger {
+    background-color: var(--status-danger-bg);
+    border-color: var(--status-danger-border);
+    color: #fca5a5;
+  }
+
+  [data-theme="dark"] .alert-success {
+    background-color: var(--status-good-bg);
+    border-color: var(--status-good-border);
+    color: #86efac;
+  }
+
+  [data-theme="dark"] .js-plotly-plot .plotly .main-svg {
+    background-color: var(--card-bg) !important;
+  }
+
+  [data-theme="dark"] .text-muted {
+    color: #9ca3af !important;
+  }
+
+  [data-theme="dark"] .accordion-item {
+    background-color: var(--card-bg);
+    border-color: var(--card-border);
+  }
+
+  [data-theme="dark"] .accordion-button {
+    background-color: var(--card-bg);
+    color: var(--dark);
+  }
+
+  [data-theme="dark"] .accordion-button:not(.collapsed) {
+    background-color: rgba(0, 123, 255, 0.15);
+    color: var(--primary);
+  }
+
+  [data-theme="dark"] .accordion-button::after {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23eaeaea' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' d='M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z'/%3E%3C/svg%3E");
+  }
+
+  /* Dark mode: config banner */
+  [data-theme="dark"] .config-status-banner {
+    background: linear-gradient(135deg, #1f2937 0%, #374151 100%);
+    border-color: #4b5563;
+  }
+
+  /* Dark mode: QC components */
+  [data-theme="dark"] .qc-summary-bar {
+    background-color: var(--card-bg) !important;
+    border-color: var(--card-border) !important;
+  }
+
+  [data-theme="dark"] .qc-metric-value {
+    color: var(--dark);
+  }
+
+  [data-theme="dark"] .filtering-breakdown-container {
+    background-color: var(--card-bg);
+    border-color: var(--card-border);
+  }
+
+  [data-theme="dark"] .filtering-reason-item {
+    background-color: var(--card-bg);
+    border-color: var(--card-border);
+  }
+
+  [data-theme="dark"] .base-quality-card,
+  [data-theme="dark"] .read-statistics-card {
+    background-color: var(--card-bg) !important;
+    border-color: var(--card-border) !important;
+  }
+
+  /* Dark mode: watchlist */
+  [data-theme="dark"] .watchlist-expand-trigger:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+  }
+
+  [data-theme="dark"] .nested-pathogen-row:nth-child(even) {
+    background-color: rgba(255, 255, 255, 0.03);
+  }
+
+  [data-theme="dark"] .nested-pathogen-row:hover {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+  }
+
+  [data-theme="dark"] .watchlist-table-header {
+    background-color: var(--card-bg) !important;
+  }
+
+  [data-theme="dark"] .pathogen-row:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+
+  [data-theme="dark"] .watchlist-pathogen-list .sticky-top,
+  [data-theme="dark"] .watchlist-pathogen-list-header {
+    background-color: var(--card-bg);
+  }
+
+  /* Dark mode: watched organism card */
+  [data-theme="dark"] .watched-organism-card {
+    background-color: #3d3218 !important;
+    border-color: var(--status-warning) !important;
+  }
+
+  [data-theme="dark"] .watched-organism-card .card-body {
+    background-color: #3d3218;
+  }
+
+  /* Dark mode: stat card */
+  [data-theme="dark"] .stat-card {
+    background: var(--card-bg);
+  }
+
+  /* Dark mode: Kraken2 badge */
+  [data-theme="dark"] .kraken2-match-badge {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+
+  /* Dark mode: taxid mapping */
+  [data-theme="dark"] .taxmap-dashboard {
+    background-color: var(--card-bg);
+  }
+
+  [data-theme="dark"] .match-type-indicator {
+    background: var(--card-bg);
+  }
+
+  /* Dark mode: scrollbar */
+  [data-theme="dark"] #dashboard-alerts-panel::-webkit-scrollbar-track {
+    background: var(--card-bg);
+  }
+
+  [data-theme="dark"] #dashboard-alerts-panel::-webkit-scrollbar-thumb {
+    background: #555;
+  }
+
+  /* Dark mode: help cards with bg-light */
+  [data-theme="dark"] .card[style*="backgroundColor: #f8f9fa"],
+  [data-theme="dark"] .bg-light {
+    background-color: var(--card-bg) !important;
+  }
+
+  /* ---- 6. RESPONSIVE FIELD BREAKPOINTS ---- */
+
+  /* 1280px laptop - ensure critical info above fold */
+  @media (max-width: 1280px) {
+    /* Reduce card padding to fit more above fold */
+    .card-body {
+      padding: 16px;
+    }
+
+    /* Compact header on smaller laptops */
+    .header {
+      padding: 10px 16px;
+    }
+
+    .header h2 {
+      font-size: 1.3rem;
+    }
+
+    /* Reduce spacing between metric cards */
+    .dashboard-metric-card {
+      margin-bottom: 8px;
+    }
+
+    /* Sankey/Sunburst chart controls - 2-column on small laptop */
+    .classification-controls .col-md-3 {
+      flex: 0 0 50%;
+      max-width: 50%;
+      margin-bottom: 8px;
+    }
+  }
+
+  /* 1024px - tablet landscape / small laptop */
+  @media (max-width: 1024px) {
+    /* Tab labels - allow wrapping to prevent overflow */
+    .nav-tabs {
+      flex-wrap: wrap;
+    }
+
+    .nav-tabs .nav-link {
+      font-size: var(--font-size-sm);
+      padding: 10px 14px;
+      white-space: normal;
+      text-align: center;
+    }
+
+    /* Two-column for validation cards */
+    .validation-card-row .col-md-3 {
+      flex: 0 0 50%;
+      max-width: 50%;
+    }
+
+    /* Stack status indicators */
+    .header .d-flex.align-items-center {
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+  }
+
+  /* 768px - tablet portrait */
+  @media (max-width: 768px) {
+    /* Stack all metric grids single column */
+    .col-md-3, .col-md-4, .col-md-6 {
+      flex: 0 0 100%;
+      max-width: 100%;
+    }
+
+    /* Enlarge touch targets further */
+    .btn {
+      min-height: 52px;
+      font-size: var(--font-size-base);
+    }
+
+    .nav-tabs .nav-link {
+      min-height: 52px;
+      padding: 14px 16px;
+    }
+
+    /* Full-width dropdowns */
+    .dash-dropdown {
+      width: 100% !important;
+    }
+
+    /* Single column for pathogen alert layout */
+    .pathogen-alert-critical {
+      flex-direction: column;
+      text-align: center;
+    }
+
+    .pathogen-alert-icon-container {
+      margin: 0 auto 12px auto;
+    }
+
+    /* Increase traffic light for tablet */
+    .dashboard-traffic-light {
+      width: 120px;
+      height: 120px;
+      font-size: var(--font-size-base);
+    }
+
+    /* Stack header controls */
+    .header .row > [class*="col-"] {
+      width: 100%;
+      text-align: center !important;
+      margin-bottom: 8px;
+    }
+
+    .header .d-flex.justify-content-end {
+      justify-content: center !important;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+  }
+
+  /* ---- 7. WORKFLOW STEPPER FIELD FIXES ---- */
+  /* Stepper circles are 28px - too small for gloved hands */
+  /* Override inline styles via class targeting */
+  .workflow-stepper-circle {
+    width: 40px !important;
+    height: 40px !important;
+    font-size: var(--font-size-base) !important;
+  }
+
+  /* ---- 8. SAMPLE SELECTOR FIELD SIZING ---- */
+  .sample-selector-compact {
+    min-width: 250px;
+  }
+
+  .sample-selector-compact .dash-dropdown .Select-control {
+    min-height: 44px !important;
+  }
+
+  /* ---- 9. FOCUS VISIBILITY ENHANCEMENT ---- */
+  /* High-contrast focus ring for field conditions */
+  *:focus-visible {
+    outline: 3px solid #005fcc;
+    outline-offset: 3px;
+    box-shadow: 0 0 0 6px rgba(0, 95, 204, 0.25);
+  }
+
+  /* Dark mode focus */
+  [data-theme="dark"] *:focus-visible,
+  @media (prefers-color-scheme: dark) {
+    *:focus-visible {
+      outline-color: #66b2ff;
+      box-shadow: 0 0 0 6px rgba(102, 178, 255, 0.3);
+    }
+  }
+
+  /* ---- 10. DECISION BANNER FIELD SIZING ---- */
+  /* Decision banners must be immediately visible */
+  .pathogen-alert-critical,
+  .pathogen-all-clear {
+    padding: 20px;
+    font-size: var(--font-size-md);
+  }
+
+  .pathogen-alert-critical .pathogen-name {
+    font-size: var(--font-size-xl);
+  }
+
+  /* Threat summary card - larger for field visibility */
+  #dashboard-threat-card {
+    min-height: 80px;
+  }
+
+  /* ---- 11. AG-GRID FIELD READABILITY ---- */
+  /* Grid text and row height for readability */
+  .ag-root-wrapper {
+    font-size: var(--font-size-sm) !important;
+  }
+
+  .ag-row {
+    min-height: 40px !important;
+  }
+
+  .ag-header-cell {
+    font-weight: var(--font-weight-semibold);
   }

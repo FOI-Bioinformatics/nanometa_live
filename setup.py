@@ -50,10 +50,6 @@ setup(
     entry_points={
         'console_scripts': [
             'nanometa-live=nanometa_live.nanometa_live:main',
-            # Deprecated: nanometa-sim is superseded by nanorunner.
-            # Retained as a stub that prints a deprecation notice.
-            # Remove this entry point in a future release.
-            'nanometa-sim=nanometa_live.nanopore_simulator:nano_sim',
             'nanometa-prepare=nanometa_live.cli.prepare:main'
         ]
     },

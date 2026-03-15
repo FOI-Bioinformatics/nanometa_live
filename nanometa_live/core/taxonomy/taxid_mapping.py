@@ -449,6 +449,7 @@ class TaxidMappingCollection:
     mapped_exact: int = 0
     mapped_fuzzy: int = 0
     mapped_manual: int = 0
+    mapped_partial: int = 0
     unmapped: int = 0
     needs_review: int = 0
 
@@ -490,6 +491,10 @@ class TaxidMappingCollection:
             1 for m in self.mappings.values()
             if m.confidence == MappingConfidence.MANUAL
         )
+        self.mapped_partial = sum(
+            1 for m in self.mappings.values()
+            if m.confidence == MappingConfidence.PARTIAL
+        )
         self.unmapped = sum(
             1 for m in self.mappings.values()
             if m.confidence == MappingConfidence.UNMAPPED
@@ -515,6 +520,7 @@ class TaxidMappingCollection:
                 "mapped_exact": self.mapped_exact,
                 "mapped_fuzzy": self.mapped_fuzzy,
                 "mapped_manual": self.mapped_manual,
+                "mapped_partial": self.mapped_partial,
                 "unmapped": self.unmapped,
                 "needs_review": self.needs_review
             },
@@ -544,6 +550,7 @@ class TaxidMappingCollection:
         collection.mapped_exact = stats.get("mapped_exact", 0)
         collection.mapped_fuzzy = stats.get("mapped_fuzzy", 0)
         collection.mapped_manual = stats.get("mapped_manual", 0)
+        collection.mapped_partial = stats.get("mapped_partial", 0)
         collection.unmapped = stats.get("unmapped", 0)
         collection.needs_review = stats.get("needs_review", 0)
 
@@ -1085,6 +1092,7 @@ class TaxidMapper:
                 "mapped_exact": 0,
                 "mapped_fuzzy": 0,
                 "mapped_manual": 0,
+                "mapped_partial": 0,
                 "unmapped": 0,
                 "needs_review": 0,
                 "database_type": "unknown"
@@ -1095,6 +1103,7 @@ class TaxidMapper:
             "mapped_exact": self._collection.mapped_exact,
             "mapped_fuzzy": self._collection.mapped_fuzzy,
             "mapped_manual": self._collection.mapped_manual,
+            "mapped_partial": getattr(self._collection, "mapped_partial", 0),
             "unmapped": self._collection.unmapped,
             "needs_review": self._collection.needs_review,
             "database_type": self._collection.database_type.value

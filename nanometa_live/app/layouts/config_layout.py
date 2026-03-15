@@ -84,11 +84,22 @@ def create_config_layout():
                     html.H4("Configuration", className="card-title mb-0 d-inline"),
                 ], className="d-flex align-items-center mb-2"),
                 html.P(
-                    "Set your input directories, Kraken2 database, and analysis parameters. "
-                    "After configuring, proceed to the Watchlist tab to select organisms to monitor, "
-                    "then to Preparation to download reference genomes before starting analysis.",
+                    "Tell the system where your sequencing data is and where to find the "
+                    "species database. Most users only need to fill in the two required fields "
+                    "below -- everything else has sensible defaults.",
                     className="card-text text-muted small"
                 ),
+                dbc.Alert([
+                    html.I(className="bi bi-lightbulb me-2"),
+                    html.Strong("Tip: "),
+                    "If this is your first time, just set the ",
+                    html.Strong("Nanopore Output Directory"),
+                    " and the ",
+                    html.Strong("Species Identification Database"),
+                    ", then click ",
+                    html.Strong("Apply Settings"),
+                    " at the bottom.",
+                ], color="info", className="small py-2 mb-0", dismissable=True),
                 html.Hr(),
 
                 # Config file selection modal (initially hidden)
@@ -190,7 +201,38 @@ def create_config_layout():
                 ], id="folder-browser-modal", is_open=False, size="md"),
 
                 # Config status message
-                html.Div(id="config-status-message", className="mt-3")
+                html.Div(id="config-status-message", className="mt-3"),
+
+                # Reset confirmation modal
+                dbc.Modal([
+                    dbc.ModalHeader([
+                        html.I(className="bi bi-exclamation-triangle-fill text-warning me-2"),
+                        dbc.ModalTitle("Reset All Settings?"),
+                    ]),
+                    dbc.ModalBody([
+                        html.P(
+                            "This will discard all your current settings and restore "
+                            "factory defaults. Any unsaved changes will be lost."
+                        ),
+                        html.P(
+                            "Saved presets will not be affected.",
+                            className="text-muted small mb-0"
+                        ),
+                    ]),
+                    dbc.ModalFooter([
+                        dbc.Button(
+                            "Cancel",
+                            id="reset-config-cancel",
+                            color="secondary",
+                        ),
+                        dbc.Button(
+                            [html.I(className="bi bi-arrow-counterclockwise me-1"),
+                             "Reset to Defaults"],
+                            id="reset-config-confirm",
+                            color="warning",
+                        ),
+                    ]),
+                ], id="reset-config-modal", is_open=False, centered=True),
             ]),
             className="mb-4"
         ),

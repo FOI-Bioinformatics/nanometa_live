@@ -95,8 +95,8 @@ def create_pathogen_abundance_chart(
         hover_texts.append(
             f"<b>{name}</b><br>"
             f"Abundance: {org.get('abundance', 0):.2f}%<br>"
-            f"Reads: {org.get('reads', 0):,}<br>"
-            f"Rank: {org.get('rank', 'Unknown')}"
+            f"DNA sequences: {org.get('reads', 0):,}<br>"
+            f"Level: {org.get('rank', 'Unknown')}"
         )
 
     fig = go.Figure()

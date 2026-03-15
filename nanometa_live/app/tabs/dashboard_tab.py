@@ -932,10 +932,10 @@ def register_dashboard_callbacks(app: Dash):
                     summary = html.Div([
                         html.Div([
                             html.I(className="bi bi-check-circle-fill text-success me-2"),
-                            html.Strong(f"{screened_count} of {total_species} species above threshold")
+                            html.Strong(f"{screened_count} species screened, none on watchlist")
                         ], className="mb-2"),
                         html.Small(
-                            "No CDC/WHO priority pathogens detected",
+                            "No dangerous organisms detected from your watchlist",
                             className="text-muted"
                         )
                     ], className="py-1")
@@ -952,7 +952,7 @@ def register_dashboard_callbacks(app: Dash):
                 icon = "bi bi-exclamation-triangle-fill"
                 icon_style = {"fontSize": "48px", "color": "#8b0000"}
                 status_text = "CRITICAL THREAT"
-                subtitle = f"{len(critical)} CDC Category A agent(s) detected"
+                subtitle = f"{len(critical)} critical pathogen(s) detected - immediate action required"
                 card_style = {"borderColor": "#8b0000", "borderWidth": "3px", "backgroundColor": "#fff5f5"}
             elif high_risk:
                 icon = "bi bi-exclamation-circle-fill"
@@ -1425,7 +1425,7 @@ def register_dashboard_callbacks(app: Dash):
                             html.Div([
                                 html.Span(entry.name, className="me-2"),
                                 html.Small(
-                                    f"(threshold: {entry.alert_threshold})",
+                                    f"(alert at {entry.alert_threshold} matches)",
                                     className="text-muted"
                                 )
                             ], className="ps-3 py-1 border-start border-2",
@@ -1708,6 +1708,23 @@ def register_dashboard_callbacks(app: Dash):
         prevent_initial_call=True,
     )
 
+    # Pre-flight checklist collapse toggle
+    app.clientside_callback(
+        """
+        function(n_clicks, is_open) {
+            if (!n_clicks) return [dash_clientside.no_update, dash_clientside.no_update];
+            var open = !is_open;
+            var icon = open ? "bi bi-chevron-up ms-2" : "bi bi-chevron-down ms-2";
+            return [open, icon];
+        }
+        """,
+        [Output("preflight-collapse", "is_open"),
+         Output("preflight-collapse-icon", "className")],
+        Input("preflight-collapse-toggle", "n_clicks"),
+        State("preflight-collapse", "is_open"),
+        prevent_initial_call=True,
+    )
+
 
 # Helper functions
 
@@ -1787,13 +1804,13 @@ def _get_error_status(error_msg: str) -> Tuple:
     return (
         status_style,                          # dashboard-status-indicator style
         "bi bi-x-circle",                      # dashboard-status-icon className
-        "FAULT - Check configuration",         # dashboard-status-text
-        "Unable to load analysis data",        # dashboard-status-subtitle
+        "ERROR - Check setup",                 # dashboard-status-text
+        "Unable to load analysis data - check settings",  # dashboard-status-subtitle
         "00:00:00",                           # dashboard-time-elapsed
         "0 / 0",                              # dashboard-files-processed
         {"display": "none"},                  # dashboard-progress-container style
         0,                                     # dashboard-progress-bar value
-        "FAULT",                              # dashboard-status-label-text
+        "ERROR",                              # dashboard-status-label-text
         "bi bi-x-circle-fill ms-1",           # dashboard-status-label-icon
         "dashboard-traffic-light",            # dashboard-status-indicator className
     )
@@ -2039,9 +2056,9 @@ def _generate_status_display(status: str) -> Tuple[Dict, str, str, str, str, str
         "danger": {
             "color": "#dc3545",  # Red
             "icon": "bi bi-x-circle",
-            "text": "FAULT - Check configuration",
-            "subtitle": "Immediate action required",
-            "label": "FAULT",
+            "text": "ERROR - Check setup",
+            "subtitle": "Immediate action required - check settings",
+            "label": "ERROR",
             "label_icon": "bi bi-x-circle-fill ms-1",
             "css_class": "status-danger"
         }
@@ -2120,8 +2137,8 @@ def _collect_samples_data(main_dir: str, available_samples: List[str]) -> List[D
             # Initialize default values
             reads = 0
             organisms = 0
-            quality = "[~] --"
-            status = "[...] Processing"
+            quality = "Pending"
+            status = "Processing"
             total_bases = 0
             mean_q = 0.0
             n50 = 0
@@ -2142,17 +2159,17 @@ def _collect_samples_data(main_dir: str, available_samples: List[str]) -> List[D
                     class_rate = 100.0 - unclassified_pct
 
                     if unclassified_pct < 30:
-                        quality = "[+] Good"
-                        status = "[OK] Complete"
+                        quality = "Good"
+                        status = "Complete"
                     elif unclassified_pct < 50:
-                        quality = "[~] Fair"
-                        status = "[!] Review"
+                        quality = "Fair"
+                        status = "Needs Review"
                     else:
-                        quality = "[-] Poor"
-                        status = "[X] Issue"
+                        quality = "Poor"
+                        status = "Issue Detected"
                 else:
-                    quality = "[++] Excellent"
-                    status = "[OK] Complete"
+                    quality = "Excellent"
+                    status = "Complete"
                     class_rate = 100.0
 
             # Try seqkit stats FIRST (per-sample data from chopper QC)
@@ -2209,8 +2226,8 @@ def _collect_samples_data(main_dir: str, available_samples: List[str]) -> List[D
             logger.error(f"Error processing sample {sample}: {e}")
             samples_data.append({
                 "sample": sample,
-                "status": "[X] Error",
-                "quality": "[X] Error",
+                "status": "Error",
+                "quality": "Error",
                 "organisms": 0,
                 "reads": "0",
                 "bases": "--",
@@ -2260,7 +2277,7 @@ def _generate_alerts(
         reads_str = sample.get("reads", "0")
         reads = int(reads_str.replace(",", "")) if isinstance(reads_str, str) else reads_str
 
-        # Estimate pass rate from quality (values use prefix format like "[+] Good")
+        # Estimate pass rate from quality label (e.g. "Good", "Fair")
         quality = sample.get("quality", "--")
         if "Excellent" in quality:
             pass_rate = 95

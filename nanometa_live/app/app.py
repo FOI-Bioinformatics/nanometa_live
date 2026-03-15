@@ -45,6 +45,22 @@ def _tab_label(icon_class: str, text: str):
     return text
 
 
+def _init_offline_mode(offline: bool) -> None:
+    """Propagate offline_mode to all API client singletons.
+
+    Must be called before any callback fires so that lazily-created
+    singletons inherit the correct mode.
+    """
+    from nanometa_live.core.taxonomy.taxonomy_api import get_ncbi_client, get_gtdb_client
+    from nanometa_live.core.utils.offline_cache import get_cache
+    from nanometa_live.core.utils.genome_manager import get_genome_manager
+
+    get_cache(offline_mode=offline)
+    get_ncbi_client(offline_mode=offline)
+    get_gtdb_client(offline_mode=offline)
+    get_genome_manager(offline_mode=offline)
+
+
 def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendManager) -> Dash:
     """
     Create and configure the Dash application.
@@ -544,6 +560,12 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
         ], id="welcome-modal", is_open=False, centered=True, size="lg"),
         dcc.Store(id="welcome-shown", storage_type="local", data=False),
     ])
+
+    # Initialize offline mode on all API clients and managers if configured
+    offline = config.get("offline_mode", False)
+    if offline:
+        logging.info("Offline mode enabled — API clients will use cached data only")
+    _init_offline_mode(offline)
 
     # Register all callbacks
     register_callbacks(app, backend_manager)

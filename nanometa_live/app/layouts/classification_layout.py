@@ -25,12 +25,16 @@ def create_classification_layout() -> html.Div:
         dbc.Row([
             # Title + view selector
             dbc.Col([
-                html.H4("Organism Classification Relationships", className="mb-2"),
+                html.H4("Organism Classification", className="mb-2"),
+                html.Small(
+                    "Shows how detected organisms are related to each other in the tree of life",
+                    className="text-muted d-block mb-2"
+                ),
                 dbc.RadioItems(
                     id='classification-view-type',
                     options=[
-                        {'label': ' Sankey Diagram', 'value': 'sankey'},
-                        {'label': ' Sunburst Chart', 'value': 'sunburst'}
+                        {'label': ' Flow View (Sankey)', 'value': 'sankey'},
+                        {'label': ' Ring View (Sunburst)', 'value': 'sunburst'}
                     ],
                     value='sankey',
                     inline=True,
@@ -82,17 +86,17 @@ def create_classification_layout() -> html.Div:
             dbc.Col([
                 html.Label([
                     html.I(className="bi bi-bar-chart-steps me-2"),
-                    "Max Taxa Per Level:"
+                    "Organisms Per Level:"
                 ], className="fw-bold"),
                 dbc.Select(
                     id='classification-max-taxa',
                     options=[
-                        {'label': '5 taxa', 'value': '5'},
-                        {'label': '10 taxa (default)', 'value': '10'},
-                        {'label': '15 taxa', 'value': '15'},
-                        {'label': '20 taxa', 'value': '20'},
-                        {'label': '30 taxa', 'value': '30'},
-                        {'label': '50 taxa', 'value': '50'},
+                        {'label': '5 organisms', 'value': '5'},
+                        {'label': '10 organisms (default)', 'value': '10'},
+                        {'label': '15 organisms', 'value': '15'},
+                        {'label': '20 organisms', 'value': '20'},
+                        {'label': '30 organisms', 'value': '30'},
+                        {'label': '50 organisms', 'value': '50'},
                         {'label': 'All (no limit)', 'value': '0'},
                     ],
                     value='10',
@@ -192,14 +196,14 @@ def create_classification_layout() -> html.Div:
                                 dcc.Dropdown(
                                     id='classification-levels-input',
                                     options=[
-                                        {'label': 'D - Domain', 'value': 'D'},
-                                        {'label': 'K - Kingdom', 'value': 'K'},
-                                        {'label': 'P - Phylum', 'value': 'P'},
-                                        {'label': 'C - Class', 'value': 'C'},
-                                        {'label': 'O - Order', 'value': 'O'},
-                                        {'label': 'F - Family', 'value': 'F'},
-                                        {'label': 'G - Genus', 'value': 'G'},
-                                        {'label': 'S - Species', 'value': 'S'}
+                                        {'label': 'Domain (broadest)', 'value': 'D'},
+                                        {'label': 'Kingdom', 'value': 'K'},
+                                        {'label': 'Phylum (major group)', 'value': 'P'},
+                                        {'label': 'Class', 'value': 'C'},
+                                        {'label': 'Order', 'value': 'O'},
+                                        {'label': 'Family', 'value': 'F'},
+                                        {'label': 'Genus (closely related)', 'value': 'G'},
+                                        {'label': 'Species (most specific)', 'value': 'S'}
                                     ],
                                     value=['P', 'C', 'O', 'F', 'G', 'S'],  # Match 'standard' preset
                                     multi=True,
@@ -214,7 +218,7 @@ def create_classification_layout() -> html.Div:
                         )
                     ], md=7)
                 ])
-            ], title="Advanced Filter Options", id="classification-filters-accordion")
+            ], title="Advanced Settings (Domain filters, taxonomy levels)", id="classification-filters-accordion")
         ], start_collapsed=True, className="mb-3"),
 
         # Divider

@@ -27,8 +27,8 @@ from nanometa_live.app.tabs.classification_tab import (
     create_sunburst_data,
     create_placeholder_sankey,
     create_empty_sunburst,
-    filter_by_domains,
 )
+from nanometa_live.app.tabs.kraken2_helpers import filter_by_domains
 from nanometa_live.core.testing.mock_data_generator import (
     MockDataGenerator,
     MockDataScenario,

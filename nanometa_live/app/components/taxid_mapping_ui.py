@@ -34,7 +34,7 @@ def create_mapping_status_dashboard(id_prefix: str = "taxmap") -> dbc.Card:
         dbc.CardHeader([
             dbc.Row([
                 dbc.Col([
-                    html.H6("Taxonomy ID Mapping Status", className="mb-0"),
+                    html.H6("Organism Matching Status", className="mb-0"),
                 ], width=8),
                 dbc.Col([
                     dbc.Badge(
@@ -169,7 +169,7 @@ def create_mapping_controls(id_prefix: str = "taxmap") -> dbc.Card:
     """
     return dbc.Card([
         dbc.CardHeader([
-            html.H6("Mapping Controls", className="mb-0"),
+            html.H6("Database Scan Controls", className="mb-0"),
         ]),
         dbc.CardBody([
             dbc.Row([
@@ -183,7 +183,7 @@ def create_mapping_controls(id_prefix: str = "taxmap") -> dbc.Card:
                                     className="bi bi-arrow-repeat me-2"
                                 ),
                                 html.Span(
-                                    "Re-scan Database",
+                                    "Scan Database",
                                     id=f"{id_prefix}-rescan-text"
                                 ),
                             ],
@@ -206,11 +206,11 @@ def create_mapping_controls(id_prefix: str = "taxmap") -> dbc.Card:
                         id=f"{id_prefix}-rescan-options",
                         options=[
                             {
-                                "label": " Preserve manual overrides",
+                                "label": " Keep my manual corrections",
                                 "value": "preserve_manual"
                             },
                             {
-                                "label": " Auto-accept high-confidence (>85%)",
+                                "label": " Auto-accept strong matches (>85%)",
                                 "value": "auto_accept"
                             },
                         ],
@@ -279,7 +279,7 @@ def create_mapping_table_section(id_prefix: str = "taxmap") -> dbc.Card:
         dbc.CardHeader([
             dbc.Row([
                 dbc.Col([
-                    html.H6("Watchlist Mappings", className="mb-0 d-inline"),
+                    html.H6("Organism Matches", className="mb-0 d-inline"),
                     dbc.Badge(
                         "0",
                         id=f"{id_prefix}-entry-count",
@@ -320,10 +320,10 @@ def create_mapping_table_section(id_prefix: str = "taxmap") -> dbc.Card:
             html.Div([
                 dbc.Row([
                     dbc.Col(html.Small("Status", className="fw-bold"), width=1),
-                    dbc.Col(html.Small("NCBI Name", className="fw-bold"), width=2),
-                    dbc.Col(html.Small("NCBI TaxID", className="fw-bold"), width=1),
-                    dbc.Col(html.Small("Kraken TaxID", className="fw-bold"), width=1),
-                    dbc.Col(html.Small("Kraken Name", className="fw-bold"), width=3),
+                    dbc.Col(html.Small("Organism Name", className="fw-bold"), width=2),
+                    dbc.Col(html.Small("Ref. ID", className="fw-bold"), width=1),
+                    dbc.Col(html.Small("DB ID", className="fw-bold"), width=1),
+                    dbc.Col(html.Small("Database Name", className="fw-bold"), width=3),
                     dbc.Col(html.Small("Score", className="fw-bold"), width=2),
                     dbc.Col(html.Small("Actions", className="fw-bold"), width=2),
                 ], className="py-2 bg-light border-bottom"),
@@ -338,7 +338,7 @@ def create_mapping_table_section(id_prefix: str = "taxmap") -> dbc.Card:
             # Empty state
             html.Div([
                 html.P(
-                    "No mappings found. Load a watchlist and scan the database.",
+                    "No organism matches found yet. Enable a watchlist and scan the database.",
                     className="text-muted text-center py-4"
                 ),
             ], id=f"{id_prefix}-empty-state"),
@@ -474,7 +474,7 @@ def create_manual_mapping_modal(id_prefix: str = "taxmap") -> dbc.Modal:
     """
     return dbc.Modal([
         dbc.ModalHeader([
-            dbc.ModalTitle("Manual Taxonomy Mapping"),
+            dbc.ModalTitle("Manual Organism Mapping"),
         ]),
         dbc.ModalBody([
             dcc.Store(id=f"{id_prefix}-edit-ncbi-taxid", data=None),
@@ -482,7 +482,7 @@ def create_manual_mapping_modal(id_prefix: str = "taxmap") -> dbc.Modal:
             # Entry being mapped
             dbc.Card([
                 dbc.CardBody([
-                    html.H6("Watchlist Entry", className="text-muted mb-2"),
+                    html.H6("Organism to Map", className="text-muted mb-2"),
                     dbc.Row([
                         dbc.Col([
                             html.Strong("Name: "),
@@ -492,16 +492,16 @@ def create_manual_mapping_modal(id_prefix: str = "taxmap") -> dbc.Modal:
                             ),
                         ], width=8),
                         dbc.Col([
-                            html.Strong("NCBI TaxID: "),
+                            html.Strong("Taxonomy ID: "),
                             html.Code(id=f"{id_prefix}-edit-ncbi-taxid-display"),
                         ], width=4),
                     ]),
                 ]),
             ], className="mb-3 border-start border-primary border-3"),
 
-            # Search Kraken database
+            # Search species database
             html.Div([
-                html.H6("Search Kraken2 Database", className="mb-2"),
+                html.H6("Search Species Database", className="mb-2"),
                 dbc.InputGroup([
                     dbc.Input(
                         id=f"{id_prefix}-kraken-search",
@@ -517,7 +517,7 @@ def create_manual_mapping_modal(id_prefix: str = "taxmap") -> dbc.Modal:
                     ),
                 ]),
                 html.Small(
-                    "Search the Kraken2 database for matching taxa",
+                    "Search the species database for matching organisms",
                     className="text-muted"
                 ),
             ], className="mb-3"),

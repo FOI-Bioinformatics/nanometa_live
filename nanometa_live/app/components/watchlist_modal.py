@@ -144,7 +144,7 @@ def create_pathogen_list_content(
                             ),
                         ]),
                         html.Small([
-                            f"Taxid: {taxid}" if taxid else "Name-based matching",
+                            f"ID: {taxid}" if taxid else "Matched by name",
                         ], className="text-muted"),
                     ], width=5),
 
@@ -297,12 +297,12 @@ def create_pathogen_detail_content(pathogen: Dict[str, Any]) -> html.Div:
         html.Table([
             html.Tbody([
                 html.Tr([
-                    html.Td("NCBI Taxid:", className="fw-bold pe-3"),
-                    html.Td(str(taxid) if taxid else "Name-based matching"),
+                    html.Td("Database ID:", className="fw-bold pe-3"),
+                    html.Td(str(taxid) if taxid else "Matched by name"),
                 ]),
                 html.Tr([
                     html.Td("Alert Threshold:", className="fw-bold pe-3"),
-                    html.Td(f"{threshold} reads"),
+                    html.Td(f"{threshold} DNA matches"),
                 ]),
                 html.Tr([
                     html.Td("Source:", className="fw-bold pe-3"),
@@ -313,7 +313,7 @@ def create_pathogen_detail_content(pathogen: Dict[str, Any]) -> html.Div:
 
         # Alternative names
         html.Div([
-            html.H6("Alternative Names (for GTDB matching):", className="mb-2"),
+            html.H6("Alternative Names:", className="mb-2"),
             html.Div([
                 dbc.Badge(alt, color="secondary", className="me-1 mb-1")
                 for alt in names_alt
@@ -359,7 +359,7 @@ def create_threshold_edit_modal(id_prefix: str = "watchlist") -> dbc.Modal:
                 id=f"{id_prefix}-threshold-modal-name",
                 className="mb-3"
             ),
-            dbc.Label("Alert Threshold (reads):"),
+            dbc.Label("Alert Threshold (DNA matches):"),
             dbc.Input(
                 id=f"{id_prefix}-threshold-modal-input",
                 type="number",
@@ -367,7 +367,7 @@ def create_threshold_edit_modal(id_prefix: str = "watchlist") -> dbc.Modal:
                 value=10
             ),
             html.Small(
-                "Alert is triggered when reads exceed this threshold.",
+                "An alert is triggered when the number of DNA matches exceeds this value.",
                 className="text-muted"
             ),
             # Hidden store for taxid

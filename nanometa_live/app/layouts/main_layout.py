@@ -241,8 +241,19 @@ def create_main_layout():
                         id="detailed-organism-table",
                         columnDefs=[
                             {"headerName": "Organism Name", "field": "name"},
-                            {"headerName": "Taxonomy ID", "field": "taxid"},
-                            {"headerName": "Rank", "field": "rank"},
+                            {
+                                "headerName": "Classification Level",
+                                "field": "rank",
+                                "valueFormatter": {
+                                    "function": (
+                                        "function(params) {"
+                                        "  var m = {D:'Domain',K:'Kingdom',P:'Phylum',C:'Class',"
+                                        "           O:'Order',F:'Family',G:'Genus',S:'Species',U:'Unclassified'};"
+                                        "  return m[params.value] || params.value;"
+                                        "}"
+                                    )
+                                },
+                            },
                             {
                                 "headerName": "DNA Sequences",
                                 "field": "reads",
@@ -253,6 +264,11 @@ def create_main_layout():
                                 "headerName": "Abundance (%)",
                                 "field": "abundance",
                                 "cellStyle": {"fontWeight": "bold"},
+                            },
+                            {
+                                "headerName": "Database ID",
+                                "field": "taxid",
+                                "hide": True,
                             },
                         ],
                         rowData=[],
