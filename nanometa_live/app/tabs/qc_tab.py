@@ -13,7 +13,8 @@ import json
 import glob
 from datetime import datetime
 
-from dash import Dash, Input, Output, State, html, no_update
+from dash import Dash, Input, Output, State, html, no_update, ctx
+from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 import plotly.express as px
 
@@ -35,6 +36,7 @@ from nanometa_live.app.utils.callback_helpers import (
     log_callback_error,
     get_classification_stats,
 )
+from nanometa_live.app.utils.debounce import should_skip_update, get_trigger_type
 
 
 def _get_empty_qc_figures():
@@ -84,6 +86,10 @@ def register_qc_callbacks(app: Dash):
         This prevents multiple callbacks from redundantly loading the same data.
         Returns a dict with kraken_df and fastp_data for the selected sample.
         """
+        # Skip redundant interval-triggered rescans
+        if get_trigger_type(ctx) == "interval":
+            if should_skip_update("qc_data_cache", debounce_ms=2000):
+                raise PreventUpdate
 
         cache_data = {
             "loaded": False,
@@ -153,10 +159,13 @@ def register_qc_callbacks(app: Dash):
         Shows actual reads and base pairs that passed through the pipeline,
         ordered by file modification time to show processing progress.
         """
+        if get_trigger_type(ctx) == "interval":
+            if should_skip_update("qc_plots", debounce_ms=2000):
+                raise PreventUpdate
 
         # Check if we have valid config and main_dir
         main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
-        if not main_dir or not os.path.exists(main_dir):
+        if not main_dir or not os.path.isdir(main_dir):
             return _get_empty_qc_figures()
 
         try:
@@ -394,6 +403,10 @@ def register_qc_callbacks(app: Dash):
     )
     def update_qc_stats(n_intervals, selected_sample, config, status):
         """Update the QC statistics based on the latest data."""
+        if get_trigger_type(ctx) == "interval":
+            if should_skip_update("qc_stats", debounce_ms=2000):
+                raise PreventUpdate
+
         # Default values for when no data is available
         default_values = [
             "Total reads pre-filtering: 0",
@@ -410,7 +423,7 @@ def register_qc_callbacks(app: Dash):
 
         # Check if we have valid config and main_dir
         main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
-        if not main_dir or not os.path.exists(main_dir):
+        if not main_dir or not os.path.isdir(main_dir):
             return default_values
 
         try:
@@ -723,10 +736,13 @@ def register_qc_callbacks(app: Dash):
 
         This table shows individual stats for each detected sample/barcode.
         """
+        if get_trigger_type(ctx) == "interval":
+            if should_skip_update("qc_per_sample_table", debounce_ms=2000):
+                raise PreventUpdate
 
         # Check if we have valid config and main_dir
         main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
-        if not main_dir or not os.path.exists(main_dir):
+        if not main_dir or not os.path.isdir(main_dir):
             return []
 
         try:
@@ -763,6 +779,9 @@ def register_qc_callbacks(app: Dash):
         - FASTP: q20_bases, q30_bases, total_bases, quality_curves
         - Seqkit (Chopper): Q20(%), Q30(%), sum_len
         """
+        if get_trigger_type(ctx) == "interval":
+            if should_skip_update("qc_base_quality", debounce_ms=2000):
+                raise PreventUpdate
 
         # Default empty state
         empty_state = EmptyStateMessage(
@@ -773,7 +792,7 @@ def register_qc_callbacks(app: Dash):
 
         # Check if we have valid config and main_dir
         main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
-        if not main_dir or not os.path.exists(main_dir):
+        if not main_dir or not os.path.isdir(main_dir):
             return empty_state
 
         try:
@@ -867,6 +886,9 @@ def register_qc_callbacks(app: Dash):
         - FASTP: read1_mean_length (before/after), gc_content
         - Seqkit (Chopper): avg_len, N50, GC(%)
         """
+        if get_trigger_type(ctx) == "interval":
+            if should_skip_update("qc_read_stats", debounce_ms=2000):
+                raise PreventUpdate
 
         # Default empty state
         empty_state = EmptyStateMessage(
@@ -877,7 +899,7 @@ def register_qc_callbacks(app: Dash):
 
         # Check if we have valid config and main_dir
         main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
-        if not main_dir or not os.path.exists(main_dir):
+        if not main_dir or not os.path.isdir(main_dir):
             return empty_state
 
         try:
@@ -983,6 +1005,9 @@ def register_qc_callbacks(app: Dash):
 
         Shows a visual representation of quality filtering statistics.
         """
+        if get_trigger_type(ctx) == "interval":
+            if should_skip_update("qc_filtering_breakdown", debounce_ms=2000):
+                raise PreventUpdate
 
         # Default empty state
         empty_state = EmptyStateMessage(
@@ -993,7 +1018,7 @@ def register_qc_callbacks(app: Dash):
 
         # Check if we have valid config and main_dir
         main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
-        if not main_dir or not os.path.exists(main_dir):
+        if not main_dir or not os.path.isdir(main_dir):
             return empty_state
 
         try:
@@ -1106,6 +1131,9 @@ def register_qc_callbacks(app: Dash):
 
         Returns a KeyMetricsSummaryCard component matching the QualityScoreIndicator design.
         """
+        if get_trigger_type(ctx) == "interval":
+            if should_skip_update("qc_metrics_summary", debounce_ms=2000):
+                raise PreventUpdate
 
         from nanometa_live.app.components.organism_components import KeyMetricsSummaryCard
 
@@ -1118,7 +1146,7 @@ def register_qc_callbacks(app: Dash):
 
         # Check if we have valid config and main_dir
         main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
-        if not main_dir or not os.path.exists(main_dir):
+        if not main_dir or not os.path.isdir(main_dir):
             return empty_state
 
         try:
@@ -1286,6 +1314,9 @@ def register_qc_callbacks(app: Dash):
         Translates raw metrics into plain-language recommendations for
         operators who may not have bioinformatics expertise.
         """
+        if get_trigger_type(ctx) == "interval":
+            if should_skip_update("qc_action_guidance", debounce_ms=2000):
+                raise PreventUpdate
 
         main_dir = (
             config.get("results_output_directory", "")
@@ -1293,7 +1324,7 @@ def register_qc_callbacks(app: Dash):
             if config
             else ""
         )
-        if not main_dir or not os.path.exists(main_dir):
+        if not main_dir or not os.path.isdir(main_dir):
             return ""
 
         try:

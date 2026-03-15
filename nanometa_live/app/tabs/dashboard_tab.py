@@ -33,6 +33,7 @@ from nanometa_live.app.utils.callback_helpers import (
     validate_config_and_get_main_dir,
     log_callback_error,
 )
+from nanometa_live.app.utils.debounce import should_skip_update, get_trigger_type
 from nanometa_live.app.layouts.dashboard_layout import create_alerts_list, create_pipeline_stages_display
 from nanometa_live.app.components.modern_components import (
     QualityScoreBadge,
@@ -213,7 +214,7 @@ def register_dashboard_callbacks(app: Dash):
         pipeline_completed = status.get("completed", False)
         has_data = available_samples and len(available_samples) > 1
         main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
-        has_results_dir = main_dir and os.path.exists(os.path.join(main_dir, "kraken2"))
+        has_results_dir = main_dir and os.path.isdir(os.path.join(main_dir, "kraken2"))
         should_load = visualization_mode or pipeline_running or pipeline_completed or has_data or has_results_dir
         return should_load, main_dir
 
@@ -221,7 +222,7 @@ def register_dashboard_callbacks(app: Dash):
         """Resolve available_samples, detecting directly if needed."""
         if not available_samples or available_samples == ["All Samples"]:
             from nanometa_live.core.utils.sample_detector import get_available_samples as detect_samples
-            if main_dir and os.path.exists(main_dir):
+            if main_dir and os.path.isdir(main_dir):
                 return detect_samples(main_dir)
         return available_samples
 
@@ -241,6 +242,9 @@ def register_dashboard_callbacks(app: Dash):
     )
     def compute_overall_status_cache(n_intervals, config, status, available_samples):
         """Compute overall status once per interval and cache for other callbacks."""
+        if should_skip_update("dashboard_overall_status", debounce_ms=2000):
+            raise PreventUpdate
+
         should_load, main_dir = _should_load_data(config, status, available_samples)
         if not should_load:
             return None
@@ -610,6 +614,9 @@ def register_dashboard_callbacks(app: Dash):
         Returns:
             Tuple of (stages_container, current_stage_text)
         """
+        if should_skip_update("dashboard_pipeline_stages", debounce_ms=2000):
+            raise PreventUpdate
+
         # Check if in visualization mode
         visualization_mode = config.get("visualization_only", False) if config else False
 
@@ -688,6 +695,9 @@ def register_dashboard_callbacks(app: Dash):
         Returns:
             Tuple of (q_score_badge, n50_badge, classification_badge, total_bases_badge)
         """
+        if should_skip_update("dashboard_nanoplot_badges", debounce_ms=2000):
+            raise PreventUpdate
+
         # Default empty state
         empty_badge = dbc.Badge("--", color="secondary", className="px-3 py-2", style={"fontSize": "1.1rem"})
 
@@ -700,7 +710,7 @@ def register_dashboard_callbacks(app: Dash):
 
         # Also check if main_dir has data (for post-completion viewing)
         main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
-        has_main_dir = main_dir and os.path.exists(main_dir)
+        has_main_dir = main_dir and os.path.isdir(main_dir)
 
         if not (visualization_mode or pipeline_running or pipeline_completed or has_main_dir):
             return empty_badge, empty_badge, empty_badge, empty_badge
@@ -797,6 +807,9 @@ def register_dashboard_callbacks(app: Dash):
         Returns:
             Tuple of (alert_panel_children, container_style)
         """
+        if should_skip_update("dashboard_pathogen_alert", debounce_ms=2000):
+            raise PreventUpdate
+
         if not config:
             return html.Div(), {"display": "none"}
 
@@ -807,7 +820,7 @@ def register_dashboard_callbacks(app: Dash):
 
         # Only check when we have data
         if not (visualization_mode or pipeline_running or pipeline_completed):
-            if not (main_dir and os.path.exists(main_dir)):
+            if not (main_dir and os.path.isdir(main_dir)):
                 return html.Div(), {"display": "none"}
 
         try:
@@ -863,6 +876,10 @@ def register_dashboard_callbacks(app: Dash):
         Shows overall threat status with color-coded indicator and
         lists any detected dangerous pathogens.
         """
+        if get_trigger_type(ctx) == "interval":
+            if should_skip_update("dashboard_threat_summary", debounce_ms=2000):
+                raise PreventUpdate
+
         # Default safe state
         safe_icon = "bi bi-shield-check"
         safe_style = {"fontSize": "48px", "color": "#28a745"}
@@ -880,7 +897,7 @@ def register_dashboard_callbacks(app: Dash):
             return safe_icon, safe_style, safe_status, safe_subtitle, safe_card_style, waiting_summary, no_data_banner
 
         main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
-        if not main_dir or not os.path.exists(main_dir):
+        if not main_dir or not os.path.isdir(main_dir):
             return safe_icon, safe_style, safe_status, safe_subtitle, safe_card_style, waiting_summary, no_data_banner
 
         try:
@@ -1014,13 +1031,17 @@ def register_dashboard_callbacks(app: Dash):
         Shows classified vs unclassified reads in a compact visualization.
         Respects the global sample selector for consistency with other metrics.
         """
+        if get_trigger_type(ctx) == "interval":
+            if should_skip_update("dashboard_classification_donut", debounce_ms=2000):
+                raise PreventUpdate
+
         from nanometa_live.app.utils.chart_builders import create_classification_donut
 
         if not config:
             return create_classification_donut(0, 0)
 
         main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
-        if not main_dir or not os.path.exists(main_dir):
+        if not main_dir or not os.path.isdir(main_dir):
             return create_classification_donut(0, 0)
 
         try:
@@ -1354,6 +1375,10 @@ def register_dashboard_callbacks(app: Dash):
         Shows summary statistics and list of enabled watchlist entries
         grouped by threat level.
         """
+        if get_trigger_type(ctx) == "interval":
+            if should_skip_update("dashboard_watchlist_panel", debounce_ms=2000):
+                raise PreventUpdate
+
         try:
             manager = get_watchlist_manager()
 
@@ -1498,6 +1523,9 @@ def register_dashboard_callbacks(app: Dash):
         Stores the current time when data loads successfully,
         and shows a stale warning when data age exceeds 2x the polling interval.
         """
+        if should_skip_update("dashboard_data_freshness", debounce_ms=2000):
+            raise PreventUpdate
+
         if not config:
             return None, LastUpdatedBadge(timestamp=None)
 

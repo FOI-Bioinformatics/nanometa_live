@@ -66,28 +66,30 @@ def parse_arguments():
     return parser.parse_args()
 
 
+logger = logging.getLogger(__name__)
+
+
 def main():
     """Main entry point for app module."""
     args = parse_arguments()
 
     # If --main_dir is provided, run in visualization-only mode
     if args.main_dir:
-        # Simple visualization mode - parse existing data and display
-        print(f"Starting Nanometa Live in visualization mode")
-        print(f"Data directory: {args.main_dir}")
-        print(f"Server: http://localhost:{args.port}")
-        print("Note: No pipeline execution - displaying existing data only")
-        print()
-
         # Set up minimal logging
         if args.debug:
             logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
         else:
             logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
+        # Simple visualization mode - parse existing data and display
+        logger.info("Starting Nanometa Live in visualization mode")
+        logger.info("Data directory: %s", args.main_dir)
+        logger.info("Server: http://localhost:%s", args.port)
+        logger.info("No pipeline execution - displaying existing data only")
+
         # Verify directory exists
         if not os.path.exists(args.main_dir):
-            print(f"Error: Directory not found: {args.main_dir}")
+            logger.error("Directory not found: %s", args.main_dir)
             sys.exit(1)
 
         # Create minimal data directory
@@ -107,7 +109,7 @@ def main():
         app = create_app(config, data_dir, backend_manager)
 
         # Start server
-        app.run(host=args.host, port=args.port, debug=args.debug)
+        app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
 
     else:
         # Full mode - use the main nanometa_live entry point

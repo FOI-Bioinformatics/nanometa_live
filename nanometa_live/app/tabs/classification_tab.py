@@ -10,7 +10,8 @@ import logging
 import pandas as pd
 from typing import Optional
 
-from dash import Dash, Input, Output, State, no_update, html
+from dash import Dash, Input, Output, State, no_update, html, ctx
+from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import plotly.express as px
@@ -22,6 +23,7 @@ from nanometa_live.app.utils.callback_helpers import (
 )
 from nanometa_live.app.components.modern_components import EmptyStateMessage
 from nanometa_live.app.utils.plotly_theme import apply_theme_to_figure
+from nanometa_live.app.utils.debounce import should_skip_update, get_trigger_type
 from nanometa_live.app.tabs.kraken2_helpers import (
     RANK_NAMES,
     RANK_NORMALIZATION,
@@ -126,6 +128,11 @@ def register_classification_callbacks(app: Dash):
             Tuple of (figure, info_message_children, graph_style)
         """
 
+        # Debounce interval-triggered refreshes
+        if get_trigger_type(ctx) == "interval":
+            if should_skip_update("classification_plot", debounce_ms=2000):
+                raise PreventUpdate
+
         # Style constants for showing/hiding the graph
         graph_visible = {"width": "100%"}
         graph_hidden = {"width": "100%", "display": "none"}
@@ -152,7 +159,7 @@ def register_classification_callbacks(app: Dash):
 
         # Validate config and get output directory using centralized helper
         main_dir = validate_config_and_get_main_dir(config)
-        if not main_dir:
+        if not main_dir or not os.path.isdir(main_dir):
             return _empty_figure(), empty_state, graph_hidden
 
         # CRITICAL FIX: Ensure selected_sample is a string, not a list
