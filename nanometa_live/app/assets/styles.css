@@ -3482,7 +3482,11 @@ body {
   }
 
   /* Dark mode focus */
-  [data-theme="dark"] *:focus-visible,
+  [data-theme="dark"] *:focus-visible {
+    outline-color: #66b2ff;
+    box-shadow: 0 0 0 6px rgba(102, 178, 255, 0.3);
+  }
+
   @media (prefers-color-scheme: dark) {
     *:focus-visible {
       outline-color: #66b2ff;
