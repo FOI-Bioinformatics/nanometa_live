@@ -3,14 +3,45 @@ Sample detection utilities for Nanometa Live v2.0.
 
 This module provides functions to automatically detect available samples
 from nanometanf output files, supporting both barcoded and non-barcoded runs.
+
+Includes mtime-based caching for get_available_samples() to reduce filesystem
+overhead from repeated glob scans on each polling interval.
 """
 
 import os
 import glob
 import logging
-from typing import List, Dict, Set
+import threading
+from typing import List, Dict, Optional, Set, Tuple
 
 from nanometa_live.core.utils.canonical_loaders import load_manifest
+
+# Module-level cache for sample detection.
+# Stores (dir_mtimes_fingerprint, cached_sample_list) keyed by main_dir.
+_sample_cache_lock = threading.Lock()
+_sample_cache: Dict[str, Tuple[Tuple[Tuple[str, float], ...], List[str]]] = {}
+
+# Output subdirectories whose mtime we monitor for cache invalidation.
+_WATCHED_SUBDIRS = ("kraken2", "fastp", "seqkit", "nanoplot", "validation")
+
+
+def _get_dir_mtimes(main_dir: str) -> Tuple[Tuple[str, float], ...]:
+    """Return a hashable fingerprint of top-level output directory mtimes."""
+    mtimes = []
+    for subdir in _WATCHED_SUBDIRS:
+        path = os.path.join(main_dir, subdir)
+        try:
+            st = os.stat(path)
+            mtimes.append((subdir, st.st_mtime))
+        except OSError:
+            mtimes.append((subdir, 0.0))
+    return tuple(mtimes)
+
+
+def invalidate_sample_cache():
+    """Clear the sample detection cache (e.g. after data changes)."""
+    with _sample_cache_lock:
+        _sample_cache.clear()
 
 
 def resolve_analysis_directory(main_dir: str) -> str:
@@ -347,7 +378,19 @@ def get_available_samples(main_dir: str) -> List[str]:
             )
             return ["All Samples"] + sorted(manifest_samples)
 
-    all_samples = set()
+    # Mtime-based cache: check whether any watched output directory has
+    # changed since the last scan.  This reduces ~384 globs to ~5
+    # os.stat() calls on cache hits.
+    current_mtimes = _get_dir_mtimes(main_dir)
+    with _sample_cache_lock:
+        cached = _sample_cache.get(main_dir)
+        if cached is not None:
+            stored_mtimes, stored_result = cached
+            if stored_mtimes == current_mtimes:
+                logging.debug("Sample detection cache hit for %s", main_dir)
+                return stored_result
+
+    all_samples: Set[str] = set()
 
     # Detect from Kraken2 output
     kraken_dir = os.path.join(main_dir, "kraken2")
@@ -375,7 +418,13 @@ def get_available_samples(main_dir: str) -> List[str]:
     sorted_samples = sorted(list(all_samples))
 
     # Always add "All Samples" as the first option
-    return ["All Samples"] + sorted_samples
+    result = ["All Samples"] + sorted_samples
+
+    # Store in mtime cache
+    with _sample_cache_lock:
+        _sample_cache[main_dir] = (current_mtimes, result)
+
+    return result
 
 
 def get_sample_file_mapping(main_dir: str) -> Dict[str, Dict[str, List[str]]]:

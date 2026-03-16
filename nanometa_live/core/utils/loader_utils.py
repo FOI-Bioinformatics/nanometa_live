@@ -278,3 +278,14 @@ def check_data_freshness(main_dir: str) -> str:
             _cleanup_stale_cache_entries()
 
     return fingerprint
+
+
+def get_last_freshness_fingerprint() -> str:
+    """
+    Return the last computed freshness fingerprint without triggering a rescan.
+
+    Tabs can call this to check whether data has changed since they last
+    rendered, and skip a full rescan when the fingerprint is unchanged.
+    """
+    with _cache_lock:
+        return _last_freshness_fingerprint

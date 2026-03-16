@@ -22,6 +22,7 @@ from nanometa_live.core.utils.loader_utils import (  # noqa: F401
     _cleanup_stale_cache_entries,
     clear_data_cache,
     check_data_freshness,
+    get_last_freshness_fingerprint,
     _get_dir_latest_mtime,
     _get_path_fingerprint,
     _check_mtime_cache,

@@ -24,6 +24,7 @@ from nanometa_live.core.utils.loader_utils import (
     _get_cache_key,
     _check_mtime_cache,
     _store_mtime_cache,
+    _is_file_stable,
 )
 
 
@@ -114,6 +115,10 @@ def load_fastp_data(main_dir: str, sample: Optional[str] = None) -> Dict[str, An
 
         for fastp_file in fastp_files:
             try:
+                if not _is_file_stable(fastp_file):
+                    logging.debug(f"Skipping unstable file: {fastp_file}")
+                    continue
+
                 with open(fastp_file, 'r') as f:
                     fastp_data = json.load(f)
 
@@ -132,7 +137,10 @@ def load_fastp_data(main_dir: str, sample: Optional[str] = None) -> Dict[str, An
                 aggregated_stats['too_many_N'] += filtering.get("too_many_N_reads", 0)
                 _acc_q30_bases += after.get("q30_bases", 0)
 
-            except Exception as e:
+            except json.JSONDecodeError as e:
+                logging.warning(f"Malformed JSON in {fastp_file}: {e}")
+                continue
+            except OSError as e:
                 logging.error(f"Error reading {fastp_file}: {e}")
                 continue
 
@@ -163,6 +171,10 @@ def load_fastp_data(main_dir: str, sample: Optional[str] = None) -> Dict[str, An
 
         for sample_file in sample_files:
             try:
+                if not _is_file_stable(sample_file):
+                    logging.debug(f"Skipping unstable file: {sample_file}")
+                    continue
+
                 with open(sample_file, 'r') as f:
                     fastp_data = json.load(f)
 
@@ -181,7 +193,10 @@ def load_fastp_data(main_dir: str, sample: Optional[str] = None) -> Dict[str, An
                 aggregated_stats['too_many_N'] += filtering.get("too_many_N_reads", 0)
                 _acc_q30_bases += after.get("q30_bases", 0)
 
-            except Exception as e:
+            except json.JSONDecodeError as e:
+                logging.warning(f"Malformed JSON in {sample_file}: {e}")
+                continue
+            except OSError as e:
                 logging.error(f"Error reading {sample_file}: {e}")
                 continue
 
@@ -219,15 +234,19 @@ def load_batch_stats(main_dir: str, sample: Optional[str] = None) -> List[Dict[s
 
     for batch_file in batch_files:
         try:
+            if not _is_file_stable(batch_file):
+                logging.debug(f"Skipping unstable batch file: {batch_file}")
+                continue
+
             with open(batch_file, 'r') as f:
                 batch_data = json.load(f)
 
-            # If sample filtering is requested, check if this batch contains the sample
-            # Note: Batch files may not have sample-level detail, so we include all for now
-            # This can be enhanced if batch files include per-sample breakdown
             all_batches.append(batch_data)
 
-        except Exception as e:
+        except json.JSONDecodeError as e:
+            logging.warning(f"Malformed JSON in {batch_file}: {e}")
+            continue
+        except OSError as e:
             logging.error(f"Error reading {batch_file}: {e}")
             continue
 
