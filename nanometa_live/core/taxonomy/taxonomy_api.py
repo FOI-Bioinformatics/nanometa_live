@@ -529,7 +529,7 @@ class GTDBClient(TaxonomyAPIClient):
     GTDB (Genome Taxonomy Database) provides a standardized bacterial
     and archaeal taxonomy based on genome phylogeny.
 
-    API documentation: https://gtdb-api.ecogenomic.org/docs
+    API documentation: https://api.gtdb.ecogenomic.org/docs
     """
 
     BASE_URL = "https://api.gtdb.ecogenomic.org"

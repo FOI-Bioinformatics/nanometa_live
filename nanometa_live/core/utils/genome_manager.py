@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 # GTDB API endpoint
-GTDB_API_BASE = "https://gtdb-api.ecogenomic.org"
+GTDB_API_BASE = "https://api.gtdb.ecogenomic.org"
 
 # NCBI Datasets API
 NCBI_DATASETS_API = "https://api.ncbi.nlm.nih.gov/datasets/v2"
