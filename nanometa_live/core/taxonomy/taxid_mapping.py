@@ -1064,10 +1064,10 @@ class TaxidMapper:
                 name_lower = node.name.lower()
                 if query_lower in name_lower:
                     # Score based on match quality
-                    if name_lower.startswith(query_lower):
-                        score = 0.95  # Prefix match
-                    elif name_lower == query_lower:
+                    if name_lower == query_lower:
                         score = 1.0  # Exact match
+                    elif name_lower.startswith(query_lower):
+                        score = 0.95  # Prefix match
                     else:
                         score = 0.7  # Substring match
 
