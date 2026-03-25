@@ -160,7 +160,7 @@ class TaxonomyMatcher:
 
     def normalize_name(self, name: str) -> str:
         """
-        Normalize a species name for comparison.
+        Normalize a species name using the shared NameNormalizer.
 
         Handles both NCBI (spaces) and GTDB (underscores) formats,
         converting to a canonical lowercase form.
@@ -174,23 +174,10 @@ class TaxonomyMatcher:
         if not name:
             return ""
 
-        # Remove GTDB rank prefixes
-        normalized = name.strip()
-        for prefix in GTDB_RANK_PREFIXES:
-            if normalized.startswith(prefix):
-                normalized = normalized[len(prefix):]
-                break
-
-        # Convert underscores to spaces
-        normalized = normalized.replace('_', ' ')
-
-        # Lowercase and strip
-        normalized = normalized.lower().strip()
-
-        # Remove multiple spaces
-        normalized = re.sub(r'\s+', ' ', normalized)
-
-        return normalized
+        from nanometa_live.core.watchlist.validation.name_normalizer import get_name_normalizer
+        normalizer = get_name_normalizer()
+        normalized = normalizer.normalize(name)
+        return normalized.canonical
 
     def get_name_variants(self, name: str) -> List[str]:
         """
