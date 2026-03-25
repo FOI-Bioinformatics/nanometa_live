@@ -277,7 +277,7 @@ def test_gtdb_api_directly(species_name):
     formatted_name = f"s__{species_name.replace(' ', '_')}"
     logging.info(f"Direct API test for: {formatted_name}")
 
-    url = "https://gtdb-api.ecogenomic.org/search/gtdb"
+    url = "https://api.gtdb.ecogenomic.org/search/gtdb"
     params = {
         "search": formatted_name,
         "page": 1,
@@ -307,7 +307,7 @@ def fetch_species_data(search_str: str, db: str = "gtdb") -> List[Dict[str, Any]
         logging.info(f"Reformatting search: '{search_str}' → '{formatted_search}'")
         search_str = formatted_search
 
-    base_url = "https://gtdb-api.ecogenomic.org/search/gtdb"
+    base_url = "https://api.gtdb.ecogenomic.org/search/gtdb"
     params = {
         "search": search_str,
         "page": 1,
