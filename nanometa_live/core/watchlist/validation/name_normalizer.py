@@ -71,12 +71,15 @@ KNOWN_RECLASSIFICATIONS = {
     "xanthomonas maltophilia": ["stenotrophomonas maltophilia"],
     # Kytococcus (formerly Micrococcus)
     "micrococcus sedentarius": ["kytococcus sedentarius"],
-    # Limosilactobacillus / Lacticaseibacillus (formerly Lactobacillus)
+    # Limosilactobacillus / Lacticaseibacillus / Ligilactobacillus / Latilactobacillus
+    # (formerly Lactobacillus, split into multiple genera in 2020)
     "lactobacillus reuteri": ["limosilactobacillus reuteri"],
     "lactobacillus fermentum": ["limosilactobacillus fermentum"],
     "lactobacillus casei": ["lacticaseibacillus casei"],
     "lactobacillus paracasei": ["lacticaseibacillus paracasei"],
     "lactobacillus rhamnosus": ["lacticaseibacillus rhamnosus"],
+    "lactobacillus salivarius": ["ligilactobacillus salivarius"],
+    "lactobacillus sakei": ["latilactobacillus sakei"],
     # Reverse mappings (new name -> old name) for databases using older taxonomy
     "clostridioides difficile": ["clostridium difficile"],
     "paraclostridium bifermentans": ["clostridium bifermentans"],
@@ -88,17 +91,27 @@ KNOWN_RECLASSIFICATIONS = {
     "lacticaseibacillus casei": ["lactobacillus casei"],
     "lacticaseibacillus paracasei": ["lactobacillus paracasei"],
     "lacticaseibacillus rhamnosus": ["lactobacillus rhamnosus"],
+    "ligilactobacillus salivarius": ["lactobacillus salivarius"],
+    "latilactobacillus sakei": ["lactobacillus sakei"],
     # ICTV virus reclassifications
-    "ebolavirus": ["orthoebolavirus"],
     "zaire ebolavirus": ["orthoebolavirus zairense"],
+    "ebola virus": ["orthoebolavirus zairense"],
     "sudan ebolavirus": ["orthoebolavirus sudanense"],
-    "poxvirus": ["orthopoxvirus"],
-    "human immunodeficiency virus 1": ["hiv-1", "lentivirus"],
-    "human immunodeficiency virus 2": ["hiv-2", "lentivirus"],
-    "hiv-1": ["human immunodeficiency virus 1"],
-    "hiv-2": ["human immunodeficiency virus 2"],
-    "orthoebolavirus zairense": ["zaire ebolavirus"],
+    "marburg marburgvirus": ["orthomarburgvirus marburgense"],
+    "marburg virus": ["orthomarburgvirus marburgense"],
+    "variola virus": ["orthopoxvirus variola"],
+    "smallpox virus": ["orthopoxvirus variola"],
+    "monkeypox virus": ["orthopoxvirus monkeypox"],
+    "mpox virus": ["orthopoxvirus monkeypox"],
+    "lassa mammarenavirus": ["mammarenavirus lassaense"],
+    "lassa virus": ["mammarenavirus lassaense"],
+    # ICTV reverse mappings (new name -> old name)
+    "orthoebolavirus zairense": ["zaire ebolavirus", "ebola virus"],
     "orthoebolavirus sudanense": ["sudan ebolavirus"],
+    "orthomarburgvirus marburgense": ["marburg marburgvirus", "marburg virus"],
+    "orthopoxvirus variola": ["variola virus", "smallpox virus"],
+    "orthopoxvirus monkeypox": ["monkeypox virus", "mpox virus"],
+    "mammarenavirus lassaense": ["lassa mammarenavirus", "lassa virus"],
 }
 
 # Genus-level reclassifications (for suggesting alternatives)
