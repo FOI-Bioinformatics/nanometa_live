@@ -30,9 +30,6 @@ from nanometa_live.app.components.pathogen_alert import (
     PathogenAlertPanel,
     ThreatSummaryIndicator
 )
-from nanometa_live.app.components.watchlist_manager_ui import (
-    create_watchlist_stats_card
-)
 from nanometa_live.app.components.watchlist_modal import create_all_modals
 
 
