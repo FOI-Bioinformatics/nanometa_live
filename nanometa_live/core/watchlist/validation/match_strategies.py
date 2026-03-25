@@ -9,9 +9,10 @@ Strategies (in priority order):
 1. Exact taxid match - Direct NCBI taxid lookup
 2. Exact name match - After normalization
 3. Variant match - GTDB naming variants
-4. Fuzzy match - Edit distance for typos
-5. Parent taxon match - Genus-level fallback
+4. Reclassification match - Known taxonomic reclassifications
+5. Fuzzy match - Edit distance for typos
 6. Substring match - For strain matching
+7. Parent taxon match - Genus-level fallback
 """
 
 import logging
@@ -249,7 +250,7 @@ class ReclassificationStrategy(MatchStrategy):
     and tries to match the reclassified name.
     """
 
-    priority = 35  # After variant (30), before fuzzy (40)
+    priority = 35  # After variant (3), before fuzzy (40)
     name = "reclassification"
 
     def match(
@@ -405,7 +406,7 @@ class FuzzyMatchStrategy(MatchStrategy):
 class ParentTaxonStrategy(MatchStrategy):
     """Fall back to genus-level matching."""
 
-    priority = 5
+    priority = 50
     name = "parent_taxon"
 
     def match(
@@ -454,7 +455,7 @@ class ParentTaxonStrategy(MatchStrategy):
 class SubstringMatchStrategy(MatchStrategy):
     """Match via substring containment (for strain matching)."""
 
-    priority = 6
+    priority = 45
     name = "substring"
 
     def __init__(self, min_overlap: float = 0.7):
