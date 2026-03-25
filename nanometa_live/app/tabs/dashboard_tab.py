@@ -966,7 +966,7 @@ def register_dashboard_callbacks(app: Dash):
 
             # Determine overall threat level
             if critical:
-                icon = "bi bi-exclamation-triangle-fill"
+                icon = "bi bi-radioactive"
                 icon_style = {"fontSize": "48px", "color": "#8b0000"}
                 status_text = "CRITICAL THREAT"
                 subtitle = f"{len(critical)} critical pathogen(s) detected - immediate action required"
@@ -1427,7 +1427,7 @@ def register_dashboard_callbacks(app: Dash):
             }
 
             threat_icons = {
-                "critical": "bi-exclamation-triangle-fill",
+                "critical": "bi-radioactive",
                 "high": "bi-exclamation-diamond-fill",
                 "moderate": "bi-info-circle-fill",
                 "low": "bi-dash-circle"
