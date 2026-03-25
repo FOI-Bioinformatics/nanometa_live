@@ -720,7 +720,8 @@ def register_preparation_callbacks(app):
             manager = get_watchlist_manager()
             entries = manager.get_entries_with_toggle_state()
             watchlist_entries = [
-                {"name": e.get("name", ""), "taxid": e.get("taxid", 0), "rank": e.get("api_rank", "species")}
+                {"name": e.get("name", ""), "taxid": e.get("taxid", 0), "rank": e.get("api_rank", "species"),
+                 "names_alt": e.get("names_alt", [])}
                 for e in entries
             ]
 
