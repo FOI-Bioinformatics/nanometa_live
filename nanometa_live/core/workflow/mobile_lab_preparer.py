@@ -341,12 +341,24 @@ class MobileLabPreparer:
             from nanometa_live.core.watchlist.watchlist_manager import (
                 get_watchlist_manager,
             )
+            from nanometa_live.core.taxonomy.taxid_mapping import get_mapping_collection
+
             wm = get_watchlist_manager()
             entries = wm.get_all_entries()
-            return [
-                {"taxid": e.taxid, "name": e.name, "kraken_taxid": e.kraken_taxid}
-                for e in entries
-            ]
+            mc = get_mapping_collection()
+
+            result = []
+            for e in entries:
+                kraken_taxid = None
+                if mc and e.taxid:
+                    kraken_taxid = mc.get_db_taxid(e.taxid)
+                result.append({
+                    "taxid": e.taxid,
+                    "name": e.name,
+                    "kraken_taxid": kraken_taxid or e.taxid,
+                    "names_alt": e.names_alt,
+                })
+            return result
         except Exception:
             pass
 
