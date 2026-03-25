@@ -97,7 +97,6 @@ def get_validation_species_from_watchlist(
     """
     Get enabled species for validation from the Watchlist system.
 
-    This replaces the old species_of_interest config approach.
     Returns species with their mapped Kraken2 taxids and available genome paths.
 
     Args:
@@ -182,7 +181,7 @@ def get_validation_species(config: Dict[str, Any]) -> Tuple[List[str], List[str]
     """
     Get species taxids for BLAST validation.
 
-    Tries Watchlist system first, falls back to species_of_interest config.
+    Uses the Watchlist system to retrieve enabled species for validation.
 
     Args:
         config: Application configuration dict
@@ -192,24 +191,12 @@ def get_validation_species(config: Dict[str, Any]) -> Tuple[List[str], List[str]
         - taxid_list: List of taxid strings for validation
         - genome_paths: List of paths to genome FASTA files
     """
-    # Try Watchlist system first (new approach)
     species_list, genome_paths = get_validation_species_from_watchlist(config)
 
     if species_list:
         # Use kraken_taxid for pipeline (mapped to database)
         taxids = [str(s['kraken_taxid']) for s in species_list if s.get('kraken_taxid')]
         return taxids, genome_paths
-
-    # Fall back to legacy species_of_interest config
-    species_of_interest = config.get("species_of_interest", [])
-    if species_of_interest:
-        logging.info("Using legacy species_of_interest config for validation")
-        taxids = []
-        for species in species_of_interest:
-            taxid = species.get("taxid")
-            if taxid:
-                taxids.append(str(taxid))
-        return taxids, []
 
     return [], []
 
@@ -359,7 +346,7 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     logging.info(f"Processing mode: {processing_mode}, Sample handling: {sample_handling}")
     logging.info(f"Input directory: {nanopore_dir}")
 
-    # Get validation species from Watchlist system (or legacy species_of_interest)
+    # Get validation species from Watchlist system
     validation_taxids, genome_paths = get_validation_species(config)
     has_species = bool(validation_taxids)
 

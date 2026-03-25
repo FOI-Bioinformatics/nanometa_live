@@ -8,65 +8,7 @@ used by the application.
 import logging
 import json
 import pandas as pd
-from typing import Dict, Any, List, Optional, Tuple
-
-
-def read_species_from_file(filename: str) -> Optional[List[str]]:
-    """
-    Read a list of species from a file.
-
-    Args:
-        filename: Path to the file containing species names
-
-    Returns:
-        List of species names or None if file cannot be read
-    """
-    try:
-        with open(filename, "r") as f:
-            species_list = [line.strip() for line in f if line.strip()]
-
-        if species_list:
-            logging.info(f"Read {len(species_list)} species from {filename}")
-        else:
-            logging.warning(f"No species found in {filename}")
-
-        return species_list
-
-    except FileNotFoundError:
-        logging.error(f"File not found: {filename}")
-        return None
-    except PermissionError:
-        logging.error(f"Permission denied: {filename}")
-        return None
-    except Exception as e:
-        logging.error(f"Error reading species file {filename}: {e}")
-        return None
-
-
-def read_species_from_config(config: Dict[str, Any]) -> List[str]:
-    """
-    Extract species list from configuration dictionary.
-
-    Args:
-        config: Configuration dictionary
-
-    Returns:
-        List of species names
-    """
-    species_list = []
-    raw_species = config.get("species_of_interest", [])
-
-    for species_entry in raw_species:
-        species_name = species_entry.get("name", "")
-        if species_name:
-            species_list.append(species_name)
-
-    if species_list:
-        logging.info(f"Extracted {len(species_list)} species from configuration")
-    else:
-        logging.warning("No species found in configuration")
-
-    return species_list
+from typing import Dict, Any, List, Tuple
 
 
 def parse_kraken_report(report_file: str) -> pd.DataFrame:

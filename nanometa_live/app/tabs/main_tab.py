@@ -677,10 +677,17 @@ def register_main_callbacks(app: Dash):
         Input("app-config", "data"),
     )
     def sync_watchlist(config):
-        """Sync species of interest from config to main tab store."""
-        if config:
-            return config.get("species_of_interest", [])
-        return []
+        """Sync watchlist entries from WatchlistManager to main tab store."""
+        if not config:
+            return []
+        try:
+            manager = get_watchlist_manager()
+            if not manager._loaded:
+                manager.load_config(config)
+            entries = manager.get_active_entries()
+            return [{"name": e.name, "taxid": e.taxid} for e in entries.values()]
+        except Exception:
+            return []
 
     # Show more organisms toggle
     @app.callback(

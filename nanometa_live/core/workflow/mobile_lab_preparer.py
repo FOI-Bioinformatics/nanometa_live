@@ -360,11 +360,4 @@ class MobileLabPreparer:
                 })
             return result
         except Exception:
-            pass
-
-        # Fallback: species_of_interest from config
-        soi = self.config.get("species_of_interest", [])
-        if isinstance(soi, list):
-            return [{"taxid": s.get("taxid", 0), "name": s.get("name", "")}
-                    for s in soi if isinstance(s, dict)]
-        return []
+            return []

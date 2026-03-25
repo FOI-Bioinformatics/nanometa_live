@@ -89,8 +89,7 @@ def _get_active_watchlist_entries(config: Dict[str, Any]) -> List[Dict[str, Any]
     """
     Get only ENABLED watchlist entries for alerting.
 
-    Combines entries from WatchlistManager (active entries only) with
-    legacy species_of_interest from config (filtering by enabled status).
+    Returns active entries from WatchlistManager.
 
     Args:
         config: Application configuration dict
