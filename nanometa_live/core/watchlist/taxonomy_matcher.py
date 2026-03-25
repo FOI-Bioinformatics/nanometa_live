@@ -22,6 +22,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from nanometa_live.core.watchlist.validation.name_normalizer import GTDB_RANK_PREFIXES
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,18 +33,6 @@ class TaxonomyType(Enum):
     GTDB = "gtdb"
     UNKNOWN = "unknown"
     MIXED = "mixed"  # Some databases combine both
-
-
-# GTDB rank prefixes
-GTDB_RANK_PREFIXES = {
-    "d__": "domain",
-    "p__": "phylum",
-    "c__": "class",
-    "o__": "order",
-    "f__": "family",
-    "g__": "genus",
-    "s__": "species",
-}
 
 
 class TaxonomyMatcher:
@@ -164,7 +154,7 @@ class TaxonomyMatcher:
     def _has_gtdb_prefix(self, name: str) -> bool:
         """Check if name has a GTDB rank prefix."""
         for prefix in GTDB_RANK_PREFIXES:
-            if prefix in name:
+            if name.startswith(prefix):
                 return True
         return False
 
