@@ -850,6 +850,7 @@ def register_dashboard_callbacks(app: Dash):
         [
             Output("dashboard-threat-icon", "className"),
             Output("dashboard-threat-icon", "style"),
+            Output("dashboard-threat-icon", "children"),
             Output("dashboard-threat-status", "children"),
             Output("dashboard-threat-subtitle", "children"),
             Output("dashboard-threat-card", "style"),
@@ -893,18 +894,18 @@ def register_dashboard_callbacks(app: Dash):
         no_data_banner = []  # Empty when no data yet
 
         if not config:
-            return safe_icon, safe_style, safe_status, safe_subtitle, safe_card_style, waiting_summary, no_data_banner
+            return safe_icon, safe_style, "", safe_status, safe_subtitle, safe_card_style, waiting_summary, no_data_banner
 
         main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
         if not main_dir or not os.path.isdir(main_dir):
-            return safe_icon, safe_style, safe_status, safe_subtitle, safe_card_style, waiting_summary, no_data_banner
+            return safe_icon, safe_style, "", safe_status, safe_subtitle, safe_card_style, waiting_summary, no_data_banner
 
         try:
             # Load Kraken2 data
             kraken_df = load_kraken_data(main_dir, "All Samples")
 
             if kraken_df.empty:
-                return safe_icon, safe_style, safe_status, safe_subtitle, safe_card_style, waiting_summary, no_data_banner
+                return safe_icon, safe_style, "", safe_status, safe_subtitle, safe_card_style, waiting_summary, no_data_banner
 
             # Extract species-level detections (vectorized)
             all_species_df = kraken_df[kraken_df["rank"] == "S"]
@@ -943,7 +944,7 @@ def register_dashboard_callbacks(app: Dash):
                         "border": "1px solid #ffc107"
                     })
                     no_wl_banner = DecisionBanner(safe=True, message="No watchlist active - screening disabled")
-                    return safe_icon, safe_style, safe_status, "No watchlist configured", safe_card_style, summary, no_wl_banner
+                    return safe_icon, safe_style, "", safe_status, "No watchlist configured", safe_card_style, summary, no_wl_banner
                 else:
                     summary = html.Div([
                         html.Div([
@@ -956,7 +957,7 @@ def register_dashboard_callbacks(app: Dash):
                         )
                     ], className="py-1")
                     safe_banner = DecisionBanner(safe=True, message="No watched pathogens detected")
-                    return safe_icon, safe_style, safe_status, safe_subtitle, safe_card_style, summary, safe_banner
+                    return safe_icon, safe_style, "", safe_status, safe_subtitle, safe_card_style, summary, safe_banner
 
             # Categorize threats
             critical = [d for d in dangerous if d.get("threat_level") == "critical"]
@@ -964,8 +965,10 @@ def register_dashboard_callbacks(app: Dash):
             moderate = [d for d in dangerous if d.get("threat_level") == "moderate"]
 
             # Determine overall threat level
+            icon_children = ""
             if critical:
-                icon = "bi bi-radioactive"
+                icon = ""
+                icon_children = "\u2623"  # Biohazard symbol
                 icon_style = {"fontSize": "48px", "color": "#8b0000"}
                 status_text = "CRITICAL THREAT"
                 subtitle = f"{len(critical)} critical pathogen(s) detected - immediate action required"
@@ -1004,11 +1007,11 @@ def register_dashboard_callbacks(app: Dash):
             summary = html.Div(pathogen_items, className="py-1")
 
             threat_banner = DecisionBanner(safe=False, message="Watched pathogens detected - review alert panel")
-            return icon, icon_style, status_text, subtitle, card_style, summary, threat_banner
+            return icon, icon_style, icon_children, status_text, subtitle, card_style, summary, threat_banner
 
         except Exception as e:
             logger.error(f"Error updating threat summary: {e}")
-            return safe_icon, safe_style, safe_status, safe_subtitle, safe_card_style, waiting_summary, no_data_banner
+            return safe_icon, safe_style, "", safe_status, safe_subtitle, safe_card_style, waiting_summary, no_data_banner
 
     @app.callback(
         Output("dashboard-classification-donut", "figure"),
@@ -1238,7 +1241,7 @@ def register_dashboard_callbacks(app: Dash):
         if hasattr(threat_level, 'value'):
             threat_level = threat_level.value
         threat_colors = {
-            "critical": ("danger", "#8b0000", "bi-radioactive"),
+            "critical": ("danger", "#8b0000", "\u2623"),
             "high": ("warning", "#dc3545", "bi-exclamation-triangle-fill"),
             "moderate": ("info", "#fd7e14", "bi-eye-fill"),
             "low": ("secondary", "#17a2b8", "bi-info-circle")
@@ -1247,9 +1250,15 @@ def register_dashboard_callbacks(app: Dash):
             threat_level, ("secondary", "#6c757d", "bi-question-circle")
         )
 
+        # Create threat banner icon element
+        if banner_icon.startswith("bi-"):
+            icon_el = html.I(className=f"bi {banner_icon} me-2", style={"fontSize": "20px"})
+        else:
+            icon_el = html.Span(banner_icon, className="me-2", style={"fontSize": "1.2em"})
+
         # Create threat banner
         threat_banner = html.Div([
-            html.I(className=f"bi {banner_icon} me-2", style={"fontSize": "20px"}),
+            icon_el,
             html.Strong(f"{threat_level.upper()} THREAT LEVEL", style={"fontSize": "16px"})
         ], className=f"alert alert-{alert_color} text-center py-2 mb-0",
            style={"borderLeft": f"5px solid {banner_color}"})
@@ -1426,7 +1435,7 @@ def register_dashboard_callbacks(app: Dash):
             }
 
             threat_icons = {
-                "critical": "bi-radioactive",
+                "critical": "\u2623",
                 "high": "bi-exclamation-diamond-fill",
                 "moderate": "bi-info-circle-fill",
                 "low": "bi-dash-circle"
@@ -1436,9 +1445,14 @@ def register_dashboard_callbacks(app: Dash):
                 entries = entries_by_threat[threat_level]
                 if entries:
                     # Add section header
+                    ti = threat_icons[threat_level]
+                    if ti.startswith("bi-"):
+                        icon_el = html.I(className=f"bi {ti} me-1 text-{threat_colors[threat_level]}")
+                    else:
+                        icon_el = html.Span(ti, className=f"me-1 text-{threat_colors[threat_level]}", style={"fontSize": "1.1em"})
                     entry_components.append(
                         html.Div([
-                            html.I(className=f"bi {threat_icons[threat_level]} me-1 text-{threat_colors[threat_level]}"),
+                            icon_el,
                             html.Strong(f"{threat_level.capitalize()} ({len(entries)})")
                         ], className="mt-2 mb-1")
                     )

@@ -292,7 +292,7 @@ def create_dashboard_layout():
                             html.Div(
                                 id="dashboard-threat-indicator",
                                 children=[
-                                    html.I(
+                                    html.Span(
                                         id="dashboard-threat-icon",
                                         className="bi bi-shield-check",
                                         style={"fontSize": "48px", "color": "#28a745"}
@@ -1065,12 +1065,18 @@ def create_alerts_list(alerts_data: list) -> dbc.ListGroup:
     # Severity icons and colors
     # Maps both alert engine names ("critical") and Bootstrap names ("danger")
     severity_config = {
-        "critical": {"icon": "bi-exclamation-triangle-fill", "color": "danger"},
-        "danger": {"icon": "bi-exclamation-triangle-fill", "color": "danger"},
+        "critical": {"icon": "\u2623", "color": "danger"},
+        "danger": {"icon": "\u2623", "color": "danger"},
         "warning": {"icon": "bi-exclamation-circle-fill", "color": "warning"},
         "info": {"icon": "bi-info-circle-fill", "color": "info"},
         "success": {"icon": "bi-check-circle-fill", "color": "success"}
     }
+
+    def _icon_element(icon_str, color):
+        """Render a Bootstrap Icon class or a Unicode character."""
+        if icon_str.startswith("bi-"):
+            return html.I(className=f"bi {icon_str} me-2", style={"color": f"var(--bs-{color})"})
+        return html.Span(icon_str, className="me-2", style={"fontSize": "1.2em", "color": f"var(--bs-{color})"})
 
     # Sort by severity (critical/danger > warning > info > success)
     severity_order = {"critical": 0, "danger": 0, "warning": 1, "info": 2, "success": 3}
@@ -1119,7 +1125,7 @@ def create_alerts_list(alerts_data: list) -> dbc.ListGroup:
             alert_items.append(
                 dbc.ListGroupItem([
                     html.Div([
-                        html.I(className=f"bi {config['icon']} me-2", style={"color": f"var(--bs-{config['color']})"}),
+                        _icon_element(config["icon"], config["color"]),
                         html.Span(alert.get("message", "Unknown alert")),
                     ]),
                     html.Small(alert.get("timestamp", ""), className="text-muted d-block mt-1")
@@ -1142,7 +1148,7 @@ def create_alerts_list(alerts_data: list) -> dbc.ListGroup:
             alert_items.append(
                 dbc.ListGroupItem([
                     html.Div([
-                        html.I(className=f"bi {config['icon']} me-2", style={"color": f"var(--bs-{config['color']})"}),
+                        _icon_element(config["icon"], config["color"]),
                         html.Span(alert.get("message", "Unknown alert")),
                     ]),
                     html.Small(alert.get("timestamp", ""), className="text-muted d-block mt-1")

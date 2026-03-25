@@ -17,7 +17,7 @@ THREAT_LEVELS = {
         "color": "#8b0000",
         "bg_color": "#f8d7da",
         "border_color": "#8b0000",
-        "icon": "bi-radioactive",
+        "icon": "\u2623",
         "description": "Dangerous organism requiring immediate action",
         "action": "Contact your safety officer immediately"
     },
@@ -149,7 +149,13 @@ def CriticalPathogenAlert(
         html.Div([
             # Icon section
             html.Div([
-                html.I(
+                html.Span(
+                    threat["icon"],
+                    style={
+                        "fontSize": "48px",
+                        "color": "white"
+                    }
+                ) if not threat["icon"].startswith("bi-") else html.I(
                     className=f"bi {threat['icon']}",
                     style={
                         "fontSize": "48px",
