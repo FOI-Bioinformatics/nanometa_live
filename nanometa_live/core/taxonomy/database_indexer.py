@@ -91,11 +91,20 @@ class DatabaseIndexBuilder:
             logger.info(f"Building index from existing inspect.txt.gz")
             return self.build_from_inspect_gz(str(inspect_txt_gz), database_path)
 
-        # Check for names.dmp
+        # Check for names.dmp (taxonomy/ subdir first, then root)
         names_dmp = db_path / "taxonomy" / "names.dmp"
+        if not names_dmp.exists():
+            names_dmp = db_path / "names.dmp"
+
         if names_dmp.exists():
-            logger.info(f"Building index from names.dmp")
-            nodes_dmp = db_path / "taxonomy" / "nodes.dmp"
+            logger.info(f"Building index from {names_dmp}")
+            # Check for nodes.dmp in same location as names.dmp
+            nodes_dmp = names_dmp.parent / "nodes.dmp"
+            if not nodes_dmp.exists():
+                # Also check the other location
+                alt_nodes = db_path / "taxonomy" / "nodes.dmp" if names_dmp.parent == db_path else db_path / "nodes.dmp"
+                if alt_nodes.exists():
+                    nodes_dmp = alt_nodes
             return self.build_from_names_dmp(
                 str(names_dmp),
                 str(nodes_dmp) if nodes_dmp.exists() else None,
