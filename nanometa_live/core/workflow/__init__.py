@@ -10,7 +10,7 @@ with standalone scripts but is not imported by default.
 """
 
 from nanometa_live.core.workflow.backend_manager import BackendManager
-from nanometa_live.core.workflow.pipeline_runner import run_pipeline
+from nanometa_live.core.workflow.pipeline_runner import run_pipeline  # Deprecated stub
 from nanometa_live.core.workflow.on_demand_validator import (
     OnDemandValidator,
     ValidationJob,
