@@ -840,6 +840,16 @@ def register_watchlist_callbacks(app: Dash) -> None:
         use_ncbi = "ncbi" in (api_options or [])
         use_gtdb = "gtdb" in (api_options or [])
 
+        if not use_ncbi and not use_gtdb:
+            return (
+                dash.no_update,
+                dash.no_update,
+                False,  # Close progress modal
+                0,
+                "No databases selected",
+                "Check NCBI and/or GTDB in the Databases section.",
+            )
+
         manager = get_watchlist_manager()
         taxids_to_validate = []
 
@@ -968,6 +978,16 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         use_ncbi = "ncbi" in (api_options or [])
         use_gtdb = "gtdb" in (api_options or [])
+
+        if not use_ncbi and not use_gtdb:
+            return (
+                {"display": "block"},
+                html.P(
+                    "Select at least one database (NCBI or GTDB).",
+                    className="text-warning",
+                ),
+                None,
+            )
 
         try:
             from nanometa_live.core.taxonomy.taxonomy_api import lookup_species as api_lookup
