@@ -973,17 +973,15 @@ def create_pathogen_row(
             # Kraken2 Match status with DB info
             dbc.Col([
                 html.Div([
-                    dbc.Button(
+                    dbc.Badge(
                         [
                             html.I(className=f"bi {config['icon']} me-1"),
                             config["label"],
                         ],
                         id={"type": "watchlist-row-mapping", "index": taxid},
                         color=config["color"],
-                        size="sm",
                         className="kraken2-match-badge",
-                        title="Click to edit mapping",
-                        n_clicks=0,
+                        title="Kraken2 mapping status",
                     ),
                     # Show Kraken2 DB name and taxid below the badge
                     html.Div([
