@@ -148,6 +148,14 @@ class ReadinessChecker:
                 purpose="on-demand read validation",
             ))
 
+        # minimap2 is only needed when validation_method includes minimap2
+        validation_method = config.get("validation_method", "")
+        if validation_method in ("minimap2", "both"):
+            report.checks.append(self._check_tool(
+                "minimap2", Severity.WARNING,
+                purpose="coverage validation",
+            ))
+
         # === Input/output checks (warning) ===
         report.checks.append(self._check_input_directory(config))
         report.checks.append(self._check_output_directory(config))
@@ -159,6 +167,8 @@ class ReadinessChecker:
         report.checks.append(self._check_blast_dbs(config, home))
 
         # === Informational ===
+        report.checks.append(self._check_nextflow_version())
+        report.checks.extend(self._check_network_connectivity())
         report.checks.append(self._check_taxonomy_cache(home))
         report.checks.append(self._check_pipeline_cached(config))
 
@@ -566,6 +576,69 @@ class ReadinessChecker:
             )
 
     # -- Informational checks --
+
+    def _check_nextflow_version(self) -> CheckResult:
+        """Check Nextflow version compatibility (>= 23.0 required)."""
+        try:
+            result = subprocess.run(
+                ["nextflow", "-version"],
+                capture_output=True, text=True, timeout=10,
+            )
+            output = result.stdout + result.stderr
+            # Nextflow version output typically contains a line like
+            # "nextflow version 23.10.0.5889"
+            import re
+            match = re.search(r"version\s+(\d+)\.(\d+)", output)
+            if match:
+                major = int(match.group(1))
+                minor = int(match.group(2))
+                version_str = f"{major}.{minor}"
+                if major >= 23:
+                    return CheckResult(
+                        "Nextflow Version", True, Severity.INFO,
+                        f"Nextflow {version_str} (>= 23.0)",
+                    )
+                return CheckResult(
+                    "Nextflow Version", False, Severity.WARNING,
+                    f"Nextflow {version_str} found, >= 23.0 recommended",
+                )
+            return CheckResult(
+                "Nextflow Version", False, Severity.WARNING,
+                "Could not parse Nextflow version from output",
+            )
+        except FileNotFoundError:
+            return CheckResult(
+                "Nextflow Version", False, Severity.WARNING,
+                "Nextflow not found (checked separately in tool checks)",
+            )
+        except Exception:
+            return CheckResult(
+                "Nextflow Version", False, Severity.WARNING,
+                "Could not determine Nextflow version",
+            )
+
+    def _check_network_connectivity(self) -> List[CheckResult]:
+        """Test network connectivity to NCBI and GTDB APIs."""
+        import urllib.request
+
+        results = []
+        endpoints = [
+            ("NCBI API", "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"),
+            ("GTDB API", "https://api.gtdb.ecogenomic.org/"),
+        ]
+        for name, url in endpoints:
+            try:
+                urllib.request.urlopen(url, timeout=5)  # noqa: S310
+                results.append(CheckResult(
+                    name, True, Severity.INFO,
+                    f"{name} reachable",
+                ))
+            except Exception as e:
+                results.append(CheckResult(
+                    name, False, Severity.WARNING,
+                    f"{name} unreachable: {e}. Genome downloads may fail.",
+                ))
+        return results
 
     def _check_taxonomy_cache(self, home: Path) -> CheckResult:
         cache_dir = home / "cache"
