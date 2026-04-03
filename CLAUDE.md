@@ -518,9 +518,21 @@ nanometanf now includes the minimap2 validation subworkflow with PAF output at `
 
 ---
 
-**Last Updated:** 2026-03-14
+**Last Updated:** 2026-04-03
 
-**Production hardening (2026-03-01):**
+**Production hardening phase 3 (2026-04-03):**
+
+- Taxonomy mapping: `names_alt` support for multi-name matching, strategy priority fix, DB type guards
+- GTDB API SSL fallback for environments with restricted certificate chains
+- Parser hardening: PAF bounds checking, classification race-condition guards, FASTP JSON validation
+- Readiness checker: minimap2 detection, network connectivity test, Nextflow version checks
+- FASTA validation after genome download (detects truncated or corrupt files)
+- Timeouts on all subprocess and network calls to prevent indefinite hangs
+- Test coverage: 20+ new tests for parsers, loaders, and mapping strategies
+- Icons: `bi-exclamation-octagon-fill` for critical alerts, `bi-exclamation-triangle-fill` for high-risk alerts
+- Accessibility: `title` attributes on icon-only buttons (watchlist info, alert dismiss)
+
+**Production hardening phase 1-2 (2026-03-01):**
 
 - Test suite expanded from 233 to 274 tests (all passing)
 - Fixed BLAST validation path: parsers now look in `validation/blast/` (matching nanometanf output)
