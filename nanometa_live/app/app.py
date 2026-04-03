@@ -195,9 +195,6 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
         dcc.Store(id='app-data-dir', data=data_dir),
         dcc.Store(id='kraken-databases', data=kraken_databases),
 
-        # Performance optimization stores
-        dcc.Store(id='dashboard-computed-data', data={}),
-
         # Configuration state tracking stores
         dcc.Store(id='config-source', data={
             "type": "file",  # "file", "default", or "unsaved"
