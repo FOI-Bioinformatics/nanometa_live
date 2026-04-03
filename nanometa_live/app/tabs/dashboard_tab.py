@@ -967,14 +967,13 @@ def register_dashboard_callbacks(app: Dash):
             # Determine overall threat level
             icon_children = ""
             if critical:
-                icon = ""
-                icon_children = "\u2623"  # Biohazard symbol
+                icon = "bi bi-exclamation-octagon-fill"
                 icon_style = {"fontSize": "48px", "color": "#8b0000"}
                 status_text = "CRITICAL THREAT"
                 subtitle = f"{len(critical)} critical pathogen(s) detected - immediate action required"
                 card_style = {"borderColor": "#8b0000", "borderWidth": "3px", "backgroundColor": "#fff5f5"}
             elif high_risk:
-                icon = "bi bi-exclamation-circle-fill"
+                icon = "bi bi-exclamation-triangle-fill"
                 icon_style = {"fontSize": "48px", "color": "#dc3545"}
                 status_text = "HIGH ALERT"
                 subtitle = f"{len(high_risk)} high-risk pathogen(s) detected"
@@ -1241,7 +1240,7 @@ def register_dashboard_callbacks(app: Dash):
         if hasattr(threat_level, 'value'):
             threat_level = threat_level.value
         threat_colors = {
-            "critical": ("danger", "#8b0000", "\u2623"),
+            "critical": ("danger", "#8b0000", "bi-exclamation-octagon-fill"),
             "high": ("warning", "#dc3545", "bi-exclamation-triangle-fill"),
             "moderate": ("info", "#fd7e14", "bi-eye-fill"),
             "low": ("secondary", "#17a2b8", "bi-info-circle")
@@ -1254,7 +1253,7 @@ def register_dashboard_callbacks(app: Dash):
         if banner_icon.startswith("bi-"):
             icon_el = html.I(className=f"bi {banner_icon} me-2", style={"fontSize": "20px"})
         else:
-            icon_el = html.Span(banner_icon, className="me-2", style={"fontSize": "1.2em"})
+            icon_el = html.Span(banner_icon, className="me-2", style={"fontSize": "1.5em"})
 
         # Create threat banner
         threat_banner = html.Div([
@@ -1435,8 +1434,8 @@ def register_dashboard_callbacks(app: Dash):
             }
 
             threat_icons = {
-                "critical": "\u2623",
-                "high": "bi-exclamation-diamond-fill",
+                "critical": "bi-exclamation-octagon-fill",
+                "high": "bi-exclamation-triangle-fill",
                 "moderate": "bi-info-circle-fill",
                 "low": "bi-dash-circle"
             }
@@ -1449,7 +1448,7 @@ def register_dashboard_callbacks(app: Dash):
                     if ti.startswith("bi-"):
                         icon_el = html.I(className=f"bi {ti} me-1 text-{threat_colors[threat_level]}")
                     else:
-                        icon_el = html.Span(ti, className=f"me-1 text-{threat_colors[threat_level]}", style={"fontSize": "1.1em"})
+                        icon_el = html.Span(ti, className=f"me-1 text-{threat_colors[threat_level]}", style={"fontSize": "1.4em"})
                     entry_components.append(
                         html.Div([
                             icon_el,
@@ -1688,83 +1687,7 @@ def register_dashboard_callbacks(app: Dash):
             return not is_open
         return is_open
 
-    # -------------------------------------------------
-    # PRE-FLIGHT CHECKLIST
-    # -------------------------------------------------
-    @app.callback(
-        [
-            Output("preflight-checks-list", "children"),
-            Output("preflight-container", "style"),
-        ],
-        [Input("readiness-state", "data"), Input("backend-status", "data")],
-    )
-    def update_preflight_checklist(readiness, status):
-        """Show pre-flight checklist when idle, hide when running."""
-        # Hide when pipeline is running
-        if status and status.get("running", False):
-            return no_update, {"display": "none"}
-
-        if not readiness or not readiness.get("checks"):
-            return [
-                html.Div(
-                    "Configure the application to see readiness checks.",
-                    className="text-muted",
-                )
-            ], {"display": "block"}
-
-        checks = readiness["checks"]
-        items = []
-        for check in checks:
-            passed = check.get("passed", False)
-            severity = check.get("severity", "info")
-            name = check.get("name", "Unknown")
-            message = check.get("message", "")
-
-            if passed:
-                icon_cls = "bi bi-check-circle-fill text-success"
-            elif severity == "critical":
-                icon_cls = "bi bi-x-circle-fill text-danger"
-            else:
-                icon_cls = "bi bi-exclamation-triangle-fill text-warning"
-
-            items.append(
-                html.Div([
-                    html.I(className=f"{icon_cls} me-2"),
-                    html.Span(name, className="fw-semibold me-2"),
-                    html.Span(message, className="text-muted small"),
-                ], className="mb-1")
-            )
-
-        return items, {"display": "block"}
-
-    app.clientside_callback(
-        """
-        function(n_clicks) {
-            if (!n_clicks) return dash_clientside.no_update;
-            return "preparation-tab";
-        }
-        """,
-        Output("tabs", "active_tab", allow_duplicate=True),
-        Input("preflight-goto-prep", "n_clicks"),
-        prevent_initial_call=True,
-    )
-
-    # Pre-flight checklist collapse toggle
-    app.clientside_callback(
-        """
-        function(n_clicks, is_open) {
-            if (!n_clicks) return [dash_clientside.no_update, dash_clientside.no_update];
-            var open = !is_open;
-            var icon = open ? "bi bi-chevron-up ms-2" : "bi bi-chevron-down ms-2";
-            return [open, icon];
-        }
-        """,
-        [Output("preflight-collapse", "is_open"),
-         Output("preflight-collapse-icon", "className")],
-        Input("preflight-collapse-toggle", "n_clicks"),
-        State("preflight-collapse", "is_open"),
-        prevent_initial_call=True,
-    )
+    # Pre-flight checklist removed — readiness checks are in the top bar
 
 
 # Helper functions

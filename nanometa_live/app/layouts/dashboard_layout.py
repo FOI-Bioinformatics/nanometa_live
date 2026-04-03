@@ -94,50 +94,7 @@ def create_dashboard_layout():
             ),
         ], id="dashboard-help-modal", size="lg", is_open=False),
 
-        # =============================================
-        # 0. PRE-FLIGHT CHECKLIST (visible when idle)
-        # =============================================
-        html.Div(
-            id="preflight-container",
-            children=[
-                dbc.Card([
-                    dbc.CardBody([
-                        dbc.Row([
-                            dbc.Col([
-                                html.Div([
-                                    html.I(className="bi bi-clipboard-check me-2", style={"fontSize": "1.3rem"}),
-                                    html.H5("Pre-flight Checklist", className="mb-0 d-inline"),
-                                    html.I(
-                                        id="preflight-collapse-icon",
-                                        className="bi bi-chevron-up ms-2",
-                                        style={"fontSize": "0.9rem", "cursor": "pointer",
-                                               "transition": "transform 0.2s"},
-                                    ),
-                                ], className="d-flex align-items-center",
-                                   id="preflight-collapse-toggle",
-                                   style={"cursor": "pointer"}),
-                            ], width=8),
-                            dbc.Col([
-                                dbc.Button(
-                                    [html.I(className="bi bi-arrow-right me-1"), "Go to Preparation"],
-                                    id="preflight-goto-prep",
-                                    color="outline-primary",
-                                    size="sm",
-                                ),
-                            ], width=4, className="text-end"),
-                        ], className="mb-3"),
-                        dbc.Collapse(
-                            html.Div(id="preflight-checks-list", children=[
-                                html.Div("Loading readiness checks...", className="text-muted")
-                            ]),
-                            id="preflight-collapse",
-                            is_open=True,
-                        ),
-                    ])
-                ], className="mb-3 border-start border-4 border-info"),
-            ],
-            style={"display": "block"},
-        ),
+        # Pre-flight checklist removed — readiness checks are in the top bar
 
         # =============================================
         # 1. TOP STATUS BANNER (Large Traffic Light)
@@ -1065,8 +1022,8 @@ def create_alerts_list(alerts_data: list) -> dbc.ListGroup:
     # Severity icons and colors
     # Maps both alert engine names ("critical") and Bootstrap names ("danger")
     severity_config = {
-        "critical": {"icon": "\u2623", "color": "danger"},
-        "danger": {"icon": "\u2623", "color": "danger"},
+        "critical": {"icon": "bi-exclamation-octagon-fill", "color": "danger"},
+        "danger": {"icon": "bi-exclamation-octagon-fill", "color": "danger"},
         "warning": {"icon": "bi-exclamation-circle-fill", "color": "warning"},
         "info": {"icon": "bi-info-circle-fill", "color": "info"},
         "success": {"icon": "bi-check-circle-fill", "color": "success"}
@@ -1076,7 +1033,7 @@ def create_alerts_list(alerts_data: list) -> dbc.ListGroup:
         """Render a Bootstrap Icon class or a Unicode character."""
         if icon_str.startswith("bi-"):
             return html.I(className=f"bi {icon_str} me-2", style={"color": f"var(--bs-{color})"})
-        return html.Span(icon_str, className="me-2", style={"fontSize": "1.2em", "color": f"var(--bs-{color})"})
+        return html.Span(icon_str, className="me-2", style={"fontSize": "1.5em", "color": f"var(--bs-{color})"})
 
     # Sort by severity (critical/danger > warning > info > success)
     severity_order = {"critical": 0, "danger": 0, "warning": 1, "info": 2, "success": 3}
