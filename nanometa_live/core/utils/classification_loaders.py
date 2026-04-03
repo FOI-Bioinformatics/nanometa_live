@@ -80,6 +80,18 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
     Returns:
         DataFrame with validated columns, or None if parsing fails or file unstable
     """
+    # Guard against files that vanish or are empty (expected in real-time mode)
+    try:
+        if not os.path.exists(filepath):
+            logging.debug("Kreport file no longer exists (may have been rotated): %s", filepath)
+            return None
+        if os.path.getsize(filepath) == 0:
+            logging.debug("Skipping empty kreport file: %s", filepath)
+            return None
+    except OSError:
+        logging.debug("Cannot stat kreport file (may have been removed): %s", filepath)
+        return None
+
     # Check file stability before reading (prevents reading partial files in real-time mode)
     if check_stability and not _is_file_stable(filepath):
         logging.debug(f"Skipping unstable file (may still be writing): {filepath}")
@@ -152,6 +164,12 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
 
         return df
 
+    except FileNotFoundError:
+        logging.debug("Kreport file disappeared during parsing (expected in real-time mode): %s", filepath)
+        return None
+    except OSError as e:
+        logging.warning("OS error reading kreport file %s: %s", filepath, e)
+        return None
     except Exception as e:
         logging.error(f"Error parsing Kraken2 report {filepath}: {e}")
         return None
