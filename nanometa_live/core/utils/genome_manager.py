@@ -1091,6 +1091,18 @@ class GenomeDownloadManager:
         output_db = self.blast_dir / f"{taxid}.fasta"
         genome_size_mb = genome_path.stat().st_size / (1024 * 1024) if genome_path.exists() else 0
 
+        # Check available disk space before building
+        try:
+            usage = shutil.disk_usage(str(self.blast_dir))
+            free_gb = usage.free / (1024**3)
+            if free_gb < 2.0:
+                logger.warning(
+                    f"Low disk space: {free_gb:.1f} GB free in {self.blast_dir}. "
+                    "Minimum 2 GB recommended for BLAST DB builds."
+                )
+        except OSError as e:
+            logger.debug(f"Could not check disk space: {e}")
+
         logger.info(f"Building BLAST database for taxid {taxid} (genome size: {genome_size_mb:.1f} MB)...")
 
         try:

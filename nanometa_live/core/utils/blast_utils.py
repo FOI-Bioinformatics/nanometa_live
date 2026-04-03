@@ -7,6 +7,7 @@ and validation in the Nanometa Live application.
 
 import os
 import logging
+import shutil
 import subprocess
 from typing import Dict, Any, List, Optional, Union
 
@@ -37,6 +38,18 @@ def build_blast_databases(
         if not os.path.exists(blast_db_folder):
             os.makedirs(blast_db_folder, exist_ok=True)
             logging.info(f"Created BLAST database folder at {blast_db_folder}")
+
+        # Check available disk space before building
+        try:
+            usage = shutil.disk_usage(blast_db_folder)
+            free_gb = usage.free / (1024**3)
+            if free_gb < 2.0:
+                logging.warning(
+                    f"Low disk space: {free_gb:.1f} GB free in {blast_db_folder}. "
+                    "Minimum 2 GB recommended for BLAST DB builds."
+                )
+        except OSError as e:
+            logging.debug(f"Could not check disk space: {e}")
 
         # Find files to process
         files_to_process = os.listdir(input_folder)
