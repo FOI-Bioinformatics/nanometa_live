@@ -28,6 +28,25 @@ from nanometa_live.core.utils.loader_utils import (
 )
 
 
+def _validate_fastp_json(fastp_data: Dict, filepath: str) -> bool:
+    """Check that a parsed FASTP JSON contains the expected structure.
+
+    Returns True if the required keys are present, False otherwise.
+    Logs a warning when the file appears truncated or malformed.
+    """
+    summary = fastp_data.get("summary")
+    if not isinstance(summary, dict):
+        logging.warning("FASTP file missing 'summary' key (truncated?): %s", filepath)
+        return False
+    if "before_filtering" not in summary:
+        logging.warning("FASTP file missing 'summary.before_filtering' (truncated?): %s", filepath)
+        return False
+    if "after_filtering" not in summary:
+        logging.warning("FASTP file missing 'summary.after_filtering' (truncated?): %s", filepath)
+        return False
+    return True
+
+
 def _empty_fastp_stats() -> Dict[str, int]:
     """Return empty FASTP statistics dictionary."""
     return {
@@ -122,6 +141,9 @@ def load_fastp_data(main_dir: str, sample: Optional[str] = None) -> Dict[str, An
                 with open(fastp_file, 'r') as f:
                     fastp_data = json.load(f)
 
+                if not _validate_fastp_json(fastp_data, fastp_file):
+                    continue
+
                 summary = fastp_data.get("summary", {})
                 before = summary.get("before_filtering", {})
                 after = summary.get("after_filtering", {})
@@ -177,6 +199,9 @@ def load_fastp_data(main_dir: str, sample: Optional[str] = None) -> Dict[str, An
 
                 with open(sample_file, 'r') as f:
                     fastp_data = json.load(f)
+
+                if not _validate_fastp_json(fastp_data, sample_file):
+                    continue
 
                 summary = fastp_data.get("summary", {})
                 before = summary.get("before_filtering", {})
