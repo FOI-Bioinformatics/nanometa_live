@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 # Use ruamel.yaml for comment preservation
-from ruamel.yaml import YAML, constructor as yaml_constructor
+from ruamel.yaml import YAML, YAMLError, constructor as yaml_constructor
 
 
 class ConfigLoader:
@@ -164,6 +164,19 @@ class ConfigLoader:
         except PermissionError:
             logging.error(f"Permission denied: Cannot read {config_path}")
             raise
+        except YAMLError as e:
+            # Provide location information when available
+            location = ""
+            if hasattr(e, "problem_mark") and e.problem_mark is not None:
+                mark = e.problem_mark
+                location = f" at line {mark.line + 1}, column {mark.column + 1}"
+            logging.error(
+                f"YAML syntax error in {config_path}{location}: {e}"
+            )
+            raise ValueError(
+                f"Invalid YAML in configuration file '{config_path}'{location}. "
+                f"Check for indentation or formatting errors."
+            ) from e
         except Exception as e:
             logging.error(f"Failed to load configuration from {config_path}. Exception: {e}")
             raise
@@ -265,6 +278,13 @@ class ConfigLoader:
                 "timestamp": config.get("timestamp", "Unknown"),
                 "filename": os.path.basename(config_path),
             }
+        except YAMLError as e:
+            location = ""
+            if hasattr(e, "problem_mark") and e.problem_mark is not None:
+                mark = e.problem_mark
+                location = f" at line {mark.line + 1}, column {mark.column + 1}"
+            logger.warning(f"Skipping {config_path}: YAML syntax error{location}")
+            return None
         except Exception:
             return None
 
