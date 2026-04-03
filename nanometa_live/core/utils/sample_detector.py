@@ -203,7 +203,12 @@ def detect_samples_from_kraken(kraken_dir: str) -> Set[str]:
     # v1.5 nested structure: detect sample subdirectories that contain a
     # batch_reports/ or batches/ folder, in case no top-level cumulative
     # report has been written yet (early in a run).
-    for item in os.listdir(kraken_dir):
+    try:
+        kraken_entries = os.listdir(kraken_dir)
+    except OSError:
+        logging.debug("Cannot list kraken2 directory (may have been removed): %s", kraken_dir)
+        return samples
+    for item in kraken_entries:
         item_path = os.path.join(kraken_dir, item)
         if not os.path.isdir(item_path):
             continue
@@ -334,7 +339,12 @@ def detect_samples_from_nanoplot(nanoplot_dir: str) -> Set[str]:
         return samples
 
     # NanoPlot usually creates subdirectories per sample
-    for item in os.listdir(nanoplot_dir):
+    try:
+        nanoplot_entries = os.listdir(nanoplot_dir)
+    except OSError:
+        logging.debug("Cannot list NanoPlot directory (may have been removed): %s", nanoplot_dir)
+        return samples
+    for item in nanoplot_entries:
         item_path = os.path.join(nanoplot_dir, item)
         if os.path.isdir(item_path):
             # Check if it contains NanoStats.txt
