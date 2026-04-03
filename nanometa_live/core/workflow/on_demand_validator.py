@@ -250,7 +250,8 @@ class OnDemandValidator:
                 cmd,
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                timeout=300,
             )
 
             if self.has_blast_db(taxid):
@@ -325,12 +326,16 @@ class OnDemandValidator:
                 cmd,
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                timeout=1800,
             )
 
             logger.info(f"BLAST completed: {output_file}")
             return output_file
 
+        except subprocess.TimeoutExpired:
+            logger.error("BLAST search timed out (30 min limit)")
+            return None
         except subprocess.CalledProcessError as e:
             logger.error(f"BLAST failed: {e.stderr}")
             return None
@@ -444,7 +449,8 @@ class OnDemandValidator:
                 cmd,
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                timeout=1800,
             )
 
             logger.info(f"minimap2 completed: {output_file}")

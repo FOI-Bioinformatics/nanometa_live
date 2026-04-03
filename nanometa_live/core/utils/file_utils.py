@@ -162,7 +162,7 @@ def download_file(url: str, destination: str, overwrite: bool = False) -> bool:
         ensure_directory(os.path.dirname(destination))
 
         # Download with progress bar
-        response = requests.get(url, stream=True)
+        response = requests.get(url, stream=True, timeout=60)
         total_size = int(response.headers.get("content-length", 0))
 
         with open(destination, "wb") as f, tqdm(
@@ -409,7 +409,8 @@ def check_command_exists(command: str) -> bool:
             ["which", command],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            check=False
+            check=False,
+            timeout=10,
         )
         return result.returncode == 0
     except Exception:

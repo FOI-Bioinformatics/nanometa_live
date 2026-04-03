@@ -77,7 +77,8 @@ def build_blast_databases(
             ]
 
             result = subprocess.run(
-                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
+                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
+                timeout=300,
             )
 
             if result.returncode != 0:
@@ -204,7 +205,8 @@ def run_blast_validation(
         ]
 
         result = subprocess.run(
-            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
+            timeout=1800,
         )
 
         if result.returncode != 0:

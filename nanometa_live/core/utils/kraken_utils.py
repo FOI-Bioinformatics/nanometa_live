@@ -47,7 +47,7 @@ def download_kraken_database(
             logging.info(f"Downloading Kraken2 database {db_name} to {temp_path}")
 
             # Stream the download to avoid loading the whole file into memory
-            with requests.get(db_url, stream=True) as response:
+            with requests.get(db_url, stream=True, timeout=60) as response:
                 response.raise_for_status()
                 total_size = int(response.headers.get("content-length", 0))
 
@@ -141,7 +141,8 @@ def inspect_kraken_db(db_path: str, output_path: str = None) -> Tuple[bool, str]
         if output_path:
             with open(output_path, "w") as f:
                 result = subprocess.run(
-                    cmd, stdout=f, stderr=subprocess.PIPE, check=True, text=True
+                    cmd, stdout=f, stderr=subprocess.PIPE, check=True, text=True,
+                    timeout=300,
                 )
             return True, f"Inspection report saved to {output_path}"
         else:
@@ -152,6 +153,7 @@ def inspect_kraken_db(db_path: str, output_path: str = None) -> Tuple[bool, str]
                 stderr=subprocess.PIPE,
                 check=True,
                 text=True,
+                timeout=300,
             )
             return True, result.stdout
 
