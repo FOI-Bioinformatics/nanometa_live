@@ -61,7 +61,7 @@ class TestClassificationVisualizations:
             "reads_clade": [10000, 3000, 1500, 1000, 800, 500, 700, 400],
             "reads": [10000, 3000, 1500, 1000, 800, 500, 700, 400],
             "rank": ["R", "D", "P", "C", "O", "F", "G", "S"],
-            "taxid": ["0", "2", "1224", "1236", "91347", "543", "561", "562"],
+            "taxid": [0, 2, 1224, 1236, 91347, 543, 561, 562],
             "name": [
                 "root",
                 "Bacteria",
@@ -71,7 +71,8 @@ class TestClassificationVisualizations:
                 "Enterobacteriaceae",
                 "Escherichia",
                 "Escherichia coli"
-            ]
+            ],
+            "parent_taxid": [0, 0, 2, 1224, 1236, 91347, 543, 561],
         }
         return pd.DataFrame(data)
 
@@ -190,14 +191,15 @@ class TestDomainFiltering:
             "reads_clade": [10000, 3000, 1500, 2000, 1000],
             "reads": [10000, 3000, 1500, 2000, 1000],
             "rank": ["R", "D", "P", "D", "P"],
-            "taxid": ["0", "2", "1224", "2157", "28890"],
+            "taxid": [0, 2, 1224, 2157, 28890],
             "name": [
                 "root",
                 "  Bacteria",  # 2-space indent for hierarchy
                 "    Proteobacteria",  # 4-space indent (child of Bacteria)
                 "  Archaea",  # 2-space indent for hierarchy
                 "    Euryarchaeota"  # 4-space indent (child of Archaea)
-            ]
+            ],
+            "parent_taxid": [0, 0, 2, 0, 2157],
         }
         return pd.DataFrame(data)
 
@@ -494,8 +496,9 @@ class TestDataIntegrity:
                 "reads_clade": [10000, 3000, 1500],
                 "reads": [10000, 3000, 1500],
                 "rank": ["D", "P", "C"],
-                "taxid": ["2", "1224", "1236"],
-                "name": ["Bacteria", "Proteobacteria", "Gammaproteobacteria"]
+                "taxid": [2, 1224, 1236],
+                "name": ["Bacteria", "Proteobacteria", "Gammaproteobacteria"],
+                "parent_taxid": [0, 2, 1224],
             }
             sample_kraken_df = pd.DataFrame(data)
 
