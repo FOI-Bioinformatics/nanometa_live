@@ -53,6 +53,11 @@ def parse_arguments():
     )
 
     parser.add_argument(
+        "--main_dir", "--main-dir",
+        help="Path to pipeline results directory (sets results_output_directory in config)",
+    )
+
+    parser.add_argument(
         "--data-dir", help="Directory to store application data (default: ~/.nanometa)"
     )
 
@@ -132,8 +137,12 @@ def main():
             config = config_loader.create_default_config()
             logging.info("Created default configuration (no previous session found)")
 
-    # Sync CLI port argument to config so GUI shows correct value
+    # Sync CLI arguments to config
     config["gui_port"] = args.port
+    if args.main_dir:
+        config["results_output_directory"] = os.path.abspath(args.main_dir)
+        config["main_dir"] = os.path.abspath(args.main_dir)
+        logging.info(f"Results directory set to {args.main_dir}")
 
     # Initialize backend manager (but don't start any processes yet)
     backend_manager = BackendManager(data_dir)
