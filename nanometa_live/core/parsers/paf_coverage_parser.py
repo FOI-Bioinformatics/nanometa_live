@@ -15,6 +15,9 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Safety limit: skip references larger than 500 MB to avoid excessive memory allocation.
+MAX_GENOME_SIZE = 500_000_000
+
 
 @dataclass
 class CoverageData:
@@ -65,15 +68,36 @@ def parse_paf_coverage(
     alignments: list = []
 
     with open(paf_path) as fh:
-        for line in fh:
+        for line_num, line in enumerate(fh, 1):
             parts = line.rstrip("\n").split("\t")
             if len(parts) < 12:
+                logger.warning(
+                    "Skipping malformed PAF line %d in %s: expected >=12 columns, got %d",
+                    line_num, paf_path.name, len(parts),
+                )
                 continue
-            tname = parts[5]
-            tlen = int(parts[6])
-            tstart = int(parts[7])
-            tend = int(parts[8])
-            mapq = int(parts[11])
+
+            try:
+                tname = parts[5]
+                tlen = int(parts[6])
+                tstart = int(parts[7])
+                tend = int(parts[8])
+                mapq = int(parts[11])
+            except ValueError:
+                logger.warning(
+                    "Skipping PAF line %d in %s: non-integer value in numeric field",
+                    line_num, paf_path.name,
+                )
+                continue
+
+            # Bounds validation
+            if tstart < 0 or tend <= tstart or tend > tlen:
+                logger.warning(
+                    "Skipping PAF line %d in %s: invalid coordinates "
+                    "(tstart=%d, tend=%d, tlen=%d)",
+                    line_num, paf_path.name, tstart, tend, tlen,
+                )
+                continue
 
             if mapq < min_mapq:
                 continue
@@ -85,14 +109,21 @@ def parse_paf_coverage(
         logger.info("No alignments found in %s", paf_path)
         return {}
 
-    # Allocate depth arrays
+    # Allocate depth arrays, skipping references that exceed the safety limit
     depth_arrays: Dict[str, np.ndarray] = {}
     for rname, rlen in ref_lengths.items():
+        if rlen > MAX_GENOME_SIZE:
+            logger.warning(
+                "Skipping reference %s (%d bp) in %s: exceeds maximum genome size (%d bp)",
+                rname, rlen, paf_path.name, MAX_GENOME_SIZE,
+            )
+            continue
         depth_arrays[rname] = np.zeros(rlen, dtype=np.uint32)
 
-    # Accumulate depth
+    # Accumulate depth (skip alignments to references that were filtered out)
     for tname, tstart, tend in alignments:
-        depth_arrays[tname][tstart:tend] += 1
+        if tname in depth_arrays:
+            depth_arrays[tname][tstart:tend] += 1
 
     # Build CoverageData objects
     results: Dict[str, CoverageData] = {}
