@@ -576,14 +576,20 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             return ["All Samples"], {}
 
     @app.callback(
-        Output("sample-selector", "options"),
+        [
+            Output("sample-selector", "options"),
+            Output("sample-selector", "value"),
+        ],
         Input("available-samples", "data"),
+        State("sample-selector", "value"),
     )
-    def update_sample_selector_options(available_samples):
+    def update_sample_selector_options(available_samples, current_value):
         """
         Update sample selector dropdown options.
 
         Converts the list of available samples into Dash dropdown options.
+        Resets the selected value to 'All Samples' if the current selection
+        is no longer available (e.g. sample directory was removed).
         """
         if not available_samples:
             available_samples = ["All Samples"]
@@ -594,7 +600,12 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 options.append({"label": "All Samples (Aggregated)", "value": sample})
             else:
                 options.append({"label": sample, "value": sample})
-        return options
+
+        # Reset to 'All Samples' if current selection is no longer valid
+        if current_value and current_value not in available_samples:
+            return options, "All Samples"
+
+        return options, no_update
 
     @app.callback(
         Output("selected-sample", "data"),
