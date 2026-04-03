@@ -144,8 +144,20 @@ def _cleanup_stale_cache_entries():
         for key, _ in sorted_entries[:entries_to_remove]:
             del _fastp_cache[key]
 
-    if stale_keys:
-        logging.debug(f"Cache cleanup: removed {len(stale_keys)} stale entries")
+    # Clean mtime cache (enforce max size)
+    if len(_file_mtimes) > CACHE_MAX_ENTRIES:
+        # Remove entries with oldest cached results (no TTL, just cap size)
+        sorted_entries = sorted(_file_mtimes.items(), key=lambda x: x[1][0])
+        entries_to_remove = len(_file_mtimes) - CACHE_MAX_ENTRIES
+        for key, _ in sorted_entries[:entries_to_remove]:
+            del _file_mtimes[key]
+        removed_mtime = entries_to_remove
+    else:
+        removed_mtime = 0
+
+    total_removed = len(stale_keys) + removed_mtime
+    if total_removed:
+        logging.debug(f"Cache cleanup: removed {total_removed} stale entries")
 
 
 def clear_data_cache():
@@ -271,11 +283,11 @@ def check_data_freshness(main_dir: str) -> str:
     raw = "|".join(parts)
     fingerprint = hashlib.md5(raw.encode()).hexdigest()
 
-    # Run cache cleanup only when data has actually changed
+    # Update fingerprint and run periodic cache cleanup (including mtime cache)
     with _cache_lock:
         if fingerprint != _last_freshness_fingerprint:
             _last_freshness_fingerprint = fingerprint
-            _cleanup_stale_cache_entries()
+        _cleanup_stale_cache_entries()
 
     return fingerprint
 
