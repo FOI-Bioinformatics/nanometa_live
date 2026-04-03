@@ -14,6 +14,12 @@ import time
 from pathlib import Path
 
 
+def _backdate_mtime(path, seconds=5):
+    """Set a file's mtime to *seconds* ago so it passes the stability check."""
+    old_time = time.time() - seconds
+    os.utime(str(path), (old_time, old_time))
+
+
 class TestKraken2FileDiscoveryPrecedence:
     """Verify that Kraken2 report file selection follows the expected priority order."""
 
@@ -60,6 +66,8 @@ class TestKraken2FileDiscoveryPrecedence:
         )
         (kraken_dir / "barcode01_batch0.kraken2.report.txt").write_text(batch0)
         (kraken_dir / "barcode01_batch1.kraken2.report.txt").write_text(batch1)
+        _backdate_mtime(kraken_dir / "barcode01_batch0.kraken2.report.txt")
+        _backdate_mtime(kraken_dir / "barcode01_batch1.kraken2.report.txt")
 
         clear_data_cache()
         df = load_kraken_data(str(tmp_path), sample="barcode01")
@@ -137,6 +145,7 @@ class TestSampleDetection:
             "100.00\t100\t100\tS\t562\t    Escherichia coli\n"
         )
         (valid_dir / "barcode01.kraken2.report.txt").write_text(report)
+        _backdate_mtime(valid_dir / "barcode01.kraken2.report.txt")
 
         clear_data_cache()
         resolved = resolve_analysis_directory(str(tmp_path))

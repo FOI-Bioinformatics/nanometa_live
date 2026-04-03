@@ -16,6 +16,7 @@ Creates 8 specialized datasets with variable species counts (1-100) to test:
 import os
 import random
 import json
+import time
 from pathlib import Path
 from typing import List, Dict, Tuple
 
@@ -179,6 +180,13 @@ def create_dataset(output_dir: str, name: str, species_count: int, total_reads: 
 
     with open(Path(output_dir) / "dataset_info.json", 'w') as f:
         json.dump(summary, f, indent=2)
+
+    # Backdate all generated files so they pass the file stability check
+    old_time = time.time() - 5
+    for root, _dirs, files in os.walk(output_dir):
+        for fname in files:
+            fpath = os.path.join(root, fname)
+            os.utime(fpath, (old_time, old_time))
 
     print(f"✓ Created {name}: {species_count} species, {total_reads:,} reads")
 
