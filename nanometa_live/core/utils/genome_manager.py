@@ -98,6 +98,57 @@ def _extract_fasta_accession(fasta_path: Path) -> Optional[str]:
     return None
 
 
+def _validate_fasta(fasta_path: Path) -> bool:
+    """Validate that a file is a valid FASTA file.
+
+    Checks that the file is non-empty, starts with a header line ('>'),
+    and contains only valid nucleotide/amino-acid sequence characters.
+
+    Args:
+        fasta_path: Path to the FASTA file to validate.
+
+    Returns:
+        True if the file appears to be a valid FASTA, False otherwise.
+    """
+    valid_seq_chars = set("ACGTNURYSWKMBDHVacgtnuryswkmbdhv.-\n\r\t ")
+    try:
+        size = fasta_path.stat().st_size
+        if size == 0:
+            logger.error(f"FASTA validation failed: {fasta_path} is empty")
+            return False
+
+        with open(fasta_path, "r") as f:
+            first_line = f.readline()
+            if not first_line.startswith(">"):
+                logger.error(
+                    f"FASTA validation failed: {fasta_path} does not start "
+                    f"with a header line ('>')"
+                )
+                return False
+
+            # Check first 10000 characters of sequence data for validity
+            chars_checked = 0
+            for line in f:
+                if line.startswith(">"):
+                    continue
+                for ch in line:
+                    if ch not in valid_seq_chars:
+                        logger.error(
+                            f"FASTA validation failed: {fasta_path} contains "
+                            f"invalid character '{ch}' in sequence data"
+                        )
+                        return False
+                chars_checked += len(line)
+                if chars_checked > 10000:
+                    break
+
+        return True
+
+    except (OSError, UnicodeDecodeError) as e:
+        logger.error(f"FASTA validation failed for {fasta_path}: {e}")
+        return False
+
+
 class GenomeDownloadManager:
     """
     Manages pathogen reference genome downloads and BLAST database building.
@@ -812,6 +863,11 @@ class GenomeDownloadManager:
 
                     shutil.move(str(temp_fasta), str(output_file))
 
+                if not _validate_fasta(output_file):
+                    logger.error(f"Downloaded virus genome failed FASTA validation: {output_file}")
+                    output_file.unlink(missing_ok=True)
+                    return None, None
+
                 accession = _extract_fasta_accession(output_file)
                 logger.info(
                     f"Downloaded virus genome to {output_file} "
@@ -900,6 +956,11 @@ class GenomeDownloadManager:
                     # Move to final location
                     shutil.move(str(temp_fasta), str(output_file))
 
+                if not _validate_fasta(output_file):
+                    logger.error(f"Downloaded genome failed FASTA validation: {output_file}")
+                    output_file.unlink(missing_ok=True)
+                    return None
+
                 logger.info(f"Downloaded genome to {output_file}")
                 return output_file
 
@@ -987,6 +1048,11 @@ class GenomeDownloadManager:
                         dst.write(src.read())
 
                     shutil.move(str(temp_fasta), str(output_file))
+
+                if not _validate_fasta(output_file):
+                    logger.error(f"Downloaded genome failed FASTA validation: {output_file}")
+                    output_file.unlink(missing_ok=True)
+                    return None, None
 
                 accession = _extract_fasta_accession(output_file)
                 logger.info(
