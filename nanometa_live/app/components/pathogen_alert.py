@@ -17,7 +17,7 @@ THREAT_LEVELS = {
         "color": "#8b0000",
         "bg_color": "#f8d7da",
         "border_color": "#8b0000",
-        "icon": "\u2623",
+        "icon": "bi-exclamation-octagon-fill",
         "description": "Dangerous organism requiring immediate action",
         "action": "Contact your safety officer immediately"
     },
