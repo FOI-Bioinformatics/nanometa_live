@@ -315,7 +315,8 @@ def HighRiskPathogenAlert(
                     html.I(className="bi bi-x-lg"),
                     color="link",
                     className="text-muted",
-                    id={"type": "pathogen-dismiss", "taxid": taxid or 0}
+                    id={"type": "pathogen-dismiss", "taxid": taxid or 0},
+                    title="Dismiss alert"
                 )
             ], className="d-flex align-items-center")
 
