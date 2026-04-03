@@ -20,6 +20,12 @@ from nanometa_live.core.utils.data_loaders import (
 )
 
 
+def _backdate_mtime(path, seconds=5):
+    """Set a file's mtime to *seconds* ago so it passes the stability check."""
+    old_time = time.time() - seconds
+    os.utime(str(path), (old_time, old_time))
+
+
 class TestFileStability:
     """Tests for file stability checking functionality."""
 
@@ -27,6 +33,7 @@ class TestFileStability:
         """A file that is not being modified should be considered stable."""
         test_file = tmp_path / "stable.txt"
         test_file.write_text("This is stable content that is complete.")
+        _backdate_mtime(test_file)
 
         # File should be stable after writing
         assert _is_file_stable(str(test_file)) is True
@@ -87,6 +94,7 @@ class TestFileStability:
         test_file = tmp_path / "at_threshold.txt"
         content = "X" * FILE_STABILITY_MIN_SIZE_BYTES
         test_file.write_text(content)
+        _backdate_mtime(test_file)
 
         assert _is_file_stable(str(test_file)) is True
 
@@ -94,6 +102,7 @@ class TestFileStability:
         test_file_small = tmp_path / "below_threshold.txt"
         content_small = "X" * (FILE_STABILITY_MIN_SIZE_BYTES - 1)
         test_file_small.write_text(content_small)
+        _backdate_mtime(test_file_small)
 
         assert _is_file_stable(str(test_file_small)) is False
 
@@ -128,6 +137,7 @@ class TestParseKraken2Report:
 
     def test_parse_with_stability_check(self, valid_kraken_report):
         """Parse with stability check enabled (default)."""
+        _backdate_mtime(valid_kraken_report)
         df = _parse_kraken2_report(str(valid_kraken_report), check_stability=True)
 
         # Should succeed - file is stable
@@ -197,14 +207,18 @@ class TestVectorizedTaxaAggregation:
 30.00\t300\t300\tS\t1280\t  Staphylococcus aureus
 20.00\t200\t200\tS\t287\t  Pseudomonas aeruginosa
 """
-        (kraken_dir / "sample1.kraken2.report.txt").write_text(report1_content)
+        report1_path = kraken_dir / "sample1.kraken2.report.txt"
+        report1_path.write_text(report1_content)
+        _backdate_mtime(report1_path)
 
         # Second report has same taxa in different order
         report2_content = """40.00\t400\t400\tS\t287\t  Pseudomonas aeruginosa
 35.00\t350\t350\tS\t1280\t  Staphylococcus aureus
 25.00\t250\t250\tS\t562\t  Escherichia coli
 """
-        (kraken_dir / "sample2.kraken2.report.txt").write_text(report2_content)
+        report2_path = kraken_dir / "sample2.kraken2.report.txt"
+        report2_path.write_text(report2_content)
+        _backdate_mtime(report2_path)
 
         # Load and aggregate
         df = load_kraken_data(str(tmp_path), sample=None)
@@ -233,10 +247,14 @@ class TestVectorizedTaxaAggregation:
         # Valid report
         report_content = """100.00\t1000\t1000\tS\t562\t  Escherichia coli
 """
-        (kraken_dir / "valid.kraken2.report.txt").write_text(report_content)
+        valid_path = kraken_dir / "valid.kraken2.report.txt"
+        valid_path.write_text(report_content)
+        _backdate_mtime(valid_path)
 
         # Empty/invalid report (should be skipped)
-        (kraken_dir / "empty.kraken2.report.txt").write_text("")
+        empty_path = kraken_dir / "empty.kraken2.report.txt"
+        empty_path.write_text("")
+        _backdate_mtime(empty_path)
 
         df = load_kraken_data(str(tmp_path), sample=None)
 
