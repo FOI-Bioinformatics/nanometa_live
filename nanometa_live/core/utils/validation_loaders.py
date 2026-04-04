@@ -232,18 +232,22 @@ def load_blast_validation_data(
 
         if sample is None or sample == "All Samples":
             # Look for all files matching this taxid
+            # Supports both legacy .txt and nanometanf .blast.tsv extensions
             patterns = [
                 os.path.join(blast_dir, f"*_{taxid}.txt"),
                 os.path.join(blast_dir, f"{taxid}.txt"),
                 os.path.join(blast_dir, f"*_{taxid}_blast.txt"),
+                os.path.join(blast_dir, f"*_{taxid}.blast.tsv"),
             ]
             for pattern in patterns:
                 blast_files.extend(glob.glob(pattern))
         else:
             # Look for sample-specific file
+            # Supports both legacy .txt and nanometanf .blast.tsv extensions
             patterns = [
                 os.path.join(blast_dir, f"{sample}_{taxid}.txt"),
                 os.path.join(blast_dir, f"{sample}_{taxid}_blast.txt"),
+                os.path.join(blast_dir, f"{sample}_{taxid}.blast.tsv"),
             ]
             for pattern in patterns:
                 if os.path.exists(pattern):

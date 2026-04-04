@@ -477,13 +477,15 @@ def load_seqkit_stats(main_dir: str, sample: Optional[str] = None) -> pd.DataFra
         return pd.DataFrame()
 
     if sample is None or sample == "All Samples":
-        # Load all TSV files
+        # Load all TSV files (flat and nanometanf v1.5 nested layout)
         tsv_files = glob.glob(os.path.join(seqkit_dir, "*.tsv"))
+        tsv_files.extend(glob.glob(os.path.join(seqkit_dir, "*/stats/*.tsv")))
     else:
-        # Load specific sample
+        # Load specific sample (flat and nested layouts)
         sample_patterns = [
             os.path.join(seqkit_dir, f"{sample}.tsv"),
-            os.path.join(seqkit_dir, f"{sample}_*.tsv")
+            os.path.join(seqkit_dir, f"{sample}_*.tsv"),
+            os.path.join(seqkit_dir, f"{sample}/stats/*.tsv"),
         ]
         tsv_files = []
         for pattern in sample_patterns:

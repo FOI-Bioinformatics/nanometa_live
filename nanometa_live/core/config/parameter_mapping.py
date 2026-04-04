@@ -475,12 +475,10 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         "validation_hit_rate_threshold": config.get("validation_hit_rate_threshold", 0.5),
         "validation_identity_threshold": config.get("validation_identity_threshold", 90.0),
         "minimap2_preset": config.get("minimap2_preset", "map-ont"),
-        "minimap2_min_mapq": config.get("minimap2_min_mapq", 30),
+        "minimap2_min_mapq": config.get("minimap2_min_mapq", 10),
 
-        # Legacy parameters (deprecated but kept for compatibility)
+        # Legacy parameter (deprecated, nanometanf maps to run_validation internally)
         "blast_validation": blast_validation_enabled,
-        "min_perc_identity": config.get("min_perc_identity", 90),
-        "e_val_cutoff": config.get("e_val_cutoff", 0.01),
 
         # QC settings
         "qc_tool": config.get("qc_tool", "chopper"),
@@ -541,22 +539,18 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
             logging.warning("Falling back to realtime mode")
             params["realtime_mode"] = True
             params["nanopore_output_dir"] = nanopore_dir
-            params["barcode_dirs"] = (sample_handling == "by_barcode")
+            params["input_dir"] = nanopore_dir
             params["batch_size"] = config.get("batch_size", 10)
             params["batch_interval"] = format_duration(check_interval)
-            params["max_avg_file_age_minutes"] = config.get("max_file_age_minutes", 1000000)
 
     else:
         # Realtime mode: Use watchPath for new files
         params["realtime_mode"] = True
         params["nanopore_output_dir"] = nanopore_dir
+        # input_dir enables nanometanf's auto-detection of barcode subdirectories
+        params["input_dir"] = nanopore_dir
 
-        # barcode_dirs controls how files are grouped in realtime mode:
-        # - True: Each barcode subdirectory is a separate sample
-        # - False: All files in directory belong to one sample
-        params["barcode_dirs"] = (sample_handling == "by_barcode")
-
-        # Pass sample_name for single-sample mode (used when barcode_dirs is False)
+        # Pass sample_name for single-sample mode
         # The pipeline will use this instead of deriving sample ID from filenames
         if sample_handling == "single_sample":
             params["sample_name"] = sample_name
@@ -599,7 +593,7 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         # both existing and new files by combining Channel.fromPath() with Channel.watchPath()
         # No samplesheet generation needed here - existing files will be detected automatically
 
-        barcode_mode = "with barcode directories" if params["barcode_dirs"] else "single sample"
+        barcode_mode = "with barcode directories" if sample_handling == "by_barcode" else "single sample"
         logging.info(f"Realtime mode ({barcode_mode}): Monitoring {nanopore_dir}")
         if params["kraken2_enable_incremental"]:
             logging.info("Incremental Kraken2 classification enabled for cumulative reporting")
