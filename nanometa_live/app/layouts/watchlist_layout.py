@@ -14,9 +14,6 @@ from typing import Any, Dict, List, Optional
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 
-from nanometa_live.app.components.taxid_mapping_ui import (
-    create_mapping_section,
-)
 from nanometa_live.app.components.modern_components import WorkflowStepper
 
 
@@ -40,12 +37,11 @@ def create_watchlist_layout() -> html.Div:
         # Stores for state management
         dcc.Store(id="watchlist-tab-state", data={}),
         dcc.Store(id="watchlist-table-refresh", data=0),  # Counter to force table refresh
-        dcc.Store(id="api-validation-progress", data={"current": 0, "total": 0}),
         dcc.Store(id="api-lookup-result", data=None),
         # Watchlist-local stores
         dcc.Store(id="taxmap-selected-entry", data=None),
         # Note: taxmap-collection, taxmap-database-info, taxmap-rescan-complete,
-        # taxmap-export-download, genome-status-data, genome-download-complete,
+        # genome-status-data, genome-download-complete,
         # blast-build-complete are shared stores defined in app.py
 
         # Main content - Simplified layout with prominent quick-start
