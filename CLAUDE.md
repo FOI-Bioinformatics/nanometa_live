@@ -518,7 +518,19 @@ nanometanf now includes the minimap2 validation subworkflow with PAF output at `
 
 ---
 
-**Last Updated:** 2026-04-03
+**Last Updated:** 2026-04-04
+
+**Production hardening phase 4 (2026-04-04) -- cross-application audit:**
+
+- Parameter mapping: replaced `barcode_dirs` (not in nanometanf schema) with `input_dir` for auto-detection
+- BLAST loader: added `.blast.tsv` glob pattern (nanometanf produces `.blast.tsv`, not `.txt`)
+- SeqKit loader: added nested directory scan for `seqkit/{sample}/stats/*.tsv` (nanometanf v1.5 layout)
+- Fixed `minimap2_min_mapq` default from 30 to 10 (matching nanometanf schema)
+- Removed legacy `min_perc_identity` and `e_val_cutoff` params (silently ignored, duplicated by new names)
+- Removed orphaned `taxmap-export-download` dcc.Download and `create_mapping_section` unused import
+- Removed orphaned stores: `api-validation-progress`, `genome-download-progress`
+- Nextflow log error extraction now captures multiline "Caused by:" context
+- Test coverage: 403 tests passing, 100+ new tests from phases 3-4
 
 **Production hardening phase 3 (2026-04-03):**
 
