@@ -814,6 +814,14 @@ class NextflowManager:
 
                         if clean_line and clean_line not in error_lines:
                             error_lines.append(clean_line)
+                            # Capture "Caused by:" context from following lines
+                            line_idx = tail_lines.index(line)
+                            for offset in range(1, 4):
+                                if line_idx + offset < len(tail_lines):
+                                    ctx = tail_lines[line_idx + offset].strip()
+                                    ctx = re.sub(r'\x1b\[[0-9;]*m', '', ctx)
+                                    if ctx and ('Caused by' in ctx or 'Command error' in ctx or ctx.startswith('>')):
+                                        error_lines.append(ctx)
                         break
 
             # Return the most relevant error lines (up to 3)
