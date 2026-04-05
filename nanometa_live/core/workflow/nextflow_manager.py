@@ -8,6 +8,7 @@ workflow manager while maintaining a compatible interface.
 
 import os
 import json
+import signal
 import time
 import glob
 import logging
@@ -52,6 +53,8 @@ class NextflowManager:
 
         # Pipeline source configuration
         self.pipeline_source = pipeline_source
+
+        self._last_trace_status = {}
 
         # Status dictionary matching SnakemakeManager interface
         self.status = {
@@ -414,17 +417,29 @@ class NextflowManager:
                 self._user_stopped = True
 
                 if self.process and self.process.poll() is None:
-                    # Try graceful termination
-                    self.process.terminate()
-                    logging.info("Sent SIGTERM to Nextflow process")
+                    # Terminate the entire process group (Nextflow + child processes
+                    # such as Docker, Kraken2, etc.) so nothing is left running.
+                    try:
+                        pgid = os.getpgid(self.process.pid)
+                        os.killpg(pgid, signal.SIGTERM)
+                        logging.info(
+                            f"Sent SIGTERM to process group {pgid}"
+                        )
+                    except (ProcessLookupError, PermissionError):
+                        # Process group already gone; fall back to direct terminate
+                        self.process.terminate()
+                        logging.info("Sent SIGTERM to Nextflow process")
 
                     try:
                         self.process.wait(timeout=30)
                         message = "Pipeline stopped gracefully"
                         logging.info(message)
                     except subprocess.TimeoutExpired:
-                        # Force kill if necessary
-                        self.process.kill()
+                        # Force kill the process group if still alive
+                        try:
+                            os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
+                        except (ProcessLookupError, PermissionError):
+                            self.process.kill()
                         self.process.wait()
                         message = "Pipeline forcefully stopped (timeout)"
                         logging.warning(message)
@@ -466,7 +481,8 @@ class NextflowManager:
                     cmd,
                     stdout=log,
                     stderr=subprocess.STDOUT,
-                    cwd=self.data_dir
+                    cwd=self.data_dir,
+                    start_new_session=True,
                 )
 
                 self.status["nextflow_pid"] = self.process.pid
@@ -560,6 +576,15 @@ class NextflowManager:
             if not os.path.exists(trace_path):
                 return {}
 
+            # Check file stability — avoid reading while Nextflow is writing
+            try:
+                stat = os.stat(trace_path)
+                age = time.time() - stat.st_mtime
+                if age < 1.0:
+                    return self._last_trace_status or {}
+            except OSError:
+                return {}
+
             with open(trace_path, 'r') as f:
                 lines = f.readlines()
 
@@ -651,7 +676,7 @@ class NextflowManager:
                     "total": counts["total"]
                 })
 
-            return {
+            result = {
                 "processes_complete": completed,
                 "processes_running": running,
                 "processes_failed": failed,
@@ -660,10 +685,12 @@ class NextflowManager:
                 "current_stage": current_stage,
                 "stage_progress": stage_progress
             }
+            self._last_trace_status = result
+            return result
 
         except Exception as e:
             logging.error(f"Error parsing trace file: {e}")
-            return {}
+            return self._last_trace_status or {}
 
     def _parse_realtime_stats(self) -> Dict[str, Any]:
         """
