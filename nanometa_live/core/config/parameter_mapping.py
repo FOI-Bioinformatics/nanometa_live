@@ -16,6 +16,7 @@ import glob
 import csv
 import re
 import logging
+from pathlib import Path
 from typing import Dict, Any, Tuple, List
 
 from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
@@ -243,7 +244,7 @@ def generate_samplesheet(
                 barcode_name = os.path.basename(barcode_dir)
                 fastq_files = glob.glob(os.path.join(barcode_dir, "*.fastq*"))
                 for fastq_file in sorted(fastq_files):
-                    rows.append([barcode_name, os.path.abspath(fastq_file)])
+                    rows.append([barcode_name, str(Path(fastq_file).resolve())])
 
         if not rows:
             raise ValueError(f"No FASTQ files found in barcode directories under {input_dir}")
@@ -259,7 +260,7 @@ def generate_samplesheet(
         for fastq_file in fastq_files:
             if sample_handling == "single_sample":
                 # All files belong to one sample
-                rows.append([sample_name, os.path.abspath(fastq_file)])
+                rows.append([sample_name, str(Path(fastq_file).resolve())])
             else:
                 # per_file mode: each file is a separate sample
                 basename = os.path.basename(fastq_file)
@@ -270,7 +271,7 @@ def generate_samplesheet(
                         break
                 # Clean sample name
                 file_sample_name = re.sub(r'[^\w]', '_', file_sample_name)
-                rows.append([file_sample_name, os.path.abspath(fastq_file)])
+                rows.append([file_sample_name, str(Path(fastq_file).resolve())])
 
     # Write samplesheet
     with open(output_path, 'w', newline='') as f:
