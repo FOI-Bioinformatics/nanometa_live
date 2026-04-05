@@ -236,6 +236,10 @@ def generate_samplesheet(
     if sample_handling == "by_barcode":
         # Look for barcode subdirectories
         barcode_dirs = sorted(glob.glob(os.path.join(input_dir, "barcode*")))
+        # Also include unclassified reads if present
+        unclassified_dir = os.path.join(input_dir, "unclassified")
+        if os.path.isdir(unclassified_dir):
+            barcode_dirs.append(unclassified_dir)
         if not barcode_dirs:
             raise ValueError(f"No barcode directories found in {input_dir}")
 
