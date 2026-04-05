@@ -7,6 +7,7 @@ and components of the application.
 
 import os
 import logging
+import threading
 import time
 
 from dash import Dash, Input, Output, State, callback, ctx, html, no_update
@@ -51,6 +52,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     # Internet Auto-Detection (startup suggestion)
     # ========================================================================
 
+    _internet_check_lock = threading.Lock()
     _internet_checked = {"done": False}
 
     @app.callback(
@@ -60,9 +62,10 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     )
     def check_internet_on_startup(config):
         """On first load, check internet and suggest offline mode if unreachable."""
-        if _internet_checked["done"]:
-            return no_update
-        _internet_checked["done"] = True
+        with _internet_check_lock:
+            if _internet_checked["done"]:
+                return no_update
+            _internet_checked["done"] = True
 
         if config and config.get("offline_mode"):
             return no_update
