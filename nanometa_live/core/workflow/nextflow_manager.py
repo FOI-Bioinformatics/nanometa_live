@@ -595,9 +595,14 @@ class NextflowManager:
             header = lines[0].strip().split('\t')
             col_indices = {col: idx for idx, col in enumerate(header)}
 
-            # Default column indices (Nextflow standard trace format)
-            name_idx = col_indices.get('name', 3)
-            status_idx = col_indices.get('status', 4)
+            name_col = col_indices.get('name')
+            status_col = col_indices.get('status')
+            if name_col is None or status_col is None:
+                logging.warning("Trace file missing required columns (name, status)")
+                return {}
+
+            name_idx = name_col
+            status_idx = status_col
             duration_idx = col_indices.get('duration', col_indices.get('realtime', -1))
 
             # Parse process status (skip header)
