@@ -241,7 +241,7 @@ class BundleManager:
         with tempfile.TemporaryDirectory() as tmpdir:
             # Extract bundle
             with tarfile.open(bundle_path, "r:gz") as tar:
-                tar.extractall(path=tmpdir)
+                tar.extractall(path=tmpdir, filter='data')
 
             tmp = Path(tmpdir)
 
