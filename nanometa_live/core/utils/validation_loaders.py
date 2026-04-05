@@ -131,69 +131,70 @@ def load_blast_validation_data(
     ]
 
     for agg_path in aggregate_paths:
-        if os.path.exists(agg_path):
-            try:
-                with open(agg_path, 'r') as f:
-                    agg_data = json.load(f)
+        try:
+            with open(agg_path, 'r') as f:
+                agg_data = json.load(f)
 
-                results = {}
-                filter_sample = None if (sample is None or sample == "All Samples") else sample
+            results = {}
+            filter_sample = None if (sample is None or sample == "All Samples") else sample
 
-                for sample_id, taxid_entries in agg_data.get('results', {}).items():
-                    if filter_sample and sample_id != filter_sample:
+            for sample_id, taxid_entries in agg_data.get('results', {}).items():
+                if filter_sample and sample_id != filter_sample:
+                    continue
+                for tid_str, entry in taxid_entries.items():
+                    tid = int(tid_str)
+                    # Check if this taxid is in the watchlist
+                    watchlist_match = None
+                    for s in watchlist:
+                        if s.get('taxid') and int(s['taxid']) == tid:
+                            watchlist_match = s
+                            break
+                    if not watchlist_match:
                         continue
-                    for tid_str, entry in taxid_entries.items():
-                        tid = int(tid_str)
-                        # Check if this taxid is in the watchlist
-                        watchlist_match = None
-                        for s in watchlist:
-                            if s.get('taxid') and int(s['taxid']) == tid:
-                                watchlist_match = s
-                                break
-                        if not watchlist_match:
-                            continue
 
-                        # BLAST data
-                        blast_hits = entry.get('blast_hits', 0)
-                        hit_rate = entry.get('hit_rate', 0.0)
-                        kraken_reads = entry.get('kraken_reads', 0)
+                    # BLAST data
+                    blast_hits = entry.get('blast_hits', 0)
+                    hit_rate = entry.get('hit_rate', 0.0)
+                    kraken_reads = entry.get('kraken_reads', 0)
 
-                        result_entry = {
-                            'taxid': tid,
-                            'name': watchlist_match.get('name', f'Species {tid}'),
-                            'total_reads': kraken_reads,
-                            'validated_reads': blast_hits,
-                            'validation_rate': round(hit_rate * 100 if hit_rate <= 1.0 else hit_rate, 1),
-                            'status': entry.get('validation_status', 'no_data'),
-                            'avg_identity': entry.get('avg_identity', 0.0),
-                        }
+                    result_entry = {
+                        'taxid': tid,
+                        'name': watchlist_match.get('name', f'Species {tid}'),
+                        'total_reads': kraken_reads,
+                        'validated_reads': blast_hits,
+                        'validation_rate': round(hit_rate * 100 if hit_rate <= 1.0 else hit_rate, 1),
+                        'status': entry.get('validation_status', 'no_data'),
+                        'avg_identity': entry.get('avg_identity', 0.0),
+                    }
 
-                        # Map status values
-                        if result_entry['status'] == 'confirmed':
-                            result_entry['status'] = 'validated'
-                        elif result_entry['status'] == 'uncertain':
-                            result_entry['status'] = 'partial'
-                        elif result_entry['status'] == 'rejected':
-                            result_entry['status'] = 'failed'
+                    # Map status values
+                    if result_entry['status'] == 'confirmed':
+                        result_entry['status'] = 'validated'
+                    elif result_entry['status'] == 'uncertain':
+                        result_entry['status'] = 'partial'
+                    elif result_entry['status'] == 'rejected':
+                        result_entry['status'] = 'failed'
 
-                        # Add minimap2 fields if present
-                        if entry.get('minimap2_mapped') is not None:
-                            result_entry['minimap2_validated_reads'] = int(entry.get('minimap2_mapped', 0))
-                            mm2_rate = entry.get('minimap2_hit_rate', 0.0)
-                            result_entry['minimap2_validation_rate'] = round(
-                                mm2_rate * 100 if mm2_rate <= 1.0 else mm2_rate, 1
-                            )
-                            result_entry['minimap2_identity'] = float(entry.get('minimap2_identity', 0.0))
-                            result_entry['minimap2_avg_mapq'] = float(entry.get('avg_mapq', 0.0))
-                            result_entry['minimap2_status'] = entry.get('minimap2_status', 'no_data')
+                    # Add minimap2 fields if present
+                    if entry.get('minimap2_mapped') is not None:
+                        result_entry['minimap2_validated_reads'] = int(entry.get('minimap2_mapped', 0))
+                        mm2_rate = entry.get('minimap2_hit_rate', 0.0)
+                        result_entry['minimap2_validation_rate'] = round(
+                            mm2_rate * 100 if mm2_rate <= 1.0 else mm2_rate, 1
+                        )
+                        result_entry['minimap2_identity'] = float(entry.get('minimap2_identity', 0.0))
+                        result_entry['minimap2_avg_mapq'] = float(entry.get('avg_mapq', 0.0))
+                        result_entry['minimap2_status'] = entry.get('minimap2_status', 'no_data')
 
-                        results[tid] = result_entry
+                    results[tid] = result_entry
 
-                if results:
-                    logging.info(f"Loaded validation data from aggregate JSON: {len(results)} entries")
-                    return results
-            except Exception as e:
-                logging.warning(f"Error reading aggregate validation JSON {agg_path}: {e}")
+            if results:
+                logging.info(f"Loaded validation data from aggregate JSON: {len(results)} entries")
+                return results
+        except (FileNotFoundError, OSError):
+            continue  # File was deleted or inaccessible
+        except Exception as e:
+            logging.warning(f"Error reading aggregate validation JSON {agg_path}: {e}")
 
     # nanometanf v1.1+ publishes BLAST results to validation/blast/
     blast_dir = os.path.join(main_dir, "validation", "blast")
@@ -250,21 +251,21 @@ def load_blast_validation_data(
                 os.path.join(blast_dir, f"{sample}_{taxid}.blast.tsv"),
             ]
             for pattern in patterns:
-                if os.path.exists(pattern):
-                    blast_files.append(pattern)
+                blast_files.append(pattern)
 
         # Count validated reads from all matching files
         unique_reads = set()
 
         for blast_file in blast_files:
             try:
-                if os.path.exists(blast_file) and os.path.getsize(blast_file) > 0:
-                    with open(blast_file, 'r') as f:
-                        for line in f:
-                            if line.strip():
-                                parts = line.strip().split('\t')
-                                if parts:
-                                    unique_reads.add(parts[0])
+                with open(blast_file, 'r') as f:
+                    for line in f:
+                        if line.strip():
+                            parts = line.strip().split('\t')
+                            if parts:
+                                unique_reads.add(parts[0])
+            except (FileNotFoundError, OSError):
+                continue  # File was deleted or inaccessible
             except Exception as e:
                 logging.warning(f"Error reading BLAST file {blast_file}: {e}")
                 continue
