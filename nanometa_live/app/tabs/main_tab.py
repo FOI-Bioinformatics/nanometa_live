@@ -12,13 +12,16 @@ Includes on-demand BLAST validation for unexpected organisms discovered during
 analysis that are not on the pre-configured watchlist.
 """
 
+import json
 import logging
+import os
 import pandas as pd
 from datetime import datetime
 from typing import List
 
 import dash
 from dash import Dash, Input, Output, State, ctx, no_update, html
+from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
 from nanometa_live.core.utils.data_loaders import load_kraken_data, load_blast_validation_data
@@ -987,6 +990,40 @@ def register_main_callbacks(app: Dash):
     # =========================================================================
 
     @app.callback(
+        Output("on-demand-validation-results", "data"),
+        Input("update-interval", "n_intervals"),
+        State("app-config", "data"),
+        State("on-demand-validation-results", "data"),
+        prevent_initial_call=False,
+    )
+    def reload_on_demand_results(n_intervals, config, existing_results):
+        """Load existing on-demand validation results from disk on initial page load."""
+        if existing_results:
+            raise PreventUpdate
+
+        results_dir = config.get("main_dir", "") if config else ""
+        if not results_dir:
+            raise PreventUpdate
+
+        od_dir = os.path.join(results_dir, "on_demand_validation")
+        if not os.path.isdir(od_dir):
+            raise PreventUpdate
+
+        results = {}
+        for f in os.listdir(od_dir):
+            if f.endswith("_validation.json"):
+                try:
+                    with open(os.path.join(od_dir, f)) as fh:
+                        data = json.load(fh)
+                    taxid = str(data.get("taxid", ""))
+                    if taxid:
+                        results[taxid] = data
+                except Exception:
+                    continue
+
+        return results if results else no_update
+
+    @app.callback(
         [
             Output("on-demand-validation-modal", "is_open"),
             Output("on-demand-validation-target", "data"),
@@ -1138,6 +1175,25 @@ def register_main_callbacks(app: Dash):
                 add_log("Error: Results directory not configured", "error")
                 return (
                     0, "Validation failed - no results directory",
+                    log_entries, [], {"display": "none"},
+                    {"display": "inline-block"}, {"display": "inline-block"}, {"display": "none"},
+                    existing_results or {}
+                )
+
+            # Check that Kraken2 per-read output files exist before attempting validation
+            kraken2_dir = os.path.join(main_dir, "kraken2")
+            has_output_files = False
+            if os.path.isdir(kraken2_dir):
+                for f in os.listdir(kraken2_dir):
+                    if ".output" in f or f.endswith(".kraken2"):
+                        has_output_files = True
+                        break
+
+            if not has_output_files:
+                add_log("Kraken2 per-read output files not found", "error")
+                return (
+                    0,
+                    "Kraken2 per-read output files not found. Enable 'Save read assignments' in the configuration and re-run the pipeline.",
                     log_entries, [], {"display": "none"},
                     {"display": "inline-block"}, {"display": "inline-block"}, {"display": "none"},
                     existing_results or {}
