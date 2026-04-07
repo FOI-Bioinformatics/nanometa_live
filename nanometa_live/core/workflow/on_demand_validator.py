@@ -163,7 +163,7 @@ class OnDemandValidator:
 
     def has_blast_db(self, taxid: int) -> bool:
         """Check if a BLAST database exists for a taxid."""
-        blast_db = self.blast_dir / f"{taxid}.fasta.nsq"
+        blast_db = self.blast_dir / f"{taxid}.fasta.nhr"
         return blast_db.exists()
 
     def download_genome(
