@@ -1135,10 +1135,11 @@ def register_main_callbacks(app: Dash):
             State("on-demand-validation-target", "data"),
             State("app-config", "data"),
             State("on-demand-validation-results", "data"),
+            State("on-demand-method-select", "value"),
         ],
         prevent_initial_call=True,
     )
-    def run_on_demand_validation(n_clicks, target, config, existing_results):
+    def run_on_demand_validation(n_clicks, target, config, existing_results, validation_method):
         """Run on-demand BLAST validation for the selected organism."""
         if not n_clicks or not target:
             return no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update
@@ -1214,10 +1215,12 @@ def register_main_callbacks(app: Dash):
 
             # Run validation (synchronous for now - could be made async with background callback)
             # Note: For production, this should use Dash background callbacks
+            method = validation_method if validation_method in ("blast", "minimap2", "both") else "blast"
             result = validator.validate_organism(
                 taxid=taxid,
                 name=name,
-                sample=sample or "all"
+                sample=sample or "all",
+                method=method,
             )
 
             if result.success:
