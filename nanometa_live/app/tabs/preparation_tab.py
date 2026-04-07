@@ -1873,4 +1873,77 @@ def register_preparation_callbacks(app):
 
         return alert, wizard_state, False
 
+    # =========================================================================
+    # Kraken2 Database Download button
+    # =========================================================================
+
+    @app.callback(
+        Output("download-kraken-db-btn", "disabled"),
+        Input("external-kraken-input", "value"),
+        prevent_initial_call=False,
+    )
+    def toggle_kraken_download_btn(selected):
+        """Enable the download button only when a database is selected."""
+        return not bool(selected)
+
+    @app.callback(
+        Output("kraken-download-status", "children"),
+        Input("download-kraken-db-btn", "n_clicks"),
+        State("external-kraken-input", "value"),
+        State("kraken-databases", "data"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
+        background=True,
+        manager=background_callback_manager,
+        running=[
+            (Output("download-kraken-db-btn", "disabled"), True, False),
+        ],
+    )
+    def download_kraken_database(set_progress, n_clicks, selected_db, databases, config):
+        """Download the selected Kraken2 database."""
+        if not n_clicks or not selected_db:
+            raise PreventUpdate
+
+        db_info = (databases or {}).get(selected_db)
+        if not db_info:
+            return dbc.Alert(f"Database '{selected_db}' not found.", color="danger")
+
+        dest_dir = (config or {}).get("kraken_db", "") or str(Path.home() / ".nanometa" / "kraken2_databases")
+
+        try:
+            from nanometa_live.core.utils.kraken_utils import download_kraken_database as _download
+            success, message = _download(db_info, dest_dir)
+            if success:
+                return dbc.Alert(
+                    [html.I(className="bi bi-check-circle me-2"), message],
+                    color="success",
+                )
+            return dbc.Alert(
+                [html.I(className="bi bi-x-circle me-2"), message],
+                color="danger",
+            )
+        except Exception as e:
+            logger.error(f"Kraken2 database download failed: {e}", exc_info=True)
+            return dbc.Alert(f"Download failed: {e}", color="danger")
+
+    # =========================================================================
+    # Wizard Cancel button
+    # =========================================================================
+
+    @app.callback(
+        Output("wizard-run-all-btn", "disabled", allow_duplicate=True),
+        Input("wizard-cancel-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def cancel_wizard(n_clicks):
+        """Re-enable the run-all button when cancel is clicked.
+
+        The wizard-run-all-btn background callback does not expose a cancel
+        input, so this callback simply re-enables the button so the user can
+        restart after clicking Cancel.
+        """
+        if not n_clicks:
+            raise PreventUpdate
+        return False
+
     logger.info("Preparation tab callbacks registered")

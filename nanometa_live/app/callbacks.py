@@ -979,21 +979,17 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             if current_tab != "dashboard-tab":
                 analysis_name = config.get("analysis_name", "Analysis") if config else "Analysis"
                 toast_msg = {
-                    "header": "Analysis Complete",
-                    "body": f"{analysis_name} has finished. Viewing results on Dashboard.",
-                    "icon": "bi-check-circle-fill",
-                    "duration": 5000,
-                    "type": "success"
+                    "type": "success",
+                    "title": "Analysis Complete",
+                    "message": f"{analysis_name} has finished. Viewing results on Dashboard.",
                 }
                 return "dashboard-tab", new_prev_state, toast_msg
             else:
                 # Already on dashboard, just show toast
                 toast_msg = {
-                    "header": "Analysis Complete",
-                    "body": "Results are now available.",
-                    "icon": "bi-check-circle-fill",
-                    "duration": 4000,
-                    "type": "success"
+                    "type": "success",
+                    "title": "Analysis Complete",
+                    "message": "Results are now available.",
                 }
                 return no_update, new_prev_state, toast_msg
 
