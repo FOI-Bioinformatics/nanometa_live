@@ -37,7 +37,6 @@ from nanometa_live.app.tabs.kraken2_helpers import (
     COLORS_OCEAN,
     COLOR_SCHEMES,
     TAXONOMY_COLORS,
-    normalize_ranks,
     recalculate_cumulative_reads,
     build_parent_map,
     filter_by_domains,
@@ -592,13 +591,10 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
         fig.update_layout(**_info_layout)
         return fig
 
-    # Normalize extended PlusPFP ranks (R2->D, K->D, P1-P9->P, etc.)
-    # before any rank-based filtering or grouping
-    kraken_df = normalize_ranks(kraken_df)
-
-    # CRITICAL FIX: Find which tax levels actually exist in the data
+    # Filter to standard taxonomy ranks only — sub-ranks (S1, S2, F3, etc.)
+    # are excluded because their cumulative reads are already counted in the
+    # parent rank's cumulative total, and including them would double-count.
     available_ranks = kraken_df["rank"].unique().tolist()
-    # Filter tax_levels to only those actually present in data
     tax_levels = [level for level in tax_levels if level in available_ranks]
 
     logging.debug(f"Sankey: Available ranks in data: {available_ranks}")
@@ -1179,9 +1175,9 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, colo
     # Ensure clean integer index to prevent duplicate-index issues with .loc[]
     kraken_df = kraken_df.reset_index(drop=True)
 
-    # Normalize extended PlusPFP ranks (R2->D, K->D, P1-P9->P, etc.)
-    # before any rank-based filtering or grouping
-    kraken_df = normalize_ranks(kraken_df)
+    # Sub-ranks (S1, S2, F3, etc.) are excluded by the tax_levels filter below.
+    # No rank normalization needed — their cumulative reads are already counted
+    # in the parent rank, so normalizing would double-count.
 
     # Use provided color palette or default
     palette = color_palette or TAXONOMY_COLORS
