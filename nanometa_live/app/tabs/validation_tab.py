@@ -556,18 +556,21 @@ def register_validation_callbacks(app: Dash):
         return options, first_value
 
     @app.callback(
-        Output("coverage-species-selector", "value", allow_duplicate=True),
+        [
+            Output("coverage-species-selector", "value", allow_duplicate=True),
+            Output("validation-sub-tabs", "active_tab", allow_duplicate=True),
+        ],
         Input({"type": "view-coverage-btn", "index": ALL}, "n_clicks"),
         prevent_initial_call=True,
     )
     def handle_view_coverage_click(n_clicks_list):
-        """Set coverage selector when a View Coverage button is clicked."""
+        """Set coverage selector and switch to coverage sub-tab when a View Coverage button is clicked."""
         if not n_clicks_list or not any(n_clicks_list):
-            return no_update
+            return no_update, no_update
         triggered = ctx.triggered_id
         if triggered and isinstance(triggered, dict):
-            return triggered.get("index", no_update)
-        return no_update
+            return triggered.get("index", no_update), "coverage-tab"
+        return no_update, no_update
 
     @app.callback(
         [
