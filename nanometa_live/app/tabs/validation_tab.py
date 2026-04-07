@@ -395,6 +395,8 @@ def register_validation_callbacks(app: Dash):
                 return no_update
 
             df = pd.DataFrame(blast_results)
+            if "coverage_breadth" in df.columns:
+                df["coverage_breadth"] = (df["coverage_breadth"] * 100).round(1)
             analysis_name = config.get("analysis_name", "analysis") if config else "analysis"
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"blast_validation_{analysis_name}_{timestamp}.csv"
