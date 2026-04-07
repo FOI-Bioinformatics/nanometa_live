@@ -64,7 +64,7 @@ class ValidationResult:
         percent_identity_min: Minimum identity in alignments
         percent_identity_max: Maximum identity in alignments
         alignment_length_mean: Mean alignment length
-        coverage_breadth: Fraction of reference genome covered
+        coverage_breadth: Mean fraction of query reads aligned (from BLAST qcovs)
         coverage_depth_mean: Mean coverage depth across reference
         avg_mapq: Mean mapping quality (minimap2 only)
         validation_method: Method used (blast, minimap2)
