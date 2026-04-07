@@ -204,9 +204,8 @@ class NextflowManager:
             return source, None
 
         elif source in ("master", "main", "dev"):
-            # Shorthand for remote:branch (support both main and master for compatibility)
-            actual_branch = "master" if source == "main" else source
-            return self.DEFAULT_REMOTE_REPO, actual_branch
+            # Shorthand for remote:branch
+            return self.DEFAULT_REMOTE_REPO, source
 
         else:
             # Assume it's a local path (may not exist yet)

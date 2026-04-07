@@ -110,7 +110,7 @@ def load_fastp_data(main_dir: str, sample: Optional[str] = None) -> Dict[str, An
     fastp_dir = os.path.join(main_dir, "fastp")
 
     if not os.path.exists(fastp_dir):
-        logging.warning(f"FASTP directory not found: {fastp_dir}")
+        logging.debug(f"FASTP directory not found: {fastp_dir}")
         return _empty_fastp_stats()
 
     # Fast mtime-based check: skip parsing if fastp directory is unchanged
