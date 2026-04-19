@@ -14,12 +14,6 @@ import plotly.express as px
 
 from nanometa_live.app.components.modern_components import EmptyStateMessage
 from nanometa_live.app.utils.plotly_theme import CHART_CONFIG
-from nanometa_live.app.components.organism_components import (
-    FilteringBreakdownVisual,
-    KeyMetricsSummaryCard,
-    BaseQualityCard,
-    ReadStatisticsCard,
-)
 
 
 def create_qc_layout():
@@ -39,42 +33,27 @@ def create_qc_layout():
     bp_fig = px.bar(title="Base Pairs per Batch")
 
     return html.Div([
-        # Centralized QC data cache - loaded once per interval cycle
-        dcc.Store(id="qc-data-cache", data={}),
         # Download component for QC report export
         dcc.Download(id="download-qc-report"),
 
-        # KEY METRICS SUMMARY CARD
-        # Provides at-a-glance overview of key QC metrics (non-sticky, matching QualityScoreIndicator style)
+        # STAGE STRIP - Pipeline overview: Raw -> Quality-filtered -> Classified
         dcc.Loading(
-            id="loading-qc-metrics",
+            id="loading-stage-strip",
             type="circle",
             color="#198754",
             children=[
-                html.Div(
-                    id="qc-metrics-summary-container",
-                    children=[
-                        EmptyStateMessage(
-                            title="No QC Metrics",
-                            message="Key metrics will appear here once data is loaded",
-                            icon="bi-speedometer2"
-                        )
-                    ],
-                    className="d-flex justify-content-center mb-4"
-                )
+                html.Div(id="qc-stage-strip", className="mb-4")
             ]
         ),
-
-        html.Hr(className="my-3"),
 
         # ACTION GUIDANCE BANNER - shown dynamically by callback
         html.Div(id="qc-action-guidance-container", className="mb-3"),
 
-        # LEVEL 1: Base Quality and Read Statistics Cards (NEW)
+        # Read Quality and Read Length Cards (after-filtering metrics)
         html.H4([
-            "Sequencing Quality",
+            "Read Quality \u2014 After filtering",
             html.Small(
-                " - How good is the raw data from the sequencer?",
+                " (SeqKit \u00b7 chopped.fastq.gz)",
                 className="text-muted fw-normal",
                 style={"fontSize": "14px"}
             ),
@@ -128,37 +107,11 @@ def create_qc_layout():
 
         html.Hr(className="my-3"),
 
-        # LEVEL 2: Filtering Breakdown (Visual Bar Chart)
-        html.H4([
-            "Quality Filtering Breakdown",
-            html.Small(
-                " - How many sequences passed quality checks?",
-                className="text-muted fw-normal",
-                style={"fontSize": "14px"}
-            ),
-        ], className="mb-3"),
-        dcc.Loading(
-            id="loading-filtering-breakdown",
-            type="circle",
-            color="#0d6efd",
-            children=[
-                html.Div(id="filtering-breakdown-container", children=[
-                    EmptyStateMessage(
-                        title="No Filtering Data",
-                        message="Filtering statistics will appear here once analysis is complete",
-                        icon="bi-funnel"
-                    )
-                ], className="mb-4")
-            ]
-        ),
-
-        html.Hr(className="my-3"),
-
-        # LEVEL 3: Per-Sample Quality Table
+        # Per-Sample Quality Table
         html.H4([
             "Per-Sample Quality",
             html.Small(
-                " - Individual results for each barcode/sample",
+                " \u2014 individual results for each barcode/sample",
                 className="text-muted fw-normal",
                 style={"fontSize": "14px"}
             ),
@@ -167,25 +120,122 @@ def create_qc_layout():
             dbc.Col([
                 dbc.Card([
                     dbc.CardHeader([
-                        html.H5("Sample Breakdown", className="mb-0"),
-                        html.Small("Quality metrics for each sample/barcode", className="text-muted ms-2")
+                        html.Div([
+                            html.H5("Sample Breakdown", className="mb-0"),
+                            html.Small(
+                                "Two horizons shown side-by-side: "
+                                "cumulative since run start, and the latest batch only.",
+                                className="text-muted d-block mt-1",
+                            ),
+                        ])
                     ]),
                     dbc.CardBody([
                         dag.AgGrid(
                             id="per-sample-table",
                             columnDefs=[
-                                {"headerName": "Sample", "field": "sample"},
                                 {
-                                    "headerName": "Sequences",
-                                    "field": "reads",
-                                    "headerTooltip": "Number of DNA sequence fragments in this sample",
-                                    "type": "numericColumn",
-                                    "valueFormatter": {"function": "d3.format(',')(params.value)"},
+                                    "headerName": "Sample",
+                                    "field": "sample",
+                                    "pinned": "left",
+                                    "minWidth": 130,
                                 },
                                 {
-                                    "headerName": "Avg. Quality",
+                                    # Group: cumulative horizon (matches Stage Strip, Dashboard, Organism tab)
+                                    "headerName": "Cumulative (since run start)",
+                                    "headerClass": "qc-col-group-cumul",
+                                    "children": [
+                                        {
+                                            "headerName": "Filtered reads",
+                                            "field": "reads_cumul",
+                                            "headerTooltip": (
+                                                "Reads that passed the quality filter, "
+                                                "summed across every batch since the run started. "
+                                                "Source: Kraken2 cumulative report."
+                                            ),
+                                            "type": "numericColumn",
+                                            "valueFormatter": {
+                                                "function": "params.value == null ? '' : d3.format(',')(params.value)"
+                                            },
+                                            "minWidth": 130,
+                                        },
+                                        {
+                                            "headerName": "Classification rate",
+                                            "field": "classified_rate_cumul",
+                                            "headerTooltip": (
+                                                "Fraction of filtered reads matched to a known organism, "
+                                                "across the whole run. Source: Kraken2 cumulative report."
+                                            ),
+                                            "cellStyle": {
+                                                "styleConditions": [
+                                                    {
+                                                        "condition": "params.data && params.data.classified_rate_cumul_num >= 80",
+                                                        "style": {"backgroundColor": "#d4edda", "color": "#155724", "fontWeight": "600"},
+                                                    },
+                                                    {
+                                                        "condition": "params.data && params.data.classified_rate_cumul_num >= 50 && params.data.classified_rate_cumul_num < 80",
+                                                        "style": {"backgroundColor": "#fff3cd", "color": "#664d03"},
+                                                    },
+                                                    {
+                                                        "condition": "params.data && params.data.classified_rate_cumul_num < 50",
+                                                        "style": {"backgroundColor": "#f8d7da", "color": "#721c24"},
+                                                    },
+                                                ],
+                                            },
+                                            "minWidth": 140,
+                                        },
+                                    ],
+                                },
+                                {
+                                    # Group: latest-batch horizon (what happened in the most recent batch)
+                                    "headerName": "Latest batch",
+                                    "headerClass": "qc-col-group-latest",
+                                    "children": [
+                                        {
+                                            "headerName": "Filtered reads",
+                                            "field": "reads_latest",
+                                            "headerTooltip": (
+                                                "Reads processed by Kraken2 in the most recent batch only. "
+                                                "Equal to the cumulative value in batch-mode runs."
+                                            ),
+                                            "type": "numericColumn",
+                                            "valueFormatter": {
+                                                "function": "params.value == null ? '' : d3.format(',')(params.value)"
+                                            },
+                                            "minWidth": 130,
+                                            "cellClass": "qc-col-latest-cell",
+                                        },
+                                        {
+                                            "headerName": "Classification rate",
+                                            "field": "classified_rate_latest",
+                                            "headerTooltip": (
+                                                "Fraction of reads classified in the most recent batch only."
+                                            ),
+                                            "cellStyle": {
+                                                "styleConditions": [
+                                                    {
+                                                        "condition": "params.data && params.data.classified_rate_latest_num >= 80",
+                                                        "style": {"color": "#155724", "fontWeight": "600"},
+                                                    },
+                                                    {
+                                                        "condition": "params.data && params.data.classified_rate_latest_num >= 50 && params.data.classified_rate_latest_num < 80",
+                                                        "style": {"color": "#664d03"},
+                                                    },
+                                                    {
+                                                        "condition": "params.data && params.data.classified_rate_latest_num > 0 && params.data.classified_rate_latest_num < 50",
+                                                        "style": {"color": "#721c24"},
+                                                    },
+                                                ],
+                                            },
+                                            "minWidth": 140,
+                                            "cellClass": "qc-col-latest-cell",
+                                        },
+                                    ],
+                                },
+                                {
+                                    "headerName": "Avg. Q score",
                                     "field": "mean_quality",
-                                    "headerTooltip": "Average quality score per read. Green (15+) = Good, Yellow (10-15) = Fair, Red (<10) = Poor. Higher is better.",
+                                    "headerTooltip": "Mean Phred quality per read. Source: SeqKit",
+                                    "minWidth": 120,
                                     "cellStyle": {
                                         "styleConditions": [
                                             {
@@ -194,24 +244,11 @@ def create_qc_layout():
                                             },
                                             {
                                                 "condition": "params.value >= 10 && params.value < 15",
-                                                "style": {"backgroundColor": "#fff3cd", "color": "#856404"},
+                                                "style": {"backgroundColor": "#fff3cd", "color": "#664d03"},
                                             },
                                             {
-                                                "condition": "params.value < 10",
+                                                "condition": "typeof params.value === 'number' && params.value < 10",
                                                 "style": {"backgroundColor": "#f8d7da", "color": "#721c24"},
-                                            },
-                                        ],
-                                    },
-                                },
-                                {
-                                    "headerName": "Identified",
-                                    "field": "classified_rate",
-                                    "headerTooltip": "Percentage of sequences matched to a known organism. 80%+ is good for environmental samples.",
-                                    "cellStyle": {
-                                        "styleConditions": [
-                                            {
-                                                "condition": "params.data && params.data.classified_rate_num >= 80",
-                                                "style": {"backgroundColor": "#d4edda", "color": "#155724", "fontWeight": "bold"},
                                             },
                                         ],
                                     },
@@ -219,37 +256,50 @@ def create_qc_layout():
                                 {
                                     "headerName": "Status",
                                     "field": "status",
-                                    "headerTooltip": "Overall assessment: Good = data is usable, Review = check results carefully, Issue = may need re-sequencing",
+                                    "headerTooltip": "Overall assessment based on cumulative classification rate.",
+                                    "minWidth": 130,
                                     "cellStyle": {
                                         "styleConditions": [
                                             {
-                                                "condition": "params.value && (params.value.indexOf('Complete') >= 0 || params.value.indexOf('Good') >= 0)",
-                                                "style": {"backgroundColor": "#d4edda", "color": "#155724", "fontWeight": "bold"},
+                                                "condition": "params.value && params.value.indexOf('Complete') >= 0",
+                                                "style": {"backgroundColor": "#d4edda", "color": "#155724", "fontWeight": "600"},
                                             },
                                             {
-                                                "condition": "params.value && (params.value.indexOf('Processing') >= 0 || params.value.indexOf('Review') >= 0)",
-                                                "style": {"backgroundColor": "#fff3cd", "color": "#856404", "fontWeight": "bold"},
+                                                "condition": "params.value && params.value.indexOf('Review') >= 0",
+                                                "style": {"backgroundColor": "#fff3cd", "color": "#664d03", "fontWeight": "600"},
                                             },
                                             {
-                                                "condition": "params.value && (params.value.indexOf('Error') >= 0 || params.value.indexOf('Issue') >= 0)",
-                                                "style": {"backgroundColor": "#f8d7da", "color": "#721c24", "fontWeight": "bold"},
+                                                "condition": "params.value && params.value.indexOf('Issue') >= 0",
+                                                "style": {"backgroundColor": "#f8d7da", "color": "#721c24", "fontWeight": "600"},
                                             },
                                         ],
                                     },
                                 },
-                                # Hidden numeric column still in data for classified_rate styling
-                                {"field": "classified_rate_num", "hide": True},
+                                # Hidden numeric companions for styleConditions
+                                {"field": "classified_rate_cumul_num", "hide": True},
+                                {"field": "classified_rate_latest_num", "hide": True},
                             ],
                             rowData=[],
-                            defaultColDef={"sortable": True, "filter": True, "resizable": True, "minWidth": 100},
+                            defaultColDef={
+                                "sortable": True,
+                                "filter": True,
+                                "resizable": True,
+                                "minWidth": 100,
+                            },
                             dashGridOptions={
                                 "pagination": True,
                                 "paginationPageSize": 10,
                                 "tooltipShowDelay": 500,
+                                "suppressMenuHide": False,
+                                # Group header dominant; column header secondary
+                                "headerHeight": 32,
+                                "groupHeaderHeight": 38,
                             },
+                            className="ag-theme-alpine qc-sample-breakdown-grid",
+                            style={"height": "420px", "width": "100%"},
                         ),
                         html.Small(
-                            "Detailed metrics available in Technical Statistics section below",
+                            "Detailed metrics available in Technical Statistics section below.",
                             className="text-muted d-block mt-2"
                         )
                     ])
@@ -352,7 +402,7 @@ def create_qc_layout():
                         html.Div([
                             # Filtering stats
                             html.H5("Quality Filtering", className="fw-bold mb-3"),
-                            html.Div(id="qc-reads-pre-filtering", children="Total DNA sequences before filtering: 0"),
+                            html.Div(id="qc-reads-pre-filtering", children="Raw reads (pre-Chopper): \u2014"),
                             html.Div(id="qc-reads-passed", children="Sequences that passed quality control: 0"),
                             html.Div(id="qc-reads-removed", children="Total sequences removed: 0"),
 
@@ -390,49 +440,53 @@ def create_qc_layout():
             dbc.CardBody([
                 dbc.Row([
                     dbc.Col([
-                        html.P("Key Terms:", className="fw-bold mb-2"),
+                        html.P("Sample Breakdown columns:", className="fw-bold mb-2"),
                         html.Ul([
                             html.Li([
-                                html.Strong("Pass Rate: "),
-                                "Percentage of sequences that are high enough quality to analyze. ",
-                                "Above 80% is normal."
+                                html.Strong("Cumulative \u2014 Filtered reads: "),
+                                "Reads that passed quality filtering, summed across every batch since the "
+                                "run started. Sourced from the Kraken2 cumulative report."
                             ]),
                             html.Li([
-                                html.Strong("Q20 / Q30: "),
-                                "Measures of base accuracy. Q20 = 99% accurate, Q30 = 99.9% accurate. ",
-                                "For nanopore: Q20 above 65% and Q30 above 45% are good."
+                                html.Strong("Cumulative \u2014 Classification rate: "),
+                                "Fraction of filtered reads that Kraken2 assigned to a taxon, across the "
+                                "whole run. Green \u2265 80%, amber 50\u201379%, red < 50% \u2014 matches the "
+                                "Stage Strip thresholds."
                             ]),
                             html.Li([
-                                html.Strong("N50: "),
-                                "A measure of sequence length. Half of all data is in sequences ",
-                                "this long or longer. Higher = better. Above 2,000 bp is good."
+                                html.Strong("Latest batch \u2014 Filtered reads / Classification rate: "),
+                                "Same two metrics restricted to the most recent batch report. In batch-mode "
+                                "runs these equal the cumulative values."
                             ]),
                             html.Li([
-                                html.Strong("GC Content: "),
-                                "The proportion of G and C bases. Should be 40-60% for most samples."
+                                html.Strong("Avg. Q score: "),
+                                "Mean Phred quality per post-filter read (SeqKit). For nanopore data a mean "
+                                "Q \u2265 15 is typical; values below Q10 suggest a degraded flow cell."
                             ]),
                         ], className="mb-0"),
                     ], md=6),
                     dbc.Col([
-                        html.P("What To Do:", className="fw-bold mb-2"),
+                        html.P("Interpreting the values:", className="fw-bold mb-2"),
                         html.Ul([
                             html.Li([
-                                html.Strong("Pass rate below 60%: "),
-                                "Check flow cell health, sample purity, and loading concentration. ",
-                                "Consider re-sequencing critical samples."
+                                html.Strong("Cumulative classification rate below 50%: "),
+                                "Most reads did not match the reference database. Confirm the correct Kraken2 "
+                                "database is configured and check sample purity."
                             ]),
                             html.Li([
-                                html.Strong("Low Q20/Q30: "),
-                                "May indicate an old or damaged flow cell, or poor library prep. ",
-                                "Results can still be usable - check organism identification confidence."
+                                html.Strong("Cumulative classification rate 50\u201379%: "),
+                                "Partial coverage of the sample by the database. Results are usable but review "
+                                "the unclassified fraction before drawing conclusions."
                             ]),
                             html.Li([
-                                html.Strong("Short sequences (low N50): "),
-                                "DNA may be degraded. Consider fresh extraction if possible."
+                                html.Strong("Latest batch rate diverges from cumulative: "),
+                                "The most recent batch differs from the run so far \u2014 useful for spotting "
+                                "contamination appearing late in a run."
                             ]),
                             html.Li([
-                                html.Strong("Everything looks good: "),
-                                "Proceed to the Organisms or Validation tabs to review findings."
+                                html.Strong("Low mean Q score: "),
+                                "Consider flow-cell health and library quality. Downstream identification can "
+                                "still be informative; cross-check with the Validation tab."
                             ]),
                         ], className="mb-0"),
                     ], md=6),

@@ -45,19 +45,26 @@ class TestKraken2FileDiscoveryPrecedence:
         assert not ecoli.empty, "Expected taxid 562 in loaded data"
         assert ecoli.iloc[0]["cumul_reads"] == 200
 
-    def test_batch_files_aggregated_when_no_standard(self, tmp_path: Path) -> None:
-        """When only batch files exist, their read counts should be aggregated."""
+    def test_batch_files_latest_only_when_no_standard(self, tmp_path: Path) -> None:
+        """When only batch files exist, only the highest-numbered (latest) batch is used.
+
+        Batch files are CUMULATIVE snapshots: batch1 already includes all reads from
+        batch0. Summing them would double-count shared reads. The correct behaviour is
+        to read only the latest batch file.
+        """
         from nanometa_live.core.utils.data_loaders import load_kraken_data, clear_data_cache
 
         kraken_dir = tmp_path / "kraken2"
         kraken_dir.mkdir()
 
+        # batch0: 50 cumulative reads (earlier snapshot)
         batch0 = (
             " 0.00\t0\t0\tU\t0\tunclassified\n"
             "100.00\t50\t0\tR\t1\troot\n"
             "100.00\t50\t0\tD\t2\t  Bacteria\n"
             "100.00\t50\t50\tS\t562\t    Escherichia coli\n"
         )
+        # batch1: 75 cumulative reads (already includes batch0 reads)
         batch1 = (
             " 0.00\t0\t0\tU\t0\tunclassified\n"
             "100.00\t75\t0\tR\t1\troot\n"
@@ -73,8 +80,9 @@ class TestKraken2FileDiscoveryPrecedence:
         df = load_kraken_data(str(tmp_path), sample="barcode01")
 
         ecoli = df[df["taxid"] == 562]
-        assert not ecoli.empty, "Expected taxid 562 in aggregated batch data"
-        assert ecoli.iloc[0]["cumul_reads"] == 125
+        assert not ecoli.empty, "Expected taxid 562 in batch data"
+        # Correct value: 75 (latest cumulative batch), NOT 125 (buggy sum of overlapping batches)
+        assert ecoli.iloc[0]["cumul_reads"] == 75
 
     def test_batch_excluded_when_cumulative_exists(self, realtime_output_dir: Path) -> None:
         """Batch files should be ignored when a cumulative report is available."""

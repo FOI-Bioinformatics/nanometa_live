@@ -41,6 +41,8 @@ from nanometa_live.app.tabs.kraken2_helpers import (
     build_parent_map,
     filter_by_domains,
     get_level_color,
+    load_kraken2_taxonomy,
+    apply_authoritative_taxonomy,
 )
 
 
@@ -199,6 +201,16 @@ def register_classification_callbacks(app: Dash):
 
             if kraken_df.empty:
                 return _empty_figure(), empty_state, graph_hidden
+
+            # Replace indentation-derived parent_taxid with authoritative values
+            # from the Kraken2 database's inspect.txt. Per-sample reports from
+            # PlusPFP can have out-of-order nodes that break the indentation
+            # parser; inspect.txt is always in correct DFS order.
+            kraken_db_path = config.get("kraken_db", "") if config else ""
+            if kraken_db_path:
+                taxonomy = load_kraken2_taxonomy(kraken_db_path)
+                if taxonomy:
+                    kraken_df = apply_authoritative_taxonomy(kraken_df, taxonomy)
 
             # Get the selected color palette (default to tableau)
             color_palette = COLOR_SCHEMES.get(color_scheme or "tableau", COLORS_TABLEAU)

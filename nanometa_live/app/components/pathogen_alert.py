@@ -10,6 +10,121 @@ from dash import html
 import dash_bootstrap_components as dbc
 
 
+# --- Per-tier chip color tokens (bg / border / text) ---
+_CHIP_COLORS = {
+    "critical": ("#f8d7da", "rgba(114,28,36,0.35)", "#721c24"),
+    "high":     ("#fff3cd", "rgba(133,100,4,0.35)",  "#856404"),
+    "watched":  ("#d1ecf1", "rgba(12,84,96,0.35)",   "#0c5460"),
+}
+_CHIP_NC    = ("#e9ecef", "#ced4da", "#6c757d")   # negative-control override
+_CHIP_MORE  = ("#e9ecef", "#ced4da", "#495057")   # "+X more" pill
+
+
+def _render_sample_attribution(
+    samples: Optional[List[Dict[str, Any]]],
+    tier: str,
+    max_inline: int = 3,
+) -> Optional[html.Div]:
+    """
+    Render the "DETECTED IN:" attribution row for a pathogen alert card.
+
+    Suppression rule (per design spec):
+      - Returns None when samples is empty.
+      - Returns None when tier is "watched" and len(samples) > 1.
+
+    Chip colors are tier-specific with a negative-control override.
+    Tooltip: "{reads} reads | {abundance}% of sample | #{rank} by read count"
+
+    Args:
+        samples: List of {sample, reads, abundance, is_negative_control} dicts,
+                 already sorted descending by reads.
+        tier:    "critical", "high", or "watched".
+        max_inline: Maximum chips shown before a "+X more" pill (default 3).
+
+    Returns:
+        html.Div attribution row, or None when suppressed.
+    """
+    if not samples:
+        return None
+
+    # Suppression: watched tier with multiple samples shows no attribution row
+    if tier == "watched" and len(samples) > 1:
+        return None
+
+    # Determine chip palette for this tier
+    tier_key = tier if tier in _CHIP_COLORS else "watched"
+    bg, border, text = _CHIP_COLORS[tier_key]
+
+    chip_style_base = {
+        "borderRadius": "3px",
+        "fontSize": "10px",
+        "fontWeight": "500",
+        "padding": "2px 7px",
+        "border": f"1px solid {border}",
+        "display": "inline-block",
+        "lineHeight": "1.4",
+    }
+
+    # Build chips (truncate at max_inline)
+    visible = samples[:max_inline]
+    overflow = len(samples) - max_inline
+
+    chips = []
+    for rank, s in enumerate(visible, start=1):
+        reads = s.get("reads", 0)
+        abund = s.get("abundance", 0.0)
+        label = s.get("sample", "")
+        is_nc = s.get("is_negative_control", False)
+
+        if is_nc:
+            chip_bg, chip_border, chip_text = _CHIP_NC
+            label = f"{label} (NC)"
+        else:
+            chip_bg, chip_border, chip_text = bg, border, text
+
+        tooltip = f"{reads:,} reads | {abund:.2f}% of sample | #{rank} by read count"
+
+        chips.append(
+            html.Span(
+                label,
+                title=tooltip,
+                style={
+                    **chip_style_base,
+                    "backgroundColor": chip_bg,
+                    "borderColor": chip_border,
+                    "color": chip_text,
+                }
+            )
+        )
+
+    if overflow > 0:
+        pill_bg, pill_border, pill_text = _CHIP_MORE
+        chips.append(
+            html.Span(
+                f"+{overflow} more",
+                style={
+                    **chip_style_base,
+                    "backgroundColor": pill_bg,
+                    "borderColor": pill_border,
+                    "color": pill_text,
+                }
+            )
+        )
+
+    return html.Div(
+        [
+            html.Span(
+                [
+                    html.Span("DETECTED IN:", className="dashboard-attribution-label-full"),
+                    html.Span("IN:", className="dashboard-attribution-label-short"),
+                ]
+            ),
+            *chips,
+        ],
+        className="dashboard-attribution-row",
+    )
+
+
 # Threat level definitions with visual specifications
 THREAT_LEVELS = {
     "critical": {
@@ -59,7 +174,8 @@ def CriticalPathogenAlert(
     confidence: str = "HIGH",
     blast_verified: bool = False,
     taxid: Optional[int] = None,
-    recommendation: Optional[str] = None
+    recommendation: Optional[str] = None,
+    samples: Optional[List[Dict[str, Any]]] = None
 ) -> html.Div:
     """
     Full-width critical pathogen alert banner.
@@ -192,11 +308,15 @@ def CriticalPathogenAlert(
                 html.H4(
                     name_display,
                     className="mb-2",
-                    style={"fontSize": "1.5rem", "marginBottom": "0.5rem"}
+                    style={"fontSize": "22px", "fontWeight": "600",
+                           "marginBottom": "0.5rem"}
                 ),
 
                 # Metrics
                 html.Div(metrics, className="mb-3"),
+
+                # Per-sample attribution row (always visible for critical tier)
+                *([attr_row] if (attr_row := _render_sample_attribution(samples or [], "critical")) else []),
 
                 # Confidence bar
                 html.Div([
@@ -248,7 +368,8 @@ def HighRiskPathogenAlert(
     abundance_pct: float = 0.0,
     confidence: str = "HIGH",
     taxid: Optional[int] = None,
-    recommendation: Optional[str] = None
+    recommendation: Optional[str] = None,
+    samples: Optional[List[Dict[str, Any]]] = None
 ) -> html.Div:
     """
     High-risk pathogen alert (less severe than critical).
@@ -263,6 +384,7 @@ def HighRiskPathogenAlert(
         confidence: Confidence level of detection
         taxid: NCBI taxonomy ID
         recommendation: Action recommendation for operator
+        samples: Per-sample attribution list (sorted descending by reads)
     """
     threat = THREAT_LEVELS["high"]
     action_text = recommendation or threat["action"]
@@ -270,6 +392,8 @@ def HighRiskPathogenAlert(
     name_display = pathogen_name
     if common_name:
         name_display = f"{pathogen_name} ({common_name})"
+
+    attr_row = _render_sample_attribution(samples or [], "high")
 
     return html.Div([
         html.Div([
@@ -298,7 +422,9 @@ def HighRiskPathogenAlert(
                     f"{read_count:,} DNA matches | ",
                     f"{abundance_pct:.2f}% of sample | ",
                     f"{confidence} confidence"
-                ], className="text-muted")
+                ], className="text-muted"),
+                # Per-sample attribution row (always visible for high-risk tier)
+                *([attr_row] if attr_row else []),
             ], className="flex-grow-1"),
 
             # Action buttons
@@ -333,44 +459,70 @@ def WatchedSpeciesAlert(
     pathogen_name: str,
     read_count: int = 0,
     abundance_pct: float = 0.0,
-    taxid: Optional[int] = None
+    taxid: Optional[int] = None,
+    samples: Optional[List[Dict[str, Any]]] = None
 ) -> html.Div:
     """
     Alert for monitored/watched species (informational level).
 
     Blue styling for species that are being tracked but not immediately dangerous.
+
+    Attribution display rules for watched tier (per design spec):
+    - 2+ samples: row suppressed (too wide for the compact card).
+    - Exactly 1 sample: single chip shown inline after a pipe divider.
+
+    Args:
+        pathogen_name: Scientific name of the organism
+        read_count: Number of reads detected
+        abundance_pct: Abundance percentage
+        taxid: NCBI taxonomy ID
+        samples: Per-sample attribution list (sorted descending by reads)
     """
     threat = THREAT_LEVELS["moderate"]
 
-    return html.Div([
+    # Attribution: suppressed for multi-sample by _render_sample_attribution;
+    # for exactly 1 sample it returns the row which we render below the main line.
+    attr_row = _render_sample_attribution(samples or [], "watched")
+
+    main_row_children = [
         html.Div([
-            html.Div([
-                html.I(
-                    className=f"bi {threat['icon']} me-2",
-                    style={"color": threat["color"]}
-                ),
-                html.Span(
-                    threat["label"],
-                    className="fw-semibold me-2",
-                    style={"color": threat["color"]}
-                ),
-                html.Span(pathogen_name, style={"fontStyle": "italic"}),
-                html.Span(f" - {read_count:,} matches", className="text-muted ms-2")
-            ], className="flex-grow-1"),
-            dbc.Button(
-                [html.I(className="bi bi-file-text me-1"), "Details"],
-                color="info",
-                outline=True,
-                size="sm",
-                id={"type": "pathogen-view-report", "taxid": taxid or 0}
-            )
-        ], className="p-2 d-flex align-items-center",
-           style={
-               "backgroundColor": threat["bg_color"],
-               "borderLeft": f"3px solid {threat['border_color']}",
-               "borderRadius": "3px",
-               "fontSize": "14px"
-           })
+            html.I(
+                className=f"bi {threat['icon']} me-2",
+                style={"color": threat["color"]}
+            ),
+            html.Span(
+                threat["label"],
+                className="fw-semibold me-2",
+                style={"color": threat["color"]}
+            ),
+            html.Span(pathogen_name, style={"fontStyle": "italic"}),
+            html.Span(f" - {read_count:,} matches", className="text-muted ms-2")
+        ], className="flex-grow-1"),
+        dbc.Button(
+            [html.I(className="bi bi-file-text me-1"), "Details"],
+            color="info",
+            outline=True,
+            size="sm",
+            id={"type": "pathogen-view-report", "taxid": taxid or 0}
+        )
+    ]
+
+    inner_children = [
+        html.Div(main_row_children, className="d-flex align-items-center"),
+        *([attr_row] if attr_row else []),
+    ]
+
+    return html.Div([
+        html.Div(
+            inner_children,
+            className="p-2",
+            style={
+                "backgroundColor": threat["bg_color"],
+                "borderLeft": f"3px solid {threat['border_color']}",
+                "borderRadius": "3px",
+                "fontSize": "14px"
+            }
+        )
     ], className="mb-2")
 
 

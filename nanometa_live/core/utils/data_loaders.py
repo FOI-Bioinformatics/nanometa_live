@@ -39,6 +39,7 @@ from nanometa_live.core.utils.classification_loaders import (  # noqa: F401
     _parse_kraken2_report,
     _deduplicate_batch_files,
     load_kraken_data,
+    load_kraken_latest_batch,
 )
 
 # QC loaders

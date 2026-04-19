@@ -1143,6 +1143,68 @@ body {
     animation: spin 1s linear infinite;
   }
 
+  /* Spin alias for screening/active process icons */
+  .spin {
+    animation: spin 1s linear infinite;
+  }
+
+  /* ============================================
+     DASHBOARD ZONE TYPOGRAPHY & SPACING
+     ============================================ */
+
+  /* Zone 1 verdict banner typography */
+  .dashboard-verdict-h3 {
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    margin-bottom: 0;
+  }
+
+  .dashboard-verdict-sub {
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.4;
+    margin-bottom: 0;
+  }
+
+  /* Zone 3 metric card values and labels */
+  .dashboard-metric-value {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 0;
+  }
+
+  .dashboard-metric-label {
+    font-size: 13px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0;
+  }
+
+  /* Zone 2 critical card headline */
+  .pathogen-critical-headline {
+    font-size: 22px;
+    font-weight: 600;
+  }
+
+  /* Inter-zone gap: 24px desktop / 16px mobile */
+  .dashboard-zone-gap {
+    margin-bottom: 16px;
+  }
+
+  @media (min-width: 768px) {
+    .dashboard-zone-gap {
+      margin-bottom: 24px;
+    }
+  }
+
+  /* Dashboard card border radius consistency */
+  .dashboard-metric-card {
+    border-radius: 8px !important;
+  }
+
   /* ============================================
      HEADER TIMER AND PROGRESS DISPLAY
      ============================================ */
@@ -1993,6 +2055,50 @@ body {
     max-height: 400px;
     overflow-y: auto;
   }
+
+/* ============================================
+   PER-SAMPLE ATTRIBUTION ROW
+   Appears inside pathogen alert cards to show
+   which barcodes/samples carry each pathogen.
+   ============================================ */
+
+/* Flex row that holds the label + chip set */
+.dashboard-attribution-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+/* "DETECTED IN:" label — full-length version */
+.dashboard-attribution-label-full {
+  font-size: 10px;
+  font-weight: 600;
+  color: #6c757d;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-right: 6px;
+  white-space: nowrap;
+}
+
+/* Abbreviated "IN:" label shown on narrow viewports */
+.dashboard-attribution-label-short {
+  display: none;
+  font-size: 10px;
+  font-weight: 600;
+  color: #6c757d;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-right: 6px;
+  white-space: nowrap;
+}
+
+/* Below 768 px: swap label text to the short form */
+@media (max-width: 768px) {
+  .dashboard-attribution-label-full  { display: none; }
+  .dashboard-attribution-label-short { display: inline; }
+}
 
 /* ============================================
    THREAT SUMMARY INDICATOR
@@ -3524,3 +3630,143 @@ body {
   .ag-header-cell {
     font-weight: var(--font-weight-semibold);
   }
+}
+
+/* ============================================
+   QC TAB - STAGE STRIP
+   ============================================ */
+.stage-strip-container {
+    position: relative;
+    padding: 28px 4px 4px;
+}
+
+.stage-strip-timestamp {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    font-size: 12px;
+    color: #6c757d;
+}
+
+.stage-strip-slots {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+}
+
+.stage-strip-slot {
+    flex: 1;
+    padding: 16px;
+    background: #ffffff;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    min-width: 0;
+}
+
+.stage-strip-slot--raw {
+    background: #ffffff;
+    border: 1px dashed #dee2e6;
+}
+
+/* 6px left-border accents match the Dashboard verdict-banner language */
+.stage-strip-slot--filtered {
+    border-left: 6px solid #084298;
+}
+
+.stage-strip-slot--classified {
+    border-left: 6px solid #155724;
+}
+
+.stage-strip-slot-heading {
+    font-size: 13px;
+    font-weight: 500;
+    text-transform: uppercase;
+    color: #6c757d;
+    margin-bottom: 4px;
+    letter-spacing: 0.04em;
+}
+
+.stage-strip-count {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: #212529;
+    margin-bottom: 2px;
+}
+
+.stage-strip-count--unavailable {
+    color: #adb5bd;
+}
+
+.stage-strip-subtitle {
+    font-size: 12px;
+    color: #6c757d;
+}
+
+.stage-strip-unavailable-note {
+    font-size: 11px;
+    color: #6c757d;
+    margin-top: 2px;
+}
+
+.stage-strip-arrow-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0 12px;
+    min-width: 60px;
+    flex-shrink: 0;
+}
+
+.stage-strip-arrow-icon {
+    font-size: 18px;
+    color: #6c757d;
+}
+
+.stage-strip-delta {
+    font-size: 13px;
+    margin-top: 4px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* Delta colors aligned with locked WCAG AA token pairs (Dashboard spec) */
+.stage-strip-delta--green { color: #155724; font-weight: 600; }
+.stage-strip-delta--amber { color: #664d03; font-weight: 600; }
+.stage-strip-delta--red   { color: #721c24; font-weight: 600; }
+.stage-strip-delta--muted { color: #6c757d; }
+
+/* QC Sample Breakdown: distinguish cumulative (primary) from latest-batch (secondary) */
+.qc-sample-breakdown-grid .ag-header-group-cell.qc-col-group-cumul {
+    background: #e7f1ff;
+    color: #084298;
+    font-weight: 600;
+    border-bottom: 2px solid #084298;
+}
+.qc-sample-breakdown-grid .ag-header-group-cell.qc-col-group-latest {
+    background: #f8f9fa;
+    color: #495057;
+    font-weight: 500;
+    border-bottom: 2px solid #adb5bd;
+}
+.qc-sample-breakdown-grid .qc-col-latest-cell {
+    background: #fafbfc;
+    color: #495057;
+}
+
+@media (max-width: 767px) {
+    .stage-strip-slots {
+        flex-direction: column;
+    }
+
+    .stage-strip-arrow-col {
+        flex-direction: row;
+        justify-content: center;
+        padding: 4px 0;
+    }
+
+    .stage-strip-arrow-col .stage-strip-arrow-icon::before {
+        content: "\f282";  /* bi-chevron-down */
+    }
+}

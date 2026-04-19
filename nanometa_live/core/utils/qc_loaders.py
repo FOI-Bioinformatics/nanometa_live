@@ -514,6 +514,31 @@ def load_seqkit_stats(main_dir: str, sample: Optional[str] = None) -> pd.DataFra
     return combined
 
 
+def _kraken_classification_counts(kraken_df: pd.DataFrame) -> tuple:
+    """Return (classified, unclassified, total) derived from a Kraken2 report.
+
+    Uses the root and unclassified rows' ``cumul_reads`` values, matching the
+    Stage Strip's ``get_classification_stats`` logic so every QC surface
+    reports the same read total for the same report.
+    """
+    if kraken_df is None or kraken_df.empty or 'name' not in kraken_df.columns:
+        return 0, 0, 0
+
+    names = kraken_df['name'].astype(str).str.strip()
+    root_mask = names == 'root'
+    unclass_mask = names == 'unclassified'
+
+    classified = (
+        int(kraken_df.loc[root_mask, 'cumul_reads'].iloc[0])
+        if root_mask.any() else 0
+    )
+    unclassified = (
+        int(kraken_df.loc[unclass_mask, 'cumul_reads'].iloc[0])
+        if unclass_mask.any() else 0
+    )
+    return classified, unclassified, classified + unclassified
+
+
 def get_sample_statistics_summary(main_dir: str) -> pd.DataFrame:
     """
     Get summary statistics for all samples (for per-barcode breakdown table).
@@ -521,13 +546,31 @@ def get_sample_statistics_summary(main_dir: str) -> pd.DataFrame:
     Supports both FASTP (when using fastp QC tool) and NanoPlot/Kraken2
     fallback (when using chopper QC tool).
 
+    Every Kraken2-derived count is reported on two time horizons:
+
+    - ``*_cumul``  : cumulative since run start (matches Stage Strip, Dashboard,
+      Organism tab). Sourced from the cumulative report when present, else
+      the standard per-sample report, else the highest-numbered batch.
+    - ``*_latest`` : latest batch only. Sourced from the highest-numbered
+      ``*_batch*`` report; falls back to the cumulative value when no batch
+      files exist (e.g. completed batch-mode runs).
+
     Returns:
-        DataFrame with columns: sample, reads, base_pairs, pass_rate,
-                               classified, unclassified, classified_rate, unclassified_rate,
-                               mean_quality, n50
+        DataFrame with columns:
+            sample, base_pairs, pass_rate, mean_quality, n50, status,
+            reads_cumul, classified_cumul, unclassified_cumul,
+            classified_rate_cumul, classified_rate_cumul_num,
+            reads_latest, classified_latest, unclassified_latest,
+            classified_rate_latest, classified_rate_latest_num,
+            reads_delta,
+            reads, classified, unclassified, classified_rate,
+            classified_rate_num, unclassified_rate   # legacy aliases (cumulative)
     """
     # Import here to avoid circular imports (classification_loaders uses loader_utils too)
-    from nanometa_live.core.utils.classification_loaders import load_kraken_data
+    from nanometa_live.core.utils.classification_loaders import (
+        load_kraken_data,
+        load_kraken_latest_batch,
+    )
 
     # Auto-resolve to analysis directory if needed
     main_dir = resolve_analysis_directory(main_dir)
@@ -545,10 +588,6 @@ def get_sample_statistics_summary(main_dir: str) -> pd.DataFrame:
         pass_rate = None  # N/A when using chopper
         mean_quality = 0
         n50 = 0
-        classified = 0
-        unclassified = 0
-        classified_rate = 0
-        unclassified_rate = 0
 
         # Try FASTP stats first
         fastp_stats = load_fastp_data(main_dir, sample)
@@ -567,11 +606,8 @@ def get_sample_statistics_summary(main_dir: str) -> pd.DataFrame:
                 mean_quality = round(10 + 25 * q30_rate, 1)
         else:
             # Fall back to NanoPlot stats (used when chopper is the QC tool)
-            # First try sample-specific NanoPlot stats
             nanoplot_stats = load_nanoplot_stats(main_dir, sample)
             if nanoplot_stats.get('number_of_reads', 0) == 0:
-                # If no per-sample stats, try root NanoStats.txt
-                # This handles cases where nanometanf produces aggregated stats
                 nanoplot_stats = load_nanoplot_stats(main_dir, None)
 
             if nanoplot_stats.get('number_of_reads', 0) > 0:
@@ -580,53 +616,96 @@ def get_sample_statistics_summary(main_dir: str) -> pd.DataFrame:
                 mean_quality = nanoplot_stats.get('mean_read_quality', 0)
                 n50 = nanoplot_stats.get('read_length_n50', 0)
 
-        # Get Kraken2 stats for this sample
-        kraken_df = load_kraken_data(main_dir, sample)
+        # --- Cumulative horizon (matches Stage Strip / Dashboard / Organism) ---
+        cumul_df = load_kraken_data(main_dir, sample)
+        classified_cumul, unclassified_cumul, kraken_total_cumul = (
+            _kraken_classification_counts(cumul_df)
+        )
 
-        if not kraken_df.empty:
-            total_kraken_reads = int(kraken_df['reads'].sum())
-            unclassified_row = kraken_df[kraken_df['taxid'] == 0]
-            unclassified = int(unclassified_row.iloc[0]['reads']) if not unclassified_row.empty else 0
-            classified = total_kraken_reads - unclassified
+        classified_rate_cumul = (
+            round((classified_cumul / kraken_total_cumul * 100), 1)
+            if kraken_total_cumul > 0 else 0
+        )
+        unclassified_rate_cumul = (
+            round((unclassified_cumul / kraken_total_cumul * 100), 1)
+            if kraken_total_cumul > 0 else 0
+        )
 
-            # If we still don't have total_reads, use Kraken2 total
-            if total_reads == 0:
-                total_reads = total_kraken_reads
-
-            classified_rate = round((classified / total_kraken_reads * 100), 1) if total_kraken_reads > 0 else 0
-            unclassified_rate = round((unclassified / total_kraken_reads * 100), 1) if total_kraken_reads > 0 else 0
-
-        # Format pass_rate for display
-        pass_rate_display = pass_rate if pass_rate is not None else "N/A"
-
-        # Determine sample status based on quality metrics
-        # Status logic: Good classification (>70%) + reasonable quality = OK
-        # Using Unicode icons for WCAG 1.4.1 compliance (not relying on color alone)
+        # If FASTP/NanoPlot did not supply a filtered count, use the Kraken2
+        # cumulative total (= reads that passed the quality filter, since the
+        # filter feeds Kraken2 in the pipeline order).
         if total_reads == 0:
-            status = "○ No Data"
-        elif classified_rate >= 70:
-            status = "✓ Complete"
-        elif classified_rate >= 50:
-            status = "⚠ Review"
-        else:
-            status = "✗ Issue"
+            total_reads = kraken_total_cumul
 
-        # Format classified_rate for display
-        classified_rate_display = f"{classified_rate}%"
+        # --- Latest-batch horizon ---
+        latest_df = load_kraken_latest_batch(main_dir, sample)
+        classified_latest, unclassified_latest, kraken_total_latest = (
+            _kraken_classification_counts(latest_df)
+        )
+
+        # If no batch files exist, latest collapses to cumulative (batch-mode
+        # runs, or runs that have only emitted a single consolidated report).
+        if kraken_total_latest == 0 and kraken_total_cumul > 0:
+            classified_latest = classified_cumul
+            unclassified_latest = unclassified_cumul
+            kraken_total_latest = kraken_total_cumul
+
+        classified_rate_latest = (
+            round((classified_latest / kraken_total_latest * 100), 1)
+            if kraken_total_latest > 0 else 0
+        )
+
+        # Delta = reads added since the previous batch. When latest == cumulative
+        # (no batch files, or only one batch exists) the delta equals the
+        # latest-batch total — operators see the full run as a single batch.
+        reads_delta = kraken_total_latest
+
+        # Status follows the cumulative classification rate.
+        if total_reads == 0:
+            status = "\u25cb No Data"
+        elif classified_rate_cumul >= 70:
+            status = "\u2713 Complete"
+        elif classified_rate_cumul >= 50:
+            status = "\u26a0 Review"
+        else:
+            status = "\u2717 Issue"
+
+        pass_rate_display = pass_rate if pass_rate is not None else "N/A"
 
         summary_data.append({
             'sample': sample,
-            'reads': total_reads,
             'base_pairs': total_bases,
             'pass_rate': pass_rate_display,
             'mean_quality': round(mean_quality, 1) if mean_quality > 0 else "N/A",
             'n50': n50 if n50 > 0 else "N/A",
-            'classified': classified,
-            'unclassified': unclassified,
-            'classified_rate': classified_rate_display,
-            'classified_rate_num': classified_rate,  # Numeric value for filtering
-            'unclassified_rate': unclassified_rate,
-            'status': status
+            'status': status,
+
+            # Cumulative horizon (since run start)
+            'reads_cumul': kraken_total_cumul if kraken_total_cumul > 0 else total_reads,
+            'classified_cumul': classified_cumul,
+            'unclassified_cumul': unclassified_cumul,
+            'classified_rate_cumul': f"{classified_rate_cumul}%",
+            'classified_rate_cumul_num': classified_rate_cumul,
+
+            # Latest batch horizon
+            'reads_latest': kraken_total_latest,
+            'classified_latest': classified_latest,
+            'unclassified_latest': unclassified_latest,
+            'classified_rate_latest': (
+                f"{classified_rate_latest}%" if kraken_total_latest > 0 else "N/A"
+            ),
+            'classified_rate_latest_num': classified_rate_latest,
+            'reads_delta': reads_delta,
+
+            # Legacy aliases (cumulative) — kept so downstream consumers that
+            # still reference the flat schema (CSV exports, older tests) keep
+            # working without a breaking change.
+            'reads': kraken_total_cumul if kraken_total_cumul > 0 else total_reads,
+            'classified': classified_cumul,
+            'unclassified': unclassified_cumul,
+            'classified_rate': f"{classified_rate_cumul}%",
+            'classified_rate_num': classified_rate_cumul,
+            'unclassified_rate': unclassified_rate_cumul,
         })
 
     return pd.DataFrame(summary_data)

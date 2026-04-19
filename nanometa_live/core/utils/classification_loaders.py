@@ -437,7 +437,7 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
             })
 
         result_df = pd.DataFrame(result_rows)
-        # Cache the result
+        # Cache the aggregated all-samples result
         with _cache_lock:
             _kraken_cache[cache_key] = (time.time(), result_df.copy())
         _store_mtime_cache(mtime_key, [kraken_dir], result_df.copy())
@@ -475,16 +475,28 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
                         sample_files.append(p)
             sample_files = list(dict.fromkeys(os.path.realpath(f) for f in sample_files))
 
-            # 3. Batch files to aggregate
+            # 3. Batch files - use only the highest-numbered (most recent) batch.
+            # Each batch file is a CUMULATIVE snapshot that already includes all
+            # reads from earlier batches. Summing multiple batches would
+            # triple-count shared reads (e.g. batch2 already contains batch0+1).
             if not sample_files:
+                candidate_batches: List[str] = []
                 for ext_pattern in (f"{sample}_batch*.kraken2.report.txt", f"{sample}_batch*.kreport2.txt"):
-                    sample_files.extend(glob.glob(os.path.join(kraken_dir, ext_pattern)))
+                    candidate_batches.extend(glob.glob(os.path.join(kraken_dir, ext_pattern)))
                 # v1.5: batch_reports/ subdirectory inside per-sample folder
                 batch_dir = os.path.join(kraken_dir, sample, "batch_reports")
                 if os.path.isdir(batch_dir):
-                    sample_files.extend(glob.glob(os.path.join(batch_dir, "*.kraken2.report.txt")))
+                    candidate_batches.extend(
+                        glob.glob(os.path.join(batch_dir, "*.kraken2.report.txt"))
+                    )
                 # Deduplicate: same batch may appear in reports/ and batch_reports/
-                sample_files = _deduplicate_batch_files(sample_files)
+                candidate_batches = _deduplicate_batch_files(candidate_batches)
+                if candidate_batches:
+                    _batch_num_re = re.compile(r'batch[_\-]?(\d+)', re.IGNORECASE)
+                    def _extract_batch_num(fp: str) -> int:
+                        m = _batch_num_re.search(os.path.basename(fp))
+                        return int(m.group(1)) if m else -1
+                    sample_files = [max(candidate_batches, key=_extract_batch_num)]
 
         if not sample_files:
             logging.warning(f"No Kraken2 files found for sample {sample}")
@@ -551,8 +563,84 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
             })
 
         result_df = pd.DataFrame(result_rows)
-        # Cache the result
+        # Cache the per-sample result
         with _cache_lock:
             _kraken_cache[cache_key] = (time.time(), result_df.copy())
         _store_mtime_cache(mtime_key, [kraken_dir], result_df.copy())
         return result_df
+
+
+def load_kraken_latest_batch(main_dir: str, sample_name: str) -> pd.DataFrame:
+    """Return the latest batch report for a single sample.
+
+    Searches for the highest-numbered batch file first (from
+    ``batch_reports/`` subdirectory or top-level kraken2 directory), then
+    falls back to a standard per-sample report if no batch files are present.
+
+    Does NOT use ``*.cumulative.kraken2.report.txt`` files (those span all
+    batches and would inflate counts relative to SeqKit latest-batch data).
+    Does NOT sum across multiple batch files.
+
+    Args:
+        main_dir: Main nanometanf output directory
+        sample_name: Sample barcode/name (not "All Samples")
+
+    Returns:
+        DataFrame with columns: %, cumul_reads, reads, rank, taxid, name.
+        Empty DataFrame if no suitable file is found.
+    """
+    main_dir = resolve_analysis_directory(main_dir)
+    kraken_dir = os.path.join(main_dir, "kraken2")
+
+    # 1. Collect candidate batch files and pick the highest-numbered one.
+    candidate_batches: List[str] = []
+    for ext_pattern in (
+        f"{sample_name}_batch*.kraken2.report.txt",
+        f"{sample_name}_batch*.kreport2.txt",
+    ):
+        candidate_batches.extend(glob.glob(os.path.join(kraken_dir, ext_pattern)))
+
+    # v1.5 layout: batch_reports/ inside per-sample subdirectory
+    batch_dir = os.path.join(kraken_dir, sample_name, "batch_reports")
+    if os.path.isdir(batch_dir):
+        candidate_batches.extend(
+            glob.glob(os.path.join(batch_dir, "*.kraken2.report.txt"))
+        )
+
+    if candidate_batches:
+        candidate_batches = _deduplicate_batch_files(candidate_batches)
+        _batch_num_re = re.compile(r"batch[_\-]?(\d+)", re.IGNORECASE)
+
+        def _extract_num(fp: str) -> int:
+            m = _batch_num_re.search(os.path.basename(fp))
+            return int(m.group(1)) if m else -1
+
+        latest = max(candidate_batches, key=_extract_num)
+        logging.debug("Latest batch file for %s: %s", sample_name, latest)
+        df = _parse_kraken2_report(latest)
+        if df is not None:
+            return df
+
+    # 2. Fall back to standard (non-cumulative) report when no batch files exist.
+    for ext in (
+        f"{sample_name}.kraken2.report.txt",
+        f"{sample_name}.kreport2.txt",
+    ):
+        for candidate in (
+            os.path.join(kraken_dir, ext),
+            os.path.join(kraken_dir, sample_name, ext),
+        ):
+            if os.path.exists(candidate):
+                df = _parse_kraken2_report(candidate)
+                if df is not None:
+                    logging.debug(
+                        "Using standard report as latest-batch for %s: %s",
+                        sample_name,
+                        candidate,
+                    )
+                    return df
+
+    logging.debug(
+        "No latest-batch report found for sample %s in %s", sample_name, kraken_dir
+    )
+    return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)

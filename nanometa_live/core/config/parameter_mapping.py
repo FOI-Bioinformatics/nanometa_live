@@ -544,7 +544,6 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
             logging.warning("Falling back to realtime mode")
             params["realtime_mode"] = True
             params["nanopore_output_dir"] = nanopore_dir
-            params["input_dir"] = nanopore_dir
             params["batch_size"] = config.get("batch_size", 10)
             params["batch_interval"] = format_duration(check_interval)
 
@@ -552,8 +551,10 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         # Realtime mode: Use watchPath for new files
         params["realtime_mode"] = True
         params["nanopore_output_dir"] = nanopore_dir
-        # input_dir enables nanometanf's auto-detection of barcode subdirectories
-        params["input_dir"] = nanopore_dir
+        # nanopore_output_dir is sufficient for realtime FASTQ monitoring.
+        # Do NOT also set input_dir — the pipeline treats input_dir and
+        # nanopore_output_dir as mutually exclusive input modes and will
+        # raise "Multiple input modes detected" if both are non-null.
 
         # Pass sample_name for single-sample mode
         # The pipeline will use this instead of deriving sample ID from filenames

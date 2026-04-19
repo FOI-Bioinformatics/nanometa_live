@@ -26,7 +26,6 @@ from nanometa_live.core.utils.data_loaders import (
     load_seqkit_stats
 )
 from nanometa_live.app.components.organism_components import (
-    FilteringBreakdownVisual,
     BaseQualityCard,
     ReadStatisticsCard
 )
@@ -37,6 +36,126 @@ from nanometa_live.app.utils.callback_helpers import (
     get_classification_stats,
 )
 from nanometa_live.app.utils.debounce import should_skip_update, get_trigger_type
+
+
+def _build_stage_strip_slot(heading, count_text, subtitle, count_extra=None, slot_class="stage-strip-slot"):
+    """Build a single slot div for the Stage Strip."""
+    children = [
+        html.Div(heading, className="stage-strip-slot-heading"),
+        html.Div(count_text, className="stage-strip-count" + (
+            " stage-strip-count--unavailable" if count_text == "\u2014" else ""
+        )),
+    ]
+    if count_extra:
+        children.append(html.Div(count_extra, className="stage-strip-unavailable-note"))
+    children.append(html.Div(subtitle, className="stage-strip-subtitle"))
+    return html.Div(children, className=slot_class)
+
+
+def _build_stage_strip(raw_reads, filtered_reads, classified_reads, unclassified_reads,
+                       is_chopper, filter_tool, timestamp_str):
+    """Build the complete Stage Strip component.
+
+    All counts are cumulative-since-run-start, matching the time horizon used
+    by the Organism, Dashboard, and Sample Breakdown cards.
+
+    Args:
+        raw_reads: Raw read count before filtering (None if unavailable)
+        filtered_reads: Cumulative quality-filtered read count
+        classified_reads: Cumulative classified read count (Kraken2 root)
+        unclassified_reads: Cumulative unclassified read count (Kraken2)
+        is_chopper: True when raw counts are unavailable (Chopper pipeline)
+        filter_tool: Label for the quality-filter tool (e.g. "Chopper", "FASTP")
+        timestamp_str: Display timestamp string
+    """
+    # --- Raw slot ---
+    if is_chopper or raw_reads is None:
+        raw_slot = _build_stage_strip_slot(
+            heading="RAW READS",
+            count_text="\u2014",
+            subtitle=f"({filter_tool})",
+            count_extra="Not available (Chopper pipeline)",
+            slot_class="stage-strip-slot stage-strip-slot--raw",
+        )
+        filter_delta_text = "N/A"
+        filter_delta_cls = "stage-strip-delta stage-strip-delta--muted"
+    else:
+        raw_slot = _build_stage_strip_slot(
+            heading="RAW READS",
+            count_text=f"{raw_reads:,}",
+            subtitle=f"({filter_tool})",
+            slot_class="stage-strip-slot",
+        )
+        if filtered_reads and raw_reads > 0:
+            removed_pct = max(0.0, (raw_reads - filtered_reads) / raw_reads * 100)
+            filter_delta_text = f"{removed_pct:.1f}% removed"
+        else:
+            filter_delta_text = "N/A"
+        filter_delta_cls = "stage-strip-delta stage-strip-delta--muted"
+
+    # --- Filtered slot ---
+    filtered_str = f"{filtered_reads:,}" if filtered_reads is not None else "\u2014"
+    filtered_slot = _build_stage_strip_slot(
+        heading="QUALITY-FILTERED",
+        count_text=filtered_str,
+        subtitle=f"({filter_tool})",
+        slot_class="stage-strip-slot stage-strip-slot--filtered",
+    )
+
+    # --- Classified slot ---
+    total_kraken = classified_reads + unclassified_reads
+    classif_rate = (classified_reads / total_kraken * 100) if total_kraken > 0 else None
+    classified_str = f"{classified_reads:,}" if total_kraken > 0 else "\u2014"
+    classified_slot = _build_stage_strip_slot(
+        heading="CLASSIFIED",
+        count_text=classified_str,
+        subtitle="(Kraken2)",
+        slot_class="stage-strip-slot stage-strip-slot--classified",
+    )
+
+    # Classification rate delta color
+    if classif_rate is None:
+        classif_delta_text = "\u2014"
+        classif_delta_cls = "stage-strip-delta stage-strip-delta--muted"
+    elif classif_rate >= 80:
+        classif_delta_text = f"{classif_rate:.1f}%"
+        classif_delta_cls = "stage-strip-delta stage-strip-delta--green"
+    elif classif_rate >= 50:
+        classif_delta_text = f"{classif_rate:.1f}%"
+        classif_delta_cls = "stage-strip-delta stage-strip-delta--amber"
+    else:
+        classif_delta_text = f"{classif_rate:.1f}%"
+        classif_delta_cls = "stage-strip-delta stage-strip-delta--red"
+
+    arrow1 = html.Div([
+        html.I(className="bi bi-arrow-right stage-strip-arrow-icon"),
+        html.Div(filter_delta_text, className=filter_delta_cls),
+    ], className="stage-strip-arrow-col")
+
+    arrow2 = html.Div([
+        html.I(className="bi bi-arrow-right stage-strip-arrow-icon"),
+        html.Div(classif_delta_text, className=classif_delta_cls),
+    ], className="stage-strip-arrow-col")
+
+    body_children = [
+        html.Div(
+            f"Last updated {timestamp_str}",
+            className="stage-strip-timestamp",
+        ),
+        html.Div(
+            [raw_slot, arrow1, filtered_slot, arrow2, classified_slot],
+            className="stage-strip-slots",
+        ),
+    ]
+
+    return html.Div(body_children, className="stage-strip-container")
+
+
+def _build_stage_strip_empty():
+    """Return a minimal Stage Strip placeholder when no data is available."""
+    return html.Div([
+        html.Div("Waiting for data...", className="stage-strip-slot-heading text-center py-3"),
+    ], className="stage-strip-container")
 
 
 def _get_empty_qc_figures():
@@ -60,77 +179,6 @@ def register_qc_callbacks(app: Dash):
     Args:
         app: Dash application
     """
-
-    # =========================================================================
-    # CENTRALIZED QC DATA LOADING
-    # This callback loads all QC data once per interval cycle and stores it
-    # in qc-data-cache. Other callbacks should read from this cache.
-    # =========================================================================
-
-    @app.callback(
-        Output("qc-data-cache", "data"),
-        [
-            Input("update-interval", "n_intervals"),
-            Input("selected-sample", "data"),
-        ],
-        [
-            State("app-config", "data"),
-            State("backend-status", "data"),
-        ],
-        prevent_initial_call=False,
-    )
-    def load_qc_data_cache(n_intervals, selected_sample, config, status):
-        """
-        Load all QC data once per interval and cache it.
-
-        This prevents multiple callbacks from redundantly loading the same data.
-        Returns a dict with kraken_df and fastp_data for the selected sample.
-        """
-        # Skip redundant interval-triggered rescans
-        if get_trigger_type(ctx) == "interval":
-            if should_skip_update("qc_data_cache", debounce_ms=2000):
-                raise PreventUpdate
-
-        cache_data = {
-            "loaded": False,
-            "sample": selected_sample,
-            "kraken_data": None,
-            "fastp_data": None,
-            "seqkit_data": None,
-            "timestamp": time.time(),
-        }
-
-        # Validate config and get output directory using centralized helper
-        main_dir = validate_config_and_get_main_dir(config)
-        if not main_dir:
-            return cache_data
-
-        try:
-            # Load Kraken2 data
-            kraken_df = load_kraken_data(main_dir, selected_sample)
-            if not kraken_df.empty:
-                # Convert to dict for JSON serialization in store
-                cache_data["kraken_data"] = kraken_df.to_dict("records")
-
-            # Load FASTP data
-            fastp_data = load_fastp_data(main_dir, selected_sample)
-            if fastp_data:
-                cache_data["fastp_data"] = fastp_data
-
-            # Load SeqKit stats if available
-            try:
-                seqkit_data = load_seqkit_stats(main_dir, selected_sample)
-                if seqkit_data:
-                    cache_data["seqkit_data"] = seqkit_data
-            except Exception:
-                pass  # SeqKit stats are optional
-
-            cache_data["loaded"] = True
-
-        except Exception as e:
-            logging.error(f"Error loading QC data cache: {e}")
-
-        return cache_data
 
     # =========================================================================
     # QC PLOTS (Processing Graphs)
@@ -409,7 +457,7 @@ def register_qc_callbacks(app: Dash):
 
         # Default values for when no data is available
         default_values = [
-            "Total reads pre-filtering: 0",
+            "Raw reads (pre-Chopper): \u2014",
             "Reads that passed filtering: 0",
             "Total reads removed: 0",
             "Too low quality: 0 (0%)",
@@ -474,9 +522,13 @@ def register_qc_callbacks(app: Dash):
             fastp_found = False
             fastp_stats = load_fastp_data(main_dir, selected_sample)
             if fastp_stats.get('total_reads_after', 0) > 0:
-                fastp_found = True
-                tot_passed_reads = fastp_stats['total_reads_after']
-                tot_reads_pre_filt = fastp_stats['total_reads_before']
+                reads_before = fastp_stats['total_reads_before']
+                reads_after = fastp_stats['total_reads_after']
+                # When chopper is the QC tool, before_filtering is absent (before=0).
+                # Only treat as fastp-found when genuine pre-filter count exists.
+                fastp_found = reads_before > 0
+                tot_passed_reads = reads_after
+                tot_reads_pre_filt = reads_before
                 tot_low_quality_reads = fastp_stats['low_quality']
                 tot_too_many_N_reads = fastp_stats['too_many_N']
                 tot_too_short_reads = fastp_stats['too_short']
@@ -569,7 +621,10 @@ def register_qc_callbacks(app: Dash):
                 )
 
             # Format output strings
-            reads_pre_filtering = f"Total reads pre-filtering: {tot_reads_pre_filt:,}"
+            if tot_reads_pre_filt > 0:
+                reads_pre_filtering = f"Raw reads (pre-Chopper): {tot_reads_pre_filt:,}"
+            else:
+                reads_pre_filtering = "Raw reads (pre-Chopper): \u2014 (not available for Chopper pipeline)"
             reads_passed = f"Reads that passed filtering: {tot_passed_reads:,} ({percentage_passed}%)"
             reads_removed = (
                 f"Total reads removed: {tot_removed_reads:,} ({percentage_removed}%)"
@@ -607,7 +662,7 @@ def register_qc_callbacks(app: Dash):
             logging.error(f"Error updating QC stats: {e}")
             # Return default values on error
             return [
-                f"Error: {str(e)}",
+                f"Raw reads (pre-Chopper): error ({str(e)})",
                 "Reads that passed filtering: 0",
                 "Total reads removed: 0",
                 "Too low quality: 0 (0%)",
@@ -989,222 +1044,85 @@ def register_qc_callbacks(app: Dash):
             )
 
     @app.callback(
-        Output("filtering-breakdown-container", "children"),
+        Output("qc-stage-strip", "children"),
         [
             Input("update-interval", "n_intervals"),
             Input("selected-sample", "data"),
         ],
         [
             State("app-config", "data"),
-            State("backend-status", "data"),
         ],
     )
-    def update_filtering_breakdown(n_intervals, selected_sample, config, status):
+    def update_stage_strip(n_intervals, selected_sample, config):
         """
-        Update the visual filtering breakdown component.
+        Render the Stage Strip: Raw -> Quality-filtered -> Classified pipeline overview.
 
-        Shows a visual representation of quality filtering statistics.
+        All counts are cumulative-since-run-start so that every tab shows the
+        same time horizon for the same sample.
+
+        Slot data sources:
+        - Raw: FASTP before_filtering count (unavailable for Chopper pipelines)
+        - Quality-filtered: derived from Kraken2 cumulative as classified + unclassified
+          (total reads Kraken2 processed = total reads that passed chopper filtering,
+          since chopper feeds Kraken2 in the pipeline order)
+        - Classified: Kraken2 cumulative root.cumul_reads (classified reads)
         """
         if get_trigger_type(ctx) == "interval":
-            if should_skip_update("qc_filtering_breakdown", debounce_ms=2000):
+            if should_skip_update("qc_stage_strip", debounce_ms=2000):
                 raise PreventUpdate
 
-        # Default empty state
-        empty_state = EmptyStateMessage(
-            title="No Filtering Data",
-            message="Filtering statistics will appear here once analysis is complete",
-            icon="bi-funnel"
-        )
-
-        # Check if we have valid config and main_dir
-        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
+        main_dir = (
+            config.get("results_output_directory", "") or config.get("main_dir", "")
+        ) if config else ""
         if not main_dir or not os.path.isdir(main_dir):
-            return empty_state
+            return _build_stage_strip_empty()
 
         try:
-            fastp_dir = os.path.join(main_dir, "fastp")
+            # Raw count only exists when FASTP produced before_filtering stats.
+            # For Chopper pipelines this branch is skipped and raw stays None.
+            raw_reads = None
+            is_chopper = True
+            filter_tool = "Chopper"
 
-            # Initialize variables
-            tot_reads_pre_filt = 0
-            tot_passed_reads = 0
-            tot_low_quality_reads = 0
-            tot_too_many_N_reads = 0
-            tot_too_short_reads = 0
-            chopper_estimated = False
-
-            # Get filtering stats from FASTP (sample-filtered)
-            fastp_found = False
             fastp_stats = load_fastp_data(main_dir, selected_sample)
-            if fastp_stats.get('total_reads_after', 0) > 0:
-                fastp_found = True
-                tot_reads_pre_filt = fastp_stats['total_reads_before']
-                tot_passed_reads = fastp_stats['total_reads_after']
-                tot_low_quality_reads = fastp_stats['low_quality']
-                tot_too_many_N_reads = fastp_stats['too_many_N']
-                tot_too_short_reads = fastp_stats['too_short']
+            reads_before = fastp_stats.get("total_reads_before", 0)
+            if reads_before > 0:
+                raw_reads = reads_before
+                is_chopper = False
+                filter_tool = "FASTP"
 
-            # Fallback to seqkit/Kraken2 if FASTP not found (chopper QC)
-            if not fastp_found:
-                seqkit_df = load_seqkit_stats(main_dir, selected_sample)
-                if not seqkit_df.empty and 'num_seqs' in seqkit_df.columns:
-                    tot_passed_reads = int(seqkit_df['num_seqs'].sum())
-
-                    # Use Kraken2 for pre-filter baseline (all reads that entered classification)
-                    # This is the correct source since seqkit measures post-chopper reads
-                    kraken_df = load_kraken_data(main_dir, selected_sample)
-                    if not kraken_df.empty:
-                        # In Kraken2: root cumul_reads = classified, unclassified cumul_reads = unclassified
-                        # Total reads = classified + unclassified
-                        root = kraken_df[kraken_df['name'].str.strip() == 'root']
-                        unclassified = kraken_df[kraken_df['name'].str.strip() == 'unclassified']
-
-                        classified_reads = int(root.iloc[0]['cumul_reads']) if not root.empty else 0
-                        unclassified_reads = int(unclassified.iloc[0]['cumul_reads']) if not unclassified.empty else 0
-                        tot_reads_pre_filt = classified_reads + unclassified_reads
-
-                        if tot_reads_pre_filt > 0:
-                            # Chopper does not produce a per-category breakdown
-                            # of removed reads. The proportions below are rough
-                            # estimates only and are labelled as such in the UI.
-                            removed = max(0, tot_reads_pre_filt - tot_passed_reads)
-                            # Approximate distribution (60% quality, 30% length, 10% complexity)
-                            tot_low_quality_reads = int(removed * 0.6)
-                            tot_too_short_reads = int(removed * 0.3)
-                            tot_too_many_N_reads = removed - tot_low_quality_reads - tot_too_short_reads
-                            chopper_estimated = True
-
-            # If we have no data, show empty state
-            if tot_reads_pre_filt == 0:
-                return empty_state
-
-            # Build removal reasons dict
-            removal_reasons = {}
-            if tot_low_quality_reads > 0:
-                removal_reasons["low_quality"] = tot_low_quality_reads
-            if tot_too_short_reads > 0:
-                removal_reasons["too_short"] = tot_too_short_reads
-            if tot_too_many_N_reads > 0:
-                removal_reasons["low_complexity"] = tot_too_many_N_reads
-
-            # If no removals, add a placeholder
-            if not removal_reasons:
-                removal_reasons = {"low_quality": 0, "too_short": 0, "low_complexity": 0}
-
-            # Generate filtering breakdown component
-            breakdown = FilteringBreakdownVisual(
-                total_reads=tot_reads_pre_filt,
-                passed_reads=tot_passed_reads,
-                removal_reasons=removal_reasons
-            )
-            if chopper_estimated:
-                return html.Div([
-                    breakdown,
-                    html.Small(
-                        "Removal breakdown is estimated (chopper does not "
-                        "report per-category statistics).",
-                        className="text-muted fst-italic mt-1 d-block"
-                    )
-                ])
-            return breakdown
-
-        except Exception as e:
-            logging.error(f"Error updating filtering breakdown: {e}")
-            return dbc.Alert(
-                f"Error loading filtering statistics: {str(e)}",
-                color="danger",
-                className="text-center"
-            )
-
-    @app.callback(
-        Output("qc-metrics-summary-container", "children"),
-        [
-            Input("update-interval", "n_intervals"),
-            Input("selected-sample", "data"),
-        ],
-        [
-            State("app-config", "data"),
-        ],
-    )
-    def update_qc_metrics_summary(n_intervals, selected_sample, config):
-        """
-        Update the key metrics summary card with QC data.
-
-        Returns a KeyMetricsSummaryCard component matching the QualityScoreIndicator design.
-        """
-        if get_trigger_type(ctx) == "interval":
-            if should_skip_update("qc_metrics_summary", debounce_ms=2000):
-                raise PreventUpdate
-
-        from nanometa_live.app.components.organism_components import KeyMetricsSummaryCard
-
-        # Default empty state
-        empty_state = dbc.Alert(
-            "Key metrics will appear here once data is loaded",
-            color="light",
-            className="text-center"
-        )
-
-        # Check if we have valid config and main_dir
-        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
-        if not main_dir or not os.path.isdir(main_dir):
-            return empty_state
-
-        try:
-            # Initialize metrics
-            tot_reads_pre_filt = 0
-            tot_passed_reads = 0
+            # Classification counts from cumulative Kraken2 — the authoritative
+            # run-total view. Filtered is derived from the same source to keep
+            # the horizon consistent.
+            cumul_df = load_kraken_data(main_dir, selected_sample)
             classified_reads = 0
-            total_kraken_reads = 0
+            unclassified_reads = 0
+            if not cumul_df.empty:
+                classified_reads, unclassified_reads, _ = get_classification_stats(cumul_df)
 
-            # Count samples
-            from nanometa_live.core.utils.sample_detector import get_available_samples
-            samples = get_available_samples(main_dir)
-            sample_count = len([s for s in samples if s != "All Samples"])
+            filtered_reads = classified_reads + unclassified_reads
 
-            # Get filtering stats from FASTP (sample-filtered)
-            fastp_stats = load_fastp_data(main_dir, selected_sample)
-            if fastp_stats.get('total_reads_after', 0) > 0:
-                tot_reads_pre_filt = fastp_stats['total_reads_before']
-                tot_passed_reads = fastp_stats['total_reads_after']
-
-            # Load Kraken2 data once (sample-filtered) for reuse
-            kraken_df = load_kraken_data(main_dir, selected_sample)
-
-            # Fallback to seqkit/Kraken2 if FASTP not found
-            if tot_passed_reads == 0:
+            # If Kraken2 has not yet produced output (pipeline still warming up)
+            # but SeqKit stats are available, fall back to SeqKit's filtered count.
+            if filtered_reads == 0:
                 seqkit_df = load_seqkit_stats(main_dir, selected_sample)
-                if not seqkit_df.empty and 'num_seqs' in seqkit_df.columns:
-                    tot_passed_reads = int(seqkit_df['num_seqs'].sum())
-                    if not kraken_df.empty:
-                        classified_count, unclassified_count, _ = get_classification_stats(kraken_df)
-                        tot_reads_pre_filt = classified_count + unclassified_count
+                if not seqkit_df.empty and "num_seqs" in seqkit_df.columns:
+                    filtered_reads = int(seqkit_df["num_seqs"].sum())
 
-            # Get classification stats from Kraken2 (sample-filtered)
-            if not kraken_df.empty:
-                classified_reads, unclassified_kraken, _ = get_classification_stats(kraken_df)
-                total_kraken_reads = classified_reads + unclassified_kraken
-
-            # Calculate rates (cap pass_rate at 100% to handle edge cases
-            # where chopper/seqkit totals differ from kraken pre-filter counts)
-            pass_rate = (tot_passed_reads / tot_reads_pre_filt * 100) if tot_reads_pre_filt > 0 else 0
-            pass_rate = min(pass_rate, 100.0)
-            classification_rate = (classified_reads / total_kraken_reads * 100) if total_kraken_reads > 0 else 0
-
-            # If no data, show empty state
-            if tot_reads_pre_filt == 0 and total_kraken_reads == 0:
-                return empty_state
-
-            # Return the KeyMetricsSummaryCard component
-            return KeyMetricsSummaryCard(
-                total_reads=tot_reads_pre_filt,
-                pass_rate=pass_rate,
-                classified_rate=classification_rate,
-                sample_count=sample_count
+            timestamp_str = datetime.now().strftime("%H:%M:%S")
+            return _build_stage_strip(
+                raw_reads=raw_reads,
+                filtered_reads=filtered_reads,
+                classified_reads=classified_reads,
+                unclassified_reads=unclassified_reads,
+                is_chopper=is_chopper,
+                filter_tool=filter_tool,
+                timestamp_str=timestamp_str,
             )
 
         except Exception as e:
-            logging.error(f"Error updating QC metrics summary: {e}")
-            return empty_state
+            logging.error(f"Error updating stage strip: {e}")
+            return _build_stage_strip_empty()
 
     # =========================================================================
     # QC REPORT EXPORT
@@ -1214,13 +1132,12 @@ def register_qc_callbacks(app: Dash):
         Output("download-qc-report", "data"),
         Input("export-qc-report", "n_clicks"),
         [
-            State("qc-data-cache", "data"),
             State("selected-sample", "data"),
             State("app-config", "data"),
         ],
         prevent_initial_call=True,
     )
-    def export_qc_report(n_clicks, qc_cache, selected_sample, config):
+    def export_qc_report(n_clicks, selected_sample, config):
         """Export QC metrics as a CSV report."""
         if not n_clicks or not config:
             return no_update
@@ -1389,39 +1306,49 @@ def register_qc_callbacks(app: Dash):
                     "more reliable results, especially for low-abundance organisms."
                 )
 
+            # Render guidance with the locked WCAG AA token pairs
+            # (matches Stage Strip delta + AgGrid cell colors).
+            def _guidance_box(bg, fg, accent, icon, lead, body):
+                return html.Div(
+                    [
+                        html.I(className=f"bi bi-{icon} me-2"),
+                        html.Strong(lead),
+                        body,
+                    ],
+                    style={
+                        "backgroundColor": bg,
+                        "color": fg,
+                        "border": "1px solid #e9ecef",
+                        "borderLeft": f"6px solid {accent}",
+                        "borderRadius": "8px",
+                        "padding": "12px 16px",
+                    },
+                    className="mb-0",
+                )
+
             if not issues:
-                # All good
                 if tot_reads_pre_filt > 0:
-                    return dbc.Alert(
-                        [
-                            html.I(className="bi bi-check-circle-fill me-2"),
-                            html.Strong("Data quality looks good. "),
-                            html.Span(
-                                "Proceed to the Organisms or Validation tabs to review findings."
-                            ),
-                        ],
-                        color="success",
-                        className="mb-0",
-                        dismissable=True,
+                    return _guidance_box(
+                        bg="#d4edda", fg="#155724", accent="#155724",
+                        icon="check-circle-fill",
+                        lead="Data quality looks good. ",
+                        body=html.Span(
+                            "Proceed to the Organisms or Validation tabs to review findings."
+                        ),
                     )
                 return ""
 
-            # Build warning/danger alert
-            severity = "danger" if pass_rate < 60 or classification_rate < 40 else "warning"
-            icon = "exclamation-triangle-fill" if severity == "warning" else "x-circle-fill"
+            is_action = pass_rate < 60 or classification_rate < 40
+            if is_action:
+                bg, fg, accent, icon = "#f8d7da", "#721c24", "#721c24", "exclamation-octagon-fill"
+                lead = "Action needed: "
+            else:
+                bg, fg, accent, icon = "#fff3cd", "#664d03", "#664d03", "exclamation-triangle-fill"
+                lead = "Review recommended: "
 
-            return dbc.Alert(
-                [
-                    html.I(className=f"bi bi-{icon} me-2"),
-                    html.Strong("Action needed: " if severity == "danger" else "Review recommended: "),
-                    html.Ul(
-                        [html.Li(issue) for issue in issues],
-                        className="mb-0 mt-2",
-                    ),
-                ],
-                color=severity,
-                className="mb-0",
-                dismissable=True,
+            return _guidance_box(
+                bg=bg, fg=fg, accent=accent, icon=icon, lead=lead,
+                body=html.Ul([html.Li(issue) for issue in issues], className="mb-0 mt-2"),
             )
 
         except Exception as e:
