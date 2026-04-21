@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
 import requests
+import urllib3
 
 from nanometa_live.core.utils.offline_cache import get_cache as get_offline_cache
 
@@ -263,6 +264,27 @@ class TaxonomyAPIClient(ABC):
 
             response.raise_for_status()
             return response.json()
+
+        except requests.exceptions.SSLError:
+            logger.warning(
+                "SSL verification failed for %s, retrying without verification", url
+            )
+            try:
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+                self._last_request_time = time.time()
+                if method == "GET":
+                    response = self._session.get(
+                        url, params=params, timeout=self.timeout, verify=False
+                    )
+                else:
+                    response = self._session.post(
+                        url, data=params, timeout=self.timeout, verify=False
+                    )
+                response.raise_for_status()
+                return response.json()
+            except requests.exceptions.RequestException as e:
+                logger.warning("API request failed (SSL fallback): %s - %s", url, e)
+                return None
 
         except requests.exceptions.RequestException as e:
             logger.warning(f"API request failed: {url} - {e}")
@@ -507,7 +529,7 @@ class GTDBClient(TaxonomyAPIClient):
     GTDB (Genome Taxonomy Database) provides a standardized bacterial
     and archaeal taxonomy based on genome phylogeny.
 
-    API documentation: https://gtdb-api.ecogenomic.org/docs
+    API documentation: https://api.gtdb.ecogenomic.org/docs
     """
 
     BASE_URL = "https://api.gtdb.ecogenomic.org"

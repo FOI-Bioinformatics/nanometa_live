@@ -13,10 +13,20 @@ Tests all features of the Main Results tab including:
 
 import pytest
 import os
+import time
 import pandas as pd
 from pathlib import Path
 import tempfile
 import json
+
+
+def _backdate_all_files(directory, seconds=5):
+    """Recursively backdate all files in a directory tree."""
+    old_time = time.time() - seconds
+    for root, _dirs, files in os.walk(str(directory)):
+        for fname in files:
+            fpath = os.path.join(root, fname)
+            os.utime(fpath, (old_time, old_time))
 
 from dash import Dash
 import dash_bootstrap_components as dbc
@@ -46,6 +56,7 @@ aken2 and BLAST data."""
             num_samples=3
         )
 
+        _backdate_all_files(test_dir)
         return test_dir
 
     @pytest.fixture

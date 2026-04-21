@@ -163,7 +163,7 @@ class OnDemandValidator:
 
     def has_blast_db(self, taxid: int) -> bool:
         """Check if a BLAST database exists for a taxid."""
-        blast_db = self.blast_dir / f"{taxid}.fasta.nsq"
+        blast_db = self.blast_dir / f"{taxid}.fasta.nhr"
         return blast_db.exists()
 
     def download_genome(
@@ -250,7 +250,8 @@ class OnDemandValidator:
                 cmd,
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                timeout=300,
             )
 
             if self.has_blast_db(taxid):
@@ -325,12 +326,16 @@ class OnDemandValidator:
                 cmd,
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                timeout=1800,
             )
 
             logger.info(f"BLAST completed: {output_file}")
             return output_file
 
+        except subprocess.TimeoutExpired:
+            logger.error("BLAST search timed out (30 min limit)")
+            return None
         except subprocess.CalledProcessError as e:
             logger.error(f"BLAST failed: {e.stderr}")
             return None
@@ -444,7 +449,8 @@ class OnDemandValidator:
                 cmd,
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                timeout=1800,
             )
 
             logger.info(f"minimap2 completed: {output_file}")
@@ -894,16 +900,40 @@ class OnDemandValidator:
         """Save validation results to JSON file."""
         output_file = self.validation_dir / f"{job.sample}_{job.taxid}_validation.json"
 
+        # Compute percent_validated as a percentage (0-100)
+        percent_validated = job.validation_rate  # already stored as percentage
+
+        # Determine validation_status using the same thresholds as the parser
+        if job.validated_reads == 0 and job.total_reads == 0:
+            validation_status = "no_data"
+        elif percent_validated >= 80 and job.avg_identity >= 90:
+            validation_status = "confirmed"
+        elif percent_validated >= 50:
+            validation_status = "partial"
+        elif percent_validated > 0:
+            validation_status = "low"
+        else:
+            validation_status = "no_data"
+
         results = {
+            # Fields expected by BlastValidationParser.parse_validation_json()
+            "sample_id": job.sample,
             "taxid": job.taxid,
+            "species": job.name,
+            "total_reads": job.total_reads,
+            "validated_reads": job.validated_reads,
+            "percent_validated": percent_validated,
+            "percent_identity_mean": job.avg_identity,
+            "validation_method": "blast",
+            "validation_status": validation_status,
+            "hit_rate": percent_validated / 100.0 if percent_validated else 0.0,
+            "timestamp": job.completed_at.isoformat() if job.completed_at else datetime.now().isoformat(),
+            # Additional fields kept for load_validation_result() compatibility
             "name": job.name,
             "sample": job.sample,
             "created_at": job.created_at.isoformat(),
             "completed_at": job.completed_at.isoformat() if job.completed_at else None,
-            "total_reads": job.total_reads,
             "extracted_reads": job.extracted_reads,
-            "validated_reads": job.validated_reads,
-            "validation_rate": job.validation_rate,
             "avg_identity": job.avg_identity,
             "genome_path": str(job.genome_path) if job.genome_path else None,
             "blast_results": str(job.blast_results) if job.blast_results else None,

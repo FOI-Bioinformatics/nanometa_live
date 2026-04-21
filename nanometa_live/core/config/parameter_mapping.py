@@ -16,6 +16,7 @@ import glob
 import csv
 import re
 import logging
+from pathlib import Path
 from typing import Dict, Any, Tuple, List
 
 from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
@@ -97,7 +98,6 @@ def get_validation_species_from_watchlist(
     """
     Get enabled species for validation from the Watchlist system.
 
-    This replaces the old species_of_interest config approach.
     Returns species with their mapped Kraken2 taxids and available genome paths.
 
     Args:
@@ -182,7 +182,7 @@ def get_validation_species(config: Dict[str, Any]) -> Tuple[List[str], List[str]
     """
     Get species taxids for BLAST validation.
 
-    Tries Watchlist system first, falls back to species_of_interest config.
+    Uses the Watchlist system to retrieve enabled species for validation.
 
     Args:
         config: Application configuration dict
@@ -192,24 +192,12 @@ def get_validation_species(config: Dict[str, Any]) -> Tuple[List[str], List[str]
         - taxid_list: List of taxid strings for validation
         - genome_paths: List of paths to genome FASTA files
     """
-    # Try Watchlist system first (new approach)
     species_list, genome_paths = get_validation_species_from_watchlist(config)
 
     if species_list:
         # Use kraken_taxid for pipeline (mapped to database)
         taxids = [str(s['kraken_taxid']) for s in species_list if s.get('kraken_taxid')]
         return taxids, genome_paths
-
-    # Fall back to legacy species_of_interest config
-    species_of_interest = config.get("species_of_interest", [])
-    if species_of_interest:
-        logging.info("Using legacy species_of_interest config for validation")
-        taxids = []
-        for species in species_of_interest:
-            taxid = species.get("taxid")
-            if taxid:
-                taxids.append(str(taxid))
-        return taxids, []
 
     return [], []
 
@@ -248,6 +236,10 @@ def generate_samplesheet(
     if sample_handling == "by_barcode":
         # Look for barcode subdirectories
         barcode_dirs = sorted(glob.glob(os.path.join(input_dir, "barcode*")))
+        # Also include unclassified reads if present
+        unclassified_dir = os.path.join(input_dir, "unclassified")
+        if os.path.isdir(unclassified_dir):
+            barcode_dirs.append(unclassified_dir)
         if not barcode_dirs:
             raise ValueError(f"No barcode directories found in {input_dir}")
 
@@ -256,7 +248,7 @@ def generate_samplesheet(
                 barcode_name = os.path.basename(barcode_dir)
                 fastq_files = glob.glob(os.path.join(barcode_dir, "*.fastq*"))
                 for fastq_file in sorted(fastq_files):
-                    rows.append([barcode_name, os.path.abspath(fastq_file)])
+                    rows.append([barcode_name, str(Path(fastq_file).resolve())])
 
         if not rows:
             raise ValueError(f"No FASTQ files found in barcode directories under {input_dir}")
@@ -272,7 +264,7 @@ def generate_samplesheet(
         for fastq_file in fastq_files:
             if sample_handling == "single_sample":
                 # All files belong to one sample
-                rows.append([sample_name, os.path.abspath(fastq_file)])
+                rows.append([sample_name, str(Path(fastq_file).resolve())])
             else:
                 # per_file mode: each file is a separate sample
                 basename = os.path.basename(fastq_file)
@@ -283,7 +275,7 @@ def generate_samplesheet(
                         break
                 # Clean sample name
                 file_sample_name = re.sub(r'[^\w]', '_', file_sample_name)
-                rows.append([file_sample_name, os.path.abspath(fastq_file)])
+                rows.append([file_sample_name, str(Path(fastq_file).resolve())])
 
     # Write samplesheet
     with open(output_path, 'w', newline='') as f:
@@ -359,7 +351,7 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     logging.info(f"Processing mode: {processing_mode}, Sample handling: {sample_handling}")
     logging.info(f"Input directory: {nanopore_dir}")
 
-    # Get validation species from Watchlist system (or legacy species_of_interest)
+    # Get validation species from Watchlist system
     validation_taxids, genome_paths = get_validation_species(config)
     has_species = bool(validation_taxids)
 
@@ -488,12 +480,10 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         "validation_hit_rate_threshold": config.get("validation_hit_rate_threshold", 0.5),
         "validation_identity_threshold": config.get("validation_identity_threshold", 90.0),
         "minimap2_preset": config.get("minimap2_preset", "map-ont"),
-        "minimap2_min_mapq": config.get("minimap2_min_mapq", 30),
+        "minimap2_min_mapq": config.get("minimap2_min_mapq", 10),
 
-        # Legacy parameters (deprecated but kept for compatibility)
+        # Legacy parameter (deprecated, nanometanf maps to run_validation internally)
         "blast_validation": blast_validation_enabled,
-        "min_perc_identity": config.get("min_perc_identity", 90),
-        "e_val_cutoff": config.get("e_val_cutoff", 0.01),
 
         # QC settings
         "qc_tool": config.get("qc_tool", "chopper"),
@@ -554,22 +544,19 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
             logging.warning("Falling back to realtime mode")
             params["realtime_mode"] = True
             params["nanopore_output_dir"] = nanopore_dir
-            params["barcode_dirs"] = (sample_handling == "by_barcode")
             params["batch_size"] = config.get("batch_size", 10)
             params["batch_interval"] = format_duration(check_interval)
-            params["max_avg_file_age_minutes"] = config.get("max_file_age_minutes", 1000000)
 
     else:
         # Realtime mode: Use watchPath for new files
         params["realtime_mode"] = True
         params["nanopore_output_dir"] = nanopore_dir
+        # nanopore_output_dir is sufficient for realtime FASTQ monitoring.
+        # Do NOT also set input_dir — the pipeline treats input_dir and
+        # nanopore_output_dir as mutually exclusive input modes and will
+        # raise "Multiple input modes detected" if both are non-null.
 
-        # barcode_dirs controls how files are grouped in realtime mode:
-        # - True: Each barcode subdirectory is a separate sample
-        # - False: All files in directory belong to one sample
-        params["barcode_dirs"] = (sample_handling == "by_barcode")
-
-        # Pass sample_name for single-sample mode (used when barcode_dirs is False)
+        # Pass sample_name for single-sample mode
         # The pipeline will use this instead of deriving sample ID from filenames
         if sample_handling == "single_sample":
             params["sample_name"] = sample_name
@@ -612,7 +599,7 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         # both existing and new files by combining Channel.fromPath() with Channel.watchPath()
         # No samplesheet generation needed here - existing files will be detected automatically
 
-        barcode_mode = "with barcode directories" if params["barcode_dirs"] else "single sample"
+        barcode_mode = "with barcode directories" if sample_handling == "by_barcode" else "single sample"
         logging.info(f"Realtime mode ({barcode_mode}): Monitoring {nanopore_dir}")
         if params["kraken2_enable_incremental"]:
             logging.info("Incremental Kraken2 classification enabled for cumulative reporting")

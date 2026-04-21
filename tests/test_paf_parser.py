@@ -96,6 +96,86 @@ class TestPAFParser:
 
         assert result == {}
 
+    def test_nonexistent_paf(self, tmp_path: Path) -> None:
+        """A missing PAF file should return an empty dict."""
+        paf = tmp_path / "missing.paf"
+        result = parse_paf_coverage(paf)
+        assert result == {}
+
+    def test_non_integer_numeric_fields(self, tmp_path: Path) -> None:
+        """Lines with non-integer values in numeric columns should be skipped."""
+        paf = tmp_path / "bad_numbers.paf"
+        lines = [
+            # Valid line
+            "read1\t1000\t0\t1000\t+\tref1\t5000\t100\t600\t500\t500\t60",
+            # tlen is not an integer
+            "read2\t1000\t0\t1000\t+\tref1\tABC\t100\t600\t500\t500\t60",
+            # mapq is not an integer
+            "read3\t1000\t0\t1000\t+\tref1\t5000\t100\t600\t500\t500\tN/A",
+        ]
+        paf.write_text("\n".join(lines) + "\n")
+
+        result = parse_paf_coverage(paf)
+        assert "ref1" in result
+        # Only the valid alignment should contribute
+        assert result["ref1"].max_depth == 1
+
+    def test_invalid_coordinates_skipped(self, tmp_path: Path) -> None:
+        """Lines with invalid alignment coordinates should be skipped."""
+        paf = tmp_path / "bad_coords.paf"
+        lines = [
+            # Valid line
+            "read1\t1000\t0\t1000\t+\tref1\t5000\t100\t600\t500\t500\t60",
+            # tstart > tend (reversed)
+            "read2\t1000\t0\t1000\t+\tref1\t5000\t600\t100\t500\t500\t60",
+            # tend > tlen (out of bounds)
+            "read3\t1000\t0\t1000\t+\tref1\t5000\t100\t6000\t500\t500\t60",
+            # tstart negative
+            "read4\t1000\t0\t1000\t+\tref1\t5000\t-1\t600\t500\t500\t60",
+            # tstart == tend (zero-length alignment)
+            "read5\t1000\t0\t1000\t+\tref1\t5000\t300\t300\t0\t0\t60",
+        ]
+        paf.write_text("\n".join(lines) + "\n")
+
+        result = parse_paf_coverage(paf)
+        assert "ref1" in result
+        # Only the first valid alignment should contribute
+        assert result["ref1"].max_depth == 1
+        assert np.all(result["ref1"].depth_array[100:600] == 1)
+
+    def test_oversized_reference_skipped(self, tmp_path: Path) -> None:
+        """References exceeding MAX_GENOME_SIZE should be skipped."""
+        from nanometa_live.core.parsers.paf_coverage_parser import MAX_GENOME_SIZE
+
+        paf = tmp_path / "huge_ref.paf"
+        huge_len = MAX_GENOME_SIZE + 1
+        lines = [
+            # Normal reference
+            f"read1\t1000\t0\t1000\t+\tsmall_ref\t5000\t100\t600\t500\t500\t60",
+            # Reference exceeding limit
+            f"read2\t1000\t0\t1000\t+\thuge_ref\t{huge_len}\t100\t600\t500\t500\t60",
+        ]
+        paf.write_text("\n".join(lines) + "\n")
+
+        result = parse_paf_coverage(paf)
+        assert "small_ref" in result
+        assert "huge_ref" not in result
+
+    def test_blank_and_whitespace_lines(self, tmp_path: Path) -> None:
+        """Blank lines and whitespace-only lines should be skipped gracefully."""
+        paf = tmp_path / "blanks.paf"
+        lines = [
+            "read1\t1000\t0\t1000\t+\tref1\t5000\t100\t600\t500\t500\t60",
+            "",
+            "   ",
+            "read2\t1000\t0\t1000\t+\tref1\t5000\t600\t900\t300\t300\t60",
+        ]
+        paf.write_text("\n".join(lines) + "\n")
+
+        result = parse_paf_coverage(paf)
+        assert "ref1" in result
+        assert result["ref1"].max_depth == 1
+
 
 class TestAggregateContigCoverage:
     """Tests for aggregate_contig_coverage functionality."""

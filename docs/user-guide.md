@@ -96,27 +96,31 @@ input_directory/
 
 ### Dashboard Tab
 
-Overview of your analysis:
-- Current status and elapsed time
-- Sample summary
-- Alerts for species of interest
+Targeted at a 30-second clinical scan. Four zones, top to bottom:
+
+- **Zone 1 — Clinical verdict banner**. A full-width card whose background color is the answer: green "ALL CLEAR", red "ACTION REQUIRED", amber "MONITORING", blue "SCREENING IN PROGRESS", grey "STANDBY". Shows run state, elapsed time, last-updated timestamp, and (when applicable) a "pending confirmatory validation" qualifier.
+- **Zone 2 — Pathogen alert cards** (shown only when alerts exist). Each alert card names the detected organism, read count and abundance, confidence level, and a "DETECTED IN:" row with per-sample chips indicating which samples the pathogen was found in. Chips are colored by severity tier. Samples marked as negative controls appear as flat gray chips with an `(NC)` suffix.
+- **Zone 3 — Supporting metrics** (four cards): Sequences Analyzed, Sample Quality (Excellent / Good / Fair / Poor with Q-score subtitle), Species Detected, Run Time.
+- **Zone 4 — Sample Details** (collapsed accordion). Per-sample table with plain-language column names: "Sequences Analyzed", "Sample Quality", "Read Length", "Match Rate".
 
 ### Organisms Tab
 
 Detected organisms and classification results:
-- **Organism Cards**: Each detected organism with abundance bars and confidence badges
-- **Summary Card**: Total organisms, DNA sequences, classification rate
-- **Watchlist Matches**: Organisms matching active watchlist entries highlighted
-- **On-Demand Validation**: Validate unexpected organisms with BLAST
+
+- **Organism cards**: each detected organism with abundance bars and confidence badges
+- **Summary card**: total organisms, DNA sequences (cumulative across all batches), classification rate
+- **Watchlist matches**: organisms matching active watchlist entries are highlighted
+- **On-demand validation**: validate unexpected organisms with BLAST
 
 ### Quality Control Tab
 
 Quality control metrics:
-- Quality score indicator with plain-language rating
-- Filtering breakdown visualization
-- Read counts before/after filtering
-- Per-sample statistics table with color-coded quality
-- Time-series plots of cumulative and per-batch data
+
+- **Stage Strip** at top: horizontal `Raw → Quality-filtered → Classified` with counts, tool subtitles, arrows, and a classification-rate delta beneath. For Chopper pipelines the Raw slot shows a dashed "Not available" placeholder because Chopper has no pre-filter stage.
+- **Read Quality** card: Avg Q, Q20, Q30, GC with color-coded thresholds (Q30 green ≥45%, amber 25–44%, red <25%)
+- **Read Length** card: N50, average length, total bases
+- **Sample Breakdown** table: per-sample filtered reads, classification rate, and average Q score with tool-source tooltips
+- **Advanced** sections (accordion): detailed processing charts and technical statistics
 
 ### Taxonomy Tab
 
@@ -206,17 +210,29 @@ Use when each file is a separate sample:
 
 ### Header Status
 
-- **Status Light**: Green (running), Gray (idle), Red (error)
+- **Status light**: Green (running), Gray (idle), Red (error)
 - **Timer**: Countdown to next data refresh
-- **Elapsed Time**: Time since analysis started
-- **Current Stage**: Active pipeline process
+- **Elapsed time**: Time since analysis started
+- **Current stage**: Active pipeline process
 
 ### Pipeline Progress
 
 When analysis is running:
-- Stage name (FASTP, KRAKEN2, etc.)
+- Stage name (Chopper, Kraken2, SeqKit, etc.)
 - Process counts (completed/total)
 - Batch number (in real-time mode)
+
+### Dashboard Verdict States
+
+The Dashboard verdict banner color is the primary signal:
+
+| State | Color | Meaning |
+|-------|-------|---------|
+| ALL CLEAR | Green | No watched pathogens detected; run is progressing or complete |
+| ACTION REQUIRED | Red | A critical or high-risk watched pathogen was detected — follow your safety protocol |
+| MONITORING | Amber | Only moderate-risk watched species detected |
+| SCREENING IN PROGRESS | Blue | Run is active; first batch not yet processed |
+| STANDBY | Grey | No run active |
 
 ## Configuration File
 

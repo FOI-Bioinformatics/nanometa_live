@@ -183,7 +183,8 @@ def create_pathogen_list_content(
                             id={"type": f"{id_prefix}-modal-info", "index": taxid},
                             size="sm",
                             color="link",
-                            className="p-0"
+                            className="p-0",
+                            title="View pathogen details"
                         ),
                     ], width=1, className="text-end"),
                 ], align="center", className="py-2 border-bottom"),

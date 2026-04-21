@@ -802,9 +802,6 @@ def register_watchlist_callbacks(app: Dash) -> None:
     # API Validation
     # ---------------------------------------------------------------------
 
-    # NOTE: update_cache_badge callback removed - watchlist-cache-badge component
-    # no longer exists in the active layout (was in legacy _create_api_validation_section)
-
     @app.callback(
         [
             Output("watchlist-tab-state", "data", allow_duplicate=True),
@@ -839,6 +836,16 @@ def register_watchlist_callbacks(app: Dash) -> None:
         trigger = str(ctx.triggered_id)
         use_ncbi = "ncbi" in (api_options or [])
         use_gtdb = "gtdb" in (api_options or [])
+
+        if not use_ncbi and not use_gtdb:
+            return (
+                dash.no_update,
+                dash.no_update,
+                False,  # Close progress modal
+                0,
+                "No databases selected",
+                "Check NCBI and/or GTDB in the Databases section.",
+            )
 
         manager = get_watchlist_manager()
         taxids_to_validate = []
@@ -886,9 +893,6 @@ def register_watchlist_callbacks(app: Dash) -> None:
             f"Validated {validated} of {total} entries",
             detail,
         )
-
-    # NOTE: clear_cache callback removed - watchlist-clear-cache-btn component
-    # no longer exists in the active layout (was in legacy _create_api_validation_section)
 
     # ---------------------------------------------------------------------
     # API Details Modal
@@ -968,6 +972,16 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         use_ncbi = "ncbi" in (api_options or [])
         use_gtdb = "gtdb" in (api_options or [])
+
+        if not use_ncbi and not use_gtdb:
+            return (
+                {"display": "block"},
+                html.P(
+                    "Select at least one database (NCBI or GTDB).",
+                    className="text-warning",
+                ),
+                None,
+            )
 
         try:
             from nanometa_live.core.taxonomy.taxonomy_api import lookup_species as api_lookup
@@ -1144,9 +1158,6 @@ def register_watchlist_callbacks(app: Dash) -> None:
                 no_update,
             )
 
-    # NOTE: set_taxonomy_mode callback removed - watchlist-taxonomy-mode component
-    # no longer exists in the active layout (was in legacy _create_stats_row)
-
     # ---------------------------------------------------------------------
     # File Upload
     # ---------------------------------------------------------------------
@@ -1311,12 +1322,5 @@ def register_watchlist_callbacks(app: Dash) -> None:
                 no_update,
                 dbc.Alert(f"Delete failed: {e}", color="danger", duration=5000),
             )
-
-    # NOTE: handle_file_view callback removed - watchlist-filter-watchlist component
-    # does not exist in the active layout (the feature was never fully implemented)
-
-    # NOTE: Taxid mapping callbacks removed - the corresponding layout components
-    # (taxmap-section-collapse, taxmap-mapping-modal, etc.) were never added to the
-    # active layout. Rescan and preparation callbacks live in preparation_tab.py.
 
     logger.info("Watchlist tab callbacks registered")

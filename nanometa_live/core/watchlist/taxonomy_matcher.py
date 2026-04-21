@@ -22,6 +22,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from nanometa_live.core.watchlist.validation.name_normalizer import GTDB_RANK_PREFIXES
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,18 +33,6 @@ class TaxonomyType(Enum):
     GTDB = "gtdb"
     UNKNOWN = "unknown"
     MIXED = "mixed"  # Some databases combine both
-
-
-# GTDB rank prefixes
-GTDB_RANK_PREFIXES = {
-    "d__": "domain",
-    "p__": "phylum",
-    "c__": "class",
-    "o__": "order",
-    "f__": "family",
-    "g__": "genus",
-    "s__": "species",
-}
 
 
 class TaxonomyMatcher:
@@ -164,13 +154,13 @@ class TaxonomyMatcher:
     def _has_gtdb_prefix(self, name: str) -> bool:
         """Check if name has a GTDB rank prefix."""
         for prefix in GTDB_RANK_PREFIXES:
-            if prefix in name:
+            if name.startswith(prefix):
                 return True
         return False
 
     def normalize_name(self, name: str) -> str:
         """
-        Normalize a species name for comparison.
+        Normalize a species name using the shared NameNormalizer.
 
         Handles both NCBI (spaces) and GTDB (underscores) formats,
         converting to a canonical lowercase form.
@@ -184,23 +174,10 @@ class TaxonomyMatcher:
         if not name:
             return ""
 
-        # Remove GTDB rank prefixes
-        normalized = name.strip()
-        for prefix in GTDB_RANK_PREFIXES:
-            if normalized.startswith(prefix):
-                normalized = normalized[len(prefix):]
-                break
-
-        # Convert underscores to spaces
-        normalized = normalized.replace('_', ' ')
-
-        # Lowercase and strip
-        normalized = normalized.lower().strip()
-
-        # Remove multiple spaces
-        normalized = re.sub(r'\s+', ' ', normalized)
-
-        return normalized
+        from nanometa_live.core.watchlist.validation.name_normalizer import get_name_normalizer
+        normalizer = get_name_normalizer()
+        normalized = normalizer.normalize(name)
+        return normalized.canonical
 
     def get_name_variants(self, name: str) -> List[str]:
         """

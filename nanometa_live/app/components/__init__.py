@@ -21,12 +21,6 @@ from nanometa_live.app.components.sample_selector import (
     create_sample_selector,
     create_compact_sample_selector,
 )
-from nanometa_live.app.components.watchlist_manager_ui import (
-    create_watchlist_section,
-    create_active_species_list,
-    create_taxonomy_selector,
-    create_watchlist_stats_card,
-)
 from nanometa_live.app.components.watchlist_modal import (
     create_watchlist_view_modal,
     create_pathogen_detail_modal,
@@ -67,11 +61,7 @@ __all__ = [
     "create_config_form",
     "create_sample_selector",
     "create_compact_sample_selector",
-    # Watchlist management
-    "create_watchlist_section",
-    "create_active_species_list",
-    "create_taxonomy_selector",
-    "create_watchlist_stats_card",
+    # Watchlist modals
     "create_watchlist_view_modal",
     "create_pathogen_detail_modal",
     "create_pathogen_list_content",

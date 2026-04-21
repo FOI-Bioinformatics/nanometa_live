@@ -465,6 +465,23 @@ def create_main_layout():
                     ], color="info")
                 ]),
 
+                # Validation method selector
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Label("Validation Method:", html_for="on-demand-method-select"),
+                        dbc.Select(
+                            id="on-demand-method-select",
+                            options=[
+                                {"label": "BLAST", "value": "blast"},
+                                {"label": "minimap2", "value": "minimap2"},
+                                {"label": "Both (BLAST + minimap2)", "value": "both"},
+                            ],
+                            value="blast",
+                        ),
+                        dbc.FormText("Select the alignment method for sequence validation"),
+                    ], md=6)
+                ], className="mt-3 mb-2"),
+
                 html.Hr(),
 
                 # Progress section

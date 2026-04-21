@@ -195,7 +195,7 @@ def _create_blast_tab() -> dbc.Tab:
                                              "headerTooltip": "Percentage of sequences confirmed. 80%+ is strong evidence."},
                                             {"headerName": "Match %", "field": "percent_identity_mean", "type": "numericColumn",
                                              "headerTooltip": "How closely sequences match the reference. 95%+ is a strong match."},
-                                            {"headerName": "Genome Covered", "field": "coverage_breadth", "type": "numericColumn",
+                                            {"headerName": "Query Coverage (%)", "field": "coverage_breadth", "type": "numericColumn",
                                              "headerTooltip": "Percentage of the reference genome covered by sequences"},
                                             {
                                                 "headerName": "Status",
@@ -509,7 +509,7 @@ def create_validation_result_card(
         percent_identity: Mean identity percentage
         total_reads: Total reads from Kraken2
         validated_reads: Reads validated by BLAST
-        coverage: Reference genome coverage (0-1)
+        coverage: Mean query alignment coverage fraction (0-1, from BLAST qcovs)
         sample_id: Sample identifier
         validation_method: Validation method used (blast or minimap2)
         avg_mapq: Average mapping quality (minimap2)
@@ -609,7 +609,7 @@ def create_validation_result_card(
                 dbc.Col([
                     html.Div([
                         html.Small(
-                            "Alignment Score" if validation_method == "minimap2" else "Genome Covered",
+                            "Alignment Score" if validation_method == "minimap2" else "Query Coverage",
                             className="text-muted d-block"
                         ),
                         html.Strong(

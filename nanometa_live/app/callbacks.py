@@ -7,6 +7,7 @@ and components of the application.
 
 import os
 import logging
+import threading
 import time
 
 from dash import Dash, Input, Output, State, callback, ctx, html, no_update
@@ -51,6 +52,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     # Internet Auto-Detection (startup suggestion)
     # ========================================================================
 
+    _internet_check_lock = threading.Lock()
     _internet_checked = {"done": False}
 
     @app.callback(
@@ -60,9 +62,10 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     )
     def check_internet_on_startup(config):
         """On first load, check internet and suggest offline mode if unreachable."""
-        if _internet_checked["done"]:
-            return no_update
-        _internet_checked["done"] = True
+        with _internet_check_lock:
+            if _internet_checked["done"]:
+                return no_update
+            _internet_checked["done"] = True
 
         if config and config.get("offline_mode"):
             return no_update
@@ -576,14 +579,20 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             return ["All Samples"], {}
 
     @app.callback(
-        Output("sample-selector", "options"),
+        [
+            Output("sample-selector", "options"),
+            Output("sample-selector", "value"),
+        ],
         Input("available-samples", "data"),
+        State("sample-selector", "value"),
     )
-    def update_sample_selector_options(available_samples):
+    def update_sample_selector_options(available_samples, current_value):
         """
         Update sample selector dropdown options.
 
         Converts the list of available samples into Dash dropdown options.
+        Resets the selected value to 'All Samples' if the current selection
+        is no longer available (e.g. sample directory was removed).
         """
         if not available_samples:
             available_samples = ["All Samples"]
@@ -594,7 +603,12 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 options.append({"label": "All Samples (Aggregated)", "value": sample})
             else:
                 options.append({"label": sample, "value": sample})
-        return options
+
+        # Reset to 'All Samples' if current selection is no longer valid
+        if current_value and current_value not in available_samples:
+            return options, "All Samples"
+
+        return options, no_update
 
     @app.callback(
         Output("selected-sample", "data"),
@@ -965,21 +979,17 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             if current_tab != "dashboard-tab":
                 analysis_name = config.get("analysis_name", "Analysis") if config else "Analysis"
                 toast_msg = {
-                    "header": "Analysis Complete",
-                    "body": f"{analysis_name} has finished. Viewing results on Dashboard.",
-                    "icon": "bi-check-circle-fill",
-                    "duration": 5000,
-                    "type": "success"
+                    "type": "success",
+                    "title": "Analysis Complete",
+                    "message": f"{analysis_name} has finished. Viewing results on Dashboard.",
                 }
                 return "dashboard-tab", new_prev_state, toast_msg
             else:
                 # Already on dashboard, just show toast
                 toast_msg = {
-                    "header": "Analysis Complete",
-                    "body": "Results are now available.",
-                    "icon": "bi-check-circle-fill",
-                    "duration": 4000,
-                    "type": "success"
+                    "type": "success",
+                    "title": "Analysis Complete",
+                    "message": "Results are now available.",
                 }
                 return no_update, new_prev_state, toast_msg
 

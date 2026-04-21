@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 # GTDB API endpoint
-GTDB_API_BASE = "https://gtdb-api.ecogenomic.org"
+GTDB_API_BASE = "https://api.gtdb.ecogenomic.org"
 
 # NCBI Datasets API
 NCBI_DATASETS_API = "https://api.ncbi.nlm.nih.gov/datasets/v2"
@@ -96,6 +96,57 @@ def _extract_fasta_accession(fasta_path: Path) -> Optional[str]:
     except (OSError, UnicodeDecodeError):
         pass
     return None
+
+
+def _validate_fasta(fasta_path: Path) -> bool:
+    """Validate that a file is a valid FASTA file.
+
+    Checks that the file is non-empty, starts with a header line ('>'),
+    and contains only valid nucleotide/amino-acid sequence characters.
+
+    Args:
+        fasta_path: Path to the FASTA file to validate.
+
+    Returns:
+        True if the file appears to be a valid FASTA, False otherwise.
+    """
+    valid_seq_chars = set("ACGTNURYSWKMBDHVacgtnuryswkmbdhv.-\n\r\t ")
+    try:
+        size = fasta_path.stat().st_size
+        if size == 0:
+            logger.error(f"FASTA validation failed: {fasta_path} is empty")
+            return False
+
+        with open(fasta_path, "r") as f:
+            first_line = f.readline()
+            if not first_line.startswith(">"):
+                logger.error(
+                    f"FASTA validation failed: {fasta_path} does not start "
+                    f"with a header line ('>')"
+                )
+                return False
+
+            # Check first 10000 characters of sequence data for validity
+            chars_checked = 0
+            for line in f:
+                if line.startswith(">"):
+                    continue
+                for ch in line:
+                    if ch not in valid_seq_chars:
+                        logger.error(
+                            f"FASTA validation failed: {fasta_path} contains "
+                            f"invalid character '{ch}' in sequence data"
+                        )
+                        return False
+                chars_checked += len(line)
+                if chars_checked > 10000:
+                    break
+
+        return True
+
+    except (OSError, UnicodeDecodeError) as e:
+        logger.error(f"FASTA validation failed for {fasta_path}: {e}")
+        return False
 
 
 class GenomeDownloadManager:
@@ -812,6 +863,11 @@ class GenomeDownloadManager:
 
                     shutil.move(str(temp_fasta), str(output_file))
 
+                if not _validate_fasta(output_file):
+                    logger.error(f"Downloaded virus genome failed FASTA validation: {output_file}")
+                    output_file.unlink(missing_ok=True)
+                    return None, None
+
                 accession = _extract_fasta_accession(output_file)
                 logger.info(
                     f"Downloaded virus genome to {output_file} "
@@ -899,6 +955,11 @@ class GenomeDownloadManager:
 
                     # Move to final location
                     shutil.move(str(temp_fasta), str(output_file))
+
+                if not _validate_fasta(output_file):
+                    logger.error(f"Downloaded genome failed FASTA validation: {output_file}")
+                    output_file.unlink(missing_ok=True)
+                    return None
 
                 logger.info(f"Downloaded genome to {output_file}")
                 return output_file
@@ -988,6 +1049,11 @@ class GenomeDownloadManager:
 
                     shutil.move(str(temp_fasta), str(output_file))
 
+                if not _validate_fasta(output_file):
+                    logger.error(f"Downloaded genome failed FASTA validation: {output_file}")
+                    output_file.unlink(missing_ok=True)
+                    return None, None
+
                 accession = _extract_fasta_accession(output_file)
                 logger.info(
                     f"Downloaded genome by taxid to {output_file} "
@@ -1024,6 +1090,18 @@ class GenomeDownloadManager:
 
         output_db = self.blast_dir / f"{taxid}.fasta"
         genome_size_mb = genome_path.stat().st_size / (1024 * 1024) if genome_path.exists() else 0
+
+        # Check available disk space before building
+        try:
+            usage = shutil.disk_usage(str(self.blast_dir))
+            free_gb = usage.free / (1024**3)
+            if free_gb < 2.0:
+                logger.warning(
+                    f"Low disk space: {free_gb:.1f} GB free in {self.blast_dir}. "
+                    "Minimum 2 GB recommended for BLAST DB builds."
+                )
+        except OSError as e:
+            logger.debug(f"Could not check disk space: {e}")
 
         logger.info(f"Building BLAST database for taxid {taxid} (genome size: {genome_size_mb:.1f} MB)...")
 

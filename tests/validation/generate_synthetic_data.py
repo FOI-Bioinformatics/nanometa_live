@@ -9,6 +9,7 @@ Creates 4 barcodes with known organisms from built-in watchlists:
 """
 import json
 import os
+import time
 from pathlib import Path
 
 
@@ -316,3 +317,10 @@ def generate_all_synthetic_data(output_dir):
     )
     paf_path = validation_dir / "barcode01_taxid1773.paf"
     paf_path.write_text("\n".join(paf_lines) + "\n")
+
+    # Backdate all generated files so they pass the file stability check
+    old_time = time.time() - 5
+    for root, _dirs, files in os.walk(str(output_dir)):
+        for fname in files:
+            fpath = os.path.join(root, fname)
+            os.utime(fpath, (old_time, old_time))

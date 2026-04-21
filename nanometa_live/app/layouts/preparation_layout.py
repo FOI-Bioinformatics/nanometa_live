@@ -34,7 +34,6 @@ def create_preparation_layout():
         # in a single callback's outputs).
         dcc.Store(id="wizard-step-state-relay", data=None),
         dcc.Store(id="prep-job-state", data=None),
-        dcc.Store(id="genome-download-progress", data={"current": 0, "total": 0, "status": "idle"}),
         dcc.Store(id="download-cancel-flag", data=False),
         dcc.Store(id="blast-cancel-flag", data=False),
         dcc.Store(id="genome-import-unrecognized", data=[]),

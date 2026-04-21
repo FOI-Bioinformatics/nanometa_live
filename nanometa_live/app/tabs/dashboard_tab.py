@@ -34,21 +34,14 @@ from nanometa_live.app.utils.callback_helpers import (
     log_callback_error,
 )
 from nanometa_live.app.utils.debounce import should_skip_update, get_trigger_type
-from nanometa_live.app.layouts.dashboard_layout import create_alerts_list, create_pipeline_stages_display
+from nanometa_live.app.layouts.dashboard_layout import create_alerts_list
 from nanometa_live.app.components.modern_components import (
-    QualityScoreBadge,
-    N50Badge,
-    ClassificationRateBadge,
     LastUpdatedBadge,
-    TrendIndicator,
-    DecisionBanner
 )
 from nanometa_live.app.components.pathogen_alert import (
-    PathogenAlertPanel,
     CriticalPathogenAlert,
     HighRiskPathogenAlert,
     WatchedSpeciesAlert,
-    ThreatSummaryIndicator
 )
 
 logger = logging.getLogger(__name__)
@@ -85,12 +78,67 @@ def _species_df_to_organisms(species_df: pd.DataFrame) -> List[Dict[str, Any]]:
     return result_df.to_dict('records')
 
 
+def _load_per_sample_organisms(
+    main_dir: str,
+    available_samples: List[str]
+) -> Dict[int, List[Dict[str, Any]]]:
+    """
+    Load species-level organisms from each sample and return a per-taxid attribution dict.
+
+    Keyed by the Kraken2 database taxid (as it appears in reports), each value is a
+    list of sample-level dicts sorted descending by reads. A sample is flagged as
+    negative control when its name contains "negative" (case-insensitive) — the
+    codebase has no explicit manifest NC flag at this stage.
+
+    Args:
+        main_dir: Results output directory
+        available_samples: All sample names including "All Samples"
+
+    Returns:
+        Dict[int, List[{sample, reads, abundance, is_negative_control}]]
+    """
+    real_samples = [s for s in available_samples if s != "All Samples"]
+    if not real_samples:
+        return {}
+
+    taxid_to_samples: Dict[int, List[Dict[str, Any]]] = {}
+
+    for sample in real_samples:
+        is_nc = "negative" in sample.lower()
+        try:
+            kraken_df = load_kraken_data(main_dir, sample)
+            if kraken_df.empty:
+                continue
+            species_df = kraken_df[
+                (kraken_df["rank"] == "S") & (kraken_df["reads"] >= 5)
+            ]
+            if species_df.empty:
+                continue
+            for org in _species_df_to_organisms(species_df):
+                taxid = org["taxid"]
+                if taxid not in taxid_to_samples:
+                    taxid_to_samples[taxid] = []
+                taxid_to_samples[taxid].append({
+                    "sample": sample,
+                    "reads": org["reads"],
+                    "abundance": org["abundance"],
+                    "is_negative_control": is_nc,
+                })
+        except Exception as exc:
+            logger.debug(f"Per-sample organism load failed for {sample}: {exc}")
+
+    # Sort each sample list descending by reads
+    for taxid in taxid_to_samples:
+        taxid_to_samples[taxid].sort(key=lambda x: x["reads"], reverse=True)
+
+    return taxid_to_samples
+
+
 def _get_active_watchlist_entries(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Get only ENABLED watchlist entries for alerting.
 
-    Combines entries from WatchlistManager (active entries only) with
-    legacy species_of_interest from config (filtering by enabled status).
+    Returns active entries from WatchlistManager.
 
     Args:
         config: Application configuration dict
@@ -263,105 +311,271 @@ def register_dashboard_callbacks(app: Dash):
             return None
 
     # ================================================================
-    # D3a: Status callback (lightweight, reads cached overall status)
+    # Zone 1: Verdict Banner callback
+    # Merges previous D3a (status) and threat summary into one banner.
     # ================================================================
     @app.callback(
         [
-            Output("dashboard-status-indicator", "style"),
-            Output("dashboard-status-icon", "className"),
-            Output("dashboard-status-text", "children"),
-            Output("dashboard-status-subtitle", "children"),
+            Output("dashboard-verdict-banner", "children"),
+            Output("dashboard-verdict-banner", "style"),
             Output("dashboard-time-elapsed", "children"),
-            Output("dashboard-files-processed", "children"),
-            Output("dashboard-progress-container", "style"),
-            Output("dashboard-progress-bar", "value"),
-            Output("dashboard-status-label-text", "children"),
-            Output("dashboard-status-label-icon", "className"),
-            Output("dashboard-status-indicator", "className"),
+            Output("dashboard-run-state-badge", "children"),
+            Output("dashboard-run-state-badge", "color"),
         ],
         [
-            Input("dashboard-overall-status-cache", "data"),
+            Input("update-interval", "n_intervals"),
+            Input("watchlist-tab-state", "data"),
         ],
         [
             State("app-config", "data"),
             State("backend-status", "data"),
+            State("dashboard-overall-status-cache", "data"),
+            State("validation-data-store", "data"),
         ]
     )
-    def update_dashboard_status(overall_status, config, status):
-        """Update dashboard status card using cached overall status."""
-        if not overall_status:
-            return _get_idle_status()
+    def update_verdict_banner(n_intervals, watchlist_state, config, status,
+                              overall_status, validation_data):
+        """Update the clinical verdict banner based on analysis status and pathogen screening."""
+        if get_trigger_type(ctx) == "interval":
+            if should_skip_update("dashboard_verdict_banner", debounce_ms=2000):
+                raise PreventUpdate
+
+        pipeline_running = status.get("running", False) if status else False
+        pipeline_completed = status.get("completed", False) if status else False
+        start_time = status.get("start_time") if status else None
+        time_elapsed = _format_time_elapsed(start_time)
+        last_updated_str = "Last updated " + datetime.now().strftime("%H:%M:%S")
+
+        # Check whether any validation results exist (used for confidence qualifier)
+        validation_has_results = bool(
+            validation_data and validation_data.get("results")
+        )
+
+        if pipeline_running:
+            run_state = "ACTIVE"
+            run_state_color = "success"
+        elif pipeline_completed:
+            run_state = "COMPLETE"
+            run_state_color = "info"
+        else:
+            run_state = "STANDBY"
+            run_state_color = "secondary"
+
+        # No config or no data: STANDBY or SCREENING IN PROGRESS
+        if not config:
+            if pipeline_running:
+                return (
+                    _make_banner_content(
+                        "arrow-repeat", "#084298",
+                        "SCREENING IN PROGRESS", "First results pending",
+                        run_state, time_elapsed,
+                        sub_color="#084298",
+                        last_updated_str=last_updated_str,
+                        icon_extra_class="spin",
+                    ),
+                    _verdict_banner_style("#cfe2ff", "#0d6efd"),
+                    time_elapsed, run_state, run_state_color
+                )
+            return (
+                _make_banner_content(
+                    "pause-circle", "#6c757d",
+                    "STANDBY", "Start an analysis to begin",
+                    run_state, time_elapsed,
+                    sub_color="#6c757d",
+                    last_updated_str=last_updated_str,
+                ),
+                _verdict_banner_style("#f8f9fa", "#6c757d"),
+                time_elapsed, run_state, run_state_color
+            )
+
+        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
+
+        # Pipeline running but no data yet
+        if overall_status and overall_status.get("status") == "starting":
+            return (
+                _make_banner_content(
+                    "arrow-repeat", "#084298",
+                    "SCREENING IN PROGRESS", "First results pending",
+                    run_state, time_elapsed,
+                    sub_color="#084298",
+                    last_updated_str=last_updated_str,
+                    icon_extra_class="spin",
+                ),
+                _verdict_banner_style("#cfe2ff", "#0d6efd"),
+                time_elapsed, run_state, run_state_color
+            )
 
         try:
-            pipeline_running = status.get("running", False) if status else False
+            if main_dir and os.path.isdir(main_dir):
+                kraken_df = load_kraken_data(main_dir, "All Samples")
+                if not kraken_df.empty:
+                    species_df = kraken_df[
+                        (kraken_df["rank"] == "S") & (kraken_df["reads"] >= 5)
+                    ]
+                    detected_organisms = _species_df_to_organisms(species_df)
+                    watched_species = _get_active_watchlist_entries(config)
+                    n_watched = len(watched_species)
+                    dangerous = _check_pathogens_with_mapping(detected_organisms, config)
 
-            status_results = _generate_status_display(overall_status["status"])
-            status_style = status_results[0]
-            status_icon_class = status_results[1]
-            status_text = status_results[2]
-            status_subtitle = status_results[3]
-            status_label_text = status_results[4]
-            status_label_icon = status_results[5]
+                    if dangerous:
+                        n_found = len(dangerous)
+                        critical = [d for d in dangerous if d.get("threat_level") == "critical"]
+                        high_risk = [d for d in dangerous
+                                     if d.get("threat_level") in ["high", "high_risk"]]
+                        if critical or high_risk:
+                            action_sub = (
+                                f"{n_found} of {n_watched} monitored pathogens found — act now"
+                            )
+                            if not validation_has_results:
+                                action_sub += " — pending confirmatory validation"
+                            return (
+                                _make_banner_content(
+                                    "exclamation-octagon-fill", "#8b0000",
+                                    "ACTION REQUIRED",
+                                    action_sub,
+                                    run_state, time_elapsed,
+                                    sub_color="#721c24",
+                                    show_icon_mobile=True,
+                                    last_updated_str=last_updated_str,
+                                ),
+                                _verdict_banner_style("#f8d7da", "#8b0000"),
+                                time_elapsed, run_state, run_state_color
+                            )
+                        return (
+                            _make_banner_content(
+                                "eye-fill", "#fd7e14",
+                                "MONITORING",
+                                "Moderate-risk species found",
+                                run_state, time_elapsed,
+                                sub_color="#664d03",
+                                last_updated_str=last_updated_str,
+                            ),
+                            _verdict_banner_style("#fff3cd", "#fd7e14"),
+                            time_elapsed, run_state, run_state_color
+                        )
 
-            start_time = status.get("start_time") if status else None
-            time_elapsed = _format_time_elapsed(start_time)
+                    # ALL CLEAR
+                    return (
+                        _make_banner_content(
+                            "shield-check", "#28a745",
+                            "ALL CLEAR",
+                            f"0 of {n_watched} monitored pathogens found",
+                            run_state, time_elapsed,
+                            sub_color="#155724",
+                            last_updated_str=last_updated_str,
+                        ),
+                        _verdict_banner_style("#d4edda", "#28a745"),
+                        time_elapsed, run_state, run_state_color
+                    )
 
-            files_processed_count = status.get('files_processed', 0) if status else 0
-            files_waiting = status.get('files_waiting', 0) if status else 0
-            samples_processed = overall_status.get('samples_processed', 0)
-            total_samples = overall_status.get('total_samples', 0)
-            nanopore_dir = config.get('nanopore_output_directory', '')
-            total_input_files = _count_input_files(nanopore_dir)
+                if pipeline_running:
+                    return (
+                        _make_banner_content(
+                            "arrow-repeat", "#084298",
+                            "SCREENING IN PROGRESS", "First results pending",
+                            run_state, time_elapsed,
+                            sub_color="#084298",
+                            last_updated_str=last_updated_str,
+                            icon_extra_class="spin",
+                        ),
+                        _verdict_banner_style("#cfe2ff", "#0d6efd"),
+                        time_elapsed, run_state, run_state_color
+                    )
 
-            if pipeline_running:
-                if total_input_files > 0:
-                    # Cap processed count: batch stats can sum across batches,
-                    # exceeding the actual number of input files
-                    capped_processed = min(files_processed_count, total_input_files)
-                    files_processed = f"{capped_processed} / {total_input_files}"
-                elif files_waiting > 0:
-                    capped_processed = min(files_processed_count, files_waiting)
-                    files_processed = f"{capped_processed} / {files_waiting}"
-                else:
-                    files_processed = f"{files_processed_count} / ?"
-            else:
-                if total_input_files > 0:
-                    files_processed = f"{total_input_files} / {total_input_files}"
-                else:
-                    files_processed = f"{samples_processed} / {total_samples}"
-
-            progress_visible = {"display": "block"} if pipeline_running else {"display": "none"}
-            progress_value = int((samples_processed / total_samples) * 100) if total_samples > 0 else 0
-
-            # CSS class from _generate_status_display config
-            indicator_class = f"dashboard-traffic-light {status_results[6]}"
-
-            return (
-                status_style, status_icon_class, status_text, status_subtitle,
-                time_elapsed, files_processed, progress_visible, progress_value,
-                status_label_text, status_label_icon, indicator_class,
-            )
         except Exception as e:
-            logger.error(f"Error updating dashboard status: {e}", exc_info=True)
-            return _get_error_status(str(e))
+            logger.error(f"Error updating verdict banner: {e}", exc_info=True)
+
+        # Default: STANDBY
+        return (
+            _make_banner_content(
+                "pause-circle", "#6c757d",
+                "STANDBY", "Start an analysis to begin",
+                run_state, time_elapsed,
+                sub_color="#6c757d",
+                last_updated_str=last_updated_str,
+            ),
+            _verdict_banner_style("#f8f9fa", "#6c757d"),
+            time_elapsed, run_state, run_state_color
+        )
 
     # ================================================================
-    # D3b: Metrics callback (reads cached overall status)
+    # Zone 3: Quality card callback
+    # Replaces the old update_nanoplot_badges callback.
+    # ================================================================
+    @app.callback(
+        Output("dashboard-quality-card-content", "children"),
+        [Input("update-interval", "n_intervals")],
+        [State("app-config", "data"), State("backend-status", "data")]
+    )
+    def update_quality_card(n_intervals, config, status):
+        """Update the Sample Quality card with Q-score level and value."""
+        if should_skip_update("dashboard_quality_card", debounce_ms=2000):
+            raise PreventUpdate
+
+        default_content = [
+            html.I(className="bi bi-shield-check",
+                   style={"fontSize": "28px", "color": "#6c757d"}),
+            html.H3("--", className="dashboard-metric-value mb-0"),
+            html.P("Sample Quality", className="dashboard-metric-label text-muted mb-0")
+        ]
+
+        if not config:
+            return default_content
+
+        visualization_mode = config.get("visualization_only", False)
+        pipeline_running = status.get("running", False) if status else False
+        pipeline_completed = status.get("completed", False) if status else False
+        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
+        has_main_dir = bool(main_dir and os.path.isdir(main_dir))
+
+        if not (visualization_mode or pipeline_running or pipeline_completed or has_main_dir):
+            return default_content
+
+        try:
+            nanoplot_stats = load_nanoplot_stats(main_dir)
+            mean_quality = nanoplot_stats.get("mean_read_quality", 0)
+
+            if not mean_quality:
+                qc_stats = get_qc_stats(main_dir)
+                mean_quality = qc_stats.get("mean_quality", 0) or qc_stats.get("q_score", 0)
+
+            if mean_quality and mean_quality > 0:
+                # Q-score thresholds matching QualityScoreBadge logic
+                if mean_quality >= 20:
+                    level = "Excellent"
+                    icon_color = "#28a745"
+                elif mean_quality >= 15:
+                    level = "Good"
+                    icon_color = "#0dcaf0"
+                elif mean_quality >= 10:
+                    level = "Fair"
+                    icon_color = "#ffc107"
+                else:
+                    level = "Poor"
+                    icon_color = "#dc3545"
+
+                return [
+                    html.I(className="bi bi-shield-check",
+                           style={"fontSize": "28px", "color": icon_color}),
+                    html.H3(level, className="dashboard-metric-value mb-0",
+                            style={"color": icon_color}),
+                    html.P(f"Q{mean_quality:.1f}", className="text-muted small mb-0"),
+                    html.P("Sample Quality",
+                           className="dashboard-metric-label text-muted mb-0")
+                ]
+
+        except Exception as e:
+            logger.error(f"Error updating quality card: {e}")
+
+        return default_content
+
+    # ================================================================
+    # D3b: Metrics callback (sequences + organisms counts)
     # ================================================================
     @app.callback(
         [
-            Output("dashboard-total-files-count", "children"),
-            Output("dashboard-total-files-trend", "children"),
             Output("dashboard-sequences-count", "children"),
-            Output("dashboard-quality-score", "children"),
             Output("dashboard-organisms-count", "children"),
-            Output("dashboard-alerts-count-display", "children"),
-            Output("dashboard-alerts-icon", "className"),
-            Output("dashboard-alerts-icon", "style"),
-            Output("dashboard-sequences-trend", "children"),
-            Output("dashboard-quality-trend", "children"),
-            Output("dashboard-organisms-trend", "children"),
-            Output("dashboard-alerts-trend", "children"),
             Output("dashboard-data-cache", "data"),
         ],
         [
@@ -370,27 +584,16 @@ def register_dashboard_callbacks(app: Dash):
         ],
         [
             State("app-config", "data"),
-            State("backend-status", "data"),
             State("available-samples", "data"),
             State("dashboard-data-cache", "data"),
         ]
     )
-    def update_dashboard_metrics(overall_status, selected_dashboard_sample, config, status, available_samples, prev_cache):
-        """Update dashboard metric cards using cached overall status."""
-        empty_trend = ""
-        idle_metrics = ("0", empty_trend,
-                        "0", "--", "0", "0", "bi bi-bell", {"fontSize": "32px", "color": "#6c757d"},
-                        empty_trend, empty_trend, empty_trend, empty_trend, prev_cache or {})
+    def update_dashboard_metrics(overall_status, selected_dashboard_sample,
+                                 config, available_samples, prev_cache):
+        """Update sequences and organisms counts from cached overall status."""
+        idle_metrics = ("0", "0", prev_cache or {})
 
         if not overall_status:
-            # Still show total files count even when idle
-            nanopore_dir = config.get("nanopore_output_directory") or config.get("nanopore_dir", "") if config else ""
-            if nanopore_dir:
-                total_files = _count_input_files(nanopore_dir)
-                idle_with_files = (str(total_files), empty_trend,
-                                   "0", "--", "0", "0", "bi bi-bell", {"fontSize": "32px", "color": "#6c757d"},
-                                   empty_trend, empty_trend, empty_trend, empty_trend, prev_cache or {})
-                return idle_with_files
             return idle_metrics
 
         try:
@@ -398,18 +601,10 @@ def register_dashboard_callbacks(app: Dash):
             available_samples = _resolve_samples(main_dir, available_samples)
             metric_sample = selected_dashboard_sample if selected_dashboard_sample else "All Samples"
 
-            # Count total input files
-            nanopore_dir = config.get("nanopore_output_directory") or config.get("nanopore_dir", "") if config else ""
-            total_files = _count_input_files(nanopore_dir) if nanopore_dir else 0
-            total_files_display = str(total_files)
-
-            # Calculate metric values based on selected sample
             if metric_sample and metric_sample != "All Samples":
                 sample_kraken_df = load_kraken_data(main_dir, metric_sample)
                 sample_reads = int(sample_kraken_df["reads"].sum()) if not sample_kraken_df.empty else 0
                 sequences_count = f"{sample_reads:,}"
-                sample_quality = _estimate_quality_score(main_dir, sample_kraken_df)
-                quality_score = str(sample_quality) if sample_quality else "--"
                 if not sample_kraken_df.empty:
                     org_df = sample_kraken_df[sample_kraken_df["rank"].isin(["S", "G"])]
                     org_df = org_df[org_df["taxid"] > 1]
@@ -418,88 +613,23 @@ def register_dashboard_callbacks(app: Dash):
                     organisms_count = "0"
             else:
                 sequences_count = f"{overall_status['total_reads']:,}"
-                quality_score = str(overall_status['quality_score']) if overall_status['quality_score'] else "--"
                 organisms_count = str(overall_status['organisms_detected'])
 
-            # Alerts count for icon (lightweight - read cached samples_data)
-            samples_data = overall_status.get("_samples_data", [])
-            alerts_data = _generate_alerts(overall_status, main_dir, config, samples_data)
-            alerts_count_val = len(alerts_data)
-            alerts_count_display = str(alerts_count_val)
-
-            if alerts_count_val > 0:
-                alerts_icon_class = "bi bi-bell-fill"
-                _severity_colors = {
-                    "danger": "#dc3545",
-                    "warning": "#ffc107",
-                    "info": "#0dcaf0",
-                    "success": "#198754",
-                }
-                highest_severity = _get_alerts_badge_color(alerts_data)
-                alerts_icon_style = {
-                    "fontSize": "32px",
-                    "color": _severity_colors.get(highest_severity, "#6c757d")
-                }
-            else:
-                alerts_icon_class = "bi bi-bell"
-                alerts_icon_style = {"fontSize": "32px", "color": "#6c757d"}
-
-            # Calculate trends from previous cache
-            prev_cache = prev_cache or {}
-            prev_reads = prev_cache.get("reads", 0)
-            prev_quality = prev_cache.get("quality", 0)
-            prev_organisms = prev_cache.get("organisms", 0)
-            prev_alerts = prev_cache.get("alerts", 0)
-
-            # Parse current numeric values for delta calculation
             try:
                 cur_reads = int(sequences_count.replace(",", ""))
             except (ValueError, AttributeError):
                 cur_reads = 0
             try:
-                cur_quality = int(quality_score) if quality_score != "--" else 0
-            except (ValueError, TypeError):
-                cur_quality = 0
-            try:
                 cur_organisms = int(organisms_count)
             except (ValueError, TypeError):
                 cur_organisms = 0
 
-            # Total files trend
-            prev_files = prev_cache.get("total_files", 0)
-            files_trend = TrendIndicator(total_files - prev_files, "files") if total_files != prev_files and prev_files > 0 else ""
+            new_cache = {"reads": cur_reads, "organisms": cur_organisms}
+            return sequences_count, organisms_count, new_cache
 
-            # Only show trends when we have previous data to compare against
-            if prev_reads > 0 or prev_organisms > 0:
-                seq_trend = TrendIndicator(cur_reads - prev_reads, "reads") if cur_reads != prev_reads else ""
-                org_trend = TrendIndicator(cur_organisms - prev_organisms) if cur_organisms != prev_organisms else ""
-            else:
-                seq_trend = ""
-                org_trend = ""
-            quality_trend = ""
-            alerts_trend = ""
-
-            # Update cache with current values
-            new_cache = {
-                "total_files": total_files,
-                "reads": cur_reads,
-                "quality": cur_quality,
-                "organisms": cur_organisms,
-                "alerts": alerts_count_val,
-            }
-
-            return (
-                total_files_display, files_trend,
-                sequences_count, quality_score, organisms_count,
-                alerts_count_display, alerts_icon_class, alerts_icon_style,
-                seq_trend, quality_trend, org_trend, alerts_trend, new_cache,
-            )
         except Exception as e:
             logger.error(f"Error updating dashboard metrics: {e}", exc_info=True)
-            empty_trend = ""
-            return ("0", empty_trend,
-                    "0", "--", "0", "1", "bi bi-bell-fill", {"fontSize": "32px", "color": "#dc3545"},
-                    empty_trend, empty_trend, empty_trend, empty_trend, prev_cache or {})
+            return "0", "0", prev_cache or {}
 
     # ================================================================
     # D3c: Sample table callback
@@ -592,217 +722,36 @@ def register_dashboard_callbacks(app: Dash):
 
     @app.callback(
         [
-            Output("dashboard-stages-container", "children"),
-            Output("dashboard-current-stage", "children")
-        ],
-        [Input("update-interval", "n_intervals")],
-        [State("backend-status", "data"), State("app-config", "data")]
-    )
-    def update_pipeline_stages(
-        n_intervals: int,
-        status: Dict[str, Any],
-        config: Dict[str, Any]
-    ) -> Tuple:
-        """
-        Update the pipeline stages display.
-
-        Args:
-            n_intervals: Interval counter
-            status: Backend status including stages information
-            config: Application configuration
-
-        Returns:
-            Tuple of (stages_container, current_stage_text)
-        """
-        if should_skip_update("dashboard_pipeline_stages", debounce_ms=2000):
-            raise PreventUpdate
-
-        # Check if in visualization mode
-        visualization_mode = config.get("visualization_only", False) if config else False
-
-        # Default empty state - show appropriate message
-        if visualization_mode:
-            viewing_stages = html.Div([
-                html.I(className="bi bi-eye text-info", style={"fontSize": "24px"}),
-                html.P("Viewing previously completed analysis results", className="text-muted mb-0 mt-2")
-            ], className="text-center py-3")
-        else:
-            viewing_stages = html.Div([
-                html.I(className="bi bi-hourglass text-muted", style={"fontSize": "24px"}),
-                html.P("Waiting for pipeline to start...", className="text-muted mb-0 mt-2")
-            ], className="text-center py-3")
-
-        if not status:
-            return viewing_stages, ""
-
-        pipeline_running = status.get("running", False)
-        if not pipeline_running:
-            # Check if we have completed stages to show
-            stages = status.get("stages", [])
-            if not stages:
-                return viewing_stages, ""
-
-        try:
-            stages = status.get("stages", [])
-            current_stage = status.get("current_stage", None)
-
-            if not stages:
-                return viewing_stages, ""
-
-            # Create stages display
-            stages_display = create_pipeline_stages_display(stages, current_stage)
-
-            # Current stage text
-            if current_stage:
-                current_stage_text = f"Currently running: {current_stage}"
-            else:
-                # Check if all stages completed
-                all_completed = all(s.get("status") == "completed" for s in stages)
-                if all_completed and stages:
-                    current_stage_text = "Pipeline completed"
-                else:
-                    current_stage_text = ""
-
-            return stages_display, current_stage_text
-
-        except Exception as e:
-            logger.error(f"Error updating pipeline stages: {e}")
-            return viewing_stages, ""
-
-    @app.callback(
-        [
-            Output("dashboard-q-score-badge", "children"),
-            Output("dashboard-n50-badge", "children"),
-            Output("dashboard-classification-badge", "children"),
-            Output("dashboard-total-bases", "children")
-        ],
-        [Input("update-interval", "n_intervals")],
-        [State("app-config", "data"), State("backend-status", "data")]
-    )
-    def update_nanoplot_badges(
-        n_intervals: int,
-        config: Dict[str, Any],
-        status: Dict[str, Any]
-    ) -> Tuple:
-        """
-        Update the NanoPlot quality metric badges.
-
-        Args:
-            n_intervals: Interval counter
-            config: Application configuration
-            status: Backend status
-
-        Returns:
-            Tuple of (q_score_badge, n50_badge, classification_badge, total_bases_badge)
-        """
-        if should_skip_update("dashboard_nanoplot_badges", debounce_ms=2000):
-            raise PreventUpdate
-
-        # Default empty state
-        empty_badge = dbc.Badge("--", color="secondary", className="px-3 py-2", style={"fontSize": "1.1rem"})
-
-        if not config:
-            return empty_badge, empty_badge, empty_badge, empty_badge
-
-        visualization_mode = config.get("visualization_only", False)
-        pipeline_running = status.get("running", False) if status else False
-        pipeline_completed = status.get("completed", False) if status else False
-
-        # Also check if main_dir has data (for post-completion viewing)
-        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
-        has_main_dir = main_dir and os.path.isdir(main_dir)
-
-        if not (visualization_mode or pipeline_running or pipeline_completed or has_main_dir):
-            return empty_badge, empty_badge, empty_badge, empty_badge
-
-        try:
-            # Load NanoPlot stats
-            nanoplot_stats = load_nanoplot_stats(main_dir)
-
-            # Load Kraken data for classification rate
-            kraken_df = load_kraken_data(main_dir, "All Samples")
-
-            # Q-score badge
-            mean_quality = nanoplot_stats.get("mean_read_quality", 0)
-            if mean_quality > 0:
-                q_badge = QualityScoreBadge(q_score=mean_quality)
-            else:
-                q_badge = dbc.Badge("Q: N/A", color="secondary", className="px-3 py-2", style={"fontSize": "1.1rem"})
-
-            # N50 badge
-            n50 = nanoplot_stats.get("read_length_n50", 0)
-            if n50 > 0:
-                n50_badge = N50Badge(n50_value=n50)
-            else:
-                n50_badge = dbc.Badge("N50: N/A", color="secondary", className="px-3 py-2", style={"fontSize": "1.1rem"})
-
-            # Classification rate badge - use shared helper for Kraken2 stats
-            classified_reads, unclassified_reads, _ = get_classification_stats(kraken_df)
-            total_reads = classified_reads + unclassified_reads
-
-            if total_reads > 0:
-                classification_badge = ClassificationRateBadge(
-                    classified_reads=classified_reads,
-                    total_reads=total_reads
-                )
-            else:
-                classification_badge = dbc.Badge(
-                    "Class: N/A", color="secondary", className="px-3 py-2", style={"fontSize": "1.1rem"}
-                )
-
-            # Total bases badge - use 'total_bases' key (not 'number_of_bases')
-            total_bases = nanoplot_stats.get("total_bases", 0)
-            if total_bases > 0:
-                # Format with appropriate units
-                if total_bases >= 1_000_000_000:
-                    bases_text = f"{total_bases / 1_000_000_000:.1f} Gb"
-                elif total_bases >= 1_000_000:
-                    bases_text = f"{total_bases / 1_000_000:.1f} Mb"
-                elif total_bases >= 1_000:
-                    bases_text = f"{total_bases / 1_000:.1f} kb"
-                else:
-                    bases_text = f"{total_bases} bp"
-                bases_badge = dbc.Badge(
-                    bases_text,
-                    color="info",
-                    className="px-3 py-2",
-                    style={"fontSize": "1.1rem"}
-                )
-            else:
-                bases_badge = dbc.Badge(
-                    "N/A", color="secondary", className="px-3 py-2", style={"fontSize": "1.1rem"}
-                )
-
-            return q_badge, n50_badge, classification_badge, bases_badge
-
-        except Exception as e:
-            logger.error(f"Error updating NanoPlot badges: {e}")
-            return empty_badge, empty_badge, empty_badge, empty_badge
-
-    @app.callback(
-        [
             Output("dashboard-pathogen-alert-container", "children"),
             Output("dashboard-pathogen-alert-container", "style")
         ],
         [Input("update-interval", "n_intervals")],
-        [State("app-config", "data"), State("backend-status", "data")],
+        [
+            State("app-config", "data"),
+            State("backend-status", "data"),
+            State("available-samples", "data"),
+        ],
         prevent_initial_call=False
     )
     def update_pathogen_alert_panel(
         n_intervals: int,
         config: Dict[str, Any],
-        status: Dict[str, Any]
+        status: Dict[str, Any],
+        available_samples: Optional[List[str]]
     ) -> Tuple[html.Div, Dict[str, str]]:
         """
         Update the pathogen alert panel with detected dangerous organisms.
 
         This callback checks for CDC Category A/B/C agents, WHO priority
-        pathogens, and user-configured watchlist species.
+        pathogens, and user-configured watchlist species.  Per-sample
+        attribution data (which barcodes carry each pathogen) is built from
+        individual per-sample Kraken2 reports and passed to the alert components.
 
         Args:
             n_intervals: Interval counter
             config: Application configuration
             status: Backend status
+            available_samples: List of detected sample names
 
         Returns:
             Tuple of (alert_panel_children, container_style)
@@ -824,7 +773,7 @@ def register_dashboard_callbacks(app: Dash):
                 return html.Div(), {"display": "none"}
 
         try:
-            # Load Kraken2 data
+            # Load aggregated Kraken2 data for pathogen detection
             kraken_df = load_kraken_data(main_dir, "All Samples")
 
             if kraken_df.empty:
@@ -837,235 +786,21 @@ def register_dashboard_callbacks(app: Dash):
             ]
             detected_organisms = _species_df_to_organisms(species_df)
 
+            # Build per-sample attribution: taxid -> [{sample, reads, abundance, is_nc}]
+            resolved_samples = _resolve_samples(main_dir, available_samples)
+            taxid_to_samples = _load_per_sample_organisms(main_dir, resolved_samples)
+
             # Get only ENABLED watchlist entries for alerting
             watched_species = _get_active_watchlist_entries(config)
 
-            # Create alert panel
-            return _create_pathogen_alert_panel(detected_organisms, watched_species)
+            # Create alert panel with per-sample attribution
+            return _create_pathogen_alert_panel(
+                detected_organisms, watched_species, config, taxid_to_samples
+            )
 
         except Exception as e:
             logger.error(f"Error updating pathogen alert panel: {e}")
             return html.Div(), {"display": "none"}
-
-    @app.callback(
-        [
-            Output("dashboard-threat-icon", "className"),
-            Output("dashboard-threat-icon", "style"),
-            Output("dashboard-threat-status", "children"),
-            Output("dashboard-threat-subtitle", "children"),
-            Output("dashboard-threat-card", "style"),
-            Output("dashboard-pathogen-summary", "children"),
-            Output("dashboard-decision-banner", "children"),
-        ],
-        [
-            Input("update-interval", "n_intervals"),
-            Input("watchlist-tab-state", "data"),
-        ],
-        [State("app-config", "data"), State("backend-status", "data")],
-        prevent_initial_call=False
-    )
-    def update_threat_summary(
-        n_intervals: int,
-        watchlist_state: Dict,
-        config: Dict[str, Any],
-        status: Dict[str, Any]
-    ) -> Tuple:
-        """
-        Update the threat summary indicator and pathogen list.
-
-        Shows overall threat status with color-coded indicator and
-        lists any detected dangerous pathogens.
-        """
-        if get_trigger_type(ctx) == "interval":
-            if should_skip_update("dashboard_threat_summary", debounce_ms=2000):
-                raise PreventUpdate
-
-        # Default safe state
-        safe_icon = "bi bi-shield-check"
-        safe_style = {"fontSize": "48px", "color": "#28a745"}
-        safe_status = "ALL CLEAR"
-        safe_subtitle = "No dangerous pathogens detected"
-        safe_card_style = {"borderColor": "#28a745", "borderWidth": "2px"}
-        waiting_summary = html.Div([
-            html.I(className="bi bi-shield-check text-muted me-2"),
-            html.Span("Screening begins when analysis starts", className="text-muted")
-        ], className="text-center py-2")
-
-        no_data_banner = []  # Empty when no data yet
-
-        if not config:
-            return safe_icon, safe_style, safe_status, safe_subtitle, safe_card_style, waiting_summary, no_data_banner
-
-        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
-        if not main_dir or not os.path.isdir(main_dir):
-            return safe_icon, safe_style, safe_status, safe_subtitle, safe_card_style, waiting_summary, no_data_banner
-
-        try:
-            # Load Kraken2 data
-            kraken_df = load_kraken_data(main_dir, "All Samples")
-
-            if kraken_df.empty:
-                return safe_icon, safe_style, safe_status, safe_subtitle, safe_card_style, waiting_summary, no_data_banner
-
-            # Extract species-level detections (vectorized)
-            all_species_df = kraken_df[kraken_df["rank"] == "S"]
-            total_species = len(all_species_df[all_species_df["reads"] >= 1])
-            species_df = all_species_df[all_species_df["reads"] >= 5]
-            detected_organisms = _species_df_to_organisms(species_df)
-
-            # Check for dangerous pathogens using proper taxid mapping
-            # This handles GTDB databases where Kraken2 taxids differ from NCBI taxids
-            dangerous = _check_pathogens_with_mapping(detected_organisms, config)
-
-            if not dangerous:
-                # Check if watchlist is actually active
-                watched_species = _get_active_watchlist_entries(config)
-                screened_count = len(detected_organisms)
-                logger.debug(f"Pathogen screening: {len(watched_species)} active watchlist entries, "
-                             f"{screened_count} organisms screened")
-
-                if not watched_species:
-                    # No watchlist active - warn the operator
-                    summary = html.Div([
-                        html.Div([
-                            html.I(className="bi bi-exclamation-triangle-fill text-warning me-2",
-                                   style={"fontSize": "1.5rem"}),
-                            html.Strong("No watchlist activated", style={"fontSize": "1.1rem"})
-                        ], className="mb-2 d-flex align-items-center"),
-                        html.P(
-                            "Enable a watchlist in the Watchlist tab to screen for pathogens. "
-                            "Without an active watchlist, pathogen screening is disabled.",
-                            className="text-muted small mb-0"
-                        )
-                    ], className="py-2", style={
-                        "backgroundColor": "#fff3cd",
-                        "borderRadius": "6px",
-                        "padding": "12px",
-                        "border": "1px solid #ffc107"
-                    })
-                    no_wl_banner = DecisionBanner(safe=True, message="No watchlist active - screening disabled")
-                    return safe_icon, safe_style, safe_status, "No watchlist configured", safe_card_style, summary, no_wl_banner
-                else:
-                    summary = html.Div([
-                        html.Div([
-                            html.I(className="bi bi-check-circle-fill text-success me-2"),
-                            html.Strong(f"{screened_count} species screened, none on watchlist")
-                        ], className="mb-2"),
-                        html.Small(
-                            "No dangerous organisms detected from your watchlist",
-                            className="text-muted"
-                        )
-                    ], className="py-1")
-                    safe_banner = DecisionBanner(safe=True, message="No watched pathogens detected")
-                    return safe_icon, safe_style, safe_status, safe_subtitle, safe_card_style, summary, safe_banner
-
-            # Categorize threats
-            critical = [d for d in dangerous if d.get("threat_level") == "critical"]
-            high_risk = [d for d in dangerous if d.get("threat_level") in ["high", "high_risk"]]
-            moderate = [d for d in dangerous if d.get("threat_level") == "moderate"]
-
-            # Determine overall threat level
-            if critical:
-                icon = "bi bi-exclamation-triangle-fill"
-                icon_style = {"fontSize": "48px", "color": "#8b0000"}
-                status_text = "CRITICAL THREAT"
-                subtitle = f"{len(critical)} critical pathogen(s) detected - immediate action required"
-                card_style = {"borderColor": "#8b0000", "borderWidth": "3px", "backgroundColor": "#fff5f5"}
-            elif high_risk:
-                icon = "bi bi-exclamation-circle-fill"
-                icon_style = {"fontSize": "48px", "color": "#dc3545"}
-                status_text = "HIGH ALERT"
-                subtitle = f"{len(high_risk)} high-risk pathogen(s) detected"
-                card_style = {"borderColor": "#dc3545", "borderWidth": "3px", "backgroundColor": "#fff8f8"}
-            else:
-                icon = "bi bi-exclamation-diamond-fill"
-                icon_style = {"fontSize": "48px", "color": "#fd7e14"}
-                status_text = "WATCH ALERT"
-                subtitle = f"{len(moderate)} watched species detected"
-                card_style = {"borderColor": "#fd7e14", "borderWidth": "2px"}
-
-            # Create pathogen list
-            pathogen_items = []
-            for d in dangerous[:5]:  # Show top 5
-                threat = d.get("threat_level", "unknown")
-                color = "#8b0000" if threat == "critical" else "#dc3545" if threat in ["high", "high_risk"] else "#fd7e14"
-                pathogen_items.append(
-                    html.Div([
-                        html.I(className="bi bi-circle-fill me-2", style={"fontSize": "8px", "color": color}),
-                        html.Span(d.get("name", "Unknown")[:30], style={"fontSize": "12px"}),
-                        html.Span(f" ({d.get('reads', 0):,})", className="text-muted", style={"fontSize": "11px"})
-                    ], className="mb-1")
-                )
-
-            if len(dangerous) > 5:
-                pathogen_items.append(
-                    html.Small(f"+ {len(dangerous) - 5} more...", className="text-muted")
-                )
-
-            summary = html.Div(pathogen_items, className="py-1")
-
-            threat_banner = DecisionBanner(safe=False, message="Watched pathogens detected - review alert panel")
-            return icon, icon_style, status_text, subtitle, card_style, summary, threat_banner
-
-        except Exception as e:
-            logger.error(f"Error updating threat summary: {e}")
-            return safe_icon, safe_style, safe_status, safe_subtitle, safe_card_style, waiting_summary, no_data_banner
-
-    @app.callback(
-        Output("dashboard-classification-donut", "figure"),
-        [
-            Input("update-interval", "n_intervals"),
-            Input("sample-selector", "value"),
-        ],
-        [State("app-config", "data"), State("backend-status", "data")]
-    )
-    def update_classification_donut(
-        n_intervals: int,
-        selected_sample: str,
-        config: Dict[str, Any],
-        status: Dict[str, Any]
-    ):
-        """
-        Update the classification summary donut chart.
-
-        Shows classified vs unclassified reads in a compact visualization.
-        Respects the global sample selector for consistency with other metrics.
-        """
-        if get_trigger_type(ctx) == "interval":
-            if should_skip_update("dashboard_classification_donut", debounce_ms=2000):
-                raise PreventUpdate
-
-        from nanometa_live.app.utils.chart_builders import create_classification_donut
-
-        if not config:
-            return create_classification_donut(0, 0)
-
-        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
-        if not main_dir or not os.path.isdir(main_dir):
-            return create_classification_donut(0, 0)
-
-        try:
-            metric_sample = selected_sample if selected_sample else "All Samples"
-            kraken_df = load_kraken_data(main_dir, metric_sample)
-
-            if kraken_df.empty:
-                return create_classification_donut(0, 0)
-
-            # Calculate classified vs unclassified using cumul_reads
-            # In Kraken2 reports, taxid 0 (unclassified) and taxid 1 (root)
-            # have cumul_reads values that represent total unclassified and
-            # classified reads respectively. Using these top-level cumulative
-            # counts is the standard approach for Kraken2 report parsing.
-            unclassified_row = kraken_df[kraken_df["taxid"] == 0]
-            unclassified = int(unclassified_row.iloc[0]["cumul_reads"]) if not unclassified_row.empty else 0
-            root_row = kraken_df[kraken_df["taxid"] == 1]
-            classified = int(root_row.iloc[0]["cumul_reads"]) if not root_row.empty else 0
-
-            return create_classification_donut(classified, unclassified)
-
-        except Exception as e:
-            logger.error(f"Error updating classification donut: {e}")
-            return create_classification_donut(0, 0)
 
     # Pattern-matching callbacks for pathogen alert buttons
     @app.callback(
@@ -1239,7 +974,7 @@ def register_dashboard_callbacks(app: Dash):
         if hasattr(threat_level, 'value'):
             threat_level = threat_level.value
         threat_colors = {
-            "critical": ("danger", "#8b0000", "bi-radioactive"),
+            "critical": ("danger", "#8b0000", "bi-exclamation-octagon-fill"),
             "high": ("warning", "#dc3545", "bi-exclamation-triangle-fill"),
             "moderate": ("info", "#fd7e14", "bi-eye-fill"),
             "low": ("secondary", "#17a2b8", "bi-info-circle")
@@ -1248,9 +983,15 @@ def register_dashboard_callbacks(app: Dash):
             threat_level, ("secondary", "#6c757d", "bi-question-circle")
         )
 
+        # Create threat banner icon element
+        if banner_icon.startswith("bi-"):
+            icon_el = html.I(className=f"bi {banner_icon} me-2", style={"fontSize": "20px"})
+        else:
+            icon_el = html.Span(banner_icon, className="me-2", style={"fontSize": "1.5em"})
+
         # Create threat banner
         threat_banner = html.Div([
-            html.I(className=f"bi {banner_icon} me-2", style={"fontSize": "20px"}),
+            icon_el,
             html.Strong(f"{threat_level.upper()} THREAT LEVEL", style={"fontSize": "16px"})
         ], className=f"alert alert-{alert_color} text-center py-2 mb-0",
            style={"borderLeft": f"5px solid {banner_color}"})
@@ -1346,29 +1087,10 @@ def register_dashboard_callbacks(app: Dash):
         }
 
     # ========================================================================
-    # Active Watchlist Panel Callbacks
+    # Removed: Active Watchlist Panel (watchlist section removed in redesign)
     # ========================================================================
 
-    @app.callback(
-        [
-            Output("dashboard-watchlist-count", "children"),
-            Output("dashboard-taxonomy-badge", "children"),
-            Output("dashboard-wl-critical-count", "children"),
-            Output("dashboard-wl-high-count", "children"),
-            Output("dashboard-wl-moderate-count", "children"),
-            Output("dashboard-wl-low-count", "children"),
-            Output("dashboard-watchlist-entries", "children"),
-        ],
-        [
-            Input("update-interval", "n_intervals"),
-            Input("watchlist-tab-state", "data"),
-        ],
-        [
-            State("app-config", "data"),
-        ],
-        prevent_initial_call=False
-    )
-    def update_dashboard_watchlist_panel(n_intervals, watchlist_state, config):
+    def update_dashboard_watchlist_panel(n_intervals, watchlist_state, config):  # noqa: not registered
         """
         Update the Active Watchlist panel on the Dashboard tab.
 
@@ -1427,8 +1149,8 @@ def register_dashboard_callbacks(app: Dash):
             }
 
             threat_icons = {
-                "critical": "bi-exclamation-triangle-fill",
-                "high": "bi-exclamation-diamond-fill",
+                "critical": "bi-exclamation-octagon-fill",
+                "high": "bi-exclamation-triangle-fill",
                 "moderate": "bi-info-circle-fill",
                 "low": "bi-dash-circle"
             }
@@ -1437,9 +1159,14 @@ def register_dashboard_callbacks(app: Dash):
                 entries = entries_by_threat[threat_level]
                 if entries:
                     # Add section header
+                    ti = threat_icons[threat_level]
+                    if ti.startswith("bi-"):
+                        icon_el = html.I(className=f"bi {ti} me-1 text-{threat_colors[threat_level]}")
+                    else:
+                        icon_el = html.Span(ti, className=f"me-1 text-{threat_colors[threat_level]}", style={"fontSize": "1.4em"})
                     entry_components.append(
                         html.Div([
-                            html.I(className=f"bi {threat_icons[threat_level]} me-1 text-{threat_colors[threat_level]}"),
+                            icon_el,
                             html.Strong(f"{threat_level.capitalize()} ({len(entries)})")
                         ], className="mt-2 mb-1")
                     )
@@ -1545,19 +1272,6 @@ def register_dashboard_callbacks(app: Dash):
                 pass
 
         return now, LastUpdatedBadge(timestamp=now, stale=stale)
-
-    @app.callback(
-        Output("tabs", "active_tab", allow_duplicate=True),
-        Input("dashboard-goto-watchlist-btn", "n_clicks"),
-        prevent_initial_call=True
-    )
-    def navigate_to_watchlist_tab(n_clicks):
-        """Navigate to the Watchlist tab when the activation prompt button is clicked."""
-        if not n_clicks:
-            return no_update
-        return "watchlist-tab"
-
-    # Watchlist collapse toggle moved to clientside callback in app.py
 
     # ---- Export Results callbacks ----
     @app.callback(
@@ -1675,83 +1389,7 @@ def register_dashboard_callbacks(app: Dash):
             return not is_open
         return is_open
 
-    # -------------------------------------------------
-    # PRE-FLIGHT CHECKLIST
-    # -------------------------------------------------
-    @app.callback(
-        [
-            Output("preflight-checks-list", "children"),
-            Output("preflight-container", "style"),
-        ],
-        [Input("readiness-state", "data"), Input("backend-status", "data")],
-    )
-    def update_preflight_checklist(readiness, status):
-        """Show pre-flight checklist when idle, hide when running."""
-        # Hide when pipeline is running
-        if status and status.get("running", False):
-            return no_update, {"display": "none"}
-
-        if not readiness or not readiness.get("checks"):
-            return [
-                html.Div(
-                    "Configure the application to see readiness checks.",
-                    className="text-muted",
-                )
-            ], {"display": "block"}
-
-        checks = readiness["checks"]
-        items = []
-        for check in checks:
-            passed = check.get("passed", False)
-            severity = check.get("severity", "info")
-            name = check.get("name", "Unknown")
-            message = check.get("message", "")
-
-            if passed:
-                icon_cls = "bi bi-check-circle-fill text-success"
-            elif severity == "critical":
-                icon_cls = "bi bi-x-circle-fill text-danger"
-            else:
-                icon_cls = "bi bi-exclamation-triangle-fill text-warning"
-
-            items.append(
-                html.Div([
-                    html.I(className=f"{icon_cls} me-2"),
-                    html.Span(name, className="fw-semibold me-2"),
-                    html.Span(message, className="text-muted small"),
-                ], className="mb-1")
-            )
-
-        return items, {"display": "block"}
-
-    app.clientside_callback(
-        """
-        function(n_clicks) {
-            if (!n_clicks) return dash_clientside.no_update;
-            return "preparation-tab";
-        }
-        """,
-        Output("tabs", "active_tab", allow_duplicate=True),
-        Input("preflight-goto-prep", "n_clicks"),
-        prevent_initial_call=True,
-    )
-
-    # Pre-flight checklist collapse toggle
-    app.clientside_callback(
-        """
-        function(n_clicks, is_open) {
-            if (!n_clicks) return [dash_clientside.no_update, dash_clientside.no_update];
-            var open = !is_open;
-            var icon = open ? "bi bi-chevron-up ms-2" : "bi bi-chevron-down ms-2";
-            return [open, icon];
-        }
-        """,
-        [Output("preflight-collapse", "is_open"),
-         Output("preflight-collapse-icon", "className")],
-        Input("preflight-collapse-toggle", "n_clicks"),
-        State("preflight-collapse", "is_open"),
-        prevent_initial_call=True,
-    )
+    # Pre-flight checklist removed — readiness checks are in the top bar
 
 
 # Helper functions
@@ -1790,58 +1428,94 @@ def _count_input_files(nanopore_dir: str) -> int:
     return count
 
 
-def _get_idle_status() -> Tuple:
-    """Return idle state for the status callback (D3a, 11 outputs)."""
-    status_style = {
-        "width": "80px",
-        "height": "80px",
-        "borderRadius": "50%",
-        "backgroundColor": "#6c757d",
-        "display": "flex",
-        "alignItems": "center",
-        "justifyContent": "center",
-        "boxShadow": "0 4px 12px rgba(0,0,0,0.15)"
-    }
-    return (
-        status_style,                          # dashboard-status-indicator style
-        "bi bi-pause-circle",                  # dashboard-status-icon className
-        "STANDBY - Ready to begin",           # dashboard-status-text
-        "Click 'Start Analysis' to begin",    # dashboard-status-subtitle
-        "00:00:00",                           # dashboard-time-elapsed
-        "0 / 0",                              # dashboard-files-processed
-        {"display": "none"},                  # dashboard-progress-container style
-        0,                                     # dashboard-progress-bar value
-        "STANDBY",                            # dashboard-status-label-text
-        "bi bi-pause-fill ms-1",              # dashboard-status-label-icon
-        "dashboard-traffic-light status-idle", # dashboard-status-indicator className
+def _make_banner_content(
+    icon_name: str,
+    icon_color: str,
+    heading: str,
+    sub: str,
+    run_state: str,
+    time_elapsed: str,
+    sub_color: str = "inherit",
+    show_icon_mobile: bool = False,
+    last_updated_str: Optional[str] = None,
+    icon_extra_class: str = "",
+) -> dbc.Row:
+    """
+    Build the inner content for the Zone 1 clinical verdict banner.
+
+    Args:
+        icon_name: Bootstrap icon name (without 'bi-' prefix, e.g. 'shield-check')
+        icon_color: CSS hex color for the icon
+        heading: H3 verdict text
+        sub: Subtitle text below the heading
+        run_state: Run state badge text (ACTIVE/STANDBY/COMPLETE)
+        time_elapsed: Formatted elapsed time string
+        sub_color: Explicit text color for subtitle (WCAG AA compliance)
+        show_icon_mobile: If True, icon is always visible; if False, hidden below 768px
+        last_updated_str: Formatted "Last updated HH:MM:SS" string for right column
+        icon_extra_class: Extra CSS class(es) appended to icon element (e.g. 'spin')
+
+    Returns:
+        dbc.Row with left verdict column and right run-state column
+    """
+    run_state_color = (
+        "success" if run_state == "ACTIVE"
+        else "info" if run_state == "COMPLETE"
+        else "secondary"
     )
+    # Icon visibility: ACTION REQUIRED always shows; others hide on mobile
+    icon_visibility = "" if show_icon_mobile else "d-none d-sm-inline"
+    icon_class = f"bi bi-{icon_name} {icon_visibility} {icon_extra_class}".strip()
+
+    right_children = [
+        dbc.Badge(run_state, color=run_state_color,
+                  style={"borderRadius": "8px"}),
+        html.Div(time_elapsed, className="small text-muted mt-1"),
+    ]
+    if last_updated_str:
+        right_children.append(
+            html.Div(last_updated_str,
+                     style={"fontSize": "12px", "color": "#6c757d", "marginTop": "2px"})
+        )
+
+    return dbc.Row([
+        dbc.Col([
+            html.Div([
+                html.I(
+                    className=icon_class,
+                    style={"fontSize": "40px", "color": icon_color, "flexShrink": "0"}
+                ),
+                html.Div([
+                    html.H3(heading, className="dashboard-verdict-h3 mb-0"),
+                    html.P(sub, className="dashboard-verdict-sub mb-0",
+                           style={"color": sub_color})
+                ], className="ms-0 ms-sm-3")
+            ], className="d-flex align-items-center")
+        ], md=9),
+        dbc.Col([
+            html.Div(right_children, className="text-end")
+        ], md=3, className="d-flex align-items-center justify-content-end")
+    ], className="align-items-center g-0")
 
 
-def _get_error_status(error_msg: str) -> Tuple:
-    """Return error state for the status callback (D3a, 11 outputs)."""
-    status_style = {
-        "width": "80px",
-        "height": "80px",
-        "borderRadius": "50%",
-        "backgroundColor": "#dc3545",
-        "display": "flex",
-        "alignItems": "center",
-        "justifyContent": "center",
-        "boxShadow": "0 4px 12px rgba(220,53,69,0.4)"
+def _verdict_banner_style(bg_color: str, border_color: str) -> dict:
+    """
+    Return inline style dict for the Zone 1 verdict banner container.
+
+    Args:
+        bg_color: Background color hex
+        border_color: Border color hex
+
+    Returns:
+        CSS style dict
+    """
+    return {
+        "backgroundColor": bg_color,
+        "border": f"6px solid {border_color}",
+        "borderRadius": "8px",
+        "padding": "24px 32px",
+        "minHeight": "120px",
     }
-    return (
-        status_style,                          # dashboard-status-indicator style
-        "bi bi-x-circle",                      # dashboard-status-icon className
-        "ERROR - Check setup",                 # dashboard-status-text
-        "Unable to load analysis data - check settings",  # dashboard-status-subtitle
-        "00:00:00",                           # dashboard-time-elapsed
-        "0 / 0",                              # dashboard-files-processed
-        {"display": "none"},                  # dashboard-progress-container style
-        0,                                     # dashboard-progress-bar value
-        "ERROR",                              # dashboard-status-label-text
-        "bi bi-x-circle-fill ms-1",           # dashboard-status-label-icon
-        "dashboard-traffic-light",            # dashboard-status-indicator className
-    )
 
 
 def _get_idle_alerts() -> Tuple:
@@ -2421,7 +2095,8 @@ def _get_alerts_badge_color(alerts_data: List[Dict[str, Any]]) -> str:
 def _create_pathogen_alert_panel(
     detected_organisms: List[Dict[str, Any]],
     watched_species: Optional[List[Dict[str, Any]]] = None,
-    config: Optional[Dict[str, Any]] = None
+    config: Optional[Dict[str, Any]] = None,
+    taxid_to_samples: Optional[Dict[int, List[Dict[str, Any]]]] = None
 ) -> Tuple[html.Div, Dict[str, str]]:
     """
     Create pathogen alert panel based on detected dangerous organisms.
@@ -2430,12 +2105,16 @@ def _create_pathogen_alert_panel(
         detected_organisms: List of organisms from Kraken2 classification
         watched_species: Optional user-configured watchlist (legacy, kept for compatibility)
         config: Application configuration dict (used for taxid mapping)
+        taxid_to_samples: Per-taxid sample attribution dict built by
+            _load_per_sample_organisms (keyed by Kraken2 db taxid)
 
     Returns:
         Tuple of (alert_panel_component, container_style)
     """
     if not detected_organisms:
         return html.Div(), {"display": "none"}
+
+    taxid_to_samples = taxid_to_samples or {}
 
     try:
         # Check for dangerous pathogens using proper taxid mapping
@@ -2461,6 +2140,13 @@ def _create_pathogen_alert_panel(
             action = detection.get("action_required", "Follow biosafety protocols")
             taxid = detection.get("taxid")
 
+            # Resolve per-sample attribution: prefer the Kraken2 db taxid used during
+            # detection, fall back to the NCBI taxid stored on the watchlist entry.
+            kraken_taxid = detection.get("detected_taxid") or taxid
+            samples_for_detection = taxid_to_samples.get(kraken_taxid, [])
+            if not samples_for_detection and kraken_taxid != taxid:
+                samples_for_detection = taxid_to_samples.get(taxid, [])
+
             if threat_level == "critical":
                 critical_count += 1
                 alert_components.append(
@@ -2471,7 +2157,8 @@ def _create_pathogen_alert_panel(
                         abundance_pct=abundance,
                         confidence="HIGH" if reads >= 100 else "MODERATE",
                         taxid=taxid,
-                        recommendation=action
+                        recommendation=action,
+                        samples=samples_for_detection
                     )
                 )
             elif threat_level in ["high", "high_risk"]:
@@ -2483,7 +2170,8 @@ def _create_pathogen_alert_panel(
                         read_count=reads,
                         abundance_pct=abundance,
                         taxid=taxid,
-                        recommendation=action
+                        recommendation=action,
+                        samples=samples_for_detection
                     )
                 )
             else:
@@ -2494,7 +2182,8 @@ def _create_pathogen_alert_panel(
                         pathogen_name=pathogen_name,
                         read_count=reads,
                         abundance_pct=abundance,
-                        taxid=taxid
+                        taxid=taxid,
+                        samples=samples_for_detection
                     )
                 )
 

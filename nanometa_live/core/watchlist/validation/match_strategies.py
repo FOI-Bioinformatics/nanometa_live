@@ -9,9 +9,10 @@ Strategies (in priority order):
 1. Exact taxid match - Direct NCBI taxid lookup
 2. Exact name match - After normalization
 3. Variant match - GTDB naming variants
-4. Fuzzy match - Edit distance for typos
-5. Parent taxon match - Genus-level fallback
+4. Reclassification match - Known taxonomic reclassifications
+5. Fuzzy match - Edit distance for typos
 6. Substring match - For strain matching
+7. Parent taxon match - Genus-level fallback
 """
 
 import logging
@@ -45,6 +46,7 @@ class MatchType(Enum):
     FUZZY = "fuzzy"                    # Edit distance match
     PARENT_TAXON = "parent_taxon"      # Genus-level match
     SUBSTRING = "substring"            # One contains the other
+    ALT_NAME = "alt_name"              # Match via alternative species name
     NO_MATCH = "no_match"
 
 
@@ -249,7 +251,7 @@ class ReclassificationStrategy(MatchStrategy):
     and tries to match the reclassified name.
     """
 
-    priority = 35  # After variant (30), before fuzzy (40)
+    priority = 35  # After variant (3), before fuzzy (40)
     name = "reclassification"
 
     def match(
@@ -405,7 +407,7 @@ class FuzzyMatchStrategy(MatchStrategy):
 class ParentTaxonStrategy(MatchStrategy):
     """Fall back to genus-level matching."""
 
-    priority = 5
+    priority = 50
     name = "parent_taxon"
 
     def match(
@@ -454,7 +456,7 @@ class ParentTaxonStrategy(MatchStrategy):
 class SubstringMatchStrategy(MatchStrategy):
     """Match via substring containment (for strain matching)."""
 
-    priority = 6
+    priority = 45
     name = "substring"
 
     def __init__(self, min_overlap: float = 0.7):
@@ -578,15 +580,20 @@ class CompositeMatchStrategy:
         self,
         name: str,
         taxid: Optional[int],
-        index: DatabaseTaxonomyIndex
+        index: DatabaseTaxonomyIndex,
+        alt_names: Optional[List[str]] = None,
     ) -> MatchResult:
         """
         Try each strategy until a match is found.
+
+        If all strategies fail with the primary name and alt_names are provided,
+        retries ExactName and Variant strategies with each alternative name.
 
         Args:
             name: Species name to match
             taxid: Optional NCBI taxid
             index: Database taxonomy index
+            alt_names: Optional alternative names (old names, synonyms)
 
         Returns:
             MatchResult (may be NO_MATCH if nothing found)
@@ -597,12 +604,10 @@ class CompositeMatchStrategy:
         normalized = self._normalizer.normalize(name)
 
         # For custom databases, skip taxid-based matching since taxids are incompatible
-        # Custom databases (e.g., GTDB-based) use arbitrary sequential taxid schemes
         skip_taxid_match = index.database_type == DatabaseTaxonomyType.CUSTOM
 
-        # Try each strategy
+        # Try each strategy with primary name
         for strategy in self.strategies:
-            # Skip ExactTaxidStrategy for custom databases
             if skip_taxid_match and isinstance(strategy, ExactTaxidStrategy):
                 logger.debug(f"Skipping taxid match for custom database")
                 continue
@@ -618,6 +623,38 @@ class CompositeMatchStrategy:
             except Exception as e:
                 logger.warning(f"Strategy {strategy.name} failed: {e}")
                 continue
+
+        # Primary name failed -- try alternative names
+        if alt_names:
+            name_strategies = [
+                s for s in self.strategies
+                if isinstance(s, (ExactNameStrategy, VariantMatchStrategy))
+            ]
+            for alt_name in alt_names:
+                alt_normalized = self._normalizer.normalize(alt_name)
+                for strategy in name_strategies:
+                    try:
+                        result = strategy.match(alt_normalized, None, index)
+                        if result:
+                            logger.info(
+                                f"Match found via alt name '{alt_name}' "
+                                f"({strategy.name}): {name} -> "
+                                f"{result.matched_name} (score={result.score:.2f})"
+                            )
+                            return MatchResult(
+                                match_type=MatchType.ALT_NAME,
+                                matched_node=result.matched_node,
+                                score=result.score * 0.95,
+                                details={
+                                    "method": "alt_name",
+                                    "alt_name": alt_name,
+                                    "inner_strategy": strategy.name,
+                                    "query": name,
+                                },
+                            )
+                    except Exception as e:
+                        logger.warning(f"Alt name strategy {strategy.name} failed for '{alt_name}': {e}")
+                        continue
 
         # No match found
         return MatchResult(

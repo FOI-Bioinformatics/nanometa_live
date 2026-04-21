@@ -64,7 +64,7 @@ class ValidationResult:
         percent_identity_min: Minimum identity in alignments
         percent_identity_max: Maximum identity in alignments
         alignment_length_mean: Mean alignment length
-        coverage_breadth: Fraction of reference genome covered
+        coverage_breadth: Mean fraction of query reads aligned (from BLAST qcovs)
         coverage_depth_mean: Mean coverage depth across reference
         avg_mapq: Mean mapping quality (minimap2 only)
         validation_method: Method used (blast, minimap2)
@@ -186,19 +186,24 @@ class ValidationParser:
 
     def has_validation_data(self) -> bool:
         """Check if any validation data exists."""
-        if not self.validation_dir or not self.validation_dir.exists():
-            return False
+        if self.validation_dir and self.validation_dir.exists():
+            # Check for any validation files
+            patterns = ['*.json', '*.blast.tsv', '*.blast.txt', '*_blast.txt']
+            for pattern in patterns:
+                if list(self.validation_dir.glob(pattern)):
+                    return True
+            # Also check for aggregate JSON one level up (validation/validation_results.json)
+            if self.validation_dir.name != 'validation':
+                parent_agg = self.validation_dir.parent / 'validation_results.json'
+                if parent_agg.exists():
+                    return True
 
-        # Check for any validation files
-        patterns = ['*.json', '*.blast.tsv', '*.blast.txt', '*_blast.txt']
-        for pattern in patterns:
-            if list(self.validation_dir.glob(pattern)):
+        # Also check the on_demand_validation/ directory
+        on_demand_dir = self.results_dir / "on_demand_validation"
+        if on_demand_dir.is_dir():
+            if list(on_demand_dir.glob("*.json")):
                 return True
-        # Also check for aggregate JSON one level up (validation/validation_results.json)
-        if self.validation_dir.name != 'validation':
-            parent_agg = self.validation_dir.parent / 'validation_results.json'
-            if parent_agg.exists():
-                return True
+
         return False
 
     def parse_validation_json(self, filepath: Path) -> Optional[ValidationResult]:
@@ -553,6 +558,40 @@ class ValidationParser:
                         blast_file, file_sample, file_taxid
                     )
                     results.append(result)
+
+        # Also check the on_demand_validation/ directory for results produced by
+        # OnDemandValidator.  These supplement (never replace) pipeline results.
+        on_demand_dir = self.results_dir / "on_demand_validation"
+        if on_demand_dir.is_dir():
+            # Check for an aggregate JSON produced by on-demand runs
+            od_aggregate = on_demand_dir / "validation_results.json"
+            if od_aggregate.exists():
+                od_results = self.parse_nanometanf_aggregate_json(
+                    od_aggregate, sample=sample, taxid=taxid
+                )
+                for od_r in od_results:
+                    already_present = any(
+                        r.sample_id == od_r.sample_id and r.taxid == od_r.taxid
+                        for r in results
+                    )
+                    if not already_present:
+                        results.append(od_r)
+
+            # Also scan individual JSON files in on_demand_validation/
+            for json_file in on_demand_dir.glob("*_validation.json"):
+                od_r = self.parse_validation_json(json_file)
+                if od_r is None:
+                    continue
+                if sample and od_r.sample_id != sample:
+                    continue
+                if taxid and od_r.taxid != taxid:
+                    continue
+                already_present = any(
+                    r.sample_id == od_r.sample_id and r.taxid == od_r.taxid
+                    for r in results
+                )
+                if not already_present:
+                    results.append(od_r)
 
         logger.info(f"Retrieved {len(results)} validation results")
         return results

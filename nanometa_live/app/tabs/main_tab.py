@@ -12,13 +12,16 @@ Includes on-demand BLAST validation for unexpected organisms discovered during
 analysis that are not on the pre-configured watchlist.
 """
 
+import json
 import logging
+import os
 import pandas as pd
 from datetime import datetime
 from typing import List
 
 import dash
 from dash import Dash, Input, Output, State, ctx, no_update, html
+from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
 from nanometa_live.core.utils.data_loaders import load_kraken_data, load_blast_validation_data
@@ -677,10 +680,17 @@ def register_main_callbacks(app: Dash):
         Input("app-config", "data"),
     )
     def sync_watchlist(config):
-        """Sync species of interest from config to main tab store."""
-        if config:
-            return config.get("species_of_interest", [])
-        return []
+        """Sync watchlist entries from WatchlistManager to main tab store."""
+        if not config:
+            return []
+        try:
+            manager = get_watchlist_manager()
+            if not manager._loaded:
+                manager.load_config(config)
+            entries = manager.get_active_entries()
+            return [{"name": e.name, "taxid": e.taxid} for e in entries.values()]
+        except Exception:
+            return []
 
     # Show more organisms toggle
     @app.callback(
@@ -980,6 +990,40 @@ def register_main_callbacks(app: Dash):
     # =========================================================================
 
     @app.callback(
+        Output("on-demand-validation-results", "data"),
+        Input("update-interval", "n_intervals"),
+        State("app-config", "data"),
+        State("on-demand-validation-results", "data"),
+        prevent_initial_call=False,
+    )
+    def reload_on_demand_results(n_intervals, config, existing_results):
+        """Load existing on-demand validation results from disk on initial page load."""
+        if existing_results:
+            raise PreventUpdate
+
+        results_dir = config.get("main_dir", "") if config else ""
+        if not results_dir:
+            raise PreventUpdate
+
+        od_dir = os.path.join(results_dir, "on_demand_validation")
+        if not os.path.isdir(od_dir):
+            raise PreventUpdate
+
+        results = {}
+        for f in os.listdir(od_dir):
+            if f.endswith("_validation.json"):
+                try:
+                    with open(os.path.join(od_dir, f)) as fh:
+                        data = json.load(fh)
+                    taxid = str(data.get("taxid", ""))
+                    if taxid:
+                        results[taxid] = data
+                except Exception:
+                    continue
+
+        return results if results else no_update
+
+    @app.callback(
         [
             Output("on-demand-validation-modal", "is_open"),
             Output("on-demand-validation-target", "data"),
@@ -1091,10 +1135,11 @@ def register_main_callbacks(app: Dash):
             State("on-demand-validation-target", "data"),
             State("app-config", "data"),
             State("on-demand-validation-results", "data"),
+            State("on-demand-method-select", "value"),
         ],
         prevent_initial_call=True,
     )
-    def run_on_demand_validation(n_clicks, target, config, existing_results):
+    def run_on_demand_validation(n_clicks, target, config, existing_results, validation_method):
         """Run on-demand BLAST validation for the selected organism."""
         if not n_clicks or not target:
             return no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update
@@ -1136,6 +1181,25 @@ def register_main_callbacks(app: Dash):
                     existing_results or {}
                 )
 
+            # Check that Kraken2 per-read output files exist before attempting validation
+            kraken2_dir = os.path.join(main_dir, "kraken2")
+            has_output_files = False
+            if os.path.isdir(kraken2_dir):
+                for f in os.listdir(kraken2_dir):
+                    if ".output" in f or f.endswith(".kraken2"):
+                        has_output_files = True
+                        break
+
+            if not has_output_files:
+                add_log("Kraken2 per-read output files not found", "error")
+                return (
+                    0,
+                    "Kraken2 per-read output files not found. Enable 'Save read assignments' in the configuration and re-run the pipeline.",
+                    log_entries, [], {"display": "none"},
+                    {"display": "inline-block"}, {"display": "inline-block"}, {"display": "none"},
+                    existing_results or {}
+                )
+
             add_log(f"Starting validation for {name} (taxid: {taxid})", "info")
 
             # Import the validator
@@ -1151,10 +1215,12 @@ def register_main_callbacks(app: Dash):
 
             # Run validation (synchronous for now - could be made async with background callback)
             # Note: For production, this should use Dash background callbacks
+            method = validation_method if validation_method in ("blast", "minimap2", "both") else "blast"
             result = validator.validate_organism(
                 taxid=taxid,
                 name=name,
-                sample=sample or "all"
+                sample=sample or "all",
+                method=method,
             )
 
             if result.success:

@@ -43,54 +43,73 @@ Everything in Nanometa Live uses traffic lights - just like a stoplight:
 
 ## 📊 Dashboard Overview (Your Starting Point)
 
-When you open Nanometa Live, you see the **Dashboard** tab (default view):
+When you open Nanometa Live, you see the **Dashboard** tab (default view). It has four zones, top to bottom.
 
-### Top Section: Overall Status
-```
-🟢 System Running
-Analysis in progress - processing sample data
-Time elapsed: 00:15:32 | Processing - 3 of 5 samples complete
-```
+### Zone 1 — Clinical Verdict Banner (Your Primary Signal)
 
-**What to look for**:
-- Traffic light color (green/amber/red)
-- Time running
-- Progress statement
+A single large banner across the top of the page. **The background color of this banner is the answer to "is there a problem?"**:
 
-### Middle Section: Key Metrics (4 Cards)
 ```
-┌──────────────┬─────────────┬──────────────┬────────────┐
-│   10,000     │     85      │      12      │      2     │
-│ DNA Sequences│ Data Quality│  Organisms   │   Alerts   │
-└──────────────┴─────────────┴──────────────┴────────────┘
+🟢 ALL CLEAR                       0 of 42 monitored pathogens found
+   No action required              Sample: barcode01 | ACTIVE  02:14:06
+                                   Last updated 14:23:45
 ```
 
-**What each means**:
-1. **DNA Sequences**: Total genetic material processed (higher = more data)
-2. **Data Quality**: Score 0-100 (>75 is good, <60 needs attention)
-3. **Organisms**: Number of different species found
-4. **Alerts**: Active issues requiring attention (0 is best)
+```
+🔴 ACTION REQUIRED                 2 of 42 monitored pathogens found
+   Act immediately                 Sample: barcode01 | ACTIVE  02:14:06
+                                   Last updated 14:23:45
+```
 
-**Hover over any number for detailed explanation.**
+**Verdict states**:
 
-### Bottom Left: Sample Status Table
+| State | Color | What it means |
+|-------|-------|---------------|
+| ALL CLEAR | Green | No watched pathogens detected. Run is progressing or complete. |
+| ACTION REQUIRED | Red | A critical or high-risk pathogen on your watchlist was detected. Follow your safety protocol. |
+| MONITORING | Amber | Only moderate-risk watched species detected. Review. |
+| SCREENING IN PROGRESS | Blue | Run is active; first results pending. |
+| STANDBY | Grey | No run is active. |
 
-Color-coded table showing each sample:
-- 🟢 **Green row**: Good quality, no issues
-- 🟡 **Amber row**: Review recommended
-- 🔴 **Red row**: Problem detected
+If validation (BLAST / minimap2) has not yet run on a detected pathogen, the ACTION REQUIRED banner appends "— pending confirmatory validation" to the sub-line.
 
-**Click any row to see detailed info for that sample.**
+### Zone 2 — Pathogen Found Cards (only when alerts exist)
 
-### Bottom Right: Active Alerts
+When a pathogen is detected, one or more cards appear beneath Zone 1:
 
-Priority-sorted list of issues:
-- 🔴 **Red**: Critical - act immediately
-- 🟡 **Amber**: Warning - review soon
-- 🔵 **Blue**: Info - for your awareness
-- 🟢 **Green**: Success - positive update
+```
+🔴 CRITICAL — Bacillus anthracis (Anthrax)
+   4,521 matches | 3.62% of sample | HIGH confidence | BLAST Verified
+   DETECTED IN: [barcode03] [barcode11]
+   Contact your safety officer immediately.
+```
 
-**Each alert tells you WHAT to do, not just what's wrong.**
+**DETECTED IN:** tells you *which samples* each pathogen was found in. Colored chips list the samples.
+- Normal sample chips use the alert severity color
+- **Negative control samples** appear as flat gray chips with `(NC)` after the name
+- If a pathogen appears in many samples, the first 3 are shown inline and the rest indicated as `+X more`
+
+### Zone 3 — Supporting Metrics (4 cards)
+```
+┌──────────────────┬──────────────┬──────────────────┬──────────┐
+│    10,000        │  Good        │  12 species      │  ACTIVE  │
+│ Sequences        │  Q17 Quality │  detected        │ 02:14:06 │
+│ Analyzed         │              │                  │          │
+└──────────────────┴──────────────┴──────────────────┴──────────┘
+```
+
+1. **Sequences Analyzed**: total reads processed so far
+2. **Sample Quality**: plain-language level (Excellent / Good / Fair / Poor) with the Q-score as a subtitle
+3. **Species Detected**: count of distinct organisms found
+4. **Run Time**: elapsed time + run state badge
+
+### Zone 4 — Sample Details (collapsed accordion)
+
+Click to expand a per-sample table with plain-language columns:
+- **Sequences Analyzed** — reads processed for that sample
+- **Sample Quality** — Q-score with color coding
+- **Read Length** — typical read length
+- **Match Rate** — how many reads were classified
 
 ---
 
@@ -202,10 +221,10 @@ Click the button in the alert or follow the listed steps.
 ## 🗺️ Tab Guide (Where to Find What)
 
 ### Dashboard Tab (Default - Start Here)
-- **Purpose**: At-a-glance status
+- **Purpose**: At-a-glance clinical verdict
 - **When to use**: Always check first
-- **Key info**: Traffic light, alerts, sample status
-- **Action buttons**: Generate Report, View Details
+- **Key info**: Zone 1 verdict banner (color is the answer), Zone 2 pathogen cards with sample attribution, Zone 3 metrics, Zone 4 per-sample details
+- **Action buttons**: View Report, Confirm (on pathogen cards)
 
 ### Configuration Tab
 - **Purpose**: Set up new analyses
@@ -220,10 +239,14 @@ Click the button in the alert or follow the listed steps.
 - **Export**: Download species lists
 
 ### Quality Control Tab
-- **Purpose**: Data quality metrics
-- **When to use**: When quality alerts appear
-- **Key info**: Pass rates, filtering reasons, per-sample breakdown
-- **Use for**: Troubleshooting quality issues
+- **Purpose**: Data quality metrics across pipeline stages
+- **When to use**: When quality alerts appear, or to verify data is trustworthy
+- **Key info**:
+  - **Stage Strip** at top: `Raw → Quality-filtered → Classified` with counts and a classification-rate delta
+  - **Read Quality** card: Q20/Q30/average quality with color-coded thresholds
+  - **Read Length** card: N50 and average length
+  - **Sample Breakdown** table: per-sample filtered reads, classification rate, average Q score
+- **Pipeline note**: When running Chopper (the default), the "Raw" slot shows "Not available" because Chopper does not produce a pre-filter read count
 
 ### Taxonomy Tab
 - **Purpose**: Visual organism relationships

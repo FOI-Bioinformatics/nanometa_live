@@ -720,8 +720,20 @@ class WatchlistManager:
             entry = None
             best_score = 0.0
 
-            # First try exact taxid match (NCBI only)
-            if taxid and taxid in active_entries:
+            # First try exact taxid match (only for NCBI databases)
+            db_is_ncbi = True  # Safe default
+            try:
+                from nanometa_live.core.taxonomy.taxid_mapping import (
+                    get_mapping_collection,
+                    DatabaseTaxonomyType,
+                )
+                mc = get_mapping_collection()
+                if mc and mc.database_type:
+                    db_is_ncbi = mc.database_type == DatabaseTaxonomyType.NCBI
+            except Exception:
+                pass
+
+            if db_is_ncbi and taxid and taxid in active_entries:
                 entry = active_entries[taxid]
                 best_score = 1.0
             else:
@@ -1474,8 +1486,13 @@ class WatchlistManager:
             match_method = "none"
 
             # Try to find matching entry
-            # 1. First, try direct NCBI taxid match
-            if detected_taxid and detected_taxid in active_entries:
+            # 1. First, try direct NCBI taxid match (only for NCBI databases)
+            db_is_ncbi = True
+            if mapping_collection and mapping_collection.database_type:
+                from nanometa_live.core.taxonomy.taxid_mapping import DatabaseTaxonomyType
+                db_is_ncbi = mapping_collection.database_type == DatabaseTaxonomyType.NCBI
+
+            if db_is_ncbi and detected_taxid and detected_taxid in active_entries:
                 entry = active_entries[detected_taxid]
                 best_score = 1.0
                 match_method = "direct_ncbi"

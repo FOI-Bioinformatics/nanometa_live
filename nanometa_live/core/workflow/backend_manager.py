@@ -23,6 +23,13 @@ from typing import Dict, Any, Optional, Tuple, IO
 from nanometa_live.core.workflow.nextflow_manager import NextflowManager
 
 
+def _parse_bool(value):
+    """Parse a boolean value that may be a string."""
+    if isinstance(value, str):
+        return value.lower() in ("true", "yes", "y", "1")
+    return bool(value)
+
+
 class BackendManager:
     """Manages backend processes for Nanometa Live using nanometanf pipeline."""
 
@@ -154,12 +161,30 @@ class BackendManager:
             path, description, must_exist=False, allow_creation=True
         )
 
+    @staticmethod
+    def _process_exists(pid: int) -> bool:
+        """
+        Check whether a process with the given PID is still running.
+
+        Args:
+            pid: Process ID to check
+
+        Returns:
+            True if the process exists, False otherwise
+        """
+        try:
+            os.kill(pid, 0)  # Signal 0 checks existence without affecting process
+            return True
+        except (OSError, ProcessLookupError):
+            return False
+
     def _acquire_lock(self, results_dir: str) -> Tuple[bool, str]:
         """
         Acquire exclusive lock on results directory to prevent multi-user collisions.
 
         Uses file-based locking (fcntl) to ensure only one pipeline can write
-        to a given results directory at a time.
+        to a given results directory at a time. Detects and removes stale lock
+        files left behind by crashed processes.
 
         Args:
             results_dir: Path to the results directory to lock
@@ -169,6 +194,20 @@ class BackendManager:
         """
         lock_file = os.path.join(results_dir, ".nanometa.lock")
         self._lock_file_path = lock_file
+
+        # Check for stale lock from a crashed process
+        if os.path.exists(lock_file):
+            try:
+                with open(lock_file, 'r') as f:
+                    lock_data = json.load(f)
+                pid = lock_data.get("pid")
+                if pid and not self._process_exists(pid):
+                    logging.info(
+                        f"Removing stale lock file (PID {pid} no longer running)"
+                    )
+                    os.remove(lock_file)
+            except (json.JSONDecodeError, OSError):
+                pass  # If we cannot read the lock file, proceed to try acquire
 
         try:
             # Create/open lock file
@@ -258,13 +297,13 @@ class BackendManager:
 
         # Ensure boolean parameters are strictly boolean
         if "kraken_memory_mapping" in self.config:
-            self.config["kraken_memory_mapping"] = bool(self.config["kraken_memory_mapping"])
+            self.config["kraken_memory_mapping"] = _parse_bool(self.config["kraken_memory_mapping"])
 
         if "blast_validation" in self.config:
-            self.config["blast_validation"] = bool(self.config["blast_validation"])
+            self.config["blast_validation"] = _parse_bool(self.config["blast_validation"])
 
         if "remove_temp_files" in self.config:
-            self.config["remove_temp_files"] = bool(self.config["remove_temp_files"])
+            self.config["remove_temp_files"] = _parse_bool(self.config["remove_temp_files"])
 
         # Create required directories
         main_dir = self.config.get("main_dir")

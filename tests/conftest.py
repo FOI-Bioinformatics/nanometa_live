@@ -11,8 +11,22 @@ This module provides:
 import pytest
 import pandas as pd
 import os
+import time
 from pathlib import Path
 from typing import Dict, List, Any
+
+
+def _backdate_mtime(path, seconds=5):
+    """Set a file's mtime to *seconds* ago so it passes the stability check."""
+    old_time = time.time() - seconds
+    os.utime(str(path), (old_time, old_time))
+
+
+def _backdate_all_files(directory: Path, seconds: int = 5) -> None:
+    """Recursively backdate all files in a directory tree."""
+    for root, _dirs, files in os.walk(str(directory)):
+        for fname in files:
+            _backdate_mtime(os.path.join(root, fname), seconds)
 
 
 # Test dataset paths
@@ -45,6 +59,9 @@ def test_datasets() -> Dict[str, Path]:
         still_missing = [name for name, path in DATASETS.items() if not path.exists()]
         if still_missing:
             pytest.skip(f"Failed to generate test datasets: {still_missing}")
+
+    # Backdate all generated files so they pass the file stability check
+    _backdate_all_files(TEST_DATA_DIR)
 
     return DATASETS
 
@@ -155,6 +172,7 @@ def realtime_output_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     )
     (fastp_dir / "barcode01.fastp.json").write_text(fastp_json)
 
+    _backdate_all_files(base)
     return base
 
 
@@ -184,6 +202,7 @@ def batch_output_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     )
     (fastp_dir / "barcode01.fastp.json").write_text(fastp_json)
 
+    _backdate_all_files(base)
     return base
 
 
@@ -207,6 +226,7 @@ def malformed_output_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     (fastp_dir / "corrupt.fastp.json").write_text("not json {")
     (validation_dir / "empty.paf").write_text("")
 
+    _backdate_all_files(base)
     return base
 
 
@@ -236,6 +256,7 @@ def multi_analysis_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
         kraken_dir.mkdir(parents=True)
         (kraken_dir / "barcode01.kraken2.report.txt").write_text(content)
 
+    _backdate_all_files(base)
     return base
 
 

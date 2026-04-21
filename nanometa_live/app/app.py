@@ -195,9 +195,6 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
         dcc.Store(id='app-data-dir', data=data_dir),
         dcc.Store(id='kraken-databases', data=kraken_databases),
 
-        # Performance optimization stores
-        dcc.Store(id='dashboard-computed-data', data={}),
-
         # Configuration state tracking stores
         dcc.Store(id='config-source', data={
             "type": "file",  # "file", "default", or "unsaved"
@@ -222,7 +219,6 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
         dcc.Store(id='taxmap-collection', data=None),
         dcc.Store(id='taxmap-database-info', data=None),
         dcc.Store(id='taxmap-rescan-complete', data=None),
-        dcc.Download(id='taxmap-export-download'),
         dcc.Store(id='genome-status-data', data={}),
         dcc.Store(id='genome-download-complete', data=None),
         dcc.Store(id='blast-build-complete', data=None),

@@ -395,6 +395,8 @@ def register_validation_callbacks(app: Dash):
                 return no_update
 
             df = pd.DataFrame(blast_results)
+            if "coverage_breadth" in df.columns:
+                df["coverage_breadth"] = (df["coverage_breadth"] * 100).round(1)
             analysis_name = config.get("analysis_name", "analysis") if config else "analysis"
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"blast_validation_{analysis_name}_{timestamp}.csv"
@@ -556,18 +558,21 @@ def register_validation_callbacks(app: Dash):
         return options, first_value
 
     @app.callback(
-        Output("coverage-species-selector", "value", allow_duplicate=True),
+        [
+            Output("coverage-species-selector", "value", allow_duplicate=True),
+            Output("validation-sub-tabs", "active_tab", allow_duplicate=True),
+        ],
         Input({"type": "view-coverage-btn", "index": ALL}, "n_clicks"),
         prevent_initial_call=True,
     )
     def handle_view_coverage_click(n_clicks_list):
-        """Set coverage selector when a View Coverage button is clicked."""
+        """Set coverage selector and switch to coverage sub-tab when a View Coverage button is clicked."""
         if not n_clicks_list or not any(n_clicks_list):
-            return no_update
+            return no_update, no_update
         triggered = ctx.triggered_id
         if triggered and isinstance(triggered, dict):
-            return triggered.get("index", no_update)
-        return no_update
+            return triggered.get("index", no_update), "coverage-tab"
+        return no_update, no_update
 
     @app.callback(
         [

@@ -5,7 +5,9 @@ common real-world scenarios: fresh starts, file corruption, real-time
 batch accumulation, and dynamic sample appearance.
 """
 
+import os
 import pathlib
+import time
 
 import pandas as pd
 import pytest
@@ -16,6 +18,12 @@ from nanometa_live.core.utils.data_loaders import (
     load_kraken_data,
 )
 from nanometa_live.core.utils.sample_detector import get_available_samples
+
+
+def _backdate_mtime(path, seconds=5):
+    """Set a file's mtime to *seconds* ago so it passes the stability check."""
+    old_time = time.time() - seconds
+    os.utime(str(path), (old_time, old_time))
 
 
 def _write_kraken_report(
@@ -33,6 +41,7 @@ def _write_kraken_report(
         f"100.00\t{reads}\t{reads}\tS\t{taxid}\t    {species_name}",
     ]
     path.write_text("\n".join(lines) + "\n")
+    _backdate_mtime(path)
 
 
 class TestFreshStartToDataAppearance:
@@ -77,9 +86,9 @@ class TestRealtimeBatchAccumulation:
 
     def test_batch_accumulation(self, tmp_path: pathlib.Path) -> None:
         """Batch reports are summed; cumulative report takes precedence when present."""
-        # Place batch files in a subdirectory to mirror nanometanf output
-        # structure and avoid glob pattern double-matching at top level.
-        kraken_dir = tmp_path / "kraken2" / "barcode01"
+        # Place batch files at the top level of kraken2/ to match the loader's
+        # glob pattern: kraken2/*_batch*.kraken2.report.txt
+        kraken_dir = tmp_path / "kraken2"
 
         # First batch
         _write_kraken_report(

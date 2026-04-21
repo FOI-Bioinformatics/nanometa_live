@@ -341,8 +341,8 @@ A: Fully compatible - no changes needed.
 **Q: Can I use Singularity instead of Docker?**
 A: Yes, set `profile="singularity"` in start() call. GUI support coming in v2.1.
 
-**Q: Is POD5 basecalling supported?**
-A: Yes, nanometanf v1.1.0 supports Dorado basecalling. GUI integration coming in v2.1.
+**Q: Does the pipeline basecall signal-level data?**
+A: No. Nanometa Live v2 and the nanometanf pipeline accept only basecalled FASTQ input (live or batch). Run MinKNOW with basecalling enabled, or basecall separately, and point `nanopore_output_directory` at the resulting FASTQ directory.
 
 ## Support
 

@@ -37,7 +37,7 @@ CANONICAL_RANK_ORDER = ["D", "K", "P", "C", "O", "F", "G", "S"]
 STANDARD_RANKS = {"D", "K", "P", "C", "O", "F", "G", "S", "R", "R1", "U"}
 
 # Extended rank normalization for Kraken2 PlusPFP (NCBI extended taxonomy).
-# PlusPFP uses sub-ranks (R2, R3, K, K1-K3, P1-P9, C1-C6, O1-O4, F1-F2, G1-G2, S1)
+# PlusPFP uses sub-ranks (R2, R3, K, K1-K3, P1-P9, C1-C6, O1-O4, F1-F7, G1-G2, S1-S3)
 # that are mapped to the standard 8-level hierarchy (D, K, P, C, O, F, G, S).
 # Kingdom (K) is preserved as a distinct level between Domain and Phylum.
 RANK_NORMALIZATION = {
@@ -49,9 +49,9 @@ RANK_NORMALIZATION = {
     "P6": "P", "P7": "P", "P8": "P", "P9": "P",
     "C1": "C", "C2": "C", "C3": "C", "C4": "C", "C5": "C", "C6": "C",
     "O1": "O", "O2": "O", "O3": "O", "O4": "O",
-    "F1": "F", "F2": "F",
+    "F1": "F", "F2": "F", "F3": "F", "F4": "F", "F5": "F", "F6": "F", "F7": "F",
     "G1": "G", "G2": "G",
-    "S1": "S",
+    "S1": "S", "S2": "S", "S3": "S",
 }
 
 
@@ -150,8 +150,8 @@ def normalize_ranks(df):
     """
     Normalize extended Kraken2 PlusPFP ranks to standard taxonomy levels.
 
-    Maps sub-ranks (K1-K3, P1-P9, C1-C6, etc.) to their parent standard
-    rank (K, P, C, O, F, G, S). K (Kingdom) is kept as a distinct level
+    Maps sub-ranks (K1-K3, P1-P9, C1-C6, O1-O4, F1-F7, G1-G2, S1-S3) to their
+    parent standard rank (K, P, C, O, F, G, S). K (Kingdom) is kept as a distinct level
     between D (Domain) and P (Phylum). Rows with unmappable ranks (R, R1, U)
     are left unchanged. Works on a copy of the dataframe.
 
@@ -168,6 +168,119 @@ def normalize_ranks(df):
     result = df.copy()
     result["original_rank"] = result["rank"]
     result["rank"] = result["rank"].map(lambda r: RANK_NORMALIZATION.get(r, r))
+    return result
+
+
+# ============================================================================
+# Authoritative Taxonomy from Kraken2 Database
+# ============================================================================
+#
+# Kraken2 per-sample reports can have non-standard file ordering (nodes
+# appearing out of DFS order or in the wrong subtree). The indentation-based
+# parent_taxid parser in classification_loaders assumes strict DFS order,
+# which produces incorrect parent chains for some organisms (observed with
+# the PlusPFP database: Bacillus appears before Bacillaceae in the report,
+# and Bacillus cereus is placed inside the Lactobacillales subtree).
+#
+# The database's inspect.txt contains the full taxonomy tree in correct DFS
+# order, so parsing it once gives us authoritative taxid -> parent_taxid
+# mappings that we can apply to the per-sample reports.
+
+_TAXONOMY_CACHE: dict = {}
+
+
+def load_kraken2_taxonomy(kraken_db_path: str) -> dict:
+    """Load authoritative taxid -> parent_taxid mapping from Kraken2 inspect.txt.
+
+    The inspect.txt file in a Kraken2 database contains the full taxonomy
+    tree in proper DFS order. Parsing its indentation yields correct parent
+    relationships (unlike per-sample reports which may be disordered).
+
+    Args:
+        kraken_db_path: Path to the Kraken2 database directory.
+
+    Returns:
+        Dict mapping taxid -> parent_taxid. Returns empty dict if the
+        inspect.txt file is missing or cannot be read.
+    """
+    import os
+
+    if not kraken_db_path:
+        return {}
+
+    inspect_path = os.path.join(kraken_db_path, "inspect.txt")
+    if inspect_path in _TAXONOMY_CACHE:
+        return _TAXONOMY_CACHE[inspect_path]
+
+    if not os.path.exists(inspect_path):
+        logging.debug(f"Kraken2 inspect.txt not found at {inspect_path}")
+        _TAXONOMY_CACHE[inspect_path] = {}
+        return {}
+
+    taxid_to_parent: dict = {}
+    indent_stack = []  # list of (indent, taxid)
+
+    try:
+        with open(inspect_path) as f:
+            for line in f:
+                if line.startswith("#"):
+                    continue
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) < 6:
+                    continue
+                try:
+                    taxid = int(parts[4])
+                except (ValueError, IndexError):
+                    continue
+                name = parts[5]
+                indent = len(name) - len(name.lstrip())
+
+                while indent_stack and indent_stack[-1][0] >= indent:
+                    indent_stack.pop()
+
+                parent = indent_stack[-1][1] if indent_stack else 0
+                taxid_to_parent[taxid] = parent
+                indent_stack.append((indent, taxid))
+    except OSError as exc:
+        logging.warning(f"Failed to read Kraken2 inspect.txt: {exc}")
+        _TAXONOMY_CACHE[inspect_path] = {}
+        return {}
+
+    logging.info(
+        f"Loaded Kraken2 taxonomy from {inspect_path}: "
+        f"{len(taxid_to_parent)} taxa"
+    )
+    _TAXONOMY_CACHE[inspect_path] = taxid_to_parent
+    return taxid_to_parent
+
+
+def apply_authoritative_taxonomy(df, taxid_to_parent: dict):
+    """Replace parent_taxid column with authoritative values from Kraken2 taxonomy.
+
+    The per-sample report's indentation-based parent_taxid can be wrong when
+    the report file has non-standard ordering. This function replaces each
+    entry's parent_taxid with the value from inspect.txt (if available).
+
+    Args:
+        df: DataFrame with 'taxid' and 'parent_taxid' columns.
+        taxid_to_parent: Authoritative taxid -> parent_taxid mapping
+                         (from load_kraken2_taxonomy).
+
+    Returns:
+        DataFrame with corrected parent_taxid values. If the mapping is
+        empty, returns the input unchanged.
+    """
+    if not taxid_to_parent or df.empty or "taxid" not in df.columns:
+        return df
+
+    result = df.copy()
+    # Map each taxid to its authoritative parent. Taxids not present in the
+    # taxonomy (e.g. U/unclassified) keep their existing parent_taxid.
+    mapped = result["taxid"].astype(int).map(taxid_to_parent)
+    if "parent_taxid" in result.columns:
+        result["parent_taxid"] = mapped.fillna(result["parent_taxid"]).astype(int)
+    else:
+        result["parent_taxid"] = mapped.fillna(0).astype(int)
     return result
 
 

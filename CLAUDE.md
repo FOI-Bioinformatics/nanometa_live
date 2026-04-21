@@ -119,6 +119,8 @@ Input FASTQ -> nanometanf Pipeline -> Output Files -> Data Loaders -> Dash Callb
 | Coverage Plots | `app/components/coverage_plots.py` | Depth, cumulative, histogram figures |
 | Watchlist Manager | `core/watchlist/watchlist_manager.py` | Watchlist entry management |
 | Taxid Mapper | `core/taxonomy/taxid_mapping.py` | NCBI-to-Kraken2 taxid resolution |
+| Authoritative Taxonomy | `app/tabs/kraken2_helpers.py` | `load_kraken2_taxonomy()` / `apply_authoritative_taxonomy()` — parses `inspect.txt` from Kraken2 DB to correct parent_taxid for Sankey/Sunburst |
+| Latest-Batch Loader | `core/utils/classification_loaders.py` | `load_kraken_latest_batch()` — selects highest-numbered batch report, never sums across cumulative batches |
 | Genome Manager | `core/utils/genome_manager.py` | Reference genome downloads and BLAST DBs |
 | On-Demand Validator | `core/workflow/on_demand_validator.py` | On-demand BLAST/minimap2 validation |
 
@@ -370,6 +372,70 @@ User Input (Pathogen Name)
 | Viruses | NCBI | RefSeq reference genome |
 | Parasites | NCBI | RefSeq representative genome |
 
+## Dashboard Architecture (4-zone clinical layout)
+
+The Dashboard is targeted at first responders and clinicians with a 30-second scan. Four zones, top-to-bottom:
+
+**Zone 1 — Clinical Verdict Banner** (full-width, ~120px minimum, 8px radius, 6px left border)
+Single unified banner whose background color is the answer. Replaces three older fragmented elements (traffic-light status, decision banner, threat indicator card).
+
+| State | Background | Left border | Icon | Trigger |
+|-------|-----------|-------------|------|---------|
+| ALL CLEAR | `#d4edda` | `#28a745` | `bi-shield-check` | 0 watched pathogens detected, run active or complete |
+| ACTION REQUIRED | `#f8d7da` | `#8b0000` | `bi-exclamation-octagon-fill` | Any critical or high-risk watched pathogen found |
+| MONITORING | `#fff3cd` | `#fd7e14` | `bi-eye-fill` | Only moderate/watch-level pathogens found |
+| SCREENING IN PROGRESS | `#cfe2ff` | `#0d6efd` | `bi-arrow-repeat` (with `.spin`) | Run active, first batch pending |
+| STANDBY | `#f8f9fa` | muted | — | No run active |
+
+WCAG AA-compliant text colors forced per state. Verdict H3 32px / 700 / letter-spacing −0.01em. Right column shows run state badge, elapsed time, last-updated timestamp, and a "— pending confirmatory validation" qualifier appended to ACTION REQUIRED when BLAST/minimap2 validation has not yet run.
+
+**Zone 2 — Pathogen Alert Cards** (conditional)
+Hidden when no alerts. Uses existing `CriticalPathogenAlert` (~120px), `HighRiskPathogenAlert` (~80px), `WatchedSpeciesAlert` (~60px) from `app/components/pathogen_alert.py`.
+
+Each alert card carries a **per-sample attribution row** ("DETECTED IN:" label + chips). Alert dict schema extended with:
+```python
+"samples": [
+    {"sample": "barcode03", "reads": 4521, "abundance": 3.62, "is_negative_control": False},
+    ...
+]
+```
+Sorted descending by reads. Chip treatment: 10px / 500, border-radius 3px, colored per severity tier. Negative-control chips render flat gray with `(NC)` suffix. Top 3 chips inline + `+X more` pill for 5+ samples. Non-clickable (read surface).
+
+**Zone 3 — Supporting Data Strip** (4 cards, md=3 each)
+- **Sequences Analyzed** — total reads (cumulative)
+- **Sample Quality** — headline = plain level (Excellent / Good / Fair / Poor); subtitle = Q-score
+- **Species Detected** — distinct organism count
+- **Run Time** — elapsed + state badge
+
+StatCard value 28px / 700, label 13px / 500 uppercase letter-spacing +0.04em. 8px radius.
+
+**Zone 4 — Sample Details** (collapsed accordion)
+Per-sample AgGrid table + secondary technical details. Column names in plain language: "Sequences Analyzed", "Sample Quality", "Read Length" (formerly N50), "Match Rate" (formerly ID Rate).
+
+**Responsive:**
+- <768px: Zone 1 icon hidden except for ACTION REQUIRED; Zone 3 stacks to 2×2
+- <480px: Zone 3 stacks 1×4
+
+## Quality Control Stage Strip
+
+The QC tab's primary element is a horizontal three-slot **Stage Strip**: Raw → Quality-filtered → Classified. Each slot: 13px uppercase muted label, 28px bold count, 12px muted subtitle naming the tool, 8px radius, left-border accent (`#084298` for quality-filtered, `#155724` for classified, dashed `#dee2e6` when N/A).
+
+**Chopper pipelines**: Raw slot is dashed border + `—` at 28px `#adb5bd` + inline text "Not available (Chopper pipeline)". Chopper has no pre-filter stage, and nanometanf does not emit pre-chopper seqkit stats.
+
+**Delta row** beneath arrows shows the classification rate colored per threshold:
+
+| Rate | Color | Range |
+|------|-------|-------|
+| Green | `#155724` / `#d4edda` | ≥ 80% |
+| Amber | `#664d03` / `#fff3cd` | 50–79% |
+| Red | `#721c24` / `#f8d7da` | < 50% |
+
+**Q30 thresholds**: green ≥45%, amber 25–44%, red <25%.
+
+A "Last updated HH:MM:SS" timestamp sits in the Stage Strip's top-right corner.
+
+Removed cards (bug vectors in earlier layouts): `KeyMetricsSummaryCard` (triple-count source), `FilteringBreakdownVisual` (dead code for Chopper).
+
 ## Validation System
 
 ### Overview
@@ -448,7 +514,7 @@ Output: ~/.nanometa/genomes/{taxid}.fasta
 ### Running Tests
 
 ```bash
-# Full test suite (274 tests)
+# Full test suite (433 tests)
 pytest tests/ -v
 
 # Individual test modules
@@ -476,8 +542,7 @@ pytest tests/test_nanometanf_parser.py -v       # Pipeline output parser
 ```
 /Users/andreassjodin/Desktop/ONT/demodata_ONT/data/nanometa_testdata/
 ├── multiple_fastq/    # Barcoded samples
-├── single_fastq/      # Flat directory
-└── multiple_pod5/     # POD5 files (requires Dorado)
+└── single_fastq/      # Flat directory
 
 Kraken2 DB: /Users/andreassjodin/Desktop/ONT/demodata_ONT/database/kraken2.gtdb_bac120_4Gb
 ```
@@ -518,9 +583,45 @@ nanometanf now includes the minimap2 validation subworkflow with PAF output at `
 
 ---
 
-**Last Updated:** 2026-03-14
+**Last Updated:** 2026-04-15
 
-**Production hardening (2026-03-01):**
+**UI redesign phase 5 (2026-04-13 to 2026-04-15) -- clinical-operator rework:**
+
+- **Dashboard 4-zone redesign** targeted at first responders / clinicians with 30-second scan. Zone 1 unified verdict banner (background color = answer), Zone 2 pathogen alert cards with per-sample attribution, Zone 3 four-card supporting strip, Zone 4 collapsed accordion for details. WCAG AA-compliant text colors, 6px left borders, locked type scale (verdict H3 32px / 700, StatCard value 28px / 700), 8px radius site-wide. `SCREENING IN PROGRESS` state uses blue (not amber) with spinning icon to avoid color ambiguity with `MONITORING`. "Last updated HH:MM:SS" and "— pending confirmatory validation" clinical qualifiers.
+- **Per-sample pathogen attribution** — alert engine organism dict extended with `samples: [{sample, reads, abundance, is_negative_control}]` sorted descending by reads. Zone 2 alert cards render "DETECTED IN:" chip row with severity-tier colors, negative-control chips in flat gray with `(NC)` suffix, `+X more` pill for 5+ samples. Non-clickable read surface. `pathogen_alert.py` + `alert_engine.py` + callbacks in `dashboard_tab.py` updated.
+- **Authoritative taxonomy for Sankey/Sunburst** — Kraken2 PlusPFP reports can have non-DFS node ordering (e.g. Bacillus appears before Bacillaceae). The indentation-based `parent_taxid` parser produced broken parent chains, causing B. thuringiensis and other species to be missing from Sankey links. Fix: new `load_kraken2_taxonomy(kraken_db_path)` parses `inspect.txt` (always in proper DFS order) to cache authoritative taxid→parent_taxid; `apply_authoritative_taxonomy(df, taxonomy)` overrides the broken per-report values in the classification callback.
+- **QC Stage Strip** — new top-of-tab horizontal `Raw → Quality-filtered → Classified` strip with delta classification rate, Chopper-pipeline handling for the Raw slot (dashed border + "Not available"), and plain-language column renames in the per-sample AgGrid ("Filtered reads", "Classification rate", "Avg. Q score") with tool-source tooltips.
+- **Kraken2 batch-report aggregation fix** — in the per-sample branch of `load_kraken_data()`, when no cumulative or standard report was present the loader summed `reads` and `cumul_reads` across every `*_batch*.kraken2.report.txt` file. Each batch file is itself a cumulative snapshot that already contains the reads from earlier batches, so summing them multi-counted shared reads (barcode02 reported 538 reads when the correct value was 208). Fix: in the batch-file fallback, select only the highest-numbered batch via `_extract_batch_num` and parse that single file. The all-samples branch was unaffected because it prefers `*.cumulative.kraken2.report.txt` or the single standard report. New dedicated helper `load_kraken_latest_batch(main_dir, sample)` for callers that need the latest-batch horizon without the cumulative fallback.
+- **Cross-tab time-horizon unification** — Organism, Dashboard, and QC Sample Breakdown all use cumulative-since-run-start; the QC Stage Strip previously used latest-batch (with a silent cumulative fallback that lied about the horizon). Every tab now shows the same cumulative numbers for the same sample: filtered = `root.cumul_reads + unclassified.cumul_reads` (the total reads Kraken2 processed = reads that passed chopper). Dropped the "FASTP" label bug — the Filtered slot now carries the filtering tool name (Chopper or FASTP) based on whether raw read count is available.
+- **Pipeline integration fixes** — `parameter_mapping.py`: removed conflicting `input_dir` from both realtime and batch-fallback branches (was triggering nanometanf's "Multiple input modes detected" validation error). Q30 thresholds adjusted: red <25% (was <30%), amber 25–44%.
+- **nanorunner (upstream tool) fix** — `manifest.py::_rechunk_entries()` was appending all chunks per barcode sequentially, so replay with `--reads-per-file 1000` exhausted barcode01 before starting barcode02. Fixed to interleave round-robin across barcodes using `itertools.zip_longest` so every timing interval advances all barcodes together. Run with `--batch-size 12` to release one file per barcode per interval.
+- **Test coverage** — expanded to 433 tests (from 403).
+
+**Production hardening phase 4 (2026-04-04) -- cross-application audit:**
+
+- Parameter mapping: replaced `barcode_dirs` (not in nanometanf schema) with `input_dir` for auto-detection
+- BLAST loader: added `.blast.tsv` glob pattern (nanometanf produces `.blast.tsv`, not `.txt`)
+- SeqKit loader: added nested directory scan for `seqkit/{sample}/stats/*.tsv` (nanometanf v1.5 layout)
+- Fixed `minimap2_min_mapq` default from 30 to 10 (matching nanometanf schema)
+- Removed legacy `min_perc_identity` and `e_val_cutoff` params (silently ignored, duplicated by new names)
+- Removed orphaned `taxmap-export-download` dcc.Download and `create_mapping_section` unused import
+- Removed orphaned stores: `api-validation-progress`, `genome-download-progress`
+- Nextflow log error extraction now captures multiline "Caused by:" context
+- Test coverage: 403 tests passing, 100+ new tests from phases 3-4
+
+**Production hardening phase 3 (2026-04-03):**
+
+- Taxonomy mapping: `names_alt` support for multi-name matching, strategy priority fix, DB type guards
+- GTDB API SSL fallback for environments with restricted certificate chains
+- Parser hardening: PAF bounds checking, classification race-condition guards, FASTP JSON validation
+- Readiness checker: minimap2 detection, network connectivity test, Nextflow version checks
+- FASTA validation after genome download (detects truncated or corrupt files)
+- Timeouts on all subprocess and network calls to prevent indefinite hangs
+- Test coverage: 20+ new tests for parsers, loaders, and mapping strategies
+- Icons: `bi-exclamation-octagon-fill` for critical alerts, `bi-exclamation-triangle-fill` for high-risk alerts
+- Accessibility: `title` attributes on icon-only buttons (watchlist info, alert dismiss)
+
+**Production hardening phase 1-2 (2026-03-01):**
 
 - Test suite expanded from 233 to 274 tests (all passing)
 - Fixed BLAST validation path: parsers now look in `validation/blast/` (matching nanometanf output)

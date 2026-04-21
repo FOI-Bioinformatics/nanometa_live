@@ -1174,8 +1174,8 @@ def BaseQualityCard(
         return color_config["success"]
 
     def get_q30_color(value: float) -> dict:
-        """Get color for Q30 rate (nanopore-calibrated)."""
-        if value < 30:
+        """Get color for Q30 rate (nanopore-calibrated). Green >=45%, amber 25-44%, red <25%."""
+        if value < 25:
             return color_config["danger"]
         elif value < 45:
             return color_config["warning"]
@@ -1194,17 +1194,15 @@ def BaseQualityCard(
     q20_colors = get_q20_color(q20_rate)
     q30_colors = get_q30_color(q30_rate)
 
-    # Determine overall card color based on lower metric (nanopore-calibrated)
+    # Card surface: white with neutral border + 6px left accent in the threshold
+    # color. Matches the Dashboard 8px radius / 6px accent design language.
     overall_metric = min(q20_rate, q30_rate)
     if overall_metric < 30:
-        card_bg = color_config["danger"]["bg_light"]
-        card_border = "rgba(220, 53, 69, 0.25)"
+        card_accent = "#721c24"
     elif overall_metric < 45:
-        card_bg = color_config["warning"]["bg_light"]
-        card_border = "rgba(255, 193, 7, 0.30)"
+        card_accent = "#664d03"
     else:
-        card_bg = color_config["success"]["bg_light"]
-        card_border = "rgba(40, 167, 69, 0.25)"
+        card_accent = "#155724"
 
     # Build sparkline if quality curve is available
     sparkline_section = None
@@ -1305,7 +1303,8 @@ def BaseQualityCard(
                     html.I(className=f"bi bi-{q20_colors['icon']} me-1",
                            style={"color": q20_colors["bg"], "fontSize": "12px"}),
                     html.Span(f"{q20_rate:.1f}%", style={
-                        "fontSize": "24px", "fontWeight": "700", "color": q20_colors["bg"]
+                        "fontSize": "28px", "fontWeight": "700",
+                        "letterSpacing": "-0.01em", "color": q20_colors["bg"]
                     })
                 ]),
                 # Progress bar
@@ -1353,7 +1352,8 @@ def BaseQualityCard(
                     html.I(className=f"bi bi-{q30_colors['icon']} me-1",
                            style={"color": q30_colors["bg"], "fontSize": "12px"}),
                     html.Span(f"{q30_rate:.1f}%", style={
-                        "fontSize": "24px", "fontWeight": "700", "color": q30_colors["bg"]
+                        "fontSize": "28px", "fontWeight": "700",
+                        "letterSpacing": "-0.01em", "color": q30_colors["bg"]
                     })
                 ]),
                 # Progress bar
@@ -1395,7 +1395,8 @@ def BaseQualityCard(
                 ]),
                 html.Div([
                     html.Span(format_bases(total_bases), style={
-                        "fontSize": "24px", "fontWeight": "700", "color": "#007bff"
+                        "fontSize": "28px", "fontWeight": "700",
+                        "letterSpacing": "-0.01em", "color": "#212529"
                     })
                 ]),
                 html.Small(f"{total_bases:,} bp", className="text-muted", style={"fontSize": "10px"})
@@ -1407,10 +1408,11 @@ def BaseQualityCard(
         sparkline_section
 
     ], className="base-quality-card", style={
-        "backgroundColor": card_bg,
-        "borderRadius": "12px",
+        "backgroundColor": "#ffffff",
+        "borderRadius": "8px",
         "padding": "16px 20px",
-        "border": f"1px solid {card_border}"
+        "border": "1px solid #e9ecef",
+        "borderLeft": f"6px solid {card_accent}",
     })
 
 
@@ -1488,9 +1490,9 @@ def ReadStatisticsCard(
     gc_colors = get_gc_color(gc_content)
     n50_colors = get_n50_color(n50)
 
-    # Use neutral background since these are informational metrics
-    card_bg = "rgba(0, 123, 255, 0.08)"
-    card_border = "rgba(0, 123, 255, 0.20)"
+    # Card surface: white with neutral border + 6px left accent. Read statistics
+    # are informational (no severity), so accent uses the Dashboard info-blue token.
+    card_accent = "#084298"
 
     # Build length comparison text
     length_comparison = None
@@ -1526,7 +1528,8 @@ def ReadStatisticsCard(
                 ]),
                 html.Div([
                     html.Span(f"{format_length(mean_length)}", style={
-                        "fontSize": "24px", "fontWeight": "700", "color": "#007bff"
+                        "fontSize": "28px", "fontWeight": "700",
+                        "letterSpacing": "-0.01em", "color": "#212529"
                     }),
                     html.Span(" bp", style={"fontSize": "12px", "color": "#6c757d"})
                 ]),
@@ -1560,8 +1563,9 @@ def ReadStatisticsCard(
                     html.Span(
                         f"{format_length(n50)}" if n50 is not None else "N/A",
                         style={
-                            "fontSize": "24px",
+                            "fontSize": "28px",
                             "fontWeight": "700",
+                            "letterSpacing": "-0.01em",
                             "color": n50_colors["bg"] if n50 is not None else "#6c757d"
                         }
                     ),
@@ -1597,8 +1601,9 @@ def ReadStatisticsCard(
                     html.Span(
                         f"{gc_content:.1f}%" if gc_content is not None else "N/A",
                         style={
-                            "fontSize": "24px",
+                            "fontSize": "28px",
                             "fontWeight": "700",
+                            "letterSpacing": "-0.01em",
                             "color": gc_colors["bg"] if gc_content is not None else "#6c757d"
                         }
                     )
@@ -1613,8 +1618,9 @@ def ReadStatisticsCard(
         ], className="d-flex align-items-stretch"),
 
     ], className="read-statistics-card", style={
-        "backgroundColor": card_bg,
-        "borderRadius": "12px",
+        "backgroundColor": "#ffffff",
+        "borderRadius": "8px",
         "padding": "16px 20px",
-        "border": f"1px solid {card_border}"
+        "border": "1px solid #e9ecef",
+        "borderLeft": f"6px solid {card_accent}",
     })

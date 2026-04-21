@@ -77,6 +77,20 @@ class ReadExtractor:
                 logger.info(f"Found Kraken2 output: {path}")
                 return path
 
+        # Check for batch output files (real-time mode produces per-batch files)
+        import glob as glob_mod
+        batch_pattern = str(self.kraken2_dir / f"{sample}_batch*.kraken2.output.txt")
+        batch_files = sorted(glob_mod.glob(batch_pattern))
+        if batch_files:
+            logger.info(f"Found batch Kraken2 output: {batch_files[-1]}")
+            return Path(batch_files[-1])
+
+        # Check for merged output in parent kraken2 directory
+        merged_path = self.kraken2_dir / f"{sample}.merged.kraken2.output.txt"
+        if merged_path.exists():
+            logger.info(f"Found merged Kraken2 output: {merged_path}")
+            return merged_path
+
         logger.warning(f"Kraken2 output not found for sample: {sample}")
         return None
 

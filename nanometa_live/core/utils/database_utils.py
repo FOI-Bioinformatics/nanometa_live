@@ -281,7 +281,8 @@ def decompress_database(
                 ["tar", "-xzf", tar_file_path, "-C", extract_folder],
                 check=True,
                 stderr=subprocess.PIPE,
-                stdout=subprocess.PIPE
+                stdout=subprocess.PIPE,
+                timeout=3600,
             )
             logging.info(f"Extraction with system tar command succeeded: {extract_folder}")
 

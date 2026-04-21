@@ -612,38 +612,44 @@ def create_classification_donut(
         sort=False
     )
 
-    # Center text - show percentage with subtitle for operational clarity
+    # Center text - two separate annotations to avoid unsupported <span style> in Plotly's SVG renderer
     if compact:
         fig.add_annotation(
-            text=(
-                f"<b>{classification_rate:.0f}%</b><br>"
-                f"<span style='font-size:9px;color:{COLORS['gray_600']}'>of reads identified</span>"
-            ),
-            x=0.5, y=0.5,
+            text=f"<b>{classification_rate:.0f}%</b>",
+            x=0.5, y=0.57,
             showarrow=False,
-            font=dict(size=28, color=rate_color, family="Arial Black, Arial, sans-serif")
+            font=dict(size=26, color=rate_color, family="Arial Black, Arial, sans-serif")
+        )
+        fig.add_annotation(
+            text="of reads identified",
+            x=0.5, y=0.38,
+            showarrow=False,
+            font=dict(size=9, color=COLORS["gray_600"], family="Arial, sans-serif")
         )
     else:
         fig.add_annotation(
-            text=(
-                f"<b>{classification_rate:.1f}%</b><br>"
-                f"<span style='font-size:11px;color:{COLORS['gray_600']}'>of reads identified</span>"
-            ),
-            x=0.5, y=0.5,
+            text=f"<b>{classification_rate:.1f}%</b>",
+            x=0.5, y=0.57,
             showarrow=False,
-            font=dict(size=24, color=rate_color, family="Arial Black, Arial, sans-serif")
+            font=dict(size=22, color=rate_color, family="Arial Black, Arial, sans-serif")
+        )
+        fig.add_annotation(
+            text="of reads identified",
+            x=0.5, y=0.38,
+            showarrow=False,
+            font=dict(size=11, color=COLORS["gray_600"], family="Arial, sans-serif")
         )
 
     # Layout optimized for compact card
     if compact:
         fig.update_layout(
-            height=180,
-            margin=dict(l=5, r=5, t=5, b=25),
+            height=200,
+            margin=dict(l=5, r=5, t=5, b=45),
             showlegend=True,
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
-                y=-0.15,
+                y=-0.12,
                 xanchor="center",
                 x=0.5,
                 font=dict(size=11)

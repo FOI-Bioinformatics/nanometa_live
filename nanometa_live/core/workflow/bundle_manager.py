@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import tarfile
 import tempfile
@@ -200,6 +201,7 @@ class BundleManager:
         bundle_path: str,
         kraken_db_path: str,
         nanometa_home: Optional[str] = None,
+        force: bool = False,
     ) -> Dict[str, Any]:
         """
         Import a bundle and set up for offline operation.
@@ -212,6 +214,7 @@ class BundleManager:
             bundle_path: Path to the bundle tar.gz.
             kraken_db_path: Path to the Kraken2 database on this machine.
             nanometa_home: Target ~/.nanometa directory.
+            force: If True, continue import despite checksum mismatches.
 
         Returns:
             Dict with import results (success, warnings, manifest).
@@ -238,7 +241,7 @@ class BundleManager:
         with tempfile.TemporaryDirectory() as tmpdir:
             # Extract bundle
             with tarfile.open(bundle_path, "r:gz") as tar:
-                tar.extractall(path=tmpdir)
+                tar.extractall(path=tmpdir, filter='data')
 
             tmp = Path(tmpdir)
 
@@ -274,10 +277,22 @@ class BundleManager:
                     mismatches.append(f"{rel_path} (missing)")
 
             if mismatches:
-                result["warnings"].append(
+                for f_path in mismatches:
+                    logger.warning(f"Checksum mismatch: {f_path}")
+                mismatch_msg = (
                     f"{len(mismatches)} file(s) failed checksum verification: "
                     f"{', '.join(mismatches[:5])}"
                     + ("..." if len(mismatches) > 5 else "")
+                )
+                if not force:
+                    result["success"] = False
+                    result["warnings"].append(
+                        f"{mismatch_msg}. Import aborted. "
+                        "Use force=True to import despite mismatches."
+                    )
+                    return result
+                result["warnings"].append(
+                    f"{mismatch_msg}. Continuing anyway (force=True)."
                 )
 
             # Verify DB hash compatibility
@@ -289,6 +304,15 @@ class BundleManager:
                         f"Database hash mismatch: bundle={manifest['db_hash']}, "
                         f"local={local_hash}. Mappings may need regeneration."
                     )
+
+            # Validate tool versions against local installations
+            bundle_versions = manifest.get("tool_versions", {})
+            if bundle_versions:
+                local_versions = self._collect_tool_versions()
+                version_warnings = _check_version_compatibility(
+                    bundle_versions, local_versions
+                )
+                result["warnings"].extend(version_warnings)
 
             # Copy directories to home (handle partial imports gracefully)
             for dirname in ["genomes", "blast", "mappings", "cache", "watchlists", "containers"]:
@@ -470,3 +494,49 @@ def _get_command_version(command: str, args: List[str]) -> str:
         return "unknown"
     except Exception:
         return "error"
+
+
+def _extract_major_version(version_str: str) -> Optional[str]:
+    """Extract the major version number from a version string.
+
+    Handles common formats like '23.10.1', 'v2.1.0', 'BLAST 2.14.0+',
+    'nextflow version 23.10.1.5891'.
+    """
+    match = re.search(r"(\d+)\.\d+", version_str)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _check_version_compatibility(
+    bundle_versions: Dict[str, str],
+    local_versions: Dict[str, str],
+) -> List[str]:
+    """Compare bundle tool versions against local installations.
+
+    Returns a list of warning strings for major version mismatches.
+    """
+    warnings = []
+    for tool, bundle_ver in bundle_versions.items():
+        local_ver = local_versions.get(tool, "not found")
+
+        # Skip tools that are not found or had errors
+        if bundle_ver in ("not found", "unknown", "error"):
+            continue
+        if local_ver in ("not found", "unknown", "error"):
+            warnings.append(
+                f"Tool '{tool}' was {bundle_ver} in bundle but is "
+                f"{local_ver} locally."
+            )
+            continue
+
+        bundle_major = _extract_major_version(bundle_ver)
+        local_major = _extract_major_version(local_ver)
+
+        if bundle_major and local_major and bundle_major != local_major:
+            warnings.append(
+                f"Major version mismatch for {tool}: "
+                f"bundle={bundle_ver}, local={local_ver}. "
+                "Results may differ."
+            )
+    return warnings

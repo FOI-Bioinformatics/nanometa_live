@@ -49,9 +49,16 @@ ABBREVIATIONS = {
 # Known taxonomic reclassifications (old name -> new name)
 # GTDB and modern phylogenomics have reclassified several genera
 KNOWN_RECLASSIFICATIONS = {
+    # Clostridioides (formerly Clostridium)
     "clostridium difficile": ["clostridioides difficile"],
+    "clostridium bifermentans": ["paraclostridium bifermentans"],
+    # Cutibacterium (formerly Propionibacterium)
     "propionibacterium acnes": ["cutibacterium acnes"],
+    "propionibacterium avidum": ["cutibacterium avidum"],
+    "propionibacterium granulosum": ["cutibacterium granulosum"],
+    # Enterobacter / Klebsiella
     "enterobacter aerogenes": ["klebsiella aerogenes"],
+    # Bacillus cereus sensu lato
     "bacillus cereus group": ["bacillus cereus", "bacillus anthracis", "bacillus thuringiensis"],
     # Shigella is phylogenetically within E. coli (same species in GTDB)
     "shigella": ["escherichia coli"],
@@ -59,11 +66,59 @@ KNOWN_RECLASSIFICATIONS = {
     "shigella sonnei": ["escherichia coli"],
     "shigella dysenteriae": ["escherichia coli"],
     "shigella boydii": ["escherichia coli"],
+    # Stenotrophomonas (formerly Pseudomonas / Xanthomonas)
+    "pseudomonas maltophilia": ["stenotrophomonas maltophilia"],
+    "xanthomonas maltophilia": ["stenotrophomonas maltophilia"],
+    # Kytococcus (formerly Micrococcus)
+    "micrococcus sedentarius": ["kytococcus sedentarius"],
+    # Limosilactobacillus / Lacticaseibacillus / Ligilactobacillus / Latilactobacillus
+    # (formerly Lactobacillus, split into multiple genera in 2020)
+    "lactobacillus reuteri": ["limosilactobacillus reuteri"],
+    "lactobacillus fermentum": ["limosilactobacillus fermentum"],
+    "lactobacillus casei": ["lacticaseibacillus casei"],
+    "lactobacillus paracasei": ["lacticaseibacillus paracasei"],
+    "lactobacillus rhamnosus": ["lacticaseibacillus rhamnosus"],
+    "lactobacillus salivarius": ["ligilactobacillus salivarius"],
+    "lactobacillus sakei": ["latilactobacillus sakei"],
+    # Reverse mappings (new name -> old name) for databases using older taxonomy
+    "clostridioides difficile": ["clostridium difficile"],
+    "paraclostridium bifermentans": ["clostridium bifermentans"],
+    "cutibacterium acnes": ["propionibacterium acnes"],
+    "stenotrophomonas maltophilia": ["pseudomonas maltophilia", "xanthomonas maltophilia"],
+    "kytococcus sedentarius": ["micrococcus sedentarius"],
+    "limosilactobacillus reuteri": ["lactobacillus reuteri"],
+    "limosilactobacillus fermentum": ["lactobacillus fermentum"],
+    "lacticaseibacillus casei": ["lactobacillus casei"],
+    "lacticaseibacillus paracasei": ["lactobacillus paracasei"],
+    "lacticaseibacillus rhamnosus": ["lactobacillus rhamnosus"],
+    "ligilactobacillus salivarius": ["lactobacillus salivarius"],
+    "latilactobacillus sakei": ["lactobacillus sakei"],
+    # ICTV virus reclassifications
+    "zaire ebolavirus": ["orthoebolavirus zairense"],
+    "ebola virus": ["orthoebolavirus zairense"],
+    "sudan ebolavirus": ["orthoebolavirus sudanense"],
+    "marburg marburgvirus": ["orthomarburgvirus marburgense"],
+    "marburg virus": ["orthomarburgvirus marburgense"],
+    "variola virus": ["orthopoxvirus variola"],
+    "smallpox virus": ["orthopoxvirus variola"],
+    "monkeypox virus": ["orthopoxvirus monkeypox"],
+    "mpox virus": ["orthopoxvirus monkeypox"],
+    "lassa mammarenavirus": ["mammarenavirus lassaense"],
+    "lassa virus": ["mammarenavirus lassaense"],
+    # ICTV reverse mappings (new name -> old name)
+    "orthoebolavirus zairense": ["zaire ebolavirus", "ebola virus"],
+    "orthoebolavirus sudanense": ["sudan ebolavirus"],
+    "orthomarburgvirus marburgense": ["marburg marburgvirus", "marburg virus"],
+    "orthopoxvirus variola": ["variola virus", "smallpox virus"],
+    "orthopoxvirus monkeypox": ["monkeypox virus", "mpox virus"],
+    "mammarenavirus lassaense": ["lassa mammarenavirus", "lassa virus"],
 }
 
 # Genus-level reclassifications (for suggesting alternatives)
 GENUS_RECLASSIFICATIONS = {
     "shigella": "escherichia",  # All Shigella species are in Escherichia in GTDB
+    "propionibacterium": "cutibacterium",  # Most clinical species moved to Cutibacterium
+    "lactobacillus": "limosilactobacillus",  # Split into multiple genera in 2020
 }
 
 
