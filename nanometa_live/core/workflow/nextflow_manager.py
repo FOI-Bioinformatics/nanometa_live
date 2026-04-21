@@ -15,6 +15,7 @@ import logging
 import subprocess
 import threading
 import re
+from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 
 from nanometa_live.core.config.parameter_mapping import (
@@ -30,15 +31,15 @@ class NextflowManager:
     # Default remote repository
     DEFAULT_REMOTE_REPO = "foi-bioinformatics/nanometanf"
 
-    def __init__(self, data_dir: str, pipeline_source: str = "remote:master"):
+    def __init__(self, data_dir: str, pipeline_source: str = "remote:dev"):
         """
         Initialize the Nextflow manager.
 
         Args:
             data_dir: Base directory for storing data, logs, and work files
             pipeline_source: Pipeline source specification. Options:
-                - "remote:master" - GitHub repo with master branch (stable, default)
-                - "remote:dev" - GitHub repo with dev branch (development)
+                - "remote:dev" - GitHub repo with dev branch (active development, default)
+                - "remote:master" - GitHub repo with master branch (stable release)
                 - "/path/to/local/nanometanf" - Local filesystem path
         """
         self.data_dir = data_dir
@@ -227,6 +228,80 @@ class NextflowManager:
         """
         self.pipeline_source = source
         logging.info(f"Pipeline source updated to: {source}")
+
+    def validate_pipeline_source(self) -> Tuple[bool, str]:
+        """
+        Validate that the configured pipeline source is resolvable.
+
+        For local paths: check the directory exists and contains main.nf.
+        For remote specs: check the GitHub branch resolves via ls-remote.
+
+        Returns:
+            Tuple of (ok: bool, message: str). A failure message describes
+            what to fix (e.g., "branch 'master' not found on origin;
+            try 'remote:dev' or a local path").
+        """
+        pipeline_path, revision = self._parse_pipeline_source()
+
+        # Local path: verify directory has a Nextflow entrypoint
+        if revision is None:
+            p = Path(pipeline_path)
+            if not p.is_dir():
+                return False, (
+                    f"Pipeline source '{self.pipeline_source}' is not a "
+                    f"readable directory. Set pipeline_source in config.yaml "
+                    f"to a valid local path or a 'remote:<branch>' spec."
+                )
+            if not (p / "main.nf").exists():
+                return False, (
+                    f"Pipeline directory '{p}' does not contain main.nf; "
+                    f"this does not look like a Nextflow pipeline checkout."
+                )
+            return True, f"Local pipeline at {p}"
+
+        # Remote path: try to resolve the branch via git ls-remote.
+        # This is network-dependent; a failure is not fatal here -- the
+        # startup validator treats "couldn't reach GitHub" as a warning, but
+        # a reachable-remote-with-missing-branch as a fatal misconfig.
+        remote_url = f"https://github.com/{pipeline_path}.git"
+        try:
+            result = subprocess.run(
+                ["git", "ls-remote", "--heads", remote_url, revision],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except FileNotFoundError:
+            return True, (
+                f"git not available to validate remote '{remote_url}' "
+                f"branch '{revision}'; skipping pre-flight check."
+            )
+        except subprocess.TimeoutExpired:
+            return True, (
+                f"git ls-remote timed out while validating "
+                f"remote:{revision}; skipping pre-flight check."
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            return True, (
+                f"Could not validate remote:{revision} ({exc}); "
+                f"skipping pre-flight check."
+            )
+
+        if result.returncode != 0:
+            # Network or auth error -- don't hard-fail on first run.
+            return True, (
+                f"git ls-remote returned non-zero for {remote_url}; "
+                f"skipping pre-flight check. stderr: {result.stderr.strip()}"
+            )
+
+        if not result.stdout.strip():
+            return False, (
+                f"Branch '{revision}' not found on {pipeline_path}. "
+                f"Set pipeline_source to an existing branch "
+                f"(e.g. 'remote:dev' or 'remote:master') or to a local path."
+            )
+
+        return True, f"Remote pipeline at {pipeline_path} (revision: {revision})"
 
     def setup(self, config_path: str) -> Tuple[bool, str]:
         """

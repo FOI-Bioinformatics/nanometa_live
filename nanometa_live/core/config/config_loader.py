@@ -110,7 +110,11 @@ class ConfigLoader:
             "sample_name": "sample",
             # Pipeline execution settings
             "pipeline_profile": "docker",
-            "pipeline_source": "remote:master",
+            # Default to the active development branch. The master branch lags
+            # behind dev for active feature work; a fresh install pointed at
+            # master may fail to fetch required modules. Override via
+            # config.yaml or the UI for production deployments.
+            "pipeline_source": "remote:dev",
             # Realtime mode settings
             "max_file_age_minutes": 1000000,
             # Batch settings (for realtime mode, batch_size=1 processes files immediately)
