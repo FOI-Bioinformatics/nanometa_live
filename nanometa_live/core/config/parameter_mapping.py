@@ -2,18 +2,22 @@
 Parameter mapping between Nanometa Live and nanometanf.
 
 This module provides functions to convert Nanometa Live configuration parameters
-to nanometanf v1.1.0 pipeline parameters and Nextflow configuration.
+to nanometanf pipeline parameters and Nextflow configuration.
 
-Supported input modes:
-- 'auto': Auto-detect based on directory structure (default)
-- 'batch': Single sample with multiple FASTQ files (--fastq_input_dir)
-- 'barcode': Multiple barcodes with subdirectories (--barcode_input_dir)
-- 'realtime': Real-time monitoring with watchPath (--nanopore_output_dir)
+Supported processing modes (set via config["processing_mode"]):
+- 'batch': Process existing files. Emits `--input <samplesheet.csv>` by
+  default, or `--input_dir <dir>` when config["use_input_dir_mode"] is true.
+- 'realtime': Live watchPath monitoring via `--realtime_mode true`
+  and `--nanopore_output_dir <dir>`.
+
+Callers may also pre-supply `config["input"]` with a path to an existing
+samplesheet; it is honoured verbatim and no samplesheet is auto-generated.
 """
 
 import os
 import glob
 import csv
+import platform
 import re
 import logging
 from pathlib import Path
@@ -62,6 +66,46 @@ def detect_input_mode(input_dir: str) -> str:
     # Default to realtime for empty or monitoring directories
     logging.info("Defaulting to realtime mode (no existing FASTQ files found)")
     return "realtime"
+
+
+def validate_sample_handling_layout(sample_handling: str, input_dir: str) -> None:
+    """
+    Validate that `sample_handling` matches the actual directory layout.
+
+    The `per_file` and `single_sample` modes expect FASTQ files directly in
+    `input_dir`; the `by_barcode` mode expects `barcode*` subdirectories. A
+    common misconfiguration is selecting `per_file` but pointing at a barcoded
+    layout: the pipeline then groups per-file samples into a single sample by
+    filename stem, silently discarding barcode identity.
+
+    Args:
+        sample_handling: One of 'per_file', 'single_sample', 'by_barcode'.
+        input_dir: Path to the Nanopore output directory.
+
+    Raises:
+        ValueError: If the layout contradicts the declared handling mode.
+    """
+    if not os.path.isdir(input_dir):
+        # Other code paths already raise a clearer error for a missing input
+        # directory; don't double-warn here.
+        return
+
+    barcode_dirs = [
+        d for d in glob.glob(os.path.join(input_dir, "barcode*"))
+        if os.path.isdir(d)
+    ]
+    has_barcode_subdirs = any(
+        glob.glob(os.path.join(d, "*.fastq*")) for d in barcode_dirs
+    )
+
+    if sample_handling in ("per_file", "single_sample") and has_barcode_subdirs:
+        raise ValueError(
+            f"sample_handling={sample_handling!r} but {input_dir!r} contains "
+            f"barcode subdirectories with FASTQ files. This is almost always "
+            f"a misconfiguration: either set sample_handling='by_barcode' to "
+            f"demultiplex, or point nanopore_output_directory at a flat "
+            f"directory of FASTQ files."
+        )
 
 
 def format_duration(seconds: int) -> str:
@@ -457,13 +501,28 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
                 "Download pathogen genomes in the Watchlist tab first."
             )
 
+    # Kraken2 memory mapping: auto-disable on ARM unless the user set an
+    # explicit override. nanometanf's KRAKEN2 module falls back to a plain
+    # (non-mmap) load on ARM regardless, but emitting the explicit False
+    # here silences the per-run WARN and matches the behaviour operators see.
+    if "kraken_memory_mapping" in config:
+        kraken2_memory_mapping = bool(config["kraken_memory_mapping"])
+    elif platform.machine().lower() in {"arm64", "aarch64"}:
+        logging.info(
+            "ARM host detected (%s); defaulting kraken2_memory_mapping=False",
+            platform.machine(),
+        )
+        kraken2_memory_mapping = False
+    else:
+        kraken2_memory_mapping = True
+
     # Create base nanometanf parameters
     params = {
         "outdir": main_dir,
 
         # Kraken2 classification
         "kraken2_db": kraken_db,
-        "kraken2_memory_mapping": config.get("kraken_memory_mapping", True),
+        "kraken2_memory_mapping": kraken2_memory_mapping,
 
         # Save reads assignment and classified FASTQs (required for validation to work)
         # The VALIDATION workflow needs:
@@ -521,31 +580,59 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         elif genome_paths:
             logging.info(f"Found {len(genome_paths)} downloaded genomes for validation")
 
-    # Set input parameters based on processing mode and sample handling
+    # Set input parameters based on processing mode and sample handling.
+    # Batch mode offers three input paths, checked in priority order:
+    #   1. config["input"] is an existing file -> pass through verbatim
+    #      (supports the "bring your own samplesheet" workflow).
+    #   2. config["use_input_dir_mode"] is true -> emit --input_dir for the
+    #      nanometanf INPUT_SCANNER subworkflow (auto-layout discovery).
+    #   3. Otherwise -> auto-generate a samplesheet from nanopore_dir.
     if processing_mode == "batch":
-        # Batch mode: Generate samplesheet for existing files
-        # This avoids the watchPath limitation where existing files are not detected
-        samplesheet_dir = os.path.join(main_dir, "samplesheets")
-        os.makedirs(samplesheet_dir, exist_ok=True)
-        samplesheet_path = os.path.join(samplesheet_dir, "input_samplesheet.csv")
+        user_input = config.get("input")
+        use_input_dir = bool(config.get("use_input_dir_mode", False))
 
-        try:
-            generate_samplesheet(
-                nanopore_dir,
-                samplesheet_path,
-                sample_handling=sample_handling,
-                sample_name=sample_name
+        if user_input and os.path.isfile(user_input):
+            params["input"] = str(user_input)
+            logging.info(
+                f"Batch mode: using pre-supplied samplesheet at {user_input}"
             )
-            params["input"] = samplesheet_path
-            logging.info(f"Batch mode ({sample_handling}): Generated samplesheet at {samplesheet_path}")
-        except ValueError as e:
-            # Fall back to realtime mode if samplesheet generation fails
-            logging.warning(f"Samplesheet generation failed: {e}")
-            logging.warning("Falling back to realtime mode")
-            params["realtime_mode"] = True
-            params["nanopore_output_dir"] = nanopore_dir
-            params["batch_size"] = config.get("batch_size", 10)
-            params["batch_interval"] = format_duration(check_interval)
+        elif use_input_dir:
+            params["input_dir"] = nanopore_dir
+            logging.info(
+                f"Batch mode (input_dir): nanometanf INPUT_SCANNER will "
+                f"auto-discover layout under {nanopore_dir}"
+            )
+        else:
+            if user_input:
+                logging.warning(
+                    f"config['input']={user_input!r} does not point at an "
+                    f"existing file; falling back to samplesheet generation"
+                )
+            # Validate the declared sample_handling matches the directory
+            # shape before we commit to samplesheet generation.
+            validate_sample_handling_layout(sample_handling, nanopore_dir)
+
+            samplesheet_dir = os.path.join(main_dir, "samplesheets")
+            os.makedirs(samplesheet_dir, exist_ok=True)
+            samplesheet_path = os.path.join(samplesheet_dir, "input_samplesheet.csv")
+
+            try:
+                generate_samplesheet(
+                    nanopore_dir,
+                    samplesheet_path,
+                    sample_handling=sample_handling,
+                    sample_name=sample_name
+                )
+                params["input"] = samplesheet_path
+                logging.info(f"Batch mode ({sample_handling}): Generated samplesheet at {samplesheet_path}")
+            except ValueError as e:
+                # Fall back to realtime mode if samplesheet generation fails
+                logging.warning(f"Samplesheet generation failed: {e}")
+                logging.warning("Falling back to realtime mode")
+                params["realtime_mode"] = True
+                params["nanopore_output_dir"] = nanopore_dir
+                params["batch_size"] = config.get("batch_size", 10)
+                params["batch_interval"] = format_duration(check_interval)
 
     else:
         # Realtime mode: Use watchPath for new files
@@ -613,123 +700,122 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def create_nextflow_config(config: Dict[str, Any]) -> str:
     """
-    Create custom nextflow.config content for resource limits.
+    Create custom nextflow.config content for resource limits and profile.
+
+    Notes on 2026-04-21 audit cleanup:
+    - The legacy ``params { max_cpus / max_memory / max_time }`` block has
+      been removed; those keys are not part of nanometanf's schema and
+      Nextflow emitted invalid-param warnings each run.
+    - The FASTP ``withName`` block is only emitted when ``qc_tool == "fastp"``
+      so the default (chopper) pipeline does not carry dead config.
+    - Braces are emitted literally (no Python f-string double-brace artefacts).
 
     Args:
         config: Nanometa Live configuration dictionary
 
     Returns:
-        String content for nextflow.config file
-
-    Example:
-        >>> config = {"snakemake_cores": 8, "kraken_cores": 6}
-        >>> config_str = create_nextflow_config(config)
-        >>> "max_cpus = 8" in config_str
-        True
+        String content suitable for writing to a Nextflow ``-c`` config file.
     """
-    # Extract resource configuration
-    # pipeline_cores is the current key; snakemake_cores is kept for backwards compatibility
     max_cores = config.get("pipeline_cores") or config.get("snakemake_cores", 4)
     kraken_cores = config.get("kraken_cores", max_cores)
     blast_cores = config.get("blast_cores", 2)
     validation_cores = config.get("validation_cores", 2)
+    qc_tool = str(config.get("qc_tool", "chopper")).lower()
 
-    # Determine execution profile for container/environment settings
     profile = config.get("pipeline_profile", "docker")
 
-    # Build profile-specific configuration block
-    if profile == "singularity" or profile == "apptainer":
-        profile_block = f"""// Singularity configuration
-singularity {{
-    enabled = true
-    autoMounts = true
-}}
-
-// Docker configuration
-docker {{
-    enabled = false
-}}
-"""
+    # Profile-specific container runtime settings. Using explicit string
+    # concatenation (rather than nested f-strings with doubled braces) to avoid
+    # the Groovy interpolation artefact called out in the audit.
+    if profile in ("singularity", "apptainer"):
+        profile_block = (
+            "// Singularity configuration\n"
+            "singularity {\n"
+            "    enabled = true\n"
+            "    autoMounts = true\n"
+            "}\n\n"
+            "// Docker configuration\n"
+            "docker {\n"
+            "    enabled = false\n"
+            "}\n"
+        )
     elif profile == "conda":
-        profile_block = """// Conda profile selected - no container runtime configured
-docker {{
-    enabled = false
-}}
-
-singularity {{
-    enabled = false
-}}
-"""
+        profile_block = (
+            "// Conda profile selected - no container runtime configured\n"
+            "docker {\n"
+            "    enabled = false\n"
+            "}\n\n"
+            "singularity {\n"
+            "    enabled = false\n"
+            "}\n"
+        )
     else:
-        # Default: docker
-        profile_block = f"""// Docker configuration
-docker {{
-    enabled = true
-    runOptions = '-u $(id -u):$(id -g)'
-}}
+        profile_block = (
+            "// Docker configuration\n"
+            "docker {\n"
+            "    enabled = true\n"
+            "    runOptions = '-u $(id -u):$(id -g)'\n"
+            "}\n\n"
+            "// Singularity configuration\n"
+            "singularity {\n"
+            "    enabled = false\n"
+            "}\n"
+        )
 
-// Singularity configuration
-singularity {{
-    enabled = false
-}}
-"""
+    withname_blocks = [
+        "    // Kraken2 classification (most CPU-intensive)\n"
+        "    withName: 'KRAKEN2_KRAKEN2' {\n"
+        f"        cpus = {kraken_cores}\n"
+        "        memory = '8.GB'\n"
+        "    }\n",
+        "    // BLAST validation\n"
+        "    withName: 'BLAST_BLASTN' {\n"
+        f"        cpus = {blast_cores}\n"
+        "        memory = '4.GB'\n"
+        "    }\n",
+        "    // NanoPlot QC\n"
+        "    withName: 'NANOPLOT' {\n"
+        "        cpus = 2\n"
+        "        memory = '4.GB'\n"
+        "    }\n",
+        "    // Validation sequence extraction\n"
+        "    withName: 'EXTRACT_VALIDATION_SEQS' {\n"
+        f"        cpus = {validation_cores}\n"
+        "        memory = '4.GB'\n"
+        "    }\n",
+    ]
+    if qc_tool == "fastp":
+        withname_blocks.insert(
+            2,
+            "    // FASTP quality filtering\n"
+            "    withName: 'FASTP' {\n"
+            "        cpus = 2\n"
+            "        memory = '4.GB'\n"
+            "    }\n",
+        )
+    process_block = "process {\n" + "\n".join(withname_blocks) + "}\n"
 
-    # Generate config content
-    config_content = f"""// Custom Nextflow configuration for Nanometa Live
-// Auto-generated from Nanometa Live configuration
-
-params {{
-    max_cpus = {max_cores}
-    max_memory = '16.GB'
-    max_time = '24.h'
-}}
-
-// Allow overwriting report files from previous runs
-report {{
-    overwrite = true
-}}
-
-timeline {{
-    overwrite = true
-}}
-
-trace {{
-    overwrite = true
-}}
-
-process {{
-    // Kraken2 classification (most CPU-intensive)
-    withName: 'KRAKEN2_KRAKEN2' {{
-        cpus = {kraken_cores}
-        memory = '8.GB'
-    }}
-
-    // BLAST validation
-    withName: 'BLAST_BLASTN' {{
-        cpus = {blast_cores}
-        memory = '4.GB'
-    }}
-
-    // FASTP quality filtering
-    withName: 'FASTP' {{
-        cpus = 2
-        memory = '4.GB'
-    }}
-
-    // NanoPlot QC
-    withName: 'NANOPLOT' {{
-        cpus = 2
-        memory = '4.GB'
-    }}
-
-    // Validation sequence extraction
-    withName: 'EXTRACT_VALIDATION_SEQS' {{
-        cpus = {validation_cores}
-        memory = '4.GB'
-    }}
-}}
-
-{profile_block}"""
+    config_content = (
+        "// Custom Nextflow configuration for Nanometa Live\n"
+        "// Auto-generated from Nanometa Live configuration\n"
+        "\n"
+        "// Allow overwriting report files from previous runs\n"
+        "report {\n"
+        "    overwrite = true\n"
+        "}\n"
+        "\n"
+        "timeline {\n"
+        "    overwrite = true\n"
+        "}\n"
+        "\n"
+        "trace {\n"
+        "    overwrite = true\n"
+        "}\n"
+        "\n"
+        + process_block
+        + "\n"
+        + profile_block
+    )
 
     return config_content
 

@@ -1,0 +1,78 @@
+"""
+Tests for seqkit output layout discovery.
+
+Regression coverage for F9 / P2-4: the nanometanf pipeline emits seqkit stats
+as a flat ``seqkit/<sample>.tsv`` layout; an older CLAUDE.md description and a
+pre-v1.5 loader expected ``seqkit/<sample>/stats/*.tsv``. These tests pin
+both layouts so neither regresses.
+"""
+
+import pandas as pd
+import pytest
+
+from nanometa_live.core.utils.qc_loaders import load_seqkit_stats
+
+
+SEQKIT_HEADER = (
+    "file\tformat\ttype\tnum_seqs\tsum_len\tmin_len\tavg_len\tmax_len"
+    "\tQ1\tQ2\tQ3\tsum_gap\tN50\tQ20(%)\tQ30(%)\tAvgQual\tGC(%)\n"
+)
+
+SEQKIT_ROW = (
+    "barcode01.fastq.gz\tFASTQ\tDNA\t100\t120000\t50\t1200\t8000"
+    "\t500\t1100\t1800\t0\t1500\t98.5\t90.0\t22.3\t44.0\n"
+)
+
+
+def _write_seqkit_tsv(path, rows=1):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        f.write(SEQKIT_HEADER)
+        for _ in range(rows):
+            f.write(SEQKIT_ROW)
+
+
+class TestSeqkitFlatLayout:
+    def test_flat_single_sample(self, tmp_path):
+        _write_seqkit_tsv(tmp_path / "seqkit" / "barcode01.tsv")
+
+        df = load_seqkit_stats(str(tmp_path), sample="barcode01")
+        assert not df.empty
+        assert df.iloc[0]["num_seqs"] == 100
+        assert "sample" in df.columns
+        assert df.iloc[0]["sample"] == "barcode01"
+
+    def test_flat_all_samples(self, tmp_path):
+        _write_seqkit_tsv(tmp_path / "seqkit" / "barcode01.tsv")
+        _write_seqkit_tsv(tmp_path / "seqkit" / "barcode02.tsv")
+
+        df = load_seqkit_stats(str(tmp_path), sample=None)
+        assert len(df) == 2
+        assert set(df["sample"]) == {"barcode01", "barcode02"}
+
+
+class TestSeqkitNestedLayout:
+    def test_nested_single_sample(self, tmp_path):
+        _write_seqkit_tsv(tmp_path / "seqkit" / "barcode01" / "stats" / "stats.tsv")
+
+        df = load_seqkit_stats(str(tmp_path), sample="barcode01")
+        assert not df.empty
+        assert df.iloc[0]["num_seqs"] == 100
+
+    def test_nested_all_samples(self, tmp_path):
+        _write_seqkit_tsv(tmp_path / "seqkit" / "barcode01" / "stats" / "a.tsv")
+        _write_seqkit_tsv(tmp_path / "seqkit" / "barcode02" / "stats" / "b.tsv")
+
+        df = load_seqkit_stats(str(tmp_path), sample=None)
+        assert len(df) == 2
+
+
+class TestSeqkitMissing:
+    def test_missing_directory_returns_empty_df(self, tmp_path):
+        df = load_seqkit_stats(str(tmp_path), sample="barcode01")
+        assert df.empty
+
+    def test_missing_sample_returns_empty_df(self, tmp_path):
+        _write_seqkit_tsv(tmp_path / "seqkit" / "barcode01.tsv")
+        df = load_seqkit_stats(str(tmp_path), sample="barcode99")
+        assert df.empty

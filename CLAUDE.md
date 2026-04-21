@@ -235,23 +235,35 @@ mapq  (col 11) = mapping quality
 
 ```
 results/
-├── kraken2/
-│   ├── barcode01.kraken2.report.txt
-│   └── barcode01.cumulative.kraken2.report.txt  # Real-time mode
-├── fastp/
-│   └── barcode01.fastp.json
-├── taxpasta/
-│   └── *.tsv
-├── validation/
-│   ├── blast/
-│   │   └── barcode01.blast.tsv                 # BLAST results
-│   └── minimap2/
-│       └── barcode01_taxid562.paf              # Coverage data
-├── on_demand_validation/
-│   └── barcode01_562_ondemand.paf              # On-demand results
-└── pipeline_info/
-    └── trace.txt  # For process monitoring
+|-- kraken2/
+|   |-- barcode01.kraken2.report.txt
+|   `-- barcode01.cumulative.kraken2.report.txt  # Real-time mode
+|-- fastp/                                       # only when qc_tool: fastp
+|   `-- barcode01.fastp.json
+|-- seqkit/                                      # only when qc_tool: chopper
+|   `-- barcode01.tsv                            # flat layout (current)
+|-- taxpasta/
+|   `-- *.tsv
+|-- validation/
+|   |-- blast/
+|   |   `-- barcode01.blast.tsv                 # BLAST results
+|   `-- minimap2/
+|       `-- barcode01_taxid562.paf              # Coverage data
+|-- on_demand_validation/
+|   `-- barcode01_562_ondemand.paf              # On-demand results
+`-- logs/
+    `-- trace.txt                                # Nextflow process trace
 ```
+
+Notes on QC output layout (2026-04-21 audit clarifications):
+
+- `fastp/` and `seqkit/` are mutually exclusive -- exactly one is produced
+  per run, depending on `qc_tool`. The QC loaders (`qc_loaders.py`) try
+  fastp first and fall back to seqkit.
+- `seqkit/<sample>.tsv` is the current nanometanf layout. An older nested
+  layout (`seqkit/<sample>/stats/*.tsv`) is also supported by the loader
+  for backwards compatibility.
+- Nextflow's trace report lives under `logs/`, not `pipeline_info/`.
 
 ## Configuration
 
