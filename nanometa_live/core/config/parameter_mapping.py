@@ -17,6 +17,7 @@ samplesheet; it is honoured verbatim and no samplesheet is auto-generated.
 import os
 import glob
 import csv
+import platform
 import re
 import logging
 from pathlib import Path
@@ -500,13 +501,28 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
                 "Download pathogen genomes in the Watchlist tab first."
             )
 
+    # Kraken2 memory mapping: auto-disable on ARM unless the user set an
+    # explicit override. nanometanf's KRAKEN2 module falls back to a plain
+    # (non-mmap) load on ARM regardless, but emitting the explicit False
+    # here silences the per-run WARN and matches the behaviour operators see.
+    if "kraken_memory_mapping" in config:
+        kraken2_memory_mapping = bool(config["kraken_memory_mapping"])
+    elif platform.machine().lower() in {"arm64", "aarch64"}:
+        logging.info(
+            "ARM host detected (%s); defaulting kraken2_memory_mapping=False",
+            platform.machine(),
+        )
+        kraken2_memory_mapping = False
+    else:
+        kraken2_memory_mapping = True
+
     # Create base nanometanf parameters
     params = {
         "outdir": main_dir,
 
         # Kraken2 classification
         "kraken2_db": kraken_db,
-        "kraken2_memory_mapping": config.get("kraken_memory_mapping", True),
+        "kraken2_memory_mapping": kraken2_memory_mapping,
 
         # Save reads assignment and classified FASTQs (required for validation to work)
         # The VALIDATION workflow needs:

@@ -189,3 +189,30 @@ class TestInputDirMode:
         params = create_nextflow_params(base_config)
         assert "input" in params
         assert "input_dir" not in params
+
+
+# ---- F11 / P2-9: ARM auto-disables kraken2_memory_mapping ------------------
+
+
+class TestArmMemoryMappingDefault:
+    def test_arm_disables_memory_mapping(self, base_config):
+        with patch("platform.machine", return_value="arm64"):
+            params = create_nextflow_params(base_config)
+        assert params["kraken2_memory_mapping"] is False
+
+    def test_aarch64_disables_memory_mapping(self, base_config):
+        with patch("platform.machine", return_value="aarch64"):
+            params = create_nextflow_params(base_config)
+        assert params["kraken2_memory_mapping"] is False
+
+    def test_x86_keeps_memory_mapping_on(self, base_config):
+        with patch("platform.machine", return_value="x86_64"):
+            params = create_nextflow_params(base_config)
+        assert params["kraken2_memory_mapping"] is True
+
+    def test_explicit_override_wins_on_arm(self, base_config):
+        base_config["kraken_memory_mapping"] = True
+        with patch("platform.machine", return_value="arm64"):
+            params = create_nextflow_params(base_config)
+        # Explicit user override is respected.
+        assert params["kraken2_memory_mapping"] is True
