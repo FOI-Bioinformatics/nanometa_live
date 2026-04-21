@@ -376,7 +376,7 @@ def get_barcode_list(input_directory: str) -> List[str]:
 
 def detect_file_format(input_directory: str) -> Dict[str, Any]:
     """
-    Detect the format of input files (FASTQ, POD5, etc.)
+    Detect the format of input files (FASTQ variants).
 
     Args:
         input_directory: Path to input directory
@@ -417,16 +417,10 @@ def detect_file_format(input_directory: str) -> Dict[str, Any]:
 
     result["formats_found"] = extensions
 
-    # Determine primary format
+    # Determine primary format (FASTQ only; pipeline no longer accepts POD5 input)
     fastq_count = sum(extensions.get(ext, 0) for ext in [".fastq", ".fq", ".fastq.gz", ".fq.gz"])
-    pod5_count = extensions.get(".pod5", 0)
-    fast5_count = extensions.get(".fast5", 0)
 
-    if fastq_count >= pod5_count and fastq_count >= fast5_count:
+    if fastq_count > 0:
         result["primary_format"] = "fastq"
-    elif pod5_count > 0:
-        result["primary_format"] = "pod5"
-    elif fast5_count > 0:
-        result["primary_format"] = "fast5"
 
     return result

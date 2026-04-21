@@ -39,8 +39,6 @@ TERM_TRANSLATIONS = {
     # Analysis terms
     "barcode": "sample tag",
     "demultiplexing": "sample separation",
-    "basecalling": "signal conversion",
-    "pod5": "raw sequencing file",
     "fastq": "sequence data file",
 
     # Processing terms

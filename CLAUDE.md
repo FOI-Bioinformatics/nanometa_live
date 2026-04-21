@@ -542,8 +542,7 @@ pytest tests/test_nanometanf_parser.py -v       # Pipeline output parser
 ```
 /Users/andreassjodin/Desktop/ONT/demodata_ONT/data/nanometa_testdata/
 ├── multiple_fastq/    # Barcoded samples
-├── single_fastq/      # Flat directory
-└── multiple_pod5/     # POD5 files (requires Dorado)
+└── single_fastq/      # Flat directory
 
 Kraken2 DB: /Users/andreassjodin/Desktop/ONT/demodata_ONT/database/kraken2.gtdb_bac120_4Gb
 ```
