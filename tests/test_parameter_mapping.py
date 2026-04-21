@@ -13,6 +13,7 @@ import pytest
 
 from nanometa_live.core.config.config_loader import ConfigLoader
 from nanometa_live.core.config.parameter_mapping import (
+    create_nextflow_config,
     create_nextflow_params,
     validate_sample_handling_layout,
 )
@@ -216,3 +217,31 @@ class TestArmMemoryMappingDefault:
             params = create_nextflow_params(base_config)
         # Explicit user override is respected.
         assert params["kraken2_memory_mapping"] is True
+
+
+# ---- F8 / P2-1..P2-3: custom.config template cleanup -----------------------
+
+
+class TestCustomConfigTemplate:
+    def test_no_max_cpus_params_block(self, base_config):
+        cfg = create_nextflow_config(base_config)
+        # max_cpus / max_memory / max_time are not in nanometanf's schema.
+        assert "max_cpus" not in cfg
+        assert "max_memory =" not in cfg
+        assert "max_time =" not in cfg
+
+    def test_fastp_block_only_emitted_for_fastp(self, base_config):
+        base_config["qc_tool"] = "chopper"
+        cfg_chopper = create_nextflow_config(base_config)
+        assert "'FASTP'" not in cfg_chopper
+
+        base_config["qc_tool"] = "fastp"
+        cfg_fastp = create_nextflow_config(base_config)
+        assert "'FASTP'" in cfg_fastp
+
+    def test_no_double_brace_interpolation_artifacts(self, base_config):
+        cfg = create_nextflow_config(base_config)
+        # Groovy uses single braces; double-brace sequences indicate a leftover
+        # Python f-string interpolation artefact (P2-2).
+        assert "{{" not in cfg
+        assert "}}" not in cfg

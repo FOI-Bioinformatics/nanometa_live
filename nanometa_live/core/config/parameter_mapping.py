@@ -700,123 +700,122 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def create_nextflow_config(config: Dict[str, Any]) -> str:
     """
-    Create custom nextflow.config content for resource limits.
+    Create custom nextflow.config content for resource limits and profile.
+
+    Notes on 2026-04-21 audit cleanup:
+    - The legacy ``params { max_cpus / max_memory / max_time }`` block has
+      been removed; those keys are not part of nanometanf's schema and
+      Nextflow emitted invalid-param warnings each run.
+    - The FASTP ``withName`` block is only emitted when ``qc_tool == "fastp"``
+      so the default (chopper) pipeline does not carry dead config.
+    - Braces are emitted literally (no Python f-string double-brace artefacts).
 
     Args:
         config: Nanometa Live configuration dictionary
 
     Returns:
-        String content for nextflow.config file
-
-    Example:
-        >>> config = {"snakemake_cores": 8, "kraken_cores": 6}
-        >>> config_str = create_nextflow_config(config)
-        >>> "max_cpus = 8" in config_str
-        True
+        String content suitable for writing to a Nextflow ``-c`` config file.
     """
-    # Extract resource configuration
-    # pipeline_cores is the current key; snakemake_cores is kept for backwards compatibility
     max_cores = config.get("pipeline_cores") or config.get("snakemake_cores", 4)
     kraken_cores = config.get("kraken_cores", max_cores)
     blast_cores = config.get("blast_cores", 2)
     validation_cores = config.get("validation_cores", 2)
+    qc_tool = str(config.get("qc_tool", "chopper")).lower()
 
-    # Determine execution profile for container/environment settings
     profile = config.get("pipeline_profile", "docker")
 
-    # Build profile-specific configuration block
-    if profile == "singularity" or profile == "apptainer":
-        profile_block = f"""// Singularity configuration
-singularity {{
-    enabled = true
-    autoMounts = true
-}}
-
-// Docker configuration
-docker {{
-    enabled = false
-}}
-"""
+    # Profile-specific container runtime settings. Using explicit string
+    # concatenation (rather than nested f-strings with doubled braces) to avoid
+    # the Groovy interpolation artefact called out in the audit.
+    if profile in ("singularity", "apptainer"):
+        profile_block = (
+            "// Singularity configuration\n"
+            "singularity {\n"
+            "    enabled = true\n"
+            "    autoMounts = true\n"
+            "}\n\n"
+            "// Docker configuration\n"
+            "docker {\n"
+            "    enabled = false\n"
+            "}\n"
+        )
     elif profile == "conda":
-        profile_block = """// Conda profile selected - no container runtime configured
-docker {{
-    enabled = false
-}}
-
-singularity {{
-    enabled = false
-}}
-"""
+        profile_block = (
+            "// Conda profile selected - no container runtime configured\n"
+            "docker {\n"
+            "    enabled = false\n"
+            "}\n\n"
+            "singularity {\n"
+            "    enabled = false\n"
+            "}\n"
+        )
     else:
-        # Default: docker
-        profile_block = f"""// Docker configuration
-docker {{
-    enabled = true
-    runOptions = '-u $(id -u):$(id -g)'
-}}
+        profile_block = (
+            "// Docker configuration\n"
+            "docker {\n"
+            "    enabled = true\n"
+            "    runOptions = '-u $(id -u):$(id -g)'\n"
+            "}\n\n"
+            "// Singularity configuration\n"
+            "singularity {\n"
+            "    enabled = false\n"
+            "}\n"
+        )
 
-// Singularity configuration
-singularity {{
-    enabled = false
-}}
-"""
+    withname_blocks = [
+        "    // Kraken2 classification (most CPU-intensive)\n"
+        "    withName: 'KRAKEN2_KRAKEN2' {\n"
+        f"        cpus = {kraken_cores}\n"
+        "        memory = '8.GB'\n"
+        "    }\n",
+        "    // BLAST validation\n"
+        "    withName: 'BLAST_BLASTN' {\n"
+        f"        cpus = {blast_cores}\n"
+        "        memory = '4.GB'\n"
+        "    }\n",
+        "    // NanoPlot QC\n"
+        "    withName: 'NANOPLOT' {\n"
+        "        cpus = 2\n"
+        "        memory = '4.GB'\n"
+        "    }\n",
+        "    // Validation sequence extraction\n"
+        "    withName: 'EXTRACT_VALIDATION_SEQS' {\n"
+        f"        cpus = {validation_cores}\n"
+        "        memory = '4.GB'\n"
+        "    }\n",
+    ]
+    if qc_tool == "fastp":
+        withname_blocks.insert(
+            2,
+            "    // FASTP quality filtering\n"
+            "    withName: 'FASTP' {\n"
+            "        cpus = 2\n"
+            "        memory = '4.GB'\n"
+            "    }\n",
+        )
+    process_block = "process {\n" + "\n".join(withname_blocks) + "}\n"
 
-    # Generate config content
-    config_content = f"""// Custom Nextflow configuration for Nanometa Live
-// Auto-generated from Nanometa Live configuration
-
-params {{
-    max_cpus = {max_cores}
-    max_memory = '16.GB'
-    max_time = '24.h'
-}}
-
-// Allow overwriting report files from previous runs
-report {{
-    overwrite = true
-}}
-
-timeline {{
-    overwrite = true
-}}
-
-trace {{
-    overwrite = true
-}}
-
-process {{
-    // Kraken2 classification (most CPU-intensive)
-    withName: 'KRAKEN2_KRAKEN2' {{
-        cpus = {kraken_cores}
-        memory = '8.GB'
-    }}
-
-    // BLAST validation
-    withName: 'BLAST_BLASTN' {{
-        cpus = {blast_cores}
-        memory = '4.GB'
-    }}
-
-    // FASTP quality filtering
-    withName: 'FASTP' {{
-        cpus = 2
-        memory = '4.GB'
-    }}
-
-    // NanoPlot QC
-    withName: 'NANOPLOT' {{
-        cpus = 2
-        memory = '4.GB'
-    }}
-
-    // Validation sequence extraction
-    withName: 'EXTRACT_VALIDATION_SEQS' {{
-        cpus = {validation_cores}
-        memory = '4.GB'
-    }}
-}}
-
-{profile_block}"""
+    config_content = (
+        "// Custom Nextflow configuration for Nanometa Live\n"
+        "// Auto-generated from Nanometa Live configuration\n"
+        "\n"
+        "// Allow overwriting report files from previous runs\n"
+        "report {\n"
+        "    overwrite = true\n"
+        "}\n"
+        "\n"
+        "timeline {\n"
+        "    overwrite = true\n"
+        "}\n"
+        "\n"
+        "trace {\n"
+        "    overwrite = true\n"
+        "}\n"
+        "\n"
+        + process_block
+        + "\n"
+        + profile_block
+    )
 
     return config_content
 
