@@ -12,6 +12,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from nanometa_live.core.config.config_loader import ConfigLoader
+from nanometa_live.core.config.parameter_mapping import (
+    validate_sample_handling_layout,
+)
 from nanometa_live.core.workflow.nextflow_manager import NextflowManager
 
 
@@ -87,3 +90,33 @@ class TestValidatePipelineSource:
         # Offline/network failure must not hard-fail -- we skip the check.
         assert ok is True
         assert "skipping pre-flight check" in msg
+
+
+# ---- F7 / P1-7: sample_handling vs directory-layout validation -------------
+
+
+class TestSampleHandlingLayoutValidation:
+    def test_per_file_with_barcode_subdirs_raises(self, tmp_path):
+        (tmp_path / "barcode01").mkdir()
+        (tmp_path / "barcode01" / "a.fastq.gz").write_bytes(b"")
+        (tmp_path / "barcode02").mkdir()
+        (tmp_path / "barcode02" / "b.fastq.gz").write_bytes(b"")
+
+        with pytest.raises(ValueError) as exc:
+            validate_sample_handling_layout("per_file", str(tmp_path))
+        assert "per_file" in str(exc.value)
+
+    def test_per_file_with_flat_layout_passes(self, tmp_path):
+        (tmp_path / "a.fastq.gz").write_bytes(b"")
+        (tmp_path / "b.fastq.gz").write_bytes(b"")
+        validate_sample_handling_layout("per_file", str(tmp_path))
+
+    def test_by_barcode_with_barcode_subdirs_passes(self, tmp_path):
+        (tmp_path / "barcode01").mkdir()
+        (tmp_path / "barcode01" / "a.fastq.gz").write_bytes(b"")
+        validate_sample_handling_layout("by_barcode", str(tmp_path))
+
+    def test_missing_dir_does_not_raise(self, tmp_path):
+        # Fail-soft when the directory is absent -- other code paths raise a
+        # more actionable error for this case.
+        validate_sample_handling_layout("per_file", str(tmp_path / "missing"))

@@ -67,6 +67,46 @@ def detect_input_mode(input_dir: str) -> str:
     return "realtime"
 
 
+def validate_sample_handling_layout(sample_handling: str, input_dir: str) -> None:
+    """
+    Validate that `sample_handling` matches the actual directory layout.
+
+    The `per_file` and `single_sample` modes expect FASTQ files directly in
+    `input_dir`; the `by_barcode` mode expects `barcode*` subdirectories. A
+    common misconfiguration is selecting `per_file` but pointing at a barcoded
+    layout: the pipeline then groups per-file samples into a single sample by
+    filename stem, silently discarding barcode identity.
+
+    Args:
+        sample_handling: One of 'per_file', 'single_sample', 'by_barcode'.
+        input_dir: Path to the Nanopore output directory.
+
+    Raises:
+        ValueError: If the layout contradicts the declared handling mode.
+    """
+    if not os.path.isdir(input_dir):
+        # Other code paths already raise a clearer error for a missing input
+        # directory; don't double-warn here.
+        return
+
+    barcode_dirs = [
+        d for d in glob.glob(os.path.join(input_dir, "barcode*"))
+        if os.path.isdir(d)
+    ]
+    has_barcode_subdirs = any(
+        glob.glob(os.path.join(d, "*.fastq*")) for d in barcode_dirs
+    )
+
+    if sample_handling in ("per_file", "single_sample") and has_barcode_subdirs:
+        raise ValueError(
+            f"sample_handling={sample_handling!r} but {input_dir!r} contains "
+            f"barcode subdirectories with FASTQ files. This is almost always "
+            f"a misconfiguration: either set sample_handling='by_barcode' to "
+            f"demultiplex, or point nanopore_output_directory at a flat "
+            f"directory of FASTQ files."
+        )
+
+
 def format_duration(seconds: int) -> str:
     """
     Convert seconds to Nextflow duration string.
