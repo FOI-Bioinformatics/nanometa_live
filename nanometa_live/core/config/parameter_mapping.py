@@ -2,13 +2,16 @@
 Parameter mapping between Nanometa Live and nanometanf.
 
 This module provides functions to convert Nanometa Live configuration parameters
-to nanometanf v1.1.0 pipeline parameters and Nextflow configuration.
+to nanometanf pipeline parameters and Nextflow configuration.
 
-Supported input modes:
-- 'auto': Auto-detect based on directory structure (default)
-- 'batch': Single sample with multiple FASTQ files (--fastq_input_dir)
-- 'barcode': Multiple barcodes with subdirectories (--barcode_input_dir)
-- 'realtime': Real-time monitoring with watchPath (--nanopore_output_dir)
+Supported processing modes (set via config["processing_mode"]):
+- 'batch': Process existing files. Emits `--input <samplesheet.csv>` by
+  default, or `--input_dir <dir>` when config["use_input_dir_mode"] is true.
+- 'realtime': Live watchPath monitoring via `--realtime_mode true`
+  and `--nanopore_output_dir <dir>`.
+
+Callers may also pre-supply `config["input"]` with a path to an existing
+samplesheet; it is honoured verbatim and no samplesheet is auto-generated.
 """
 
 import os
