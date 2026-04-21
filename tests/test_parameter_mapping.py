@@ -13,9 +13,33 @@ import pytest
 
 from nanometa_live.core.config.config_loader import ConfigLoader
 from nanometa_live.core.config.parameter_mapping import (
+    create_nextflow_params,
     validate_sample_handling_layout,
 )
 from nanometa_live.core.workflow.nextflow_manager import NextflowManager
+
+
+@pytest.fixture
+def base_config(tmp_path):
+    """A minimal batch-mode config that create_nextflow_params will accept."""
+    nanopore_dir = tmp_path / "input"
+    nanopore_dir.mkdir()
+    (nanopore_dir / "sample1.fastq.gz").write_bytes(b"@seq\nACGT\n+\n!!!!\n")
+
+    results_dir = tmp_path / "results"
+    results_dir.mkdir()
+
+    return {
+        "nanopore_output_directory": str(nanopore_dir),
+        "results_output_directory": str(results_dir),
+        "kraken_db": str(tmp_path / "kraken2_db"),
+        "processing_mode": "batch",
+        "sample_handling": "single_sample",
+        "sample_name": "test_sample",
+        "analysis_name": "TestRun",
+        "check_intervals_seconds": 15,
+        "blast_validation": False,
+    }
 
 
 # ---- F1 / P1-3: default pipeline_source -------------------------------------
@@ -120,3 +144,48 @@ class TestSampleHandlingLayoutValidation:
         # Fail-soft when the directory is absent -- other code paths raise a
         # more actionable error for this case.
         validate_sample_handling_layout("per_file", str(tmp_path / "missing"))
+
+
+# ---- F2 / P1-4: honor pre-supplied input samplesheet -----------------------
+
+
+class TestInputSamplesheetHonored:
+    def test_prebuilt_input_is_kept_verbatim(self, base_config, tmp_path):
+        samplesheet = tmp_path / "my_samplesheet.csv"
+        samplesheet.write_text("sample,fastq_1,fastq_2\nsample1,/tmp/s1.fq.gz,\n")
+
+        base_config["input"] = str(samplesheet)
+        params = create_nextflow_params(base_config)
+
+        assert params["input"] == str(samplesheet)
+        gen = Path(base_config["results_output_directory"]) / "samplesheets" / "input_samplesheet.csv"
+        assert not gen.exists(), (
+            "Auto-generated samplesheet must not overwrite the user-supplied input"
+        )
+
+    def test_missing_input_falls_back_to_autogen(self, base_config, tmp_path):
+        base_config["input"] = str(tmp_path / "does-not-exist.csv")
+        params = create_nextflow_params(base_config)
+
+        gen = Path(base_config["results_output_directory"]) / "samplesheets" / "input_samplesheet.csv"
+        assert params["input"] == str(gen)
+        assert gen.exists()
+
+
+# ---- F3 / P1-5: use_input_dir_mode -----------------------------------------
+
+
+class TestInputDirMode:
+    def test_input_dir_mode_skips_samplesheet(self, base_config):
+        base_config["use_input_dir_mode"] = True
+        params = create_nextflow_params(base_config)
+
+        assert params.get("input_dir") == base_config["nanopore_output_directory"]
+        assert "input" not in params or params.get("input") is None
+        gen = Path(base_config["results_output_directory"]) / "samplesheets" / "input_samplesheet.csv"
+        assert not gen.exists()
+
+    def test_default_still_generates_samplesheet(self, base_config):
+        params = create_nextflow_params(base_config)
+        assert "input" in params
+        assert "input_dir" not in params

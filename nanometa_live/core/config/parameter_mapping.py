@@ -564,31 +564,59 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         elif genome_paths:
             logging.info(f"Found {len(genome_paths)} downloaded genomes for validation")
 
-    # Set input parameters based on processing mode and sample handling
+    # Set input parameters based on processing mode and sample handling.
+    # Batch mode offers three input paths, checked in priority order:
+    #   1. config["input"] is an existing file -> pass through verbatim
+    #      (supports the "bring your own samplesheet" workflow).
+    #   2. config["use_input_dir_mode"] is true -> emit --input_dir for the
+    #      nanometanf INPUT_SCANNER subworkflow (auto-layout discovery).
+    #   3. Otherwise -> auto-generate a samplesheet from nanopore_dir.
     if processing_mode == "batch":
-        # Batch mode: Generate samplesheet for existing files
-        # This avoids the watchPath limitation where existing files are not detected
-        samplesheet_dir = os.path.join(main_dir, "samplesheets")
-        os.makedirs(samplesheet_dir, exist_ok=True)
-        samplesheet_path = os.path.join(samplesheet_dir, "input_samplesheet.csv")
+        user_input = config.get("input")
+        use_input_dir = bool(config.get("use_input_dir_mode", False))
 
-        try:
-            generate_samplesheet(
-                nanopore_dir,
-                samplesheet_path,
-                sample_handling=sample_handling,
-                sample_name=sample_name
+        if user_input and os.path.isfile(user_input):
+            params["input"] = str(user_input)
+            logging.info(
+                f"Batch mode: using pre-supplied samplesheet at {user_input}"
             )
-            params["input"] = samplesheet_path
-            logging.info(f"Batch mode ({sample_handling}): Generated samplesheet at {samplesheet_path}")
-        except ValueError as e:
-            # Fall back to realtime mode if samplesheet generation fails
-            logging.warning(f"Samplesheet generation failed: {e}")
-            logging.warning("Falling back to realtime mode")
-            params["realtime_mode"] = True
-            params["nanopore_output_dir"] = nanopore_dir
-            params["batch_size"] = config.get("batch_size", 10)
-            params["batch_interval"] = format_duration(check_interval)
+        elif use_input_dir:
+            params["input_dir"] = nanopore_dir
+            logging.info(
+                f"Batch mode (input_dir): nanometanf INPUT_SCANNER will "
+                f"auto-discover layout under {nanopore_dir}"
+            )
+        else:
+            if user_input:
+                logging.warning(
+                    f"config['input']={user_input!r} does not point at an "
+                    f"existing file; falling back to samplesheet generation"
+                )
+            # Validate the declared sample_handling matches the directory
+            # shape before we commit to samplesheet generation.
+            validate_sample_handling_layout(sample_handling, nanopore_dir)
+
+            samplesheet_dir = os.path.join(main_dir, "samplesheets")
+            os.makedirs(samplesheet_dir, exist_ok=True)
+            samplesheet_path = os.path.join(samplesheet_dir, "input_samplesheet.csv")
+
+            try:
+                generate_samplesheet(
+                    nanopore_dir,
+                    samplesheet_path,
+                    sample_handling=sample_handling,
+                    sample_name=sample_name
+                )
+                params["input"] = samplesheet_path
+                logging.info(f"Batch mode ({sample_handling}): Generated samplesheet at {samplesheet_path}")
+            except ValueError as e:
+                # Fall back to realtime mode if samplesheet generation fails
+                logging.warning(f"Samplesheet generation failed: {e}")
+                logging.warning("Falling back to realtime mode")
+                params["realtime_mode"] = True
+                params["nanopore_output_dir"] = nanopore_dir
+                params["batch_size"] = config.get("batch_size", 10)
+                params["batch_interval"] = format_duration(check_interval)
 
     else:
         # Realtime mode: Use watchPath for new files
