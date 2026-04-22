@@ -149,6 +149,15 @@ def _validate_performance_settings(config: Dict[str, Any]) -> None:
     ):
         config["check_intervals_seconds"] = 15
 
+    # Realtime timeout (minutes). None means "run indefinitely" and is a valid value.
+    # Only coerce if the key is missing or the value is an invalid type/out of range.
+    if "realtime_timeout_minutes" not in config:
+        config["realtime_timeout_minutes"] = 60
+    elif config["realtime_timeout_minutes"] is not None:
+        rtm = config["realtime_timeout_minutes"]
+        if not isinstance(rtm, int) or isinstance(rtm, bool) or rtm < 1 or rtm > 10080:
+            config["realtime_timeout_minutes"] = 60
+
     # Local package management
     if "local_package_management" not in config:
         config["local_package_management"] = None
