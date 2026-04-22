@@ -441,6 +441,33 @@ def create_config_form():
                         dbc.Row([
                             dbc.Col([
                                 dbc.Label([
+                                    "Realtime Timeout (minutes) ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1", id="realtime-timeout-minutes-info")
+                                ], html_for="realtime-timeout-minutes-input"),
+                                dbc.Input(
+                                    id="realtime-timeout-minutes-input",
+                                    type="number",
+                                    min=1,
+                                    max=10080,
+                                    step=1,
+                                    value=60,
+                                    placeholder="Leave empty to run indefinitely"
+                                ),
+                                dbc.FormText(
+                                    "Stop real-time monitoring after this many minutes without new files. "
+                                    "Empty = run until manually stopped."
+                                ),
+                                dbc.Tooltip(
+                                    "Only applies in real-time mode. The pipeline watches for new FASTQ files "
+                                    "and stops when no new files appear within this window. Maps to nanometanf's "
+                                    "--realtime_timeout_minutes. Default 60; clear the field for no timeout.",
+                                    target="realtime-timeout-minutes-info"
+                                )
+                            ], md=6)
+                        ], className="mb-3"),
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Label([
                                     "Minimum Detection Count ",
                                     html.I(className="bi bi-info-circle text-muted ms-1", id="min-reads-info")
                                 ], html_for="min-reads-per-level-input"),

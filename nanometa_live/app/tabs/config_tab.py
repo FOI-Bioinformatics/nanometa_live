@@ -414,6 +414,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             State("danger-threshold-input", "value"),
             State("kraken-taxonomy-input", "value"),
             State("check-interval-input", "value"),
+            State("realtime-timeout-minutes-input", "value"),
             State("min-reads-per-level-input", "value"),
             State("memory-mapping-input", "value"),
             State("blast-validation-input", "value"),
@@ -452,6 +453,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         danger_threshold,
         taxonomy,
         check_interval,
+        realtime_timeout_minutes,
         min_reads_per_level,
         memory_mapping,
         blast_validation,
@@ -552,6 +554,14 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             if check_interval < 1 or check_interval > 300:
                 errors.append("Check Interval must be between 1-300 seconds")
 
+        if realtime_timeout_minutes is not None and realtime_timeout_minutes != "":
+            try:
+                rtm = int(realtime_timeout_minutes)
+                if rtm < 1 or rtm > 10080:
+                    errors.append("Realtime Timeout must be between 1-10080 minutes (or empty for no timeout)")
+            except (TypeError, ValueError):
+                errors.append("Realtime Timeout must be an integer number of minutes")
+
         if min_reads_per_level is not None:
             if min_reads_per_level < 1:
                 errors.append("Minimum Reads per Level must be at least 1")
@@ -611,6 +621,13 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
         if check_interval is not None:
             config["check_intervals_seconds"] = check_interval
+
+        # Empty/None -> null (run indefinitely); numeric -> int
+        config["realtime_timeout_minutes"] = (
+            int(realtime_timeout_minutes)
+            if realtime_timeout_minutes not in (None, "")
+            else None
+        )
 
         if min_reads_per_level is not None:
             config["default_reads_per_level"] = min_reads_per_level
@@ -800,6 +817,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("danger-threshold-input", "value"),
             Output("kraken-taxonomy-input", "value"),
             Output("check-interval-input", "value"),
+            Output("realtime-timeout-minutes-input", "value"),
             Output("min-reads-per-level-input", "value"),
             Output("memory-mapping-input", "value"),
             Output("blast-validation-input", "value"),
@@ -832,7 +850,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     def initialize_form_from_config(refresh_trigger, config):
         """Initialize form fields from the current configuration."""
         if not config:
-            return [no_update] * 33
+            return [no_update] * 34
 
         # Extract values from config
         analysis_name = config.get("analysis_name", "")
@@ -843,6 +861,9 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         danger_threshold = config.get("danger_lower_limit", 100)
         taxonomy = config.get("kraken_taxonomy", "gtdb")
         check_interval = config.get("check_intervals_seconds", 15)
+        # None in YAML means "run indefinitely"; show empty string to blank the numeric input
+        realtime_timeout_raw = config.get("realtime_timeout_minutes", 60)
+        realtime_timeout_minutes = "" if realtime_timeout_raw is None else realtime_timeout_raw
         min_reads_per_level = config.get("default_reads_per_level", 10)
 
         # Handle boolean values
@@ -925,6 +946,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             danger_threshold,
             taxonomy,
             check_interval,
+            realtime_timeout_minutes,
             min_reads_per_level,
             memory_mapping,
             blast_validation,
@@ -1501,6 +1523,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("danger-threshold-input", "value"),
             Input("kraken-taxonomy-input", "value"),
             Input("check-interval-input", "value"),
+            Input("realtime-timeout-minutes-input", "value"),
             Input("min-reads-per-level-input", "value"),
             Input("memory-mapping-input", "value"),
             Input("blast-validation-input", "value"),
@@ -1528,7 +1551,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     )
     def detect_form_changes(
         analysis_name, nanopore_dir, kraken_db, results_dir, update_interval,
-        danger_threshold, taxonomy, check_interval,
+        danger_threshold, taxonomy, check_interval, realtime_timeout_minutes,
         min_reads_per_level, memory_mapping, blast_validation, validation_method,
         min_identity, e_value_cutoff, minimap2_preset, minimap2_min_mapq,
         genome_cache_dir, cores, gui_port, clean_temp,
@@ -1554,6 +1577,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "danger_lower_limit": danger_threshold,
             "kraken_taxonomy": taxonomy or "",
             "check_intervals_seconds": check_interval,
+            "realtime_timeout_minutes": (
+                int(realtime_timeout_minutes)
+                if realtime_timeout_minutes not in (None, "")
+                else None
+            ),
             "default_reads_per_level": min_reads_per_level,
             "kraken_memory_mapping": bool(memory_mapping),
             "blast_validation": bool(blast_validation),

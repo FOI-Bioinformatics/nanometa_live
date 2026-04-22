@@ -117,6 +117,8 @@ class ConfigLoader:
             "pipeline_source": "remote:dev",
             # Realtime mode settings
             "max_file_age_minutes": 1000000,
+            # Stop real-time monitoring after N minutes with no new files (null = run indefinitely)
+            "realtime_timeout_minutes": 60,
             # Batch settings (for realtime mode, batch_size=1 processes files immediately)
             "batch_size": 1,
             "min_batch_size": 1,
