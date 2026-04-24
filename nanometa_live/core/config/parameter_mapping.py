@@ -185,7 +185,7 @@ def get_validation_species_from_watchlist(
                 logging.debug(
                     f"Using taxid mapping collection with {len(mapping_collection.mappings)} mappings"
                 )
-        except Exception as e:
+        except (ImportError, AttributeError, FileNotFoundError) as e:
             logging.debug(f"No taxid mapping collection available: {e}")
 
         species_list = []
@@ -224,8 +224,14 @@ def get_validation_species_from_watchlist(
         )
         return species_list, genome_paths
 
-    except Exception as e:
-        logging.warning(f"Failed to get watchlist species: {e}")
+    except (ImportError, AttributeError) as e:
+        logging.warning(f"Watchlist subsystem unavailable: {e}")
+        return [], []
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        logging.warning(f"Failed to read watchlist data: {e}")
+        return [], []
+    except (ValueError, KeyError, TypeError) as e:
+        logging.warning(f"Failed to parse watchlist entries: {e}")
         return [], []
 
 
@@ -428,8 +434,10 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         try:
             stats = genome_manager.get_statistics()
             logging.debug(f"Genome manager stats: {stats}")
-        except Exception as e:
-            logging.debug(f"Could not get genome stats: {e}")
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logging.debug(f"Could not read genome cache: {e}")
+        except AttributeError as e:
+            logging.debug(f"Genome manager missing get_statistics: {e}")
 
         # Get the full species list with both NCBI and Kraken taxids
         # We need NCBI taxids for genome file lookup, and Kraken taxids for pipeline filtering
@@ -481,8 +489,10 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
                 with open(pathogen_genomes_path, 'r') as f:
                     content = json.load(f)
                 logging.debug(f"pathogen_genomes.json contains {len(content)} entries")
-            except Exception as e:
-                logging.debug(f"Could not read pathogen_genomes.json for verification: {e}")
+            except (FileNotFoundError, PermissionError, OSError) as e:
+                logging.debug(f"Could not read pathogen_genomes.json: {e}")
+            except json.JSONDecodeError as e:
+                logging.debug(f"Malformed pathogen_genomes.json: {e}")
         else:
             logging.warning(
                 "No downloaded genomes found for enabled watchlist species. "

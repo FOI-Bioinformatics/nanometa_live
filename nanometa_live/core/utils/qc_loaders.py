@@ -348,8 +348,11 @@ def load_nanoplot_stats(main_dir: str, sample: Optional[str] = None) -> Dict[str
                     aggregated['read_length_n50'],
                     stats.get('read_length_n50', 0)
                 )
-        except Exception as e:
-            logging.error(f"Error parsing {stats_file}: {e}")
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logging.warning(f"Cannot read NanoStats file {stats_file}: {e}")
+            continue
+        except (ValueError, KeyError, TypeError) as e:
+            logging.warning(f"Malformed NanoStats file {stats_file}: {e}")
             continue
 
     # Average the mean values
@@ -401,8 +404,11 @@ def _parse_nanostats_file(filepath: str) -> Dict[str, Any]:
 
         return stats
 
-    except Exception as e:
-        logging.error(f"Error parsing NanoStats file {filepath}: {e}")
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        logging.warning(f"Cannot read NanoStats file {filepath}: {e}")
+        return _empty_nanoplot_stats()
+    except (ValueError, TypeError) as e:
+        logging.warning(f"Malformed NanoStats file {filepath}: {e}")
         return _empty_nanoplot_stats()
 
 
@@ -503,8 +509,11 @@ def load_seqkit_stats(main_dir: str, sample: Optional[str] = None) -> pd.DataFra
             sample_name = os.path.basename(tsv_file).replace('.tsv', '')
             df['sample'] = sample_name
             all_stats.append(df)
-        except Exception as e:
-            logging.error(f"Error reading seqkit file {tsv_file}: {e}")
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logging.warning(f"Cannot read seqkit file {tsv_file}: {e}")
+            continue
+        except (pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeDecodeError) as e:
+            logging.warning(f"Malformed seqkit file {tsv_file}: {e}")
             continue
 
     if not all_stats:

@@ -121,7 +121,7 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
         for col in numeric_cols:
             try:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
-            except Exception as e:
+            except (ValueError, TypeError) as e:
                 logging.warning(
                     f"Column '{col}' in {filepath} contains non-numeric values: {e}"
                 )
@@ -170,8 +170,15 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
     except OSError as e:
         logging.warning("OS error reading kreport file %s: %s", filepath, e)
         return None
-    except Exception as e:
-        logging.error(f"Error parsing Kraken2 report {filepath}: {e}")
+    except (pd.errors.ParserError, pd.errors.EmptyDataError, ValueError) as e:
+        logging.warning("Malformed Kraken2 report %s: %s", filepath, e)
+        return None
+    except Exception:
+        # Unexpected failure in the parsing logic above. Keep a single
+        # catch-all so a single corrupt file cannot bring the whole
+        # dashboard down, but log with exception() so the stack trace
+        # reaches the debug log.
+        logging.exception("Unexpected error parsing Kraken2 report %s", filepath)
         return None
 
 

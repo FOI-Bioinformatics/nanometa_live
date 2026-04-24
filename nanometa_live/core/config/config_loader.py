@@ -185,8 +185,11 @@ class ConfigLoader:
                 f"Invalid YAML in configuration file '{config_path}'{location}. "
                 f"Check for indentation or formatting errors."
             ) from e
-        except Exception as e:
-            logging.error(f"Failed to load configuration from {config_path}. Exception: {e}")
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logging.error(f"Could not read configuration {config_path}: {e}")
+            raise
+        except Exception:
+            logging.exception(f"Unexpected failure loading configuration {config_path}")
             raise
 
     def _standardize_boolean_params(self, config: Dict[str, Any]) -> None:
@@ -256,8 +259,8 @@ class ConfigLoader:
             with open(config_path, "w") as f:
                 self.yaml.dump(save_config, f)
             return config_path
-        except Exception as e:
-            logging.error(f"Failed to save configuration: {e}")
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logging.error(f"Failed to write configuration to {config_path}: {e}")
             raise
 
     def _get_config_metadata(self, config_path: str) -> Optional[Dict[str, Any]]:
@@ -293,7 +296,7 @@ class ConfigLoader:
                 location = f" at line {mark.line + 1}, column {mark.column + 1}"
             logger.warning(f"Skipping {config_path}: YAML syntax error{location}")
             return None
-        except Exception:
+        except (FileNotFoundError, PermissionError, OSError):
             return None
 
     def get_available_configs(self) -> List[Dict[str, Any]]:
@@ -400,6 +403,9 @@ class ConfigLoader:
             with open(db_file, 'r') as f:
                 db_config = yaml.safe_load(f)
             return db_config.get("kraken2_databases", {})
-        except Exception as e:
-            logging.error(f"Error loading Kraken databases: {e}")
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logging.error(f"Could not read Kraken databases file {db_file}: {e}")
+            return {}
+        except yaml.YAMLError as e:
+            logging.error(f"Malformed Kraken databases file {db_file}: {e}")
             return {}

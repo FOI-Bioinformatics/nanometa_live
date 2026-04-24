@@ -32,9 +32,13 @@ def parse_kraken_report(report_file: str) -> pd.DataFrame:
         logging.info(f"Parsed Kraken report {report_file} with {len(df)} entries")
         return df
 
-    except Exception as e:
-        logging.error(f"Error parsing Kraken report {report_file}: {e}")
-        # Return empty DataFrame with correct columns
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        logging.error(f"Could not read Kraken report {report_file}: {e}")
+        return pd.DataFrame(
+            columns=["%", "cumul_reads", "reads", "rank", "taxid", "name"]
+        )
+    except (pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeDecodeError) as e:
+        logging.error(f"Malformed Kraken report {report_file}: {e}")
         return pd.DataFrame(
             columns=["%", "cumul_reads", "reads", "rank", "taxid", "name"]
         )
@@ -83,8 +87,11 @@ def parse_kraken_output(kraken_file: str) -> Dict[str, int]:
         )
         return taxid_counts
 
-    except Exception as e:
-        logging.error(f"Error parsing Kraken output {kraken_file}: {e}")
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        logging.error(f"Could not read Kraken output {kraken_file}: {e}")
+        return {}
+    except (UnicodeDecodeError, ValueError) as e:
+        logging.error(f"Malformed Kraken output {kraken_file}: {e}")
         return {}
 
 
@@ -124,8 +131,11 @@ def parse_fastq_file(fastq_file: str) -> Tuple[int, int]:
         logging.info(f"Parsed {fastq_file}: {read_count} reads, {total_bp} bp")
         return read_count, total_bp
 
-    except Exception as e:
-        logging.error(f"Error parsing FASTQ file {fastq_file}: {e}")
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        logging.error(f"Could not read FASTQ file {fastq_file}: {e}")
+        return 0, 0
+    except (UnicodeDecodeError, EOFError) as e:
+        logging.error(f"Malformed FASTQ file {fastq_file}: {e}")
         return 0, 0
 
 
@@ -155,8 +165,16 @@ def parse_fastp_report(report_file: str) -> Dict[str, int]:
         logging.info(f"Parsed FastP report {report_file}")
         return stats
 
-    except Exception as e:
-        logging.error(f"Error parsing FastP report {report_file}: {e}")
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        logging.error(f"Could not read FastP report {report_file}: {e}")
+        return {
+            "passed_filter_reads": 0,
+            "low_quality_reads": 0,
+            "too_many_N_reads": 0,
+            "too_short_reads": 0,
+        }
+    except json.JSONDecodeError as e:
+        logging.error(f"Malformed FastP report {report_file}: {e}")
         return {
             "passed_filter_reads": 0,
             "low_quality_reads": 0,
@@ -206,8 +224,11 @@ def parse_blast_results(blast_file: str) -> Tuple[int, int]:
         )
         return unique_reads, total_alignments
 
-    except Exception as e:
-        logging.error(f"Error parsing BLAST results {blast_file}: {e}")
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        logging.error(f"Could not read BLAST results {blast_file}: {e}")
+        return 0, 0
+    except (pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeDecodeError) as e:
+        logging.error(f"Malformed BLAST results {blast_file}: {e}")
         return 0, 0
 
 
@@ -264,8 +285,8 @@ def extract_classified_reads(kraken_report: str) -> Tuple[int, int, float, float
             percent_unclassified,
         )
 
-    except Exception as e:
+    except (IndexError, KeyError, ValueError, TypeError) as e:
         logging.error(
-            f"Error extracting classification stats from {kraken_report}: {e}"
+            f"Malformed Kraken report structure in {kraken_report}: {e}"
         )
         return 0, 0, 0.0, 0.0
