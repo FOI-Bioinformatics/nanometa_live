@@ -156,3 +156,126 @@ class TestRealtimeBatchAccumulation:
         samples_updated = get_available_samples(str(tmp_path))
         assert "barcode01" in samples_updated
         assert "barcode02" in samples_updated
+
+
+class TestBatchInputDirAutoDetect:
+    """Scenario E: batch mode + by_barcode auto-enables --input_dir.
+
+    The GUI exposes processing_mode and sample_handling but has no toggle
+    for the use_input_dir_mode flag. Before the fix, selecting batch +
+    by_barcode with no pre-built samplesheet silently fell back to
+    realtime mode. create_nextflow_params now emits --input_dir for this
+    combination and no longer emits --input.
+    """
+
+    @staticmethod
+    def _base_config(tmp_path: pathlib.Path) -> dict:
+        nanopore_dir = tmp_path / "input"
+        nanopore_dir.mkdir()
+        # Populate with minimal barcode directories so the layout validator
+        # recognises a by_barcode shape.
+        for barcode in ("barcode01", "barcode02"):
+            sub = nanopore_dir / barcode
+            sub.mkdir()
+            (sub / "reads.fastq.gz").write_bytes(b"@seq\nACGT\n+\n!!!!\n")
+
+        results_dir = tmp_path / "results"
+        results_dir.mkdir()
+
+        return {
+            "nanopore_output_directory": str(nanopore_dir),
+            "results_output_directory": str(results_dir),
+            "kraken_db": str(tmp_path / "kraken2_db"),
+            "processing_mode": "batch",
+            "sample_handling": "by_barcode",
+            "sample_name": "sample",
+            "analysis_name": "TestBatchByBarcode",
+            "check_intervals_seconds": 15,
+            "blast_validation": False,
+        }
+
+    def test_auto_enables_input_dir_when_no_samplesheet(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        from nanometa_live.core.config.parameter_mapping import create_nextflow_params
+
+        config = self._base_config(tmp_path)
+        params = create_nextflow_params(config)
+
+        assert params.get("input_dir") == config["nanopore_output_directory"]
+        # Must not also set --input -- nanometanf rejects multiple input modes.
+        assert "input" not in params or not params.get("input")
+        # Scenario E is batch; realtime_mode must not be set.
+        assert not params.get("realtime_mode")
+        # No auto-generated samplesheet should have been written when
+        # INPUT_SCANNER is responsible for layout discovery.
+        generated = (
+            pathlib.Path(config["results_output_directory"])
+            / "samplesheets"
+            / "input_samplesheet.csv"
+        )
+        assert not generated.exists()
+
+    def test_explicit_samplesheet_still_wins(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A caller-supplied config['input'] must still be honoured verbatim."""
+        from nanometa_live.core.config.parameter_mapping import create_nextflow_params
+
+        config = self._base_config(tmp_path)
+        samplesheet = tmp_path / "prebuilt.csv"
+        samplesheet.write_text("sample,fastq_1\nbarcode01,barcode01/reads.fastq.gz\n")
+        config["input"] = str(samplesheet)
+
+        params = create_nextflow_params(config)
+
+        assert params.get("input") == str(samplesheet)
+        assert "input_dir" not in params
+
+    def test_scenario_e_does_not_fall_back_to_realtime(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Regression guard for the silent-fallback bug.
+
+        Before the fix, batch + by_barcode with no samplesheet flipped the
+        params to realtime mode. The emitted params must now declare batch
+        semantics (input_dir + no realtime_mode + no nanopore_output_dir).
+        """
+        from nanometa_live.core.config.parameter_mapping import create_nextflow_params
+
+        config = self._base_config(tmp_path)
+        params = create_nextflow_params(config)
+
+        assert params.get("input_dir") == config["nanopore_output_directory"]
+        assert not params.get("realtime_mode")
+        assert "nanopore_output_dir" not in params
+
+    def test_single_sample_still_generates_samplesheet(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Scenario E must be scoped to by_barcode -- single_sample is unaffected."""
+        from nanometa_live.core.config.parameter_mapping import create_nextflow_params
+
+        nanopore_dir = tmp_path / "input"
+        nanopore_dir.mkdir()
+        (nanopore_dir / "reads.fastq.gz").write_bytes(b"@seq\nACGT\n+\n!!!!\n")
+
+        results_dir = tmp_path / "results"
+        results_dir.mkdir()
+
+        config = {
+            "nanopore_output_directory": str(nanopore_dir),
+            "results_output_directory": str(results_dir),
+            "kraken_db": str(tmp_path / "kraken2_db"),
+            "processing_mode": "batch",
+            "sample_handling": "single_sample",
+            "sample_name": "sample",
+            "analysis_name": "TestBatchSingleSample",
+            "check_intervals_seconds": 15,
+            "blast_validation": False,
+        }
+
+        params = create_nextflow_params(config)
+
+        assert "input" in params and params["input"]
+        assert "input_dir" not in params
