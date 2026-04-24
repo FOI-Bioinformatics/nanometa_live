@@ -109,12 +109,14 @@ class ConfigLoader:
             "sample_handling": "by_barcode",
             "sample_name": "sample",
             # Pipeline execution settings
-            "pipeline_profile": "docker",
-            # Default to the active development branch. The master branch lags
-            # behind dev for active feature work; a fresh install pointed at
-            # master may fail to fetch required modules. Override via
-            # config.yaml or the UI for production deployments.
-            "pipeline_source": "remote:dev",
+            "pipeline_profile": "conda",
+            # Pinned remote default: tracks the main branch of the upstream
+            # nanometanf repository. A fresh install without this pin silently
+            # fell back to an unresolved spec, so the GUI would report
+            # "pipeline not found" after the first run attempt. Override in
+            # config.yaml (e.g. "remote:dev" for active development, or a
+            # local path "local:/path/to/checkout") as needed.
+            "pipeline_source": "remote:main",
             # Realtime mode settings
             "max_file_age_minutes": 1000000,
             # Stop real-time monitoring after N minutes with no new files (null = run indefinitely)

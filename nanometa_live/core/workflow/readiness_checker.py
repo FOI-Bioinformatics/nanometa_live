@@ -662,26 +662,48 @@ class ReadinessChecker:
         source = config.get("pipeline_source", "")
         if not source:
             return CheckResult(
-                "Pipeline Source", False, Severity.INFO,
-                "No pipeline source configured"
+                "Pipeline Source", False, Severity.CRITICAL,
+                "No pipeline_source configured. Set pipeline_source in "
+                "config.yaml to 'remote:main' or a local path; otherwise "
+                "the pipeline cannot be launched.",
             )
         # Strip "local:" prefix if present (used by nextflow_manager convention)
-        if source.startswith("local:"):
-            source = source[len("local:"):]
+        normalized = source
+        if normalized.startswith("local:"):
+            normalized = normalized[len("local:"):]
         # Local path (doesn't look like a remote URI)
-        if not source.startswith(("http://", "https://", "remote")):
-            p = Path(source)
+        if not normalized.startswith(("http://", "https://", "remote")):
+            p = Path(normalized)
             if p.exists():
+                if (p / "main.nf").exists():
+                    return CheckResult(
+                        "Pipeline Source", True, Severity.INFO,
+                        f"Local pipeline at {p}",
+                    )
                 return CheckResult(
-                    "Pipeline Source", True, Severity.INFO,
-                    f"Local pipeline at {p}"
+                    "Pipeline Source", False, Severity.CRITICAL,
+                    f"Local pipeline directory exists at {p} but is missing "
+                    f"main.nf; this does not look like a Nextflow pipeline "
+                    f"checkout.",
                 )
             return CheckResult(
-                "Pipeline Source", False, Severity.WARNING,
-                f"Local pipeline path does not exist: {p}"
+                "Pipeline Source", False, Severity.CRITICAL,
+                f"Local pipeline path does not exist: {p}. Set "
+                f"pipeline_source in config.yaml to a valid local path or "
+                f"to a remote spec such as 'remote:main'.",
             )
-        # Remote source
+        # Remote source: verify it's a recognised form
+        if not (normalized.startswith("remote:")
+                or normalized in ("master", "main", "dev")):
+            return CheckResult(
+                "Pipeline Source", False, Severity.WARNING,
+                f"Pipeline source '{source}' is not a recognised remote "
+                f"form. Expected 'remote:<branch>' (e.g. 'remote:main').",
+            )
+        # Remote source (well-formed): first run will fetch the pipeline
+        # from GitHub. Surfaced as INFO rather than silently skipped.
         return CheckResult(
-            "Pipeline Source", False, Severity.INFO,
-            "Pipeline source is remote (requires network for first run)"
+            "Pipeline Source", True, Severity.INFO,
+            f"Pipeline source is remote ({source}); requires network "
+            f"access on first run.",
         )
