@@ -6,12 +6,19 @@ to nanometanf pipeline parameters and Nextflow configuration.
 
 Supported processing modes (set via config["processing_mode"]):
 - 'batch': Process existing files. Emits `--input <samplesheet.csv>` by
-  default, or `--input_dir <dir>` when config["use_input_dir_mode"] is true.
+  default, or `--input_dir <dir>` when config["use_input_dir_mode"] is
+  true. `batch` + `sample_handling == "by_barcode"` with no supplied
+  samplesheet also auto-enables `--input_dir` so nanometanf's
+  INPUT_SCANNER handles layout discovery (Scenario E).
 - 'realtime': Live watchPath monitoring via `--realtime_mode true`
   and `--nanopore_output_dir <dir>`.
 
 Callers may also pre-supply `config["input"]` with a path to an existing
 samplesheet; it is honoured verbatim and no samplesheet is auto-generated.
+
+The emitted params are validated at the end of create_nextflow_params
+to reject mutually exclusive input sources (input, input_dir,
+nanopore_output_dir) before the pipeline starts.
 """
 
 import os
@@ -581,17 +588,38 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
             logging.info(f"Found {len(genome_paths)} downloaded genomes for validation")
 
     # Set input parameters based on processing mode and sample handling.
-    # Batch mode offers three input paths, checked in priority order:
+    # Batch mode offers four input paths, checked in priority order:
     #   1. config["input"] is an existing file -> pass through verbatim
     #      (supports the "bring your own samplesheet" workflow).
     #   2. config["use_input_dir_mode"] is true -> emit --input_dir for the
-    #      nanometanf INPUT_SCANNER subworkflow (auto-layout discovery).
-    #   3. Otherwise -> auto-generate a samplesheet from nanopore_dir.
+    #      nanometanf INPUT_SCANNER subworkflow (explicit opt-in).
+    #   3. Scenario E: batch + by_barcode with no pre-built samplesheet
+    #      auto-enables --input_dir so the INPUT_SCANNER can discover the
+    #      barcode* subdirectory layout itself. This removes a silent GUI
+    #      regression where the missing flag caused the run to fall back
+    #      to realtime mode without any user-visible warning.
+    #   4. Otherwise -> auto-generate a samplesheet from nanopore_dir.
     if processing_mode == "batch":
         user_input = config.get("input")
         use_input_dir = bool(config.get("use_input_dir_mode", False))
 
-        if user_input and os.path.isfile(user_input):
+        # Scenario E auto-trigger: batch + by_barcode + no samplesheet.
+        # Scoped narrowly to by_barcode so single_sample and per_file
+        # continue to generate their samplesheets as before.
+        samplesheet_provided = bool(user_input) and os.path.isfile(user_input)
+        if (
+            not use_input_dir
+            and not samplesheet_provided
+            and sample_handling == "by_barcode"
+        ):
+            use_input_dir = True
+            logging.info(
+                "Batch mode + by_barcode with no samplesheet supplied: "
+                "auto-enabling --input_dir so nanometanf INPUT_SCANNER "
+                "can discover the barcode layout."
+            )
+
+        if samplesheet_provided:
             params["input"] = str(user_input)
             logging.info(
                 f"Batch mode: using pre-supplied samplesheet at {user_input}"
@@ -694,6 +722,23 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     # Add email if provided
     if "email" in config and config["email"]:
         params["email"] = config["email"]
+
+    # Dual-input guard. nanometanf rejects a run that specifies more than
+    # one input source (input, input_dir, nanopore_output_dir) because the
+    # INPUT_SCANNER would not know which mode to use. Detect the conflict
+    # here so the error is a precise Python message rather than a
+    # "Multiple input modes detected" at Nextflow start.
+    input_keys = [
+        key for key in ("input", "input_dir", "nanopore_output_dir")
+        if params.get(key)
+    ]
+    if len(input_keys) > 1:
+        raise ValueError(
+            "Conflicting input parameters emitted: "
+            f"{input_keys}. Only one of --input, --input_dir, or "
+            "--nanopore_output_dir may be set; check processing_mode and "
+            "sample_handling settings."
+        )
 
     return params
 
