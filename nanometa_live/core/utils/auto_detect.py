@@ -417,7 +417,6 @@ def detect_file_format(input_directory: str) -> Dict[str, Any]:
 
     result["formats_found"] = extensions
 
-    # Determine primary format (FASTQ only; pipeline no longer accepts POD5 input)
     fastq_count = sum(extensions.get(ext, 0) for ext in [".fastq", ".fq", ".fastq.gz", ".fq.gz"])
 
     if fastq_count > 0:
