@@ -912,16 +912,17 @@ def validate_nanometanf_params(params: Dict[str, Any]) -> Tuple[bool, str]:
 
     # Determine which input mode is being used
     has_samplesheet_input = "input" in params and params["input"]
+    has_input_dir = "input_dir" in params and params["input_dir"]
     has_fastq_input = "fastq_input_dir" in params and params["fastq_input_dir"]
     has_barcode_input = "barcode_input_dir" in params and params["barcode_input_dir"]
     has_realtime_input = "nanopore_output_dir" in params and params["nanopore_output_dir"]
 
     # Validate at least one input mode is specified
-    if not (has_samplesheet_input or has_fastq_input or has_barcode_input or has_realtime_input):
+    if not (has_samplesheet_input or has_input_dir or has_fastq_input or has_barcode_input or has_realtime_input):
         return (
             False,
             "Missing input. Must specify one of: "
-            "input (samplesheet), fastq_input_dir, barcode_input_dir, or nanopore_output_dir"
+            "input (samplesheet), input_dir, fastq_input_dir, barcode_input_dir, or nanopore_output_dir"
         )
 
     # Validate Kraken2 database exists
@@ -955,6 +956,12 @@ def validate_nanometanf_params(params: Dict[str, Any]) -> Tuple[bool, str]:
             if len(lines) < 2:
                 return False, f"Samplesheet is empty or has no samples: {samplesheet_path}"
         logging.info(f"Samplesheet mode: Using {samplesheet_path} with {len(lines) - 1} samples")
+
+    elif has_input_dir:
+        input_dir = params["input_dir"]
+        if not os.path.isdir(input_dir):
+            return False, f"input_dir not found: {input_dir}"
+        logging.info(f"input_dir mode: nanometanf INPUT_SCANNER will discover layout under {input_dir}")
 
     elif has_fastq_input:
         input_dir = params["fastq_input_dir"]
