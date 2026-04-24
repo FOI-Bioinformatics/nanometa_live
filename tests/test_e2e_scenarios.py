@@ -85,12 +85,20 @@ class TestRealtimeBatchAccumulation:
     """Verify batch-file aggregation and cumulative report priority."""
 
     def test_batch_accumulation(self, tmp_path: pathlib.Path) -> None:
-        """Batch reports are summed; cumulative report takes precedence when present."""
+        """Each batch file is a cumulative snapshot.
+
+        The all-samples loader must pick the highest-numbered batch per
+        sample (matching the per-sample branch fixed in the 2026-04-15
+        audit) rather than summing across batches -- summing would
+        multi-count reads because each batch already contains everything
+        from earlier batches. The explicit cumulative report takes
+        precedence over any batch file when present.
+        """
         # Place batch files at the top level of kraken2/ to match the loader's
         # glob pattern: kraken2/*_batch*.kraken2.report.txt
         kraken_dir = tmp_path / "kraken2"
 
-        # First batch
+        # First batch: 100 reads cumulative so far
         _write_kraken_report(
             kraken_dir / "barcode01_batch0.kraken2.report.txt",
             taxid=562,
@@ -101,11 +109,13 @@ class TestRealtimeBatchAccumulation:
         species1 = df1[df1["rank"] == "S"]
         assert int(species1.iloc[0]["reads"]) == 100
 
-        # Second batch
+        # Second batch: 250 cumulative reads (100 prior + 150 new). Each batch
+        # file is a full cumulative snapshot, so the latest file IS the run
+        # cumulative. The loader must NOT sum this with batch0.
         _write_kraken_report(
             kraken_dir / "barcode01_batch1.kraken2.report.txt",
             taxid=562,
-            reads=150,
+            reads=250,
         )
         clear_data_cache()
         df2 = load_kraken_data(str(tmp_path))
