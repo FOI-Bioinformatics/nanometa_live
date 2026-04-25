@@ -72,8 +72,8 @@ class ConfigManager:
 
             return self.current_config
 
-        except Exception as e:
-            logging.error(f"Failed to load configuration: {e}")
+        except (FileNotFoundError, PermissionError, OSError, ValueError, TypeError, KeyError, AttributeError) as e:
+            logging.exception(f"Failed to load configuration: {e}")
             # Fall back to a default configuration
             self.current_config = self.config_loader.create_default_config()
             self.config_path = None
