@@ -13,9 +13,11 @@ import pytest
 
 from nanometa_live.core.utils.classification_loaders import (
     KRAKEN2_EXPECTED_COLUMNS,
+    _is_incremental_layout,
     _parse_kraken2_report,
     _deduplicate_batch_files,
     load_kraken_data,
+    load_kraken_latest_batch,
 )
 
 
@@ -187,3 +189,188 @@ class TestLoadKrakenDataRaceConditions:
         assert len(df) == 1
         # Should have loaded the cumulative report (500 reads)
         assert df.iloc[0]["reads"] == 500
+
+
+# ---------------------------------------------------------------------------
+# Incremental vs legacy batch-report dispatch
+# ---------------------------------------------------------------------------
+
+
+def _write_batch_report(path, root_reads: int, species_taxid: int, species_name: str):
+    """Write a minimal Kraken2 report containing root and one species row."""
+    content = (
+        f"100.00\t{root_reads}\t0\tR\t1\troot\n"
+        f"100.00\t{root_reads}\t0\tD\t2\t  Bacteria\n"
+        f"100.00\t{root_reads}\t{root_reads}\tS\t{species_taxid}\t    {species_name}\n"
+    )
+    path.write_text(content)
+    _backdate_mtime(path)
+
+
+def _build_incremental_layout(kraken_dir, sample: str, batch_reads):
+    """Create a v1.5 incremental layout for *sample* with the given per-batch read counts.
+
+    Each batch report contains only that batch's reads (a delta), and a
+    matching ``stats/batch_N_report_stats.json`` is created so that
+    ``_is_incremental_layout`` recognises the directory as incremental.
+    """
+    sample_dir = kraken_dir / sample
+    batch_reports = sample_dir / "batch_reports"
+    stats_dir = sample_dir / "stats"
+    batch_reports.mkdir(parents=True)
+    stats_dir.mkdir(parents=True)
+
+    species_for_batch = [
+        (562, "Escherichia coli"),
+        (1639, "Listeria monocytogenes"),
+        (1280, "Staphylococcus aureus"),
+        (485, "Neisseria gonorrhoeae"),
+    ]
+
+    for idx, reads in enumerate(batch_reads):
+        species_taxid, species_name = species_for_batch[idx % len(species_for_batch)]
+        report = batch_reports / f"batch_{idx}.kraken2.report.txt"
+        _write_batch_report(report, reads, species_taxid, species_name)
+
+        stats_file = stats_dir / f"batch_{idx}_report_stats.json"
+        stats_file.write_text(
+            f'{{"sample_id": "{sample}", "batch_id": {idx}, "total_reads": {reads}}}'
+        )
+        _backdate_mtime(stats_file)
+
+
+def _build_legacy_batch_layout(kraken_dir, sample: str, snapshot_reads):
+    """Create a flat legacy layout where each batch is a CUMULATIVE snapshot.
+
+    No ``stats/`` subdirectory is created; ``_is_incremental_layout``
+    therefore treats this as the legacy non-incremental flow and selects
+    the highest-numbered batch only.
+    """
+    for idx, reads in enumerate(snapshot_reads):
+        report = kraken_dir / f"{sample}_batch{idx}.kraken2.report.txt"
+        _write_batch_report(report, reads, 562, "Escherichia coli")
+
+
+class TestIsIncrementalLayout:
+    """Tests for the layout-detection helper."""
+
+    def test_no_kraken_dir_returns_false(self, tmp_path):
+        assert _is_incremental_layout(str(tmp_path / "missing")) is False
+
+    def test_flat_layout_returns_false(self, tmp_path):
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+        # Flat cumulative report - no per-sample stats subdirectory
+        (kraken_dir / "sample1.cumulative.kraken2.report.txt").write_text(
+            "100.00\t500\t500\tS\t562\t  Escherichia coli\n"
+        )
+        assert _is_incremental_layout(str(kraken_dir)) is False
+
+    def test_incremental_layout_returns_true(self, tmp_path):
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+        _build_incremental_layout(kraken_dir, "barcode01", batch_reads=[59, 18])
+        assert _is_incremental_layout(str(kraken_dir)) is True
+        assert _is_incremental_layout(str(kraken_dir), "barcode01") is True
+
+    def test_incremental_for_other_sample_only(self, tmp_path):
+        """Restricting to a sample with no stats/ should return False."""
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+        _build_incremental_layout(kraken_dir, "barcode01", batch_reads=[10])
+        # barcode02 has no stats directory
+        (kraken_dir / "barcode02").mkdir()
+        assert _is_incremental_layout(str(kraken_dir), "barcode02") is False
+
+
+class TestLoadKrakenDataIncrementalLayout:
+    """Per-sample loader behaviour under incremental vs legacy batch layouts."""
+
+    def test_incremental_layout_sums_batch_deltas(self, tmp_path):
+        """Each batch report is a delta; loader must SUM across batches."""
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+        # Reproduces the run2_D scenario: 59 + 18 + 0 = 77 cumulative reads.
+        _build_incremental_layout(
+            kraken_dir, "combined_sample", batch_reads=[59, 18, 0]
+        )
+
+        df = load_kraken_data(str(tmp_path), sample="combined_sample")
+        assert not df.empty
+        root = df[df["taxid"] == 1]
+        assert not root.empty
+        # Root cumulative reads must sum to 77, not 18 (highest batch alone)
+        # and not 59 (first batch alone).
+        assert int(root.iloc[0]["cumul_reads"]) == 77
+
+    def test_incremental_layout_distinct_taxa_preserved(self, tmp_path):
+        """Different species across batches should all appear in the merged result."""
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+        # batch_0 -> E. coli (562), batch_1 -> L. monocytogenes (1639)
+        _build_incremental_layout(
+            kraken_dir, "barcode01", batch_reads=[40, 30]
+        )
+        df = load_kraken_data(str(tmp_path), sample="barcode01")
+        taxids = set(df["taxid"].astype(int).tolist())
+        assert 562 in taxids
+        assert 1639 in taxids
+        # Total reads = 40 + 30 = 70 spread across both species
+        assert int(df["reads"].sum()) == 70
+
+    def test_legacy_layout_uses_highest_batch_only(self, tmp_path):
+        """Flat ``{sample}_batch{N}`` snapshots: keep the highest only."""
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+        # Legacy flow writes a cumulative snapshot per batch: batch1 already
+        # contains batch0's reads, so the loader must pick the highest only.
+        _build_legacy_batch_layout(
+            kraken_dir, "sample1", snapshot_reads=[100, 200, 350]
+        )
+
+        df = load_kraken_data(str(tmp_path), sample="sample1")
+        assert not df.empty
+        root = df[df["taxid"] == 1]
+        assert int(root.iloc[0]["cumul_reads"]) == 350
+
+    def test_incremental_layout_all_samples_branch(self, tmp_path):
+        """Aggregate across samples should also sum incremental deltas."""
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+        _build_incremental_layout(kraken_dir, "barcode01", batch_reads=[10, 20])
+        _build_incremental_layout(kraken_dir, "barcode02", batch_reads=[5, 7])
+
+        df = load_kraken_data(str(tmp_path), sample="All Samples")
+        assert not df.empty
+        root = df[df["taxid"] == 1]
+        # Total = 10 + 20 + 5 + 7 = 42
+        assert int(root.iloc[0]["cumul_reads"]) == 42
+
+
+class TestLoadKrakenLatestBatchSemantics:
+    """``load_kraken_latest_batch`` should return the most recent batch only."""
+
+    def test_incremental_returns_latest_delta(self, tmp_path):
+        """Incremental mode: latest batch holds only that batch's reads."""
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+        _build_incremental_layout(
+            kraken_dir, "barcode01", batch_reads=[59, 18]
+        )
+        df = load_kraken_latest_batch(str(tmp_path), "barcode01")
+        assert not df.empty
+        root = df[df["taxid"] == 1]
+        # Highest-numbered batch (batch_1) carries 18 reads
+        assert int(root.iloc[0]["cumul_reads"]) == 18
+
+    def test_legacy_returns_latest_snapshot(self, tmp_path):
+        """Legacy mode: latest batch is a cumulative snapshot of all reads."""
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+        _build_legacy_batch_layout(
+            kraken_dir, "sample1", snapshot_reads=[100, 200, 350]
+        )
+        df = load_kraken_latest_batch(str(tmp_path), "sample1")
+        assert not df.empty
+        root = df[df["taxid"] == 1]
+        assert int(root.iloc[0]["cumul_reads"]) == 350
