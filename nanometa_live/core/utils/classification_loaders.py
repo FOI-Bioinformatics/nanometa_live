@@ -490,23 +490,36 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
             logging.warning("No Kraken2 report files found")
             return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
 
-        # Deduplicate by sample name: if multiple files resolve to the same
-        # sample (e.g. top-level and subdir copies), keep only the first to
-        # prevent double-counting reads across duplicate report files.
-        seen_samples = set()
+        # Deduplicate by (sample, batch) so that copies of the same report
+        # in different directories (e.g. top-level + subdir, or
+        # ``reports/`` + ``batch_reports/``) do not multi-count reads.
+        # Files from per-sample subdirectories carry their containing folder
+        # in the key so that files with identical basenames but different
+        # samples (e.g. ``barcode01/batch_reports/batch_0`` and
+        # ``barcode02/batch_reports/batch_0``) are kept distinct.
+        seen_keys: set = set()
         deduplicated_files = []
         for kreport_file in kreport_files:
             basename = os.path.basename(kreport_file)
-            sample_name = re.sub(
+            stem = re.sub(
                 r'\.(cumulative\.kraken2\.report|kraken2\.report|kreport2)\.txt$',
                 '', basename
             )
-            if sample_name in seen_samples:
+            parent_dir = os.path.basename(os.path.dirname(kreport_file))
+            grandparent = os.path.basename(os.path.dirname(os.path.dirname(kreport_file)))
+            # Use the per-sample directory as namespace when present so that
+            # incremental batches under ``<sample>/batch_reports/`` are
+            # disambiguated by sample.
+            if parent_dir in ("batch_reports", "reports", "batches"):
+                dedup_key = (grandparent, stem)
+            else:
+                dedup_key = (parent_dir, stem)
+            if dedup_key in seen_keys:
                 logging.debug(
-                    f"Skipping duplicate report for sample {sample_name}: {kreport_file}"
+                    f"Skipping duplicate report for {dedup_key}: {kreport_file}"
                 )
                 continue
-            seen_samples.add(sample_name)
+            seen_keys.add(dedup_key)
             deduplicated_files.append(kreport_file)
         kreport_files = deduplicated_files
 
