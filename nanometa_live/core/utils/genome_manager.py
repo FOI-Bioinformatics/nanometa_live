@@ -1619,9 +1619,14 @@ class GenomeDownloadManager:
                 if not path and taxid not in self._last_errors:
                     self._last_errors[taxid] = f"Download failed for {name} (taxid={taxid})"
 
-            except Exception as e:
-                # Worker is invoked from a ThreadPoolExecutor; keep broad catch
-                # so a single download failure does not poison the whole batch.
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+                    FileNotFoundError, PermissionError, OSError,
+                    requests.exceptions.RequestException, json.JSONDecodeError,
+                    zipfile.BadZipFile, ValueError, KeyError, AttributeError) as e:
+                # Worker is invoked from a ThreadPoolExecutor; the inner helpers
+                # already catch their own narrow families, so anything reaching
+                # here is one of: subprocess failure, network failure, JSON or
+                # archive corruption, or a known data-shape error.
                 logger.exception(f"Batch download failed for {name} (taxid={taxid}): {e}")
                 self._last_errors[taxid] = str(e)
 
