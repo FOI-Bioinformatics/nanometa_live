@@ -350,8 +350,8 @@ class ReadExtractor:
                 error_message=None
             )
 
-        except Exception as e:
-            logger.error(f"Error extracting reads for taxid {taxid}: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, ValueError, KeyError, AttributeError) as e:
+            logger.exception(f"Error extracting reads for taxid {taxid}: {e}")
             return ExtractionResult(
                 taxid=taxid,
                 sample=sample,

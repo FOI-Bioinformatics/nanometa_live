@@ -370,8 +370,8 @@ class AlertEngine:
                         f"PATHOGEN ALERT: {high_count} high-risk pathogen(s) detected"
                     )
 
-        except Exception as e:
-            logger.error(f"Error checking for dangerous pathogens: {e}")
+        except (KeyError, AttributeError, ValueError, TypeError) as e:
+            logger.exception(f"Error checking for dangerous pathogens: {e}")
             # Don't fail silently - add an error alert
             alerts.append(Alert(
                 severity=AlertSeverity.WARNING,
