@@ -245,8 +245,8 @@ class ValidationParser:
             logger.debug(f"Parsed validation JSON: {result.sample_id}/{result.taxid}")
             return result
 
-        except Exception as e:
-            logger.error(f"Error parsing validation JSON {filepath}: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+            logger.exception(f"Error parsing validation JSON {filepath}: {e}")
             return None
 
     def parse_blast_tabular(
@@ -342,8 +342,8 @@ class ValidationParser:
             )
             return result
 
-        except Exception as e:
-            logger.error(f"Error parsing BLAST tabular {filepath}: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, pd.errors.ParserError, pd.errors.EmptyDataError, KeyError, ValueError, TypeError) as e:
+            logger.exception(f"Error parsing BLAST tabular {filepath}: {e}")
             result.errors.append(str(e))
             result.status = ValidationStatus.FAILED
             return result
@@ -433,8 +433,8 @@ class ValidationParser:
             logger.info(f"Parsed {len(results)} results from nanometanf aggregate JSON")
             return results
 
-        except Exception as e:
-            logger.error(f"Error parsing nanometanf aggregate JSON {filepath}: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError) as e:
+            logger.exception(f"Error parsing nanometanf aggregate JSON {filepath}: {e}")
             return []
 
     def get_validation_results(
@@ -504,8 +504,8 @@ class ValidationParser:
                     logger.info(f"Loaded {len(results)} results from summary JSON")
                     return results
 
-            except Exception as e:
-                logger.warning(f"Error reading validation summary: {e}")
+            except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+                logger.exception(f"Error reading validation summary: {e}")
 
         # Fall back to individual files
         json_files = list(self.validation_dir.glob('*_validation.json'))
