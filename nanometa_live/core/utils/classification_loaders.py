@@ -182,6 +182,54 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
         return None
 
 
+def _is_incremental_layout(kraken_dir: str, sample: Optional[str] = None) -> bool:
+    """
+    Detect whether the kraken2 output uses the v1.5 incremental streaming layout.
+
+    In incremental mode (``kraken2_enable_incremental: true``) each batch
+    report under ``<sample>/batch_reports/`` contains only that batch's
+    reads (a delta), not a running cumulative snapshot. The presence of
+    ``<sample>/stats/batch_N_report_stats.json`` is the canonical marker
+    of this layout, since the older non-incremental flow does not emit
+    those per-batch stats files.
+
+    Args:
+        kraken_dir: Path to the ``kraken2/`` output directory
+        sample: Optional sample name. When provided, only that sample's
+            subdirectory is inspected; otherwise any sample's stats
+            directory is sufficient evidence.
+
+    Returns:
+        True if a per-sample ``stats/batch_*_report_stats.json`` is found.
+    """
+    if not os.path.isdir(kraken_dir):
+        return False
+
+    samples_to_check: List[str]
+    if sample is not None:
+        samples_to_check = [sample]
+    else:
+        try:
+            samples_to_check = [
+                entry for entry in os.listdir(kraken_dir)
+                if os.path.isdir(os.path.join(kraken_dir, entry))
+            ]
+        except OSError:
+            return False
+
+    for sample_name in samples_to_check:
+        stats_dir = os.path.join(kraken_dir, sample_name, "stats")
+        if not os.path.isdir(stats_dir):
+            continue
+        try:
+            for entry in os.listdir(stats_dir):
+                if entry.startswith("batch_") and entry.endswith("_report_stats.json"):
+                    return True
+        except OSError:
+            continue
+    return False
+
+
 def _deduplicate_batch_files(filepaths: List[str]) -> List[str]:
     """
     Deduplicate batch report files that exist in multiple directories.
@@ -254,10 +302,22 @@ def _deduplicate_batch_files(filepaths: List[str]) -> List[str]:
 
 def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFrame:
     """
-    Load Kraken2 classification data for specific sample or all samples.
+    Load Kraken2 classification data for a specific sample or all samples.
 
-    Uses time-based caching to reduce file system operations.
-    Auto-resolves base directory to most recent analysis directory if needed.
+    The loader resolves the cumulative read counts using a layered fallback:
+
+    1. Flat ``*.cumulative.kraken2.report.txt`` (preferred, already aggregated).
+    2. Standard non-batch report (``{sample}.kraken2.report.txt``).
+    3. Batch reports. Their semantics depend on the upstream layout:
+       legacy ``{sample}_batch{N}`` files are cumulative snapshots, so only
+       the highest-numbered batch is read; v1.5 incremental
+       ``<sample>/batch_reports/batch_N`` files are deltas, so all batches
+       are summed per taxid. The two cases are distinguished by
+       ``_is_incremental_layout``.
+
+    Uses time-based caching to reduce file system operations and
+    auto-resolves the base directory to the most recent analysis run when
+    the supplied path points to a parent directory.
 
     Args:
         main_dir: Main nanometanf output directory (or base directory)
@@ -352,12 +412,17 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
 
             kreport_files = list(dict.fromkeys(os.path.realpath(f) for f in kreport_files))
 
-            # 3. Batch files as last resort. Each batch file is itself a
-            # cumulative snapshot, so for each sample we keep only the
-            # highest-numbered batch (matches the per-sample branch fix
-            # from the 2026-04-15 audit and avoids multi-counting reads
-            # in realtime single_sample mode, where no per-sample
-            # cumulative report has been written yet).
+            # 3. Batch files as last resort. The semantics depend on the
+            # upstream layout, so we dispatch via ``_is_incremental_layout``:
+            #
+            #   * Legacy (non-incremental): flat ``{sample}_batch{N}`` files
+            #     are CUMULATIVE snapshots. We keep only the highest-numbered
+            #     batch per sample (matches the 2026-04-15 audit fix).
+            #   * v1.5 incremental: ``<sample>/batch_reports/batch_N`` files
+            #     are DELTAS. All batches are kept; the per-taxid aggregation
+            #     below sums them. The all-samples aggregation happens to
+            #     work for both modes because it accumulates by taxid across
+            #     every retained file.
             if not kreport_files:
                 logging.debug("No standard reports found, looking for batch files")
                 candidate_batches: List[str] = []
@@ -372,45 +437,54 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
                 candidate_batches = _deduplicate_batch_files(candidate_batches)
 
                 if candidate_batches:
-                    # Group batches by underlying sample (strip _batch<N> suffix)
-                    # and keep only the highest-numbered batch per sample.
-                    _batch_num_re = re.compile(r'batch[_\-]?(\d+)', re.IGNORECASE)
-                    _batch_suffix_re = re.compile(r'[._]batch[_\-]?\d+$', re.IGNORECASE)
-
-                    def _batch_sample(fp: str) -> str:
-                        basename = os.path.basename(fp)
-                        stem = re.sub(
-                            r'\.(cumulative\.kraken2\.report|kraken2\.report|kreport2)\.txt$',
-                            '', basename,
+                    if _is_incremental_layout(kraken_dir):
+                        # Incremental deltas - keep every batch so the
+                        # aggregation loop sums per taxid across batches.
+                        kreport_files = candidate_batches
+                        logging.debug(
+                            "Incremental Kraken2 layout detected: summing "
+                            "%d batch reports across all samples",
+                            len(candidate_batches),
                         )
-                        # Strip batch_N suffix if it is embedded in the filename.
-                        stripped = _batch_suffix_re.sub('', stem)
-                        if stripped and stripped != stem:
-                            return stripped
-                        # Fall back to the containing directory (v1.5 nested
-                        # layout publishes batch_N.kraken2.report.txt inside
-                        # the per-sample batch_reports/ folder).
-                        parts = fp.replace('\\', '/').split('/')
-                        for i, part in enumerate(parts):
-                            if part in ('batch_reports', 'reports', 'batches') and i > 0:
-                                return parts[i - 1]
-                        return stem
+                    else:
+                        # Legacy snapshots: keep one (highest-numbered) per sample.
+                        _batch_num_re = re.compile(r'batch[_\-]?(\d+)', re.IGNORECASE)
+                        _batch_suffix_re = re.compile(r'[._]batch[_\-]?\d+$', re.IGNORECASE)
 
-                    def _batch_num(fp: str) -> int:
-                        m = _batch_num_re.search(os.path.basename(fp))
-                        return int(m.group(1)) if m else -1
+                        def _batch_sample(fp: str) -> str:
+                            basename = os.path.basename(fp)
+                            stem = re.sub(
+                                r'\.(cumulative\.kraken2\.report|kraken2\.report|kreport2)\.txt$',
+                                '', basename,
+                            )
+                            # Strip batch_N suffix if it is embedded in the filename.
+                            stripped = _batch_suffix_re.sub('', stem)
+                            if stripped and stripped != stem:
+                                return stripped
+                            # Fall back to the containing directory (v1.5 nested
+                            # layout publishes batch_N.kraken2.report.txt inside
+                            # the per-sample batch_reports/ folder).
+                            parts = fp.replace('\\', '/').split('/')
+                            for i, part in enumerate(parts):
+                                if part in ('batch_reports', 'reports', 'batches') and i > 0:
+                                    return parts[i - 1]
+                            return stem
 
-                    by_sample: Dict[str, str] = {}
-                    for fp in candidate_batches:
-                        sample_key = _batch_sample(fp)
-                        current = by_sample.get(sample_key)
-                        if current is None or _batch_num(fp) > _batch_num(current):
-                            by_sample[sample_key] = fp
-                    kreport_files = list(by_sample.values())
-                    logging.debug(
-                        f"Selected {len(kreport_files)} latest-per-sample batch "
-                        f"Kraken2 reports from {len(candidate_batches)} candidates"
-                    )
+                        def _batch_num(fp: str) -> int:
+                            m = _batch_num_re.search(os.path.basename(fp))
+                            return int(m.group(1)) if m else -1
+
+                        by_sample: Dict[str, str] = {}
+                        for fp in candidate_batches:
+                            sample_key = _batch_sample(fp)
+                            current = by_sample.get(sample_key)
+                            if current is None or _batch_num(fp) > _batch_num(current):
+                                by_sample[sample_key] = fp
+                        kreport_files = list(by_sample.values())
+                        logging.debug(
+                            f"Selected {len(kreport_files)} latest-per-sample batch "
+                            f"Kraken2 reports from {len(candidate_batches)} candidates"
+                        )
 
         if not kreport_files:
             logging.warning("No Kraken2 report files found")
@@ -526,10 +600,20 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
                         sample_files.append(p)
             sample_files = list(dict.fromkeys(os.path.realpath(f) for f in sample_files))
 
-            # 3. Batch files - use only the highest-numbered (most recent) batch.
-            # Each batch file is a CUMULATIVE snapshot that already includes all
-            # reads from earlier batches. Summing multiple batches would
-            # triple-count shared reads (e.g. batch2 already contains batch0+1).
+            # 3. Batch files. The semantics depend on the upstream layout:
+            #
+            #   * Legacy (non-incremental) flow publishes flat
+            #     ``{sample}_batch{N}.kraken2.report.txt`` files where each
+            #     report is a CUMULATIVE snapshot containing all reads since
+            #     run start. The correct choice is the highest-numbered batch.
+            #   * v1.5+ incremental flow (``kraken2_enable_incremental: true``)
+            #     publishes ``<sample>/batch_reports/batch_N.kraken2.report.txt``
+            #     where each report is a DELTA covering only that batch. The
+            #     correct choice is the sum of all batches.
+            #
+            # We dispatch on the layout via ``_is_incremental_layout`` (which
+            # checks for the ``<sample>/stats/batch_N_report_stats.json``
+            # files emitted only by the incremental writer).
             if not sample_files:
                 candidate_batches: List[str] = []
                 for ext_pattern in (f"{sample}_batch*.kraken2.report.txt", f"{sample}_batch*.kreport2.txt"):
@@ -543,11 +627,21 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
                 # Deduplicate: same batch may appear in reports/ and batch_reports/
                 candidate_batches = _deduplicate_batch_files(candidate_batches)
                 if candidate_batches:
-                    _batch_num_re = re.compile(r'batch[_\-]?(\d+)', re.IGNORECASE)
-                    def _extract_batch_num(fp: str) -> int:
-                        m = _batch_num_re.search(os.path.basename(fp))
-                        return int(m.group(1)) if m else -1
-                    sample_files = [max(candidate_batches, key=_extract_batch_num)]
+                    if _is_incremental_layout(kraken_dir, sample):
+                        # Incremental deltas - use every batch and let the
+                        # aggregation logic below sum them per taxid.
+                        sample_files = candidate_batches
+                        logging.debug(
+                            "Incremental Kraken2 layout detected for %s: "
+                            "summing %d batch reports",
+                            sample, len(candidate_batches),
+                        )
+                    else:
+                        _batch_num_re = re.compile(r'batch[_\-]?(\d+)', re.IGNORECASE)
+                        def _extract_batch_num(fp: str) -> int:
+                            m = _batch_num_re.search(os.path.basename(fp))
+                            return int(m.group(1)) if m else -1
+                        sample_files = [max(candidate_batches, key=_extract_batch_num)]
 
         if not sample_files:
             logging.warning(f"No Kraken2 files found for sample {sample}")
@@ -624,13 +718,22 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
 def load_kraken_latest_batch(main_dir: str, sample_name: str) -> pd.DataFrame:
     """Return the latest batch report for a single sample.
 
-    Searches for the highest-numbered batch file first (from
-    ``batch_reports/`` subdirectory or top-level kraken2 directory), then
-    falls back to a standard per-sample report if no batch files are present.
+    Returns the highest-numbered batch file found under
+    ``<sample>/batch_reports/`` or the top-level kraken2 directory, falling
+    back to a standard per-sample report when no batch files exist.
 
-    Does NOT use ``*.cumulative.kraken2.report.txt`` files (those span all
-    batches and would inflate counts relative to SeqKit latest-batch data).
-    Does NOT sum across multiple batch files.
+    The same selection (highest-numbered batch) yields the intended
+    "latest batch" semantics in both upstream layouts:
+
+    * Legacy non-incremental: each batch is a cumulative snapshot, so the
+      highest batch is the most recent total — equivalent to SeqKit's
+      latest-batch view.
+    * v1.5 incremental: each batch is a delta covering only that batch, so
+      the highest batch is exactly the reads added since the previous batch.
+
+    Cumulative reports are deliberately not consulted because they span
+    all batches and would inflate counts relative to the latest-batch
+    horizon used by SeqKit.
 
     Args:
         main_dir: Main nanometanf output directory
