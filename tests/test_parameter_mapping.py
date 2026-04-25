@@ -13,6 +13,7 @@ import pytest
 
 from nanometa_live.core.config.config_loader import ConfigLoader
 from nanometa_live.core.config.parameter_mapping import (
+    _validate_single_input_source,
     create_nextflow_config,
     create_nextflow_params,
     validate_sample_handling_layout,
@@ -245,3 +246,69 @@ class TestCustomConfigTemplate:
         # Python f-string interpolation artefact (P2-2).
         assert "{{" not in cfg
         assert "}}" not in cfg
+
+
+# ---- _validate_single_input_source helper guard ----------------------------
+
+
+class TestSingleInputGuard:
+    """Direct unit tests for the dual-input guard helper.
+
+    The helper enforces that exactly one of nanometanf's mutually exclusive
+    input-source keys is populated. Zero or more than one is rejected.
+    """
+
+    INPUT_KEYS = (
+        "input",
+        "input_dir",
+        "fastq_input_dir",
+        "barcode_input_dir",
+        "nanopore_output_dir",
+    )
+
+    def test_zero_input_keys_raises(self):
+        with pytest.raises(ValueError) as exc:
+            _validate_single_input_source({"outdir": "/tmp/out"})
+        assert "no input mode" in str(exc.value)
+
+    def test_zero_input_keys_with_only_falsy_values_raises(self):
+        # Empty strings and None are not populated.
+        params = {key: "" for key in self.INPUT_KEYS}
+        params["nanopore_output_dir"] = None
+        with pytest.raises(ValueError) as exc:
+            _validate_single_input_source(params)
+        assert "no input mode" in str(exc.value)
+
+    @pytest.mark.parametrize("key", INPUT_KEYS)
+    def test_exactly_one_input_key_passes(self, key):
+        params = {key: "/some/path"}
+        # Must return None silently and not raise.
+        assert _validate_single_input_source(params) is None
+
+    def test_two_input_keys_raises(self):
+        params = {
+            "input": "/tmp/sheet.csv",
+            "nanopore_output_dir": "/tmp/sequencer",
+        }
+        with pytest.raises(ValueError) as exc:
+            _validate_single_input_source(params)
+        msg = str(exc.value)
+        assert "multiple input modes" in msg
+        assert "input" in msg
+        assert "nanopore_output_dir" in msg
+
+    def test_three_input_keys_raises(self):
+        params = {
+            "input": "/tmp/sheet.csv",
+            "input_dir": "/tmp/in",
+            "nanopore_output_dir": "/tmp/sequencer",
+        }
+        with pytest.raises(ValueError) as exc:
+            _validate_single_input_source(params)
+        assert "multiple input modes" in str(exc.value)
+
+    def test_all_five_input_keys_raises(self):
+        params = {key: "/some/path" for key in self.INPUT_KEYS}
+        with pytest.raises(ValueError) as exc:
+            _validate_single_input_source(params)
+        assert "multiple input modes" in str(exc.value)
