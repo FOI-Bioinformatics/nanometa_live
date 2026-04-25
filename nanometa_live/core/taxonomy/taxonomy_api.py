@@ -134,8 +134,8 @@ class TaxonomyCache:
                         logger.debug(f"Loaded taxonomy cache: {self.cache_file}")
                     else:
                         logger.info("Cache version mismatch, starting fresh")
-            except Exception as e:
-                logger.warning(f"Failed to load cache: {e}")
+            except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, json.JSONDecodeError, AttributeError) as e:
+                logger.exception(f"Failed to load cache: {e}")
 
     def _save(self) -> None:
         """Save cache to disk."""
@@ -145,8 +145,8 @@ class TaxonomyCache:
             with open(self.cache_file, "w", encoding="utf-8") as f:
                 json.dump(self._data, f, indent=2)
             logger.debug(f"Saved taxonomy cache: {self.cache_file}")
-        except Exception as e:
-            logger.warning(f"Failed to save cache: {e}")
+        except (FileNotFoundError, PermissionError, OSError, TypeError, ValueError) as e:
+            logger.exception(f"Failed to save cache: {e}")
 
     # NCBI cache methods
     def get_ncbi_by_taxid(self, taxid: int) -> Optional[NCBIResult]:
@@ -504,7 +504,7 @@ class NCBIClient(TaxonomyAPIClient):
 
             return lineage
 
-        except Exception as e:
+        except (requests.exceptions.RequestException, IndexError, AttributeError) as e:
             logger.debug(f"Failed to get lineage for {taxid}: {e}")
             return []
 

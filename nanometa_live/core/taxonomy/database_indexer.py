@@ -189,8 +189,8 @@ class DatabaseIndexBuilder:
 
             return index
 
-        except Exception as e:
-            logger.error(f"Failed to build index from inspect file: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError) as e:
+            logger.exception(f"Failed to build index from inspect file: {e}")
             return None
 
     def build_from_inspect_gz(
@@ -267,8 +267,8 @@ class DatabaseIndexBuilder:
 
             return index
 
-        except Exception as e:
-            logger.error(f"Failed to build index from gzipped inspect file: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, EOFError) as e:
+            logger.exception(f"Failed to build index from gzipped inspect file: {e}")
             return None
 
     def build_from_names_dmp(
@@ -356,8 +356,8 @@ class DatabaseIndexBuilder:
 
             return index
 
-        except Exception as e:
-            logger.error(f"Failed to build index from names.dmp: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError) as e:
+            logger.exception(f"Failed to build index from names.dmp: {e}")
             return None
 
     def build_from_kraken2_inspect(
@@ -403,8 +403,8 @@ class DatabaseIndexBuilder:
         except FileNotFoundError:
             logger.error("kraken2-inspect command not found")
             return None
-        except Exception as e:
-            logger.error(f"Failed to run kraken2-inspect: {e}")
+        except (subprocess.CalledProcessError, PermissionError, OSError) as e:
+            logger.exception(f"Failed to run kraken2-inspect: {e}")
             return None
 
     def _create_node(

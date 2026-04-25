@@ -570,8 +570,8 @@ class TaxidMappingCollection:
                 json.dump(self.to_dict(), f, indent=2)
             logger.info(f"Saved mapping collection to {filepath}")
             return True
-        except Exception as e:
-            logger.error(f"Failed to save mapping collection: {e}")
+        except (FileNotFoundError, PermissionError, OSError, TypeError, ValueError) as e:
+            logger.exception(f"Failed to save mapping collection: {e}")
             return False
 
     @classmethod
@@ -584,8 +584,8 @@ class TaxidMappingCollection:
             with open(path, 'r') as f:
                 data = json.load(f)
             return cls.from_dict(data)
-        except Exception as e:
-            logger.error(f"Failed to load mapping collection: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+            logger.exception(f"Failed to load mapping collection: {e}")
             return None
 
 
@@ -752,8 +752,8 @@ class TaxidMapper:
                     f"in {load_time:.2f}s"
                 )
                 index_loaded = True
-            except Exception as e:
-                logger.warning(f"Failed to load cached index, rebuilding: {e}")
+            except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+                logger.exception(f"Failed to load cached index, rebuilding: {e}")
                 index_loaded = False
 
         if not index_loaded:
@@ -772,8 +772,8 @@ class TaxidMapper:
                     with open(cache_path, 'w') as f:
                         json.dump(self._index.to_dict(), f)
                     logger.info(f"Saved database index to cache: {cache_path}")
-                except Exception as e:
-                    logger.warning(f"Failed to cache database index: {e}")
+                except (FileNotFoundError, PermissionError, OSError, TypeError, ValueError) as e:
+                    logger.exception(f"Failed to cache database index: {e}")
 
         if self._index is None:
             logger.error(f"Failed to build index for {database_path}")
