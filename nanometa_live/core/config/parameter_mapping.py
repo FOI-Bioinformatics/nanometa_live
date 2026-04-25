@@ -348,6 +348,51 @@ def generate_samplesheet(
     return output_path
 
 
+_INPUT_SOURCE_KEYS = (
+    "input",
+    "input_dir",
+    "fastq_input_dir",
+    "barcode_input_dir",
+    "nanopore_output_dir",
+)
+
+
+def _validate_single_input_source(params: Dict[str, Any]) -> None:
+    """
+    Verify that exactly one nanometanf input-source parameter is populated.
+
+    nanometanf treats the input-source keys as mutually exclusive. Setting
+    more than one results in an opaque "Multiple input modes detected"
+    error at Nextflow start; setting none means INPUT_SCANNER has nothing
+    to scan. Detecting both conditions in Python yields a precise,
+    actionable error before the pipeline launches.
+
+    Args:
+        params: Dictionary of nanometanf parameters about to be passed to
+            Nextflow.
+
+    Raises:
+        ValueError: If zero or multiple input-source keys are populated.
+    """
+    populated = [key for key in _INPUT_SOURCE_KEYS if params.get(key)]
+
+    if not populated:
+        raise ValueError(
+            "no input mode configured: one of "
+            f"{list(_INPUT_SOURCE_KEYS)} must be set so nanometanf "
+            "INPUT_SCANNER has a source to read from."
+        )
+
+    if len(populated) > 1:
+        raise ValueError(
+            "multiple input modes configured: "
+            f"{populated}. Only one of "
+            "--input, --input_dir, --fastq_input_dir, "
+            "--barcode_input_dir, or --nanopore_output_dir may be set; "
+            "check processing_mode and sample_handling settings."
+        )
+
+
 def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     """
     Create nanometanf parameter dictionary from Nanometa Live configuration.
@@ -734,21 +779,11 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         params["email"] = config["email"]
 
     # Dual-input guard. nanometanf rejects a run that specifies more than
-    # one input source (input, input_dir, nanopore_output_dir) because the
-    # INPUT_SCANNER would not know which mode to use. Detect the conflict
-    # here so the error is a precise Python message rather than a
-    # "Multiple input modes detected" at Nextflow start.
-    input_keys = [
-        key for key in ("input", "input_dir", "nanopore_output_dir")
-        if params.get(key)
-    ]
-    if len(input_keys) > 1:
-        raise ValueError(
-            "Conflicting input parameters emitted: "
-            f"{input_keys}. Only one of --input, --input_dir, or "
-            "--nanopore_output_dir may be set; check processing_mode and "
-            "sample_handling settings."
-        )
+    # one input source because INPUT_SCANNER would not know which mode to
+    # use. _validate_single_input_source raises a precise Python message
+    # before Nextflow starts, instead of the opaque "Multiple input modes
+    # detected" error.
+    _validate_single_input_source(params)
 
     return params
 

@@ -15,6 +15,7 @@ import logging
 import subprocess
 import threading
 import re
+import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 
@@ -110,8 +111,9 @@ class NextflowManager:
             return False, "Docker not found. Please install Docker Desktop."
         except subprocess.TimeoutExpired:
             return False, "Docker check timed out. Docker may be unresponsive."
-        except Exception as e:
-            return False, f"Error checking Docker: {str(e)}"
+        except (subprocess.CalledProcessError, PermissionError, OSError) as e:
+            logging.exception("Docker availability check failed")
+            return False, f"Error checking Docker: {e}"
 
     def _check_singularity_available(self) -> Tuple[bool, str]:
         """
@@ -139,8 +141,8 @@ class NextflowManager:
                 continue
             except subprocess.TimeoutExpired:
                 return False, f"{cmd.capitalize()} check timed out."
-            except Exception as e:
-                logging.debug(f"Error checking {cmd}: {e}")
+            except (subprocess.CalledProcessError, PermissionError, OSError):
+                logging.exception(f"Error checking {cmd}")
                 continue
 
         return False, (
@@ -170,8 +172,9 @@ class NextflowManager:
             return False, "Conda not found. Please install Conda/Miniconda/Miniforge."
         except subprocess.TimeoutExpired:
             return False, "Conda check timed out."
-        except Exception as e:
-            return False, f"Error checking Conda: {str(e)}"
+        except (subprocess.CalledProcessError, PermissionError, OSError) as e:
+            logging.exception("Conda availability check failed")
+            return False, f"Error checking Conda: {e}"
 
     def _parse_pipeline_source(self) -> Tuple[str, Optional[str]]:
         """
@@ -282,7 +285,10 @@ class NextflowManager:
                 f"git ls-remote timed out while validating "
                 f"remote:{revision}; skipping pre-flight check."
             )
-        except Exception as exc:  # pragma: no cover - defensive
+        except (subprocess.CalledProcessError, PermissionError, OSError) as exc:  # pragma: no cover - defensive
+            logging.exception(
+                "Could not validate remote:%s via git ls-remote", revision,
+            )
             return True, (
                 f"Could not validate remote:{revision} ({exc}); "
                 f"skipping pre-flight check."
@@ -320,7 +326,6 @@ class NextflowManager:
             # Load configuration
             with open(config_path, 'r') as f:
                 if config_path.endswith('.yaml') or config_path.endswith('.yml'):
-                    import yaml
                     config = yaml.safe_load(f)
                 else:
                     config = json.load(f)
@@ -377,9 +382,15 @@ class NextflowManager:
         except json.JSONDecodeError as e:
             logging.error(f"Invalid JSON configuration: {e}")
             return False, f"Invalid JSON configuration: {e}"
-        except Exception as e:
-            logging.error(f"Error setting up Nextflow pipeline: {e}")
+        except (PermissionError, OSError, UnicodeDecodeError) as e:
+            logging.exception("File I/O error during Nextflow setup")
             return False, f"Setup error: {e}"
+        except (ValueError, KeyError, TypeError) as e:
+            logging.exception("Invalid configuration during Nextflow setup")
+            return False, f"Setup error: {e}"
+        except yaml.YAMLError as e:
+            logging.exception("Invalid YAML configuration")
+            return False, f"Invalid YAML configuration: {e}"
 
     def start(
         self,
@@ -472,8 +483,8 @@ class NextflowManager:
 
                 return True, f"Nextflow pipeline started with profile: {profile}"
 
-            except Exception as e:
-                logging.error(f"Error starting Nextflow pipeline: {e}")
+            except (OSError, RuntimeError, ValueError) as e:
+                logging.exception("Error starting Nextflow pipeline")
                 return False, f"Start error: {e}"
 
     def stop(self) -> Tuple[bool, str]:
@@ -526,8 +537,8 @@ class NextflowManager:
 
                 return True, message
 
-            except Exception as e:
-                logging.error(f"Error stopping Nextflow pipeline: {e}")
+            except (subprocess.TimeoutExpired, ProcessLookupError, PermissionError, OSError) as e:
+                logging.exception("Error stopping Nextflow pipeline")
                 return False, f"Stop error: {e}"
 
     def get_status(self) -> Dict[str, Any]:
@@ -589,8 +600,11 @@ class NextflowManager:
                     logging.info("Nextflow completed successfully")
 
         except Exception as e:
+            # Background thread top-of-loop: keep broad catch so a single
+            # unexpected failure cannot leave the manager flagged as running
+            # forever. logger.exception() preserves the stack trace.
             error_msg = f"Error in Nextflow workflow: {e}"
-            logging.error(error_msg)
+            logging.exception(error_msg)
             self.status["errors"].append(str(e))
 
         finally:
@@ -632,8 +646,11 @@ class NextflowManager:
                 # Sleep before next poll
                 time.sleep(5)
 
-            except Exception as e:
-                logging.error(f"Error in status monitoring: {e}")
+            except Exception:
+                # Background polling loop: keep broad catch so a transient
+                # parse error does not kill the monitor thread. logger.exception()
+                # preserves the stack trace for diagnosis.
+                logging.exception("Error in status monitoring")
                 time.sleep(5)
 
         logging.info("Status monitoring thread stopped")
@@ -768,8 +785,8 @@ class NextflowManager:
             self._last_trace_status = result
             return result
 
-        except Exception as e:
-            logging.error(f"Error parsing trace file: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, ValueError, IndexError) as e:
+            logging.exception("Error parsing trace file")
             return self._last_trace_status or {}
 
     def _parse_realtime_stats(self) -> Dict[str, Any]:
@@ -830,8 +847,8 @@ class NextflowManager:
 
                     total_files += file_count
 
-                except Exception as e:
-                    logging.warning(f"Error parsing batch file {batch_file}: {e}")
+                except (json.JSONDecodeError, FileNotFoundError, PermissionError, OSError, UnicodeDecodeError) as e:
+                    logging.exception(f"Error parsing batch file {batch_file}")
                     continue
 
             return {
@@ -839,8 +856,8 @@ class NextflowManager:
                 "current_batch": batch_count
             }
 
-        except Exception as e:
-            logging.error(f"Error parsing realtime stats: {e}")
+        except (json.JSONDecodeError, FileNotFoundError, PermissionError, OSError, UnicodeDecodeError) as e:
+            logging.exception("Error parsing realtime stats")
             return {}
 
     def _extract_error_from_log(self, log_file: str, max_lines: int = 50) -> str:
@@ -946,8 +963,8 @@ class NextflowManager:
 
             return ""
 
-        except Exception as e:
-            logging.warning(f"Error extracting error from log: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError) as e:
+            logging.exception("Error extracting error from log")
             return ""
 
 
@@ -1012,8 +1029,8 @@ class NextflowExecutor:
 
             return success, message
 
-        except Exception as e:
-            logging.error(f"Error starting Nextflow workflow: {e}")
+        except (OSError, RuntimeError, ValueError) as e:
+            logging.exception("Error starting Nextflow workflow")
             return False, f"Error starting Nextflow workflow: {e}"
 
     def stop(self) -> Tuple[bool, str]:
@@ -1041,8 +1058,8 @@ class NextflowExecutor:
 
             return True, "Nextflow workflow stopped"
 
-        except Exception as e:
-            logging.error(f"Error stopping Nextflow workflow: {e}")
+        except (subprocess.TimeoutExpired, ProcessLookupError, PermissionError, OSError) as e:
+            logging.exception("Error stopping Nextflow workflow")
             return False, f"Error stopping Nextflow workflow: {e}"
 
     def get_status(self) -> Dict[str, Any]:
