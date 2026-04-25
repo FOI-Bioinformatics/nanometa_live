@@ -223,7 +223,8 @@ class GenomeDownloadManager:
                 logger.info(f"Resolved taxid {taxid}: {species_name} ({kingdom})")
                 return species_name, kingdom
 
-        except Exception as e:
+        except (requests.exceptions.RequestException, ValueError, AttributeError,
+                KeyError, TypeError) as e:
             logger.warning(f"Failed to resolve species name for taxid {taxid}: {e}")
 
         # Fall back to watchlist name if NCBI lookup failed
@@ -234,7 +235,7 @@ class GenomeDownloadManager:
             if entry and entry.name:
                 logger.info(f"Using watchlist name for taxid {taxid}: {entry.name}")
                 return entry.name, "Unknown"
-        except Exception:
+        except (ImportError, AttributeError):
             pass
 
         return f"Unknown (taxid {taxid})", "Unknown"
@@ -372,7 +373,8 @@ class GenomeDownloadManager:
                     for taxid_str, meta_dict in data.items():
                         self._metadata[int(taxid_str)] = GenomeMetadata.from_dict(meta_dict)
                 logger.info(f"Loaded metadata for {len(self._metadata)} genomes")
-            except Exception as e:
+            except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+                    json.JSONDecodeError, ValueError, TypeError) as e:
                 logger.warning(f"Failed to load genome metadata: {e}")
 
     def _save_metadata(self) -> None:
@@ -381,8 +383,8 @@ class GenomeDownloadManager:
             data = {str(k): v.to_dict() for k, v in self._metadata.items()}
             with open(self.metadata_file, "w") as f:
                 json.dump(data, f, indent=2)
-        except Exception as e:
-            logger.error(f"Failed to save genome metadata: {e}")
+        except (PermissionError, OSError, TypeError, ValueError) as e:
+            logger.exception(f"Failed to save genome metadata: {e}")
 
     def get_genome_path(self, taxid: int) -> Optional[Path]:
         """
@@ -531,8 +533,9 @@ class GenomeDownloadManager:
 
             return None
 
-        except Exception as e:
-            logger.error(f"Failed to get kingdom for taxid {taxid}: {e}")
+        except (requests.exceptions.RequestException, ET.ParseError,
+                ValueError, KeyError) as e:
+            logger.exception(f"Failed to get kingdom for taxid {taxid}: {e}")
             return None
 
     def fetch_gtdb_accession(
@@ -594,8 +597,9 @@ class GenomeDownloadManager:
 
             return None
 
-        except Exception as e:
-            logger.error(f"GTDB API error for '{species_name}': {e}")
+        except (requests.exceptions.RequestException, json.JSONDecodeError,
+                ValueError, KeyError, AttributeError) as e:
+            logger.exception(f"GTDB API error for '{species_name}': {e}")
             return None
 
     def fetch_ncbi_accession(self, taxid: int) -> Optional[Tuple[str, Dict[str, Any]]]:
@@ -643,8 +647,9 @@ class GenomeDownloadManager:
 
             return None
 
-        except Exception as e:
-            logger.error(f"NCBI API error for taxid {taxid}: {e}")
+        except (requests.exceptions.RequestException, json.JSONDecodeError,
+                ValueError, KeyError, AttributeError) as e:
+            logger.exception(f"NCBI API error for taxid {taxid}: {e}")
             return None
 
     def download_genome(
@@ -878,8 +883,9 @@ class GenomeDownloadManager:
         except subprocess.TimeoutExpired:
             logger.error(f"Virus genome download timed out for taxid {taxid}")
             return None, None
-        except Exception as e:
-            logger.error(
+        except (subprocess.CalledProcessError, FileNotFoundError, PermissionError,
+                OSError, zipfile.BadZipFile) as e:
+            logger.exception(
                 f"Virus genome download failed for taxid {taxid}: {e}"
             )
             return None, None
@@ -967,8 +973,9 @@ class GenomeDownloadManager:
         except subprocess.TimeoutExpired:
             logger.error(f"Download timed out for {accession}")
             return None
-        except Exception as e:
-            logger.error(f"Download failed for {accession}: {e}")
+        except (subprocess.CalledProcessError, FileNotFoundError, PermissionError,
+                OSError, zipfile.BadZipFile) as e:
+            logger.exception(f"Download failed for {accession}: {e}")
             return None
 
     def _download_ncbi_genome_by_taxid(self, taxid: int, species_name: str) -> Tuple[Optional[Path], Optional[str]]:
@@ -1064,8 +1071,9 @@ class GenomeDownloadManager:
         except subprocess.TimeoutExpired:
             logger.error(f"Download timed out for taxid {taxid}")
             return None, None
-        except Exception as e:
-            logger.error(f"Download by taxid failed for {taxid}: {e}")
+        except (subprocess.CalledProcessError, FileNotFoundError, PermissionError,
+                OSError, zipfile.BadZipFile) as e:
+            logger.exception(f"Download by taxid failed for {taxid}: {e}")
             return None, None
 
     def build_blast_db(self, taxid: int) -> bool:
@@ -1133,8 +1141,9 @@ class GenomeDownloadManager:
             logger.info(f"Successfully built BLAST database: {output_db}")
             return True
 
-        except Exception as e:
-            logger.error(f"Failed to build BLAST database: {e}")
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+                FileNotFoundError, PermissionError, OSError) as e:
+            logger.exception(f"Failed to build BLAST database: {e}")
             return False
 
     def get_all_genomes(self) -> List[GenomeMetadata]:
@@ -1192,8 +1201,8 @@ class GenomeDownloadManager:
                 f"Generated pathogen_genomes.json with {len(genome_mapping)} genomes at {output_path}"
             )
             return output_path
-        except Exception as e:
-            logger.error(f"Failed to write pathogen_genomes.json: {e}")
+        except (PermissionError, OSError, TypeError, ValueError) as e:
+            logger.exception(f"Failed to write pathogen_genomes.json: {e}")
             return None
 
     def get_all_genome_status(
@@ -1388,8 +1397,9 @@ class GenomeDownloadManager:
                                 results[tid] = part
                                 break
 
-            except Exception as e:
-                logger.error(f"Batch kingdom lookup failed for chunk starting at index {i}: {e}")
+            except (requests.exceptions.RequestException, ET.ParseError,
+                    ValueError, KeyError) as e:
+                logger.exception(f"Batch kingdom lookup failed for chunk starting at index {i}: {e}")
 
         logger.info(f"Batch kingdom lookup: resolved {len(results)}/{len(taxids)} taxids")
         return results
@@ -1610,7 +1620,9 @@ class GenomeDownloadManager:
                     self._last_errors[taxid] = f"Download failed for {name} (taxid={taxid})"
 
             except Exception as e:
-                logger.error(f"Batch download failed for {name} (taxid={taxid}): {e}")
+                # Worker is invoked from a ThreadPoolExecutor; keep broad catch
+                # so a single download failure does not poison the whole batch.
+                logger.exception(f"Batch download failed for {name} (taxid={taxid}): {e}")
                 self._last_errors[taxid] = str(e)
 
             with lock:
@@ -1619,7 +1631,11 @@ class GenomeDownloadManager:
                     try:
                         progress_callback(completed, total, name)
                     except Exception:
-                        pass
+                        # User-supplied callback may raise anything; isolate
+                        # the batch loop from caller errors.
+                        logger.exception(
+                            f"Progress callback raised for taxid {taxid}"
+                        )
 
             return taxid, path
 
@@ -1684,8 +1700,9 @@ class GenomeDownloadManager:
                 try:
                     if future.result():
                         built += 1
-                except Exception as e:
-                    logger.error(f"BLAST DB build failed for taxid {taxid}: {e}")
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+                        FileNotFoundError, PermissionError, OSError) as e:
+                    logger.exception(f"BLAST DB build failed for taxid {taxid}: {e}")
 
         logger.info(f"Built {built}/{len(to_build)} BLAST databases")
         return built
@@ -1721,8 +1738,8 @@ class GenomeDownloadManager:
             logger.info(f"Deleted genome for taxid {taxid}")
             return True
 
-        except Exception as e:
-            logger.error(f"Failed to delete genome for taxid {taxid}: {e}")
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logger.exception(f"Failed to delete genome for taxid {taxid}: {e}")
             return False
 
     def delete_all_genomes(self) -> int:
