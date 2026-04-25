@@ -119,8 +119,9 @@ class NanometanfOutputParser:
             logger.info(f"Parsed MultiQC general stats: {len(df)} samples")
             return df
 
-        except Exception as e:
-            logger.error(f"Error parsing MultiQC general stats: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+                pd.errors.ParserError, pd.errors.EmptyDataError, ValueError) as e:
+            logger.exception(f"Error parsing MultiQC general stats: {e}")
             return pd.DataFrame()
 
     def parse_multiqc_json(self) -> Dict[str, Any]:
@@ -146,8 +147,9 @@ class NanometanfOutputParser:
             logger.info(f"Parsed MultiQC JSON with {len(data.get('report_plot_data', {}))} plot datasets")
             return data
 
-        except Exception as e:
-            logger.error(f"Error parsing MultiQC JSON: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+                json.JSONDecodeError) as e:
+            logger.exception(f"Error parsing MultiQC JSON: {e}")
             return {}
 
     def parse_multiqc_fastp_data(self) -> pd.DataFrame:
@@ -179,8 +181,9 @@ class NanometanfOutputParser:
             logger.info(f"Parsed MultiQC FASTP data: {len(df)} samples")
             return df
 
-        except Exception as e:
-            logger.error(f"Error parsing MultiQC FASTP data: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+                pd.errors.ParserError, pd.errors.EmptyDataError, ValueError) as e:
+            logger.exception(f"Error parsing MultiQC FASTP data: {e}")
             return pd.DataFrame()
 
     def parse_multiqc_kraken_data(self) -> pd.DataFrame:
@@ -212,8 +215,9 @@ class NanometanfOutputParser:
             logger.info(f"Parsed MultiQC Kraken2 data: {len(df)} samples")
             return df
 
-        except Exception as e:
-            logger.error(f"Error parsing MultiQC Kraken2 data: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+                pd.errors.ParserError, pd.errors.EmptyDataError, ValueError) as e:
+            logger.exception(f"Error parsing MultiQC Kraken2 data: {e}")
             return pd.DataFrame()
 
     # ==================== Kraken2 Parsers ====================
@@ -270,8 +274,9 @@ class NanometanfOutputParser:
             logger.info(f"Parsed Kraken2 report for {sample}: {len(df)} taxa")
             return df
 
-        except Exception as e:
-            logger.error(f"Error parsing Kraken2 report for {sample}: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+                pd.errors.ParserError, pd.errors.EmptyDataError, ValueError) as e:
+            logger.exception(f"Error parsing Kraken2 report for {sample}: {e}")
             return pd.DataFrame(columns=['percent', 'reads_clade', 'reads_taxon', 'rank', 'taxid', 'name'])
 
     def parse_kraken_output(self, sample: str) -> Dict[int, int]:
@@ -323,8 +328,9 @@ class NanometanfOutputParser:
             logger.info(f"Parsed Kraken2 output for {sample}: {len(taxid_counts)} unique taxa")
             return taxid_counts
 
-        except Exception as e:
-            logger.error(f"Error parsing Kraken2 output for {sample}: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+                ValueError, IndexError) as e:
+            logger.exception(f"Error parsing Kraken2 output for {sample}: {e}")
             return {}
 
     def combine_kraken_reports(self) -> pd.DataFrame:
@@ -393,8 +399,9 @@ class NanometanfOutputParser:
                 if not df.empty:
                     df['sample'] = sample_name
                     all_reports.append(df)
-            except Exception as e:
-                logger.error(f"Error parsing report {report_file}: {e}")
+            except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+                    pd.errors.ParserError, pd.errors.EmptyDataError, ValueError) as e:
+                logger.exception(f"Error parsing report {report_file}: {e}")
                 continue
 
         if not all_reports:
@@ -514,8 +521,9 @@ class NanometanfOutputParser:
             logger.info(f"Parsed FASTP report for {sample}")
             return data
 
-        except Exception as e:
-            logger.error(f"Error parsing FASTP report for {sample}: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+                json.JSONDecodeError) as e:
+            logger.exception(f"Error parsing FASTP report for {sample}: {e}")
             return {}
 
     def combine_fastp_reports(self) -> pd.DataFrame:
@@ -582,8 +590,9 @@ class NanometanfOutputParser:
 
                 all_reports.append(report_dict)
 
-            except Exception as e:
-                logger.error(f"Error parsing FASTP report {json_file}: {e}")
+            except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+                    json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+                logger.exception(f"Error parsing FASTP report {json_file}: {e}")
                 continue
 
         if not all_reports:
@@ -697,8 +706,9 @@ class NanometanfOutputParser:
             logger.info(f"Parsed BLAST results for {sample}: {len(df)} hits")
             return df
 
-        except Exception as e:
-            logger.error(f"Error parsing BLAST results for {sample}: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+                pd.errors.ParserError, pd.errors.EmptyDataError, ValueError) as e:
+            logger.exception(f"Error parsing BLAST results for {sample}: {e}")
             return pd.DataFrame(columns=[
                 'qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen',
                 'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore'
@@ -751,8 +761,9 @@ class NanometanfOutputParser:
                 if not df.empty:
                     all_hits.append(df)
 
-            except Exception as e:
-                logger.error(f"Error parsing BLAST file {blast_file}: {e}")
+            except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+                    pd.errors.ParserError, pd.errors.EmptyDataError, ValueError) as e:
+                logger.exception(f"Error parsing BLAST file {blast_file}: {e}")
                 continue
 
         if not all_hits:
@@ -806,8 +817,9 @@ class NanometanfOutputParser:
             logger.debug(f"Parsed batch stats for batch {batch_number}")
             return data
 
-        except Exception as e:
-            logger.error(f"Error parsing batch {batch_number} stats: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+                json.JSONDecodeError) as e:
+            logger.exception(f"Error parsing batch {batch_number} stats: {e}")
             return {}
 
     def get_latest_batch_number(self) -> int:
@@ -835,8 +847,8 @@ class NanometanfOutputParser:
 
             return max(batch_numbers) if batch_numbers else 0
 
-        except Exception as e:
-            logger.error(f"Error getting latest batch number: {e}")
+        except (OSError, ValueError) as e:
+            logger.exception(f"Error getting latest batch number: {e}")
             return 0
 
     def parse_all_batch_stats(self) -> List[Dict[str, Any]]:
@@ -863,15 +875,16 @@ class NanometanfOutputParser:
                     with open(batch_file, 'r') as f:
                         data = json.load(f)
                         all_batches.append(data)
-                except Exception as e:
-                    logger.error(f"Error parsing batch file {batch_file}: {e}")
+                except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+                        json.JSONDecodeError) as e:
+                    logger.exception(f"Error parsing batch file {batch_file}: {e}")
                     continue
 
             logger.info(f"Parsed {len(all_batches)} batch statistics files")
             return all_batches
 
-        except Exception as e:
-            logger.error(f"Error parsing batch stats: {e}")
+        except OSError as e:
+            logger.exception(f"Error parsing batch stats: {e}")
             return []
 
     def get_cumulative_stats(self) -> Dict[str, Any]:
@@ -957,22 +970,22 @@ class NanometanfOutputParser:
                     'unclassified': int(unclassified),
                     'classification_rate': float(classified / (classified + unclassified)) if (classified + unclassified) > 0 else 0.0,
                 }
-        except Exception as e:
-            logger.error(f"Error computing Kraken2 classification summary: {e}")
+        except (KeyError, ValueError, TypeError, ZeroDivisionError, AttributeError) as e:
+            logger.exception(f"Error computing Kraken2 classification summary: {e}")
 
         # FASTP summary
         try:
             fastp_summary = self.get_fastp_summary()
             summary['fastp'] = fastp_summary
-        except Exception as e:
-            logger.error(f"Error computing FASTP summary: {e}")
+        except (KeyError, ValueError, TypeError, AttributeError) as e:
+            logger.exception(f"Error computing FASTP summary: {e}")
 
         # Real-time batch summary
         try:
             cumulative_stats = self.get_cumulative_stats()
             summary['realtime'] = cumulative_stats
-        except Exception as e:
-            logger.error(f"Error computing real-time summary: {e}")
+        except (KeyError, ValueError, TypeError, AttributeError) as e:
+            logger.exception(f"Error computing real-time summary: {e}")
 
         # Overall summary (prefer Kraken2 for classification stats)
         if summary['kraken2']:
@@ -1057,7 +1070,9 @@ class RealtimeMonitor:
                                 self.update_callback(batch_data)
                                 logger.debug(f"Callback executed for batch {batch_num}")
                             except Exception as e:
-                                logger.error(f"Error in update callback for batch {batch_num}: {e}")
+                                # User-supplied callback may raise anything; isolate the
+                                # monitor loop from caller errors. Keep broad catch.
+                                logger.exception(f"Error in update callback for batch {batch_num}: {e}")
 
                     self.last_batch_number = current_batch
 
@@ -1065,7 +1080,9 @@ class RealtimeMonitor:
                 time.sleep(interval)
 
             except Exception as e:
-                logger.error(f"Error in monitoring loop: {e}")
+                # Background-thread top-of-loop guard: keep broad catch so the
+                # monitoring thread survives unexpected errors per cycle 4 D1 rule.
+                logger.exception(f"Error in monitoring loop: {e}")
                 time.sleep(interval)
 
     def start_monitoring(self, interval: int = 10):

@@ -205,8 +205,8 @@ class OnDemandValidator:
                 logger.error(f"Failed to download genome for taxid {taxid}")
                 return None
 
-        except Exception as e:
-            logger.error(f"Error downloading genome for taxid {taxid}: {e}")
+        except (OSError, AttributeError, ValueError) as e:
+            logger.exception(f"Error downloading genome for taxid {taxid}: {e}")
             return None
 
     def build_blast_db(
@@ -267,8 +267,8 @@ class OnDemandValidator:
         except FileNotFoundError:
             logger.error("makeblastdb not found - BLAST+ toolkit not installed?")
             return False
-        except Exception as e:
-            logger.error(f"Error building BLAST database for taxid {taxid}: {e}")
+        except (subprocess.TimeoutExpired, PermissionError, OSError) as e:
+            logger.exception(f"Error building BLAST database for taxid {taxid}: {e}")
             return False
 
     def run_blast(
@@ -342,8 +342,8 @@ class OnDemandValidator:
         except FileNotFoundError:
             logger.error("blastn not found - BLAST+ toolkit not installed?")
             return None
-        except Exception as e:
-            logger.error(f"Error running BLAST: {e}")
+        except (PermissionError, OSError) as e:
+            logger.exception(f"Error running BLAST: {e}")
             return None
 
     def parse_blast_results(self, blast_output: Path) -> Dict[str, Any]:
@@ -388,8 +388,9 @@ class OnDemandValidator:
                 "total_hits": len(identities)
             }
 
-        except Exception as e:
-            logger.error(f"Error parsing BLAST results: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+                ValueError, IndexError) as e:
+            logger.exception(f"Error parsing BLAST results: {e}")
             return {
                 "validated_reads": 0,
                 "avg_identity": 0.0,
@@ -464,8 +465,8 @@ class OnDemandValidator:
         except FileNotFoundError:
             logger.error("minimap2 not found in PATH")
             return None
-        except Exception as e:
-            logger.error(f"Error running minimap2: {e}")
+        except (subprocess.TimeoutExpired, PermissionError, OSError) as e:
+            logger.exception(f"Error running minimap2: {e}")
             return None
 
     def _parse_paf_results(
@@ -524,8 +525,9 @@ class OnDemandValidator:
                 "max_identity": max(identities) if identities else 0.0,
             }
 
-        except Exception as e:
-            logger.error(f"Error parsing PAF results: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+                ValueError, IndexError) as e:
+            logger.exception(f"Error parsing PAF results: {e}")
             return {
                 "mapped_reads": 0,
                 "total_reads": 0,
@@ -599,8 +601,8 @@ class OnDemandValidator:
             import json as _json
             with open(genomes_json_path, 'w') as f:
                 _json.dump({str(taxid): str(genome_fasta)}, f)
-        except Exception as e:
-            logger.error(f"Failed to write pathogen genomes JSON: {e}")
+        except (PermissionError, OSError, TypeError, ValueError) as e:
+            logger.exception(f"Failed to write pathogen genomes JSON: {e}")
             return None
 
         if progress_callback:
@@ -667,8 +669,9 @@ class OnDemandValidator:
         except FileNotFoundError:
             logger.warning("nextflow not found in PATH")
             return None
-        except Exception as e:
-            logger.error(f"nanometanf validation error: {e}")
+        except (subprocess.CalledProcessError, PermissionError, OSError,
+                ImportError, AttributeError, KeyError) as e:
+            logger.exception(f"nanometanf validation error: {e}")
             return None
 
     def validate_organism(
@@ -874,7 +877,11 @@ class OnDemandValidator:
             )
 
         except Exception as e:
-            logger.error(f"Validation failed for taxid {taxid}: {e}")
+            # Top-level orchestrator catch: validate_organism is the public entry
+            # point invoked from the UI. A single failure must not crash the
+            # caller, and the cause is recorded on the job for surfacing in the
+            # dashboard. Keep broad catch.
+            logger.exception(f"Validation failed for taxid {taxid}: {e}")
             job.status = ValidationStatus.FAILED
             job.error_message = str(e)
             return self._create_failed_result(taxid, name, sample, str(e))
@@ -943,8 +950,8 @@ class OnDemandValidator:
             with open(output_file, 'w') as f:
                 json.dump(results, f, indent=2)
             logger.info(f"Saved validation results to {output_file}")
-        except Exception as e:
-            logger.error(f"Failed to save validation results: {e}")
+        except (PermissionError, OSError, TypeError, ValueError) as e:
+            logger.exception(f"Failed to save validation results: {e}")
 
     def get_job_status(self, taxid: int, sample: str) -> Optional[ValidationJob]:
         """Get status of a validation job."""
@@ -977,8 +984,9 @@ class OnDemandValidator:
                 blast_output_file=Path(data["blast_results"]) if data.get("blast_results") else None
             )
 
-        except Exception as e:
-            logger.error(f"Failed to load validation result: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+                json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+            logger.exception(f"Failed to load validation result: {e}")
             return None
 
     def get_available_organisms(self, sample: str) -> List[Dict[str, Any]]:

@@ -207,7 +207,7 @@ class ReadinessChecker:
         try:
             from nanometa_live.core.taxonomy.taxid_mapping import get_database_hash
             db_hash = get_database_hash(db_path)
-        except Exception as e:
+        except (ImportError, AttributeError, OSError, ValueError) as e:
             return CheckResult(
                 "DB Taxonomy Index", False, Severity.CRITICAL,
                 f"Could not compute database hash: {e}"
@@ -240,7 +240,7 @@ class ReadinessChecker:
         try:
             from nanometa_live.core.taxonomy.taxid_mapping import get_database_hash
             db_hash = get_database_hash(db_path)
-        except Exception as e:
+        except (ImportError, AttributeError, OSError, ValueError) as e:
             return CheckResult(
                 "Taxid Mappings", False, Severity.CRITICAL,
                 f"Could not compute database hash: {e}"
@@ -469,7 +469,7 @@ class ReadinessChecker:
                 "Watchlist Active", False, Severity.WARNING,
                 "No watchlist enabled - enable pathogens in the Watchlist tab"
             )
-        except Exception:
+        except (ImportError, AttributeError, OSError):
             # Check config for watchlist section as fallback
             wl = config.get("watchlist", {})
             if isinstance(wl, dict) and wl.get("enabled_watchlists"):
@@ -510,7 +510,7 @@ class ReadinessChecker:
                 f"{have}/{total} enabled entries have genomes",
                 details=f"Missing: {names_preview}{suffix}"
             )
-        except Exception as e:
+        except (ImportError, AttributeError, OSError) as e:
             logger.warning(f"Could not check watchlist genomes: {e}")
             # Fallback: just check directory
             genomes_dir = home / "genomes"
@@ -561,7 +561,7 @@ class ReadinessChecker:
                 f"{have}/{total} enabled entries have BLAST databases",
                 details=f"Missing: {names_preview}{suffix}"
             )
-        except Exception as e:
+        except (ImportError, AttributeError, OSError) as e:
             logger.warning(f"Could not check BLAST databases: {e}")
             blast_dir = home / "blast"
             nhr_files = list(blast_dir.glob("*.nhr")) if blast_dir.exists() else []
@@ -611,7 +611,8 @@ class ReadinessChecker:
                 "Nextflow Version", False, Severity.WARNING,
                 "Nextflow not found (checked separately in tool checks)",
             )
-        except Exception:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+                PermissionError, OSError):
             return CheckResult(
                 "Nextflow Version", False, Severity.WARNING,
                 "Could not determine Nextflow version",
@@ -634,6 +635,11 @@ class ReadinessChecker:
                     f"{name} reachable",
                 ))
             except Exception as e:
+                # Connectivity probe: any failure (URLError, HTTPError, socket
+                # error, SSL issue, timeout, proxy misconfiguration, even a
+                # surprising upstream exception) means "unreachable" for the
+                # operator. Keep broad catch so the readiness report stays
+                # useful regardless of why the probe failed.
                 results.append(CheckResult(
                     name, False, Severity.WARNING,
                     f"{name} unreachable: {e}. Genome downloads may fail.",

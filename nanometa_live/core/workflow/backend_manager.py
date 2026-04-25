@@ -117,7 +117,7 @@ class BackendManager:
         # Resolve to absolute path
         try:
             resolved = os.path.abspath(os.path.expanduser(path))
-        except Exception as e:
+        except (ValueError, TypeError, OSError) as e:
             raise ValueError(f"Invalid {description}: {e}")
 
         # Check against blocked prefixes
@@ -237,7 +237,7 @@ class BackendManager:
             try:
                 with open(lock_file, 'r') as f:
                     existing_info = f.read()
-            except Exception:
+            except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError):
                 pass
 
             error_msg = (
@@ -251,8 +251,8 @@ class BackendManager:
             self._lock_fd = None
             return False, error_msg
 
-        except Exception as e:
-            logging.error(f"Error acquiring lock: {e}")
+        except (PermissionError, OSError, ValueError) as e:
+            logging.exception(f"Error acquiring lock: {e}")
             if self._lock_fd:
                 self._lock_fd.close()
                 self._lock_fd = None
@@ -270,7 +270,7 @@ class BackendManager:
                     fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_UN)
                 self._lock_fd.close()
                 logging.info("Released lock on results directory")
-            except Exception as e:
+            except (OSError, ValueError) as e:
                 logging.warning(f"Error releasing lock: {e}")
             finally:
                 self._lock_fd = None
@@ -531,8 +531,8 @@ class BackendManager:
             # Processed files comes from workflow_manager status
             self.status["files_waiting"] = waiting_files
 
-        except Exception as e:
-            logging.error(f"Error updating file counts: {e}")
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logging.exception(f"Error updating file counts: {e}")
 
     def _monitor_status(self):
         """Monitor the status of the backend processes in a separate thread."""
@@ -570,8 +570,8 @@ class BackendManager:
                         # Stop the underlying Nextflow process
                         try:
                             self.workflow_manager.stop()
-                        except Exception as e:
-                            logging.error(f"Error stopping pipeline after timeout: {e}")
+                        except (OSError, RuntimeError, AttributeError) as e:
+                            logging.exception(f"Error stopping pipeline after timeout: {e}")
                         break
 
                 # Get workflow manager status
@@ -651,7 +651,9 @@ class BackendManager:
                 time.sleep(5)
 
             except Exception as e:
-                logging.error(f"Error in monitoring thread: {e}")
+                # Background-thread top-of-loop guard: keep broad catch so the
+                # monitor thread survives unexpected errors per cycle 4 D1 rule.
+                logging.exception(f"Error in monitoring thread: {e}")
                 time.sleep(5)
 
         # Release lock when monitoring thread exits (pipeline completed or stopped)
