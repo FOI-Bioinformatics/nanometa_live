@@ -31,15 +31,16 @@ class NextflowManager:
     # Default remote repository
     DEFAULT_REMOTE_REPO = "foi-bioinformatics/nanometanf"
 
-    def __init__(self, data_dir: str, pipeline_source: str = "remote:dev"):
+    def __init__(self, data_dir: str, pipeline_source: str = "remote:main"):
         """
         Initialize the Nextflow manager.
 
         Args:
             data_dir: Base directory for storing data, logs, and work files
             pipeline_source: Pipeline source specification. Options:
-                - "remote:dev" - GitHub repo with dev branch (active development, default)
-                - "remote:master" - GitHub repo with master branch (stable release)
+                - "remote:main" - GitHub repo with main branch (pinned default)
+                - "remote:dev" - GitHub repo with dev branch (active development)
+                - "remote:master" - GitHub repo with master branch (legacy)
                 - "/path/to/local/nanometanf" - Local filesystem path
         """
         self.data_dir = data_dir

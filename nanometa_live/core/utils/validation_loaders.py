@@ -193,8 +193,10 @@ def load_blast_validation_data(
                 return results
         except (FileNotFoundError, OSError):
             continue  # File was deleted or inaccessible
-        except Exception as e:
-            logging.warning(f"Error reading aggregate validation JSON {agg_path}: {e}")
+        except json.JSONDecodeError as e:
+            logging.warning(f"Malformed aggregate validation JSON {agg_path}: {e}")
+        except (ValueError, KeyError, TypeError) as e:
+            logging.warning(f"Unexpected content in aggregate validation JSON {agg_path}: {e}")
 
     # nanometanf v1.1+ publishes BLAST results to validation/blast/
     blast_dir = os.path.join(main_dir, "validation", "blast")
@@ -266,8 +268,8 @@ def load_blast_validation_data(
                                 unique_reads.add(parts[0])
             except (FileNotFoundError, OSError):
                 continue  # File was deleted or inaccessible
-            except Exception as e:
-                logging.warning(f"Error reading BLAST file {blast_file}: {e}")
+            except UnicodeDecodeError as e:
+                logging.warning(f"BLAST file is not valid text {blast_file}: {e}")
                 continue
 
         validated_count = len(unique_reads)

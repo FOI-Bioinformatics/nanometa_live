@@ -94,8 +94,8 @@ def download_kraken_database(
         return False, f"Error downloading database: {str(e)}"
     except tarfile.TarError as e:
         return False, f"Error extracting database: {str(e)}"
-    except Exception as e:
-        return False, f"Unexpected error: {str(e)}"
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        return False, f"I/O error preparing database: {str(e)}"
 
 
 def verify_kraken_db(db_path: str) -> bool:
@@ -159,8 +159,10 @@ def inspect_kraken_db(db_path: str, output_path: str = None) -> Tuple[bool, str]
 
     except subprocess.CalledProcessError as e:
         return False, f"Error running kraken2-inspect: {e.stderr}"
-    except Exception as e:
-        return False, f"Unexpected error: {str(e)}"
+    except subprocess.TimeoutExpired as e:
+        return False, f"kraken2-inspect timed out after {e.timeout}s"
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        return False, f"Cannot launch kraken2-inspect: {str(e)}"
 
 
 def ensure_inspect_file(db_path: str) -> Optional[str]:

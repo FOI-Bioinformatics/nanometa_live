@@ -30,7 +30,7 @@ def ensure_directory(directory: str) -> bool:
     try:
         os.makedirs(directory, exist_ok=True)
         return True
-    except Exception as e:
+    except (PermissionError, OSError) as e:
         logging.error(f"Error creating directory {directory}: {e}")
         return False
 
@@ -87,7 +87,7 @@ def copy_file(source: str, destination: str, overwrite: bool = False) -> bool:
         logging.info(f"Copied {source} to {destination}")
         return True
 
-    except Exception as e:
+    except (shutil.SameFileError, PermissionError, OSError) as e:
         logging.error(f"Error copying file from {source} to {destination}: {e}")
         return False
 
@@ -135,8 +135,11 @@ def extract_archive(archive_path: str, extract_dir: str) -> bool:
         logging.info(f"Extracted {archive_path} to {extract_dir}")
         return True
 
-    except Exception as e:
-        logging.error(f"Error extracting archive {archive_path}: {e}")
+    except (zipfile.BadZipFile, tarfile.TarError, gzip.BadGzipFile, EOFError) as e:
+        logging.error(f"Corrupt archive {archive_path}: {e}")
+        return False
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        logging.error(f"I/O error extracting archive {archive_path}: {e}")
         return False
 
 
@@ -180,8 +183,11 @@ def download_file(url: str, destination: str, overwrite: bool = False) -> bool:
         logging.info(f"Downloaded {url} to {destination}")
         return True
 
-    except Exception as e:
-        logging.error(f"Error downloading file from {url}: {e}")
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Network error downloading {url}: {e}")
+        return False
+    except (PermissionError, OSError) as e:
+        logging.error(f"I/O error saving download to {destination}: {e}")
         return False
 
 
@@ -214,8 +220,8 @@ def calculate_file_hash(file_path: str, hash_type: str = "md5") -> str:
 
         return hash_func.hexdigest()
 
-    except Exception as e:
-        logging.error(f"Error calculating {hash_type} hash for {file_path}: {e}")
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        logging.error(f"Could not read {file_path} to calculate hash: {e}")
         return ""
 
 
@@ -262,7 +268,7 @@ def get_file_list(
 
         return file_list
 
-    except Exception as e:
+    except (PermissionError, OSError) as e:
         logging.error(f"Error getting file list for {directory}: {e}")
         return []
 
@@ -286,8 +292,11 @@ def read_file_lines(file_path: str) -> List[str]:
             with open(file_path, "r") as f:
                 return [line.strip() for line in f]
 
-    except Exception as e:
-        logging.error(f"Error reading file {file_path}: {e}")
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        logging.error(f"Could not read file {file_path}: {e}")
+        return []
+    except (UnicodeDecodeError, EOFError, gzip.BadGzipFile) as e:
+        logging.error(f"Malformed file {file_path}: {e}")
         return []
 
 
@@ -318,7 +327,7 @@ def write_file_lines(file_path: str, lines: List[str]) -> bool:
 
         return True
 
-    except Exception as e:
+    except (PermissionError, OSError) as e:
         logging.error(f"Error writing to file {file_path}: {e}")
         return False
 
@@ -342,7 +351,7 @@ def remove_temp_files(paths: List[str]) -> bool:
             elif os.path.isdir(path):
                 shutil.rmtree(path)
                 logging.debug(f"Removed temporary directory: {path}")
-        except Exception as e:
+        except (PermissionError, OSError) as e:
             logging.error(f"Error removing temporary path {path}: {e}")
             success = False
 
@@ -361,7 +370,7 @@ def create_temp_directory() -> Optional[str]:
         logging.debug(f"Created temporary directory: {temp_dir}")
         return temp_dir
 
-    except Exception as e:
+    except (PermissionError, OSError) as e:
         logging.error(f"Error creating temporary directory: {e}")
         return None
 
@@ -389,7 +398,7 @@ def get_most_recent_file(directory: str, pattern: str = None) -> Optional[str]:
 
         return file_list[0]
 
-    except Exception as e:
+    except (FileNotFoundError, PermissionError, OSError) as e:
         logging.error(f"Error finding most recent file in {directory}: {e}")
         return None
 
@@ -403,8 +412,8 @@ def check_command_exists(command: str) -> bool:
     Returns:
         True if the command exists and is executable, False otherwise
     """
+    import subprocess
     try:
-        import subprocess
         result = subprocess.run(
             ["which", command],
             stdout=subprocess.PIPE,
@@ -413,5 +422,5 @@ def check_command_exists(command: str) -> bool:
             timeout=10,
         )
         return result.returncode == 0
-    except Exception:
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return False

@@ -109,12 +109,14 @@ class ConfigLoader:
             "sample_handling": "by_barcode",
             "sample_name": "sample",
             # Pipeline execution settings
-            "pipeline_profile": "docker",
-            # Default to the active development branch. The master branch lags
-            # behind dev for active feature work; a fresh install pointed at
-            # master may fail to fetch required modules. Override via
-            # config.yaml or the UI for production deployments.
-            "pipeline_source": "remote:dev",
+            "pipeline_profile": "conda",
+            # Pinned remote default: tracks the main branch of the upstream
+            # nanometanf repository. A fresh install without this pin silently
+            # fell back to an unresolved spec, so the GUI would report
+            # "pipeline not found" after the first run attempt. Override in
+            # config.yaml (e.g. "remote:dev" for active development, or a
+            # local path "local:/path/to/checkout") as needed.
+            "pipeline_source": "remote:main",
             # Realtime mode settings
             "max_file_age_minutes": 1000000,
             # Stop real-time monitoring after N minutes with no new files (null = run indefinitely)
@@ -183,8 +185,11 @@ class ConfigLoader:
                 f"Invalid YAML in configuration file '{config_path}'{location}. "
                 f"Check for indentation or formatting errors."
             ) from e
-        except Exception as e:
-            logging.error(f"Failed to load configuration from {config_path}. Exception: {e}")
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logging.error(f"Could not read configuration {config_path}: {e}")
+            raise
+        except Exception:
+            logging.exception(f"Unexpected failure loading configuration {config_path}")
             raise
 
     def _standardize_boolean_params(self, config: Dict[str, Any]) -> None:
@@ -254,8 +259,8 @@ class ConfigLoader:
             with open(config_path, "w") as f:
                 self.yaml.dump(save_config, f)
             return config_path
-        except Exception as e:
-            logging.error(f"Failed to save configuration: {e}")
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logging.error(f"Failed to write configuration to {config_path}: {e}")
             raise
 
     def _get_config_metadata(self, config_path: str) -> Optional[Dict[str, Any]]:
@@ -291,7 +296,7 @@ class ConfigLoader:
                 location = f" at line {mark.line + 1}, column {mark.column + 1}"
             logger.warning(f"Skipping {config_path}: YAML syntax error{location}")
             return None
-        except Exception:
+        except (FileNotFoundError, PermissionError, OSError):
             return None
 
     def get_available_configs(self) -> List[Dict[str, Any]]:
@@ -398,6 +403,9 @@ class ConfigLoader:
             with open(db_file, 'r') as f:
                 db_config = yaml.safe_load(f)
             return db_config.get("kraken2_databases", {})
-        except Exception as e:
-            logging.error(f"Error loading Kraken databases: {e}")
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logging.error(f"Could not read Kraken databases file {db_file}: {e}")
+            return {}
+        except yaml.YAMLError as e:
+            logging.error(f"Malformed Kraken databases file {db_file}: {e}")
             return {}

@@ -121,7 +121,7 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
         for col in numeric_cols:
             try:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
-            except Exception as e:
+            except (ValueError, TypeError) as e:
                 logging.warning(
                     f"Column '{col}' in {filepath} contains non-numeric values: {e}"
                 )
@@ -170,8 +170,15 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
     except OSError as e:
         logging.warning("OS error reading kreport file %s: %s", filepath, e)
         return None
-    except Exception as e:
-        logging.error(f"Error parsing Kraken2 report {filepath}: {e}")
+    except (pd.errors.ParserError, pd.errors.EmptyDataError, ValueError) as e:
+        logging.warning("Malformed Kraken2 report %s: %s", filepath, e)
+        return None
+    except Exception:
+        # Unexpected failure in the parsing logic above. Keep a single
+        # catch-all so a single corrupt file cannot bring the whole
+        # dashboard down, but log with exception() so the stack trace
+        # reaches the debug log.
+        logging.exception("Unexpected error parsing Kraken2 report %s", filepath)
         return None
 
 
@@ -345,21 +352,65 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
 
             kreport_files = list(dict.fromkeys(os.path.realpath(f) for f in kreport_files))
 
-            # 3. Batch files as last resort (will be aggregated)
+            # 3. Batch files as last resort. Each batch file is itself a
+            # cumulative snapshot, so for each sample we keep only the
+            # highest-numbered batch (matches the per-sample branch fix
+            # from the 2026-04-15 audit and avoids multi-counting reads
+            # in realtime single_sample mode, where no per-sample
+            # cumulative report has been written yet).
             if not kreport_files:
-                logging.debug("No standard reports found, looking for batch files to aggregate")
+                logging.debug("No standard reports found, looking for batch files")
+                candidate_batches: List[str] = []
                 # Top-level batch files
                 for ext_pattern in ("*_batch*.kraken2.report.txt", "*_batch*.kreport2.txt"):
-                    kreport_files.extend(glob.glob(os.path.join(kraken_dir, ext_pattern)))
+                    candidate_batches.extend(glob.glob(os.path.join(kraken_dir, ext_pattern)))
                 # v1.5: batch_reports/ inside per-sample subdirs
-                kreport_files.extend(
+                candidate_batches.extend(
                     _scan_subdirs_for_pattern(kraken_dir, "*.kraken2.report.txt", subdir="batch_reports")
                 )
                 # Deduplicate: same batch may appear in reports/ and batch_reports/
-                kreport_files = _deduplicate_batch_files(kreport_files)
+                candidate_batches = _deduplicate_batch_files(candidate_batches)
 
-                if kreport_files:
-                    logging.debug(f"Found {len(kreport_files)} batch Kraken2 reports to aggregate")
+                if candidate_batches:
+                    # Group batches by underlying sample (strip _batch<N> suffix)
+                    # and keep only the highest-numbered batch per sample.
+                    _batch_num_re = re.compile(r'batch[_\-]?(\d+)', re.IGNORECASE)
+                    _batch_suffix_re = re.compile(r'[._]batch[_\-]?\d+$', re.IGNORECASE)
+
+                    def _batch_sample(fp: str) -> str:
+                        basename = os.path.basename(fp)
+                        stem = re.sub(
+                            r'\.(cumulative\.kraken2\.report|kraken2\.report|kreport2)\.txt$',
+                            '', basename,
+                        )
+                        # Strip batch_N suffix if it is embedded in the filename.
+                        stripped = _batch_suffix_re.sub('', stem)
+                        if stripped and stripped != stem:
+                            return stripped
+                        # Fall back to the containing directory (v1.5 nested
+                        # layout publishes batch_N.kraken2.report.txt inside
+                        # the per-sample batch_reports/ folder).
+                        parts = fp.replace('\\', '/').split('/')
+                        for i, part in enumerate(parts):
+                            if part in ('batch_reports', 'reports', 'batches') and i > 0:
+                                return parts[i - 1]
+                        return stem
+
+                    def _batch_num(fp: str) -> int:
+                        m = _batch_num_re.search(os.path.basename(fp))
+                        return int(m.group(1)) if m else -1
+
+                    by_sample: Dict[str, str] = {}
+                    for fp in candidate_batches:
+                        sample_key = _batch_sample(fp)
+                        current = by_sample.get(sample_key)
+                        if current is None or _batch_num(fp) > _batch_num(current):
+                            by_sample[sample_key] = fp
+                    kreport_files = list(by_sample.values())
+                    logging.debug(
+                        f"Selected {len(kreport_files)} latest-per-sample batch "
+                        f"Kraken2 reports from {len(candidate_batches)} candidates"
+                    )
 
         if not kreport_files:
             logging.warning("No Kraken2 report files found")

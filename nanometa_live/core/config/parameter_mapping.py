@@ -6,12 +6,19 @@ to nanometanf pipeline parameters and Nextflow configuration.
 
 Supported processing modes (set via config["processing_mode"]):
 - 'batch': Process existing files. Emits `--input <samplesheet.csv>` by
-  default, or `--input_dir <dir>` when config["use_input_dir_mode"] is true.
+  default, or `--input_dir <dir>` when config["use_input_dir_mode"] is
+  true. `batch` + `sample_handling == "by_barcode"` with no supplied
+  samplesheet also auto-enables `--input_dir` so nanometanf's
+  INPUT_SCANNER handles layout discovery (Scenario E).
 - 'realtime': Live watchPath monitoring via `--realtime_mode true`
   and `--nanopore_output_dir <dir>`.
 
 Callers may also pre-supply `config["input"]` with a path to an existing
 samplesheet; it is honoured verbatim and no samplesheet is auto-generated.
+
+The emitted params are validated at the end of create_nextflow_params
+to reject mutually exclusive input sources (input, input_dir,
+nanopore_output_dir) before the pipeline starts.
 """
 
 import os
@@ -178,7 +185,7 @@ def get_validation_species_from_watchlist(
                 logging.debug(
                     f"Using taxid mapping collection with {len(mapping_collection.mappings)} mappings"
                 )
-        except Exception as e:
+        except (ImportError, AttributeError, FileNotFoundError) as e:
             logging.debug(f"No taxid mapping collection available: {e}")
 
         species_list = []
@@ -217,8 +224,14 @@ def get_validation_species_from_watchlist(
         )
         return species_list, genome_paths
 
-    except Exception as e:
-        logging.warning(f"Failed to get watchlist species: {e}")
+    except (ImportError, AttributeError) as e:
+        logging.warning(f"Watchlist subsystem unavailable: {e}")
+        return [], []
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        logging.warning(f"Failed to read watchlist data: {e}")
+        return [], []
+    except (ValueError, KeyError, TypeError) as e:
+        logging.warning(f"Failed to parse watchlist entries: {e}")
         return [], []
 
 
@@ -421,8 +434,10 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         try:
             stats = genome_manager.get_statistics()
             logging.debug(f"Genome manager stats: {stats}")
-        except Exception as e:
-            logging.debug(f"Could not get genome stats: {e}")
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logging.debug(f"Could not read genome cache: {e}")
+        except AttributeError as e:
+            logging.debug(f"Genome manager missing get_statistics: {e}")
 
         # Get the full species list with both NCBI and Kraken taxids
         # We need NCBI taxids for genome file lookup, and Kraken taxids for pipeline filtering
@@ -474,8 +489,10 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
                 with open(pathogen_genomes_path, 'r') as f:
                     content = json.load(f)
                 logging.debug(f"pathogen_genomes.json contains {len(content)} entries")
-            except Exception as e:
-                logging.debug(f"Could not read pathogen_genomes.json for verification: {e}")
+            except (FileNotFoundError, PermissionError, OSError) as e:
+                logging.debug(f"Could not read pathogen_genomes.json: {e}")
+            except json.JSONDecodeError as e:
+                logging.debug(f"Malformed pathogen_genomes.json: {e}")
         else:
             logging.warning(
                 "No downloaded genomes found for enabled watchlist species. "
@@ -581,17 +598,38 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
             logging.info(f"Found {len(genome_paths)} downloaded genomes for validation")
 
     # Set input parameters based on processing mode and sample handling.
-    # Batch mode offers three input paths, checked in priority order:
+    # Batch mode offers four input paths, checked in priority order:
     #   1. config["input"] is an existing file -> pass through verbatim
     #      (supports the "bring your own samplesheet" workflow).
     #   2. config["use_input_dir_mode"] is true -> emit --input_dir for the
-    #      nanometanf INPUT_SCANNER subworkflow (auto-layout discovery).
-    #   3. Otherwise -> auto-generate a samplesheet from nanopore_dir.
+    #      nanometanf INPUT_SCANNER subworkflow (explicit opt-in).
+    #   3. Scenario E: batch + by_barcode with no pre-built samplesheet
+    #      auto-enables --input_dir so the INPUT_SCANNER can discover the
+    #      barcode* subdirectory layout itself. This removes a silent GUI
+    #      regression where the missing flag caused the run to fall back
+    #      to realtime mode without any user-visible warning.
+    #   4. Otherwise -> auto-generate a samplesheet from nanopore_dir.
     if processing_mode == "batch":
         user_input = config.get("input")
         use_input_dir = bool(config.get("use_input_dir_mode", False))
 
-        if user_input and os.path.isfile(user_input):
+        # Scenario E auto-trigger: batch + by_barcode + no samplesheet.
+        # Scoped narrowly to by_barcode so single_sample and per_file
+        # continue to generate their samplesheets as before.
+        samplesheet_provided = bool(user_input) and os.path.isfile(user_input)
+        if (
+            not use_input_dir
+            and not samplesheet_provided
+            and sample_handling == "by_barcode"
+        ):
+            use_input_dir = True
+            logging.info(
+                "Batch mode + by_barcode with no samplesheet supplied: "
+                "auto-enabling --input_dir so nanometanf INPUT_SCANNER "
+                "can discover the barcode layout."
+            )
+
+        if samplesheet_provided:
             params["input"] = str(user_input)
             logging.info(
                 f"Batch mode: using pre-supplied samplesheet at {user_input}"
@@ -694,6 +732,23 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     # Add email if provided
     if "email" in config and config["email"]:
         params["email"] = config["email"]
+
+    # Dual-input guard. nanometanf rejects a run that specifies more than
+    # one input source (input, input_dir, nanopore_output_dir) because the
+    # INPUT_SCANNER would not know which mode to use. Detect the conflict
+    # here so the error is a precise Python message rather than a
+    # "Multiple input modes detected" at Nextflow start.
+    input_keys = [
+        key for key in ("input", "input_dir", "nanopore_output_dir")
+        if params.get(key)
+    ]
+    if len(input_keys) > 1:
+        raise ValueError(
+            "Conflicting input parameters emitted: "
+            f"{input_keys}. Only one of --input, --input_dir, or "
+            "--nanopore_output_dir may be set; check processing_mode and "
+            "sample_handling settings."
+        )
 
     return params
 
@@ -857,16 +912,17 @@ def validate_nanometanf_params(params: Dict[str, Any]) -> Tuple[bool, str]:
 
     # Determine which input mode is being used
     has_samplesheet_input = "input" in params and params["input"]
+    has_input_dir = "input_dir" in params and params["input_dir"]
     has_fastq_input = "fastq_input_dir" in params and params["fastq_input_dir"]
     has_barcode_input = "barcode_input_dir" in params and params["barcode_input_dir"]
     has_realtime_input = "nanopore_output_dir" in params and params["nanopore_output_dir"]
 
     # Validate at least one input mode is specified
-    if not (has_samplesheet_input or has_fastq_input or has_barcode_input or has_realtime_input):
+    if not (has_samplesheet_input or has_input_dir or has_fastq_input or has_barcode_input or has_realtime_input):
         return (
             False,
             "Missing input. Must specify one of: "
-            "input (samplesheet), fastq_input_dir, barcode_input_dir, or nanopore_output_dir"
+            "input (samplesheet), input_dir, fastq_input_dir, barcode_input_dir, or nanopore_output_dir"
         )
 
     # Validate Kraken2 database exists
@@ -900,6 +956,12 @@ def validate_nanometanf_params(params: Dict[str, Any]) -> Tuple[bool, str]:
             if len(lines) < 2:
                 return False, f"Samplesheet is empty or has no samples: {samplesheet_path}"
         logging.info(f"Samplesheet mode: Using {samplesheet_path} with {len(lines) - 1} samples")
+
+    elif has_input_dir:
+        input_dir = params["input_dir"]
+        if not os.path.isdir(input_dir):
+            return False, f"input_dir not found: {input_dir}"
+        logging.info(f"input_dir mode: nanometanf INPUT_SCANNER will discover layout under {input_dir}")
 
     elif has_fastq_input:
         input_dir = params["fastq_input_dir"]
