@@ -157,7 +157,7 @@ class BundleManager:
                     rel = snapshot_path.relative_to(staging)
                     manifest["checksums"][str(rel)] = _file_md5(snapshot_path)
                     logger.info(f"Exported {exported} taxonomy cache entries to bundle")
-            except Exception as e:
+            except (ImportError, AttributeError, OSError, json.JSONDecodeError) as e:
                 logger.warning(f"Could not export taxonomy snapshot: {e}")
 
             # Template genome_metadata.json paths
@@ -356,7 +356,7 @@ class BundleManager:
                     cache = OfflineTaxonomyCache()
                     loaded = cache.load_snapshot(str(taxonomy_snapshot))
                     logger.info(f"Loaded {loaded} taxonomy entries from bundle snapshot")
-                except Exception as e:
+                except (ImportError, AttributeError, OSError, json.JSONDecodeError) as e:
                     result["warnings"].append(f"Failed to load taxonomy snapshot: {e}")
 
             # Load container images if present
@@ -378,7 +378,7 @@ class BundleManager:
                         cfg["kraken_db"] = kraken_db_path
                     import_loader.save_config(cfg, "config.yaml")
                     logger.info("Set offline_mode=True in config")
-                except Exception as e:
+                except (ImportError, AttributeError, OSError, ValueError) as e:
                     result["warnings"].append(f"Could not update config: {e}")
 
         logger.info(f"Bundle imported to {home}")
@@ -424,23 +424,24 @@ class BundleManager:
                 dst_file = dst_dir / yaml_file.name
                 if not dst_file.exists():
                     shutil.copy2(yaml_file, dst_file)
-        except Exception as e:
+        except (ImportError, AttributeError, OSError) as e:
             logger.debug(f"Could not copy built-in watchlists: {e}")
 
     def _load_container_images(self, containers_dir: Path) -> int:
         """Load container images from the bundle's containers directory."""
+        import subprocess
         loaded = 0
         try:
             # Try Docker tar files
             for tar_file in containers_dir.glob("*.tar"):
                 try:
-                    import subprocess
                     subprocess.run(
                         ["docker", "load", "-i", str(tar_file)],
                         capture_output=True, check=True, timeout=300,
                     )
                     loaded += 1
-                except Exception as e:
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+                        FileNotFoundError, PermissionError, OSError) as e:
                     logger.warning(f"Failed to load container image {tar_file.name}: {e}")
 
             # Singularity/Apptainer .sif files are used in-place, no loading needed
@@ -449,7 +450,7 @@ class BundleManager:
                 logger.info(f"Found {sif_count} Singularity/Apptainer images (used in-place)")
                 loaded += sif_count
 
-        except Exception as e:
+        except OSError as e:
             logger.warning(f"Error loading container images: {e}")
 
         return loaded
@@ -492,7 +493,8 @@ def _get_command_version(command: str, args: List[str]) -> str:
             if line:
                 return line[:100]  # Truncate long output
         return "unknown"
-    except Exception:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+            FileNotFoundError, PermissionError, OSError):
         return "error"
 
 
