@@ -129,8 +129,8 @@ class TaxonomyMatcher:
                     if re.match(r'^[a-z]__', name):
                         gtdb_indicators += 3
 
-        except Exception as e:
-            logger.error(f"Error reading report file: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError) as e:
+            logger.exception(f"Error reading report file: {e}")
             return TaxonomyType.UNKNOWN
 
         # Determine taxonomy type

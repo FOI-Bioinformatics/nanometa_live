@@ -480,8 +480,8 @@ class WatchlistManager:
                 self._enabled_watchlists.add(watchlist_id)
                 logger.info(f"Loaded {count} entries from watchlist: {watchlist_id}")
 
-            except Exception as e:
-                logger.warning(f"Failed to load watchlist {watchlist_id}: {e}")
+            except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, yaml.YAMLError, KeyError, ValueError, TypeError, AttributeError) as e:
+                logger.exception(f"Failed to load watchlist {watchlist_id}: {e}")
 
     def _load_custom_yaml_file(self, file_path: str) -> None:
         """Load a custom YAML watchlist file by path."""
@@ -514,8 +514,8 @@ class WatchlistManager:
             self._enabled_watchlists.add(watchlist_id)
             logger.info(f"Loaded {len(pathogens)} entries from custom file: {file_path}")
 
-        except Exception as e:
-            logger.error(f"Error loading custom watchlist {file_path}: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, yaml.YAMLError, KeyError, ValueError, TypeError, AttributeError) as e:
+            logger.exception(f"Error loading custom watchlist {file_path}: {e}")
 
     def _load_builtin_categories(self, categories: List[str]) -> None:
         """Load entries from built-in pathogen database by category."""
@@ -730,7 +730,7 @@ class WatchlistManager:
                 mc = get_mapping_collection()
                 if mc and mc.database_type:
                     db_is_ncbi = mc.database_type == DatabaseTaxonomyType.NCBI
-            except Exception:
+            except (ImportError, AttributeError):
                 pass
 
             if db_is_ncbi and taxid and taxid in active_entries:
@@ -850,7 +850,7 @@ class WatchlistManager:
             state_path.parent.mkdir(parents=True, exist_ok=True)
             with open(state_path, "w") as f:
                 yaml.dump({"disabled_taxids": disabled}, f, default_flow_style=False)
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, OSError, yaml.YAMLError) as e:
             logger.debug(f"Could not save toggle state: {e}")
 
     def _restore_toggle_state(self) -> None:
@@ -871,7 +871,7 @@ class WatchlistManager:
                     count += 1
             if count:
                 logger.info(f"Restored toggle state: {count} entries disabled from previous session")
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, yaml.YAMLError, AttributeError) as e:
             logger.debug(f"Could not restore toggle state: {e}")
 
     # -------------------------------------------------------------------------
@@ -1081,8 +1081,8 @@ class WatchlistManager:
         loader = _get_watchlist_loader()
         try:
             pathogens = loader.load_watchlist(watchlist_id)
-        except Exception as e:
-            logger.warning(f"Failed to load watchlist preview for {watchlist_id}: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, yaml.YAMLError, KeyError, ValueError) as e:
+            logger.exception(f"Failed to load watchlist preview for {watchlist_id}: {e}")
             return []
 
         result = []
