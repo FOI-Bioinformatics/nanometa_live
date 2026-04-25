@@ -231,8 +231,8 @@ def estimate_update_interval(
                 if subdir.is_dir():
                     count += len(list(subdir.glob("*.fastq*")))
                     count += len(list(subdir.glob("*.fq*")))
-        except Exception as e:
-            logger.warning(f"Error counting files: {e}")
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logger.exception(f"Error counting files: {e}")
         return count
 
     initial_count = count_fastq_files()
@@ -248,7 +248,7 @@ def estimate_update_interval(
             mod_times.append(f.stat().st_mtime)
         for f in input_path.rglob("*.fq*"):
             mod_times.append(f.stat().st_mtime)
-    except Exception:
+    except (FileNotFoundError, PermissionError, OSError):
         pass
 
     if not mod_times:
@@ -331,7 +331,7 @@ def auto_detect_config(
                     recent_count += 1
                     if recent_count >= 3:
                         break
-        except Exception:
+        except (FileNotFoundError, PermissionError, OSError):
             pass
 
         if recent_count >= 3:
@@ -412,8 +412,8 @@ def detect_file_format(input_directory: str) -> Dict[str, Any]:
 
                 extensions[suffix] = extensions.get(suffix, 0) + 1
                 result["total_files"] += 1
-    except Exception as e:
-        logger.warning(f"Error scanning files: {e}")
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        logger.exception(f"Error scanning files: {e}")
 
     result["formats_found"] = extensions
 

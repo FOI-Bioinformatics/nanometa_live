@@ -211,8 +211,8 @@ class ReportGenerator:
                     "detected": reads > 0,
                 })
 
-        except Exception as e:
-            logger.warning("Could not screen watchlist: %s", e)
+        except (ImportError, AttributeError, KeyError, ValueError, TypeError) as e:
+            logger.exception("Could not screen watchlist: %s", e)
 
         return results
 
@@ -222,8 +222,8 @@ class ReportGenerator:
             from nanometa_live.core.utils.alert_engine import get_alert_engine
             engine = get_alert_engine()
             return [a.to_dict() for a in engine.get_active_alerts()]
-        except Exception as e:
-            logger.warning("Could not collect alerts: %s", e)
+        except (ImportError, AttributeError) as e:
+            logger.exception("Could not collect alerts: %s", e)
             return []
 
     def _get_plotly_js(self) -> str:
@@ -250,7 +250,7 @@ class ReportGenerator:
                     self._plotly_js = candidate.read_text(encoding="utf-8")
                     logger.info("Using local plotly.js from %s", candidate)
                     return self._plotly_js
-        except Exception:
+        except (ImportError, AttributeError, FileNotFoundError, PermissionError, OSError, UnicodeDecodeError):
             pass
 
         # Fallback: use CDN reference (not fully self-contained but functional)
@@ -430,8 +430,8 @@ class ReportGenerator:
                 try:
                     shutil.copytree(src, dst, dirs_exist_ok=True)
                     logger.info("Copied %s to %s", src, dst)
-                except Exception as e:
-                    logger.warning("Could not copy %s: %s", src, e)
+                except (FileNotFoundError, PermissionError, OSError, shutil.Error) as e:
+                    logger.exception("Could not copy %s: %s", src, e)
 
     def _write_metadata(self, output_dir: str, data: Dict[str, Any]):
         """Write summary.json and metadata.json."""

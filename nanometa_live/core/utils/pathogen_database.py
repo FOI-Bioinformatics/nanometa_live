@@ -314,7 +314,7 @@ def reload_database() -> bool:
     try:
         _database = get_pathogen_database(force_reload=True)
         return True
-    except Exception as e:
-        logger.error(f"Failed to reload pathogen database: {e}")
+    except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, KeyError, ValueError, TypeError, AttributeError) as e:
+        logger.exception(f"Failed to reload pathogen database: {e}")
         return False
 

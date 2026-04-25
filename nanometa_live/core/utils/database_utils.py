@@ -7,6 +7,7 @@ This module provides utility functions for downloading and managing Kraken2 data
 import os
 import logging
 import requests
+import subprocess
 import tarfile
 import shutil
 from typing import Optional, Tuple, Dict, Callable
@@ -124,15 +125,15 @@ def download_and_prepare_kraken_database(
             try:
                 os.remove(db_file_name)
                 logging.info(f"Removed downloaded archive {db_file_name} to save space")
-            except Exception as e:
+            except (FileNotFoundError, PermissionError, OSError) as e:
                 # Just log this - not a critical error
                 logging.warning(f"Could not remove downloaded archive {db_file_name}: {str(e)}")
 
         return True, f"Successfully prepared database '{external_db_key}'", db_extract_folder
 
-    except Exception as e:
+    except (FileNotFoundError, PermissionError, OSError, ValueError, RuntimeError) as e:
         error_msg = f"Error preparing Kraken2 database: {str(e)}"
-        logging.error(error_msg)
+        logging.exception(error_msg)
         # Clean up any flag files
         if 'download_flag_file' in locals() and os.path.exists(download_flag_file):
             try:
@@ -273,7 +274,6 @@ def decompress_database(
 
         # Try to use the system tar command first, which often handles large files better
         try:
-            import subprocess
             if progress_callback:
                 progress_callback(60, "Using system tar command for extraction...")
 
@@ -306,8 +306,8 @@ def decompress_database(
             logging.info(f"Successfully extracted {tar_file_path} to {extract_folder}")
             return True
 
-    except Exception as e:
-        logging.error(f"Error extracting file: {str(e)}")
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError, PermissionError, OSError, tarfile.TarError, EOFError) as e:
+        logging.exception(f"Error extracting file: {str(e)}")
         if progress_callback:
             progress_callback(80, f"Error extracting file: {str(e)}")
         return False

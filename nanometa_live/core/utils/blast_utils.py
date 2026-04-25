@@ -106,8 +106,8 @@ def build_blast_databases(
     except subprocess.CalledProcessError as e:
         logging.error(f"Command failed: {e.cmd}. Error: {e.stderr.decode()}")
         return False
-    except Exception as e:
-        logging.error(f"Error building BLAST databases: {e}")
+    except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError, OSError) as e:
+        logging.exception(f"Error building BLAST databases: {e}")
         return False
 
 
@@ -153,8 +153,8 @@ def check_blast_dbs_exist(
 
         return missing_dbs
 
-    except Exception as e:
-        logging.error(f"Error checking BLAST databases: {e}")
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        logging.exception(f"Error checking BLAST databases: {e}")
         return list(str(taxid) for _, taxid in species_to_taxid.items())
 
 
@@ -232,8 +232,8 @@ def run_blast_validation(
     except subprocess.CalledProcessError as e:
         logging.error(f"BLAST command failed: {e.cmd}. Error: {e.stderr.decode()}")
         return False
-    except Exception as e:
-        logging.error(f"Error running BLAST validation: {e}")
+    except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError, OSError) as e:
+        logging.exception(f"Error running BLAST validation: {e}")
         return False
 
 
@@ -269,8 +269,8 @@ def count_validated_reads(blast_result_file: str) -> int:
         logging.info(f"Counted {count} validated reads in {blast_result_file}")
         return count
 
-    except Exception as e:
-        logging.error(f"Error counting validated reads: {e}")
+    except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError) as e:
+        logging.exception(f"Error counting validated reads: {e}")
         return 0
 
 
@@ -313,6 +313,6 @@ def get_blast_validation_summary(
 
         return results
 
-    except Exception as e:
-        logging.error(f"Error generating BLAST validation summary: {e}")
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        logging.exception(f"Error generating BLAST validation summary: {e}")
         return {}

@@ -188,9 +188,6 @@ class ConfigLoader:
         except (FileNotFoundError, PermissionError, OSError) as e:
             logging.error(f"Could not read configuration {config_path}: {e}")
             raise
-        except Exception:
-            logging.exception(f"Unexpected failure loading configuration {config_path}")
-            raise
 
     def _standardize_boolean_params(self, config: Dict[str, Any]) -> None:
         """

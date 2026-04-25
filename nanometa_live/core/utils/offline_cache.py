@@ -501,7 +501,7 @@ class OfflineTaxonomyCache:
                     entry = CacheEntry.from_dict(entry_data)
                     if entry.is_expired():
                         stats["expired_entries"] += 1
-                except Exception:
+                except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
                     pass
 
         stats["cache_size_mb"] = round(stats["cache_size_bytes"] / (1024 * 1024), 2)

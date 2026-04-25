@@ -11,6 +11,7 @@ precedence over built-in watchlists.
 """
 
 import logging
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -149,8 +150,8 @@ class WatchlistLoader:
                     metadata = self._read_metadata(file_path, source)
                     if metadata:
                         discovered[metadata.id] = metadata
-                except Exception as e:
-                    logger.warning(f"Error reading watchlist {file_path}: {e}")
+                except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, yaml.YAMLError) as e:
+                    logger.exception(f"Error reading watchlist {file_path}: {e}")
 
             # Also check for .yml files
             for file_path in search_path.glob("*.yml"):
@@ -161,8 +162,8 @@ class WatchlistLoader:
                     metadata = self._read_metadata(file_path, source)
                     if metadata:
                         discovered[metadata.id] = metadata
-                except Exception as e:
-                    logger.warning(f"Error reading watchlist {file_path}: {e}")
+                except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, yaml.YAMLError) as e:
+                    logger.exception(f"Error reading watchlist {file_path}: {e}")
 
         self._cached_watchlists = discovered
         return list(discovered.values())
@@ -200,8 +201,8 @@ class WatchlistLoader:
                 categories=sorted(categories)
             )
 
-        except Exception as e:
-            logger.error(f"Error reading metadata from {file_path}: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, yaml.YAMLError) as e:
+            logger.exception(f"Error reading metadata from {file_path}: {e}")
             return None
 
     def load_watchlist(self, watchlist_id: str) -> List[WatchlistPathogenEntry]:
@@ -259,13 +260,13 @@ class WatchlistLoader:
                         notes=p_data.get("notes", "")
                     )
                     pathogens.append(entry)
-                except Exception as e:
-                    logger.warning(f"Error parsing pathogen entry: {e}")
+                except (TypeError, ValueError, AttributeError) as e:
+                    logger.exception(f"Error parsing pathogen entry: {e}")
 
             return pathogens
 
-        except Exception as e:
-            logger.error(f"Error loading pathogens from {file_path}: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, yaml.YAMLError) as e:
+            logger.exception(f"Error loading pathogens from {file_path}: {e}")
             return []
 
     def get_builtin_watchlists(self) -> List[WatchlistMetadata]:
@@ -372,7 +373,6 @@ class WatchlistLoader:
         # Copy file
         dest_path = dest_dir / source_path.name
         try:
-            import shutil
             shutil.copy2(source_path, dest_path)
 
             # Clear cache to pick up new file
@@ -380,7 +380,8 @@ class WatchlistLoader:
             self._loaded_pathogens.clear()
 
             return True, f"Imported watchlist to {dest_path}"
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, OSError, shutil.SameFileError) as e:
+            logger.exception(f"Failed to import watchlist: {e}")
             return False, f"Failed to import: {e}"
 
     def create_user_watchlist_dir(self) -> Path:

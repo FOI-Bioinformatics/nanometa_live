@@ -159,7 +159,11 @@ class MobileLabPreparer:
                 method(idx, result, skip_existing)
                 result.stages_completed.append(stage.value)
             except Exception as e:
-                logger.error(f"Stage {stage.value} failed: {e}", exc_info=True)
+                # Top-level stage dispatcher: each _run_<stage> method runs a
+                # different mix of subprocess / network / file I/O work, so
+                # any failure must be captured here and reported to the
+                # operator without aborting non-critical follow-on stages.
+                logger.exception(f"Stage {stage.value} failed: {e}")
                 result.stages_failed.append(stage.value)
                 result.errors.append(f"{STAGE_LABELS[stage]}: {e}")
                 # Critical stages abort; non-critical continue
@@ -284,7 +288,7 @@ class MobileLabPreparer:
             snapshot_path = str(self.home / "cache" / "taxonomy_snapshot.json")
             count = cache.export_snapshot(snapshot_path)
             logger.info(f"Exported {count} taxonomy cache entries")
-        except Exception as e:
+        except (ImportError, AttributeError, FileNotFoundError, PermissionError, OSError, TypeError, ValueError) as e:
             result.warnings.append(f"Taxonomy cache export: {e}")
 
     def _run_check_tools(self, idx: int, result: PreparationResult, skip_existing: bool):
@@ -359,5 +363,5 @@ class MobileLabPreparer:
                     "names_alt": e.names_alt,
                 })
             return result
-        except Exception:
+        except (ImportError, AttributeError):
             return []

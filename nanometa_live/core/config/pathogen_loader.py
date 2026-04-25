@@ -301,8 +301,8 @@ class PathogenDatabase:
             logger.info(f"Loaded {len(self._pathogens)} pathogens into database")
             return True
 
-        except Exception as e:
-            logger.error(f"Failed to load pathogen database: {e}")
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, KeyError, ValueError, TypeError, AttributeError) as e:
+            logger.exception(f"Failed to load pathogen database: {e}")
             self._load_errors.append(str(e))
             return False
 

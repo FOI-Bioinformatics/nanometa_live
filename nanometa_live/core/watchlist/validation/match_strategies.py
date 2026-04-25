@@ -620,8 +620,8 @@ class CompositeMatchStrategy:
                         f"{name} -> {result.matched_name} (score={result.score:.2f})"
                     )
                     return result
-            except Exception as e:
-                logger.warning(f"Strategy {strategy.name} failed: {e}")
+            except (KeyError, ValueError, TypeError, AttributeError, IndexError) as e:
+                logger.exception(f"Strategy {strategy.name} failed: {e}")
                 continue
 
         # Primary name failed -- try alternative names
@@ -652,8 +652,8 @@ class CompositeMatchStrategy:
                                     "query": name,
                                 },
                             )
-                    except Exception as e:
-                        logger.warning(f"Alt name strategy {strategy.name} failed for '{alt_name}': {e}")
+                    except (KeyError, ValueError, TypeError, AttributeError, IndexError) as e:
+                        logger.exception(f"Alt name strategy {strategy.name} failed for '{alt_name}': {e}")
                         continue
 
         # No match found
