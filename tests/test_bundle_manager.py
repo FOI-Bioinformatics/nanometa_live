@@ -11,7 +11,10 @@ import pytest
 
 from nanometa_live.core.workflow.bundle_manager import (
     BundleManager,
+    _ACTIVATE_SCRIPT_FILENAME,
+    _ACTIVATE_SCRIPT_TEMPLATE,
     _BUNDLED_CONDA_CACHE_DIRNAME,
+    _PRE_WARM_SCENARIOS,
     _check_version_compatibility,
     _extract_major_version,
     _file_md5,
@@ -766,3 +769,427 @@ class TestPreWarmEndToEnd:
             "manually with `pytest -m slow tests/test_bundle_manager.py "
             "-k test_real_pre_warm`."
         )
+
+
+class TestExtendedPreWarmScenarios:
+    """Cycle 11: validation_blast, validation_minimap2, fastp_qc scenarios.
+
+    These extend the cycle 9 baseline of four scenarios so the bundled
+    cache covers BLAST, minimap2+samtools, and FASTP envs in addition
+    to the chopper/seqkit/kraken2/multiqc set already covered.
+    """
+
+    def test_seven_scenarios_registered(self):
+        """The pre-warm scenario list now carries exactly seven entries
+        in the order the audit recommended."""
+        names = [s["name"] for s in _PRE_WARM_SCENARIOS]
+        assert names == [
+            "batch_samplesheet",
+            "realtime_multiplex",
+            "realtime_per_file",
+            "realtime_single_sample",
+            "validation_blast",
+            "validation_minimap2",
+            "fastp_qc",
+        ]
+
+    def test_each_scenario_has_required_fields(self):
+        """Every scenario must declare name, params, and comment so the
+        manifest summary and stub invocation have what they need."""
+        for scenario in _PRE_WARM_SCENARIOS:
+            assert "name" in scenario
+            assert "params" in scenario
+            assert "comment" in scenario
+            assert isinstance(scenario["params"], dict)
+            assert scenario["params"]  # non-empty
+            assert isinstance(scenario["comment"], str)
+            assert scenario["comment"].strip()
+
+    def test_validation_blast_params_target_blast_env(self):
+        scenario = next(
+            s for s in _PRE_WARM_SCENARIOS if s["name"] == "validation_blast"
+        )
+        assert scenario["params"].get("run_validation") == "true"
+        assert scenario["params"].get("validation_method") == "blast"
+
+    def test_validation_minimap2_params_target_minimap2_env(self):
+        scenario = next(
+            s for s in _PRE_WARM_SCENARIOS if s["name"] == "validation_minimap2"
+        )
+        assert scenario["params"].get("run_validation") == "true"
+        assert scenario["params"].get("validation_method") == "minimap2"
+
+    def test_fastp_qc_params_target_fastp_env(self):
+        scenario = next(
+            s for s in _PRE_WARM_SCENARIOS if s["name"] == "fastp_qc"
+        )
+        assert scenario["params"].get("qc_tool") == "fastp"
+
+    def test_all_seven_scenarios_attempted(self, tmp_path):
+        """When pre-warm runs, every scenario in the registry is passed
+        to ``_run_pre_warm_scenario`` exactly once."""
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
+
+        attempted: list = []
+
+        def fake_run_scenario(scenario, pipeline_dir, staging, env):
+            attempted.append(scenario["name"])
+            cache_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
+            cache_root.mkdir(parents=True, exist_ok=True)
+            (cache_root / f"env-{scenario['name']}").mkdir(exist_ok=True)
+            return True, "ok"
+
+        mgr = BundleManager()
+        out = tmp_path / "out.tar.gz"
+        with patch.object(mgr, "_run_pre_warm_scenario", side_effect=fake_run_scenario):
+            with patch(
+                "nanometa_live.core.workflow.bundle_manager.shutil.which",
+                return_value="/usr/bin/nextflow",
+            ):
+                mgr.export_bundle(
+                    str(out),
+                    config={"kraken_db": "", "results_output_directory": str(tmp_path)},
+                    nanometa_home=str(home),
+                    pre_warm_conda_envs=True,
+                    pipeline_path=str(pipeline_dir),
+                )
+
+        assert attempted == [
+            "batch_samplesheet",
+            "realtime_multiplex",
+            "realtime_per_file",
+            "realtime_single_sample",
+            "validation_blast",
+            "validation_minimap2",
+            "fastp_qc",
+        ]
+
+        with tarfile.open(str(out), "r:gz") as tar:
+            with tar.extractfile("manifest.json") as fh:
+                manifest = json.loads(fh.read().decode("utf-8"))
+        recorded = manifest["pre_warm_conda_envs"]["scenarios"]
+        for name in attempted:
+            assert name in recorded
+
+    def test_validation_scenario_writes_pathogen_genomes_placeholder(self, tmp_path):
+        """Validation scenarios pass a ``pathogen_genomes`` JSON path to
+        the stub run so nanometanf's startup check does not abort
+        before stub mode fires."""
+        captured_cmds: list = []
+
+        # Patch subprocess.run to capture the constructed command and
+        # short-circuit out without actually launching nextflow.
+        class _FakeResult:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_subprocess_run(cmd, **kwargs):
+            captured_cmds.append(cmd)
+            return _FakeResult()
+
+        scenario = {
+            "name": "validation_blast",
+            "params": {
+                "processing_mode": "batch",
+                "sample_handling": "single_sample",
+                "run_validation": "true",
+                "validation_method": "blast",
+            },
+            "comment": "stub",
+        }
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
+
+        with patch("subprocess.run", side_effect=fake_subprocess_run):
+            ok, msg = BundleManager._run_pre_warm_scenario(
+                scenario=scenario,
+                pipeline_dir=pipeline_dir,
+                staging=staging,
+                env={"NXF_CONDA_CACHEDIR": str(staging / "conda_cache")},
+            )
+
+        assert ok is True
+        assert captured_cmds, "subprocess.run should have been invoked once"
+        cmd = captured_cmds[0]
+        assert "--pathogen_genomes" in cmd
+        idx = cmd.index("--pathogen_genomes")
+        placeholder_path = Path(cmd[idx + 1])
+        assert placeholder_path.exists()
+        payload = json.loads(placeholder_path.read_text())
+        assert payload == {"pathogens": []}
+
+    def test_fastp_scenario_does_not_write_pathogen_genomes(self, tmp_path):
+        """Non-validation scenarios should not gain a pathogen_genomes
+        argument; that placeholder is only required when run_validation
+        is enabled."""
+        captured_cmds: list = []
+
+        class _FakeResult:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_subprocess_run(cmd, **kwargs):
+            captured_cmds.append(cmd)
+            return _FakeResult()
+
+        scenario = {
+            "name": "fastp_qc",
+            "params": {
+                "processing_mode": "batch",
+                "sample_handling": "single_sample",
+                "qc_tool": "fastp",
+            },
+            "comment": "stub",
+        }
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
+
+        with patch("subprocess.run", side_effect=fake_subprocess_run):
+            ok, _ = BundleManager._run_pre_warm_scenario(
+                scenario=scenario,
+                pipeline_dir=pipeline_dir,
+                staging=staging,
+                env={"NXF_CONDA_CACHEDIR": str(staging / "conda_cache")},
+            )
+
+        assert ok is True
+        cmd = captured_cmds[0]
+        assert "--pathogen_genomes" not in cmd
+        # The fastp-specific param must still reach the stub call.
+        assert "--qc_tool" in cmd
+        idx = cmd.index("--qc_tool")
+        assert cmd[idx + 1] == "fastp"
+
+
+class TestActivateOfflineEnvsScript:
+    """Cycle 11: bundles ship a thin activation helper that the
+    operator sources to set NXF_CONDA_CACHEDIR after import.
+    """
+
+    def test_repo_script_has_valid_bash_syntax(self):
+        """The script under scripts/activate_offline_envs.sh must be
+        syntactically valid bash. ``bash -n`` parses without executing.
+        """
+        import subprocess
+
+        repo_root = Path(__file__).resolve().parent.parent
+        script_path = repo_root / "scripts" / _ACTIVATE_SCRIPT_FILENAME
+        assert script_path.exists(), (
+            f"Expected activation script at {script_path}"
+        )
+
+        result = subprocess.run(
+            ["bash", "-n", str(script_path)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, (
+            f"bash -n failed: {result.stderr}"
+        )
+
+    def test_activate_script_template_renders_to_valid_bash(self, tmp_path):
+        """The string template embedded in bundle_manager renders to
+        bash that parses cleanly. Renders with the cache dirname token
+        to mirror what export_bundle writes into the staging area.
+        """
+        import subprocess
+
+        rendered = _ACTIVATE_SCRIPT_TEMPLATE.format(
+            cache_dirname=_BUNDLED_CONDA_CACHE_DIRNAME,
+        )
+        script_path = tmp_path / _ACTIVATE_SCRIPT_FILENAME
+        script_path.write_text(rendered)
+
+        result = subprocess.run(
+            ["bash", "-n", str(script_path)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, (
+            f"Rendered template did not parse: {result.stderr}"
+        )
+
+    def test_activate_script_template_exports_required_vars(self):
+        rendered = _ACTIVATE_SCRIPT_TEMPLATE.format(
+            cache_dirname=_BUNDLED_CONDA_CACHE_DIRNAME,
+        )
+        assert "export NXF_CONDA_CACHEDIR=" in rendered
+        assert "NXF_OFFLINE" in rendered
+        assert "set -euo pipefail" in rendered
+
+    def test_export_bundle_writes_activation_script_when_pre_warm_succeeds(
+        self, tmp_path
+    ):
+        """When pre-warm produces a cache, the bundle archive must
+        contain ``activate_offline_envs.sh`` at the top level.
+        """
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
+
+        def fake_run_scenario(scenario, pipeline_dir, staging, env):
+            cache_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
+            cache_root.mkdir(parents=True, exist_ok=True)
+            (cache_root / "env-deadbeef").mkdir(exist_ok=True)
+            (cache_root / "env-deadbeef" / "marker").write_text("ok")
+            return True, "ok"
+
+        mgr = BundleManager()
+        out = tmp_path / "out.tar.gz"
+        with patch.object(mgr, "_run_pre_warm_scenario", side_effect=fake_run_scenario):
+            with patch(
+                "nanometa_live.core.workflow.bundle_manager.shutil.which",
+                return_value="/usr/bin/nextflow",
+            ):
+                mgr.export_bundle(
+                    str(out),
+                    config={"kraken_db": "", "results_output_directory": str(tmp_path)},
+                    nanometa_home=str(home),
+                    pre_warm_conda_envs=True,
+                    pipeline_path=str(pipeline_dir),
+                )
+
+        with tarfile.open(str(out), "r:gz") as tar:
+            names = tar.getnames()
+            with tar.extractfile(_ACTIVATE_SCRIPT_FILENAME) as fh:
+                content = fh.read().decode("utf-8")
+
+        assert _ACTIVATE_SCRIPT_FILENAME in names
+        assert "export NXF_CONDA_CACHEDIR=" in content
+
+        # Activation script must also be checksummed in the manifest so
+        # import-time validation catches archive corruption.
+        with tarfile.open(str(out), "r:gz") as tar:
+            with tar.extractfile("manifest.json") as fh:
+                manifest = json.loads(fh.read().decode("utf-8"))
+        assert _ACTIVATE_SCRIPT_FILENAME in manifest["checksums"]
+
+    def test_export_bundle_omits_activation_script_when_pre_warm_skipped(
+        self, tmp_path
+    ):
+        """A bundle built without pre-warm has nothing to activate, so
+        the helper script should not appear in the archive."""
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        out = tmp_path / "out.tar.gz"
+        mgr = BundleManager()
+        mgr.export_bundle(
+            str(out),
+            config={"kraken_db": "", "results_output_directory": str(tmp_path)},
+            nanometa_home=str(home),
+        )
+
+        with tarfile.open(str(out), "r:gz") as tar:
+            names = tar.getnames()
+        assert _ACTIVATE_SCRIPT_FILENAME not in names
+
+    def test_import_bundle_restores_activation_script_to_home(self, tmp_path):
+        """After import the helper sits in the install dir and the
+        result dict surfaces its absolute path so the operator can
+        copy/paste a single source command."""
+        home = tmp_path / "build_home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
+
+        def fake_run_scenario(scenario, pipeline_dir, staging, env):
+            cache_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
+            cache_root.mkdir(parents=True, exist_ok=True)
+            env_dir = cache_root / "env-feedface"
+            env_dir.mkdir(exist_ok=True)
+            (env_dir / "marker").write_text("ok")
+            return True, "ok"
+
+        mgr = BundleManager()
+        bundle_path = tmp_path / "bundle.tar.gz"
+        with patch.object(mgr, "_run_pre_warm_scenario", side_effect=fake_run_scenario):
+            with patch(
+                "nanometa_live.core.workflow.bundle_manager.shutil.which",
+                return_value="/usr/bin/nextflow",
+            ):
+                mgr.export_bundle(
+                    str(bundle_path),
+                    config={"kraken_db": "", "results_output_directory": str(tmp_path)},
+                    nanometa_home=str(home),
+                    pre_warm_conda_envs=True,
+                    pipeline_path=str(pipeline_dir),
+                )
+
+        field = tmp_path / "field_home"
+        field.mkdir()
+        result = mgr.import_bundle(
+            str(bundle_path),
+            kraken_db_path="",
+            nanometa_home=str(field),
+        )
+
+        assert result["success"] is True
+        installed_script = field / _ACTIVATE_SCRIPT_FILENAME
+        assert installed_script.exists()
+        # Result dict surfaces the absolute path for operator reference.
+        assert result.get("activation_script") == str(installed_script)
+        # The script must remain syntactically valid after relocation.
+        import subprocess
+        check = subprocess.run(
+            ["bash", "-n", str(installed_script)],
+            capture_output=True,
+            text=True,
+        )
+        assert check.returncode == 0, (
+            f"Installed script must parse: {check.stderr}"
+        )
+
+    def test_readme_points_to_activation_script(self, tmp_path):
+        """The README must instruct the operator to source the helper,
+        not just to export NXF_CONDA_CACHEDIR by hand."""
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
+
+        def fake_run_scenario(scenario, pipeline_dir, staging, env):
+            cache_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
+            cache_root.mkdir(parents=True, exist_ok=True)
+            (cache_root / "env-marker").mkdir(exist_ok=True)
+            (cache_root / "env-marker" / "ok").write_text("ok")
+            return True, "ok"
+
+        mgr = BundleManager()
+        out = tmp_path / "out.tar.gz"
+        with patch.object(mgr, "_run_pre_warm_scenario", side_effect=fake_run_scenario):
+            with patch(
+                "nanometa_live.core.workflow.bundle_manager.shutil.which",
+                return_value="/usr/bin/nextflow",
+            ):
+                mgr.export_bundle(
+                    str(out),
+                    config={"kraken_db": "", "results_output_directory": str(tmp_path)},
+                    nanometa_home=str(home),
+                    pre_warm_conda_envs=True,
+                    pipeline_path=str(pipeline_dir),
+                )
+
+        with tarfile.open(str(out), "r:gz") as tar:
+            with tar.extractfile("README_FIELD.md") as fh:
+                readme = fh.read().decode("utf-8")
+
+        assert "source ./activate_offline_envs.sh" in readme
