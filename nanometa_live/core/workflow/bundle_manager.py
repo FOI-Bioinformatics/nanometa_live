@@ -42,16 +42,57 @@ Bundle version: {version}
    - Path to the Kraken2 database on this machine
 4. The application will automatically enter offline mode.
 
+## First-time machine setup (when an outer install bundle accompanies this archive)
+
+If this archive is paired with a conda-packed environment tarball
+(commonly named ``conda_envs/nf-core.tar.gz``), restore it on the field
+machine before launching Nanometa Live. Note that the ``conda-unpack``
+binary is not on PATH until the tarball is extracted, so it must be
+invoked from the extracted prefix directly:
+
+    mkdir -p ~/miniforge3/envs/nf-core
+    tar -xzf conda_envs/nf-core.tar.gz -C ~/miniforge3/envs/nf-core
+    ~/miniforge3/envs/nf-core/bin/conda-unpack
+
+This relinks the environment to its new prefix and removes the
+build-machine paths.
+
+## NXF_CONDA_CACHEDIR (Nextflow per-process conda envs)
+
+Nextflow's conda profile creates a separate environment for every
+process module on first use. These environments are NOT the same as
+the monolithic ``nf-core`` environment above; they are hashed from
+each module's ``environment.yml`` and live under
+``${{NXF_CONDA_CACHEDIR}}`` (default: ``work/conda``).
+
+For an offline run the field machine must have these per-process envs
+already present, otherwise Nextflow will try to resolve packages from
+bioconda/conda-forge and fail. The recommended workflow is:
+
+1. On the build machine (online), run every scenario you intend to use
+   on the field machine at least once with ``pipeline_profile: conda``.
+   This populates ``~/.nanometa/work/conda/`` with all required envs.
+2. Include that directory in the deployment package transferred to the
+   field machine (typically alongside this bundle).
+3. On the field machine, point Nextflow at the unpacked cache before
+   launching Nanometa Live:
+
+       export NXF_CONDA_CACHEDIR=/path/to/unpacked/conda_cache
+
+Without this, the first realtime or validation run on a fresh field
+machine will require network access to create the missing envs.
+
 ## Contents
 
-- genomes/       Reference genome FASTA files
-- blast/         Pre-built BLAST databases
-- mappings/      Taxid mapping files
-- cache/         Taxonomy cache (GTDB + NCBI snapshots)
-- watchlists/    Watchlist YAML configurations
-- containers/    Container images (if included)
-- config.yaml    Application configuration snapshot
-- manifest.json  Bundle manifest with checksums
+- genomes/                       Reference genome FASTA files
+- blast/                         Pre-built BLAST databases
+- mappings/                      Taxid mapping files
+- cache/                         Taxonomy cache (GTDB + NCBI snapshots)
+- watchlists/                    Watchlist YAML configurations
+- containers/                    Container images (if included)
+- watchlist_toggle_state.yaml    Per-entry enable/disable selections
+- config.yaml                    Application configuration snapshot
+- manifest.json                  Bundle manifest with checksums
 
 ## Notes
 
@@ -60,6 +101,9 @@ Bundle version: {version}
 - Container images ({container_runtime}) are included if they were
   cached during preparation.
 - Tool versions used during preparation are recorded in manifest.json.
+- Build-time tools such as ``conda-pack`` and ``datasets`` are not
+  required at runtime; if a version warning lists them as missing
+  locally that is informational only.
 """
 
 
@@ -586,6 +630,13 @@ def _extract_major_version(version_str: str) -> Optional[str]:
     return None
 
 
+# Tools that are only used during bundle preparation on the build machine.
+# Their absence on the field machine is expected and is not a problem at
+# runtime. Version-compatibility warnings for these tools are reported as
+# informational rather than as a missing-tool warning.
+_BUILD_ONLY_TOOLS = frozenset({"conda-pack", "datasets"})
+
+
 def _check_version_compatibility(
     bundle_versions: Dict[str, str],
     local_versions: Dict[str, str],
@@ -593,6 +644,9 @@ def _check_version_compatibility(
     """Compare bundle tool versions against local installations.
 
     Returns a list of warning strings for major version mismatches.
+    Build-only tools (e.g. conda-pack, NCBI datasets) that are absent
+    on the field machine produce an informational note instead of a
+    missing-tool warning, since they are not used at runtime.
     """
     warnings = []
     for tool, bundle_ver in bundle_versions.items():
@@ -602,10 +656,17 @@ def _check_version_compatibility(
         if bundle_ver in ("not found", "unknown", "error"):
             continue
         if local_ver in ("not found", "unknown", "error"):
-            warnings.append(
-                f"Tool '{tool}' was {bundle_ver} in bundle but is "
-                f"{local_ver} locally."
-            )
+            if tool in _BUILD_ONLY_TOOLS:
+                warnings.append(
+                    f"Note: build-only tool '{tool}' is not present "
+                    "on this machine; this is expected for offline "
+                    "deployments and is not a runtime requirement."
+                )
+            else:
+                warnings.append(
+                    f"Tool '{tool}' was {bundle_ver} in bundle but is "
+                    f"{local_ver} locally."
+                )
             continue
 
         bundle_major = _extract_major_version(bundle_ver)

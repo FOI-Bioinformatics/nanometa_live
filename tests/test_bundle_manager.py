@@ -363,3 +363,94 @@ class TestWatchlistToggleStateRoundTrip:
         )
         assert result["success"] is True
         assert not (field_home / "watchlist_toggle_state.yaml").exists()
+
+
+class TestReadmeFieldGuidance:
+    """GAP-5/GAP-7: README must surface conda-unpack and NXF_CONDA_CACHEDIR.
+
+    These two pieces of operator guidance were missing from the bundle's
+    README, leading to a confusing first-time setup on the field machine.
+    """
+
+    def test_export_bundle_readme_documents_conda_unpack(self, tmp_path):
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        out = tmp_path / "out.tar.gz"
+        mgr = BundleManager()
+        mgr.export_bundle(
+            str(out),
+            config={"kraken_db": "", "results_output_directory": str(tmp_path)},
+            nanometa_home=str(home),
+        )
+
+        with tarfile.open(str(out), "r:gz") as tar:
+            with tar.extractfile("README_FIELD.md") as fh:
+                readme = fh.read().decode("utf-8")
+
+        # GAP-5: conda-unpack invocation should reference the extracted
+        # binary path, not "conda run -n nf-core conda-unpack".
+        assert "bin/conda-unpack" in readme
+        assert "conda run -n nf-core conda-unpack" not in readme
+
+    def test_export_bundle_readme_documents_nxf_conda_cachedir(self, tmp_path):
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        out = tmp_path / "out.tar.gz"
+        mgr = BundleManager()
+        mgr.export_bundle(
+            str(out),
+            config={"kraken_db": "", "results_output_directory": str(tmp_path)},
+            nanometa_home=str(home),
+        )
+
+        with tarfile.open(str(out), "r:gz") as tar:
+            with tar.extractfile("README_FIELD.md") as fh:
+                readme = fh.read().decode("utf-8")
+
+        # GAP-7: NXF_CONDA_CACHEDIR must be documented.
+        assert "NXF_CONDA_CACHEDIR" in readme
+
+
+class TestBuildOnlyToolWarnings:
+    """GAP-6: warnings for build-only tools should be informational, not errors.
+
+    conda-pack and NCBI datasets are only used during bundle preparation
+    on the build machine. Their absence on the field machine is expected
+    and should not be flagged as a missing runtime dependency.
+    """
+
+    def test_conda_pack_missing_locally_is_informational(self):
+        bundle = {"conda-pack": "0.7.1", "nextflow": "25.10.4"}
+        local = {"conda-pack": "not found", "nextflow": "25.10.4"}
+        warnings = _check_version_compatibility(bundle, local)
+        # Exactly one warning, and it should be marked informational.
+        conda_pack_warnings = [w for w in warnings if "conda-pack" in w]
+        assert len(conda_pack_warnings) == 1
+        msg = conda_pack_warnings[0].lower()
+        assert "build-only" in msg or "expected" in msg
+        # The legacy phrasing must not surface for build-only tools.
+        assert "was 0.7.1 in bundle but is not found locally" not in conda_pack_warnings[0]
+
+    def test_datasets_missing_locally_is_informational(self):
+        bundle = {"datasets": "16.0.0"}
+        local = {"datasets": "not found"}
+        warnings = _check_version_compatibility(bundle, local)
+        assert len(warnings) == 1
+        assert "datasets" in warnings[0]
+        msg = warnings[0].lower()
+        assert "build-only" in msg or "expected" in msg
+
+    def test_runtime_tool_missing_locally_still_warns_strongly(self):
+        bundle = {"kraken2": "2.1.3"}
+        local = {"kraken2": "not found"}
+        warnings = _check_version_compatibility(bundle, local)
+        # Runtime tools must keep the original strict warning shape.
+        assert len(warnings) == 1
+        assert "kraken2" in warnings[0]
+        assert "build-only" not in warnings[0].lower()
