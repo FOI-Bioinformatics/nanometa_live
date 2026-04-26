@@ -31,6 +31,49 @@ _HOME_PLACEHOLDER = "${NANOMETA_HOME}"
 # extracted location of this directory on the field machine.
 _BUNDLED_CONDA_CACHE_DIRNAME = "conda_cache"
 
+# Filename of the operator-sourced activation helper that exports
+# NXF_CONDA_CACHEDIR. The same content is shipped both in the repo at
+# scripts/activate_offline_envs.sh and embedded into every bundle that
+# carries a pre-warmed cache, so the field machine never depends on the
+# build-host repo layout.
+_ACTIVATE_SCRIPT_FILENAME = "activate_offline_envs.sh"
+
+_ACTIVATE_SCRIPT_TEMPLATE = """#!/usr/bin/env bash
+# Activate Nextflow's pre-warmed per-process conda cache shipped with a
+# Nanometa Live offline bundle.
+#
+# Usage:
+#     source ./activate_offline_envs.sh
+#
+# The script auto-detects the bundle install directory from its own
+# location, exports NXF_CONDA_CACHEDIR to the bundled cache directory,
+# and prints a single-line ready message. Source this from the
+# operator's shell before launching Nanometa Live.
+
+set -euo pipefail
+
+if [ -n "${{BASH_SOURCE[0]:-}}" ]; then
+    _script_path="${{BASH_SOURCE[0]}}"
+else
+    _script_path="$0"
+fi
+_install_dir="$(cd "$(dirname "${{_script_path}}")" && pwd)"
+
+if [ -d "${{_install_dir}}/{cache_dirname}" ]; then
+    _cache_dir="${{_install_dir}}/{cache_dirname}"
+elif [ -d "${{_install_dir}}/../{cache_dirname}" ]; then
+    _cache_dir="$(cd "${{_install_dir}}/.." && pwd)/{cache_dirname}"
+else
+    echo "activate_offline_envs.sh: {cache_dirname} directory not found near ${{_install_dir}}" >&2
+    return 1 2>/dev/null || exit 1
+fi
+
+export NXF_CONDA_CACHEDIR="${{_cache_dir}}"
+export NXF_OFFLINE="${{NXF_OFFLINE:-true}}"
+
+echo "Nanometa Live offline envs ready: NXF_CONDA_CACHEDIR=${{NXF_CONDA_CACHEDIR}}"
+"""
+
 # Pipeline scenarios used to drive Nextflow's stub mode during the
 # pre-warm step. Each scenario corresponds to a sample-handling mode
 # the field operator may run; together they cover every per-process
@@ -42,6 +85,10 @@ _PRE_WARM_SCENARIOS = [
             "processing_mode": "batch",
             "sample_handling": "single_sample",
         },
+        "comment": (
+            "Default batch path with chopper QC. Covers chopper, seqkit, "
+            "nanoplot, kraken2, taxpasta, multiqc, manifest writers."
+        ),
     },
     {
         "name": "realtime_multiplex",
@@ -49,6 +96,10 @@ _PRE_WARM_SCENARIOS = [
             "processing_mode": "realtime",
             "sample_handling": "by_barcode",
         },
+        "comment": (
+            "Realtime watchPath barcode mode; same env set as batch "
+            "plus the realtime-only kraken2 incremental classifier."
+        ),
     },
     {
         "name": "realtime_per_file",
@@ -56,6 +107,7 @@ _PRE_WARM_SCENARIOS = [
             "processing_mode": "realtime",
             "sample_handling": "per_file",
         },
+        "comment": "Realtime per-file fan-out; reuses realtime envs.",
     },
     {
         "name": "realtime_single_sample",
@@ -63,6 +115,47 @@ _PRE_WARM_SCENARIOS = [
             "processing_mode": "realtime",
             "sample_handling": "single_sample",
         },
+        "comment": "Realtime single-sample aggregation path.",
+    },
+    {
+        "name": "validation_blast",
+        "params": {
+            "processing_mode": "batch",
+            "sample_handling": "single_sample",
+            "run_validation": "true",
+            "validation_method": "blast",
+            "skip_kraken2": "false",
+        },
+        "comment": (
+            "Triggers BLASTN_VALIDATION, BLAST_MAKEBLASTDB, and "
+            "EXTRACT_READS_BY_TAXID envs; required for offline pathogen "
+            "confirmation."
+        ),
+    },
+    {
+        "name": "validation_minimap2",
+        "params": {
+            "processing_mode": "batch",
+            "sample_handling": "single_sample",
+            "run_validation": "true",
+            "validation_method": "minimap2",
+        },
+        "comment": (
+            "Triggers MINIMAP2_ALIGNMENT_VALIDATION and the samtools env "
+            "used for alignment post-processing."
+        ),
+    },
+    {
+        "name": "fastp_qc",
+        "params": {
+            "processing_mode": "batch",
+            "sample_handling": "single_sample",
+            "qc_tool": "fastp",
+        },
+        "comment": (
+            "Switches QC tool from chopper to fastp; covers FASTP and "
+            "FASTP_STREAMING envs that the default chopper path skips."
+        ),
     },
 ]
 
@@ -97,13 +190,20 @@ After ``import_bundle`` the cache lives at::
 
     {{NANOMETA_HOME}}/{conda_cache_dirname}
 
-To make Nextflow use it, export ``NXF_CONDA_CACHEDIR`` before
-launching Nanometa Live::
+The helper script ``activate_offline_envs.sh`` (installed
+alongside the cache by ``import_bundle``) does the export for
+you. From the install directory, run::
+
+    source ./activate_offline_envs.sh
+
+That sets ``NXF_CONDA_CACHEDIR`` to the bundled cache and
+``NXF_OFFLINE=true`` so Nextflow does not try to refresh itself
+on a network-restricted field machine. As a manual fallback the
+same effect is::
 
     export NXF_CONDA_CACHEDIR=$HOME/.nanometa/{conda_cache_dirname}
 
-The helper script ``scripts/activate_offline_envs.sh`` (if
-present) does this for you. Pre-warmed scenarios cover:
+Pre-warmed scenarios cover:
 {scenario_summary}
 
 Note: the pre-warmed envs are pinned to the exact module
@@ -338,6 +438,18 @@ class BundleManager:
                         if f.is_file():
                             rel = f.relative_to(staging)
                             manifest["checksums"][str(rel)] = _file_md5(f)
+                    # Embed the operator activation script next to the
+                    # cache so the imported bundle is self-contained.
+                    script_path = staging / _ACTIVATE_SCRIPT_FILENAME
+                    script_path.write_text(
+                        _ACTIVATE_SCRIPT_TEMPLATE.format(
+                            cache_dirname=_BUNDLED_CONDA_CACHE_DIRNAME,
+                        )
+                    )
+                    script_path.chmod(0o755)
+                    manifest["checksums"][_ACTIVATE_SCRIPT_FILENAME] = _file_md5(
+                        script_path
+                    )
             manifest["pre_warm_conda_envs"] = pre_warm_result
 
             # Generate README. The conda-cache section depends on
@@ -579,6 +691,20 @@ class BundleManager:
                     "launching Nanometa Live."
                 )
 
+            # Restore the operator activation script next to the cache
+            # so the operator can ``source ./activate_offline_envs.sh``
+            # without hunting for the build-host repo.
+            script_src = tmp / _ACTIVATE_SCRIPT_FILENAME
+            if script_src.exists():
+                script_dst = home / _ACTIVATE_SCRIPT_FILENAME
+                shutil.copy2(script_src, script_dst)
+                script_dst.chmod(0o755)
+                result["activation_script"] = str(script_dst)
+                logger.info(
+                    f"Wrote activation helper to {script_dst}; run "
+                    f"`source {script_dst}` before launching Nanometa Live."
+                )
+
             # Auto-set offline_mode in config
             config_path = home / "config.yaml"
             if config_path.exists():
@@ -754,6 +880,19 @@ class BundleManager:
         )
 
         scenario_params: Dict[str, Any] = dict(scenario.get("params", {}))
+
+        # Validation scenarios trigger nanometanf's pathogen_genomes check
+        # at pipeline startup. Stub mode still runs that check, so write a
+        # minimal placeholder JSON if the scenario opts into validation
+        # without supplying its own pathogen_genomes path.
+        if (
+            str(scenario_params.get("run_validation", "")).lower() == "true"
+            and "pathogen_genomes" not in scenario_params
+        ):
+            placeholder = scenario_dir / "pathogen_genomes.json"
+            placeholder.write_text(json.dumps({"pathogens": []}))
+            scenario_params["pathogen_genomes"] = str(placeholder)
+
         cmd = [
             "nextflow", "run", str(pipeline_dir / "main.nf"),
             "-stub",
