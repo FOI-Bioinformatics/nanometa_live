@@ -42,16 +42,57 @@ Bundle version: {version}
    - Path to the Kraken2 database on this machine
 4. The application will automatically enter offline mode.
 
+## First-time machine setup (when an outer install bundle accompanies this archive)
+
+If this archive is paired with a conda-packed environment tarball
+(commonly named ``conda_envs/nf-core.tar.gz``), restore it on the field
+machine before launching Nanometa Live. Note that the ``conda-unpack``
+binary is not on PATH until the tarball is extracted, so it must be
+invoked from the extracted prefix directly:
+
+    mkdir -p ~/miniforge3/envs/nf-core
+    tar -xzf conda_envs/nf-core.tar.gz -C ~/miniforge3/envs/nf-core
+    ~/miniforge3/envs/nf-core/bin/conda-unpack
+
+This relinks the environment to its new prefix and removes the
+build-machine paths.
+
+## NXF_CONDA_CACHEDIR (Nextflow per-process conda envs)
+
+Nextflow's conda profile creates a separate environment for every
+process module on first use. These environments are NOT the same as
+the monolithic ``nf-core`` environment above; they are hashed from
+each module's ``environment.yml`` and live under
+``${{NXF_CONDA_CACHEDIR}}`` (default: ``work/conda``).
+
+For an offline run the field machine must have these per-process envs
+already present, otherwise Nextflow will try to resolve packages from
+bioconda/conda-forge and fail. The recommended workflow is:
+
+1. On the build machine (online), run every scenario you intend to use
+   on the field machine at least once with ``pipeline_profile: conda``.
+   This populates ``~/.nanometa/work/conda/`` with all required envs.
+2. Include that directory in the deployment package transferred to the
+   field machine (typically alongside this bundle).
+3. On the field machine, point Nextflow at the unpacked cache before
+   launching Nanometa Live:
+
+       export NXF_CONDA_CACHEDIR=/path/to/unpacked/conda_cache
+
+Without this, the first realtime or validation run on a fresh field
+machine will require network access to create the missing envs.
+
 ## Contents
 
-- genomes/       Reference genome FASTA files
-- blast/         Pre-built BLAST databases
-- mappings/      Taxid mapping files
-- cache/         Taxonomy cache (GTDB + NCBI snapshots)
-- watchlists/    Watchlist YAML configurations
-- containers/    Container images (if included)
-- config.yaml    Application configuration snapshot
-- manifest.json  Bundle manifest with checksums
+- genomes/                       Reference genome FASTA files
+- blast/                         Pre-built BLAST databases
+- mappings/                      Taxid mapping files
+- cache/                         Taxonomy cache (GTDB + NCBI snapshots)
+- watchlists/                    Watchlist YAML configurations
+- containers/                    Container images (if included)
+- watchlist_toggle_state.yaml    Per-entry enable/disable selections
+- config.yaml                    Application configuration snapshot
+- manifest.json                  Bundle manifest with checksums
 
 ## Notes
 
@@ -60,6 +101,9 @@ Bundle version: {version}
 - Container images ({container_runtime}) are included if they were
   cached during preparation.
 - Tool versions used during preparation are recorded in manifest.json.
+- Build-time tools such as ``conda-pack`` and ``datasets`` are not
+  required at runtime; if a version warning lists them as missing
+  locally that is informational only.
 """
 
 
@@ -166,6 +210,17 @@ class BundleManager:
                 meta_dst = staging / "genome_metadata.json"
                 _template_paths(meta_src, meta_dst, str(home), _HOME_PLACEHOLDER)
                 manifest["checksums"]["genome_metadata.json"] = _file_md5(meta_dst)
+
+            # Copy per-entry watchlist toggle state so the field machine
+            # restores the operator's enable/disable selections instead of
+            # falling back to defaults. Older bundles may lack this file.
+            toggle_src = home / "watchlist_toggle_state.yaml"
+            if toggle_src.exists():
+                toggle_dst = staging / "watchlist_toggle_state.yaml"
+                shutil.copy2(toggle_src, toggle_dst)
+                manifest["checksums"]["watchlist_toggle_state.yaml"] = _file_md5(
+                    toggle_dst
+                )
 
             # Save config (with kraken_db as placeholder)
             from nanometa_live.core.config.config_loader import ConfigLoader
@@ -344,6 +399,17 @@ class BundleManager:
                     _HOME_PLACEHOLDER, str(home)
                 )
 
+            # Restore per-entry watchlist toggle state if the bundle
+            # carries one. Older bundles predate this file, so absence
+            # is silently tolerated.
+            toggle_src = tmp / "watchlist_toggle_state.yaml"
+            if toggle_src.exists():
+                toggle_dst = home / "watchlist_toggle_state.yaml"
+                shutil.copy2(toggle_src, toggle_dst)
+                logger.info(
+                    "Imported watchlist_toggle_state.yaml from bundle"
+                )
+
             # Import taxonomy snapshot
             taxonomy_snapshot = tmp / "cache" / "taxonomy_snapshot.json"
             if not taxonomy_snapshot.exists():
@@ -413,11 +479,21 @@ class BundleManager:
         return None
 
     def _copy_builtin_watchlists(self, dst_dir: Path) -> None:
-        """Copy built-in watchlist YAMLs to the bundle."""
-        try:
-            from nanometa_live.core.config.data import watchlists as wl_pkg
+        """Copy built-in watchlist YAMLs to the bundle.
 
-            wl_path = Path(wl_pkg.__file__).parent
+        Resolves the source directory via importlib.resources so the lookup
+        works under both regular and editable installs. Editable installs
+        produce a namespace package whose __file__ attribute is None, which
+        breaks the legacy Path(wl_pkg.__file__).parent approach.
+        """
+        try:
+            wl_path = _resolve_builtin_watchlist_dir()
+            if wl_path is None or not wl_path.is_dir():
+                logger.debug(
+                    "Built-in watchlist directory not found; skipping copy."
+                )
+                return
+
             dst_dir.mkdir(parents=True, exist_ok=True)
 
             for yaml_file in wl_path.glob("*.yaml"):
@@ -454,6 +530,50 @@ class BundleManager:
             logger.warning(f"Error loading container images: {e}")
 
         return loaded
+
+
+def _resolve_builtin_watchlist_dir() -> Optional[Path]:
+    """Locate the built-in watchlist directory in a way that survives editable installs.
+
+    Editable installs expose ``nanometa_live.core.config.data.watchlists`` as a
+    namespace package whose ``__file__`` attribute is ``None``. The previous
+    implementation called ``Path(pkg.__file__).parent`` and crashed with
+    TypeError. The lookup now prefers ``importlib.resources.files`` and falls
+    back to the package's ``__path__`` entries.
+    """
+    import importlib
+    import importlib.resources as pkg_resources
+
+    pkg_name = "nanometa_live.core.config.data.watchlists"
+
+    try:
+        ref = pkg_resources.files(pkg_name)
+    except (ModuleNotFoundError, AttributeError, TypeError):
+        ref = None
+
+    if ref is not None:
+        try:
+            candidate = Path(str(ref))
+            if candidate.is_dir():
+                return candidate
+        except (TypeError, OSError):
+            pass
+
+    try:
+        wl_pkg = importlib.import_module(pkg_name)
+    except ImportError:
+        return None
+
+    for raw_path in getattr(wl_pkg, "__path__", []) or []:
+        candidate = Path(raw_path)
+        if candidate.is_dir():
+            return candidate
+
+    file_attr = getattr(wl_pkg, "__file__", None)
+    if file_attr:
+        return Path(file_attr).parent
+
+    return None
 
 
 def _file_md5(path: Path) -> str:
@@ -510,6 +630,13 @@ def _extract_major_version(version_str: str) -> Optional[str]:
     return None
 
 
+# Tools that are only used during bundle preparation on the build machine.
+# Their absence on the field machine is expected and is not a problem at
+# runtime. Version-compatibility warnings for these tools are reported as
+# informational rather than as a missing-tool warning.
+_BUILD_ONLY_TOOLS = frozenset({"conda-pack", "datasets"})
+
+
 def _check_version_compatibility(
     bundle_versions: Dict[str, str],
     local_versions: Dict[str, str],
@@ -517,6 +644,9 @@ def _check_version_compatibility(
     """Compare bundle tool versions against local installations.
 
     Returns a list of warning strings for major version mismatches.
+    Build-only tools (e.g. conda-pack, NCBI datasets) that are absent
+    on the field machine produce an informational note instead of a
+    missing-tool warning, since they are not used at runtime.
     """
     warnings = []
     for tool, bundle_ver in bundle_versions.items():
@@ -526,10 +656,17 @@ def _check_version_compatibility(
         if bundle_ver in ("not found", "unknown", "error"):
             continue
         if local_ver in ("not found", "unknown", "error"):
-            warnings.append(
-                f"Tool '{tool}' was {bundle_ver} in bundle but is "
-                f"{local_ver} locally."
-            )
+            if tool in _BUILD_ONLY_TOOLS:
+                warnings.append(
+                    f"Note: build-only tool '{tool}' is not present "
+                    "on this machine; this is expected for offline "
+                    "deployments and is not a runtime requirement."
+                )
+            else:
+                warnings.append(
+                    f"Tool '{tool}' was {bundle_ver} in bundle but is "
+                    f"{local_ver} locally."
+                )
             continue
 
         bundle_major = _extract_major_version(bundle_ver)
