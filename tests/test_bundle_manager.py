@@ -14,6 +14,7 @@ from nanometa_live.core.workflow.bundle_manager import (
     _check_version_compatibility,
     _extract_major_version,
     _file_md5,
+    _resolve_builtin_watchlist_dir,
 )
 
 
@@ -205,3 +206,90 @@ class TestVersionCompatibility:
         assert result["success"] is True
         # Should have a warning about nextflow 23 vs 25
         assert any("nextflow" in w.lower() for w in result["warnings"])
+
+
+class TestBuiltinWatchlistResolution:
+    """GAP-2: Resolve built-in watchlist directory under editable installs.
+
+    The previous implementation called ``Path(wl_pkg.__file__).parent`` on
+    the namespace package, which raises TypeError because ``__file__`` is
+    None for namespace packages produced by editable installs. The fix
+    moves the lookup to ``importlib.resources.files`` with a fallback to
+    the package's ``__path__`` entries.
+    """
+
+    def test_resolve_returns_existing_directory(self):
+        """Resolution returns a directory containing watchlist YAMLs."""
+        wl_dir = _resolve_builtin_watchlist_dir()
+        assert wl_dir is not None
+        assert wl_dir.is_dir()
+        # The built-in watchlists ship with at least one YAML file.
+        assert any(wl_dir.glob("*.yaml")), (
+            f"Expected at least one *.yaml under {wl_dir}"
+        )
+
+    def test_resolve_handles_namespace_package_file_none(self):
+        """Resolution works when wl_pkg.__file__ is None (editable install).
+
+        Simulate the editable-install condition by importing the
+        watchlists package and confirming its ``__file__`` is None on
+        this checkout. The fix must still return a usable directory.
+        """
+        from nanometa_live.core.config.data import watchlists as wl_pkg
+
+        # Sanity: this checkout is an editable install, so __file__ is None.
+        # If a future package layout adds an __init__.py the assertion
+        # changes shape but the resolver must still succeed.
+        if wl_pkg.__file__ is not None:
+            pytest.skip(
+                "watchlists package is a regular package on this install; "
+                "the namespace-package crash path cannot be exercised here."
+            )
+
+        wl_dir = _resolve_builtin_watchlist_dir()
+        assert wl_dir is not None
+        assert wl_dir.is_dir()
+
+    def test_copy_builtin_watchlists_succeeds_on_editable_install(self, tmp_path):
+        """End-to-end: BundleManager._copy_builtin_watchlists() does not raise.
+
+        Before the fix, this call failed with TypeError on editable
+        installs because ``Path(None).parent`` is invalid.
+        """
+        mgr = BundleManager()
+        dst = tmp_path / "watchlists"
+        # Should not raise.
+        mgr._copy_builtin_watchlists(dst)
+        # At least one YAML should be copied across.
+        assert dst.exists()
+        copied = list(dst.glob("*.yaml"))
+        assert len(copied) > 0, (
+            "Expected built-in watchlist YAMLs to be copied to the bundle"
+        )
+
+    def test_export_bundle_runs_under_editable_install(self, tmp_path):
+        """End-to-end: full export_bundle() succeeds on an editable install."""
+        home = tmp_path / "home"
+        home.mkdir()
+        # Create a tiny placeholder genome so export has something to walk.
+        genomes = home / "genomes"
+        genomes.mkdir()
+        (genomes / "1.fasta").write_text(">x\nA\n")
+
+        out = tmp_path / "out.tar.gz"
+        mgr = BundleManager()
+        config = {
+            "kraken_db": "",  # skip db_hash branch
+            "results_output_directory": str(tmp_path / "results"),
+        }
+        result_path = mgr.export_bundle(
+            str(out), config=config, nanometa_home=str(home)
+        )
+        assert result_path == out
+        assert out.exists() and out.stat().st_size > 0
+        # Confirm the archive contains a watchlists/ entry.
+        with tarfile.open(str(out), "r:gz") as tar:
+            names = tar.getnames()
+        assert any(n.startswith("watchlists/") for n in names), (
+            "export_bundle should embed built-in watchlists"
+        )

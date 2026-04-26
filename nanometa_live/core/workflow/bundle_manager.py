@@ -413,11 +413,21 @@ class BundleManager:
         return None
 
     def _copy_builtin_watchlists(self, dst_dir: Path) -> None:
-        """Copy built-in watchlist YAMLs to the bundle."""
-        try:
-            from nanometa_live.core.config.data import watchlists as wl_pkg
+        """Copy built-in watchlist YAMLs to the bundle.
 
-            wl_path = Path(wl_pkg.__file__).parent
+        Resolves the source directory via importlib.resources so the lookup
+        works under both regular and editable installs. Editable installs
+        produce a namespace package whose __file__ attribute is None, which
+        breaks the legacy Path(wl_pkg.__file__).parent approach.
+        """
+        try:
+            wl_path = _resolve_builtin_watchlist_dir()
+            if wl_path is None or not wl_path.is_dir():
+                logger.debug(
+                    "Built-in watchlist directory not found; skipping copy."
+                )
+                return
+
             dst_dir.mkdir(parents=True, exist_ok=True)
 
             for yaml_file in wl_path.glob("*.yaml"):
@@ -454,6 +464,50 @@ class BundleManager:
             logger.warning(f"Error loading container images: {e}")
 
         return loaded
+
+
+def _resolve_builtin_watchlist_dir() -> Optional[Path]:
+    """Locate the built-in watchlist directory in a way that survives editable installs.
+
+    Editable installs expose ``nanometa_live.core.config.data.watchlists`` as a
+    namespace package whose ``__file__`` attribute is ``None``. The previous
+    implementation called ``Path(pkg.__file__).parent`` and crashed with
+    TypeError. The lookup now prefers ``importlib.resources.files`` and falls
+    back to the package's ``__path__`` entries.
+    """
+    import importlib
+    import importlib.resources as pkg_resources
+
+    pkg_name = "nanometa_live.core.config.data.watchlists"
+
+    try:
+        ref = pkg_resources.files(pkg_name)
+    except (ModuleNotFoundError, AttributeError, TypeError):
+        ref = None
+
+    if ref is not None:
+        try:
+            candidate = Path(str(ref))
+            if candidate.is_dir():
+                return candidate
+        except (TypeError, OSError):
+            pass
+
+    try:
+        wl_pkg = importlib.import_module(pkg_name)
+    except ImportError:
+        return None
+
+    for raw_path in getattr(wl_pkg, "__path__", []) or []:
+        candidate = Path(raw_path)
+        if candidate.is_dir():
+            return candidate
+
+    file_attr = getattr(wl_pkg, "__file__", None)
+    if file_attr:
+        return Path(file_attr).parent
+
+    return None
 
 
 def _file_md5(path: Path) -> str:
