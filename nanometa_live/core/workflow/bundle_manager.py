@@ -167,6 +167,17 @@ class BundleManager:
                 _template_paths(meta_src, meta_dst, str(home), _HOME_PLACEHOLDER)
                 manifest["checksums"]["genome_metadata.json"] = _file_md5(meta_dst)
 
+            # Copy per-entry watchlist toggle state so the field machine
+            # restores the operator's enable/disable selections instead of
+            # falling back to defaults. Older bundles may lack this file.
+            toggle_src = home / "watchlist_toggle_state.yaml"
+            if toggle_src.exists():
+                toggle_dst = staging / "watchlist_toggle_state.yaml"
+                shutil.copy2(toggle_src, toggle_dst)
+                manifest["checksums"]["watchlist_toggle_state.yaml"] = _file_md5(
+                    toggle_dst
+                )
+
             # Save config (with kraken_db as placeholder)
             from nanometa_live.core.config.config_loader import ConfigLoader
             bundle_config = dict(config)
@@ -342,6 +353,17 @@ class BundleManager:
                 _template_paths(
                     meta_src, meta_dst,
                     _HOME_PLACEHOLDER, str(home)
+                )
+
+            # Restore per-entry watchlist toggle state if the bundle
+            # carries one. Older bundles predate this file, so absence
+            # is silently tolerated.
+            toggle_src = tmp / "watchlist_toggle_state.yaml"
+            if toggle_src.exists():
+                toggle_dst = home / "watchlist_toggle_state.yaml"
+                shutil.copy2(toggle_src, toggle_dst)
+                logger.info(
+                    "Imported watchlist_toggle_state.yaml from bundle"
                 )
 
             # Import taxonomy snapshot

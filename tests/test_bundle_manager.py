@@ -293,3 +293,73 @@ class TestBuiltinWatchlistResolution:
         assert any(n.startswith("watchlists/") for n in names), (
             "export_bundle should embed built-in watchlists"
         )
+
+
+class TestWatchlistToggleStateRoundTrip:
+    """GAP-3: per-entry enable/disable state must survive export and import.
+
+    The watchlist_toggle_state.yaml file at ~/.nanometa records which
+    individual pathogen entries the operator enabled. Without it the
+    field machine sees default toggle state for every entry.
+    """
+
+    def _make_export_home(self, tmp_path, toggle_payload):
+        home = tmp_path / "build_home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+        toggle = home / "watchlist_toggle_state.yaml"
+        toggle.write_text(toggle_payload)
+        return home
+
+    def test_toggle_state_round_trips(self, tmp_path):
+        toggle_yaml = (
+            "version: 1\n"
+            "entries:\n"
+            "  '1639': enabled\n"
+            "  '562': disabled\n"
+        )
+        build_home = self._make_export_home(tmp_path, toggle_yaml)
+        bundle_path = tmp_path / "bundle.tar.gz"
+
+        mgr = BundleManager()
+        mgr.export_bundle(
+            str(bundle_path),
+            config={"kraken_db": "", "results_output_directory": str(tmp_path / "results")},
+            nanometa_home=str(build_home),
+        )
+
+        # Confirm the bundle archive carries the file at the top level.
+        with tarfile.open(str(bundle_path), "r:gz") as tar:
+            names = tar.getnames()
+        assert "watchlist_toggle_state.yaml" in names
+
+        # Import on a fresh field-machine home and verify content.
+        field_home = tmp_path / "field_home"
+        field_home.mkdir()
+        result = mgr.import_bundle(
+            str(bundle_path),
+            kraken_db_path="",
+            nanometa_home=str(field_home),
+        )
+        assert result["success"] is True
+        restored = field_home / "watchlist_toggle_state.yaml"
+        assert restored.exists(), (
+            "import_bundle must restore watchlist_toggle_state.yaml"
+        )
+        assert restored.read_text() == toggle_yaml
+
+    def test_import_silently_tolerates_missing_toggle_state(self, tmp_path):
+        """Older bundles do not carry this file -- import must not warn or fail."""
+        bundle_path, _ = _make_minimal_bundle(tmp_path)
+        field_home = tmp_path / "field_home"
+        field_home.mkdir()
+
+        mgr = BundleManager()
+        result = mgr.import_bundle(
+            str(bundle_path),
+            kraken_db_path="",
+            nanometa_home=str(field_home),
+        )
+        assert result["success"] is True
+        assert not (field_home / "watchlist_toggle_state.yaml").exists()
