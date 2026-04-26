@@ -437,7 +437,25 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError(
             "No output directory configured. Please set 'Results Output Directory' in the UI."
         )
-    if not nanopore_dir:
+
+    # In batch mode an operator may bring their own samplesheet
+    # (config["input"]) instead of pointing the run at a sequencer
+    # output directory. The samplesheet path itself is the input
+    # source, so an empty nanopore_output_directory is legitimate.
+    # Realtime mode always needs a watch directory, and any batch
+    # path that does not resolve to an existing samplesheet still
+    # needs nanopore_output_directory to drive samplesheet generation
+    # or input_dir auto-discovery.
+    samplesheet_input = config.get("input")
+    samplesheet_provided = bool(samplesheet_input) and os.path.isfile(
+        str(samplesheet_input)
+    )
+    processing_mode_for_check = config.get("processing_mode", "batch")
+    samplesheet_only_mode = (
+        processing_mode_for_check == "batch" and samplesheet_provided
+    )
+
+    if not nanopore_dir and not samplesheet_only_mode:
         raise ValueError(
             "No input directory configured. Please set 'Nanopore Output Directory' in the UI."
         )

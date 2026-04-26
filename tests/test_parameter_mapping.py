@@ -174,6 +174,66 @@ class TestInputSamplesheetHonored:
         assert gen.exists()
 
 
+# ---- GAP-4: nanopore_output_directory optional in samplesheet-only mode ----
+
+
+class TestSamplesheetOnlyMode:
+    """GAP-4: a pre-supplied samplesheet is the input source; the
+    sequencer output directory is no longer required for batch runs.
+
+    Before the fix, create_nextflow_params() raised
+    ``ValueError: No input directory configured`` on an empty
+    nanopore_output_directory, even when config['input'] pointed at a
+    valid samplesheet. Operators preparing offline bundles only have a
+    samplesheet, so this aborted Scenario A end-to-end.
+    """
+
+    def test_samplesheet_only_no_nanopore_dir_passes(self, base_config, tmp_path):
+        samplesheet = tmp_path / "my_samplesheet.csv"
+        samplesheet.write_text(
+            "sample,fastq_1,fastq_2\nsample1,/tmp/s1.fq.gz,\n"
+        )
+        base_config["input"] = str(samplesheet)
+        base_config["nanopore_output_directory"] = ""
+
+        params = create_nextflow_params(base_config)
+
+        assert params["input"] == str(samplesheet)
+
+    def test_samplesheet_only_missing_key_passes(self, base_config, tmp_path):
+        """nanopore_output_directory key absent entirely is also accepted."""
+        samplesheet = tmp_path / "my_samplesheet.csv"
+        samplesheet.write_text(
+            "sample,fastq_1,fastq_2\nsample1,/tmp/s1.fq.gz,\n"
+        )
+        base_config["input"] = str(samplesheet)
+        base_config.pop("nanopore_output_directory", None)
+
+        params = create_nextflow_params(base_config)
+
+        assert params["input"] == str(samplesheet)
+
+    def test_realtime_mode_still_requires_nanopore_dir(self, base_config):
+        """Realtime mode has no samplesheet path, so the guard still applies."""
+        base_config["processing_mode"] = "realtime"
+        base_config["nanopore_output_directory"] = ""
+
+        with pytest.raises(ValueError) as exc:
+            create_nextflow_params(base_config)
+        assert "Nanopore Output Directory" in str(exc.value)
+
+    def test_batch_without_samplesheet_still_requires_nanopore_dir(
+        self, base_config, tmp_path
+    ):
+        """Batch mode without a real samplesheet still needs a directory."""
+        base_config["nanopore_output_directory"] = ""
+        base_config["input"] = str(tmp_path / "missing.csv")
+
+        with pytest.raises(ValueError) as exc:
+            create_nextflow_params(base_config)
+        assert "Nanopore Output Directory" in str(exc.value)
+
+
 # ---- F3 / P1-5: use_input_dir_mode -----------------------------------------
 
 
