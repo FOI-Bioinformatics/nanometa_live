@@ -5,12 +5,13 @@ import json
 import tarfile
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 
 from nanometa_live.core.workflow.bundle_manager import (
     BundleManager,
+    _BUNDLED_CONDA_CACHE_DIRNAME,
     _check_version_compatibility,
     _extract_major_version,
     _file_md5,
@@ -454,3 +455,314 @@ class TestBuildOnlyToolWarnings:
         assert len(warnings) == 1
         assert "kraken2" in warnings[0]
         assert "build-only" not in warnings[0].lower()
+
+
+def _make_fake_pipeline_checkout(parent: Path) -> Path:
+    """Build a minimal directory layout that satisfies the pipeline-resolver
+    contract: directory exists and contains ``main.nf``.
+
+    Used to drive _pre_warm_conda_envs without actually invoking Nextflow.
+    """
+    pipeline = parent / "fake_nanometanf"
+    (pipeline / "modules" / "local" / "fastp_streaming").mkdir(parents=True)
+    (pipeline / "main.nf").write_text("// stub\n")
+    (pipeline / "modules" / "local" / "fastp_streaming" / "environment.yml").write_text(
+        "name: fastp_streaming\nchannels: [bioconda]\n"
+    )
+    return pipeline
+
+
+class TestPreWarmCondaEnvs:
+    """GAP-1: BundleManager.export_bundle(pre_warm_conda_envs=True) bakes
+    the per-process Nextflow conda envs into the bundle so the field
+    machine never needs network access on first run.
+
+    The actual Nextflow stub invocation is mocked so these tests stay
+    fast; the end-to-end smoke is covered separately under @pytest.mark.slow.
+    """
+
+    def test_default_remains_disabled(self, tmp_path):
+        """Calling export_bundle without the flag does NOT pre-warm.
+
+        Existing operator workflows (cycle 8 and earlier) must keep
+        producing identical bundles when the new flag is omitted.
+        """
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        out = tmp_path / "out.tar.gz"
+        mgr = BundleManager()
+        mgr.export_bundle(
+            str(out),
+            config={"kraken_db": "", "results_output_directory": str(tmp_path)},
+            nanometa_home=str(home),
+        )
+
+        with tarfile.open(str(out), "r:gz") as tar:
+            names = tar.getnames()
+
+        # No conda_cache directory should exist in the bundle.
+        assert not any(
+            n.startswith(f"{_BUNDLED_CONDA_CACHE_DIRNAME}/") for n in names
+        ), "Default export must not include conda_cache/"
+
+        # Manifest must record that pre-warm was not attempted.
+        with tarfile.open(str(out), "r:gz") as tar:
+            with tar.extractfile("manifest.json") as fh:
+                manifest = json.loads(fh.read().decode("utf-8"))
+        assert manifest["pre_warm_conda_envs"]["attempted"] is False
+        assert manifest["pre_warm_conda_envs"]["success"] is False
+
+    def test_pre_warm_records_manifest_entries(self, tmp_path):
+        """When pre-warm succeeds, the bundle manifest lists every cache
+        env directory under conda_cache/ with a checksum entry."""
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
+
+        # Mock the per-scenario stub run so it "creates" two env dirs
+        # in the cache the same way Nextflow's CondaCache would.
+        def fake_run_scenario(scenario, pipeline_dir, staging, env):
+            cache_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
+            cache_root.mkdir(parents=True, exist_ok=True)
+            for env_md5 in (
+                "env-aaaa1111bbbb2222cccc3333dddd4444",
+                "env-eeee5555ffff6666aaaa7777bbbb8888",
+            ):
+                env_dir = cache_root / env_md5
+                env_dir.mkdir(exist_ok=True)
+                (env_dir / "bin" / "fastp").parent.mkdir(parents=True, exist_ok=True)
+                (env_dir / "bin" / "fastp").write_text("#!/bin/sh\nexit 0\n")
+            return True, "ok"
+
+        mgr = BundleManager()
+        out = tmp_path / "out.tar.gz"
+        with patch.object(mgr, "_run_pre_warm_scenario", side_effect=fake_run_scenario):
+            with patch("nanometa_live.core.workflow.bundle_manager.shutil.which",
+                       return_value="/usr/bin/nextflow"):
+                mgr.export_bundle(
+                    str(out),
+                    config={"kraken_db": "", "results_output_directory": str(tmp_path)},
+                    nanometa_home=str(home),
+                    pre_warm_conda_envs=True,
+                    pipeline_path=str(pipeline_dir),
+                )
+
+        with tarfile.open(str(out), "r:gz") as tar:
+            names = tar.getnames()
+
+        # Conda cache files must be packed into the bundle.
+        assert any(
+            n.startswith(f"{_BUNDLED_CONDA_CACHE_DIRNAME}/env-aaaa") for n in names
+        ), "Bundle must include the pre-warmed env directories"
+
+        # Manifest must record pre-warm metadata and checksums.
+        with tarfile.open(str(out), "r:gz") as tar:
+            with tar.extractfile("manifest.json") as fh:
+                manifest = json.loads(fh.read().decode("utf-8"))
+        pwc = manifest["pre_warm_conda_envs"]
+        assert pwc["attempted"] is True
+        assert pwc["success"] is True
+        assert pwc["env_count"] >= 1
+        assert "batch_samplesheet" in pwc["scenarios"]
+
+        # Every conda_cache file must have a checksum entry so import
+        # validation can detect tarball corruption later.
+        cache_files = [n for n in manifest["checksums"]
+                       if n.startswith(f"{_BUNDLED_CONDA_CACHE_DIRNAME}/")]
+        assert len(cache_files) >= 1
+
+    def test_pre_warm_falls_back_when_nextflow_missing(self, tmp_path):
+        """If the build host has no nextflow binary, pre-warm logs a
+        warning and the bundle is still produced without the cache.
+
+        This guards the documented fallback behavior referenced in the
+        task description ("on failure, falls back to skipping pre-warm
+        and logs a clear warning").
+        """
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
+
+        out = tmp_path / "out.tar.gz"
+        mgr = BundleManager()
+        with patch("nanometa_live.core.workflow.bundle_manager.shutil.which",
+                   return_value=None):
+            mgr.export_bundle(
+                str(out),
+                config={"kraken_db": "", "results_output_directory": str(tmp_path)},
+                nanometa_home=str(home),
+                pre_warm_conda_envs=True,
+                pipeline_path=str(pipeline_dir),
+            )
+
+        with tarfile.open(str(out), "r:gz") as tar:
+            names = tar.getnames()
+            with tar.extractfile("manifest.json") as fh:
+                manifest = json.loads(fh.read().decode("utf-8"))
+
+        assert not any(
+            n.startswith(f"{_BUNDLED_CONDA_CACHE_DIRNAME}/") for n in names
+        ), "Failed pre-warm must not leave a half-populated cache in bundle"
+
+        pwc = manifest["pre_warm_conda_envs"]
+        assert pwc["attempted"] is True
+        assert pwc["success"] is False
+        assert any("nextflow" in w.lower() for w in pwc["warnings"])
+
+    def test_pre_warm_falls_back_without_pipeline_checkout(self, tmp_path):
+        """Pre-warm needs a local pipeline checkout. When neither the
+        ``pipeline_path`` argument nor ``config['pipeline_source']``
+        resolves to a directory, the bundle is still produced but the
+        cache is omitted.
+        """
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        out = tmp_path / "out.tar.gz"
+        mgr = BundleManager()
+        with patch("nanometa_live.core.workflow.bundle_manager.shutil.which",
+                   return_value="/usr/bin/nextflow"):
+            with patch.object(
+                BundleManager, "_resolve_pipeline_checkout", return_value=None
+            ):
+                mgr.export_bundle(
+                    str(out),
+                    config={
+                        "kraken_db": "",
+                        "results_output_directory": str(tmp_path),
+                        "pipeline_source": "remote:main",  # not a local dir
+                    },
+                    nanometa_home=str(home),
+                    pre_warm_conda_envs=True,
+                )
+
+        with tarfile.open(str(out), "r:gz") as tar:
+            with tar.extractfile("manifest.json") as fh:
+                manifest = json.loads(fh.read().decode("utf-8"))
+
+        pwc = manifest["pre_warm_conda_envs"]
+        assert pwc["success"] is False
+        assert any(
+            "pipeline_path" in w or "pipeline_source" in w or "checkout" in w
+            for w in pwc["warnings"]
+        )
+
+    def test_readme_documents_pre_warm_when_active(self, tmp_path):
+        """When pre-warm succeeds, the README must explain that the
+        cache is bundled and tell the operator to set NXF_CONDA_CACHEDIR
+        to the restored location, NOT the manual workaround.
+        """
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
+
+        def fake_run_scenario(scenario, pipeline_dir, staging, env):
+            cache_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
+            cache_root.mkdir(parents=True, exist_ok=True)
+            (cache_root / "env-deadbeef").mkdir(exist_ok=True)
+            (cache_root / "env-deadbeef" / "marker").write_text("ok")
+            return True, "ok"
+
+        mgr = BundleManager()
+        out = tmp_path / "out.tar.gz"
+        with patch.object(mgr, "_run_pre_warm_scenario", side_effect=fake_run_scenario):
+            with patch("nanometa_live.core.workflow.bundle_manager.shutil.which",
+                       return_value="/usr/bin/nextflow"):
+                mgr.export_bundle(
+                    str(out),
+                    config={"kraken_db": "", "results_output_directory": str(tmp_path)},
+                    nanometa_home=str(home),
+                    pre_warm_conda_envs=True,
+                    pipeline_path=str(pipeline_dir),
+                )
+
+        with tarfile.open(str(out), "r:gz") as tar:
+            with tar.extractfile("README_FIELD.md") as fh:
+                readme = fh.read().decode("utf-8")
+
+        # Auto block must mention the bundled cache and the env var.
+        assert "pre_warm_conda_envs=True" in readme
+        assert "NXF_CONDA_CACHEDIR" in readme
+        assert _BUNDLED_CONDA_CACHE_DIRNAME in readme
+        # Manual workaround phrasing should not be in this branch.
+        assert "without ``pre_warm_conda_envs``" not in readme
+
+    def test_import_restores_conda_cache_to_home(self, tmp_path):
+        """import_bundle restores the bundled conda cache to
+        ``<nanometa_home>/conda_cache`` and surfaces its path on the
+        result so the operator can export NXF_CONDA_CACHEDIR.
+        """
+        home = tmp_path / "build_home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
+
+        def fake_run_scenario(scenario, pipeline_dir, staging, env):
+            cache_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
+            cache_root.mkdir(parents=True, exist_ok=True)
+            env_dir = cache_root / "env-feedface"
+            env_dir.mkdir(exist_ok=True)
+            (env_dir / "marker").write_text("ok")
+            return True, "ok"
+
+        mgr = BundleManager()
+        bundle_path = tmp_path / "bundle.tar.gz"
+        with patch.object(mgr, "_run_pre_warm_scenario", side_effect=fake_run_scenario):
+            with patch("nanometa_live.core.workflow.bundle_manager.shutil.which",
+                       return_value="/usr/bin/nextflow"):
+                mgr.export_bundle(
+                    str(bundle_path),
+                    config={"kraken_db": "", "results_output_directory": str(tmp_path)},
+                    nanometa_home=str(home),
+                    pre_warm_conda_envs=True,
+                    pipeline_path=str(pipeline_dir),
+                )
+
+        # Now import on a fresh field-machine home.
+        field = tmp_path / "field_home"
+        field.mkdir()
+        result = mgr.import_bundle(
+            str(bundle_path),
+            kraken_db_path="",
+            nanometa_home=str(field),
+        )
+
+        assert result["success"] is True
+        restored = field / _BUNDLED_CONDA_CACHE_DIRNAME / "env-feedface" / "marker"
+        assert restored.exists(), (
+            "import_bundle must extract conda_cache/env-* into "
+            "<nanometa_home>/conda_cache/"
+        )
+        assert "conda_cache_path" in result
+        assert result["conda_cache_path"].endswith(_BUNDLED_CONDA_CACHE_DIRNAME)
+
+
+class TestPreWarmEndToEnd:
+    """Real end-to-end pre-warm test against the operator's nanometanf
+    checkout. Marked slow because it actually invokes ``nextflow`` and
+    creates conda envs (~30 minutes, ~5 GB on the build host).
+    """
+
+    @pytest.mark.slow
+    def test_real_pre_warm_against_pipeline_checkout(self, tmp_path):
+        pytest.skip(
+            "End-to-end pre-warm requires online nextflow + conda; run "
+            "manually with `pytest -m slow tests/test_bundle_manager.py "
+            "-k test_real_pre_warm`."
+        )

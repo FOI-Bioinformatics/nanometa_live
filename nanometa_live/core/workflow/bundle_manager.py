@@ -26,6 +26,92 @@ logger = logging.getLogger(__name__)
 # Placeholder token for absolute paths in exported metadata
 _HOME_PLACEHOLDER = "${NANOMETA_HOME}"
 
+# Default location inside the bundle staging area for the pre-warmed
+# Nextflow conda cache. Operators set NXF_CONDA_CACHEDIR to the
+# extracted location of this directory on the field machine.
+_BUNDLED_CONDA_CACHE_DIRNAME = "conda_cache"
+
+# Pipeline scenarios used to drive Nextflow's stub mode during the
+# pre-warm step. Each scenario corresponds to a sample-handling mode
+# the field operator may run; together they cover every per-process
+# environment.yml in nanometanf at the time of writing.
+_PRE_WARM_SCENARIOS = [
+    {
+        "name": "batch_samplesheet",
+        "params": {
+            "processing_mode": "batch",
+            "sample_handling": "single_sample",
+        },
+    },
+    {
+        "name": "realtime_multiplex",
+        "params": {
+            "processing_mode": "realtime",
+            "sample_handling": "by_barcode",
+        },
+    },
+    {
+        "name": "realtime_per_file",
+        "params": {
+            "processing_mode": "realtime",
+            "sample_handling": "per_file",
+        },
+    },
+    {
+        "name": "realtime_single_sample",
+        "params": {
+            "processing_mode": "realtime",
+            "sample_handling": "single_sample",
+        },
+    },
+]
+
+# README sub-block describing the manual pre-warm workaround used when
+# the bundle did NOT pre-warm conda envs at build time.
+_README_CONDA_CACHE_MANUAL = """The bundle you received was built without ``pre_warm_conda_envs``,
+so the per-process envs are NOT included. Recommended workflow:
+
+1. On the build machine (online), run every scenario you intend to
+   use on the field machine at least once with
+   ``pipeline_profile: conda``. This populates
+   ``~/.nanometa/work/conda/`` with all required envs.
+2. Include that directory in the deployment package transferred to
+   the field machine.
+3. On the field machine, point Nextflow at the unpacked cache
+   before launching Nanometa Live::
+
+       export NXF_CONDA_CACHEDIR=/path/to/unpacked/conda_cache
+
+Without this, the first realtime or validation run on a fresh
+field machine will require network access to create the missing
+envs."""
+
+# README sub-block describing the auto pre-warmed conda cache that
+# is included in the bundle when ``pre_warm_conda_envs=True`` was
+# passed to ``export_bundle``.
+_README_CONDA_CACHE_AUTO = """This bundle was built with ``pre_warm_conda_envs=True``, so a
+populated ``conda_cache/`` directory is included alongside the
+other bundle contents.
+
+After ``import_bundle`` the cache lives at::
+
+    {{NANOMETA_HOME}}/{conda_cache_dirname}
+
+To make Nextflow use it, export ``NXF_CONDA_CACHEDIR`` before
+launching Nanometa Live::
+
+    export NXF_CONDA_CACHEDIR=$HOME/.nanometa/{conda_cache_dirname}
+
+The helper script ``scripts/activate_offline_envs.sh`` (if
+present) does this for you. Pre-warmed scenarios cover:
+{scenario_summary}
+
+Note: the pre-warmed envs are pinned to the exact module
+``environment.yml`` SHAs in the nanometanf checkout used at build
+time. If the field machine is later upgraded to a newer
+nanometanf release, missing envs will require a rebuild of the
+bundle."""
+
 # Field README template
 _README_TEMPLATE = """# Nanometa Live - Offline Bundle
 
@@ -67,20 +153,9 @@ each module's ``environment.yml`` and live under
 
 For an offline run the field machine must have these per-process envs
 already present, otherwise Nextflow will try to resolve packages from
-bioconda/conda-forge and fail. The recommended workflow is:
+bioconda/conda-forge and fail.
 
-1. On the build machine (online), run every scenario you intend to use
-   on the field machine at least once with ``pipeline_profile: conda``.
-   This populates ``~/.nanometa/work/conda/`` with all required envs.
-2. Include that directory in the deployment package transferred to the
-   field machine (typically alongside this bundle).
-3. On the field machine, point Nextflow at the unpacked cache before
-   launching Nanometa Live:
-
-       export NXF_CONDA_CACHEDIR=/path/to/unpacked/conda_cache
-
-Without this, the first realtime or validation run on a fresh field
-machine will require network access to create the missing envs.
+{conda_cache_section}
 
 ## Contents
 
@@ -115,6 +190,8 @@ class BundleManager:
         output_path: str,
         config: Dict[str, Any],
         nanometa_home: Optional[str] = None,
+        pre_warm_conda_envs: bool = False,
+        pipeline_path: Optional[str] = None,
     ) -> Path:
         """
         Export a portable bundle containing all prepared data.
@@ -127,6 +204,16 @@ class BundleManager:
             output_path: Path for the output tar.gz file.
             config: Current application configuration.
             nanometa_home: Path to ~/.nanometa directory.
+            pre_warm_conda_envs: If True, run nanometanf in stub mode
+                under ``-profile conda`` so Nextflow resolves and creates
+                every per-process env. The populated cache directory is
+                then included in the bundle. Adds roughly 30 minutes and
+                ~5 GB to the build. Default False so existing flows are
+                unaffected.
+            pipeline_path: Optional explicit path to the nanometanf
+                checkout. Required when ``pre_warm_conda_envs`` is True
+                and ``config['pipeline_source']`` does not resolve to a
+                local directory. The path must contain ``main.nf``.
 
         Returns:
             Path to the created bundle file.
@@ -229,12 +316,49 @@ class BundleManager:
             bundle_loader = ConfigLoader(str(staging))
             bundle_loader.save_config(bundle_config, "config.yaml")
 
-            # Generate README
+            # Optionally pre-warm Nextflow's per-process conda envs.
+            # Failures fall back to the manual workaround so existing
+            # flows are never blocked by a network or channel hiccup.
+            pre_warm_result: Dict[str, Any] = {
+                "attempted": False,
+                "success": False,
+                "scenarios": [],
+                "env_count": 0,
+                "warnings": [],
+            }
+            if pre_warm_conda_envs:
+                pre_warm_result = self._pre_warm_conda_envs(
+                    staging=staging,
+                    config=config,
+                    pipeline_path=pipeline_path,
+                )
+                if pre_warm_result["success"]:
+                    cache_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
+                    for f in cache_root.rglob("*"):
+                        if f.is_file():
+                            rel = f.relative_to(staging)
+                            manifest["checksums"][str(rel)] = _file_md5(f)
+            manifest["pre_warm_conda_envs"] = pre_warm_result
+
+            # Generate README. The conda-cache section depends on
+            # whether the pre-warm step actually populated the cache.
+            if pre_warm_result.get("success"):
+                scenario_summary = "\n".join(
+                    f"   - {name}" for name in pre_warm_result["scenarios"]
+                )
+                conda_cache_section = _README_CONDA_CACHE_AUTO.format(
+                    conda_cache_dirname=_BUNDLED_CONDA_CACHE_DIRNAME,
+                    scenario_summary=scenario_summary,
+                )
+            else:
+                conda_cache_section = _README_CONDA_CACHE_MANUAL
+
             readme_content = _README_TEMPLATE.format(
                 creation_date=manifest["creation_date"],
                 creator=manifest["creator"],
                 version=manifest["version"],
                 container_runtime=manifest["container_runtime"] or "none cached",
+                conda_cache_section=conda_cache_section,
             )
             readme_path = staging / "README_FIELD.md"
             readme_path.write_text(readme_content)
@@ -242,6 +366,12 @@ class BundleManager:
             # Save manifest
             with open(staging / "manifest.json", "w") as f:
                 json.dump(manifest, f, indent=2)
+
+            # Drop the staging-only ``_pre_warm`` working directory
+            # (dummy samplesheets, scratch ``work/``) before tarring.
+            scratch = staging / "_pre_warm"
+            if scratch.exists():
+                shutil.rmtree(scratch, ignore_errors=True)
 
             # Create tar.gz
             with tarfile.open(str(output), "w:gz") as tar:
@@ -370,7 +500,11 @@ class BundleManager:
                 result["warnings"].extend(version_warnings)
 
             # Copy directories to home (handle partial imports gracefully)
-            for dirname in ["genomes", "blast", "mappings", "cache", "watchlists", "containers"]:
+            for dirname in [
+                "genomes", "blast", "mappings", "cache",
+                "watchlists", "containers",
+                _BUNDLED_CONDA_CACHE_DIRNAME,
+            ]:
                 src = tmp / dirname
                 if src.exists():
                     dst = home / dirname
@@ -432,6 +566,19 @@ class BundleManager:
                 if loaded_count > 0:
                     logger.info(f"Loaded {loaded_count} container images from bundle")
 
+            # If the bundle ships a pre-warmed Nextflow conda cache,
+            # surface its restored location so the operator can point
+            # NXF_CONDA_CACHEDIR at it.
+            restored_conda_cache = home / _BUNDLED_CONDA_CACHE_DIRNAME
+            if restored_conda_cache.is_dir() and any(restored_conda_cache.iterdir()):
+                result["conda_cache_path"] = str(restored_conda_cache)
+                logger.info(
+                    "Restored pre-warmed Nextflow conda cache to "
+                    f"{restored_conda_cache}. Set "
+                    f"NXF_CONDA_CACHEDIR={restored_conda_cache} before "
+                    "launching Nanometa Live."
+                )
+
             # Auto-set offline_mode in config
             config_path = home / "config.yaml"
             if config_path.exists():
@@ -442,6 +589,8 @@ class BundleManager:
                     cfg["offline_mode"] = True
                     if kraken_db_path:
                         cfg["kraken_db"] = kraken_db_path
+                    if "conda_cache_path" in result:
+                        cfg["nxf_conda_cachedir"] = result["conda_cache_path"]
                     import_loader.save_config(cfg, "config.yaml")
                     logger.info("Set offline_mode=True in config")
                 except (ImportError, AttributeError, OSError, ValueError) as e:
@@ -449,6 +598,189 @@ class BundleManager:
 
         logger.info(f"Bundle imported to {home}")
         return result
+
+    def _pre_warm_conda_envs(
+        self,
+        staging: Path,
+        config: Dict[str, Any],
+        pipeline_path: Optional[str],
+    ) -> Dict[str, Any]:
+        """
+        Populate ``staging/conda_cache`` with every per-process env
+        nanometanf needs.
+
+        Strategy: run ``nextflow run <pipeline> -stub -profile conda``
+        once per scenario. Stub mode skips real work but still triggers
+        Nextflow's ``CondaCache`` resolution for each process. The
+        scenarios in ``_PRE_WARM_SCENARIOS`` together exercise every
+        ``environment.yml`` shipped with the pipeline.
+
+        Returns a dict describing the outcome that gets written into
+        ``manifest.json`` so the field machine can verify which envs
+        are pinned in the bundle.
+
+        On failure (network outage, missing nextflow binary, missing
+        pipeline checkout) the function logs a warning and returns
+        ``success=False`` so the caller falls back to the manual
+        workaround documented in the README.
+        """
+        outcome: Dict[str, Any] = {
+            "attempted": True,
+            "success": False,
+            "scenarios": [],
+            "env_count": 0,
+            "warnings": [],
+        }
+
+        if not shutil.which("nextflow"):
+            outcome["warnings"].append(
+                "nextflow binary not found on PATH; skipping pre-warm."
+            )
+            logger.warning(outcome["warnings"][-1])
+            return outcome
+
+        resolved_pipeline = self._resolve_pipeline_checkout(
+            config=config, override=pipeline_path
+        )
+        if resolved_pipeline is None:
+            outcome["warnings"].append(
+                "Could not resolve a local nanometanf checkout for "
+                "pre-warm. Pass pipeline_path or set pipeline_source "
+                "to a local directory."
+            )
+            logger.warning(outcome["warnings"][-1])
+            return outcome
+
+        cache_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
+        cache_root.mkdir(parents=True, exist_ok=True)
+
+        env = os.environ.copy()
+        env["NXF_CONDA_CACHEDIR"] = str(cache_root)
+        # Discourage Nextflow from auto-updating itself mid-run on the
+        # build machine; that would defeat reproducibility of the
+        # pinned envs we are about to bake into the bundle.
+        env.setdefault("NXF_OFFLINE", "false")
+
+        for scenario in _PRE_WARM_SCENARIOS:
+            scenario_ok, scenario_msg = self._run_pre_warm_scenario(
+                scenario=scenario,
+                pipeline_dir=resolved_pipeline,
+                staging=staging,
+                env=env,
+            )
+            if scenario_ok:
+                outcome["scenarios"].append(scenario["name"])
+            else:
+                outcome["warnings"].append(
+                    f"Scenario '{scenario['name']}' pre-warm failed: "
+                    f"{scenario_msg}"
+                )
+                logger.warning(outcome["warnings"][-1])
+
+        env_dirs = [
+            d for d in cache_root.iterdir()
+            if d.is_dir() and d.name.startswith("env-")
+        ]
+        outcome["env_count"] = len(env_dirs)
+        outcome["success"] = bool(outcome["scenarios"]) and outcome["env_count"] > 0
+
+        if not outcome["success"]:
+            # Drop the half-populated cache directory so the bundle
+            # does not silently ship a broken cache.
+            shutil.rmtree(cache_root, ignore_errors=True)
+
+        return outcome
+
+    @staticmethod
+    def _resolve_pipeline_checkout(
+        config: Dict[str, Any],
+        override: Optional[str],
+    ) -> Optional[Path]:
+        """
+        Locate a usable on-disk nanometanf checkout for the pre-warm
+        step. Search order:
+
+        1. Explicit ``override`` argument.
+        2. ``config['pipeline_source']`` if it points to an existing
+           directory containing ``main.nf``.
+        3. ``~/.nextflow/assets/foi-bioinformatics/nanometanf`` (the
+           default location Nextflow uses after a remote pull).
+
+        Returns the resolved Path or None if no candidate qualifies.
+        """
+        candidates: List[Path] = []
+        if override:
+            candidates.append(Path(override).expanduser())
+
+        source = config.get("pipeline_source")
+        if isinstance(source, str) and source:
+            stripped = source.split(":", 1)[1] if source.startswith("local:") else source
+            if not stripped.startswith("remote:"):
+                p = Path(stripped).expanduser()
+                if p.is_dir():
+                    candidates.append(p)
+
+        candidates.append(
+            Path("~/.nextflow/assets/foi-bioinformatics/nanometanf").expanduser()
+        )
+
+        for cand in candidates:
+            if cand.is_dir() and (cand / "main.nf").exists():
+                return cand
+        return None
+
+    @staticmethod
+    def _run_pre_warm_scenario(
+        scenario: Dict[str, Any],
+        pipeline_dir: Path,
+        staging: Path,
+        env: Dict[str, str],
+    ) -> tuple:
+        """
+        Run a single ``nextflow run -stub -profile conda`` invocation
+        for one scenario. Returns ``(ok, message)``.
+        """
+        import subprocess
+
+        scenario_dir = staging / "_pre_warm" / scenario["name"]
+        scenario_dir.mkdir(parents=True, exist_ok=True)
+
+        samplesheet = scenario_dir / "samplesheet.csv"
+        fastq_stub = scenario_dir / "stub.fastq.gz"
+        fastq_stub.write_bytes(b"")  # zero-byte placeholder is fine for stub mode
+        samplesheet.write_text(
+            "sample,fastq\n"
+            f"stub_sample,{fastq_stub}\n"
+        )
+
+        scenario_params: Dict[str, Any] = dict(scenario.get("params", {}))
+        cmd = [
+            "nextflow", "run", str(pipeline_dir / "main.nf"),
+            "-stub",
+            "-profile", "conda",
+            "-work-dir", str(scenario_dir / "work"),
+            "--input", str(samplesheet),
+            "--outdir", str(scenario_dir / "results"),
+        ]
+        for key, value in scenario_params.items():
+            cmd += [f"--{key}", str(value)]
+
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=str(scenario_dir),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=1800,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+            return False, f"subprocess error: {exc}"
+
+        if result.returncode != 0:
+            tail = (result.stderr or result.stdout or "").splitlines()[-5:]
+            return False, "; ".join(tail) or f"exit {result.returncode}"
+        return True, "ok"
 
     def _collect_tool_versions(self) -> Dict[str, str]:
         """Collect versions of key tools for the manifest."""

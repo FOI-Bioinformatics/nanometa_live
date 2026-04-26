@@ -16,6 +16,19 @@ from pathlib import Path
 from typing import Dict, List, Any
 
 
+def pytest_configure(config):
+    """Register custom markers used in this suite.
+
+    The ``slow`` marker is used to gate end-to-end smoke tests that
+    invoke external binaries (Nextflow, conda, datasets) and take many
+    minutes. Run them explicitly with ``pytest -m slow``.
+    """
+    config.addinivalue_line(
+        "markers",
+        "slow: end-to-end test requiring external binaries; not run by default.",
+    )
+
+
 def _backdate_mtime(path, seconds=5):
     """Set a file's mtime to *seconds* ago so it passes the stability check."""
     old_time = time.time() - seconds
