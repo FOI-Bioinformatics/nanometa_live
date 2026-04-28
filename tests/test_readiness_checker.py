@@ -120,6 +120,18 @@ class TestNetworkConnectivity:
         assert ncbi.passed is True
         assert gtdb.passed is False
 
+    def test_offline_mode_skips_probe(self, checker):
+        """In offline mode the probe must NOT issue urlopen calls."""
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            results = checker._check_network_connectivity({"offline_mode": True})
+
+        assert mock_urlopen.call_count == 0, (
+            "Network probe must not run in offline mode"
+        )
+        assert len(results) == 1
+        assert results[0].passed is True
+        assert "skipped" in results[0].message.lower()
+
 
 # -- Container runtime check --
 

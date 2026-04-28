@@ -1914,6 +1914,16 @@ def register_preparation_callbacks(app):
         if not n_clicks or not selected_db:
             raise PreventUpdate
 
+        if (config or {}).get("offline_mode"):
+            return dbc.Alert(
+                [
+                    html.I(className="bi bi-cloud-slash me-2"),
+                    "Offline mode is enabled. Transfer the species database "
+                    "as part of the offline bundle instead of downloading.",
+                ],
+                color="warning",
+            )
+
         db_info = (databases or {}).get(selected_db)
         if not db_info:
             return dbc.Alert(f"Database '{selected_db}' not found.", color="danger")

@@ -168,7 +168,7 @@ class ReadinessChecker:
 
         # === Informational ===
         report.checks.append(self._check_nextflow_version())
-        report.checks.extend(self._check_network_connectivity())
+        report.checks.extend(self._check_network_connectivity(config))
         report.checks.append(self._check_taxonomy_cache(home))
         report.checks.append(self._check_pipeline_cached(config))
 
@@ -618,8 +618,19 @@ class ReadinessChecker:
                 "Could not determine Nextflow version",
             )
 
-    def _check_network_connectivity(self) -> List[CheckResult]:
-        """Test network connectivity to NCBI and GTDB APIs."""
+    def _check_network_connectivity(self, config: Dict[str, Any] | None = None) -> List[CheckResult]:
+        """Test network connectivity to NCBI and GTDB APIs.
+
+        Skipped when ``config['offline_mode']`` is true: in offline mode the
+        probe blocks the readiness panel for the full timeout per endpoint
+        and surfaces a warning operators are trained to treat as actionable.
+        """
+        if (config or {}).get("offline_mode"):
+            return [CheckResult(
+                "Network", True, Severity.INFO,
+                "Offline mode -- network probe skipped",
+            )]
+
         import urllib.request
 
         results = []
