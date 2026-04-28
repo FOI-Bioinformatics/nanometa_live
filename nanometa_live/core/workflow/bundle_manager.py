@@ -177,6 +177,37 @@ _PRE_WARM_SCENARIOS = [
             "FASTP_STREAMING envs that the default chopper path skips."
         ),
     },
+    {
+        "name": "assembly_flye",
+        "params": {
+            "processing_mode": "batch",
+            "sample_handling": "single_sample",
+            "enable_assembly": "true",
+        },
+        "comment": (
+            "Enables the assembly subworkflow so flye and miniasm conda "
+            "envs are pre-built. Assembly is opt-in via enable_assembly "
+            "and stays off in default field deployments, but field labs "
+            "running de novo assembly need these envs cached."
+        ),
+    },
+    {
+        "name": "untar_kraken2_db",
+        "params": {
+            "processing_mode": "batch",
+            "sample_handling": "single_sample",
+            "kraken2_db": (
+                "https://raw.githubusercontent.com/nf-core/test-datasets/"
+                "modules/data/genomics/sarscov2/genome/db/kraken2.tar.gz"
+            ),
+        },
+        "comment": (
+            "Triggers UNTAR on a tar.gz Kraken2 DB so the untar conda "
+            "env is cached. Operators handing the field machine a "
+            "tarred DB need this env to avoid a network fetch on first "
+            "launch."
+        ),
+    },
 ]
 
 # README sub-block describing the manual pre-warm workaround used when
@@ -299,6 +330,28 @@ bioconda/conda-forge and fail.
 - Build-time tools such as ``conda-pack`` and ``datasets`` are not
   required at runtime; if a version warning lists them as missing
   locally that is informational only.
+
+## Platform restriction for pre-warmed conda envs
+
+Conda environments built by Nextflow under ``NXF_CONDA_CACHEDIR`` embed
+absolute build-machine paths and per-architecture binaries. They cannot
+be relocated across operating systems or CPU architectures. **The build
+machine and the field machine must share the same OS and CPU
+architecture** (for example, both Linux x86_64, or both macOS arm64).
+
+A bundle built on macOS arm64 will not run on Linux x86_64 even if the
+Python and Nextflow versions match. ``import_bundle`` records the build
+platform in ``manifest.json`` and emits a WARNING (not CRITICAL) at
+import time when it detects a mismatch, so an operator who ignores the
+warning will still hit a runtime failure once Nextflow tries to spawn a
+process from the cached env.
+
+If cross-platform deployment is required, do not pre-warm conda envs at
+build time. Instead, ship the bundle without them and let the field
+machine resolve envs from each module's ``environment.yml`` on first
+run (this requires the field machine to have brief network access for
+the bioconda fetches, or a private bioconda mirror reachable from the
+field network).
 """
 
 
