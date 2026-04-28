@@ -313,10 +313,11 @@ def register_preparation_callbacks(app):
         Input("export-bundle-btn", "n_clicks"),
         State("bundle-export-directory", "value"),
         State("bundle-export-filename", "value"),
+        State("bundle-export-prewarm", "value"),
         State("app-config", "data"),
         prevent_initial_call=True,
     )
-    def export_bundle(n_clicks, directory, filename, config):
+    def export_bundle(n_clicks, directory, filename, pre_warm, config):
         """Check readiness, then export or show issues."""
         if not n_clicks:
             raise PreventUpdate
@@ -342,7 +343,7 @@ def register_preparation_callbacks(app):
 
         # All checks pass — export immediately
         if not critical and not warnings:
-            result = _run_export(config, filename, directory)
+            result = _run_export(config, filename, directory, pre_warm=pre_warm)
             return html.Div(), {"display": "none"}, result, False
 
         # Build issue list
@@ -395,16 +396,17 @@ def register_preparation_callbacks(app):
         Input("export-force-btn", "n_clicks"),
         State("bundle-export-directory", "value"),
         State("bundle-export-filename", "value"),
+        State("bundle-export-prewarm", "value"),
         State("app-config", "data"),
         prevent_initial_call=True,
     )
-    def force_export_bundle(n_clicks, directory, filename, config):
+    def force_export_bundle(n_clicks, directory, filename, pre_warm, config):
         """Export bundle after user acknowledged warnings."""
         if not n_clicks:
             raise PreventUpdate
-        return _run_export(config, filename, directory)
+        return _run_export(config, filename, directory, pre_warm=pre_warm)
 
-    def _run_export(config, filename=None, directory=None):
+    def _run_export(config, filename=None, directory=None, pre_warm=True):
         """Perform the actual bundle export. Returns an Alert component."""
         try:
             from nanometa_live.core.workflow.bundle_manager import BundleManager
@@ -421,7 +423,10 @@ def register_preparation_callbacks(app):
                 config.get("pipeline_source"), str
             ) and not str(config.get("pipeline_source", "")).startswith("remote:") else None
             path = manager.export_bundle(
-                str(output_path), config, pipeline_path=pipeline_path
+                str(output_path),
+                config,
+                pipeline_path=pipeline_path,
+                pre_warm_conda_envs=bool(pre_warm),
             )
             size_mb = path.stat().st_size / (1024 * 1024)
 

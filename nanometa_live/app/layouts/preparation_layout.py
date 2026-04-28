@@ -10,12 +10,31 @@ Provides UI for:
 - Exporting/importing portable bundles for offline field operation
 """
 
+import platform
 from pathlib import Path
 
 import dash_bootstrap_components as dbc
 from dash import html, dcc
 
 from nanometa_live.app.components.modern_components import WorkflowStepper
+
+
+def _build_platform_banner() -> dbc.Alert:
+    """Banner reminding the operator that pre-warmed conda envs are platform-locked."""
+    system = platform.system()
+    machine = platform.machine()
+    return dbc.Alert(
+        [
+            html.I(className="bi bi-info-circle me-2"),
+            html.Strong(f"Build platform: {system} {machine}. "),
+            "Pre-warmed conda environments only run on a field machine "
+            "with the same OS and CPU architecture. For cross-platform "
+            "deployment, leave pre-warm off and let the field machine "
+            "resolve environments on first run (requires brief network access).",
+        ],
+        color="info",
+        className="small py-2 mb-3",
+    )
 
 
 def create_preparation_layout():
@@ -217,6 +236,18 @@ def create_preparation_layout():
                                         type="text",
                                     ),
                                 ], className="mb-3"),
+                                # Pre-warm conda toggle + platform banner
+                                dbc.Checkbox(
+                                    id="bundle-export-prewarm",
+                                    label=(
+                                        "Pre-warm conda environments "
+                                        "(adds roughly 30 min and ~5 GB; "
+                                        "field machine must match this OS and CPU)"
+                                    ),
+                                    value=True,
+                                    className="mb-2",
+                                ),
+                                _build_platform_banner(),
                                 dbc.Button(
                                     [html.I(className="bi bi-download me-2"), "Export Bundle"],
                                     id="export-bundle-btn",

@@ -1529,3 +1529,76 @@ class TestBuildPlatformCheck:
         assert mismatch_warnings, (
             "Expected a platform-mismatch warning in import result"
         )
+
+
+class TestPreparationTabPreWarmCheckbox:
+    """The Preparation tab must surface the pre-warm toggle and platform banner."""
+
+    def test_layout_includes_prewarm_checkbox_default_on(self):
+        """bundle-export-prewarm checkbox is in the layout, defaults to True."""
+        from nanometa_live.app.layouts.preparation_layout import (
+            create_preparation_layout,
+        )
+        import dash_bootstrap_components as dbc
+
+        def find_checkbox(node, target_id):
+            if isinstance(node, dbc.Checkbox) and getattr(node, "id", None) == target_id:
+                return node
+            children = getattr(node, "children", None)
+            if children is None:
+                return None
+            if not isinstance(children, (list, tuple)):
+                children = [children]
+            for c in children:
+                if hasattr(c, "children") or hasattr(c, "id"):
+                    found = find_checkbox(c, target_id)
+                    if found is not None:
+                        return found
+            return None
+
+        layout = create_preparation_layout()
+        cb = find_checkbox(layout, "bundle-export-prewarm")
+        assert cb is not None, "bundle-export-prewarm checkbox missing"
+        assert cb.value is True, "pre-warm checkbox must default to ON"
+
+    def test_platform_banner_renders(self):
+        """_build_platform_banner returns an Alert with current OS+arch."""
+        import platform as _plat
+        from nanometa_live.app.layouts.preparation_layout import (
+            _build_platform_banner,
+        )
+        import dash_bootstrap_components as dbc
+
+        banner = _build_platform_banner()
+        assert isinstance(banner, dbc.Alert)
+        rendered = json.dumps(banner.to_plotly_json(), default=str)
+        assert _plat.system() in rendered
+        assert _plat.machine() in rendered
+
+    def test_export_callbacks_read_prewarm_state(self):
+        """The export-bundle and export-force-btn callbacks must include
+        bundle-export-prewarm among their State inputs.
+        """
+        import dash
+        from nanometa_live.app.tabs.preparation_tab import (
+            register_preparation_callbacks,
+        )
+
+        app = dash.Dash(__name__, suppress_callback_exceptions=True)
+        register_preparation_callbacks(app)
+
+        prewarm_listeners = []
+        for cb_id, spec in app.callback_map.items():
+            state_specs = spec.get("state", []) or []
+            # Dash stores state entries as dicts: {'id': ..., 'property': ...}
+            state_ids = [s.get("id") if isinstance(s, dict) else getattr(s, "component_id", None)
+                         for s in state_specs]
+            if "bundle-export-prewarm" in state_ids:
+                prewarm_listeners.append(cb_id)
+
+        # Both the primary export callback and the force-export fallback
+        # must read the checkbox.
+        assert len(prewarm_listeners) >= 2, (
+            f"Expected at least 2 callbacks reading bundle-export-prewarm, "
+            f"got {len(prewarm_listeners)}: {prewarm_listeners}"
+        )

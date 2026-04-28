@@ -1,9 +1,10 @@
 """
 CLI entry point for offline deployment preparation.
 
-Provides three subcommands:
+Provides four subcommands:
   deploy  - Run full MobileLabPreparer pipeline with console progress.
   check   - Run ReadinessChecker only, print pass/fail table.
+  export  - Export an offline bundle from a prepared ~/.nanometa.
   import  - Import a portable bundle via BundleManager.
 """
 
@@ -172,6 +173,76 @@ def _check(args):
     sys.exit(0 if report.ready else 1)
 
 
+def _export(args):
+    """Export an offline bundle from an already-prepared ~/.nanometa.
+
+    Mirrors the GUI Preparation tab's Export Bundle action without running
+    the preparer first. Use this when ~/.nanometa already contains downloaded
+    genomes, BLAST DBs, mappings, and watchlists from a prior deploy.
+    """
+    import platform
+    import yaml
+    from nanometa_live.core.workflow.bundle_manager import BundleManager
+
+    if not os.path.exists(args.config):
+        print(f"{_RED}Config file not found: {args.config}{_RESET}", file=sys.stderr)
+        sys.exit(1)
+
+    with open(args.config) as f:
+        config = yaml.safe_load(f) or {}
+
+    if args.db:
+        config["kraken_db"] = args.db
+
+    pre_warm = bool(args.pre_warm) and not bool(args.no_pre_warm)
+
+    pipeline_path = args.pipeline
+    if pipeline_path is None:
+        # Fall back to a local pipeline_source from the config, but only
+        # if it resolves to a directory that contains main.nf.
+        pipeline_source = config.get("pipeline_source", "")
+        if (
+            isinstance(pipeline_source, str)
+            and not pipeline_source.startswith(("remote:", "https://", "git@"))
+            and os.path.isdir(pipeline_source)
+        ):
+            pipeline_path = pipeline_source
+
+    if pre_warm and not pipeline_path:
+        print(
+            f"{_RED}--pre-warm requires --pipeline pointing to a local "
+            f"nanometanf checkout (config.pipeline_source did not resolve "
+            f"to a local directory).{_RESET}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print(f"{_BOLD}Nanometa Live - Export Offline Bundle{_RESET}")
+    print(f"  Output: {args.output}")
+    print(f"  Pre-warm conda envs: {'YES' if pre_warm else 'no'}")
+    if pre_warm:
+        print(
+            f"  {_YELLOW}Build platform: {platform.system()} "
+            f"{platform.machine()}. Field machine must match.{_RESET}"
+        )
+    if pipeline_path:
+        print(f"  Pipeline source: {pipeline_path}")
+    print()
+
+    bm = BundleManager()
+    nanometa_home = args.home or None
+    path = bm.export_bundle(
+        args.output,
+        config,
+        nanometa_home=nanometa_home,
+        pre_warm_conda_envs=pre_warm,
+        pipeline_path=pipeline_path,
+    )
+    size_mb = path.stat().st_size / (1024 * 1024)
+    print(f"{_GREEN}Bundle exported: {path} ({size_mb:.1f} MB){_RESET}")
+    sys.exit(0)
+
+
 def _import_bundle(args):
     """Import a portable bundle."""
     from nanometa_live.core.workflow.bundle_manager import BundleManager
@@ -222,6 +293,8 @@ def main():
               nanometa-prepare deploy --config config.yaml --db /data/kraken2_db
               nanometa-prepare deploy --config config.yaml --output bundle.tar.gz
               nanometa-prepare check --config config.yaml --db /data/kraken2_db
+              nanometa-prepare export --config config.yaml --output bundle.tar.gz \\
+                  --pre-warm --pipeline /path/to/nanometanf
               nanometa-prepare import --bundle bundle.tar.gz --db /data/kraken2_db
         """),
     )
@@ -274,6 +347,38 @@ def main():
         help="Override Kraken2 database path from config",
     )
     check_p.set_defaults(func=_check)
+
+    # export
+    export_p = subparsers.add_parser(
+        "export",
+        help="Export offline bundle from a prepared ~/.nanometa",
+    )
+    export_p.add_argument(
+        "--config", "-c", required=True,
+        help="Path to Nanometa Live config.yaml",
+    )
+    export_p.add_argument(
+        "--output", "-o", required=True,
+        help="Output bundle path (e.g. bundle.tar.gz)",
+    )
+    export_p.add_argument(
+        "--db", default=None,
+        help="Override Kraken2 database path from config",
+    )
+    export_p.add_argument(
+        "--pipeline", default=None,
+        help="Path to local nanometanf checkout (required for --pre-warm)",
+    )
+    export_p.add_argument(
+        "--pre-warm", action="store_true", default=True,
+        help="Pre-warm conda environments (default: on; "
+             "build/field machines must match OS+CPU)",
+    )
+    export_p.add_argument(
+        "--no-pre-warm", action="store_true", default=False,
+        help="Disable pre-warming for cross-platform deployment",
+    )
+    export_p.set_defaults(func=_export)
 
     # import
     import_p = subparsers.add_parser(
