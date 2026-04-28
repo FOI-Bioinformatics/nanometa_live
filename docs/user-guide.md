@@ -248,7 +248,7 @@ processing_mode: "realtime"
 sample_handling: "by_barcode"
 update_interval_seconds: 30
 
-pipeline_profile: "docker"
+pipeline_profile: "conda"
 blast_validation: false
 
 # Watchlists are managed via the Watchlist tab in the GUI

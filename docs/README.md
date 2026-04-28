@@ -14,7 +14,6 @@
 |----------|-------------|
 | [Developer Guide](developer-guide.md) | Architecture and contributing |
 | [API Reference](api-reference.md) | Python API documentation |
-| [Testing Guide](MANUAL_TESTING_GUIDE.md) | Testing procedures |
 
 ## Technical Reference
 

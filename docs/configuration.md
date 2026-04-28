@@ -46,7 +46,7 @@ nanopore_output_directory: "/path/to/input"
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `pipeline_profile` | string | "docker" | `docker`, `singularity`, or `conda` |
+| `pipeline_profile` | string | "conda"  | `conda` (recommended for nanometanf), `docker`, or `singularity` |
 | `pipeline_source` | string | "remote:master" | Pipeline location (see below) |
 | `pipeline_cores` | int | 1 | CPU cores for pipeline |
 | `kraken_cores` | int | 1 | CPU cores for Kraken2 classification |
@@ -231,7 +231,7 @@ results_output_directory: "/data/results/run_001"
 kraken_db: "/databases/kraken2_standard"
 processing_mode: "batch"
 sample_handling: "by_barcode"
-pipeline_profile: "docker"
+pipeline_profile: "conda"
 ```
 
 ### Real-time Monitoring
@@ -245,7 +245,7 @@ processing_mode: "realtime"
 sample_handling: "by_barcode"
 update_interval_seconds: 15
 batch_size: 5
-pipeline_profile: "docker"
+pipeline_profile: "conda"
 ```
 
 ### Single Sample Analysis
@@ -258,7 +258,7 @@ kraken_db: "/databases/kraken2_standard"
 processing_mode: "batch"
 sample_handling: "single_sample"
 sample_name: "PATIENT_001"
-pipeline_profile: "docker"
+pipeline_profile: "conda"
 ```
 
 ### With Validation
@@ -270,7 +270,7 @@ results_output_directory: "/data/results/clinical_001"
 kraken_db: "/databases/kraken2_plusPF"
 processing_mode: "batch"
 sample_handling: "by_barcode"
-pipeline_profile: "docker"
+pipeline_profile: "conda"
 
 blast_validation: true
 validation_method: "minimap2"

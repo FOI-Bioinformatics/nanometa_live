@@ -50,6 +50,7 @@ nanometa_live/
 ├── core/
 │   ├── config/             # Configuration loading and parameter mapping
 │   │   ├── config_loader.py
+│   │   ├── config_manager.py
 │   │   ├── config_validator.py
 │   │   ├── parameter_mapping.py
 │   │   ├── pathogen_loader.py
@@ -283,7 +284,7 @@ processing_mode: "batch"        # or "realtime"
 sample_handling: "by_barcode"   # or "single_sample", "per_file"
 
 # Pipeline
-pipeline_profile: "docker"      # or "singularity", "conda"
+pipeline_profile: "conda"       # always conda for nanometanf; docker/singularity exist but aren't used
 pipeline_source: "remote:main"  # or "/local/path"
 
 # Validation
@@ -669,67 +670,7 @@ nanometanf now includes the minimap2 validation subworkflow with PAF output at `
 
 ---
 
-**Last Updated:** 2026-04-28
-
-**Offline deployment hardening — cycles 17 and 18 (2026-04-28):**
-
-- **Bundle now self-contained for offline launch.** `BundleManager.export_bundle` copies the resolved nanometanf checkout into `staging/pipeline_source/` and the relevant `~/.nextflow/plugins/<name-version>/` entries into `staging/nextflow_plugins/`, writing relative paths into the bundle's `config.yaml`. `import_bundle` rewrites them to absolute paths on the field machine and records both at `result["pipeline_source_path"]` and `result["nxf_plugins_dir"]`. Pre-fix, the default `pipeline_source: "remote:main"` made every fresh-machine launch attempt a GitHub pull; cycles 17 dry-run reproduced this end-to-end.
-- **NXF_OFFLINE must be the literal string `"true"`, not `"1"`.** Nextflow's bash launcher does `[[ $NXF_OFFLINE == true ]] && return 0` for the self-update curl probe; the JVM-side plugin manager is equally strict. `NXF_OFFLINE=1` looks plausible but does not work — the `HttpPluginRepository.fetchMetadata0` registry probe still fires and crashes air-gapped runs with `UnknownFormatConversionException: Conversion = '4'` after five retries. `NextflowManager._build_nextflow_env()` now injects `NXF_OFFLINE=true`, `NXF_DISABLE_CHECK_LATEST=true`, `NXF_PLUGINS_PATH=<dir>`, `NXF_PLUGINS_DIR=<dir>`, and `NXF_CONDA_CACHEDIR=<dir>` whenever `config['offline_mode']` is set. Verified zero registry calls in the cycle 17 dry-run with `https_proxy=http://127.0.0.1:1` blackholed.
-- **Offline guards on NCBI / GTDB callers.** `GenomeDownloadManager` methods (`get_kingdom`, `fetch_gtdb_accession`, `fetch_ncbi_accession`, `get_kingdoms_batch`, `fetch_ncbi_accessions_batch`) now short-circuit when `self.offline_mode` is true. Pre-fix, the outer `download_genome` guarded itself but called these inner methods without their own check, so kingdom-routing fired live API calls even in offline mode. Watchlist `validate_entry_via_api` and `bulk_validate_entries` accept `offline_mode` and thread it to `get_ncbi_client(offline_mode=...)` / `get_gtdb_client(offline_mode=...)`. The Validate-button and Add-custom-species (`lookup_species`) callbacks read `config["offline_mode"]` and pass it through. `taxonomy_api.lookup_species()` gained an `offline_mode` kwarg.
-- **Validate pipeline source against offline mode.** `validate_pipeline_source()` and `BackendManager.setup_project()` reject `pipeline_source` starting with `remote:` / `https://` / `git@` when `offline_mode` is true, returning a clear error before any `git ls-remote` subprocess fires.
-- **Manifest records build platform.** `manifest.json` now carries `build_platform = {system, machine, python}`. `import_bundle` warns (not blocks) on mismatch. Pre-fix, an operator could copy a macOS arm64 bundle to a Linux x86_64 field machine and discover broken binaries only at runtime.
-- **`_collect_tool_versions` regex fix.** `nextflow -version` output is now parsed by `r"version\s+(\S+)\s+build\s+(\d+)"` instead of recording the literal banner `"N E X T F L O W"`. Falls back to the first non-banner output line.
-- **`_check_db_index` NameError.** `readiness_checker.py:230` referenced an undefined `index_file` in the failure branch (only `index_file_json` and `index_file_pkl` were in scope). Replaced with `f"expected at {index_file_json} or {index_file_pkl}"`.
-- **Pre-warm scenarios extended.** Added `assembly_flye` (`enable_assembly=true`, covers flye + miniasm envs) and `untar_kraken2_db` (kraken2_db pointing at a tar.gz URL, covers the UNTAR module env). `_PRE_WARM_SCENARIOS` is now nine entries.
-- **README_TEMPLATE platform-restriction note.** Operator-facing README in the bundle now explicitly states that conda envs built on machine A do not relocate to machine B unless OS and CPU architecture match. Cross-platform deployment requires shipping without pre-warmed envs.
-- **nanometanf samplesheet template.** `assets/samplesheet.csv` (and the duplicate `workflows/assets/samplesheet.csv` removed in the cycle's cleanup branch) updated from the legacy paired-end Illumina nf-core template (`sample,fastq_1,fastq_2`) to the single-end ONT format the active `schema_input.json` already required (`sample,fastq,barcode`). Operators copying the example were producing samplesheets the schema validator rejected.
-- **nanometanf `TAXONOMIC_CLASSIFICATION` emit guard.** `workflows/nanometanf.nf` lines 580-582 now check `(params.kraken2_db && !params.skip_kraken2)` instead of `params.kraken2_db` alone. Pre-fix, runs with `--skip_kraken2 true` while a database path remained in config aborted with `Access to 'TAXONOMIC_CLASSIFICATION.out' is undefined`.
-- **nanometanf duplicate `workflows/` tree removed.** A 61-file dead duplicate of the pipeline layout (`workflows/main.nf`, `workflows/modules/`, `workflows/subworkflows/`, `workflows/assets/`, `workflows/conf/`, `workflows/tests/`, `workflows/tower.yml`, plus the duplicate `LICENSE` and `README.md`) was tracked but referenced by nothing. Removed; only the legitimate `workflows/nanometanf.nf` remains.
-- **Test coverage** — 549 passed, 1 skipped (was 433 in cycle 5). 33 new tests across `test_bundle_manager.py` (9), `test_e2e_scenarios.py` (17), `test_watchlist_validation.py` (7).
-
-**UI redesign phase 5 (2026-04-13 to 2026-04-15) -- clinical-operator rework:**
-
-- **Dashboard 4-zone redesign** targeted at first responders / clinicians with 30-second scan. Zone 1 unified verdict banner (background color = answer), Zone 2 pathogen alert cards with per-sample attribution, Zone 3 four-card supporting strip, Zone 4 collapsed accordion for details. WCAG AA-compliant text colors, 6px left borders, locked type scale (verdict H3 32px / 700, StatCard value 28px / 700), 8px radius site-wide. `SCREENING IN PROGRESS` state uses blue (not amber) with spinning icon to avoid color ambiguity with `MONITORING`. "Last updated HH:MM:SS" and "— pending confirmatory validation" clinical qualifiers.
-- **Per-sample pathogen attribution** — alert engine organism dict extended with `samples: [{sample, reads, abundance, is_negative_control}]` sorted descending by reads. Zone 2 alert cards render "DETECTED IN:" chip row with severity-tier colors, negative-control chips in flat gray with `(NC)` suffix, `+X more` pill for 5+ samples. Non-clickable read surface. `pathogen_alert.py` + `alert_engine.py` + callbacks in `dashboard_tab.py` updated.
-- **Authoritative taxonomy for Sankey/Sunburst** — Kraken2 PlusPFP reports can have non-DFS node ordering (e.g. Bacillus appears before Bacillaceae). The indentation-based `parent_taxid` parser produced broken parent chains, causing B. thuringiensis and other species to be missing from Sankey links. Fix: new `load_kraken2_taxonomy(kraken_db_path)` parses `inspect.txt` (always in proper DFS order) to cache authoritative taxid→parent_taxid; `apply_authoritative_taxonomy(df, taxonomy)` overrides the broken per-report values in the classification callback.
-- **QC Stage Strip** — new top-of-tab horizontal `Raw → Quality-filtered → Classified` strip with delta classification rate, Chopper-pipeline handling for the Raw slot (dashed border + "Not available"), and plain-language column renames in the per-sample AgGrid ("Filtered reads", "Classification rate", "Avg. Q score") with tool-source tooltips.
-- **Kraken2 batch-report aggregation fix** — in the per-sample branch of `load_kraken_data()`, when no cumulative or standard report was present the loader summed `reads` and `cumul_reads` across every `*_batch*.kraken2.report.txt` file. Each batch file is itself a cumulative snapshot that already contains the reads from earlier batches, so summing them multi-counted shared reads (barcode02 reported 538 reads when the correct value was 208). Fix: in the batch-file fallback, select only the highest-numbered batch via `_extract_batch_num` and parse that single file. The all-samples branch was unaffected because it prefers `*.cumulative.kraken2.report.txt` or the single standard report. New dedicated helper `load_kraken_latest_batch(main_dir, sample)` for callers that need the latest-batch horizon without the cumulative fallback.
-- **Cross-tab time-horizon unification** — Organism, Dashboard, and QC Sample Breakdown all use cumulative-since-run-start; the QC Stage Strip previously used latest-batch (with a silent cumulative fallback that lied about the horizon). Every tab now shows the same cumulative numbers for the same sample: filtered = `root.cumul_reads + unclassified.cumul_reads` (the total reads Kraken2 processed = reads that passed chopper). Dropped the "FASTP" label bug — the Filtered slot now carries the filtering tool name (Chopper or FASTP) based on whether raw read count is available.
-- **Pipeline integration fixes** — `parameter_mapping.py`: removed conflicting `input_dir` from both realtime and batch-fallback branches (was triggering nanometanf's "Multiple input modes detected" validation error). Q30 thresholds adjusted: red <25% (was <30%), amber 25–44%.
-- **nanorunner (upstream tool) fix** — `manifest.py::_rechunk_entries()` was appending all chunks per barcode sequentially, so replay with `--reads-per-file 1000` exhausted barcode01 before starting barcode02. Fixed to interleave round-robin across barcodes using `itertools.zip_longest` so every timing interval advances all barcodes together. Run with `--batch-size 12` to release one file per barcode per interval.
-- **Test coverage** — expanded to 433 tests (from 403).
-
-**Production hardening phase 4 (2026-04-04) -- cross-application audit:**
-
-- Parameter mapping: replaced `barcode_dirs` (not in nanometanf schema) with `input_dir` for auto-detection
-- BLAST loader: added `.blast.tsv` glob pattern (nanometanf produces `.blast.tsv`, not `.txt`)
-- SeqKit loader: added nested directory scan for `seqkit/{sample}/stats/*.tsv` (nanometanf v1.5 layout)
-- Fixed `minimap2_min_mapq` default from 30 to 10 (matching nanometanf schema)
-- Removed legacy `min_perc_identity` and `e_val_cutoff` params (silently ignored, duplicated by new names)
-- Removed orphaned `taxmap-export-download` dcc.Download and `create_mapping_section` unused import
-- Removed orphaned stores: `api-validation-progress`, `genome-download-progress`
-- Nextflow log error extraction now captures multiline "Caused by:" context
-- Test coverage: 403 tests passing, 100+ new tests from phases 3-4
-
-**Production hardening phase 3 (2026-04-03):**
-
-- Taxonomy mapping: `names_alt` support for multi-name matching, strategy priority fix, DB type guards
-- GTDB API SSL fallback for environments with restricted certificate chains
-- Parser hardening: PAF bounds checking, classification race-condition guards, FASTP JSON validation
-- Readiness checker: minimap2 detection, network connectivity test, Nextflow version checks
-- FASTA validation after genome download (detects truncated or corrupt files)
-- Timeouts on all subprocess and network calls to prevent indefinite hangs
-- Test coverage: 20+ new tests for parsers, loaders, and mapping strategies
-- Icons: `bi-exclamation-octagon-fill` for critical alerts, `bi-exclamation-triangle-fill` for high-risk alerts
-- Accessibility: `title` attributes on icon-only buttons (watchlist info, alert dismiss)
-
-**Production hardening phase 1-2 (2026-03-01):**
-
-- Test suite expanded from 233 to 274 tests (all passing)
-- Fixed BLAST validation path: parsers now look in `validation/blast/` (matching nanometanf output)
-- Fixed memory leak in BackendManager (error list deduplication)
-- Fixed `pipeline_cores` config key being ignored in parameter_mapping
-- Added `qc_tool` parameter mapping for FASTP/Chopper selection
-- Downgraded verbose VALIDATION DEBUG messages from INFO to DEBUG
-- Replaced `iterrows()` with vectorized pandas operations in main_tab
-- Added `tests/validation/conftest.py` for proper sys.path setup
+See `git log` for change history. Non-obvious patterns and quirks that
+survive across cycles are captured inline above (offline mode, authoritative
+taxonomy, Kraken2 batch-cumulative aggregation, QC Stage Strip rules,
+build-platform restriction, etc.).
