@@ -779,9 +779,10 @@ class TestExtendedPreWarmScenarios:
     to the chopper/seqkit/kraken2/multiqc set already covered.
     """
 
-    def test_seven_scenarios_registered(self):
-        """The pre-warm scenario list now carries exactly seven entries
-        in the order the audit recommended."""
+    def test_nine_scenarios_registered(self):
+        """The pre-warm scenario list now carries the entries audited
+        across cycles 11 (validation/fastp) and 17 (assembly/untar) in
+        the order the audit recommended."""
         names = [s["name"] for s in _PRE_WARM_SCENARIOS]
         assert names == [
             "batch_samplesheet",
@@ -791,6 +792,8 @@ class TestExtendedPreWarmScenarios:
             "validation_blast",
             "validation_minimap2",
             "fastp_qc",
+            "assembly_flye",
+            "untar_kraken2_db",
         ]
 
     def test_each_scenario_has_required_fields(self):
@@ -825,7 +828,24 @@ class TestExtendedPreWarmScenarios:
         )
         assert scenario["params"].get("qc_tool") == "fastp"
 
-    def test_all_seven_scenarios_attempted(self, tmp_path):
+    def test_assembly_flye_params_enable_assembly(self):
+        """The assembly scenario sets enable_assembly so flye and miniasm
+        envs land in the cache during pre-warm."""
+        scenario = next(
+            s for s in _PRE_WARM_SCENARIOS if s["name"] == "assembly_flye"
+        )
+        assert scenario["params"].get("enable_assembly") == "true"
+
+    def test_untar_kraken2_db_params_supply_tarred_db(self):
+        """The untar scenario points kraken2_db at a tar.gz URL so the
+        UNTAR module fires and its conda env lands in the cache."""
+        scenario = next(
+            s for s in _PRE_WARM_SCENARIOS if s["name"] == "untar_kraken2_db"
+        )
+        db = scenario["params"].get("kraken2_db", "")
+        assert db.endswith(".tar.gz")
+
+    def test_all_scenarios_attempted(self, tmp_path):
         """When pre-warm runs, every scenario in the registry is passed
         to ``_run_pre_warm_scenario`` exactly once."""
         home = tmp_path / "home"
@@ -867,6 +887,8 @@ class TestExtendedPreWarmScenarios:
             "validation_blast",
             "validation_minimap2",
             "fastp_qc",
+            "assembly_flye",
+            "untar_kraken2_db",
         ]
 
         with tarfile.open(str(out), "r:gz") as tar:
