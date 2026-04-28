@@ -121,8 +121,11 @@ Input FASTQ -> nanometanf Pipeline -> Output Files -> Data Loaders -> Dash Callb
 | Taxid Mapper | `core/taxonomy/taxid_mapping.py` | NCBI-to-Kraken2 taxid resolution |
 | Authoritative Taxonomy | `app/tabs/kraken2_helpers.py` | `load_kraken2_taxonomy()` / `apply_authoritative_taxonomy()` — parses `inspect.txt` from Kraken2 DB to correct parent_taxid for Sankey/Sunburst |
 | Latest-Batch Loader | `core/utils/classification_loaders.py` | `load_kraken_latest_batch()` — selects highest-numbered batch report, never sums across cumulative batches |
-| Genome Manager | `core/utils/genome_manager.py` | Reference genome downloads and BLAST DBs |
+| Genome Manager | `core/utils/genome_manager.py` | Reference genome downloads and BLAST DBs (offline-mode-aware) |
 | On-Demand Validator | `core/workflow/on_demand_validator.py` | On-demand BLAST/minimap2 validation |
+| Bundle Manager | `core/workflow/bundle_manager.py` | Mobile-lab bundle export/import: pipeline source, plugins, watchlists, genomes, BLAST DBs, conda cache; build-platform manifest |
+| Mobile Lab Preparer | `core/workflow/mobile_lab_preparer.py` | Field-deployment preparation orchestration |
+| Readiness Checker | `core/workflow/readiness_checker.py` | Pre-flight checks: tools, DBs, indices, optional network probe |
 
 ### Processing Modes
 
@@ -521,12 +524,83 @@ Output: ~/.nanometa/genomes/{taxid}.fasta
         ~/.nanometa/blast/{taxid}.fasta.{nhr,nin,nsq}
 ```
 
+## Offline Deployment
+
+Field labs without internet access are a primary deployment target. The
+codebase splits "build online, run offline" into three concerns:
+
+1. **Bundle export / import** (`BundleManager.export_bundle` /
+   `import_bundle`). Bundle ships:
+   - `pipeline_source/` (the resolved nanometanf checkout, ignoring
+     `.git/`, `work/`, `.nextflow*`, `tests/`, `.nf-test/`, `__pycache__`,
+     `*.pyc`)
+   - `nextflow_plugins/` (plugins matched in `nextflow.config` plus
+     known prefixes `nf-schema`, `nf-validation`, `nf-wave`, `nf-console`)
+   - `genomes/`, `blast/`, `mappings/`, `cache/`, `watchlists/`
+   - `config.yaml` with relative `pipeline_source: ./pipeline_source`
+     and `nxf_plugins_dir: ./nextflow_plugins`. `import_bundle` rewrites
+     these to absolute paths on the field machine.
+   - `manifest.json` records `build_platform` (`{system, machine,
+     python}`); `import_bundle` warns on platform mismatch.
+   The Kraken2 database is excluded by size and transferred separately.
+
+2. **Subprocess env injection** (`NextflowManager._build_nextflow_env`).
+   When `config['offline_mode']` is true, the Nextflow subprocess
+   receives:
+   ```
+   NXF_OFFLINE=true              # literal string "true" (not "1")
+   NXF_DISABLE_CHECK_LATEST=true
+   NXF_PLUGINS_PATH=<dir>        # suppresses registry probe
+   NXF_PLUGINS_DIR=<dir>         # legacy install-target alias
+   NXF_CONDA_CACHEDIR=<dir>      # bundled conda envs
+   ```
+   `validate_pipeline_source` and `BackendManager.setup_project` reject
+   `pipeline_source` starting with `remote:` / `https://` / `git@` when
+   offline, before any `git ls-remote` fires.
+
+3. **Offline-mode propagation** to NCBI / GTDB callers. `GenomeManager`
+   methods (`get_kingdom`, `fetch_gtdb_accession`, `fetch_ncbi_accession`,
+   `get_kingdoms_batch`, `fetch_ncbi_accessions_batch`) and the watchlist
+   Validate / Add-custom-species callbacks read `offline_mode` and
+   short-circuit network calls. Caches (`TaxonomyCache` /
+   `OfflineTaxonomyCache`) are consulted first either way.
+
+### Pre-warm conda envs
+
+`BundleManager.export_bundle(..., pre_warm_conda_envs=True)` runs
+nine stub scenarios (`_PRE_WARM_SCENARIOS`) under `-profile conda`
+to populate `~/.nanometa/work/conda/`:
+
+```
+batch_samplesheet      Default chopper QC path
+realtime_multiplex     Watchpath barcode mode
+realtime_per_file      Per-file fan-out
+realtime_single_sample Single-sample aggregation
+validation_blast       BLASTN_VALIDATION + EXTRACT_READS_BY_TAXID envs
+validation_minimap2    MINIMAP2_ALIGNMENT_VALIDATION + samtools envs
+fastp_qc               FASTP / FASTP_STREAMING (alternate QC tool)
+assembly_flye          Assembly subworkflow (flye, miniasm)
+untar_kraken2_db       UNTAR module for tar.gz Kraken2 DB
+```
+
+Adds roughly 30 minutes and ~5 GB to the build. Default off so the
+existing flow is unaffected.
+
+### Cross-platform restriction
+
+Conda environments built by Nextflow embed absolute build-machine paths
+and per-architecture binaries. **Build machine and field machine must
+share OS and CPU architecture** (e.g., both Linux x86_64, or both macOS
+arm64). Cross-platform deployment requires either shipping the bundle
+without pre-warmed envs (and resolving on first run with brief network
+access) or a separate `conda-pack` workflow not currently automated.
+
 ## Testing
 
 ### Running Tests
 
 ```bash
-# Full test suite (433 tests)
+# Full test suite (549 tests, 1 skipped)
 pytest tests/ -v
 
 # Individual test modules
@@ -595,7 +669,23 @@ nanometanf now includes the minimap2 validation subworkflow with PAF output at `
 
 ---
 
-**Last Updated:** 2026-04-15
+**Last Updated:** 2026-04-28
+
+**Offline deployment hardening — cycles 17 and 18 (2026-04-28):**
+
+- **Bundle now self-contained for offline launch.** `BundleManager.export_bundle` copies the resolved nanometanf checkout into `staging/pipeline_source/` and the relevant `~/.nextflow/plugins/<name-version>/` entries into `staging/nextflow_plugins/`, writing relative paths into the bundle's `config.yaml`. `import_bundle` rewrites them to absolute paths on the field machine and records both at `result["pipeline_source_path"]` and `result["nxf_plugins_dir"]`. Pre-fix, the default `pipeline_source: "remote:main"` made every fresh-machine launch attempt a GitHub pull; cycles 17 dry-run reproduced this end-to-end.
+- **NXF_OFFLINE must be the literal string `"true"`, not `"1"`.** Nextflow's bash launcher does `[[ $NXF_OFFLINE == true ]] && return 0` for the self-update curl probe; the JVM-side plugin manager is equally strict. `NXF_OFFLINE=1` looks plausible but does not work — the `HttpPluginRepository.fetchMetadata0` registry probe still fires and crashes air-gapped runs with `UnknownFormatConversionException: Conversion = '4'` after five retries. `NextflowManager._build_nextflow_env()` now injects `NXF_OFFLINE=true`, `NXF_DISABLE_CHECK_LATEST=true`, `NXF_PLUGINS_PATH=<dir>`, `NXF_PLUGINS_DIR=<dir>`, and `NXF_CONDA_CACHEDIR=<dir>` whenever `config['offline_mode']` is set. Verified zero registry calls in the cycle 17 dry-run with `https_proxy=http://127.0.0.1:1` blackholed.
+- **Offline guards on NCBI / GTDB callers.** `GenomeDownloadManager` methods (`get_kingdom`, `fetch_gtdb_accession`, `fetch_ncbi_accession`, `get_kingdoms_batch`, `fetch_ncbi_accessions_batch`) now short-circuit when `self.offline_mode` is true. Pre-fix, the outer `download_genome` guarded itself but called these inner methods without their own check, so kingdom-routing fired live API calls even in offline mode. Watchlist `validate_entry_via_api` and `bulk_validate_entries` accept `offline_mode` and thread it to `get_ncbi_client(offline_mode=...)` / `get_gtdb_client(offline_mode=...)`. The Validate-button and Add-custom-species (`lookup_species`) callbacks read `config["offline_mode"]` and pass it through. `taxonomy_api.lookup_species()` gained an `offline_mode` kwarg.
+- **Validate pipeline source against offline mode.** `validate_pipeline_source()` and `BackendManager.setup_project()` reject `pipeline_source` starting with `remote:` / `https://` / `git@` when `offline_mode` is true, returning a clear error before any `git ls-remote` subprocess fires.
+- **Manifest records build platform.** `manifest.json` now carries `build_platform = {system, machine, python}`. `import_bundle` warns (not blocks) on mismatch. Pre-fix, an operator could copy a macOS arm64 bundle to a Linux x86_64 field machine and discover broken binaries only at runtime.
+- **`_collect_tool_versions` regex fix.** `nextflow -version` output is now parsed by `r"version\s+(\S+)\s+build\s+(\d+)"` instead of recording the literal banner `"N E X T F L O W"`. Falls back to the first non-banner output line.
+- **`_check_db_index` NameError.** `readiness_checker.py:230` referenced an undefined `index_file` in the failure branch (only `index_file_json` and `index_file_pkl` were in scope). Replaced with `f"expected at {index_file_json} or {index_file_pkl}"`.
+- **Pre-warm scenarios extended.** Added `assembly_flye` (`enable_assembly=true`, covers flye + miniasm envs) and `untar_kraken2_db` (kraken2_db pointing at a tar.gz URL, covers the UNTAR module env). `_PRE_WARM_SCENARIOS` is now nine entries.
+- **README_TEMPLATE platform-restriction note.** Operator-facing README in the bundle now explicitly states that conda envs built on machine A do not relocate to machine B unless OS and CPU architecture match. Cross-platform deployment requires shipping without pre-warmed envs.
+- **nanometanf samplesheet template.** `assets/samplesheet.csv` (and the duplicate `workflows/assets/samplesheet.csv` removed in the cycle's cleanup branch) updated from the legacy paired-end Illumina nf-core template (`sample,fastq_1,fastq_2`) to the single-end ONT format the active `schema_input.json` already required (`sample,fastq,barcode`). Operators copying the example were producing samplesheets the schema validator rejected.
+- **nanometanf `TAXONOMIC_CLASSIFICATION` emit guard.** `workflows/nanometanf.nf` lines 580-582 now check `(params.kraken2_db && !params.skip_kraken2)` instead of `params.kraken2_db` alone. Pre-fix, runs with `--skip_kraken2 true` while a database path remained in config aborted with `Access to 'TAXONOMIC_CLASSIFICATION.out' is undefined`.
+- **nanometanf duplicate `workflows/` tree removed.** A 61-file dead duplicate of the pipeline layout (`workflows/main.nf`, `workflows/modules/`, `workflows/subworkflows/`, `workflows/assets/`, `workflows/conf/`, `workflows/tests/`, `workflows/tower.yml`, plus the duplicate `LICENSE` and `README.md`) was tracked but referenced by nothing. Removed; only the legitimate `workflows/nanometanf.nf` remains.
+- **Test coverage** — 549 passed, 1 skipped (was 433 in cycle 5). 33 new tests across `test_bundle_manager.py` (9), `test_e2e_scenarios.py` (17), `test_watchlist_validation.py` (7).
 
 **UI redesign phase 5 (2026-04-13 to 2026-04-15) -- clinical-operator rework:**
 
