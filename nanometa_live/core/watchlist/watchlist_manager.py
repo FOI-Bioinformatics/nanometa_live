@@ -1192,6 +1192,7 @@ class WatchlistManager:
         taxid: int,
         use_ncbi: bool = True,
         use_gtdb: bool = True,
+        offline_mode: bool = False,
     ) -> Dict[str, Any]:
         """
         Validate a watchlist entry by querying NCBI and/or GTDB APIs.
@@ -1200,6 +1201,7 @@ class WatchlistManager:
             taxid: Taxonomy ID of the entry to validate
             use_ncbi: Whether to query NCBI API
             use_gtdb: Whether to query GTDB API
+            offline_mode: If True, skip live API calls and use cached data only
 
         Returns:
             Dict with validation results:
@@ -1231,9 +1233,15 @@ class WatchlistManager:
             "entry": None,
         }
 
+        if offline_mode:
+            logger.debug(
+                "validate_entry_via_api: offline_mode=True, skipping live API calls for taxid %s",
+                taxid,
+            )
+
         # Query NCBI
         if use_ncbi:
-            ncbi = get_ncbi_client()
+            ncbi = get_ncbi_client(offline_mode=offline_mode)
             # Try by taxid first, then by name
             ncbi_result = None
             if entry.taxid and entry.taxid > 0:
@@ -1254,7 +1262,7 @@ class WatchlistManager:
 
         # Query GTDB
         if use_gtdb:
-            gtdb = get_gtdb_client()
+            gtdb = get_gtdb_client(offline_mode=offline_mode)
             # Search by name (GTDB doesn't use NCBI taxids)
             search_name = entry.api_sciname or entry.name
             gtdb_result = gtdb.search_by_name(search_name)
@@ -1279,6 +1287,7 @@ class WatchlistManager:
         use_ncbi: bool = True,
         use_gtdb: bool = True,
         progress_callback: Optional[callable] = None,
+        offline_mode: bool = False,
     ) -> Dict[str, Any]:
         """
         Validate multiple entries via API.
@@ -1288,6 +1297,7 @@ class WatchlistManager:
             use_ncbi: Whether to query NCBI API
             use_gtdb: Whether to query GTDB API
             progress_callback: Optional callback(current, total) for progress
+            offline_mode: If True, skip live API calls and use cached data only
 
         Returns:
             Dict with:
@@ -1317,6 +1327,7 @@ class WatchlistManager:
                 taxid,
                 use_ncbi=use_ncbi,
                 use_gtdb=use_gtdb,
+                offline_mode=offline_mode,
             )
 
             results["results"].append({

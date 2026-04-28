@@ -789,6 +789,7 @@ def lookup_species(
     name: str,
     use_ncbi: bool = True,
     use_gtdb: bool = True,
+    offline_mode: bool = False,
 ) -> Dict[str, Any]:
     """
     Look up a species by name in both NCBI and GTDB.
@@ -797,6 +798,8 @@ def lookup_species(
         name: Species name to search
         use_ncbi: Whether to query NCBI
         use_gtdb: Whether to query GTDB
+        offline_mode: When True, query the cached clients only;
+            no live HTTP requests are made.
 
     Returns:
         Dict with:
@@ -811,11 +814,11 @@ def lookup_species(
     }
 
     if use_ncbi:
-        ncbi = get_ncbi_client()
+        ncbi = get_ncbi_client(offline_mode=offline_mode)
         result["ncbi_result"] = ncbi.search_by_name(name)
 
     if use_gtdb:
-        gtdb = get_gtdb_client()
+        gtdb = get_gtdb_client(offline_mode=offline_mode)
         result["gtdb_result"] = gtdb.search_by_name(name)
 
     return result

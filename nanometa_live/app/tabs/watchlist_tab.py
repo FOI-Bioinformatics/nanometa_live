@@ -819,6 +819,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
             State("watchlist-api-options", "value"),
             State({"type": "watchlist-row-validate", "index": ALL}, "id"),
             State("watchlist-table-refresh", "data"),
+            State("app-config", "data"),
         ],
         prevent_initial_call=True,
     )
@@ -828,6 +829,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
         api_options: List[str],
         row_ids: List[Dict],
         current_refresh: int,
+        config: Optional[Dict],
     ) -> Tuple:
         """Handle API validation requests."""
         if not ctx.triggered_id:
@@ -836,15 +838,22 @@ def register_watchlist_callbacks(app: Dash) -> None:
         trigger = str(ctx.triggered_id)
         use_ncbi = "ncbi" in (api_options or [])
         use_gtdb = "gtdb" in (api_options or [])
+        offline_mode = bool((config or {}).get("offline_mode", False))
 
         if not use_ncbi and not use_gtdb:
             return (
-                dash.no_update,
-                dash.no_update,
+                no_update,
+                no_update,
                 False,  # Close progress modal
                 0,
                 "No databases selected",
                 "Check NCBI and/or GTDB in the Databases section.",
+            )
+
+        if offline_mode:
+            logger.info(
+                "validate_entries: offline_mode=True; API calls will be skipped; "
+                "only cached data will be used."
             )
 
         manager = get_watchlist_manager()
@@ -868,6 +877,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
             taxids=taxids_to_validate,
             use_ncbi=use_ncbi,
             use_gtdb=use_gtdb,
+            offline_mode=offline_mode,
         )
 
         validated = results.get("validated", 0)
@@ -881,7 +891,9 @@ def register_watchlist_callbacks(app: Dash) -> None:
         if use_gtdb:
             apis_used.append("GTDB")
         detail = f"APIs: {', '.join(apis_used) if apis_used else 'None selected'}"
-        if failed > 0:
+        if offline_mode:
+            detail += " | offline mode: only cached data used"
+        elif failed > 0:
             detail += f" | {failed} failed"
 
         new_refresh = (current_refresh or 0) + 1
@@ -957,6 +969,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
             State("watchlist-add-name", "value"),
             State("watchlist-add-taxid", "value"),
             State("watchlist-api-options", "value"),
+            State("app-config", "data"),
         ],
         prevent_initial_call=True,
     )
@@ -965,6 +978,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
         name: str,
         taxid: Optional[int],
         api_options: list,
+        config: Optional[Dict],
     ) -> Tuple:
         """Look up species in NCBI/GTDB APIs."""
         if not n_clicks or not name:
@@ -972,6 +986,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         use_ncbi = "ncbi" in (api_options or [])
         use_gtdb = "gtdb" in (api_options or [])
+        offline_mode = bool((config or {}).get("offline_mode", False))
 
         if not use_ncbi and not use_gtdb:
             return (
@@ -985,7 +1000,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         try:
             from nanometa_live.core.taxonomy.taxonomy_api import lookup_species as api_lookup
-            result = api_lookup(name, use_ncbi=use_ncbi, use_gtdb=use_gtdb)
+            result = api_lookup(name, use_ncbi=use_ncbi, use_gtdb=use_gtdb, offline_mode=offline_mode)
 
             ncbi_result = None
             gtdb_result = None

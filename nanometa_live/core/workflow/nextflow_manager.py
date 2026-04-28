@@ -57,6 +57,9 @@ class NextflowManager:
         # Pipeline source configuration
         self.pipeline_source = pipeline_source
 
+        # Run configuration stored by setup() for use in _run_workflow()
+        self._run_config: Optional[Dict[str, Any]] = None
+
         self._last_trace_status = {}
 
         # Status dictionary matching SnakemakeManager interface
@@ -233,18 +236,40 @@ class NextflowManager:
         self.pipeline_source = source
         logging.info(f"Pipeline source updated to: {source}")
 
-    def validate_pipeline_source(self) -> Tuple[bool, str]:
+    def validate_pipeline_source(self, config: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
         """
         Validate that the configured pipeline source is resolvable.
 
         For local paths: check the directory exists and contains main.nf.
         For remote specs: check the GitHub branch resolves via ls-remote.
+        In offline mode, remote sources are rejected immediately without
+        any network call.
+
+        Args:
+            config: Optional configuration dict. When offline_mode is set
+                and the source is remote, returns failure without a network
+                call.
 
         Returns:
             Tuple of (ok: bool, message: str). A failure message describes
             what to fix (e.g., "branch 'master' not found on origin;
             try 'remote:dev' or a local path").
         """
+        # Offline guard: reject remote sources before any network attempt.
+        if config and config.get("offline_mode"):
+            source = self.pipeline_source
+            is_remote = (
+                source.startswith("remote:")
+                or source.startswith("https://")
+                or source.startswith("git@")
+                or source in ("master", "main", "dev")
+            )
+            if is_remote:
+                return False, (
+                    "Cannot use remote pipeline_source in offline mode. "
+                    "Set pipeline_source to a local path in config.yaml."
+                )
+
         pipeline_path, revision = self._parse_pipeline_source()
 
         # Local path: verify directory has a Nextflow entrypoint
@@ -329,6 +354,9 @@ class NextflowManager:
                     config = yaml.safe_load(f)
                 else:
                     config = json.load(f)
+
+            # Store a copy of the run config for env injection in _run_workflow()
+            self._run_config = dict(config)
 
             # Convert to nanometanf parameters
             params = create_nextflow_params(config)
@@ -472,7 +500,7 @@ class NextflowManager:
                 # Start workflow in background thread
                 threading.Thread(
                     target=self._run_workflow,
-                    args=(cmd,),
+                    args=(cmd, self._run_config),
                     daemon=True
                 ).start()
 
@@ -550,17 +578,78 @@ class NextflowManager:
         """
         return self.status.copy()
 
-    def _run_workflow(self, cmd: List[str]) -> None:
+    @staticmethod
+    def _build_nextflow_env(config: Optional[Dict[str, Any]]) -> Dict[str, str]:
+        """
+        Build the subprocess environment for a Nextflow run.
+
+        Starts from the current process environment and injects offline-mode
+        variables when the corresponding config keys are set.
+
+        Args:
+            config: Run configuration dict (may be None).
+
+        Returns:
+            A copy of os.environ augmented with any offline-mode variables.
+        """
+        env = os.environ.copy()
+        if not config:
+            return env
+
+        if config.get("offline_mode"):
+            # The Nextflow bash launcher checks `NXF_OFFLINE == true` (string
+            # equality, lowercase) to skip its self-update curl probe. The
+            # JVM side accepts boolean-ish values, so "true" satisfies both.
+            env["NXF_OFFLINE"] = "true"
+            env["NXF_DISABLE_CHECK_LATEST"] = "true"
+            logging.info("Offline mode active: NXF_OFFLINE=true and NXF_DISABLE_CHECK_LATEST=true injected.")
+
+        cachedir = config.get("nxf_conda_cachedir", "")
+        if cachedir:
+            abs_cachedir = os.path.abspath(cachedir)
+            if os.path.isdir(abs_cachedir):
+                env["NXF_CONDA_CACHEDIR"] = abs_cachedir
+                logging.info(f"NXF_CONDA_CACHEDIR set to: {abs_cachedir}")
+            else:
+                logging.warning(
+                    f"nxf_conda_cachedir '{cachedir}' is not an existing directory; "
+                    f"NXF_CONDA_CACHEDIR will not be set."
+                )
+
+        plugins_dir = config.get("nxf_plugins_dir", "")
+        if plugins_dir:
+            abs_plugins_dir = os.path.abspath(plugins_dir)
+            if os.path.isdir(abs_plugins_dir):
+                # NXF_PLUGINS_PATH is the load path that suppresses Nextflow's
+                # registry.nextflow.io probe (Nextflow >= 25.x). NXF_PLUGINS_DIR
+                # is the install target and does not stop the probe; we set
+                # both so legacy versions still resolve plugins from the cache.
+                env["NXF_PLUGINS_PATH"] = abs_plugins_dir
+                env["NXF_PLUGINS_DIR"] = abs_plugins_dir
+                logging.info(f"NXF_PLUGINS_PATH and NXF_PLUGINS_DIR set to: {abs_plugins_dir}")
+            else:
+                logging.warning(
+                    f"nxf_plugins_dir '{plugins_dir}' is not an existing directory; "
+                    f"NXF_PLUGINS_PATH/NXF_PLUGINS_DIR will not be set."
+                )
+
+        return env
+
+    def _run_workflow(self, cmd: List[str], config: Optional[Dict[str, Any]] = None) -> None:
         """
         Execute the Nextflow command in subprocess.
 
         Args:
             cmd: Nextflow command as list of arguments
+            config: Run configuration dict used to build the subprocess
+                environment (offline-mode variables, conda cache dir, etc.)
         """
         self._user_stopped = False
         try:
             log_file = os.path.join(self.log_dir, "nextflow.log")
             logging.info(f"Nextflow output will be logged to: {log_file}")
+
+            env = self._build_nextflow_env(config)
 
             with open(log_file, "w") as log:
                 self.process = subprocess.Popen(
@@ -569,6 +658,7 @@ class NextflowManager:
                     stderr=subprocess.STDOUT,
                     cwd=self.data_dir,
                     start_new_session=True,
+                    env=env,
                 )
 
                 self.status["nextflow_pid"] = self.process.pid

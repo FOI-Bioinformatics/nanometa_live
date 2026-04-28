@@ -470,6 +470,9 @@ class GenomeDownloadManager:
         Returns:
             Kingdom name (Bacteria, Archaea, Fungi, Viruses, etc.) or None
         """
+        if self.offline_mode:
+            logger.debug(f"Offline mode: skipping NCBI kingdom lookup for taxid {taxid}")
+            return None
         try:
             url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
             params = {
@@ -551,6 +554,9 @@ class GenomeDownloadManager:
         Returns:
             Tuple of (accession, metadata_dict) or None if not found
         """
+        if self.offline_mode:
+            logger.debug(f"Offline mode: skipping GTDB lookup for '{species_name}'")
+            return None
         try:
             # Format for GTDB search
             search_term = f"s__{species_name.replace(' ', '_')}"
@@ -612,6 +618,9 @@ class GenomeDownloadManager:
         Returns:
             Tuple of (accession, metadata_dict) or None if not found
         """
+        if self.offline_mode:
+            logger.debug(f"Offline mode: skipping NCBI accession lookup for taxid {taxid}")
+            return None
         try:
             url = f"{NCBI_DATASETS_API}/genome/taxon/{taxid}"
             params = {
@@ -1338,6 +1347,9 @@ class GenomeDownloadManager:
         """
         if not taxids:
             return {}
+        if self.offline_mode:
+            logger.debug(f"Offline mode: skipping batch NCBI kingdom lookup for {len(taxids)} taxids")
+            return {}
 
         results: Dict[int, str] = {}
 
@@ -1421,6 +1433,9 @@ class GenomeDownloadManager:
             entries are omitted.
         """
         if not taxids:
+            return {}
+        if self.offline_mode:
+            logger.debug(f"Offline mode: skipping batch NCBI accession lookup for {len(taxids)} taxids")
             return {}
 
         results: Dict[int, Tuple[str, Dict[str, Any]]] = {}

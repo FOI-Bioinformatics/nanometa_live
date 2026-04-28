@@ -417,7 +417,12 @@ def register_preparation_callbacks(app):
             output_path = export_dir / (filename or "mobile_lab_bundle.tar.gz")
 
             manager = BundleManager()
-            path = manager.export_bundle(str(output_path), config)
+            pipeline_path = config.get("pipeline_source") if isinstance(
+                config.get("pipeline_source"), str
+            ) and not str(config.get("pipeline_source", "")).startswith("remote:") else None
+            path = manager.export_bundle(
+                str(output_path), config, pipeline_path=pipeline_path
+            )
             size_mb = path.stat().st_size / (1024 * 1024)
 
             return dbc.Alert([
