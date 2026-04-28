@@ -325,6 +325,23 @@ class BackendManager:
         pipeline_source = self.config.get("pipeline_source", "remote:main")
         self.workflow_manager.set_pipeline_source(pipeline_source)
 
+        # Offline guard: reject remote sources before any network attempt.
+        if _parse_bool(self.config.get("offline_mode", False)):
+            is_remote = (
+                pipeline_source.startswith("remote:")
+                or pipeline_source.startswith("https://")
+                or pipeline_source.startswith("git@")
+                or pipeline_source in ("master", "main", "dev")
+            )
+            if is_remote:
+                msg = (
+                    "Offline mode is active but pipeline_source is remote "
+                    f"('{pipeline_source}'). Set pipeline_source to a local "
+                    "path in config.yaml before starting an offline run."
+                )
+                logging.error(msg)
+                return False, msg
+
         # Set up Nextflow workflow
         success, message = self.workflow_manager.setup(config_path)
         if not success:

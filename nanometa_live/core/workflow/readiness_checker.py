@@ -227,7 +227,7 @@ class ReadinessChecker:
         return CheckResult(
             "DB Taxonomy Index", False, Severity.CRITICAL,
             "Taxonomy index not built (run preparation)",
-            details=str(index_file)
+            details=f"expected at {index_file_json} or {index_file_pkl}"
         )
 
     def _check_taxid_mappings(self, config: Dict[str, Any], home: Path) -> CheckResult:

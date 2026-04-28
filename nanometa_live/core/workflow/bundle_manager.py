@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import os
+import platform
 import re
 import shutil
 import tarfile
@@ -73,6 +74,25 @@ export NXF_OFFLINE="${{NXF_OFFLINE:-true}}"
 
 echo "Nanometa Live offline envs ready: NXF_CONDA_CACHEDIR=${{NXF_CONDA_CACHEDIR}}"
 """
+
+# Subdirectory name inside the bundle for the bundled pipeline source checkout.
+_BUNDLED_PIPELINE_DIRNAME = "pipeline_source"
+
+# Subdirectory name inside the bundle for the bundled Nextflow plugin cache.
+_BUNDLED_NXF_PLUGINS_DIRNAME = "nextflow_plugins"
+
+# Patterns of files and directories to skip when copying the pipeline source
+# to keep bundle size manageable.
+_PIPELINE_IGNORE_PATTERNS = (
+    ".git",
+    "work",
+    ".nextflow",
+    ".nextflow.log*",
+    "tests",
+    ".nf-test",
+    "*.pyc",
+    "__pycache__",
+)
 
 # Pipeline scenarios used to drive Nextflow's stub mode during the
 # pre-warm step. Each scenario corresponds to a sample-handling mode
@@ -336,6 +356,11 @@ class BundleManager:
                 "checksums": {},
                 "tool_versions": self._collect_tool_versions(),
                 "container_runtime": self._detect_container_runtime(),
+                "build_platform": {
+                    "system": platform.system(),
+                    "machine": platform.machine(),
+                    "python": platform.python_version(),
+                },
             }
 
             # Record DB hash for compatibility check on import
@@ -409,10 +434,32 @@ class BundleManager:
                     toggle_dst
                 )
 
-            # Save config (with kraken_db as placeholder)
+            # Bundle the pipeline source checkout so the field machine does
+            # not depend on the build-machine's absolute path.
+            pipeline_source_meta = self._bundle_pipeline_source(
+                staging=staging,
+                config=config,
+                pipeline_path=pipeline_path,
+            )
+            manifest["pipeline_source"] = pipeline_source_meta
+
+            # Bundle the Nextflow plugin cache so registry probes do not
+            # fire on a network-restricted field machine.
+            nxf_plugins_meta = self._bundle_nextflow_plugins(
+                staging=staging,
+                config=config,
+            )
+            manifest["nextflow_plugins"] = nxf_plugins_meta
+
+            # Save config (with kraken_db as placeholder and relative
+            # pipeline_source when the source was bundled).
             from nanometa_live.core.config.config_loader import ConfigLoader
             bundle_config = dict(config)
             bundle_config["kraken_db"] = "${KRAKEN_DB}"
+            if pipeline_source_meta.get("bundled"):
+                bundle_config["pipeline_source"] = f"./{_BUNDLED_PIPELINE_DIRNAME}"
+            if nxf_plugins_meta.get("bundled"):
+                bundle_config["nxf_plugins_dir"] = f"./{_BUNDLED_NXF_PLUGINS_DIRNAME}"
             bundle_loader = ConfigLoader(str(staging))
             bundle_loader.save_config(bundle_config, "config.yaml")
 
@@ -611,11 +658,35 @@ class BundleManager:
                 )
                 result["warnings"].extend(version_warnings)
 
+            # Warn when the bundle was built on a different OS or CPU
+            # architecture. Conda envs and compiled binaries are not
+            # portable across platform boundaries.
+            build_plat = manifest.get("build_platform", {})
+            if build_plat:
+                local_system = platform.system()
+                local_machine = platform.machine()
+                bundle_system = build_plat.get("system", "")
+                bundle_machine = build_plat.get("machine", "")
+                if (bundle_system and bundle_machine) and (
+                    local_system != bundle_system or local_machine != bundle_machine
+                ):
+                    msg = (
+                        f"Bundle was built on {bundle_system}/{bundle_machine} "
+                        f"but field machine is {local_system}/{local_machine}. "
+                        "Pre-warmed conda envs and bundled binaries will likely "
+                        "not work. Plan to rebuild conda envs from "
+                        "environment.yml on the field machine."
+                    )
+                    logger.warning(msg)
+                    result["warnings"].append(msg)
+
             # Copy directories to home (handle partial imports gracefully)
             for dirname in [
                 "genomes", "blast", "mappings", "cache",
                 "watchlists", "containers",
                 _BUNDLED_CONDA_CACHE_DIRNAME,
+                _BUNDLED_PIPELINE_DIRNAME,
+                _BUNDLED_NXF_PLUGINS_DIRNAME,
             ]:
                 src = tmp / dirname
                 if src.exists():
@@ -644,6 +715,14 @@ class BundleManager:
                     meta_src, meta_dst,
                     _HOME_PLACEHOLDER, str(home)
                 )
+
+            # Copy bundle config.yaml to home so the block below can
+            # update offline_mode and rebase paths. Without this step
+            # the file would only exist at home if a prior import had
+            # already placed it there.
+            config_src = tmp / "config.yaml"
+            if config_src.exists():
+                shutil.copy2(config_src, home / "config.yaml")
 
             # Restore per-entry watchlist toggle state if the bundle
             # carries one. Older bundles predate this file, so absence
@@ -717,6 +796,27 @@ class BundleManager:
                         cfg["kraken_db"] = kraken_db_path
                     if "conda_cache_path" in result:
                         cfg["nxf_conda_cachedir"] = result["conda_cache_path"]
+                    # Rebase pipeline_source from relative bundle path to
+                    # absolute path on this machine.
+                    ps = cfg.get("pipeline_source", "")
+                    if isinstance(ps, str) and ps == f"./{_BUNDLED_PIPELINE_DIRNAME}":
+                        abs_pipeline = home / _BUNDLED_PIPELINE_DIRNAME
+                        if abs_pipeline.is_dir():
+                            cfg["pipeline_source"] = str(abs_pipeline)
+                            result["pipeline_source_path"] = str(abs_pipeline)
+                            logger.info(
+                                f"Rebased pipeline_source to {abs_pipeline}"
+                            )
+                    # Rebase nxf_plugins_dir similarly.
+                    npd = cfg.get("nxf_plugins_dir", "")
+                    if isinstance(npd, str) and npd == f"./{_BUNDLED_NXF_PLUGINS_DIRNAME}":
+                        abs_plugins = home / _BUNDLED_NXF_PLUGINS_DIRNAME
+                        if abs_plugins.is_dir():
+                            cfg["nxf_plugins_dir"] = str(abs_plugins)
+                            result["nxf_plugins_dir"] = str(abs_plugins)
+                            logger.info(
+                                f"Rebased nxf_plugins_dir to {abs_plugins}"
+                            )
                     import_loader.save_config(cfg, "config.yaml")
                     logger.info("Set offline_mode=True in config")
                 except (ImportError, AttributeError, OSError, ValueError) as e:
@@ -855,6 +955,165 @@ class BundleManager:
                 return cand
         return None
 
+    def _bundle_pipeline_source(
+        self,
+        staging: Path,
+        config: Dict[str, Any],
+        pipeline_path: Optional[str],
+    ) -> Dict[str, Any]:
+        """Copy the pipeline source checkout into the bundle staging area.
+
+        Resolves the source using the same strategy as
+        ``_resolve_pipeline_checkout``. Skips large or build-specific
+        artifacts to keep the bundle size manageable.
+
+        Returns a metadata dict for the manifest:
+        ``{bundled: bool, path: str | None}``.
+        """
+        meta: Dict[str, Any] = {"bundled": False, "path": None}
+
+        pipeline_source_cfg = config.get("pipeline_source", "")
+        if isinstance(pipeline_source_cfg, str) and pipeline_source_cfg.startswith("remote:"):
+            logger.warning(
+                "pipeline_source is '%s' (remote reference); no local "
+                "checkout to bundle. The field machine will need network "
+                "access or a pre-existing Nextflow assets cache to run "
+                "the pipeline.",
+                pipeline_source_cfg,
+            )
+            return meta
+
+        resolved = self._resolve_pipeline_checkout(
+            config=config, override=pipeline_path
+        )
+        if resolved is None:
+            logger.info(
+                "No local pipeline checkout found for bundling; "
+                "pipeline_source will not be included in the bundle."
+            )
+            return meta
+
+        dst = staging / _BUNDLED_PIPELINE_DIRNAME
+        try:
+            shutil.copytree(
+                str(resolved),
+                str(dst),
+                ignore=shutil.ignore_patterns(*_PIPELINE_IGNORE_PATTERNS),
+            )
+            meta["bundled"] = True
+            meta["path"] = f"./{_BUNDLED_PIPELINE_DIRNAME}"
+            logger.info(
+                "Bundled pipeline source from %s as %s",
+                resolved,
+                _BUNDLED_PIPELINE_DIRNAME,
+            )
+        except OSError as exc:
+            logger.warning(
+                "Could not bundle pipeline source from %s: %s",
+                resolved,
+                exc,
+            )
+
+        return meta
+
+    def _bundle_nextflow_plugins(
+        self,
+        staging: Path,
+        config: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Copy referenced Nextflow plugins into the bundle staging area.
+
+        Copies ``~/.nextflow/plugins/`` entries that are referenced by
+        the pipeline's ``nextflow.config`` (``id 'nf-schema@...'`` etc.)
+        plus any cached plugin whose directory name starts with a
+        recognised plugin prefix (nf-schema, nf-validation, nf-wave).
+
+        With the plugins present on the field machine, setting
+        ``NXF_OFFLINE=true`` (the literal string, lowercase) suppresses
+        Nextflow's plugin registry probe and self-update curl, and
+        ``NXF_PLUGINS_PATH`` points the JVM at the restored directory.
+        Note: ``NXF_OFFLINE=1`` does not work -- Nextflow's bash launcher
+        and JVM both check for string equality with ``true``. The
+        verified offline launch env on Nextflow 25.10.4 is::
+
+            NXF_OFFLINE=true
+            NXF_DISABLE_CHECK_LATEST=true
+            NXF_PLUGINS_PATH=<bundled-plugins-dir>
+
+        Both env vars are injected automatically by ``NextflowManager``
+        when ``config['offline_mode']`` is True.
+
+        Returns a metadata dict for the manifest:
+        ``{bundled: bool, plugin_count: int}``.
+        """
+        meta: Dict[str, Any] = {"bundled": False, "plugin_count": 0}
+
+        plugins_home = Path.home() / ".nextflow" / "plugins"
+        if not plugins_home.is_dir():
+            logger.info(
+                "~/.nextflow/plugins/ not found; skipping plugin bundling."
+            )
+            return meta
+
+        # Determine which plugin names the pipeline references.
+        referenced: List[str] = []
+        pipeline_checkout = self._resolve_pipeline_checkout(
+            config=config, override=None
+        )
+        if pipeline_checkout is not None:
+            nxf_config = pipeline_checkout / "nextflow.config"
+            if nxf_config.is_file():
+                try:
+                    cfg_text = nxf_config.read_text(errors="replace")
+                    # Match: id 'nf-schema@2.4.2'
+                    for m in re.finditer(r"id\s+['\"]([^'\"@]+)@[^'\"]+['\"]", cfg_text):
+                        referenced.append(m.group(1))
+                except OSError as exc:
+                    logger.warning("Could not read nextflow.config: %s", exc)
+
+        # Always include the common Nextflow helper plugins.
+        _PLUGIN_PREFIXES = ("nf-schema", "nf-validation", "nf-wave", "nf-console")
+
+        def _should_include(plugin_dir: Path) -> bool:
+            name = plugin_dir.name  # e.g. nf-schema-2.4.2
+            for prefix in _PLUGIN_PREFIXES:
+                if name.startswith(prefix):
+                    return True
+            for ref in referenced:
+                if name.startswith(ref):
+                    return True
+            return False
+
+        dst_plugins = staging / _BUNDLED_NXF_PLUGINS_DIRNAME
+        dst_plugins.mkdir(parents=True, exist_ok=True)
+        count = 0
+        for plugin_dir in sorted(plugins_home.iterdir()):
+            if not plugin_dir.is_dir():
+                continue
+            if not _should_include(plugin_dir):
+                continue
+            dst = dst_plugins / plugin_dir.name
+            if not dst.exists():
+                try:
+                    shutil.copytree(str(plugin_dir), str(dst))
+                    count += 1
+                except OSError as exc:
+                    logger.warning(
+                        "Could not copy plugin %s: %s", plugin_dir.name, exc
+                    )
+
+        if count > 0:
+            meta["bundled"] = True
+            meta["plugin_count"] = count
+            logger.info(
+                "Bundled %d Nextflow plugin(s) from %s", count, plugins_home
+            )
+        else:
+            # Remove the empty directory so it is not tarred into the bundle.
+            dst_plugins.rmdir()
+
+        return meta
+
     @staticmethod
     def _run_pre_warm_scenario(
         scenario: Dict[str, Any],
@@ -925,8 +1184,8 @@ class BundleManager:
         """Collect versions of key tools for the manifest."""
         versions = {}
 
-        # Nextflow
-        versions["nextflow"] = _get_command_version("nextflow", ["-version"])
+        # Nextflow: parse "version X.Y.Z build N" from ``nextflow -version``.
+        versions["nextflow"] = _get_nextflow_version()
 
         # Kraken2
         versions["kraken2"] = _get_command_version("kraken2", ["--version"])
@@ -1063,6 +1322,39 @@ def _template_paths(src: Path, dst: Path, find: str, replace: str):
     content = content.replace(find, replace)
     with open(dst, "w") as f:
         f.write(content)
+
+
+def _get_nextflow_version() -> str:
+    """Return the Nextflow version string in 'X.Y.Z build N' form.
+
+    ``nextflow -version`` prints a multi-line banner. The useful line
+    matches ``version X.Y.Z build N``. Falls back to the first non-empty
+    output line when the pattern is absent.
+    """
+    import subprocess
+
+    if not shutil.which("nextflow"):
+        return "not found"
+
+    try:
+        result = subprocess.run(
+            ["nextflow", "-version"],
+            capture_output=True, text=True, timeout=10,
+        )
+        output = (result.stdout + result.stderr).strip()
+        # Look for the canonical version line in the banner.
+        match = re.search(r"version\s+(\S+)\s+build\s+(\d+)", output)
+        if match:
+            return f"{match.group(1)} build {match.group(2)}"
+        # Fallback: return the first non-empty, non-banner line.
+        for line in output.split("\n"):
+            stripped = line.strip()
+            if stripped and not set(stripped).issubset({" ", "N", "E", "X", "T", "F", "L", "O", "W", "-"}):
+                return stripped[:100]
+        return "unknown"
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+            FileNotFoundError, PermissionError, OSError):
+        return "error"
 
 
 def _get_command_version(command: str, args: List[str]) -> str:

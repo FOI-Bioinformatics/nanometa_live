@@ -1193,3 +1193,317 @@ class TestActivateOfflineEnvsScript:
                 readme = fh.read().decode("utf-8")
 
         assert "source ./activate_offline_envs.sh" in readme
+
+
+# ---------------------------------------------------------------------------
+# Cycle 17 fixes
+# ---------------------------------------------------------------------------
+
+class TestBundlePipelineSource:
+    """Fix #1: Pipeline source checkout is bundled and path rebased on import."""
+
+    def test_pipeline_source_bundled_when_local_checkout_found(self, tmp_path):
+        """When pipeline_source points to a local directory with main.nf,
+        export_bundle copies it as pipeline_source/ in the archive and
+        writes pipeline_source: ./pipeline_source in config.yaml."""
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
+
+        out = tmp_path / "out.tar.gz"
+        mgr = BundleManager()
+        mgr.export_bundle(
+            str(out),
+            config={
+                "kraken_db": "",
+                "results_output_directory": str(tmp_path),
+                "pipeline_source": str(pipeline_dir),
+            },
+            nanometa_home=str(home),
+        )
+
+        with tarfile.open(str(out), "r:gz") as tar:
+            names = tar.getnames()
+            # pipeline_source/main.nf must be in the archive.
+            assert any(n == "pipeline_source/main.nf" for n in names), (
+                "pipeline_source/main.nf must be bundled"
+            )
+            # config.yaml must contain the relative reference.
+            with tar.extractfile("config.yaml") as fh:
+                cfg_text = fh.read().decode("utf-8")
+        assert "./pipeline_source" in cfg_text
+
+        # manifest must record bundled=true.
+        with tarfile.open(str(out), "r:gz") as tar:
+            with tar.extractfile("manifest.json") as fh:
+                manifest = json.loads(fh.read().decode("utf-8"))
+        assert manifest["pipeline_source"]["bundled"] is True
+        assert manifest["pipeline_source"]["path"] == "./pipeline_source"
+
+    def test_pipeline_source_rebased_on_import(self, tmp_path):
+        """import_bundle rewrites pipeline_source from ./pipeline_source
+        to the absolute path on the field machine."""
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
+
+        bundle_path = tmp_path / "bundle.tar.gz"
+        mgr = BundleManager()
+        mgr.export_bundle(
+            str(bundle_path),
+            config={
+                "kraken_db": "",
+                "results_output_directory": str(tmp_path),
+                "pipeline_source": str(pipeline_dir),
+            },
+            nanometa_home=str(home),
+        )
+
+        field = tmp_path / "field_home"
+        field.mkdir()
+        result = mgr.import_bundle(
+            str(bundle_path),
+            kraken_db_path="",
+            nanometa_home=str(field),
+        )
+
+        assert result["success"] is True
+        assert "pipeline_source_path" in result
+        expected = str(field / "pipeline_source")
+        assert result["pipeline_source_path"] == expected
+        assert Path(result["pipeline_source_path"]).is_dir()
+
+    def test_remote_pipeline_source_logs_warning_not_error(self, tmp_path):
+        """When pipeline_source is 'remote:main', export still succeeds
+        (no local checkout to copy) and the manifest records bundled=false."""
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        out = tmp_path / "out.tar.gz"
+        mgr = BundleManager()
+        mgr.export_bundle(
+            str(out),
+            config={
+                "kraken_db": "",
+                "results_output_directory": str(tmp_path),
+                "pipeline_source": "remote:main",
+            },
+            nanometa_home=str(home),
+        )
+
+        assert out.exists()
+        with tarfile.open(str(out), "r:gz") as tar:
+            names = tar.getnames()
+            with tar.extractfile("manifest.json") as fh:
+                manifest = json.loads(fh.read().decode("utf-8"))
+
+        assert not any(n.startswith("pipeline_source/") for n in names)
+        assert manifest["pipeline_source"]["bundled"] is False
+
+
+class TestBundleNextflowPlugins:
+    """Fix #2: Nextflow plugin cache bundled to prevent registry probes."""
+
+    def test_plugins_bundled_when_cache_exists(self, tmp_path):
+        """When ~/.nextflow/plugins/ contains plugin dirs, matching entries
+        are copied into nextflow_plugins/ in the bundle and the manifest
+        records the count."""
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        # Create a stub ~/.nextflow/plugins directory under tmp_path.
+        fake_nxf_plugins = tmp_path / ".nextflow" / "plugins"
+        fake_nxf_plugins.mkdir(parents=True)
+        plugin_dir = fake_nxf_plugins / "nf-schema-2.4.2"
+        plugin_dir.mkdir()
+        (plugin_dir / "plugin.jar").write_bytes(b"PK\x03\x04")
+
+        out = tmp_path / "out.tar.gz"
+        mgr = BundleManager()
+
+        # Patch Path.home() so the plugin cache resolves to our stub dir.
+        with patch(
+            "nanometa_live.core.workflow.bundle_manager.Path.home",
+            return_value=tmp_path,
+        ):
+            mgr.export_bundle(
+                str(out),
+                config={"kraken_db": "", "results_output_directory": str(tmp_path)},
+                nanometa_home=str(home),
+            )
+
+        with tarfile.open(str(out), "r:gz") as tar:
+            names = tar.getnames()
+            with tar.extractfile("manifest.json") as fh:
+                manifest = json.loads(fh.read().decode("utf-8"))
+
+        assert any(n.startswith("nextflow_plugins/nf-schema-2.4.2") for n in names), (
+            "nf-schema plugin must be bundled"
+        )
+        assert manifest["nextflow_plugins"]["bundled"] is True
+        assert manifest["nextflow_plugins"]["plugin_count"] >= 1
+
+    def test_plugins_not_bundled_when_cache_missing(self, tmp_path):
+        """When ~/.nextflow/plugins/ does not exist, export succeeds and
+        the manifest records bundled=false."""
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        out = tmp_path / "out.tar.gz"
+        mgr = BundleManager()
+
+        # Point home to tmp_path which has no .nextflow/plugins sub-dir.
+        with patch(
+            "nanometa_live.core.workflow.bundle_manager.Path.home",
+            return_value=tmp_path / "no_such_home",
+        ):
+            mgr.export_bundle(
+                str(out),
+                config={"kraken_db": "", "results_output_directory": str(tmp_path)},
+                nanometa_home=str(home),
+            )
+
+        assert out.exists()
+        with tarfile.open(str(out), "r:gz") as tar:
+            with tar.extractfile("manifest.json") as fh:
+                manifest = json.loads(fh.read().decode("utf-8"))
+
+        assert manifest["nextflow_plugins"]["bundled"] is False
+
+
+class TestNextflowVersionDetection:
+    """Fix #7: _get_nextflow_version parses the actual version line."""
+
+    def test_parses_version_line(self):
+        """A typical 'nextflow -version' banner is reduced to 'X.Y.Z build N'."""
+        from nanometa_live.core.workflow.bundle_manager import _get_nextflow_version
+        import subprocess
+
+        fake_output = (
+            "\n"
+            "      N E X T F L O W\n"
+            "      version 25.10.4 build 11173\n"
+            "      created 10-11-2024 17:11 UTC\n"
+            "      cite doi:10.1038/nbt.3820\n"
+            "      http://nextflow.io\n"
+        )
+
+        class FakeResult:
+            stdout = fake_output
+            stderr = ""
+            returncode = 0
+
+        with patch("shutil.which", return_value="/usr/bin/nextflow"):
+            with patch("subprocess.run", return_value=FakeResult()):
+                version = _get_nextflow_version()
+
+        assert version == "25.10.4 build 11173", (
+            f"Expected '25.10.4 build 11173', got '{version}'"
+        )
+
+    def test_banner_not_returned_as_version(self):
+        """The 'N E X T F L O W' banner line must not be returned as the version."""
+        from nanometa_live.core.workflow.bundle_manager import _get_nextflow_version
+
+        class FakeResult:
+            stdout = "      N E X T F L O W\n      version 25.10.4 build 11173\n"
+            stderr = ""
+            returncode = 0
+
+        with patch("shutil.which", return_value="/usr/bin/nextflow"):
+            with patch("subprocess.run", return_value=FakeResult()):
+                version = _get_nextflow_version()
+
+        assert "N E X T F L O W" not in version
+
+
+class TestBuildPlatformCheck:
+    """Fix #8: Build platform recorded in manifest; import warns on mismatch."""
+
+    def test_export_records_build_platform(self, tmp_path):
+        """export_bundle writes build_platform to the manifest with
+        system, machine, and python fields."""
+        home = tmp_path / "home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+
+        out = tmp_path / "out.tar.gz"
+        mgr = BundleManager()
+        mgr.export_bundle(
+            str(out),
+            config={"kraken_db": "", "results_output_directory": str(tmp_path)},
+            nanometa_home=str(home),
+        )
+
+        with tarfile.open(str(out), "r:gz") as tar:
+            with tar.extractfile("manifest.json") as fh:
+                manifest = json.loads(fh.read().decode("utf-8"))
+
+        bp = manifest.get("build_platform")
+        assert bp is not None, "manifest must contain build_platform"
+        assert "system" in bp
+        assert "machine" in bp
+        assert "python" in bp
+        # Values must be non-empty strings.
+        assert bp["system"]
+        assert bp["machine"]
+        assert bp["python"]
+
+    def test_import_warns_on_platform_mismatch(self, tmp_path):
+        """import_bundle adds a WARNING-level message when the bundle's
+        platform differs from the current machine."""
+        bundle_path, manifest = _make_minimal_bundle(tmp_path)
+
+        # Inject a mismatched build_platform into the bundle.
+        staging = tmp_path / "staging_patch"
+        staging.mkdir()
+        with tarfile.open(str(bundle_path), "r:gz") as tar:
+            tar.extractall(path=str(staging), filter="data")
+
+        manifest_path = staging / "manifest.json"
+        manifest_data = json.loads(manifest_path.read_text())
+        manifest_data["build_platform"] = {
+            "system": "FakeOS",
+            "machine": "fakearch",
+            "python": "3.0.0",
+        }
+        manifest_path.write_text(json.dumps(manifest_data, indent=2))
+
+        patched_bundle = tmp_path / "patched_bundle.tar.gz"
+        with tarfile.open(str(patched_bundle), "w:gz") as tar:
+            for item in staging.iterdir():
+                tar.add(str(item), arcname=item.name)
+
+        field = tmp_path / "field_home"
+        field.mkdir()
+        mgr = BundleManager()
+        result = mgr.import_bundle(
+            str(patched_bundle),
+            kraken_db_path="",
+            nanometa_home=str(field),
+            force=True,
+        )
+
+        # Import must succeed even on mismatch.
+        assert result["success"] is True
+        # A warning mentioning the mismatch must be present.
+        mismatch_warnings = [
+            w for w in result["warnings"]
+            if "FakeOS" in w or "fakearch" in w or "built on" in w.lower()
+        ]
+        assert mismatch_warnings, (
+            "Expected a platform-mismatch warning in import result"
+        )
