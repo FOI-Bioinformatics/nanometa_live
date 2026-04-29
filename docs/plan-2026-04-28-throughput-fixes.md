@@ -224,8 +224,89 @@ Run after Waves 1-2 land. Report:
 This wave is not coding work; it is acceptance testing. Drive it on the
 target hardware where the pipeline will actually run.
 
+## Wave 6 -- Container source URL audit (~half day)
+
+**Why now:** every nf-core module declares a tri-source artifact -- a
+conda `environment.yml`, a Singularity URL
+(`https://depot.galaxyproject.org/singularity/<tool>:<ver>--<hash>`),
+and a Docker reference (`biocontainers/<tool>:<ver>--<hash>` or
+increasingly `community.wave.seqera.io/...`). The three need to be
+version-locked or runtime behaviour silently diverges per profile.
+This wave inventories the current state, flags drift, and produces the
+artifact list any future Apptainer/Singularity pre-pull path
+(provisionally Wave 7, see "Future") will consume.
+
+### W6-A. Inventory every container directive in nanometanf
+
+**Files:**
+- `/Users/andreassjodin/Code/nanometanf/modules/nf-core/*/main.nf`
+- `/Users/andreassjodin/Code/nanometanf/modules/local/*.nf` and
+  `/Users/andreassjodin/Code/nanometanf/modules/local/*/main.nf`
+- `/Users/andreassjodin/Code/nanometanf/modules.json` (declared git_sha
+  per module; cross-check against the parsed container tag)
+
+**Approach:**
+1. Parse the `container "${ ... }"` ternary in every `main.nf`. Pull out
+   both the Singularity URL and the Docker reference. Be aware some
+   older nf-core modules ship a single-source container; some local
+   modules ship none.
+2. Parse the same module's `environment.yml` for the bioconda spec.
+3. Cross-check that the conda version matches the container tag
+   (e.g. `bioconda::chopper=0.12.0` -> `chopper:0.12.0--<hash>`). The
+   build hash differs across packages but the version must match.
+4. Verify each URL with a `HEAD` request:
+   - Singularity: `curl -sIL -o /dev/null -w "%{http_code}" <url>`
+   - Docker (Quay): `skopeo inspect docker://quay.io/biocontainers/<ref>`
+     or `docker manifest inspect`. Do NOT pull, just check existence.
+5. Flag local modules with no `container` directive at all -- those
+   only work under the conda profile, which is fine for nanometa_live's
+   "always conda" preference but would block a Singularity pre-pull
+   path if anyone wants to add one later.
+
+**Deliverable:** `docs/audit-2026-04-29-container-urls.md` with:
+- One row per module: tool, conda version, singularity URL + reachability,
+  docker URL + reachability, version-match status (OK / mismatch / single-source / none)
+- A separate section listing modules that ship no container at all
+- A summary count: total / OK / mismatch / unreachable / no-container
+
+**Estimate:** 2-3 hours including HEAD requests against ~30 modules.
+
+### W6-B. Fix or escalate any mismatches found
+
+For each row tagged "mismatch" or "unreachable":
+- If the conda tool is at version X but the container is at X-1, bump
+  the container reference (these are usually nf-core stock files; the
+  fix is to re-pull the module via `nf-core modules update <name>`)
+- If the URL 404s entirely, the upstream module needs an update
+  upstream (file an nf-core/modules issue) or a local override
+- If the module is purely local (custom code, no upstream nf-core
+  origin), the fix is in this repo
+
+Document each fix in the audit report rather than committing them all
+in one PR -- some upstream fixes will take time. Local fixes go in a
+companion `cleanup/container-urls-2026-04-29` branch in nanometanf.
+
+**Estimate:** depends on findings; typically 1-3 hours for in-repo
+fixes, longer if upstream PRs needed.
+
+### W6-C. Acceptance
+
+- Audit report written and linked from `docs/README.md`
+- All in-repo fixable mismatches landed
+- Any unfixable mismatches (upstream blockers) listed as follow-ups
+- The deliverable table is consumable by a future Apptainer pre-pull
+  step (i.e. it has full URLs, not just module names)
+
 ## Out of scope for this cycle
 
+- Apptainer pre-pull as the offline-deployment artifact (provisionally
+  Wave 7; gated on Wave 6 returning a clean URL inventory). Pulls
+  pre-built `.sif` files from depot.galaxyproject.org at bundle-export
+  time and ships them in `bundle/containers/` so the field run uses
+  `-profile singularity` against local images instead of resolving
+  conda envs at runtime. Trade-off vs the existing pre-warm flow:
+  ~1-2 GB bundle vs ~5 GB pre-warmed conda; no conda solver at runtime;
+  rootless field deployment via Apptainer.
 - The fabricated nextflow-expert audit's claims that turned out to be
   wrong (Channel.watchPath missing, `--memory-mapping` not wired,
   KRAKEN2_KRAKEN2 unlabelled). All three are present and correct.
@@ -246,9 +327,12 @@ Do the waves in order:
    testing on a real 24-barcode dataset to validate visual choices.
 4. **Wave 4** ships the small pipeline tuning + operator docs.
 5. **Wave 5** is the empirical validation -- after 1-4 land.
+6. **Wave 6** is independent of Waves 1-5; can run in parallel. It is
+   a precondition for any future Apptainer/Singularity-based offline
+   deployment path.
 
-Total estimated effort: 2-3 working days for waves 1-4. Wave 5 is
-operator time only.
+Total estimated effort: 2-3 working days for waves 1-4, plus ~half day
+for Wave 6. Wave 5 is operator time only.
 
 ## Acceptance for the whole cycle
 
