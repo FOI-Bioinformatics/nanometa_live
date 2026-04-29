@@ -450,7 +450,12 @@ The QC tab's primary element is a horizontal three-slot **Stage Strip**: Raw →
 
 A "Last updated HH:MM:SS" timestamp sits in the Stage Strip's top-right corner.
 
-Removed cards (bug vectors in earlier layouts): `KeyMetricsSummaryCard` (triple-count source), `FilteringBreakdownVisual` (dead code for Chopper).
+Earlier layouts shipped three cards that are now deleted entirely:
+`KeyMetricsSummaryCard` (triple-count bug source), `FilteringBreakdownVisual`
+(dead code for Chopper), and `QualityScoreIndicator` (replaced by the
+verdict banner + Stage Strip combination). They are not in the
+component module, not re-exported, and not referenced from any
+layout. Phase-5 cleanup, 2026-04-29.
 
 ## Validation System
 

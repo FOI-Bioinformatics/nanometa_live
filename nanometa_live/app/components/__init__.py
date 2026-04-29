@@ -49,11 +49,8 @@ from nanometa_live.app.components.modern_components import (
     DecisionBanner,
 )
 from nanometa_live.app.components.organism_components import (
-    QualityScoreIndicator,
-    FilteringBreakdownVisual,
     OrganismCard,
     OrganismSummaryCard,
-    KeyMetricsSummaryCard,
 )
 
 __all__ = [
@@ -86,9 +83,6 @@ __all__ = [
     "TrendIndicator",
     "DecisionBanner",
     # Organism components
-    "QualityScoreIndicator",
-    "FilteringBreakdownVisual",
     "OrganismCard",
     "OrganismSummaryCard",
-    "KeyMetricsSummaryCard",
 ]
