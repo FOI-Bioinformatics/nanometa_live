@@ -633,6 +633,35 @@ class NextflowManager:
                     f"NXF_PLUGINS_PATH/NXF_PLUGINS_DIR will not be set."
                 )
 
+        # NXF_HOME and NXF_TEMP. Nextflow writes plugin metadata, the
+        # history file, and ~/.nextflow.log under NXF_HOME (default
+        # ~/.nextflow). On a field machine where ~ is read-only or a
+        # network share, those writes fail with NoSuchFileException
+        # and surface as opaque "tmp folder" errors. Anchor both to
+        # the results_output_directory when it is set so all Nextflow
+        # state lands on the writable working filesystem.
+        results_dir = config.get("results_output_directory", "")
+        if results_dir:
+            abs_results = os.path.abspath(results_dir)
+            try:
+                os.makedirs(abs_results, exist_ok=True)
+            except OSError as exc:
+                logging.warning(
+                    f"Could not create results_output_directory "
+                    f"'{abs_results}' for NXF_HOME/NXF_TEMP: {exc}"
+                )
+            else:
+                nxf_home = os.path.join(abs_results, ".nextflow")
+                nxf_temp = os.path.join(abs_results, ".nextflow_tmp")
+                # Only set NXF_HOME if the calling environment did not
+                # already pick one (operator override wins).
+                if not env.get("NXF_HOME"):
+                    env["NXF_HOME"] = nxf_home
+                    logging.info(f"NXF_HOME set to: {nxf_home}")
+                if not env.get("NXF_TEMP"):
+                    env["NXF_TEMP"] = nxf_temp
+                    logging.info(f"NXF_TEMP set to: {nxf_temp}")
+
         return env
 
     def _run_workflow(self, cmd: List[str], config: Optional[Dict[str, Any]] = None) -> None:
