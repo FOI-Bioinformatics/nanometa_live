@@ -40,10 +40,8 @@ nanometa_live/
 │   │   └── watchlist_tab.py
 │   └── utils/              # Callback helpers
 │       ├── callback_helpers.py     # Shared callback utilities
-│       ├── chart_builders.py       # Plotly chart construction helpers
 │       ├── config_manager.py       # Config state management
 │       ├── debounce.py             # Callback debouncing
-│       ├── export_utils.py         # Report export (CSV, PDF)
 │       └── plotly_theme.py         # Consistent Plotly theming
 ├── core/
 │   ├── config/             # Configuration loading and parameter mapping
