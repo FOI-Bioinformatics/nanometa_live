@@ -35,6 +35,8 @@
 | [Throughput: UX](audit-2026-04-28-throughput-ux.md) | 2026-04-28 | UI scaling at 12-24 barcodes |
 | [Throughput Synthesis](audit-2026-04-28-throughput-synthesis.md) | 2026-04-28 | 12-24 barcode rubric (67/100) |
 | [Container URLs](audit-2026-04-29-container-urls.md) | 2026-04-29 | Module container source verification (40 modules, 0 drift) |
+| [Short Amplicons](audit-2026-04-29-short-amplicons.md) | 2026-04-29 | Short-amplicon support (chopper_minlength=1000 P0; recommended preset) |
+| [Three-Part Readiness](audit-2026-04-29-readiness-three-parts.md) | 2026-04-29 | nanorunner 82/100, nanometanf 95/120, nanometa_live 80/100 |
 
 ## Design Plans
 
