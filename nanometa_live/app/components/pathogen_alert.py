@@ -5,9 +5,24 @@ Provides prominent, unmissable alert banners for dangerous pathogen detection.
 Designed for non-expert operators who need immediate visual feedback on threats.
 """
 
+import hashlib
 from typing import Optional, List, Dict, Any
 from dash import html
 import dash_bootstrap_components as dbc
+
+
+def _attribution_pill_id(samples: List[Dict[str, Any]], tier: str) -> str:
+    """Stable id used as the Popover target for the "+N more" pill.
+
+    Hashing the (tier, sample-name list) gives a deterministic id that
+    survives re-renders within a tick but is unique across distinct
+    pathogen alert cards on the page. dbc.Popover requires the target
+    to exist in the layout when the page renders, so the id must be
+    embedded in the chip itself.
+    """
+    seed = tier + "|" + "|".join(s.get("sample", "") for s in samples)
+    digest = hashlib.md5(seed.encode("utf-8")).hexdigest()[:10]
+    return f"alert-attribution-pill-{digest}"
 
 
 # --- Per-tier chip color tokens (bg / border / text) ---
@@ -97,18 +112,34 @@ def _render_sample_attribution(
             )
         )
 
+    popover_components = []
     if overflow > 0:
         pill_bg, pill_border, pill_text = _CHIP_MORE
+        pill_id = _attribution_pill_id(samples, tier_key)
         chips.append(
             html.Span(
                 f"+{overflow} more",
+                id=pill_id,
+                title=(
+                    f"Click to see all {len(samples)} samples where this "
+                    f"pathogen was detected"
+                ),
                 style={
                     **chip_style_base,
                     "backgroundColor": pill_bg,
                     "borderColor": pill_border,
                     "color": pill_text,
+                    "cursor": "pointer",
+                    "textDecoration": "underline dotted",
+                    "textUnderlineOffset": "2px",
                 }
             )
+        )
+        # Popover lists every sample, not just the overflow. Operators
+        # asking "which barcodes carry this pathogen?" want the complete
+        # list, not the tail.
+        popover_components.append(
+            _build_attribution_popover(samples, pill_id, tier_key)
         )
 
     return html.Div(
@@ -120,8 +151,76 @@ def _render_sample_attribution(
                 ]
             ),
             *chips,
+            *popover_components,
         ],
         className="dashboard-attribution-row",
+    )
+
+
+def _build_attribution_popover(
+    samples: List[Dict[str, Any]],
+    target_id: str,
+    tier_key: str,
+) -> dbc.Popover:
+    """Popover listing every triggering sample with reads + abundance.
+
+    Hung off the "+N more" pill so an operator can answer the clinical
+    question "which of 24 barcodes carries this pathogen?" Closes
+    P0-T01 from docs/audit-2026-04-28-throughput-ux.md, where the pill
+    was a non-interactive dead end.
+    """
+    rows = []
+    for rank, s in enumerate(samples, start=1):
+        sample_label = s.get("sample", "")
+        reads = s.get("reads", 0)
+        abund = s.get("abundance", 0.0)
+        is_nc = s.get("is_negative_control", False)
+        suffix = " (NC)" if is_nc else ""
+        text_color = "#6c757d" if is_nc else None
+        rows.append(
+            html.Div(
+                [
+                    html.Span(
+                        f"{rank}.",
+                        style={
+                            "display": "inline-block",
+                            "width": "1.6em",
+                            "color": "#6c757d",
+                            "fontVariantNumeric": "tabular-nums",
+                        },
+                    ),
+                    html.Span(
+                        f"{sample_label}{suffix}",
+                        style={
+                            "fontWeight": "600",
+                            "marginRight": "0.5em",
+                            "color": text_color or "inherit",
+                        },
+                    ),
+                    html.Span(
+                        f"{reads:,} reads ({abund:.2f}%)",
+                        style={"color": "#6c757d", "fontSize": "0.85em"},
+                    ),
+                ],
+                style={"padding": "2px 0", "fontSize": "12px"},
+            )
+        )
+
+    return dbc.Popover(
+        [
+            dbc.PopoverHeader(
+                f"All {len(samples)} samples (sorted by read count)",
+                style={"fontSize": "12px", "fontWeight": "600"},
+            ),
+            dbc.PopoverBody(
+                rows,
+                style={"maxHeight": "320px", "overflowY": "auto", "padding": "8px 12px"},
+            ),
+        ],
+        target=target_id,
+        trigger="legacy",
+        placement="bottom",
+        hide_arrow=False,
     )
 
 

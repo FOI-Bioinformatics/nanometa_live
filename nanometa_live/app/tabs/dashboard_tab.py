@@ -428,6 +428,44 @@ def register_dashboard_callbacks(app: Dash):
                             )
                             if not validation_has_results:
                                 action_sub += " — pending confirmatory validation"
+
+                            # Per-sample attribution for the banner subhead
+                            # (closes P0-T02 from
+                            # docs/audit-2026-04-28-throughput-ux.md).
+                            # The per-sample IO is shared via the loader
+                            # cache + per-key parse lock, so this adds
+                            # minimal cost on top of the main aggregation.
+                            triggering_samples: List[str] = []
+                            total_real_samples = 0
+                            try:
+                                resolved_samples = _resolve_samples(
+                                    main_dir, available_samples or []
+                                )
+                                total_real_samples = len(
+                                    [s for s in resolved_samples
+                                     if s != "All Samples"]
+                                )
+                                taxid_to_samples = _load_per_sample_organisms(
+                                    main_dir, resolved_samples
+                                )
+                                # Union the samples that triggered any critical
+                                # or high-risk pathogen, preserving descending-
+                                # by-reads order via a stable accumulator.
+                                seen = set()
+                                for d in critical + high_risk:
+                                    taxid = d.get("taxid") or d.get("kraken_taxid")
+                                    if taxid is None:
+                                        continue
+                                    for entry in taxid_to_samples.get(int(taxid), []):
+                                        name = entry.get("sample")
+                                        if name and name not in seen:
+                                            seen.add(name)
+                                            triggering_samples.append(name)
+                            except Exception as exc:
+                                logger.debug(
+                                    f"Verdict-banner attribution unavailable: {exc}"
+                                )
+
                             return (
                                 _make_banner_content(
                                     "exclamation-octagon-fill", "#8b0000",
@@ -437,6 +475,8 @@ def register_dashboard_callbacks(app: Dash):
                                     sub_color="#721c24",
                                     show_icon_mobile=True,
                                     last_updated_str=last_updated_str,
+                                    triggering_samples=triggering_samples or None,
+                                    total_sample_count=total_real_samples or None,
                                 ),
                                 _verdict_banner_style("#f8d7da", "#8b0000"),
                                 time_elapsed, run_state, run_state_color
@@ -1439,6 +1479,8 @@ def _make_banner_content(
     show_icon_mobile: bool = False,
     last_updated_str: Optional[str] = None,
     icon_extra_class: str = "",
+    triggering_samples: Optional[List[str]] = None,
+    total_sample_count: Optional[int] = None,
 ) -> dbc.Row:
     """
     Build the inner content for the Zone 1 clinical verdict banner.
@@ -1478,6 +1520,45 @@ def _make_banner_content(
                      style={"fontSize": "12px", "color": "#6c757d", "marginTop": "2px"})
         )
 
+    # Triggering-sample attribution subhead (closes P0-T02 from
+    # docs/audit-2026-04-28-throughput-ux.md). Only renders when the
+    # caller passed a non-empty triggering_samples list, which is
+    # restricted to ACTION REQUIRED today since that is the only state
+    # where the operator needs to know which barcode is contaminated.
+    verdict_text_children = [
+        html.H3(heading, className="dashboard-verdict-h3 mb-0"),
+        html.P(sub, className="dashboard-verdict-sub mb-0",
+               style={"color": sub_color}),
+    ]
+    if triggering_samples:
+        # Top 3 named inline; tail summarized as "(+N more)"
+        shown = triggering_samples[:3]
+        overflow = max(0, len(triggering_samples) - len(shown))
+        names = ", ".join(shown)
+        if overflow > 0:
+            attribution = f"Triggered by: {names} (+{overflow} more"
+            if total_sample_count:
+                attribution += f" of {total_sample_count} samples"
+            attribution += ")"
+        else:
+            n_total = total_sample_count or len(triggering_samples)
+            attribution = (
+                f"Triggered by: {names} ({len(triggering_samples)} of "
+                f"{n_total} samples)"
+            )
+        verdict_text_children.append(
+            html.P(
+                attribution,
+                className="dashboard-verdict-attribution mb-0 mt-1",
+                style={
+                    "color": sub_color,
+                    "fontSize": "13px",
+                    "fontWeight": "500",
+                    "opacity": "0.85",
+                },
+            )
+        )
+
     return dbc.Row([
         dbc.Col([
             html.Div([
@@ -1485,11 +1566,7 @@ def _make_banner_content(
                     className=icon_class,
                     style={"fontSize": "40px", "color": icon_color, "flexShrink": "0"}
                 ),
-                html.Div([
-                    html.H3(heading, className="dashboard-verdict-h3 mb-0"),
-                    html.P(sub, className="dashboard-verdict-sub mb-0",
-                           style={"color": sub_color})
-                ], className="ms-0 ms-sm-3")
+                html.Div(verdict_text_children, className="ms-0 ms-sm-3")
             ], className="d-flex align-items-center")
         ], md=9),
         dbc.Col([
