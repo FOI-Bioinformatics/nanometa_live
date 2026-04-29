@@ -12,7 +12,7 @@ plus the gaps they did not touch into a single comparison.
 | Component | Score | Strongest dimension | Weakest dimension |
 |---|---|---|---|
 | **nanorunner** | **82/100** | Atomic write semantics (10), packaging (10) | Performance/scale guidance (7) |
-| **nanometanf** | **95/120** | Real-time monitoring (9), modules.json (9) | nf-core conformance verification (6) |
+| **nanometanf** | **96/120** | Real-time monitoring (9), modules.json (9), local-module labels (9) | nf-core conformance verification (6) |
 | **nanometa_live** | **80/100** | Concurrency safety (9), offline deployment (9), docs (9) | Frontend dead code, oversize tab files (7) |
 
 The three components share a complementary readiness profile:
@@ -160,16 +160,23 @@ via `.collect()` (lines 549-562). Value channels use `.first()`
 level workflow file is heavy on conditional logic; subworkflow-
 level routing would shrink it.
 
-## Module quality (local) -- 8/10
+## Module quality (local) -- 9/10
 
 23 local modules, all referenced via include statements (no dead
 code per the audit). KRAKEN2_OUTPUT_MERGER, KRAKEN2_REPORT_GENERATOR,
 KRAKEN2_FINAL_AGGREGATOR implement the append-only batch storage
-documented in CLAUDE.md:50-66. **Weakness:** zero `withLabel`
-declarations in `conf/modules.config` for local modules -- they
-do not inherit `process_low/medium/high` resource tiers from
-`conf/base.config:42-62`, defaulting to `cpus=1, mem=6GB` for
-Python/shell helpers.
+documented in CLAUDE.md:50-66. Every local module declares an
+appropriate process label inside its own ``main.nf``: aggregators
+and Python writers use ``process_single``, file-IO helpers
+(extract_reads_by_taxid, kraken2_*_merger, seqkit_merge_stats,
+nanoplot_compare) use ``process_low``, validation modules
+(blastn_validation, minimap2_validation, fastp_streaming) use
+``process_medium``, and the heavy Kraken2 paths
+(kraken2_optimized, kraken2_incremental_classifier) use
+``process_high``. The earlier readiness-audit pass scored 8/10 here
+based on a grep for ``label:`` (with colon) that missed the Groovy
+syntax ``label 'process_low'`` (without colon) -- corrected after
+direct verification.
 
 ## Module quality (nf-core) -- 9/10
 
@@ -495,20 +502,31 @@ nanometa_live drops by 5-10 points.
 
 In order of risk-weighted impact:
 
-1. **Document the validation_results.json contract** in
-   nanometanf's `assets/`. Both `nanometa_live/core/parsers/blast_validation_parser.py`
-   and `assets/schema_*.json` should reference one canonical schema.
-2. **Add `withLabel` to the 23 nanometanf local modules.** Currently
-   they default to `cpus=1, mem=6GB` even though the resource
-   tiers exist.
-3. **Remove POD5 from nanorunner** -- one cycle. Touches CLI help,
-   detection.py constant, README.md, manifest.py docstring.
+1. **Document the validation_results.json contract** -- DONE
+   2026-04-29. JSON Schema lives at
+   ``nanometanf/assets/schema_validation_results.json``;
+   ``nanometa_live/core/parsers/blast_validation_parser.py``
+   docstring references it as the source of truth.
+2. **Add `withLabel` to the 23 nanometanf local modules** -- already
+   shipped. The earlier audit's claim was a false positive (grep for
+   ``label:`` with colon missed the Groovy syntax
+   ``label 'process_low'``). Every local module already declares the
+   appropriate label; module-quality score corrected from 8 to 9.
+3. **Remove POD5 from nanorunner** -- DONE 2026-04-29 on branch
+   ``cleanup/remove-pod5-2026-04-29``. CLI help, detection.py constant,
+   adapters.py patterns, manifest.py docstring, README, CLAUDE.md,
+   pyproject.toml keywords, plus 5 tests inverted. 730 tests pass.
 4. **Empirical Wave 5 run** of the full stack at 12 barcodes
-   on real hardware. Closes the largest set of "theoretical
-   score" gaps in one operator session.
+   on real hardware. **Still operator-driven; deferred.** Closes the
+   largest set of "theoretical score" gaps in one operator session.
 5. **Amplicon-aware Q30 / classification-rate band reinterpretation**
-   in nanometa_live -- the GUI now lets operators relax the
-   filters but the metrics still mislead them.
+   in nanometa_live -- DONE 2026-04-29. New helper
+   ``qc_tab._is_amplicon_mode(config)`` detects amplicon intent from
+   ``chopper_minlength`` / ``filtlong_min_length`` <500. When active,
+   ``BaseQualityCard`` and the QC Stage Strip relax their bands:
+   Q30 green floor 45 -> 25, Q20 green floor 65 -> 40, classification-
+   rate green floor 80 -> 50. Long-read defaults unchanged when
+   amplicon_mode is False.
 
 ## Aggregate readiness
 
