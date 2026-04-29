@@ -439,6 +439,13 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             State("kraken2-incremental-input", "value"),
             State("enable-krona-input", "value"),
             State("enable-nanopore-stats-input", "value"),
+            # Read filtering and validation overrides (Wave: amplicon support)
+            State("chopper-minlength-input", "value"),
+            State("chopper-quality-input", "value"),
+            State("filtlong-minlength-input", "value"),
+            State("validation-identity-input", "value"),
+            State("kraken2-confidence-input", "value"),
+            State("kraken2-hitgroups-input", "value"),
             State("app-config", "data"),
         ],
         prevent_initial_call=True,
@@ -478,6 +485,12 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         kraken2_incremental,
         enable_krona,
         enable_nanopore_stats,
+        chopper_minlength,
+        chopper_quality,
+        filtlong_minlength,
+        validation_identity,
+        kraken2_confidence,
+        kraken2_hitgroups,
         current_config,
     ):
         """Apply configuration changes with validation."""
@@ -707,6 +720,22 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         if enable_nanopore_stats is not None:
             config["enable_nanopore_stats_mqc"] = bool(enable_nanopore_stats)
 
+        # Read filtering and validation overrides for amplicon support.
+        # See docs/audit-2026-04-29-short-amplicons.md for the rationale
+        # behind making each of these operator-tunable.
+        if chopper_minlength is not None:
+            config["chopper_minlength"] = int(chopper_minlength)
+        if chopper_quality is not None:
+            config["chopper_quality"] = int(chopper_quality)
+        if filtlong_minlength is not None:
+            config["filtlong_min_length"] = int(filtlong_minlength)
+        if validation_identity is not None:
+            config["validation_identity_threshold"] = float(validation_identity)
+        if kraken2_confidence is not None:
+            config["kraken2_confidence"] = float(kraken2_confidence)
+        if kraken2_hitgroups is not None:
+            config["kraken2_minimum_hit_groups"] = int(kraken2_hitgroups)
+
         # Note: Species watchlist is now managed via the Watchlist tab
         # and WatchlistManager, not through this config form
 
@@ -842,6 +871,13 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("kraken2-incremental-input", "value"),
             Output("enable-krona-input", "value"),
             Output("enable-nanopore-stats-input", "value"),
+            # Read filtering and validation overrides
+            Output("chopper-minlength-input", "value"),
+            Output("chopper-quality-input", "value"),
+            Output("filtlong-minlength-input", "value"),
+            Output("validation-identity-input", "value"),
+            Output("kraken2-confidence-input", "value"),
+            Output("kraken2-hitgroups-input", "value"),
             Output("config-form-initialized", "data"),
         ],
         Input("refresh-form-trigger", "data"),
@@ -850,7 +886,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     def initialize_form_from_config(refresh_trigger, config):
         """Initialize form fields from the current configuration."""
         if not config:
-            return [no_update] * 34
+            return [no_update] * 40
 
         # Extract values from config
         analysis_name = config.get("analysis_name", "")
@@ -937,6 +973,19 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         enable_krona = bool(config.get("enable_krona_plots", False))
         enable_nanopore_stats = bool(config.get("enable_nanopore_stats_mqc", False))
 
+        # Read filtering and validation overrides. Defaults match the
+        # nanometanf pipeline-side defaults (chopper_minlength=1000,
+        # chopper_quality=10, etc.) so an operator who has not touched
+        # the new GUI fields keeps the current long-read behaviour. See
+        # docs/audit-2026-04-29-short-amplicons.md for amplicon-friendly
+        # values.
+        chopper_minlength = config.get("chopper_minlength", 1000)
+        chopper_quality = config.get("chopper_quality", 10)
+        filtlong_minlength = config.get("filtlong_min_length", 1000)
+        validation_identity = config.get("validation_identity_threshold", 90)
+        kraken2_confidence = config.get("kraken2_confidence", 0.0)
+        kraken2_hitgroups = config.get("kraken2_minimum_hit_groups", 0)
+
         return [
             analysis_name,
             nanopore_dir,
@@ -971,6 +1020,12 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             kraken2_incremental,
             enable_krona,
             enable_nanopore_stats,
+            chopper_minlength,
+            chopper_quality,
+            filtlong_minlength,
+            validation_identity,
+            kraken2_confidence,
+            kraken2_hitgroups,
             True,  # Mark form as initialized (suppresses first "Modified" badge)
         ]
 
@@ -1541,6 +1596,13 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("kraken2-incremental-input", "value"),
             Input("enable-krona-input", "value"),
             Input("enable-nanopore-stats-input", "value"),
+            # Read filtering and validation overrides
+            Input("chopper-minlength-input", "value"),
+            Input("chopper-quality-input", "value"),
+            Input("filtlong-minlength-input", "value"),
+            Input("validation-identity-input", "value"),
+            Input("kraken2-confidence-input", "value"),
+            Input("kraken2-hitgroups-input", "value"),
         ],
         [
             State("saved-config-snapshot", "data"),
@@ -1556,6 +1618,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         min_identity, e_value_cutoff, minimap2_preset, minimap2_min_mapq,
         genome_cache_dir, cores, gui_port, clean_temp,
         qc_tool, skip_nanoplot, kraken2_incremental, enable_krona, enable_nanopore_stats,
+        chopper_minlength, chopper_quality, filtlong_minlength,
+        validation_identity, kraken2_confidence, kraken2_hitgroups,
         saved_snapshot, currently_modified, form_initialized
     ):
         """Detect when form values differ from saved snapshot."""
@@ -1594,6 +1658,13 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "pipeline_cores": cores,
             "gui_port": gui_port,
             "remove_temp_files": bool(clean_temp),
+            # Read filtering / validation overrides
+            "chopper_minlength": chopper_minlength,
+            "chopper_quality": chopper_quality,
+            "filtlong_min_length": filtlong_minlength,
+            "validation_identity_threshold": validation_identity,
+            "kraken2_confidence": kraken2_confidence,
+            "kraken2_minimum_hit_groups": kraken2_hitgroups,
         }
 
         # Compare key fields with snapshot

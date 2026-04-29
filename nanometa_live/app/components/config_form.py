@@ -613,14 +613,17 @@ def create_config_form():
                                     id="minimap2-preset-input",
                                     options=[
                                         {"label": "Oxford Nanopore (default)", "value": "map-ont"},
+                                        {"label": "Short reads <500 bp (amplicons)", "value": "sr"},
                                         {"label": "PacBio HiFi", "value": "map-hifi"},
                                         {"label": "PacBio CLR", "value": "map-pb"}
                                     ],
                                     value="map-ont"
                                 ),
-                                dbc.FormText("Select your sequencing instrument type"),
+                                dbc.FormText("Select your sequencing instrument type or sr for short amplicons"),
                                 dbc.Tooltip(
                                     "Choose the sequencing technology that produced your data. "
+                                    "Use 'Short reads' (sr) for amplicons under ~500 bp where "
+                                    "the long-read preset under-aligns. "
                                     "This adjusts alignment sensitivity to match the error profile "
                                     "of your instrument.",
                                     target="minimap2-preset-info"
@@ -751,6 +754,200 @@ def create_config_form():
                             ], md=4),
                         ]),
                     ])
+                ], className="mb-3"),
+
+                # Read filtering and validation -- amplicon-friendly
+                # overrides for the long-read defaults. Operators
+                # running V3-V4 / 16S / ITS amplicons (any read pile
+                # under 1 kb) need to relax the chopper / filtlong
+                # length filter or all reads are dropped at QC.
+                # See docs/audit-2026-04-29-short-amplicons.md for
+                # the rationale and recommended preset.
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="bi bi-funnel me-2"),
+                        html.Strong("Read Filtering and Validation"),
+                    ], className="py-2"),
+                    dbc.CardBody([
+                        dbc.Alert(
+                            [
+                                html.I(className="bi bi-info-circle me-2"),
+                                html.Strong("For amplicon or short-read protocols: "),
+                                "lower the length filter and validation identity. "
+                                "The defaults below assume ONT whole-genome reads (5-50 kb).",
+                            ],
+                            color="light",
+                            className="small py-2 mb-3 border",
+                        ),
+
+                        # Row 1: chopper / filtlong length filters
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Label([
+                                    "Chopper minimum length (bp) ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1",
+                                           id="chopper-minlength-info"),
+                                ], html_for="chopper-minlength-input"),
+                                dbc.Input(
+                                    id="chopper-minlength-input",
+                                    type="number",
+                                    min=0,
+                                    max=50000,
+                                    step=50,
+                                    value=1000,
+                                ),
+                                dbc.FormText("Reads shorter than this are dropped (set to 100 for V3-V4 amplicons; 0 disables)"),
+                                dbc.Tooltip(
+                                    "Chopper's --minlength filter. Default 1000 is "
+                                    "tuned for whole-genome ONT reads. For V3-V4 "
+                                    "(~460 bp) set to 100; for ITS/16S amplicons "
+                                    "use 250-500. Set to 0 to disable length "
+                                    "filtering entirely.",
+                                    target="chopper-minlength-info",
+                                ),
+                            ], md=4),
+                            dbc.Col([
+                                dbc.Label([
+                                    "Chopper minimum quality (Q) ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1",
+                                           id="chopper-quality-info"),
+                                ], html_for="chopper-quality-input"),
+                                dbc.Input(
+                                    id="chopper-quality-input",
+                                    type="number",
+                                    min=0,
+                                    max=30,
+                                    step=1,
+                                    value=10,
+                                ),
+                                dbc.FormText("Per-read mean Q-score threshold (lower for short ONT reads)"),
+                                dbc.Tooltip(
+                                    "Chopper's --quality filter. ONT short-read "
+                                    "Q-scores trend lower than long-read because "
+                                    "the Q-score ramp-up region is a larger "
+                                    "fraction of a short read. Try 7 for amplicons.",
+                                    target="chopper-quality-info",
+                                ),
+                            ], md=4),
+                            dbc.Col([
+                                dbc.Label([
+                                    "Filtlong minimum length (bp) ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1",
+                                           id="filtlong-minlength-info"),
+                                ], html_for="filtlong-minlength-input"),
+                                dbc.Input(
+                                    id="filtlong-minlength-input",
+                                    type="number",
+                                    min=0,
+                                    max=50000,
+                                    step=50,
+                                    value=1000,
+                                ),
+                                dbc.FormText("Only used when QC tool is filtlong (above)"),
+                                dbc.Tooltip(
+                                    "Filtlong's --min_length filter. Same "
+                                    "amplicon guidance as chopper_minlength: "
+                                    "100 for V3-V4, 250-500 for ITS/16S.",
+                                    target="filtlong-minlength-info",
+                                ),
+                            ], md=4),
+                        ], className="mb-3"),
+
+                        # Row 2: validation identity + Kraken2 confidence
+                        # Minimap2 preset (incl. the new ``sr`` short-read
+                        # option for amplicons) and MAPQ threshold live in
+                        # the Validation Settings card above; keeping them
+                        # there avoids duplicate component IDs.
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Label([
+                                    "Validation identity threshold (%) ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1",
+                                           id="validation-identity-info"),
+                                ], html_for="validation-identity-input"),
+                                dbc.Input(
+                                    id="validation-identity-input",
+                                    type="number",
+                                    min=0,
+                                    max=100,
+                                    step=1,
+                                    value=90,
+                                ),
+                                dbc.FormText("Percent identity required to confirm a read"),
+                                dbc.Tooltip(
+                                    "Minimum percent identity for a read to "
+                                    "count as confirming validation. The 90% "
+                                    "default is hard for short ONT reads to "
+                                    "clear because Q-score noise hits short "
+                                    "reads proportionally harder. Try 80% for "
+                                    "amplicons.",
+                                    target="validation-identity-info",
+                                ),
+                            ], md=6),
+                            dbc.Col([
+                                html.Div([
+                                    html.I(className="bi bi-arrow-up-circle me-2 text-muted"),
+                                    html.Span(
+                                        "Minimap2 preset and MAPQ threshold are "
+                                        "in Validation Settings above. Switch to "
+                                        "'Short reads <500 bp (amplicons)' for "
+                                        "amplicon protocols.",
+                                        className="small text-muted",
+                                    ),
+                                ], className="mt-4"),
+                            ], md=6),
+                        ], className="mb-3"),
+
+                        # Row 3: kraken2 confidence
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Label([
+                                    "Kraken2 confidence (0.0-1.0) ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1",
+                                           id="kraken2-confidence-info"),
+                                ], html_for="kraken2-confidence-input"),
+                                dbc.Input(
+                                    id="kraken2-confidence-input",
+                                    type="number",
+                                    min=0,
+                                    max=1,
+                                    step=0.05,
+                                    value=0.0,
+                                ),
+                                dbc.FormText("Per-read classification confidence (0 disables)"),
+                                dbc.Tooltip(
+                                    "Kraken2 --confidence flag. 0 means accept "
+                                    "every classification; raise (0.05-0.2) if "
+                                    "you see noise in low-abundance taxa. "
+                                    "Database-dependent.",
+                                    target="kraken2-confidence-info",
+                                ),
+                            ], md=6),
+                            dbc.Col([
+                                dbc.Label([
+                                    "Kraken2 minimum hit groups ",
+                                    html.I(className="bi bi-info-circle text-muted ms-1",
+                                           id="kraken2-hitgroups-info"),
+                                ], html_for="kraken2-hitgroups-input"),
+                                dbc.Input(
+                                    id="kraken2-hitgroups-input",
+                                    type="number",
+                                    min=0,
+                                    max=10,
+                                    step=1,
+                                    value=0,
+                                ),
+                                dbc.FormText("Hit groups required (0 disables)"),
+                                dbc.Tooltip(
+                                    "Kraken2 --minimum-hit-groups. Requires at "
+                                    "least N distinct k-mer regions to support "
+                                    "a classification. Lowers false positives "
+                                    "but loses sensitivity on short reads.",
+                                    target="kraken2-hitgroups-info",
+                                ),
+                            ], md=6),
+                        ]),
+                    ]),
                 ], className="mb-3"),
 
                 # Performance Settings

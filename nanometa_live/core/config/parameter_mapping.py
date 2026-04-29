@@ -629,6 +629,21 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         "skip_fastp": False,
         "skip_nanoplot": config.get("skip_nanoplot", False),
 
+        # Read-filter overrides surfaced by the Configuration tab's
+        # Advanced Settings -> Read Filtering and Validation card.
+        # Defaults match nanometanf's pipeline-side defaults so an
+        # operator who has not touched the new GUI fields keeps the
+        # current long-read behaviour. See
+        # docs/audit-2026-04-29-short-amplicons.md for rationale on
+        # why each is operator-tunable.
+        "chopper_minlength": config.get("chopper_minlength", 1000),
+        "chopper_quality": config.get("chopper_quality", 10),
+        "filtlong_min_length": config.get("filtlong_min_length", 1000),
+        "kraken2_confidence": config.get("kraken2_confidence", 0.0),
+        "kraken2_minimum_hit_groups": config.get(
+            "kraken2_minimum_hit_groups", 0
+        ),
+
         # Visualization
         # Disable Krona plots by default - container has permissions issues with taxonomy update
         "enable_krona_plots": config.get("enable_krona_plots", False),
