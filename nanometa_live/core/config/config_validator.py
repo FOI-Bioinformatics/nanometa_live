@@ -30,6 +30,7 @@ def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
     _validate_performance_settings(validated_config)
     _validate_taxonomy_settings(validated_config)
     _validate_validation_settings(validated_config)
+    _validate_read_filtering_settings(validated_config)
     _validate_gui_settings(validated_config)
 
     # Critical: Validate boolean parameters
@@ -231,6 +232,104 @@ def _validate_validation_settings(config: Dict[str, Any]) -> None:
         or config["e_val_cutoff"] < 0
     ):
         config["e_val_cutoff"] = 0.01
+
+    # Validation identity threshold (used by minimap2 alignment validation,
+    # 0.0-100.0 percent). Out-of-range or non-numeric values reset to 90.0.
+    if (
+        "validation_identity_threshold" not in config
+        or isinstance(config["validation_identity_threshold"], bool)
+        or not isinstance(config["validation_identity_threshold"], (int, float))
+        or config["validation_identity_threshold"] < 0.0
+        or config["validation_identity_threshold"] > 100.0
+    ):
+        config["validation_identity_threshold"] = 90.0
+
+    # minimap2 alignment preset for validation. Five accepted strings;
+    # anything else falls back to map-ont (the long-read default).
+    _allowed_minimap2_presets = {"map-ont", "sr", "asm5", "asm10", "asm20"}
+    if (
+        "minimap2_preset" not in config
+        or not isinstance(config["minimap2_preset"], str)
+        or config["minimap2_preset"] not in _allowed_minimap2_presets
+    ):
+        config["minimap2_preset"] = "map-ont"
+
+    # Minimum mapping quality for minimap2 alignment filtering, 0-60.
+    if (
+        "minimap2_min_mapq" not in config
+        or isinstance(config["minimap2_min_mapq"], bool)
+        or not isinstance(config["minimap2_min_mapq"], int)
+        or config["minimap2_min_mapq"] < 0
+        or config["minimap2_min_mapq"] > 60
+    ):
+        config["minimap2_min_mapq"] = 10
+
+
+def _validate_read_filtering_settings(config: Dict[str, Any]) -> None:
+    """
+    Validate the read-filtering parameters exposed in the Configuration
+    tab's "Read Filtering and Validation" sub-card.
+
+    Defaults match nanometanf's long-read defaults so that an existing
+    config without these keys keeps current behaviour. Out-of-range
+    values reset to those defaults.
+
+    Args:
+        config: Configuration dictionary to validate
+    """
+    # chopper minimum read length (0 disables length filtering, 50000
+    # is far above any plausible long-read amplicon).
+    if (
+        "chopper_minlength" not in config
+        or isinstance(config["chopper_minlength"], bool)
+        or not isinstance(config["chopper_minlength"], int)
+        or config["chopper_minlength"] < 0
+        or config["chopper_minlength"] > 50000
+    ):
+        config["chopper_minlength"] = 1000
+
+    # chopper minimum per-read quality (0-30 covers the practical
+    # range of ONT Q-scores, including amplicon-friendly Q7).
+    if (
+        "chopper_quality" not in config
+        or isinstance(config["chopper_quality"], bool)
+        or not isinstance(config["chopper_quality"], int)
+        or config["chopper_quality"] < 0
+        or config["chopper_quality"] > 30
+    ):
+        config["chopper_quality"] = 10
+
+    # filtlong minimum read length (matches chopper_minlength bounds).
+    if (
+        "filtlong_min_length" not in config
+        or isinstance(config["filtlong_min_length"], bool)
+        or not isinstance(config["filtlong_min_length"], int)
+        or config["filtlong_min_length"] < 0
+        or config["filtlong_min_length"] > 50000
+    ):
+        config["filtlong_min_length"] = 1000
+
+    # Kraken2 confidence threshold (0.0-1.0, where 0.0 is the default
+    # of "every classification accepted").
+    if (
+        "kraken2_confidence" not in config
+        or isinstance(config["kraken2_confidence"], bool)
+        or not isinstance(config["kraken2_confidence"], (int, float))
+        or config["kraken2_confidence"] < 0.0
+        or config["kraken2_confidence"] > 1.0
+    ):
+        config["kraken2_confidence"] = 0.0
+
+    # Kraken2 minimum hit groups (0-10; 0 disables the filter, the
+    # widget caps at 10 because higher values are rare in practice).
+    if (
+        "kraken2_minimum_hit_groups" not in config
+        or isinstance(config["kraken2_minimum_hit_groups"], bool)
+        or not isinstance(config["kraken2_minimum_hit_groups"], int)
+        or config["kraken2_minimum_hit_groups"] < 0
+        or config["kraken2_minimum_hit_groups"] > 10
+    ):
+        config["kraken2_minimum_hit_groups"] = 0
 
 
 def _validate_gui_settings(config: Dict[str, Any]) -> None:

@@ -104,6 +104,29 @@ class TestReadFilteringSubCardLayout:
             "minimap2-preset-input must offer 'sr' for short amplicons"
         )
 
+    def test_minimap2_preset_default_is_long_read(self):
+        """Default must remain ``map-ont`` so unmodified configs keep
+        long-read behaviour."""
+        form = create_config_form()
+        select = _find_by_id(form, "minimap2-preset-input")
+        assert select is not None
+        assert select.value == "map-ont"
+
+    def test_minimap2_min_mapq_input_renders(self):
+        """``minimap2-min-mapq-input`` is one of the eight read-filtering
+        fields the audit plan calls out. It lives in the existing
+        Validation Settings card (not the new sub-card). The form ships
+        its own operator-facing default which can differ from the
+        pipeline default; assert only that the input renders with a
+        value in the allowed 0-60 range."""
+        form = create_config_form()
+        widget = _find_by_id(form, "minimap2-min-mapq-input")
+        assert widget is not None, (
+            "minimap2-min-mapq-input missing from the Configuration form"
+        )
+        assert isinstance(widget.value, int)
+        assert 0 <= widget.value <= 60
+
 
 # -- Callback wiring -----------------------------------------------------
 
