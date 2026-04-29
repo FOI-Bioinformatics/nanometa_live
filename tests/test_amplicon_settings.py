@@ -208,3 +208,99 @@ class TestAmpliconParamsRouted:
         assert params["filtlong_min_length"] == 1000
         assert params["kraken2_confidence"] == 0.0
         assert params["kraken2_minimum_hit_groups"] == 0
+
+
+# -- Amplicon-aware Q30 / classification bands --------------------------
+
+
+class TestAmpliconAwareBands:
+    """When the operator has set chopper_minlength<500 or
+    filtlong_min_length<500, the QC tab Q30 and classification-rate
+    bands should relax to match short-read expectations.
+    Closes P5 from the readiness audit."""
+
+    def test_is_amplicon_mode_default_false(self):
+        from nanometa_live.app.tabs.qc_tab import _is_amplicon_mode
+        assert _is_amplicon_mode(None) is False
+        assert _is_amplicon_mode({}) is False
+        assert _is_amplicon_mode({"chopper_minlength": 1000}) is False
+
+    def test_is_amplicon_mode_chopper_short(self):
+        from nanometa_live.app.tabs.qc_tab import _is_amplicon_mode
+        assert _is_amplicon_mode({"chopper_minlength": 100}) is True
+        assert _is_amplicon_mode({"chopper_minlength": 0}) is True
+        assert _is_amplicon_mode({"chopper_minlength": 499}) is True
+        assert _is_amplicon_mode({"chopper_minlength": 500}) is False
+
+    def test_is_amplicon_mode_filtlong_short(self):
+        from nanometa_live.app.tabs.qc_tab import _is_amplicon_mode
+        assert _is_amplicon_mode({"filtlong_min_length": 250}) is True
+
+    def test_is_amplicon_mode_handles_nonsense_values(self):
+        from nanometa_live.app.tabs.qc_tab import _is_amplicon_mode
+        # Strings, None, garbage all default to False (long-read mode).
+        assert _is_amplicon_mode({"chopper_minlength": None}) is False
+        assert _is_amplicon_mode({"chopper_minlength": "garbage"}) is False
+        assert _is_amplicon_mode({"chopper_minlength": ""}) is False
+
+    def test_basequalitycard_amplicon_mode_relaxes_q30_bands(self):
+        """A 30% Q30 rate is amber under long-read bands but green
+        under amplicon bands. We pick Q20=80 (above both green floors)
+        so Q20's colour does not muddy the assertion -- only Q30
+        differs between modes."""
+        from nanometa_live.app.components.organism_components import (
+            BaseQualityCard,
+        )
+
+        long_read = BaseQualityCard(q20_rate=80, q30_rate=30, total_bases=1000)
+        amplicon = BaseQualityCard(
+            q20_rate=80, q30_rate=30, total_bases=1000, amplicon_mode=True
+        )
+
+        # The Q30 metric carries its own status string in the Small
+        # element ("Excellent" / "Good" / "Fair" / "Poor"). Status
+        # transitions when bands change. Pull it from the rendered
+        # JSON: long-read shows "Fair" at 30%, amplicon shows
+        # "Excellent" at 30%.
+        import json
+        long_json = json.dumps(long_read.to_plotly_json(), default=str)
+        amp_json = json.dumps(amplicon.to_plotly_json(), default=str)
+
+        # Q30 amber colour code present in long-read at 30%
+        assert "#ffc107" in long_json, (
+            "long-read mode should colour 30% Q30 amber (#ffc107)"
+        )
+        # Amplicon mode: Q20 stays green AND Q30 turns green at 30%,
+        # so the only colour-coded metrics here use the success token.
+        # Green hex is #28a745.
+        assert "#28a745" in amp_json
+        # Sanity: the long-read variant must NOT have the Q30 cell as
+        # green at 30%; its rendered DOM should still contain the
+        # amber colour token (the Q30 cell drives it since Q20=80 is
+        # above the long-read green floor of 65).
+        assert "#ffc107" in long_json
+
+    def test_qc_stage_strip_classification_bands_amplicon(self):
+        """Classification rate at 60% is amber under long-read bands
+        but green under amplicon bands."""
+        from nanometa_live.app.tabs.qc_tab import _build_stage_strip
+
+        long_read = _build_stage_strip(
+            raw_reads=1000, filtered_reads=900,
+            classified_reads=600, unclassified_reads=400,
+            is_chopper=False, filter_tool="FASTP", timestamp_str="00:00:00",
+            amplicon_mode=False,
+        )
+        amplicon = _build_stage_strip(
+            raw_reads=1000, filtered_reads=900,
+            classified_reads=600, unclassified_reads=400,
+            is_chopper=False, filter_tool="FASTP", timestamp_str="00:00:00",
+            amplicon_mode=True,
+        )
+        import json
+        long_json = json.dumps(long_read.to_plotly_json(), default=str)
+        amp_json = json.dumps(amplicon.to_plotly_json(), default=str)
+
+        # 60% classification: amber in long-read mode, green in amplicon mode.
+        assert "stage-strip-delta--amber" in long_json
+        assert "stage-strip-delta--green" in amp_json

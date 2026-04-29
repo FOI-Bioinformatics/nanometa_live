@@ -1135,7 +1135,8 @@ def BaseQualityCard(
     q30_rate: float,
     total_bases: int,
     quality_curve: Optional[List[float]] = None,
-    source: str = "unknown"
+    source: str = "unknown",
+    amplicon_mode: bool = False,
 ) -> html.Div:
     """
     Create a base quality card showing Q20/Q30 rates with optional quality sparkline.
@@ -1150,13 +1151,22 @@ def BaseQualityCard(
         total_bases: Total base pairs processed
         quality_curve: Per-position mean quality scores (FASTP only)
         source: Data source ("fastp" or "seqkit") - affects sparkline availability
+        amplicon_mode: When True, use relaxed Q-score bands tuned for short
+            amplicon ONT reads (V3-V4, ITS, custom designs). Short reads
+            carry proportionally more end-of-read low-quality bases, so
+            Q30/Q20 sit lower on amplicons even when the data is good.
+            See docs/audit-2026-04-29-short-amplicons.md for the rationale.
 
     Returns:
         Base quality card component
 
-    Color thresholds (calibrated for Oxford Nanopore):
+    Color thresholds (long-read mode, default):
         Q20: >= 65% (good), 50-65% (warning), < 50% (poor)
-        Q30: >= 45% (good), 30-45% (warning), < 30% (poor)
+        Q30: >= 45% (good), 25-44% (warning), < 25% (poor)
+
+    Color thresholds (amplicon mode):
+        Q20: >= 40% (good), 20-39% (warning), < 20% (poor)
+        Q30: >= 25% (good), 10-24% (warning), < 10% (poor)
     """
     # Color configuration
     color_config = {
@@ -1165,19 +1175,26 @@ def BaseQualityCard(
         "success": {"bg": "#28a745", "bg_light": "rgba(40, 167, 69, 0.12)", "icon": "check-circle-fill"},
     }
 
+    if amplicon_mode:
+        _q20_red, _q20_amber = 20, 40
+        _q30_red, _q30_amber = 10, 25
+    else:
+        _q20_red, _q20_amber = 50, 65
+        _q30_red, _q30_amber = 25, 45
+
     def get_q20_color(value: float) -> dict:
         """Get color for Q20 rate (nanopore-calibrated)."""
-        if value < 50:
+        if value < _q20_red:
             return color_config["danger"]
-        elif value < 65:
+        elif value < _q20_amber:
             return color_config["warning"]
         return color_config["success"]
 
     def get_q30_color(value: float) -> dict:
-        """Get color for Q30 rate (nanopore-calibrated). Green >=45%, amber 25-44%, red <25%."""
-        if value < 25:
+        """Get color for Q30 rate (nanopore-calibrated)."""
+        if value < _q30_red:
             return color_config["danger"]
-        elif value < 45:
+        elif value < _q30_amber:
             return color_config["warning"]
         return color_config["success"]
 

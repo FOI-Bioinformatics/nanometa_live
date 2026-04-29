@@ -1,28 +1,38 @@
 """
 BlastValidationParser: Parser for nanometanf BLAST/minimap2 validation results.
 
-This module provides parsers for structured validation results from the nanometanf
-pipeline, including BLAST and future minimap2 validation outputs. It handles both
-legacy tabular BLAST output (outfmt 6) and modern JSON validation summaries.
+The aggregate output contract is documented in nanometanf's
+``assets/schema_validation_results.json`` (JSON Schema draft 2020-12).
+That file is the source of truth for the cross-component contract --
+when it changes, this parser changes. The shape is two-level nested:
 
-Expected nanometanf validation JSON output structure:
-{
-    "sample_id": "barcode01",
-    "taxid": 562,
-    "species": "Escherichia coli",
-    "total_reads": 1500,
-    "validated_reads": 1423,
-    "percent_validated": 94.87,
-    "percent_identity_mean": 98.5,
-    "percent_identity_min": 85.2,
-    "percent_identity_max": 100.0,
-    "alignment_length_mean": 450,
-    "coverage_breadth": 0.87,
-    "coverage_depth_mean": 15.3,
-    "validation_method": "blast",
-    "reference_accession": "GCF_000005845.2",
-    "timestamp": "2024-01-15T10:30:00Z"
-}
+    {
+      "pipeline_version": str,
+      "validation_method": "blast" | "minimap2" | "both",
+      "timestamp": ISO 8601 UTC,
+      "thresholds": {"hit_rate": float, "identity": float},
+      "results": {
+        "<sample_id>": {
+          "<taxid_str>": {ValidationEntry...},
+        },
+      },
+      "summary": {
+        "total_samples": int, "total_taxids_validated": int,
+        "confirmed": int, "uncertain": int, "rejected": int,
+      },
+    }
+
+A ValidationEntry has the per-(sample, taxid) fields documented in
+the schema's ``$defs/ValidationEntry`` block (taxid, species,
+validation_method, kraken_reads, extracted_reads, hit_rate,
+avg_identity, avg_coverage, validation_status, plus method-specific
+blast_hits / mapped_reads / avg_mapq / ref_name / ref_length and
+dual-method minimap2_* sibling fields).
+
+Legacy individual-file format (per-sample JSON written by older
+pipeline versions before the AGGREGATE_VALIDATION_RESULTS module
+landed) is also accepted as a fallback; ``parse_validation_json``
+normalises it into the same ``ValidationResult`` dataclass below.
 
 Author: Nanometa Live Development Team
 """

@@ -52,8 +52,42 @@ def _build_stage_strip_slot(heading, count_text, subtitle, count_extra=None, slo
     return html.Div(children, className=slot_class)
 
 
+def _is_amplicon_mode(config) -> bool:
+    """Detect whether the operator has configured amplicon-friendly filters.
+
+    Heuristic: when ``chopper_minlength`` or ``filtlong_min_length`` is
+    set to an explicit numeric value below 500 bp, the run targets
+    short amplicons (V3-V4 ~460 bp, ITS, custom designs). Long-read
+    defaults are 1000. The QC bands relax to match -- short ONT reads
+    carry proportionally more end-of-read low-quality bases, so
+    legitimate amplicon runs show Q30 and classification rates lower
+    than long-read runs.
+
+    Conservative on missing or garbage values: only returns True when
+    a numeric value below 500 is present in the config. ``None`` and
+    invalid strings keep long-read mode on.
+
+    See docs/audit-2026-04-29-short-amplicons.md for the full audit and
+    the recommended config preset.
+    """
+    if not config:
+        return False
+    for key in ("chopper_minlength", "filtlong_min_length"):
+        raw = config.get(key)
+        if raw is None or raw == "":
+            continue
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if value < 500:
+            return True
+    return False
+
+
 def _build_stage_strip(raw_reads, filtered_reads, classified_reads, unclassified_reads,
-                       is_chopper, filter_tool, timestamp_str):
+                       is_chopper, filter_tool, timestamp_str,
+                       amplicon_mode: bool = False):
     """Build the complete Stage Strip component.
 
     All counts are cumulative-since-run-start, matching the time horizon used
@@ -113,14 +147,21 @@ def _build_stage_strip(raw_reads, filtered_reads, classified_reads, unclassified
         slot_class="stage-strip-slot stage-strip-slot--classified",
     )
 
-    # Classification rate delta color
+    # Classification rate delta color. Amplicon mode uses relaxed
+    # bands because short reads classify at lower rates -- a 100%
+    # bacterial 16S amplicon run typically clears 50-70% in
+    # long-read-tuned terms but is operationally fine.
+    if amplicon_mode:
+        _green_floor, _amber_floor = 50, 25
+    else:
+        _green_floor, _amber_floor = 80, 50
     if classif_rate is None:
         classif_delta_text = "\u2014"
         classif_delta_cls = "stage-strip-delta stage-strip-delta--muted"
-    elif classif_rate >= 80:
+    elif classif_rate >= _green_floor:
         classif_delta_text = f"{classif_rate:.1f}%"
         classif_delta_cls = "stage-strip-delta stage-strip-delta--green"
-    elif classif_rate >= 50:
+    elif classif_rate >= _amber_floor:
         classif_delta_text = f"{classif_rate:.1f}%"
         classif_delta_cls = "stage-strip-delta stage-strip-delta--amber"
     else:
@@ -892,13 +933,16 @@ def register_qc_callbacks(app: Dash):
             if total_bases == 0:
                 return empty_state
 
-            # Generate BaseQualityCard component
+            # Generate BaseQualityCard component. Amplicon-mode flag
+            # comes from the operator's config (chopper_minlength<500
+            # or filtlong_min_length<500).
             return BaseQualityCard(
                 q20_rate=q20_rate,
                 q30_rate=q30_rate,
                 total_bases=total_bases,
                 quality_curve=quality_curve,
-                source=source
+                source=source,
+                amplicon_mode=_is_amplicon_mode(config),
             )
 
         except Exception as e:
@@ -1105,6 +1149,7 @@ def register_qc_callbacks(app: Dash):
                 is_chopper=is_chopper,
                 filter_tool=filter_tool,
                 timestamp_str=timestamp_str,
+                amplicon_mode=_is_amplicon_mode(config),
             )
 
         except Exception as e:
