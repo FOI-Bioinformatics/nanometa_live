@@ -759,10 +759,13 @@ def QualityScoreIndicator(
 
     rating, interpretation, color_name = get_quality_interpretation(score)
 
-    # Color configuration with icons for WCAG compliance
+    # Color configuration with icons for WCAG compliance.
+    # Text tokens align with CLAUDE.md locked colors (#721c24 dark
+    # red, #664d03 dark amber, #155724 dark green) so that AA
+    # contrast holds on the bg_light tints.
     color_config = {
         "danger": {"bg": "#dc3545", "bg_light": "rgba(220, 53, 69, 0.12)", "icon": "x-circle-fill", "text": "#721c24"},
-        "warning": {"bg": "#ffc107", "bg_light": "rgba(255, 193, 7, 0.15)", "icon": "exclamation-triangle-fill", "text": "#856404"},
+        "warning": {"bg": "#ffc107", "bg_light": "rgba(255, 193, 7, 0.15)", "icon": "exclamation-triangle-fill", "text": "#664d03"},
         "success": {"bg": "#28a745", "bg_light": "rgba(40, 167, 69, 0.12)", "icon": "check-circle-fill", "text": "#155724"},
         "good": {"bg": "#28a745", "bg_light": "rgba(40, 167, 69, 0.12)", "icon": "check-circle-fill", "text": "#155724"},
         "secondary": {"bg": "#6c757d", "bg_light": "rgba(108, 117, 125, 0.12)", "icon": "dash-circle", "text": "#383d41"},

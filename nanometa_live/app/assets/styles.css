@@ -618,7 +618,7 @@ body {
   .status-badge-review,
   .badge-warning {
     background-color: var(--status-warning-bg);
-    color: #856404; /* Darker amber for readability */
+    color: #664d03; /* Darker amber for readability */
     border-color: var(--status-warning-border);
   }
 
@@ -701,7 +701,7 @@ body {
   .alert-warning {
     background-color: var(--status-warning-bg);
     border-left-color: var(--status-warning);
-    color: #856404;
+    color: #664d03;
   }
 
   .alert-info {
@@ -984,7 +984,7 @@ body {
 
   .watched-badge {
     background-color: var(--status-warning);
-    color: #856404;
+    color: #664d03;
     font-weight: var(--font-weight-semibold);
     padding: var(--space-xs) var(--space-sm);
     border-radius: var(--radius-sm);
@@ -1000,7 +1000,7 @@ body {
   .watch-btn.watched {
     background-color: var(--status-warning) !important;
     border-color: var(--status-warning) !important;
-    color: #856404 !important;
+    color: #664d03 !important;
   }
 
   .watch-btn:hover {
@@ -1055,7 +1055,7 @@ body {
 
   .confidence-badge-medium {
     background-color: var(--status-warning-bg);
-    color: #856404;
+    color: #664d03;
     border: 1px solid var(--status-warning-border);
   }
 
@@ -1290,7 +1290,7 @@ body {
 
   .q-badge-fair {
     background-color: var(--status-warning);
-    color: #856404;
+    color: #664d03;
   }
 
   .q-badge-poor {
@@ -3121,10 +3121,31 @@ body {
 
   /* ---- 3. CONTRAST FIXES (WCAG AA) ---- */
 
-  /* Warning text on light bg: #ffc107 is only ~1.2:1 on white */
-  /* Use darker amber for ALL text-warning usage */
+  /* Warning text on light bg: Bootstrap default #ffc107 is ~1.6:1 on
+   * white (massive AA fail). The earlier audit pass tightened this to
+   * #b38600 (~3.3:1, still fails normal-text AA). Use #664d03 -- the
+   * amber token CLAUDE.md locks for the QC stage strip and verdict
+   * banner. #664d03 on white is ~7.8:1; on the fff3cd amber-banner
+   * background it remains ~7.5:1. Single source of truth for amber
+   * text across the app. */
   .text-warning {
-    color: #b38600 !important;
+    color: #664d03 !important;
+  }
+
+  /* Danger text on light bg: Bootstrap default #dc3545 is ~4.5:1 on
+   * pure white (borderline AA) but only ~3.6:1 on the f8d7da pink
+   * pathogen-alert background (fails normal-text AA). Use #721c24,
+   * the dark-red token used by the action-required verdict banner.
+   * #721c24 on white is ~9.5:1; on f8d7da it is ~7.1:1. */
+  .text-danger {
+    color: #721c24 !important;
+  }
+
+  /* Info text on light bg: Bootstrap default #17a2b8 is ~2.5:1 on
+   * the d1ecf1 info-card background. #0c5460 is ~7.5:1 on the same
+   * background and ~9:1 on white. */
+  .text-info {
+    color: #0c5460 !important;
   }
 
   /* Warning button: ensure text is readable on amber bg */

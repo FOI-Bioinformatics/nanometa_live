@@ -83,8 +83,18 @@ def create_dashboard_layout():
                     id="dashboard-verdict-banner",
                     children=_standby_verdict_content(),
                     style={
+                        # CLAUDE.md Zone 1 spec: 6px LEFT border accent
+                        # plus a subtle full outline; the bg colour
+                        # remains the dominant visual for the verdict
+                        # state. Initial standby uses a muted slate
+                        # accent; the live verdict callback rewrites
+                        # this style via _verdict_style() in
+                        # dashboard_tab.py.
                         "backgroundColor": "#f8f9fa",
-                        "border": "6px solid #6c757d",
+                        "borderLeft": "6px solid #6c757d",
+                        "border": "1px solid rgba(0, 0, 0, 0.08)",
+                        "borderLeftWidth": "6px",
+                        "borderLeftColor": "#6c757d",
                         "borderRadius": "8px",
                         "padding": "24px 32px",
                         "minHeight": "120px",
@@ -251,7 +261,7 @@ def create_dashboard_layout():
                                                     "condition": "params.value === 'Needs Review'",
                                                     "style": {
                                                         "backgroundColor": "#fff3cd",
-                                                        "color": "#856404",
+                                                        "color": "#664d03",
                                                         "fontWeight": "bold",
                                                         "borderLeft": "4px solid #ffc107"
                                                     },

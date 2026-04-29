@@ -208,7 +208,7 @@ def _create_blast_tab() -> dbc.Tab:
                                                         },
                                                         {
                                                             "condition": "params.value === 'partial'",
-                                                            "style": {"backgroundColor": "#fff3cd", "color": "#856404"},
+                                                            "style": {"backgroundColor": "#fff3cd", "color": "#664d03"},
                                                         },
                                                         {
                                                             "condition": "params.value === 'low'",
