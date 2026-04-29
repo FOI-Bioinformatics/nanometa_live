@@ -1602,3 +1602,257 @@ class TestPreparationTabPreWarmCheckbox:
             f"Expected at least 2 callbacks reading bundle-export-prewarm, "
             f"got {len(prewarm_listeners)}: {prewarm_listeners}"
         )
+
+
+class TestContainerizationModes:
+    """W7-B: ``BundleManager.export_bundle`` honors the
+    ``containerization`` parameter -- conda mode preserves the existing
+    pre-warm flow, docker mode pulls + saves Docker tars, and
+    singularity mode pulls .sif files. Bundle's emitted config carries
+    the matching pipeline_profile in every mode."""
+
+    def _stub_pipeline(self, tmp_path):
+        """Build a minimal nanometanf-shaped checkout with one module
+        carrying both Singularity and Docker references plus a
+        bioconda environment.yml. ``main.nf`` at the root is sufficient
+        for ``_resolve_local_pipeline_path``."""
+        pipeline = tmp_path / "fake_nanometanf"
+        (pipeline / "modules" / "nf-core" / "chopper").mkdir(parents=True)
+        (pipeline / "main.nf").write_text("// stub main.nf\n")
+        (pipeline / "modules" / "nf-core" / "chopper" / "main.nf").write_text(
+            'process CHOPPER {\n'
+            '    container "${ workflow.containerEngine == \'singularity\' '
+            "? 'https://depot.galaxyproject.org/singularity/chopper:0.12.0--hdcf5f25_0' "
+            ": 'biocontainers/chopper:0.12.0--hdcf5f25_0' }\"\n"
+            '}\n'
+        )
+        (pipeline / "modules" / "nf-core" / "chopper" / "environment.yml").write_text(
+            "channels:\n  - bioconda\ndependencies:\n  - bioconda::chopper=0.12.0\n"
+        )
+        return pipeline
+
+    def _read_bundle_config_profile(self, bundle_path):
+        """Extract pipeline_profile from a bundled config.yaml."""
+        import tarfile
+        import yaml
+        with tarfile.open(str(bundle_path), "r:gz") as tar:
+            cfg_member = tar.getmember("config.yaml")
+            f = tar.extractfile(cfg_member)
+            payload = yaml.safe_load(f)
+        return payload.get("pipeline_profile")
+
+    def test_invalid_mode_raises(self, tmp_path):
+        mgr = BundleManager()
+        with pytest.raises(ValueError, match="containerization"):
+            mgr.export_bundle(
+                str(tmp_path / "x.tar.gz"),
+                {"pipeline_source": "remote:main"},
+                nanometa_home=str(tmp_path / "home"),
+                containerization="podman",
+            )
+
+    def test_conda_mode_writes_conda_profile(self, tmp_path):
+        """conda mode (default) emits pipeline_profile: conda."""
+        home = tmp_path / "home"
+        home.mkdir()
+        bundle = tmp_path / "out.tar.gz"
+        mgr = BundleManager()
+        mgr.export_bundle(
+            str(bundle),
+            {"pipeline_source": "remote:main"},
+            nanometa_home=str(home),
+            containerization="conda",
+        )
+        assert bundle.exists()
+        assert self._read_bundle_config_profile(bundle) == "conda"
+
+    def test_docker_mode_writes_docker_profile_and_skips_pull_when_no_pipeline(
+        self, tmp_path
+    ):
+        """Without a local pipeline_source, docker mode still completes
+        but records a warning and pulls nothing."""
+        home = tmp_path / "home"
+        home.mkdir()
+        bundle = tmp_path / "out.tar.gz"
+        mgr = BundleManager()
+        mgr.export_bundle(
+            str(bundle),
+            {"pipeline_source": "remote:main"},
+            nanometa_home=str(home),
+            containerization="docker",
+        )
+        assert bundle.exists()
+        assert self._read_bundle_config_profile(bundle) == "docker"
+
+    def test_docker_mode_pulls_and_saves_each_image(self, tmp_path, monkeypatch):
+        """With a local pipeline checkout and a stubbed docker CLI,
+        docker mode invokes ``docker pull`` then ``docker save`` per
+        unique reference and writes the tars under
+        ``pipeline_containers/``."""
+        pipeline = self._stub_pipeline(tmp_path)
+        home = tmp_path / "home"
+        home.mkdir()
+        bundle = tmp_path / "out.tar.gz"
+
+        # Pretend docker is on PATH.
+        monkeypatch.setattr("shutil.which", lambda cmd: "/usr/bin/docker"
+                            if cmd == "docker" else None)
+
+        # Capture every subprocess call. ``docker save`` writes a real
+        # file to the requested path so the bundling step finds it.
+        calls = []
+        def fake_run(cmd, **kwargs):
+            calls.append(list(cmd))
+            if cmd[:2] == ["docker", "save"]:
+                # cmd[3] is the -o target path.
+                Path(cmd[3]).write_bytes(b"fake-docker-tar")
+            class _Done:
+                returncode = 0
+                stdout = b""
+                stderr = b""
+            return _Done()
+        monkeypatch.setattr(
+            "nanometa_live.core.workflow.bundle_manager.subprocess.run",
+            fake_run,
+        )
+
+        mgr = BundleManager()
+        mgr.export_bundle(
+            str(bundle),
+            {"pipeline_source": str(pipeline)},
+            nanometa_home=str(home),
+            containerization="docker",
+            pipeline_path=str(pipeline),
+        )
+
+        assert bundle.exists()
+        assert self._read_bundle_config_profile(bundle) == "docker"
+
+        pull_cmds = [c for c in calls if c[:2] == ["docker", "pull"]]
+        save_cmds = [c for c in calls if c[:2] == ["docker", "save"]]
+        # Exactly one image in the stub pipeline -> one pull + one save
+        assert len(pull_cmds) == 1
+        assert len(save_cmds) == 1
+        assert "biocontainers/chopper:0.12.0--hdcf5f25_0" in pull_cmds[0]
+
+        # The tar should have been bundled.
+        import tarfile
+        with tarfile.open(str(bundle), "r:gz") as tar:
+            tar_names = tar.getnames()
+        assert any(
+            "pipeline_containers/" in n and n.endswith(".tar")
+            for n in tar_names
+        ), f"expected at least one pipeline_containers/*.tar entry: {tar_names}"
+
+    def test_singularity_mode_writes_singularity_profile(
+        self, tmp_path, monkeypatch
+    ):
+        """singularity mode emits pipeline_profile: singularity and
+        runs ``apptainer pull`` per unique reference. Falls back from
+        ``apptainer`` to ``singularity`` based on PATH detection."""
+        pipeline = self._stub_pipeline(tmp_path)
+        home = tmp_path / "home"
+        home.mkdir()
+        bundle = tmp_path / "out.tar.gz"
+
+        # apptainer present, singularity absent.
+        monkeypatch.setattr(
+            "shutil.which",
+            lambda cmd: "/usr/bin/apptainer" if cmd == "apptainer" else None,
+        )
+
+        calls = []
+        def fake_run(cmd, **kwargs):
+            calls.append(list(cmd))
+            if cmd[:2] == ["apptainer", "pull"]:
+                # cmd index 3 is the .sif output path under --force flag.
+                # cmd: [apptainer, pull, --force, <out.sif>, <ref>]
+                Path(cmd[3]).write_bytes(b"fake-sif")
+            class _Done:
+                returncode = 0
+                stdout = b""
+                stderr = b""
+            return _Done()
+        monkeypatch.setattr(
+            "nanometa_live.core.workflow.bundle_manager.subprocess.run",
+            fake_run,
+        )
+
+        mgr = BundleManager()
+        mgr.export_bundle(
+            str(bundle),
+            {"pipeline_source": str(pipeline)},
+            nanometa_home=str(home),
+            containerization="singularity",
+            pipeline_path=str(pipeline),
+        )
+
+        assert bundle.exists()
+        assert self._read_bundle_config_profile(bundle) == "singularity"
+
+        pull_cmds = [c for c in calls if c[:2] == ["apptainer", "pull"]]
+        # The stub has one Singularity URL and one Docker ref. The
+        # Singularity URL gets pulled directly; the Docker ref is the
+        # SAME image so it should be deduped to one pull total.
+        assert len(pull_cmds) >= 1
+
+
+class TestPreparationTabContainerizationRadio:
+    """W7-C: the Preparation tab exposes a 3-way radio whose value
+    flows through the export callback to BundleManager."""
+
+    def test_layout_includes_containerization_radio_default_conda(self):
+        from nanometa_live.app.layouts.preparation_layout import (
+            create_preparation_layout,
+        )
+        import dash_bootstrap_components as dbc
+
+        def find_radio(node, target_id):
+            if isinstance(node, dbc.RadioItems) and getattr(node, "id", None) == target_id:
+                return node
+            children = getattr(node, "children", None)
+            if children is None:
+                return None
+            if not isinstance(children, (list, tuple)):
+                children = [children]
+            for c in children:
+                if hasattr(c, "children") or hasattr(c, "id"):
+                    found = find_radio(c, target_id)
+                    if found is not None:
+                        return found
+            return None
+
+        layout = create_preparation_layout()
+        radio = find_radio(layout, "bundle-containerization-radio")
+        assert radio is not None, "bundle-containerization-radio missing"
+        assert radio.value == "conda", "default selection must be conda"
+        # Three options regardless of host engine availability (some
+        # disabled when their CLI is missing, but always rendered).
+        values = [opt["value"] for opt in radio.options]
+        assert values == ["conda", "docker", "singularity"]
+
+    def test_export_callbacks_read_radio_state(self):
+        """Both export callbacks must subscribe to the radio's value."""
+        import dash
+        from nanometa_live.app.tabs.preparation_tab import (
+            register_preparation_callbacks,
+        )
+
+        app = dash.Dash(__name__, suppress_callback_exceptions=True)
+        register_preparation_callbacks(app)
+
+        listeners = []
+        for cb_id, spec in app.callback_map.items():
+            state_specs = spec.get("state", []) or []
+            state_ids = [
+                s.get("id") if isinstance(s, dict) else getattr(s, "component_id", None)
+                for s in state_specs
+            ]
+            if "bundle-containerization-radio" in state_ids:
+                listeners.append(cb_id)
+
+        # export_bundle (readiness path) + force_export_bundle (warnings path)
+        assert len(listeners) >= 2, (
+            f"Expected >=2 callbacks reading the radio; got {len(listeners)}: "
+            f"{listeners}"
+        )

@@ -11,7 +11,9 @@ Provides UI for:
 """
 
 import platform
+import shutil
 from pathlib import Path
+from typing import Tuple
 
 import dash_bootstrap_components as dbc
 from dash import html, dcc
@@ -19,21 +21,88 @@ from dash import html, dcc
 from nanometa_live.app.components.modern_components import WorkflowStepper
 
 
+def _detect_engine_availability() -> Tuple[bool, bool, bool]:
+    """Return ``(conda_ok, docker_ok, apptainer_ok)`` for the build host.
+
+    Conda is always available because nanometa_live itself runs in a
+    conda env. Docker and Apptainer are detected by their CLI presence
+    on PATH; the radio for an unavailable engine is rendered disabled.
+    """
+    conda_ok = True
+    docker_ok = shutil.which("docker") is not None
+    apptainer_ok = (
+        shutil.which("apptainer") is not None
+        or shutil.which("singularity") is not None
+    )
+    return conda_ok, docker_ok, apptainer_ok
+
+
 def _build_platform_banner() -> dbc.Alert:
-    """Banner reminding the operator that pre-warmed conda envs are platform-locked."""
+    """Banner that adapts to the selected containerization engine.
+
+    The body text is updated client-side via the
+    ``platform-banner-body`` callback in preparation_tab.py; the
+    initial render shows the conda mode message because conda is the
+    default radio selection.
+    """
     system = platform.system()
     machine = platform.machine()
     return dbc.Alert(
         [
             html.I(className="bi bi-info-circle me-2"),
-            html.Strong(f"Build platform: {system} {machine}. "),
-            "Pre-warmed conda environments only run on a field machine "
-            "with the same OS and CPU architecture. For cross-platform "
-            "deployment, leave pre-warm off and let the field machine "
-            "resolve environments on first run (requires brief network access).",
+            html.Span(id="platform-banner-body", children=[
+                html.Strong(f"Build platform: {system} {machine}. "),
+                "Pre-warmed conda environments only run on a field machine "
+                "with the same OS and CPU architecture.",
+            ]),
         ],
         color="info",
         className="small py-2 mb-3",
+        id="platform-banner",
+    )
+
+
+def _build_containerization_radio() -> dbc.RadioItems:
+    """Three-engine radio for offline-deployment containerization.
+
+    Closes W7-C from
+    ``docs/plan-2026-04-28-throughput-fixes.md``. Docker and
+    Apptainer options are radio-disabled when their CLI is not on the
+    build host's PATH; the platform banner above the radio adapts
+    its text based on the selected engine.
+    """
+    _, docker_ok, apptainer_ok = _detect_engine_availability()
+
+    options = [
+        {
+            "label": " Conda environments  (this OS+arch only; ~5 GB bundle)",
+            "value": "conda",
+        },
+        {
+            "label": (
+                " Docker images  (cross-platform; ~2 GB bundle)"
+                if docker_ok
+                else " Docker images  (Docker not detected on build host)"
+            ),
+            "value": "docker",
+            "disabled": not docker_ok,
+        },
+        {
+            "label": (
+                " Apptainer/Singularity  (Linux field hosts only; ~1.5 GB bundle)"
+                if apptainer_ok
+                else " Apptainer/Singularity  (apptainer not detected on build host)"
+            ),
+            "value": "singularity",
+            "disabled": not apptainer_ok,
+        },
+    ]
+
+    return dbc.RadioItems(
+        id="bundle-containerization-radio",
+        options=options,
+        value="conda",
+        className="mb-2",
     )
 
 
@@ -236,16 +305,30 @@ def create_preparation_layout():
                                         type="text",
                                     ),
                                 ], className="mb-3"),
-                                # Pre-warm conda toggle + platform banner
+                                # Containerization engine + adaptive
+                                # platform banner. Conda mode keeps the
+                                # legacy pre-warm checkbox visible so
+                                # operators can opt out for very large
+                                # bundles or cross-platform builds.
+                                html.Label(
+                                    "Containerization:",
+                                    className="fw-bold mb-1",
+                                    htmlFor="bundle-containerization-radio",
+                                ),
+                                _build_containerization_radio(),
+                                # Conda-mode-only sub-control: pre-warm
+                                # toggle. The export callback ignores
+                                # this flag when docker / singularity
+                                # is selected.
                                 dbc.Checkbox(
                                     id="bundle-export-prewarm",
                                     label=(
                                         "Pre-warm conda environments "
                                         "(adds roughly 30 min and ~5 GB; "
-                                        "field machine must match this OS and CPU)"
+                                        "applies only to Conda mode)"
                                     ),
                                     value=True,
-                                    className="mb-2",
+                                    className="mb-2 ms-3",
                                 ),
                                 _build_platform_banner(),
                                 dbc.Button(

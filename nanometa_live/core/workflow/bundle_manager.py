@@ -15,17 +15,37 @@ import os
 import platform
 import re
 import shutil
+import subprocess
 import tarfile
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 
 logger = logging.getLogger(__name__)
 
+# Supported offline-deployment engines. The choice is made at bundle
+# build time; the field machine consumes whatever artefacts the
+# selected engine produced. See docs/plan-2026-04-28-throughput-fixes.md
+# Wave 7 for the design rationale.
+ContainerizationMode = Literal["conda", "docker", "singularity"]
+SUPPORTED_CONTAINERIZATION_MODES = ("conda", "docker", "singularity")
+
 # Placeholder token for absolute paths in exported metadata
 _HOME_PLACEHOLDER = "${NANOMETA_HOME}"
+
+# Where we stage pulled Docker tar archives and Singularity .sif files
+# during build. This is distinct from the existing ``containers/``
+# staging directory which holds operator-managed BLAST containers
+# copied from ``~/.nanometa/containers``.
+_BUNDLED_PIPELINE_CONTAINERS_DIRNAME = "pipeline_containers"
+
+# Per-engine docker/apptainer command timeout in seconds. A 1 GB
+# container image typically pulls in 30-90 s on a fast link; 600 s
+# leaves headroom for slow connections without hanging an aborted
+# build.
+_CONTAINER_PULL_TIMEOUT_S = 600
 
 # Default location inside the bundle staging area for the pre-warmed
 # Nextflow conda cache. Operators set NXF_CONDA_CACHEDIR to the
@@ -365,32 +385,59 @@ class BundleManager:
         nanometa_home: Optional[str] = None,
         pre_warm_conda_envs: bool = False,
         pipeline_path: Optional[str] = None,
+        containerization: Optional[ContainerizationMode] = None,
     ) -> Path:
         """
         Export a portable bundle containing all prepared data.
 
         The bundle includes genomes, BLAST databases, taxid mappings,
-        taxonomy cache, watchlists, containers, and a manifest with checksums.
-        The Kraken2 database is excluded (transferred separately).
+        taxonomy cache, watchlists, container artefacts (per
+        ``containerization``), and a manifest with checksums. The
+        Kraken2 database is excluded (transferred separately).
 
         Args:
             output_path: Path for the output tar.gz file.
             config: Current application configuration.
             nanometa_home: Path to ~/.nanometa directory.
-            pre_warm_conda_envs: If True, run nanometanf in stub mode
+            pre_warm_conda_envs: If True (and ``containerization`` is
+                ``"conda"`` or ``None``), run nanometanf in stub mode
                 under ``-profile conda`` so Nextflow resolves and creates
                 every per-process env. The populated cache directory is
                 then included in the bundle. Adds roughly 30 minutes and
-                ~5 GB to the build. Default False so existing flows are
-                unaffected.
+                ~5 GB to the build. Ignored when ``containerization`` is
+                ``"docker"`` or ``"singularity"`` (those modes ship
+                pre-pulled images instead of conda envs).
             pipeline_path: Optional explicit path to the nanometanf
                 checkout. Required when ``pre_warm_conda_envs`` is True
-                and ``config['pipeline_source']`` does not resolve to a
-                local directory. The path must contain ``main.nf``.
+                or when ``containerization`` is ``"docker"`` /
+                ``"singularity"`` (the inventory walker needs the
+                ``modules/`` tree). Must contain ``main.nf``.
+            containerization: Offline-deployment engine to target.
+                ``"conda"`` (default when None) ships a pre-warmed
+                conda cache; the field machine must match the build
+                machine's OS+arch. ``"docker"`` runs ``docker pull`` +
+                ``docker save`` per unique module image into
+                ``pipeline_containers/`` and switches the bundle's
+                ``pipeline_profile`` to ``docker``; the field machine
+                runs unchanged on macOS / Windows / Linux with Docker
+                installed. ``"singularity"`` runs ``apptainer pull``
+                into the same staging dir as ``.sif`` files; field
+                machine must be Linux with Apptainer installed.
 
         Returns:
             Path to the created bundle file.
         """
+        # Default to conda when caller did not specify; preserves
+        # backward compatibility with the pre-Wave-7 pre_warm_conda_envs
+        # bool-only API.
+        if containerization is None:
+            containerization = "conda"
+        if containerization not in SUPPORTED_CONTAINERIZATION_MODES:
+            raise ValueError(
+                f"containerization must be one of "
+                f"{SUPPORTED_CONTAINERIZATION_MODES}; "
+                f"got {containerization!r}"
+            )
         if nanometa_home is None:
             nanometa_home = os.path.expanduser("~/.nanometa")
         home = Path(nanometa_home)
@@ -505,7 +552,10 @@ class BundleManager:
             manifest["nextflow_plugins"] = nxf_plugins_meta
 
             # Save config (with kraken_db as placeholder and relative
-            # pipeline_source when the source was bundled).
+            # pipeline_source when the source was bundled). The
+            # ``pipeline_profile`` is rewritten to match the chosen
+            # containerization engine so the field launch picks up the
+            # right Nextflow profile without operator intervention.
             from nanometa_live.core.config.config_loader import ConfigLoader
             bundle_config = dict(config)
             bundle_config["kraken_db"] = "${KRAKEN_DB}"
@@ -513,6 +563,7 @@ class BundleManager:
                 bundle_config["pipeline_source"] = f"./{_BUNDLED_PIPELINE_DIRNAME}"
             if nxf_plugins_meta.get("bundled"):
                 bundle_config["nxf_plugins_dir"] = f"./{_BUNDLED_NXF_PLUGINS_DIRNAME}"
+            bundle_config["pipeline_profile"] = containerization
             bundle_loader = ConfigLoader(str(staging))
             bundle_loader.save_config(bundle_config, "config.yaml")
 
@@ -526,7 +577,11 @@ class BundleManager:
                 "env_count": 0,
                 "warnings": [],
             }
-            if pre_warm_conda_envs:
+            # Conda pre-warm only runs when conda is the chosen engine.
+            # Docker / Singularity bundles ship pre-pulled images
+            # instead, so re-running the conda solver would just waste
+            # build time + 5 GB of disk for an unused artefact.
+            if containerization == "conda" and pre_warm_conda_envs:
                 pre_warm_result = self._pre_warm_conda_envs(
                     staging=staging,
                     config=config,
@@ -551,6 +606,38 @@ class BundleManager:
                         script_path
                     )
             manifest["pre_warm_conda_envs"] = pre_warm_result
+
+            # Docker / Singularity image pull. Both engines walk the
+            # pipeline source's ``modules/`` tree, dedupe references,
+            # and pull each unique image into ``pipeline_containers/``.
+            # The field machine loads them with ``docker load`` or runs
+            # them directly with ``apptainer run``. See W7-B in
+            # docs/plan-2026-04-28-throughput-fixes.md.
+            container_pull_result: Dict[str, Any] = {
+                "attempted": False,
+                "engine": containerization,
+                "image_count": 0,
+                "warnings": [],
+            }
+            if containerization in ("docker", "singularity"):
+                container_pull_result = self._pull_pipeline_containers(
+                    engine=containerization,
+                    staging=staging,
+                    config=config,
+                    pipeline_path=pipeline_path,
+                )
+                # Checksum every pulled artefact so the import side can
+                # detect tampering or a partial transfer.
+                images_dir = staging / _BUNDLED_PIPELINE_CONTAINERS_DIRNAME
+                if images_dir.exists():
+                    for f in images_dir.rglob("*"):
+                        if f.is_file():
+                            rel = f.relative_to(staging)
+                            manifest["checksums"][str(rel)] = _file_md5(f)
+            manifest["containerization"] = {
+                "engine": containerization,
+                "pull_result": container_pull_result,
+            }
 
             # Generate README. The conda-cache section depends on
             # whether the pre-warm step actually populated the cache.
@@ -877,6 +964,195 @@ class BundleManager:
 
         logger.info(f"Bundle imported to {home}")
         return result
+
+    def _pull_pipeline_containers(
+        self,
+        engine: str,
+        staging: Path,
+        config: Dict[str, Any],
+        pipeline_path: Optional[str],
+    ) -> Dict[str, Any]:
+        """Pull every unique container image referenced by the pipeline.
+
+        For ``docker``: ``docker pull <ref>`` followed by
+        ``docker save -o <name>.tar <ref>`` so the field machine can
+        ``docker load`` without network access.
+        For ``singularity``: ``apptainer pull <name>.sif <ref>`` (with
+        a ``docker://`` prefix added automatically when the inventory
+        only carries the Docker reference; Apptainer pulls OCI
+        registries directly).
+
+        Args:
+            engine: ``"docker"`` or ``"singularity"``.
+            staging: Bundle staging root.
+            config: App config (used to resolve pipeline source if
+                pipeline_path is not provided).
+            pipeline_path: Explicit local path to the nanometanf
+                checkout. Required -- the inventory walker needs
+                ``modules/`` to be present.
+
+        Returns:
+            Status dict with ``attempted``, ``engine``, ``image_count``,
+            ``pulled`` (list of refs), and ``warnings``.
+        """
+        result: Dict[str, Any] = {
+            "attempted": True,
+            "engine": engine,
+            "image_count": 0,
+            "pulled": [],
+            "warnings": [],
+        }
+
+        if engine not in ("docker", "singularity"):
+            result["warnings"].append(
+                f"_pull_pipeline_containers: unsupported engine {engine!r}"
+            )
+            return result
+
+        # Resolve a local pipeline checkout. Without modules/ on disk
+        # we cannot inventory the container references.
+        resolved = self._resolve_local_pipeline_path(config, pipeline_path)
+        if resolved is None:
+            result["warnings"].append(
+                "No local pipeline_source available to inventory; "
+                f"{engine} container pull skipped"
+            )
+            return result
+
+        # Verify the engine's CLI is reachable on the build machine
+        # before doing any inventory work.
+        cli = "docker" if engine == "docker" else "apptainer"
+        if shutil.which(cli) is None and engine == "singularity":
+            # Apptainer was renamed from Singularity in 2021; some
+            # distributions still ship the old binary name.
+            cli = "singularity" if shutil.which("singularity") else "apptainer"
+        if shutil.which(cli) is None:
+            result["warnings"].append(
+                f"{cli} not found on PATH; cannot pull {engine} images. "
+                f"Install {engine} on the build machine and retry."
+            )
+            return result
+
+        from nanometa_live.core.workflow.container_inventory import (
+            inventory_pipeline,
+            unique_container_refs,
+        )
+
+        entries = inventory_pipeline(resolved)
+        if not entries:
+            result["warnings"].append(
+                f"Inventory of {resolved} returned no modules"
+            )
+            return result
+
+        # Singularity can pull from Docker references directly via the
+        # ``docker://`` URL scheme, so we fall back to Docker refs when
+        # a module has no depot.galaxyproject.org Singularity URL. This
+        # matches the W6-A audit's finding that ~30% of nf-core modules
+        # ship only a community.wave.seqera.io Docker tag.
+        if engine == "docker":
+            refs = unique_container_refs(entries, "docker")
+        else:
+            sing_refs = unique_container_refs(entries, "singularity")
+            doc_refs = unique_container_refs(entries, "docker")
+            sing_set = set(sing_refs)
+            covered_docker_set = set()
+            # Build a Docker -> Singularity-equivalent mapping by
+            # checking which entries have BOTH; if a docker-only entry
+            # exists, mark its docker_ref for fallback pull.
+            for e in entries:
+                if e.singularity_url:
+                    sing_set.add(e.singularity_url)
+                elif e.docker_ref:
+                    covered_docker_set.add(e.docker_ref)
+            refs = sorted(sing_set) + sorted(
+                f"docker://{d}" for d in covered_docker_set
+            )
+
+        if not refs:
+            result["warnings"].append(
+                f"No {engine} references found in pipeline inventory"
+            )
+            return result
+
+        images_dir = staging / _BUNDLED_PIPELINE_CONTAINERS_DIRNAME
+        images_dir.mkdir(parents=True, exist_ok=True)
+
+        for ref in refs:
+            try:
+                if engine == "docker":
+                    self._pull_one_docker_image(ref, images_dir)
+                else:
+                    self._pull_one_singularity_image(ref, images_dir, cli)
+                result["pulled"].append(ref)
+                result["image_count"] += 1
+            except subprocess.SubprocessError as exc:
+                result["warnings"].append(
+                    f"Failed to pull {ref}: {exc}"
+                )
+                logger.warning(f"{engine} pull failed for {ref}: {exc}")
+            except OSError as exc:
+                result["warnings"].append(f"OSError pulling {ref}: {exc}")
+                logger.warning(f"{engine} pull OSError for {ref}: {exc}")
+
+        return result
+
+    @staticmethod
+    def _ref_to_safe_filename(ref: str) -> str:
+        """Convert a container reference to a filename-safe slug."""
+        # Strip docker:// prefix for filename purposes; keep tag info.
+        if ref.startswith("docker://"):
+            ref = ref[len("docker://"):]
+        if ref.startswith("https://"):
+            ref = ref[len("https://"):]
+        return re.sub(r"[^a-zA-Z0-9._-]", "_", ref)[:200]
+
+    def _pull_one_docker_image(self, ref: str, target_dir: Path) -> None:
+        """``docker pull`` then ``docker save`` one image to a tar."""
+        subprocess.run(
+            ["docker", "pull", ref],
+            check=True,
+            timeout=_CONTAINER_PULL_TIMEOUT_S,
+            capture_output=True,
+        )
+        out = target_dir / f"{self._ref_to_safe_filename(ref)}.tar"
+        subprocess.run(
+            ["docker", "save", "-o", str(out), ref],
+            check=True,
+            timeout=_CONTAINER_PULL_TIMEOUT_S,
+            capture_output=True,
+        )
+
+    def _pull_one_singularity_image(
+        self, ref: str, target_dir: Path, cli: str
+    ) -> None:
+        """``apptainer pull`` (or ``singularity pull``) one image to .sif."""
+        out = target_dir / f"{self._ref_to_safe_filename(ref)}.sif"
+        subprocess.run(
+            [cli, "pull", "--force", str(out), ref],
+            check=True,
+            timeout=_CONTAINER_PULL_TIMEOUT_S,
+            capture_output=True,
+        )
+
+    def _resolve_local_pipeline_path(
+        self,
+        config: Dict[str, Any],
+        pipeline_path: Optional[str],
+    ) -> Optional[Path]:
+        """Best-effort resolution of a local nanometanf checkout."""
+        if pipeline_path:
+            p = Path(pipeline_path)
+            if p.is_dir() and (p / "main.nf").exists():
+                return p
+        ps = config.get("pipeline_source", "") if config else ""
+        if isinstance(ps, str) and not ps.startswith(
+            ("remote:", "https://", "git@")
+        ):
+            p = Path(ps)
+            if p.is_dir() and (p / "main.nf").exists():
+                return p
+        return None
 
     def _pre_warm_conda_envs(
         self,

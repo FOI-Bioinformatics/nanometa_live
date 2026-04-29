@@ -195,6 +195,7 @@ def _export(args):
         config["kraken_db"] = args.db
 
     pre_warm = bool(args.pre_warm) and not bool(args.no_pre_warm)
+    containerization = args.containerization or "conda"
 
     pipeline_path = args.pipeline
     if pipeline_path is None:
@@ -208,22 +209,39 @@ def _export(args):
         ):
             pipeline_path = pipeline_source
 
-    if pre_warm and not pipeline_path:
+    needs_pipeline = (
+        (containerization == "conda" and pre_warm)
+        or containerization in ("docker", "singularity")
+    )
+    if needs_pipeline and not pipeline_path:
         print(
-            f"{_RED}--pre-warm requires --pipeline pointing to a local "
-            f"nanometanf checkout (config.pipeline_source did not resolve "
-            f"to a local directory).{_RESET}",
+            f"{_RED}--containerization {containerization} requires "
+            f"--pipeline pointing to a local nanometanf checkout "
+            f"(config.pipeline_source did not resolve to a local "
+            f"directory).{_RESET}",
             file=sys.stderr,
         )
         sys.exit(1)
 
     print(f"{_BOLD}Nanometa Live - Export Offline Bundle{_RESET}")
     print(f"  Output: {args.output}")
-    print(f"  Pre-warm conda envs: {'YES' if pre_warm else 'no'}")
-    if pre_warm:
+    print(f"  Containerization: {containerization}")
+    if containerization == "conda":
+        print(f"  Pre-warm conda envs: {'YES' if pre_warm else 'no'}")
+        if pre_warm:
+            print(
+                f"  {_YELLOW}Build platform: {platform.system()} "
+                f"{platform.machine()}. Field machine must match.{_RESET}"
+            )
+    elif containerization == "docker":
         print(
-            f"  {_YELLOW}Build platform: {platform.system()} "
-            f"{platform.machine()}. Field machine must match.{_RESET}"
+            f"  {_CYAN}Docker mode: pulls + saves linux/amd64 images. "
+            f"Field machine needs Docker installed.{_RESET}"
+        )
+    elif containerization == "singularity":
+        print(
+            f"  {_CYAN}Singularity mode: pulls .sif files. "
+            f"Field machine must be Linux with Apptainer/Singularity.{_RESET}"
         )
     if pipeline_path:
         print(f"  Pipeline source: {pipeline_path}")
@@ -237,6 +255,7 @@ def _export(args):
         nanometa_home=nanometa_home,
         pre_warm_conda_envs=pre_warm,
         pipeline_path=pipeline_path,
+        containerization=containerization,
     )
     size_mb = path.stat().st_size / (1024 * 1024)
     print(f"{_GREEN}Bundle exported: {path} ({size_mb:.1f} MB){_RESET}")
@@ -371,12 +390,20 @@ def main():
     )
     export_p.add_argument(
         "--pre-warm", action="store_true", default=True,
-        help="Pre-warm conda environments (default: on; "
+        help="Pre-warm conda environments (conda mode only; default: on; "
              "build/field machines must match OS+CPU)",
     )
     export_p.add_argument(
         "--no-pre-warm", action="store_true", default=False,
-        help="Disable pre-warming for cross-platform deployment",
+        help="Disable pre-warming for cross-platform conda deployment",
+    )
+    export_p.add_argument(
+        "--containerization", choices=["conda", "docker", "singularity"],
+        default="conda",
+        help="Offline-deployment engine. ``conda`` ships pre-warmed envs "
+             "(this OS+arch only). ``docker`` ships pre-pulled images "
+             "(cross-platform). ``singularity`` ships .sif files "
+             "(Linux-only, rootless). Default: conda.",
     )
     export_p.set_defaults(func=_export)
 

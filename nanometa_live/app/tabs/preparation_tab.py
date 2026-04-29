@@ -314,10 +314,12 @@ def register_preparation_callbacks(app):
         State("bundle-export-directory", "value"),
         State("bundle-export-filename", "value"),
         State("bundle-export-prewarm", "value"),
+        State("bundle-containerization-radio", "value"),
         State("app-config", "data"),
         prevent_initial_call=True,
     )
-    def export_bundle(n_clicks, directory, filename, pre_warm, config):
+    def export_bundle(n_clicks, directory, filename, pre_warm,
+                      containerization, config):
         """Check readiness, then export or show issues."""
         if not n_clicks:
             raise PreventUpdate
@@ -343,7 +345,11 @@ def register_preparation_callbacks(app):
 
         # All checks pass — export immediately
         if not critical and not warnings:
-            result = _run_export(config, filename, directory, pre_warm=pre_warm)
+            result = _run_export(
+                config, filename, directory,
+                pre_warm=pre_warm,
+                containerization=containerization,
+            )
             return html.Div(), {"display": "none"}, result, False
 
         # Build issue list
@@ -392,21 +398,68 @@ def register_preparation_callbacks(app):
         return not checked
 
     @app.callback(
+        Output("platform-banner-body", "children"),
+        Input("bundle-containerization-radio", "value"),
+    )
+    def adapt_platform_banner(engine):
+        """Rewrite the banner text to match the selected engine.
+
+        Conda mode warns about OS+arch lock. Docker mode tells
+        operators which hosts can consume the bundle. Singularity
+        mode flags Linux-only.
+        """
+        import platform as _plat
+        system = _plat.system()
+        machine = _plat.machine()
+
+        if engine == "docker":
+            return [
+                html.Strong("Docker mode: "),
+                "Bundle ships pre-pulled linux/amd64 images. Field "
+                "machine needs Docker (Desktop on macOS / Windows, "
+                "Engine on Linux). Build platform "
+                f"{system} {machine} pulls images compatible with all "
+                "three host OSes.",
+            ]
+        if engine == "singularity":
+            return [
+                html.Strong("Apptainer/Singularity mode: "),
+                "Bundle ships .sif files. Field machine must be Linux "
+                "(x86_64 or arm64) with Apptainer >=1.0 or Singularity "
+                ">=3.5 installed. Build platform: "
+                f"{system} {machine}.",
+            ]
+        # Default: conda
+        return [
+            html.Strong(f"Conda mode -- build platform: {system} {machine}. "),
+            "Pre-warmed conda environments only run on a field machine "
+            "with the same OS and CPU architecture. For cross-platform "
+            "deployment, switch to Docker mode above.",
+        ]
+
+    @app.callback(
         Output("export-result", "children", allow_duplicate=True),
         Input("export-force-btn", "n_clicks"),
         State("bundle-export-directory", "value"),
         State("bundle-export-filename", "value"),
         State("bundle-export-prewarm", "value"),
+        State("bundle-containerization-radio", "value"),
         State("app-config", "data"),
         prevent_initial_call=True,
     )
-    def force_export_bundle(n_clicks, directory, filename, pre_warm, config):
+    def force_export_bundle(n_clicks, directory, filename, pre_warm,
+                            containerization, config):
         """Export bundle after user acknowledged warnings."""
         if not n_clicks:
             raise PreventUpdate
-        return _run_export(config, filename, directory, pre_warm=pre_warm)
+        return _run_export(
+            config, filename, directory,
+            pre_warm=pre_warm,
+            containerization=containerization,
+        )
 
-    def _run_export(config, filename=None, directory=None, pre_warm=True):
+    def _run_export(config, filename=None, directory=None, pre_warm=True,
+                    containerization="conda"):
         """Perform the actual bundle export. Returns an Alert component."""
         try:
             from nanometa_live.core.workflow.bundle_manager import BundleManager
@@ -427,12 +480,14 @@ def register_preparation_callbacks(app):
                 config,
                 pipeline_path=pipeline_path,
                 pre_warm_conda_envs=bool(pre_warm),
+                containerization=containerization or "conda",
             )
             size_mb = path.stat().st_size / (1024 * 1024)
 
             return dbc.Alert([
                 html.I(className="bi bi-check-circle me-2"),
-                f"Bundle exported: {path} ({size_mb:.1f} MB)",
+                f"Bundle exported: {path} ({size_mb:.1f} MB) "
+                f"-- engine: {containerization or 'conda'}",
             ], color="success")
 
         except Exception as e:

@@ -297,16 +297,130 @@ fixes, longer if upstream PRs needed.
 - The deliverable table is consumable by a future Apptainer pre-pull
   step (i.e. it has full URLs, not just module names)
 
-## Out of scope for this cycle
+## Wave 7 -- Three-engine offline deployment toggle (~1 day)
 
-- Apptainer pre-pull as the offline-deployment artifact (provisionally
-  Wave 7; gated on Wave 6 returning a clean URL inventory). Pulls
-  pre-built `.sif` files from depot.galaxyproject.org at bundle-export
-  time and ships them in `bundle/containers/` so the field run uses
-  `-profile singularity` against local images instead of resolving
-  conda envs at runtime. Trade-off vs the existing pre-warm flow:
-  ~1-2 GB bundle vs ~5 GB pre-warmed conda; no conda solver at runtime;
-  rootless field deployment via Apptainer.
+**Why:** Apptainer is Linux-only, so an Apptainer-only deployment
+strategy cuts off macOS field laptops entirely. Conda envs are
+platform-locked (build OS + arch must match the field machine),
+so an all-conda strategy forces operators to rebuild bundles per
+target platform. Docker images are the only realistic cross-
+platform offline artifact for ONT pipelines: a `linux/amd64` image
+runs unchanged on macOS-with-Docker-Desktop, Windows-with-Docker-
+Desktop, and native Linux. Best practice is to give operators all
+three options and let the build-time choice match the deployment
+shape they actually need.
+
+W6's URL audit already proved feasibility: 25 modules carry
+`depot.galaxyproject.org/singularity` URLs and 15 carry
+`community.wave.seqera.io` Docker references. All HEAD-checked
+reachable. Apptainer can also pull from Docker registries, so
+the same artifact set covers both Apptainer and Docker engines.
+
+### W7-A. Container inventory helper
+
+Extract the regex parsing from `scripts/audit_container_urls.py`
+into `nanometa_live/core/workflow/container_inventory.py` so the
+audit script and the bundle builder share one parser. Public
+surface:
+
+```python
+@dataclass
+class ContainerInventoryEntry:
+    module_name: str
+    singularity_url: Optional[str]
+    docker_ref: Optional[str]
+    conda_spec: Optional[str]
+
+def inventory_pipeline(pipeline_path: Path) -> List[ContainerInventoryEntry]:
+    """Walk modules/local/ and modules/nf-core/, parse each main.nf
+    + environment.yml, return one entry per module."""
+```
+
+### W7-B. BundleManager containerization param
+
+`BundleManager.export_bundle` gains
+`containerization: Literal["conda", "docker", "singularity"] =
+"conda"`. Behaviour per mode:
+
+| Mode | Action at build | Bundle contents | Field profile |
+|---|---|---|---|
+| `conda` | Existing pre-warm flow (when `pre_warm_conda_envs=True`) | Pre-warmed `~/.nanometa/work/conda/` | `-profile conda` |
+| `docker` | Walk inventory, `docker pull <ref>` then `docker save` per image to tar | `containers/*.tar` archives | `-profile docker` |
+| `singularity` | Walk inventory, `apptainer pull <ref>` per image | `containers/*.sif` files | `-profile singularity` |
+
+Bundle's emitted `config.yaml` carries the matching
+`pipeline_profile` so the field launch picks up the right engine
+without operator intervention. The bundle README adapts to the
+chosen engine.
+
+The `containers/` directory is bundled iff a non-conda mode is
+chosen. Operators picking `conda` get the existing pre-warmed
+artifact; operators picking `docker`/`singularity` skip the conda
+pre-warm entirely.
+
+### W7-C. GUI 3-way radio + CLI flag
+
+Replace the single "Pre-warm conda environments" checkbox in the
+Preparation tab with a `dbc.RadioItems` group:
+
+```
+Containerization:
+  ( ) Conda environments       (this OS+arch only; ~5 GB bundle)
+  ( ) Docker images            (cross-platform; ~2 GB bundle)
+  ( ) Apptainer/Singularity    (Linux only; ~1.5 GB bundle)
+```
+
+Engine availability is detected at GUI render time by checking for
+`docker` and `apptainer`/`singularity` on PATH. Unavailable
+engines are radio-disabled with an explanatory tooltip
+("Docker not detected -- install Docker Desktop on the build
+machine").
+
+Platform banner adapts:
+- Conda selected: "Build platform macOS arm64. Field machine must match."
+- Docker selected: "Field machine must have Docker installed. Image platform: linux/amd64."
+- Apptainer selected: "Linux x86_64/arm64 field machines only. Apptainer >=1.0 required."
+
+CLI mirrors:
+```bash
+nanometa-prepare export \
+    --config config.yaml \
+    --output bundle.tar.gz \
+    --containerization {conda|docker|singularity} \
+    [--pipeline /path/to/nanometanf]
+```
+
+`--pre-warm` / `--no-pre-warm` remain as conda-mode-only knobs.
+
+### W7-D. Tests + acceptance
+
+- `tests/test_container_inventory.py` covers the inventory helper
+  on the live nanometanf checkout (40 modules expected; sanity
+  count + each entry has at least conda OR container).
+- `tests/test_bundle_manager.py` gains `TestContainerizationModes`
+  with three cases mocking `subprocess.run` so `docker pull`,
+  `docker save`, and `apptainer pull` calls can be verified
+  without actually pulling. Asserts each mode emits the correct
+  `pipeline_profile` in the bundled `config.yaml`.
+- `tests/test_bundle_manager.py` gets a small case that the GUI
+  radio's three values flow through the export callback to
+  `BundleManager.export_bundle(containerization=...)`.
+
+### W7-E. Acceptance criteria
+
+- Bundle export with each of the three modes produces a tarball
+  whose `config.yaml` carries the matching `pipeline_profile`.
+- For `docker` mode, the bundled `containers/` contains one tar
+  per unique container reference encountered in the inventory.
+- For `singularity` mode, `containers/` contains one `.sif` per
+  unique reference.
+- For `conda` mode, the existing flow is unchanged
+  (`~/.nanometa/work/conda/` populated; no `containers/`).
+- GUI radio reflects engine availability at render time; clicking
+  an unavailable engine is blocked with a tooltip.
+- All 608 existing tests pass; new tests bring the suite to ~620.
+
+## Out of scope for this cycle
 - The fabricated nextflow-expert audit's claims that turned out to be
   wrong (Channel.watchPath missing, `--memory-mapping` not wired,
   KRAKEN2_KRAKEN2 unlabelled). All three are present and correct.
