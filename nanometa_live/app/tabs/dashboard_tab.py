@@ -1587,8 +1587,16 @@ def _verdict_banner_style(bg_color: str, border_color: str) -> dict:
         CSS style dict
     """
     return {
+        # CLAUDE.md Zone 1 spec: background colour is the answer, the
+        # 6px LEFT border is the accent. A full border (every side)
+        # competes with the bg colour for visual weight; the left-only
+        # accent keeps the hero treatment on the colour while the
+        # subtle 1px outline gives the card edge definition.
         "backgroundColor": bg_color,
-        "border": f"6px solid {border_color}",
+        "borderLeft": f"6px solid {border_color}",
+        "border": "1px solid rgba(0, 0, 0, 0.08)",
+        "borderLeftWidth": "6px",
+        "borderLeftColor": border_color,
         "borderRadius": "8px",
         "padding": "24px 32px",
         "minHeight": "120px",

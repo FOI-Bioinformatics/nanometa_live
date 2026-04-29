@@ -26,10 +26,13 @@ def _attribution_pill_id(samples: List[Dict[str, Any]], tier: str) -> str:
 
 
 # --- Per-tier chip color tokens (bg / border / text) ---
+# Text token #664d03 is the CLAUDE.md-locked amber. The earlier
+# #856404 here was Bootstrap's amber-on-amber default, which only
+# clears AA at ~4.2:1 -- borderline for chip-size text.
 _CHIP_COLORS = {
     "critical": ("#f8d7da", "rgba(114,28,36,0.35)", "#721c24"),
-    "high":     ("#fff3cd", "rgba(133,100,4,0.35)",  "#856404"),
-    "watched":  ("#d1ecf1", "rgba(12,84,96,0.35)",   "#0c5460"),
+    "high":     ("#fff3cd", "rgba(102,77,3,0.35)",  "#664d03"),
+    "watched":  ("#d1ecf1", "rgba(12,84,96,0.35)",  "#0c5460"),
 }
 _CHIP_NC    = ("#e9ecef", "#ced4da", "#6c757d")   # negative-control override
 _CHIP_MORE  = ("#e9ecef", "#ced4da", "#495057")   # "+X more" pill
@@ -224,7 +227,15 @@ def _build_attribution_popover(
     )
 
 
-# Threat level definitions with visual specifications
+# Threat level definitions with visual specifications.
+# Text colors ('color') are tightened from the Bootstrap defaults so
+# foreground/background pairs clear WCAG AA (4.5:1 normal text):
+#   high:     #dc3545 on #f8d7da (3.6:1 fail) -> #721c24 (7.1:1)
+#   moderate: #fd7e14 on #fff3cd (2.5:1 fail) -> #664d03 (7.5:1)
+#   low:      #17a2b8 on #d1ecf1 (2.5:1 fail) -> #0c5460 (7.5:1)
+# critical's #8b0000 already passed AA. Border color stays at the
+# saturated Bootstrap value so the visual identity is preserved
+# (border is decorative, not text, so AA does not apply to it).
 THREAT_LEVELS = {
     "critical": {
         "label": "CRITICAL",
@@ -237,7 +248,7 @@ THREAT_LEVELS = {
     },
     "high": {
         "label": "HIGH RISK",
-        "color": "#dc3545",
+        "color": "#721c24",
         "bg_color": "#f8d7da",
         "border_color": "#dc3545",
         "icon": "bi-exclamation-triangle-fill",
@@ -246,7 +257,7 @@ THREAT_LEVELS = {
     },
     "moderate": {
         "label": "WATCH",
-        "color": "#fd7e14",
+        "color": "#664d03",
         "bg_color": "#fff3cd",
         "border_color": "#fd7e14",
         "icon": "bi-eye-fill",
@@ -255,7 +266,7 @@ THREAT_LEVELS = {
     },
     "low": {
         "label": "INFO",
-        "color": "#17a2b8",
+        "color": "#0c5460",
         "bg_color": "#d1ecf1",
         "border_color": "#17a2b8",
         "icon": "bi-info-circle-fill",
