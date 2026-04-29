@@ -391,3 +391,87 @@ class TestCoverageBreadthConversion:
         assert result.coverage_breadth == pytest.approx(0.82)
         # Confirm the display percentage conversion
         assert result.coverage_breadth * 100 == pytest.approx(82.0)
+
+
+class TestBlastValidationParserCache:
+    """Closes P1-T06 (audit-2026-04-28-throughput-gui.md): the validation
+    tab fires has_validation_data + get_validation_results +
+    get_validation_summary in one tick. Without the per-instance cache
+    each call walked the validation directory independently."""
+
+    def _build_validation_dir(self, tmp_path):
+        """Build a minimal validation dir with one aggregate JSON."""
+        from pathlib import Path
+        import json
+
+        validation = tmp_path / "validation"
+        validation.mkdir()
+        aggregate = validation / "validation_results.json"
+        aggregate.write_text(json.dumps({
+            "timestamp": "2026-04-29T00:00:00",
+            "validation_method": "blast",
+            "results": {
+                "barcode01": {
+                    "562": {
+                        "species": "Escherichia coli",
+                        "validated_reads": 100,
+                        "total_reads": 110,
+                        "percent_validated": 90.9,
+                        "percent_identity_mean": 98.5,
+                        "status": "CONFIRMED",
+                    },
+                },
+            },
+        }))
+        return validation
+
+    def test_cache_hit_skips_filesystem_walk(self, tmp_path, monkeypatch):
+        """Three calls within one tick must hit disk only once."""
+        from nanometa_live.core.parsers.blast_validation_parser import BlastValidationParser
+
+        validation = self._build_validation_dir(tmp_path)
+
+        parser = BlastValidationParser(str(tmp_path))
+        # First call populates the cache
+        first = parser.get_validation_results()
+        assert len(first) >= 1
+        assert parser._results_cache is not None
+
+        # Track filesystem reads on subsequent calls.
+        original_open = open
+        open_calls = []
+        def counting_open(path, *args, **kwargs):
+            open_calls.append(str(path))
+            return original_open(path, *args, **kwargs)
+        monkeypatch.setattr("builtins.open", counting_open)
+
+        second = parser.get_validation_results()
+        third = parser.get_validation_summary()  # internally calls get_validation_results
+
+        # Neither subsequent call should have opened any file
+        validation_opens = [p for p in open_calls if "validation" in p]
+        assert validation_opens == [], (
+            f"Expected zero re-opens within unchanged-mtime window, got "
+            f"{validation_opens}"
+        )
+        # Sanity: results equal the cached set
+        assert len(second) == len(first)
+
+    def test_cache_invalidates_on_dir_mtime_change(self, tmp_path):
+        """Touching the validation directory invalidates the cache."""
+        import time
+        from nanometa_live.core.parsers.blast_validation_parser import BlastValidationParser
+
+        validation = self._build_validation_dir(tmp_path)
+        parser = BlastValidationParser(str(tmp_path))
+        parser.get_validation_results()
+        assert parser._results_cache is not None
+        old_mtime = parser._results_cache_mtime
+
+        # Bump the directory's mtime by writing a new file.
+        time.sleep(0.05)
+        (validation / "newfile.json").write_text("{}")
+
+        # Next call must re-parse (different fingerprint).
+        parser.get_validation_results()
+        assert parser._results_cache_mtime != old_mtime

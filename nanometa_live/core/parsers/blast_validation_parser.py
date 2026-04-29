@@ -184,6 +184,35 @@ class ValidationParser:
         else:
             logger.debug(f"No validation directory found in {self.results_dir}")
 
+        # Per-instance results cache, invalidated on validation-dir mtime
+        # change. Closes P1-T06 from
+        # docs/audit-2026-04-28-throughput-gui.md, where
+        # validation_tab.load_validation_data() called has_validation_data
+        # + get_validation_results + get_validation_summary inside one
+        # tick -- three independent walks of the validation dir at
+        # 24-barcode scale (100-200 file opens per tick). With the
+        # cache, the second and third call now reuse the parsed list
+        # if the directory's mtime is unchanged.
+        self._results_cache_mtime: Optional[float] = None
+        self._results_cache: Optional[List["ValidationResult"]] = None
+
+    def _validation_dir_fingerprint(self) -> Optional[float]:
+        """Latest mtime under ``validation_dir``; ``None`` when missing."""
+        if not self.validation_dir or not self.validation_dir.exists():
+            return None
+        try:
+            latest = self.validation_dir.stat().st_mtime
+            for p in self.validation_dir.iterdir():
+                try:
+                    m = p.stat().st_mtime
+                    if m > latest:
+                        latest = m
+                except OSError:
+                    continue
+            return latest
+        except OSError:
+            return None
+
     def has_validation_data(self) -> bool:
         """Check if any validation data exists."""
         if self.validation_dir and self.validation_dir.exists():
@@ -452,9 +481,35 @@ class ValidationParser:
         Returns:
             List of ValidationResult objects
         """
+        # Cache fast-path: if the validation directory has not changed
+        # since the last full parse, reuse the cached unfiltered list
+        # and apply the (sample, taxid) filter in-memory.
+        fingerprint = self._validation_dir_fingerprint()
+        if (
+            fingerprint is not None
+            and self._results_cache is not None
+            and self._results_cache_mtime == fingerprint
+        ):
+            cached = self._results_cache
+            if sample is None and taxid is None:
+                return list(cached)
+            return [
+                r for r in cached
+                if (sample is None or r.sample_id == sample)
+                and (taxid is None or r.taxid == taxid)
+            ]
+
+        # Full parse path. When no filters were requested we cache the
+        # result so the next has_validation_data + get_validation_results
+        # + get_validation_summary triple inside the same tick reuses
+        # one parse rather than three.
+        cache_this_call = sample is None and taxid is None
         results = []
 
         if not self.validation_dir or not self.validation_dir.exists():
+            if cache_this_call:
+                self._results_cache = []
+                self._results_cache_mtime = fingerprint
             return results
 
         # Build candidate paths for the aggregate JSON, in priority order.
@@ -480,6 +535,9 @@ class ValidationParser:
                 aggregate_path, sample=sample, taxid=taxid
             )
             if aggregate_results:
+                if cache_this_call:
+                    self._results_cache = list(aggregate_results)
+                    self._results_cache_mtime = fingerprint
                 return aggregate_results
 
         # Next, check for combined summary JSON
@@ -502,6 +560,9 @@ class ValidationParser:
 
                 if results:
                     logger.info(f"Loaded {len(results)} results from summary JSON")
+                    if cache_this_call:
+                        self._results_cache = list(results)
+                        self._results_cache_mtime = fingerprint
                     return results
 
             except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
@@ -594,6 +655,9 @@ class ValidationParser:
                     results.append(od_r)
 
         logger.info(f"Retrieved {len(results)} validation results")
+        if cache_this_call:
+            self._results_cache = list(results)
+            self._results_cache_mtime = fingerprint
         return results
 
     def get_validation_summary(self) -> Dict[str, Any]:

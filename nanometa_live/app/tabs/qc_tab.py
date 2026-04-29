@@ -224,33 +224,20 @@ def register_qc_callbacks(app: Dash):
             # Collect actual processed data from FASTP, seqkit, or Kraken2
             sample_data = []
 
-            # Try FASTP first (most detailed)
+            # Try FASTP first (most detailed). Routed through the
+            # cached per-sample loader so concurrent QC callbacks share
+            # one parse per tick (P1-T01).
             if os.path.exists(fastp_dir):
-                fastp_files = glob.glob(os.path.join(fastp_dir, "*.fastp.json"))
-                for fastp_file in fastp_files:
-                    try:
-                        with open(fastp_file, 'r') as f:
-                            fastp_data = json.load(f)
-                            summary = fastp_data.get("summary", {})
-                            after = summary.get("after_filtering", {})
-
-                            reads = after.get("total_reads", 0)
-                            bases = after.get("total_bases", 0)
-
-                            if reads > 0:
-                                # Get file modification time for ordering
-                                mtime = os.path.getmtime(fastp_file)
-                                sample_name = os.path.basename(fastp_file).replace(".fastp.json", "")
-
-                                sample_data.append({
-                                    "Sample": sample_name,
-                                    "Time": datetime.fromtimestamp(mtime),
-                                    "Reads": reads,
-                                    "Bp": bases
-                                })
-                    except (json.JSONDecodeError, IOError, KeyError) as e:
-                        logging.debug(f"Error reading FASTP file {fastp_file}: {e}")
-                        continue
+                from nanometa_live.core.utils.qc_loaders import (
+                    load_fastp_per_sample,
+                )
+                for row in load_fastp_per_sample(main_dir):
+                    sample_data.append({
+                        "Sample": row["sample"],
+                        "Time": datetime.fromtimestamp(row["mtime"]),
+                        "Reads": row["reads_after"],
+                        "Bp": row["bases_after"],
+                    })
 
             # Fallback to seqkit stats if no FASTP (chopper QC tool)
             if not sample_data and os.path.exists(seqkit_dir):

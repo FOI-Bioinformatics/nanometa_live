@@ -76,6 +76,58 @@ def _empty_nanoplot_stats() -> Dict[str, Any]:
     }
 
 
+def load_fastp_per_sample(main_dir: str) -> List[Dict[str, Any]]:
+    """Return per-sample FASTP after-filtering stats with file mtime.
+
+    Each dict carries the data the QC tab's "processed reads over time"
+    plot needs: ``{"sample", "mtime", "reads_after", "bases_after"}``.
+    Backed by the shared mtime cache so concurrent QC callbacks share
+    one parse per tick instead of each opening every fastp JSON
+    independently. Closes P1-T01 from
+    ``docs/audit-2026-04-28-throughput-gui.md``.
+
+    Args:
+        main_dir: Main nanometanf output directory.
+
+    Returns:
+        List of {sample, mtime, reads_after, bases_after} dicts. Empty
+        list when ``main_dir/fastp`` does not exist.
+    """
+    main_dir = resolve_analysis_directory(main_dir)
+    fastp_dir = os.path.join(main_dir, "fastp")
+    if not os.path.exists(fastp_dir):
+        return []
+
+    mtime_key = f"fastp_per_sample:{main_dir}"
+    cached = _check_mtime_cache(mtime_key, [fastp_dir])
+    if cached is not None:
+        return list(cached)
+
+    rows: List[Dict[str, Any]] = []
+    for fastp_file in glob.glob(os.path.join(fastp_dir, "*.fastp.json")):
+        try:
+            if not _is_file_stable(fastp_file):
+                continue
+            with open(fastp_file, "r") as f:
+                payload = json.load(f)
+            after = payload.get("summary", {}).get("after_filtering", {})
+            reads = int(after.get("total_reads", 0))
+            if reads <= 0:
+                continue
+            rows.append({
+                "sample": os.path.basename(fastp_file).replace(".fastp.json", ""),
+                "mtime": os.path.getmtime(fastp_file),
+                "reads_after": reads,
+                "bases_after": int(after.get("total_bases", 0)),
+            })
+        except (json.JSONDecodeError, OSError, KeyError, ValueError) as exc:
+            logging.debug(f"load_fastp_per_sample skipping {fastp_file}: {exc}")
+            continue
+
+    _store_mtime_cache(mtime_key, [fastp_dir], list(rows))
+    return rows
+
+
 def load_fastp_data(main_dir: str, sample: Optional[str] = None) -> Dict[str, Any]:
     """
     Load FASTP statistics for specific sample or all samples.
