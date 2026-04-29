@@ -374,3 +374,70 @@ class TestLoadKrakenLatestBatchSemantics:
         assert not df.empty
         root = df[df["taxid"] == 1]
         assert int(root.iloc[0]["cumul_reads"]) == 350
+
+
+class TestLoadKrakenDataParseLock:
+    """The per-key parse lock must serialize concurrent miss-then-parse callers.
+
+    Closes the P0-G01 thundering-herd race documented in
+    docs/audit-2026-04-28-throughput-gui.md: when N callbacks all miss the
+    mtime + TTL caches at the same instant (because kraken2/ mtime
+    advanced since their previous tick), only the first should perform
+    the full parse; the others should wait briefly and take the cached
+    result.
+    """
+
+    def test_concurrent_miss_serializes_to_one_parse(self, tmp_path, monkeypatch):
+        """Eight threads racing a cold cache must produce exactly one parse.
+
+        The test wraps the internal ``_parse_kraken_data_uncached`` helper
+        so we can count invocations. With the per-key lock in place the
+        first thread to win the lock parses; subsequent threads find the
+        result already cached and return without re-entering the helper.
+        """
+        import threading
+        from nanometa_live.core.utils import classification_loaders as cl
+        from nanometa_live.core.utils import loader_utils
+
+        # Build a minimal kraken2 dir with one cumulative report so the
+        # parse path has actual work to do.
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+        report = kraken_dir / "barcode01.cumulative.kraken2.report.txt"
+        _write_batch_report(report, root_reads=100, species_taxid=562,
+                            species_name="Escherichia coli")
+
+        # Reset module-level caches so the test starts cold.
+        with loader_utils._cache_lock:
+            loader_utils._kraken_cache.clear()
+            loader_utils._file_mtimes.clear()
+        with loader_utils._parse_locks_lock:
+            loader_utils._parse_locks.clear()
+
+        parse_count = {"n": 0}
+        original_parse = cl._parse_kraken_data_uncached
+
+        def counting_parse(*args, **kwargs):
+            parse_count["n"] += 1
+            # Simulate a slow parse so the race window is real.
+            import time
+            time.sleep(0.05)
+            return original_parse(*args, **kwargs)
+
+        monkeypatch.setattr(cl, "_parse_kraken_data_uncached", counting_parse)
+
+        results = []
+        def worker():
+            results.append(cl.load_kraken_data(str(tmp_path), "All Samples"))
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(results) == 8, "all 8 threads must produce a result"
+        assert all(not df.empty for df in results), "all 8 must get the parsed df"
+        assert parse_count["n"] == 1, (
+            f"expected exactly one parse under per-key lock, got {parse_count['n']}"
+        )

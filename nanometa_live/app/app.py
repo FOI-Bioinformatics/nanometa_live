@@ -215,6 +215,22 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
         dcc.Store(id='previous-running-state', data=False),  # For detecting analysis completion
         dcc.Store(id='readiness-state', data={"ready": False, "checks": []}),
 
+        # Cached Kraken2 aggregates fed by a single feeder callback in
+        # dashboard_tab.py. Replaces five redundant load_kraken_data
+        # calls per interval tick (P0-G01) and the 24-iteration serial
+        # per-sample loop in _load_per_sample_organisms (P0-G02).
+        # Schema:
+        #   aggregate-kraken-cache: {
+        #       "fingerprint": str,                 # mtime hash; used for change detection
+        #       "all_samples": list[dict] | None,   # df.to_dict('records')
+        #   }
+        #   per-sample-kraken-cache: {
+        #       "fingerprint": str,
+        #       "by_sample": {sample_name: list[dict]},
+        #   }
+        dcc.Store(id='aggregate-kraken-cache', data={"fingerprint": "", "all_samples": None}),
+        dcc.Store(id='per-sample-kraken-cache', data={"fingerprint": "", "by_sample": {}}),
+
         # Shared stores for cross-tab communication (Watchlist <-> Preparation)
         dcc.Store(id='taxmap-collection', data=None),
         dcc.Store(id='taxmap-database-info', data=None),

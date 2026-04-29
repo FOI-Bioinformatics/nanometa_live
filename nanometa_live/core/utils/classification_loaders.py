@@ -26,6 +26,7 @@ from nanometa_live.core.utils.loader_utils import (
     _is_cache_valid,
     _check_mtime_cache,
     _store_mtime_cache,
+    _get_parse_lock,
 )
 
 
@@ -369,6 +370,43 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
                 logging.debug(f"Using cached Kraken data for {cache_key}")
                 return cached_df
 
+    # Serialize the parse path: concurrent callbacks that all miss above
+    # would otherwise each start their own full re-parse. Holding a
+    # per-key lock makes second-through-Nth callers wait ~ms then take
+    # the cached result the first caller just stored.
+    parse_lock = _get_parse_lock(cache_key)
+    with parse_lock:
+        # Re-check mtime and TTL cache after acquiring the lock. The first
+        # waiter to win the lock parses; subsequent waiters find the
+        # result already cached and return without re-parsing.
+        if os.path.isdir(kraken_dir):
+            mtime_cached = _check_mtime_cache(mtime_key, [kraken_dir])
+            if mtime_cached is not None:
+                return mtime_cached
+        with _cache_lock:
+            if cache_key in _kraken_cache:
+                cache_time, cached_df = _kraken_cache[cache_key]
+                if _is_cache_valid(cache_time):
+                    return cached_df
+
+        return _parse_kraken_data_uncached(
+            main_dir, sample, cache_key, kraken_dir, mtime_key
+        )
+
+
+def _parse_kraken_data_uncached(
+    main_dir: str,
+    sample: Optional[str],
+    cache_key: str,
+    kraken_dir: str,
+    mtime_key: str,
+) -> pd.DataFrame:
+    """Parse Kraken2 reports without consulting any cache.
+
+    Caller must hold the parse lock for ``cache_key`` and have already
+    re-checked the mtime and TTL caches. The function is internal; outside
+    callers should use ``load_kraken_data``.
+    """
     if not os.path.exists(kraken_dir):
         logging.warning(f"Kraken2 directory not found: {kraken_dir}")
         return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)

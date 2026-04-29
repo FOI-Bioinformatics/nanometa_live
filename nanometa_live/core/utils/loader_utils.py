@@ -43,6 +43,32 @@ _file_mtimes: Dict[str, Tuple[float, int, Any]] = {}
 # Last freshness fingerprint for change detection
 _last_freshness_fingerprint: str = ""
 
+# Per-key parse locks. Concurrent callbacks that all miss the mtime cache
+# at the same instant (because kraken2/ mtime advanced since their last
+# read) would otherwise each start a full re-parse, despite a shared
+# in-process cache existing. The per-key lock makes the parse path
+# single-writer for any given (main_dir, sample) so the second-through-
+# Nth caller waits ~ms then takes the cached result rather than redoing
+# the work in parallel. Closes the P0-G01 thundering-herd race flagged
+# in audit-2026-04-28-throughput-gui.md.
+_parse_locks: Dict[str, threading.Lock] = {}
+_parse_locks_lock = threading.Lock()
+
+
+def _get_parse_lock(cache_key: str) -> threading.Lock:
+    """Return (creating if needed) a Lock dedicated to one cache key.
+
+    Thread-safe: the registry is itself protected by a guard lock, but
+    the returned per-key lock is the one held during the actual parse
+    so concurrent keys do not serialize against each other.
+    """
+    with _parse_locks_lock:
+        lock = _parse_locks.get(cache_key)
+        if lock is None:
+            lock = threading.Lock()
+            _parse_locks[cache_key] = lock
+        return lock
+
 
 def _is_file_stable(filepath: str, wait_ms: int = FILE_STABILITY_CHECK_INTERVAL_MS) -> bool:
     """
