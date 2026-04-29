@@ -303,6 +303,97 @@ Click the button in the alert or follow the listed steps.
 
 ---
 
+## ⚙️ Tuning for High-Throughput Runs (12-24 barcodes)
+
+The pipeline ships defaults that suit a typical lab workstation
+running fewer than 12 simultaneous barcodes. Multiplexed runs at 12,
+24, or more barcodes benefit from a few configuration knobs that
+trade memory for parallelism and avoid pipeline stalls.
+
+### Pick a host class
+
+| Host class | Cores | RAM | Storage |
+|---|---|---|---|
+| Field laptop | 4-8 | 16-32 GB | NVMe SSD |
+| Lab workstation | 16 | 64 GB | NVMe SSD |
+| Beefy workstation | 32 | 128 GB | RAID SSD |
+| Server / cluster node | 64+ | 256 GB+ | NVMe / shared FS |
+
+### Recommended config knobs
+
+Add to your `config.yaml` (Nanometa Live forwards these as Nextflow
+params). Defaults shown apply when the param is omitted.
+
+| Param | Field laptop | Workstation 16c/64GB | Workstation 32c/128GB | Server 64c+ |
+|---|---|---|---|---|
+| `kraken2_memory_mapping` | `true` | `true` | `true` | `true` |
+| `kraken2_memory_gb` | `12` | `12-32` (DB-dependent) | `32-90` (DB-dependent) | `32-90` |
+| `max_classification_forks` | `2` | `4-8` | `8-16` | `16-32` |
+| `max_concurrent_batches` | `2` | `4` | `4-8` | `4-8` |
+| `update_interval_seconds` | `30` | `30` | `15` | `15` |
+| `pipeline_cores` | `4` | `8` | `16` | `32` |
+
+### `kraken2_memory_gb` rule of thumb
+
+Set `kraken2_memory_gb` to **on-disk database size + 4 GB**:
+
+| Database | On disk | `kraken2_memory_gb` |
+|---|---|---|
+| MiniKraken2 | 8 GB | `12` (default) |
+| GTDB Bac120 | ~25 GB | `30` |
+| Kraken2 PlusPF | ~70 GB | `74` |
+| Kraken2 PlusPFP | ~80 GB | `84` |
+
+With memory-mapping enabled (default), all parallel Kraken2 forks
+share the OS page cache rather than each loading their own copy --
+so this is per-process headroom, not per-instance RAM.
+
+### `max_classification_forks` and `max_concurrent_batches`
+
+These two together set the total in-flight Kraken2 work:
+
+```
+total_in_flight = N_samples × max_concurrent_batches
+                  capped by max_classification_forks
+```
+
+For 24 barcodes with `max_concurrent_batches = 4` and
+`max_classification_forks = 8` on a 16-core / 64 GB host:
+- total in-flight = min(24 × 4, 8) = 8 concurrent Kraken2 jobs
+- with mmap'd DB shared across 8 forks, ~84 GB total RAM
+  request fits in 64 GB if Linux releases unused page cache
+
+If your host OOMs or the dashboard shows long stalls between
+Kraken2 batches, lower `max_classification_forks` first; raise it
+only when pipeline progress is clearly bottlenecked on Kraken2.
+
+### When to adjust `update_interval_seconds`
+
+The dashboard refreshes every `update_interval_seconds` seconds
+(default 30). On 24-barcode runs the loader sees fresh batch reports
+on most ticks, which is fine. Lower to 15 only when you have a fast
+host and want sub-30-second pathogen alerts; raise to 60 if the
+dashboard feels sluggish (often a sign you should also tune the
+knobs above).
+
+### Verifying your tuning
+
+After updating `config.yaml` and restarting Nanometa Live:
+
+1. Open the Dashboard tab. Verdict banner should reach a non-STANDBY
+   state within one `update_interval_seconds` cycle once data starts
+   landing.
+2. Check the Quality Control tab's per-sample table. The visible row
+   count should match the actual barcode count without paginating
+   (this is the W3-A pagination bump from cycle 18).
+3. The Pathogen Alert "+N more" pill should be clickable -- the
+   popover lists every triggering sample (W1-B from cycle 18).
+4. Open the Nextflow trace report at
+   `<results>/pipeline_info/execution_trace_*.txt`. Sustained Kraken2
+   tasks should stay within the host's CPU and memory limits.
+
+---
+
 ## 🎓 Training Scenarios (Practice With Mock Data)
 
 ### Scenario 1: Normal Run (Easy)

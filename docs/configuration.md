@@ -103,6 +103,20 @@ nanopore_output_directory: "/path/to/input"
 | `min_batch_size` | int | 1 | Minimum files before triggering a batch |
 | `max_file_age_minutes` | int | 1000000 | Maximum age of files to process |
 
+### High-Throughput Tuning (12-24 barcodes)
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `kraken2_memory_gb` | int | 12 | RAM headroom (GB) per Kraken2 fork. Set to on-disk DB size + 4 GB. |
+| `kraken2_memory_mapping` | bool | true | Share the Kraken2 DB across forks via OS page cache. |
+| `max_classification_forks` | int | 4 | Max parallel Kraken2 jobs. Raise for high-RAM hosts; lower if OOM. |
+| `max_concurrent_batches` | int | 4 | Per-sample backpressure cap. Total in-flight = N_samples * this. |
+| `report_write_interval` | int | 5 | Write progressive cumulative report every N batches (0 = every batch). |
+
+See the [Operator Guide section "Tuning for High-Throughput Runs"](OPERATOR_GUIDE.md#-tuning-for-high-throughput-runs-12-24-barcodes)
+for the host-class recommendation table and per-database memory sizing
+(`kraken2_memory_gb` rule of thumb: on-disk DB size + 4 GB).
+
 ## Species of Interest
 
 Define organisms to track with alerts:
