@@ -34,22 +34,36 @@ def create_sample_selector(include_label: bool = True, width_md: int = 6) -> dbc
     if include_label:
         components.append(
             html.Label(
-                "Select Sample:",
+                [
+                    "Select Sample: ",
+                    html.Span(
+                        "(type to filter)",
+                        className="text-muted small fw-normal ms-1",
+                    ),
+                ],
                 className="fw-bold mb-2",
                 htmlFor="sample-selector"
             )
         )
 
+    # ``searchable`` is the dcc.Dropdown default but is set explicitly
+    # here to make the type-to-filter behaviour discoverable in code
+    # review. ``maxHeight`` caps the dropdown panel so a 24-barcode list
+    # opens to a scrollable window rather than overlaying the page.
+    # Closes P1-T01 from docs/audit-2026-04-28-throughput-ux.md.
     components.append(
         dcc.Dropdown(
             id='sample-selector',
             options=[{'label': 'All Samples', 'value': 'All Samples'}],
             value='All Samples',
             clearable=False,
+            searchable=True,
             className="mb-3",
-            placeholder="Select a sample...",
+            placeholder="Select a sample (type to filter)...",
             persistence=True,  # Remember selection across page reloads
             persistence_type='session',
+            optionHeight=40,
+            maxHeight=320,
             style={"minHeight": "44px", "fontSize": "16px"}
         )
     )
@@ -83,12 +97,16 @@ def create_compact_sample_selector(selector_id: str = "sample-selector-compact")
             options=[{'label': 'All Samples', 'value': 'All Samples'}],
             value='All Samples',
             clearable=False,
+            searchable=True,
+            placeholder="type to filter...",
             className="sample-selector-compact",
             persistence=True,
             persistence_type='session',
+            optionHeight=36,
+            maxHeight=320,
             style={"minHeight": "44px", "fontSize": "16px"}
         )
-    ], className="sample-selector-compact", style={'display': 'inline-block', 'minWidth': '250px'})
+    ], className="sample-selector-compact", style={'display': 'inline-block', 'minWidth': '300px'})
 
 
 def create_sample_info_badge(sample_count: int = 0) -> dbc.Badge:

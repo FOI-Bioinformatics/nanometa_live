@@ -286,17 +286,29 @@ def create_qc_layout():
                                 "resizable": True,
                                 "minWidth": 100,
                             },
+                            # Page size 25 (from 10) shows up to 24
+                            # barcodes without paginating; selector
+                            # lets the operator narrow or widen.
+                            # ``domLayout: autoHeight`` replaces the
+                            # fixed 420px container so the table grows
+                            # to fit visible rows -- the operator's
+                            # primary at-a-glance comparison surface
+                            # stops being clipped at 12 visible rows on
+                            # 1280x800 displays. Closes P1-T03 from
+                            # docs/audit-2026-04-28-throughput-ux.md.
                             dashGridOptions={
                                 "pagination": True,
-                                "paginationPageSize": 10,
+                                "paginationPageSize": 25,
+                                "paginationPageSizeSelector": [10, 25, 50, 100],
                                 "tooltipShowDelay": 500,
                                 "suppressMenuHide": False,
+                                "domLayout": "autoHeight",
                                 # Group header dominant; column header secondary
                                 "headerHeight": 32,
                                 "groupHeaderHeight": 38,
                             },
                             className="ag-theme-alpine qc-sample-breakdown-grid",
-                            style={"height": "420px", "width": "100%"},
+                            style={"width": "100%"},
                         ),
                         html.Small(
                             "Detailed metrics available in Technical Statistics section below.",

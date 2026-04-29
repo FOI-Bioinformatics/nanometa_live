@@ -8,7 +8,7 @@ sub-tab callbacks matching the two-panel layout.
 import os
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 
 from dash import Dash, Input, Output, State, ctx, no_update, html, ALL
@@ -32,6 +32,128 @@ from nanometa_live.app.components.coverage_plots import (
 from nanometa_live.app.utils.callback_helpers import log_callback_error
 
 logger = logging.getLogger(__name__)
+
+
+# Initial visible-card cap for the BLAST and minimap2 result-card
+# containers. Closes P1-T07 from
+# docs/audit-2026-04-28-throughput-ux.md: a 24-barcode x 5-species run
+# produces ~120 cards, which is heavy DOM and pushes initial render
+# past the 30-second-scan budget. The first page renders 30 cards;
+# operators who want the full list click "Show all".
+_CARD_LIST_INITIAL_LIMIT = 30
+
+
+def _build_coverage_selector_options(
+    data: Optional[Dict[str, Any]],
+    current_value: Optional[str],
+):
+    """Group minimap2 validation results into per-sample sections.
+
+    Closes P1-T06 from docs/audit-2026-04-28-throughput-ux.md: a
+    24-barcode x 5-species run produces ~120 flat entries; grouping
+    by sample turns the dropdown into 24 small sections separated by
+    disabled header rows that the dcc.Dropdown's type-to-filter still
+    matches against. ``__header__:`` sentinel values guard the
+    selection logic from accidentally picking a header row.
+
+    Returns:
+        Tuple of (options list, default value or None).
+    """
+    if not data or not data.get("results"):
+        return [], None
+
+    per_sample: Dict[str, List[Dict[str, Any]]] = {}
+    sample_order: List[str] = []
+    seen = set()
+    for r in data["results"]:
+        method = r.get("validation_method", "blast")
+        if method not in ("minimap2", "both"):
+            continue
+        sample_id = r.get("sample_id", "")
+        taxid = r.get("taxid", "")
+        key = f"{sample_id}_{taxid}"
+        if key in seen:
+            continue
+        seen.add(key)
+        entry = {
+            "label": f"{r.get('species', 'Unknown')} (taxid {taxid})",
+            "value": key,
+        }
+        if sample_id not in per_sample:
+            per_sample[sample_id] = []
+            sample_order.append(sample_id)
+        per_sample[sample_id].append(entry)
+
+    options: List[Dict[str, Any]] = []
+    for sample_id in sample_order:
+        options.append({
+            "label": f"-- {sample_id} ({len(per_sample[sample_id])} species) --",
+            "value": f"__header__:{sample_id}",
+            "disabled": True,
+        })
+        options.extend(per_sample[sample_id])
+
+    valid_values = {o["value"] for o in options if not o.get("disabled")}
+    if current_value and current_value in valid_values:
+        return options, current_value
+
+    first_value = next(
+        (o["value"] for o in options if not o.get("disabled")),
+        None,
+    )
+    return options, first_value
+
+
+def _build_paginated_card_list(
+    cards: List[Any],
+    show_all: bool,
+    show_all_button_id: str,
+) -> html.Div:
+    """Wrap a list of result cards with a "showing N of M" footer + button.
+
+    When ``show_all`` is False, only the first ``_CARD_LIST_INITIAL_LIMIT``
+    cards are rendered with a button below offering to expand. When True
+    (or when the list fits under the cap), every card is rendered with
+    just the count footer. Empty lists return an empty Div.
+    """
+    total = len(cards)
+    if total == 0:
+        return html.Div([])
+
+    visible_cards = cards if show_all or total <= _CARD_LIST_INITIAL_LIMIT \
+        else cards[:_CARD_LIST_INITIAL_LIMIT]
+    truncated = total - len(visible_cards)
+
+    footer = []
+    if truncated > 0:
+        footer.append(
+            html.Div(
+                [
+                    html.Span(
+                        f"Showing {len(visible_cards)} of {total} results.",
+                        className="text-muted me-2",
+                    ),
+                    dbc.Button(
+                        f"Show all {total}",
+                        id=show_all_button_id,
+                        color="link",
+                        size="sm",
+                        n_clicks=0,
+                        className="p-0",
+                    ),
+                ],
+                className="text-center small mt-3 pt-2 border-top",
+            )
+        )
+    elif total > _CARD_LIST_INITIAL_LIMIT:
+        footer.append(
+            html.Div(
+                f"Showing all {total} results.",
+                className="text-center small text-muted mt-3 pt-2 border-top",
+            )
+        )
+
+    return html.Div(visible_cards + footer)
 
 
 def _filter_by_method(results, method):
@@ -208,9 +330,10 @@ def register_validation_callbacks(app: Dash):
             Input("validation-data-store", "data"),
             Input("blast-status-filter", "value"),
             Input("blast-sort-select", "value"),
+            Input("blast-show-all", "data"),
         ],
     )
-    def update_blast_cards(data, status_filter, sort_by):
+    def update_blast_cards(data, status_filter, sort_by, show_all):
         """Render BLAST result cards with filtering and sorting."""
         if not data or not data.get("results"):
             return ""
@@ -256,7 +379,19 @@ def register_validation_callbacks(app: Dash):
             )
             cards.append(card)
 
-        return html.Div(cards)
+        return _build_paginated_card_list(
+            cards, show_all=bool(show_all),
+            show_all_button_id="blast-show-all-btn",
+        )
+
+    @app.callback(
+        Output("blast-show-all", "data"),
+        Input("blast-show-all-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def expand_blast_card_list(n_clicks):
+        """Flip blast-show-all to True when the operator clicks Show all."""
+        return bool(n_clicks)
 
     @app.callback(
         Output("blast-identity-plot", "figure"),
@@ -490,8 +625,9 @@ def register_validation_callbacks(app: Dash):
     @app.callback(
         Output("coverage-results-container", "children"),
         Input("validation-data-store", "data"),
+        Input("coverage-show-all", "data"),
     )
-    def update_coverage_cards(data):
+    def update_coverage_cards(data, show_all):
         """Render minimap2 result cards with View Coverage buttons."""
         if not data or not data.get("results"):
             return ""
@@ -518,7 +654,19 @@ def register_validation_callbacks(app: Dash):
             )
             cards.append(card)
 
-        return html.Div(cards)
+        return _build_paginated_card_list(
+            cards, show_all=bool(show_all),
+            show_all_button_id="coverage-show-all-btn",
+        )
+
+    @app.callback(
+        Output("coverage-show-all", "data"),
+        Input("coverage-show-all-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def expand_coverage_card_list(n_clicks):
+        """Flip coverage-show-all to True when the operator clicks Show all."""
+        return bool(n_clicks)
 
     @app.callback(
         [
@@ -533,29 +681,10 @@ def register_validation_callbacks(app: Dash):
 
         Preserves the current selection across auto-refresh intervals
         if the selected key is still present in the updated options.
+        Grouping logic lives in ``_build_coverage_selector_options``
+        so it stays unit-testable without spinning up a Dash app.
         """
-        if not data or not data.get("results"):
-            return [], None
-
-        options = []
-        seen = set()
-        for r in data["results"]:
-            method = r.get("validation_method", "blast")
-            if method not in ("minimap2", "both"):
-                continue
-            key = f"{r.get('sample_id', '')}_{r.get('taxid', '')}"
-            if key in seen:
-                continue
-            seen.add(key)
-            label = f"{r.get('species', 'Unknown')} ({r.get('sample_id', '')})"
-            options.append({"label": label, "value": key})
-
-        valid_values = {o["value"] for o in options}
-        if current_value and current_value in valid_values:
-            return options, current_value
-
-        first_value = options[0]["value"] if options else None
-        return options, first_value
+        return _build_coverage_selector_options(data, current_value)
 
     @app.callback(
         [

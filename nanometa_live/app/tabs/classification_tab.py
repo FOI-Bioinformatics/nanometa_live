@@ -55,6 +55,45 @@ def register_classification_callbacks(app: Dash):
     """
 
     @app.callback(
+        Output("classification-filter-input", "value"),
+        Output("classification-filter-input", "placeholder"),
+        Input("available-samples", "data"),
+        Input("selected-sample", "data"),
+        State("classification-filter-input", "value"),
+        prevent_initial_call=False,
+    )
+    def scale_min_reads_default(available_samples, selected_sample, current_value):
+        """Scale the minimum-DNA-sequences default upward when an
+        aggregated 24-barcode view is selected.
+
+        Closes P1-T04 from docs/audit-2026-04-28-throughput-ux.md: a
+        per-sample 1-read detection becomes 24 reads in the All-Samples
+        aggregate view and survives the static ``min_reads=10`` default,
+        producing taxonomic noise chains that look real on the
+        Sankey/Sunburst.
+
+        Heuristic: when "All Samples" is selected and >=12 barcodes are
+        loaded, set the default floor to ``max(10, 5 * N)``. Only
+        applied when the input still holds the static layout default
+        of 10, so an operator who typed a custom value keeps it.
+        """
+        is_aggregate = selected_sample in (None, "All Samples")
+        real_samples = [s for s in (available_samples or []) if s != "All Samples"]
+        n = len(real_samples)
+
+        # Recommended floor is independent of which view is selected --
+        # operator can see it in the placeholder even when looking at a
+        # single sample.
+        floor = max(10, 5 * n) if n >= 12 else 10
+        placeholder = f"min reads ({floor} recommended at {n} samples)" if n >= 12 \
+            else "min reads (10 default)"
+
+        if is_aggregate and n >= 12 and (current_value in (None, 10)):
+            return floor, placeholder
+        # Only update the placeholder hint, leave value as-is.
+        return current_value if current_value is not None else 10, placeholder
+
+    @app.callback(
         Output("classification-levels-input", "value"),
         Input("classification-level-preset", "value"),
         prevent_initial_call=False

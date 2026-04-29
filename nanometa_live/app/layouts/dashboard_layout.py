@@ -301,9 +301,18 @@ def create_dashboard_layout():
                                 ],
                                 rowData=[],
                                 defaultColDef={"sortable": True, "filter": True, "resizable": True},
+                                # Page size 25 (from 8) puts up to 24
+                                # barcodes on a single page so the
+                                # operator can scan a multiplexed run
+                                # without paginating. The size selector
+                                # exposes 10/25/50/100 for operators
+                                # who want a tighter or looser view.
+                                # Closes P1-T02 from
+                                # docs/audit-2026-04-28-throughput-ux.md.
                                 dashGridOptions={
                                     "pagination": True,
-                                    "paginationPageSize": 8,
+                                    "paginationPageSize": 25,
+                                    "paginationPageSizeSelector": [10, 25, 50, 100],
                                     "rowSelection": {"mode": "singleRow"},
                                     "tooltipShowDelay": 500,
                                 },

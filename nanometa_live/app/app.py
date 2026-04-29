@@ -224,6 +224,14 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
         dcc.Store(id='previous-running-state', data=False),  # For detecting analysis completion
         dcc.Store(id='readiness-state', data={"ready": False, "checks": []}),
 
+        # Per-list "show all" toggles for the BLAST + minimap2 result-
+        # card containers. Default False renders only the top 30; the
+        # "Show all" button each container ships flips this to True.
+        # Closes P1-T07 from
+        # docs/audit-2026-04-28-throughput-ux.md.
+        dcc.Store(id='blast-show-all', data=False),
+        dcc.Store(id='coverage-show-all', data=False),
+
         # Cached Kraken2 aggregates fed by a single feeder callback in
         # dashboard_tab.py. Replaces five redundant load_kraken_data
         # calls per interval tick (P0-G01) and the 24-iteration serial
