@@ -16,9 +16,7 @@ nanometa_live/
 │   │   ├── modern_components.py    # Operator-friendly cards, badges, meters
 │   │   ├── organism_components.py  # Organism display cards
 │   │   ├── pathogen_alert.py       # Critical pathogen alert banners
-│   │   ├── sample_selector.py      # Multi-sample/barcode selection
 │   │   ├── taxid_mapping_ui.py     # Kraken2 taxid mapping modal
-│   │   ├── tooltip_components.py   # Help icons and contextual guidance
 │   │   ├── watchlist_manager_ui.py # Watchlist management components
 │   │   └── watchlist_modal.py      # Watchlist detail modals
 │   ├── layouts/            # Tab layout definitions
