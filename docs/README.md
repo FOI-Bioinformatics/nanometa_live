@@ -46,7 +46,7 @@
 | [UX Improvements](plans/2026-03-02-ux-improvements-design.md) | Completed |
 | [Offline Deployment](plans/2026-03-06-offline-deployment-design.md) | Implemented |
 | [E2E Testing Fixes](plans/2026-03-07-e2e-testing-fixes.md) | Completed |
-| [Throughput Fixes (Waves 1-4, 6)](plan-2026-04-28-throughput-fixes.md) | Implemented; Waves 5 (empirical) + 7 (Apptainer) deferred |
+| [Throughput Fixes (Waves 1-4, 6, 7)](plan-2026-04-28-throughput-fixes.md) | COMPLETE; Wave 5 (empirical) is operator-driven |
 
 ## Archive
 

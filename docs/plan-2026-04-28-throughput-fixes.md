@@ -1,5 +1,10 @@
 # Implementation Plan -- Throughput Fixes for 12-24 Barcode Runs
 
+**Status: COMPLETE (2026-04-29).** Waves 1, 2, 3, 4, 6, 7 implemented
+and pushed. Wave 5 (empirical 12 / 24-barcode validation) is
+operator-driven and runs on real hardware -- the reproduction script
+lives in ``docs/audit-2026-04-28-throughput-synthesis.md``.
+
 Source: `docs/audit-2026-04-28-throughput-{gui,ux,synthesis}.md`.
 4 P0s, 16 P1s. This plan groups them by the smallest set of code
 changes that closes the most P0/P1s, ordered by clinical-safety risk
@@ -9,6 +14,24 @@ The audit predicted 5-15s GUI freezes per tick at 24 barcodes plus a
 clinical-misleading "+N more" pill that hides which of 24 barcodes
 triggered a critical pathogen alert. Wave 1 closes both classes in two
 focused PRs.
+
+## Completion summary
+
+| Wave | Status | Commits |
+|---|---|---|
+| 1. Clinical-safety P0s | DONE | nanometa_live `b68c01f`, `48f3fb4` |
+| 2. Throughput P1s | DONE | nanometa_live `b489234`, `14f596e` |
+| 3. UI scaling P1s | DONE | nanometa_live `d29d50f` |
+| 4. Pipeline tuning + operator docs | DONE | nanometanf `9995f6d`; nanometa_live `03bcc06` |
+| 5. Empirical 12 / 24-barcode validation | OPERATOR-DRIVEN | run-time only; reproduction script in synthesis doc |
+| 6. Container URL audit | DONE (zero drift) | nanometa_live `f085793` |
+| 7. Three-engine offline deployment toggle | DONE | nanometa_live `ff8e1bf` |
+
+All 4 P0s closed. 13+ P1s closed (P1-T05 layout reflow accepted as-is;
+P1-T07 mitigated via card-list pagination rather than full
+virtualization). Test suite grew 569 -> 622 across the cycle. The
+production-readiness rubric in ``audit-2026-04-28-throughput-
+synthesis.md`` should be re-scored by the operator after Wave 5.
 
 ## Wave 1 -- P0 closure (high priority, ~1 day total)
 
