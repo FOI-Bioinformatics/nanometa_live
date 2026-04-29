@@ -11,6 +11,7 @@ import threading
 import time
 
 from dash import Dash, Input, Output, State, callback, ctx, html, no_update
+from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
 from nanometa_live.core.workflow.backend_manager import BackendManager
@@ -547,36 +548,49 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         ],
         Input("update-interval", "n_intervals"),
         State("app-config", "data"),
+        State("available-samples", "data"),
+        State("sample-file-mapping", "data"),
     )
-    def update_available_samples(n_intervals, config):
+    def update_available_samples(n_intervals, config, prev_samples, prev_mapping):
         """
         Detect and update available samples from nanometanf output.
 
         Scans the output directory for Kraken2, FASTP, and BLAST files
         to automatically detect all available samples/barcodes.
+
+        Short-circuits with PreventUpdate when the detected sample list
+        and file mapping have not changed since the previous tick. This
+        eliminates the per-tick store-overwrite churn flagged as P1-T03
+        in docs/audit-2026-04-28-throughput-gui.md, which otherwise
+        cascades a re-render of every callback subscribed to either
+        store on every interval tick at 24-barcode scale.
         """
 
         if not config:
-            return ["All Samples"], {}
+            new_samples, new_mapping = ["All Samples"], {}
+        else:
+            try:
+                # Use results_output_directory for pipeline output (where kraken2/, fastp/ are)
+                main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
 
-        try:
-            # Use results_output_directory for pipeline output (where kraken2/, fastp/ are)
-            main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
+                if not main_dir or not os.path.exists(main_dir):
+                    new_samples, new_mapping = ["All Samples"], {}
+                else:
+                    # Get available samples from output files
+                    new_samples = get_available_samples(main_dir)
+                    new_mapping = get_sample_file_mapping(main_dir)
+                    logging.debug(f"Detected {len(new_samples)-1} samples: {new_samples}")
+            except Exception as e:
+                log_callback_error("update_available_samples", e, level=logging.WARNING)
+                new_samples, new_mapping = ["All Samples"], {}
 
-            if not main_dir or not os.path.exists(main_dir):
-                return ["All Samples"], {}
+        # Skip the store overwrite when nothing meaningful changed. The
+        # comparison is intentionally on the wire-format dicts/lists Dash
+        # sees; identical content means subscribers will not re-render.
+        if new_samples == (prev_samples or []) and new_mapping == (prev_mapping or {}):
+            raise PreventUpdate
 
-            # Get available samples from output files
-            samples = get_available_samples(main_dir)
-            mapping = get_sample_file_mapping(main_dir)
-
-            logging.debug(f"Detected {len(samples)-1} samples: {samples}")
-
-            return samples, mapping
-
-        except Exception as e:
-            log_callback_error("update_available_samples", e, level=logging.WARNING)
-            return ["All Samples"], {}
+        return new_samples, new_mapping
 
     @app.callback(
         [

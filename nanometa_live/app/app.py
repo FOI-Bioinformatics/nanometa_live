@@ -20,11 +20,20 @@ import multiprocess
 # when DiskcacheManager forks a process with a closed stderr pipe.
 multiprocess.set_start_method("spawn", force=True)
 
-# Initialize cache for background callbacks (enables async progress reporting)
+# Initialize cache for background callbacks (enables async progress reporting).
+#
+# FanoutCache shards across multiple SQLite databases (default: 8) so
+# concurrent background callbacks do not serialize behind a single
+# writer-mutex. Closes P1-T05 from
+# docs/audit-2026-04-28-throughput-gui.md, where preparation +
+# genome-download + DB-download clicks could queue silently behind each
+# other when the underlying single-shard diskcache.Cache held its write
+# lock during result persistence. Cache directory tree is unchanged on
+# disk; FanoutCache transparently namespaces shards under shards/00..07.
 _cache_dir = os.path.join(os.path.expanduser("~"), ".nanometa", "cache")
 os.makedirs(_cache_dir, exist_ok=True)
-_cache = diskcache.Cache(_cache_dir)
-background_callback_manager = DiskcacheManager(_cache)
+_cache = diskcache.FanoutCache(_cache_dir, shards=8, timeout=1.0)
+background_callback_manager = DiskcacheManager(_cache, expire=3600)
 
 from nanometa_live import __version__
 from nanometa_live.app.layouts.main_layout import create_main_layout

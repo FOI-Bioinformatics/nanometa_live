@@ -533,3 +533,70 @@ class TestBackendManagerOfflineGuard:
         assert "offline" not in msg.lower() or ok, (
             f"Unexpected offline block for local source: {msg}"
         )
+
+
+class TestBackendManagerFileCountTTL:
+    """``_update_file_counts`` must not os.listdir on every interval tick.
+
+    The TTL cache (P1-T09 from
+    docs/audit-2026-04-28-throughput-gui.md) reduces 24-barcode-multiplex
+    scan cost from 25 listdirs/tick to 25 listdirs / 5s, picked up
+    within one TTL cycle of any new file arriving.
+    """
+
+    def test_consecutive_calls_within_ttl_skip_listdir(self, tmp_path, monkeypatch):
+        """Two calls within the TTL window must result in only one listdir."""
+        from nanometa_live.core.workflow.backend_manager import BackendManager
+
+        nanopore_dir = tmp_path / "fastq_pass"
+        nanopore_dir.mkdir()
+        (nanopore_dir / "reads.fastq.gz").write_bytes(b"x")
+
+        bm = BackendManager(str(tmp_path))
+        bm.config = {"nanopore_output_directory": str(nanopore_dir)}
+
+        listdir_calls = []
+        original_listdir = os.listdir
+        def counting_listdir(p):
+            listdir_calls.append(str(p))
+            return original_listdir(p)
+        monkeypatch.setattr(os, "listdir", counting_listdir)
+
+        bm._update_file_counts()
+        first = list(listdir_calls)
+        assert bm.status["files_waiting"] == 1
+        assert len(first) >= 1, "first call must hit the filesystem"
+
+        listdir_calls.clear()
+        bm._update_file_counts()
+        # Within TTL: must NOT have called listdir again
+        assert listdir_calls == [], (
+            f"second call within TTL listdir'd {len(listdir_calls)} paths; "
+            "expected zero"
+        )
+
+    def test_call_after_ttl_expires_rescans(self, tmp_path, monkeypatch):
+        """When the TTL window has elapsed, the filesystem is consulted again."""
+        from nanometa_live.core.workflow.backend_manager import BackendManager
+
+        nanopore_dir = tmp_path / "fastq_pass"
+        nanopore_dir.mkdir()
+        (nanopore_dir / "reads.fastq.gz").write_bytes(b"x")
+
+        bm = BackendManager(str(tmp_path))
+        bm.config = {"nanopore_output_directory": str(nanopore_dir)}
+        bm._update_file_counts()
+
+        # Force the cached_at timestamp far enough back that the TTL
+        # check below treats it as expired.
+        bm._file_count_cached_at = bm._file_count_cached_at - bm._FILE_COUNT_TTL_SECONDS - 1
+
+        listdir_calls = []
+        original_listdir = os.listdir
+        def counting_listdir(p):
+            listdir_calls.append(str(p))
+            return original_listdir(p)
+        monkeypatch.setattr(os, "listdir", counting_listdir)
+
+        bm._update_file_counts()
+        assert len(listdir_calls) >= 1, "expired TTL must trigger a fresh scan"

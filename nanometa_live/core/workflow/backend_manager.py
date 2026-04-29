@@ -524,9 +524,28 @@ class BackendManager:
             # Return a copy to prevent external modification
             return dict(self.status)
 
+    # TTL for the cached file count below. Each interval tick on the
+    # dashboard ends up calling _update_file_counts at least once; on a
+    # 24-barcode multiplex run that means 25 os.listdir calls per tick
+    # (root + 24 barcode subdirs) for a quantity that does not change
+    # meaningfully between ticks. Caching for 5 seconds reduces this
+    # to one scan per ~5 ticks at the default 30 s interval, while
+    # still picking up newly arrived files within one cycle of the
+    # human-perceptible "files waiting" indicator. Closes P1-T09 from
+    # docs/audit-2026-04-28-throughput-gui.md.
+    _FILE_COUNT_TTL_SECONDS = 5.0
+
     def _update_file_counts(self):
         """Update the file processing counts from the file system."""
         try:
+            now = time.time()
+            cached_at = getattr(self, "_file_count_cached_at", 0.0)
+            if (now - cached_at) < self._FILE_COUNT_TTL_SECONDS:
+                cached = getattr(self, "_file_count_cached_value", None)
+                if cached is not None:
+                    self.status["files_waiting"] = cached
+                    return
+
             nanopore_dir = self.config.get("nanopore_output_directory", "")
 
             # Count files in nanopore directory (including barcode subdirs)
@@ -547,6 +566,8 @@ class BackendManager:
             # Update status with waiting files
             # Processed files comes from workflow_manager status
             self.status["files_waiting"] = waiting_files
+            self._file_count_cached_value = waiting_files
+            self._file_count_cached_at = now
 
         except (FileNotFoundError, PermissionError, OSError) as e:
             logging.exception(f"Error updating file counts: {e}")

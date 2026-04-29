@@ -8,13 +8,22 @@ triggers occur simultaneously (e.g., interval + sample change + tab switch).
 import time
 import threading
 import logging
+from collections import OrderedDict
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 
-# Global debounce state storage
-_debounce_timestamps: Dict[str, float] = {}
+# Global debounce state storage. Bounded by ``_DEBOUNCE_MAX_KEYS`` so
+# pattern-matching callback ids (which embed sample names, taxids, etc.
+# and can therefore generate one debounce key per pathogen-card-button
+# pair) do not grow the dict without limit during long-running 24-barcode
+# sessions. Closes P1-T08 from
+# docs/audit-2026-04-28-throughput-gui.md. OrderedDict preserves
+# insertion order, so when capacity is reached the least-recently-
+# inserted key is evicted.
+_DEBOUNCE_MAX_KEYS = 512
+_debounce_timestamps: "OrderedDict[str, float]" = OrderedDict()
 _debounce_lock = threading.Lock()
 
 
@@ -59,10 +68,19 @@ def should_skip_update(
                 f"Debounce skip: {callback_id} "
                 f"(last: {time_since_last:.0f}ms ago, threshold: {debounce_ms}ms)"
             )
+            # Mark as recently used so LRU eviction below does not
+            # discard a key we just consulted.
+            _debounce_timestamps.move_to_end(debounce_key)
             return True
 
-        # Update timestamp for this callback
+        # Update timestamp for this callback. If a stale entry already
+        # exists for this key we overwrite it; OrderedDict.__setitem__
+        # places it at the end. When the dict exceeds capacity, drop
+        # the oldest entry.
         _debounce_timestamps[debounce_key] = current_time
+        _debounce_timestamps.move_to_end(debounce_key)
+        if len(_debounce_timestamps) > _DEBOUNCE_MAX_KEYS:
+            _debounce_timestamps.popitem(last=False)
         return False
 
 
