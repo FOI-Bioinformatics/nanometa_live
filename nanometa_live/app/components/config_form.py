@@ -256,7 +256,7 @@ def create_config_form():
                 dbc.Card([
                     dbc.CardHeader([
                         html.I(className="bi bi-display me-2"),
-                        html.Strong("Display Settings")
+                        html.H6("Display Settings", className="mb-0 d-inline")
                     ], className="py-2"),
                     dbc.CardBody([
                         dbc.Row([
@@ -309,7 +309,7 @@ def create_config_form():
                 dbc.Card([
                     dbc.CardHeader([
                         html.I(className="bi bi-database me-2"),
-                        html.Strong("Database Settings")
+                        html.H6("Database Settings", className="mb-0 d-inline")
                     ], className="py-2"),
                     dbc.CardBody([
                         dbc.Row([
@@ -333,7 +333,7 @@ def create_config_form():
                 dbc.Card([
                     dbc.CardHeader([
                         html.I(className="bi bi-git me-2"),
-                        html.Strong("Pipeline Source")
+                        html.H6("Pipeline Source", className="mb-0 d-inline")
                     ], className="py-2"),
                     dbc.CardBody([
                         dbc.Row([
@@ -405,7 +405,7 @@ def create_config_form():
                 dbc.Card([
                     dbc.CardHeader([
                         html.I(className="bi bi-cpu me-2"),
-                        html.Strong("Processing Settings")
+                        html.H6("Processing Settings", className="mb-0 d-inline")
                     ], className="py-2"),
                     dbc.CardBody([
                         dbc.Row([
@@ -523,7 +523,7 @@ def create_config_form():
                 dbc.Card([
                     dbc.CardHeader([
                         html.I(className="bi bi-shield-check me-2"),
-                        html.Strong("Confirmation Testing"),
+                        html.H6("Confirmation Testing", className="mb-0 d-inline"),
                         html.I(className="bi bi-info-circle text-muted ms-2",
                                id="validation-section-info",
                                style={"fontSize": "0.85rem", "cursor": "help"}),
@@ -709,7 +709,7 @@ def create_config_form():
                 dbc.Card([
                     dbc.CardHeader([
                         html.I(className="bi bi-sliders2 me-2"),
-                        html.Strong("Analysis Options")
+                        html.H6("Analysis Options", className="mb-0 d-inline")
                     ], className="py-2"),
                     dbc.CardBody([
                         dbc.Row([
@@ -722,10 +722,14 @@ def create_config_form():
                                 dbc.Select(
                                     id="qc-tool-input",
                                     options=[
-                                        {"label": "fastp (recommended)", "value": "fastp"},
-                                        {"label": "chopper", "value": "chopper"},
+                                        {"label": "chopper (recommended)", "value": "chopper"},
+                                        {"label": "fastp", "value": "fastp"},
                                     ],
-                                    value="fastp"
+                                    # Operator preference + matches
+                                    # nextflow_schema.json default; closes
+                                    # P1 #4 from
+                                    # docs/audit-2026-04-30-config-tab.md.
+                                    value="chopper"
                                 ),
                                 dbc.FormText("Tool used to filter out low-quality DNA sequences"),
                                 dbc.Tooltip(
@@ -788,7 +792,7 @@ def create_config_form():
                 dbc.Card([
                     dbc.CardHeader([
                         html.I(className="bi bi-funnel me-2"),
-                        html.Strong("Read Filtering and Validation"),
+                        html.H6("Read Filtering and Validation", className="mb-0 d-inline"),
                     ], className="py-2"),
                     dbc.CardBody([
                         dbc.Alert(
@@ -976,7 +980,7 @@ def create_config_form():
                 dbc.Card([
                     dbc.CardHeader([
                         html.I(className="bi bi-speedometer2 me-2"),
-                        html.Strong("Performance")
+                        html.H6("Performance", className="mb-0 d-inline")
                     ], className="py-2"),
                     dbc.CardBody([
                         dbc.Row([
