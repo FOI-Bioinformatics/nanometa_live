@@ -67,7 +67,6 @@ nanometa_live/
 │   │   └── data/watchlists/    # Built-in watchlist YAML files
 │   ├── parsers/
 │   │   ├── blast_validation_parser.py
-│   │   ├── nanometanf_parser.py
 │   │   └── paf_coverage_parser.py
 │   ├── taxonomy/
 │   │   ├── database_indexer.py

@@ -53,8 +53,7 @@ nanometa_live/
 │   │   └── data/               # Built-in watchlist YAML files
 │   │       └── watchlists/     # clinical_pathogens, foodborne, respiratory, etc.
 │   ├── parsers/            # Output file parsers
-│   │   ├── blast_validation_parser.py  # BLAST validation JSON parser
-│   │   ├── nanometanf_parser.py        # Pipeline output parser
+│   │   ├── blast_validation_parser.py  # BLAST + minimap2 validation_results.json
 │   │   └── paf_coverage_parser.py      # PAF per-position coverage parser
 │   ├── taxonomy/           # Taxonomy resolution
 │   │   ├── database_indexer.py     # Kraken2 database index reader
@@ -481,7 +480,12 @@ The validation tab uses two sub-tabs to separate BLAST and minimap2 results:
 
 ### On-Demand Validation (IMPLEMENTED)
 
-Allows validating unexpected organisms found during sequencing without re-running Kraken2.
+Allows validating unexpected organisms found during sequencing without
+re-running Kraken2. As of the 2026-04-30 refactor, validation
+processing is delegated to nanometanf -- the GUI invokes ``nextflow
+run -resume --validation_only`` against the main pipeline outdir, so
+previously-validated (sample, taxid) pairs hit the Nextflow work
+cache and only the newly-added taxid actually runs.
 
 ```
 User sees unexpected organism in Organisms tab
@@ -490,18 +494,72 @@ User sees unexpected organism in Organisms tab
 Clicks "Validate" button on organism card
         |
         v
-OnDemandValidator (core/workflow/on_demand_validator.py)
-  1. Download reference genome (if missing)
-  2. Build BLAST database (if missing)
-  3. Extract reads from Kraken2 per-read output
-  4. Run BLAST validation
-  5. Parse and display results
+OnDemandValidator.validate_organism(config=...)
+        |
+        v  (when pipeline_source is configured)
+validate_via_nanometanf
+  1. Download reference genome via NCBI Datasets if missing
+  2. Append taxid -> genome path to <outdir>/validation/pathogen_genomes.json
+     (cumulative across calls; atomic .replace())
+  3. Build nextflow command:
+       nextflow run <pipeline> -profile conda -resume \
+           --validation_only \
+           --kraken2_output_dir <outdir>/kraken2 \
+           --reads_dir <outdir>/<reads_dir> \
+           --validation_method blast|minimap2|both \
+           --pathogen_genomes <outdir>/validation/pathogen_genomes.json \
+           --taxids_to_validate <comma-list of all enabled taxids> \
+           --outdir <outdir>
+  4. Subprocess run; nanometanf VALIDATION_ONLY workflow consumes the
+     existing kraken2 + reads dirs and runs only the new (sample, taxid)
+     pairs (others hit the work cache).
+  5. Parse <outdir>/validation/validation_results.json + per-sample
+     stats JSONs into ValidationResult.
 ```
 
+The legacy local-subprocess path (``run_blast``, ``_run_minimap2``,
+``build_blast_db``, ``download_genome``, ``parse_blast_results``)
+remains in ``on_demand_validator.py`` as a fallback when no
+pipeline_source is configured. Removing it forces every deployment
+through nanometanf; left as a follow-up so operators on no-Nextflow
+setups still have a path.
+
 **Requirements**:
-- Kraken2 per-read output saved (`save_reads_assignment: true`)
+- ``pipeline_source`` configured (the canonical setup)
+- Kraken2 per-read output saved (``save_reads_assignment: true``)
 - Original FASTQ files accessible
-- BLAST+ toolkit installed
+
+**Resume cache behaviour (verified 2026-04-30 e2e):** with the same
+``--outdir`` and a cumulative ``pathogen_genomes.json``, a second
+invocation that adds taxid B after taxid A reports ``cached: 2`` per
+per-(sample, taxid) process for A's pairs and only B's pairs run end
+to end. The aggregator (AGGREGATE_VALIDATION_RESULTS) re-runs to
+rebuild ``validation_results.json`` over the union.
+
+**Bug-fixes shipped during the 2026-04-30 e2e audit:**
+- ``subworkflows/local/validation/main.nf:82`` -- coerce
+  ``taxids_to_validate`` to string before ``.split()``; Nextflow's
+  CLI parser auto-promotes single all-digit values to Integer despite
+  the schema declaring string, so ``--taxids_to_validate 9606`` was
+  failing every single-taxid GUI call.
+- ``modules/local/minimap2_validation/main.nf:136-153`` -- double-
+  escape ``\\n`` in the awk JSON writer; bare ``\n`` in the Groovy
+  triple-quoted string was expanding to a literal newline at parse
+  time, producing unterminated awk string literals. 100% of minimap2
+  invocations were exiting code 2 before this fix.
+- ``modules/local/blastn_validation/main.nf:113-128`` -- dedupe by
+  qseqid so ``hit_rate`` is bounded to [0, 1]; previously every HSP
+  row counted, so a 654-HSP/499-read result rendered as "1.3%
+  Confirmed" in the GUI.
+
+**UX fixes shipped at the same time:**
+- Coverage depth threshold is now operator-controllable via a numeric
+  input next to the MAPQ filter (was hardcoded at 10x).
+- BLAST stats-table column "Query Coverage (%)" -> "Read Alignment %"
+  (clearer + method-agnostic).
+- Result-card 4th metric: minimap2 "Alignment Score" -> "Mapping
+  Confidence: X / 60" with a "30+ reliable" caption. BLAST: "Query
+  Coverage" -> "Read Alignment %" (consistent with stats-table).
 
 ### Validation Result Card "View Coverage" Button
 
@@ -613,7 +671,8 @@ pytest tests/test_classification_tab.py -v      # Classification tab functions
 pytest tests/test_qc_tab.py -v                  # QC tab functions
 pytest tests/test_main_tab.py -v                # Main tab functions
 pytest tests/test_data_loaders.py -v            # Data loader functions
-pytest tests/test_nanometanf_parser.py -v       # Pipeline output parser
+pytest tests/test_validation_system.py -v       # Validation parser + on-demand validator
+pytest tests/test_coverage_threshold_control.py -v  # Coverage depth threshold UI control
 ```
 
 ### Test Data
@@ -645,7 +704,6 @@ Kraken2 DB: /Users/andreassjodin/Desktop/ONT/demodata_ONT/database/kraken2.gtdb_
 | Developer Guide | `docs/developer-guide.md` | Architecture details |
 | API Reference | `docs/api-reference.md` | Parser and loader APIs |
 | Migration Guide | `docs/MIGRATION_GUIDE_V2.md` | v1 to v2 migration |
-| Parser Guide | `docs/nanometanf_parser_guide.md` | Pipeline output parser details |
 
 ## Links
 
