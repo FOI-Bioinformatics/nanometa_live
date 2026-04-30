@@ -845,7 +845,11 @@ def create_nextflow_config(config: Dict[str, Any]) -> str:
     validation_cores = config.get("validation_cores", 2)
     qc_tool = str(config.get("qc_tool", "chopper")).lower()
 
-    profile = config.get("pipeline_profile", "docker")
+    # Default to ``conda`` to match the project convention documented in
+    # CLAUDE.md ("Nanometa pipeline_profile is conda, never docker").
+    # The legacy "docker" default was a remnant of the original nf-core
+    # template and contradicted every actual deployment.
+    profile = config.get("pipeline_profile", "conda")
 
     # Profile-specific container runtime settings. Using explicit string
     # concatenation (rather than nested f-strings with doubled braces) to avoid

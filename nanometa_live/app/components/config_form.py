@@ -206,34 +206,43 @@ def create_config_form():
                     ], md=12)
                 ], className="mb-4"),
 
-                # Pipeline Profile (essential - determines how pipeline runs)
+                # Pipeline Profile (essential - determines how pipeline runs).
+                # Default is ``conda`` per the project convention documented in
+                # CLAUDE.md ("pipeline_profile: conda; always conda for
+                # nanometanf"). Conda is reordered to the top and marked
+                # Recommended; Docker is kept as a secondary option for
+                # workstations that already have Docker Desktop installed.
                 dbc.Row([
                     dbc.Col([
                         dbc.Label([
-                            "Pipeline Profile ",
+                            "How tools are run ",
                             html.I(className="bi bi-info-circle text-muted ms-1", id="profile-info")
                         ], html_for="pipeline-profile-input"),
                         dbc.Select(
                             id="pipeline-profile-input",
                             options=[
-                                {"label": "Docker (Recommended)", "value": "docker"},
-                                {"label": "Singularity", "value": "singularity"},
-                                {"label": "Conda", "value": "conda"},
-                                {"label": "Local (no containers)", "value": "standard"}
+                                {"label": "Conda (recommended)", "value": "conda"},
+                                {"label": "Docker", "value": "docker"},
+                                {"label": "Singularity (HPC)", "value": "singularity"},
+                                {"label": "Local (tools already on PATH)", "value": "standard"}
                             ],
-                            value="docker",
+                            value="conda",
                             persistence=True,
                             persistence_type="session",
                         ),
                         dbc.Tooltip(
-                            "How pipeline tools (Kraken2, fastp, etc.) are run. "
-                            "Docker: Best for most users, requires Docker Desktop. "
-                            "Singularity: For HPC clusters. "
-                            "Conda: If Docker is unavailable. "
-                            "Local: Tools must already be installed in your PATH.",
+                            "How pipeline tools (Kraken2, fastp, BLAST, etc.) are "
+                            "supplied to the Nextflow run. "
+                            "Conda: builds isolated environments per tool from a "
+                            "lockfile -- the canonical setup for nanometanf and "
+                            "the only profile this project tests against. "
+                            "Docker: pulls pre-built images; faster startup but "
+                            "needs Docker Desktop running. "
+                            "Singularity: HPC clusters. "
+                            "Local: tools must already be installed in your PATH.",
                             target="profile-info"
                         ),
-                        dbc.FormText("How to run pipeline tools (requires Docker Desktop, Conda, or local install)")
+                        dbc.FormText("Conda is the canonical setup; switch only if Conda is unavailable")
                     ], md=12)
                 ], className="mb-4"),
 
@@ -528,10 +537,17 @@ def create_config_form():
                     dbc.CardBody([
                         dbc.Row([
                             dbc.Col([
+                                # Enabled by default. The on-demand validation
+                                # path now uses ``nextflow run -resume`` against
+                                # nanometanf so previously-validated taxids hit
+                                # the work cache and only the new pair runs --
+                                # cheap enough to be on by default. Operators
+                                # who want pure classification can still toggle
+                                # this off.
                                 dbc.Switch(
                                     id="blast-validation-input",
                                     label="Enable confirmation testing",
-                                    value=False
+                                    value=True
                                 ),
                                 dbc.FormText("Double-check detected species against reference genomes")
                             ], md=3),
@@ -544,11 +560,17 @@ def create_config_form():
                                 dcc.Dropdown(
                                     id="validation-method-input",
                                     options=[
-                                        {"label": "Sequence search (thorough)", "value": "blast"},
-                                        {"label": "Genome alignment (fast)", "value": "minimap2"},
-                                        {"label": "Both (recommended)", "value": "both"}
+                                        {"label": "Genome alignment (recommended)", "value": "minimap2"},
+                                        {"label": "Sequence search", "value": "blast"},
+                                        {"label": "Both (highest confidence, 2x compute)", "value": "both"}
                                     ],
-                                    value="both",
+                                    # Default to minimap2: fast, ONT-optimised,
+                                    # gives coverage-depth plots + mapping
+                                    # confidence. BLAST is more thorough but
+                                    # 5-10x slower per pair. Operators can
+                                    # switch to "Both" when sample volume is
+                                    # low and final-confidence matters.
+                                    value="minimap2",
                                     clearable=False
                                 ),
                                 dbc.Tooltip(
