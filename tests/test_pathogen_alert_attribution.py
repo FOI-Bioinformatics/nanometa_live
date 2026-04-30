@@ -15,7 +15,7 @@ from nanometa_live.app.components.pathogen_alert import (
     _build_attribution_popover,
     _render_sample_attribution,
 )
-from nanometa_live.app.tabs.dashboard_tab import _make_banner_content
+from nanometa_live.app.tabs.dashboard_helpers import _make_banner_content
 
 
 def _render_to_json(component) -> str:
