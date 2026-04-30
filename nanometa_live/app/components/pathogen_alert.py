@@ -559,8 +559,11 @@ def HighRiskPathogenAlert(
         ], className="d-flex align-items-center p-3",
            style={
                "backgroundColor": threat["bg_color"],
-               "borderLeft": f"4px solid {threat['border_color']}",
-               "borderRadius": "4px"
+               # 6px left-border + 8px radius matches the verdict
+               # banner and OrganismCard treatment so the dashboard
+               # speaks one visual dialect for all primary cards.
+               "borderLeft": f"6px solid {threat['border_color']}",
+               "borderRadius": "8px"
            })
     ], className="mb-3", role="alert")
 
@@ -628,8 +631,13 @@ def WatchedSpeciesAlert(
             className="p-2",
             style={
                 "backgroundColor": threat["bg_color"],
-                "borderLeft": f"3px solid {threat['border_color']}",
-                "borderRadius": "3px",
+                # 6px left-border + 8px radius matches the
+                # CriticalPathogenAlert and HighRiskPathogenAlert
+                # treatment. Watched species is a smaller card but
+                # uses the same accent thickness so all three pathogen
+                # tiers share the same visual language.
+                "borderLeft": f"6px solid {threat['border_color']}",
+                "borderRadius": "8px",
                 "fontSize": "14px"
             }
         )
