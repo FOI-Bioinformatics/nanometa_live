@@ -1216,11 +1216,16 @@ def register_main_callbacks(app: Dash):
             # Run validation (synchronous for now - could be made async with background callback)
             # Note: For production, this should use Dash background callbacks
             method = validation_method if validation_method in ("blast", "minimap2", "both") else "blast"
+            # Passing ``config`` routes through the nanometanf
+            # validation_only entry point (with -resume) when a
+            # pipeline_source is configured. The legacy subprocess
+            # path is now a fallback for the no-Nextflow case.
             result = validator.validate_organism(
                 taxid=taxid,
                 name=name,
                 sample=sample or "all",
                 method=method,
+                config=config,
             )
 
             if result.success:

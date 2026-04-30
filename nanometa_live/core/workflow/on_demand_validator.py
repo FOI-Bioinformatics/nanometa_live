@@ -538,6 +538,42 @@ class OnDemandValidator:
                 "max_identity": 0.0,
             }
 
+    # Single accumulating pathogen genomes JSON. Living in
+    # ``self.validation_dir`` keeps it next to the validation outputs
+    # nanometanf writes; the same path is read back across calls so
+    # each on-demand request appends its taxid to a stable file rather
+    # than starting fresh.
+    PATHOGEN_GENOMES_FILENAME = "pathogen_genomes.json"
+
+    def _load_pathogen_genomes(self) -> Dict[str, str]:
+        """Read the cumulative pathogen_genomes mapping (taxid -> genome
+        FASTA path) if it exists. Returns empty dict on first call or
+        when the file is missing/corrupt."""
+        path = self.validation_dir / self.PATHOGEN_GENOMES_FILENAME
+        if not path.exists():
+            return {}
+        try:
+            import json as _json
+            with open(path) as f:
+                data = _json.load(f)
+            if not isinstance(data, dict):
+                return {}
+            return {str(k): str(v) for k, v in data.items()}
+        except (json.JSONDecodeError, OSError, ValueError) as e:
+            logger.warning(f"pathogen_genomes.json unreadable, starting fresh: {e}")
+            return {}
+
+    def _save_pathogen_genomes(self, mapping: Dict[str, str]) -> Path:
+        """Atomically rewrite the cumulative pathogen_genomes mapping."""
+        import json as _json
+        path = self.validation_dir / self.PATHOGEN_GENOMES_FILENAME
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        with open(tmp, "w") as f:
+            _json.dump(mapping, f, indent=2, sort_keys=True)
+        tmp.replace(path)
+        return path
+
     def validate_via_nanometanf(
         self,
         taxid: int,
@@ -550,8 +586,14 @@ class OnDemandValidator:
         """
         Run validation by delegating to nanometanf validation-only entry point.
 
-        This ensures BLAST and minimap2 run identically whether triggered by
-        the full pipeline or on-demand from the dashboard.
+        Cumulative + resume-friendly: each call appends ``taxid`` to a
+        single ``pathogen_genomes.json`` (kept under ``self.validation_dir``)
+        and invokes ``nextflow run -resume`` against the main pipeline's
+        outdir. Nextflow's per-(sample, taxid) work cache means previously-
+        validated pairs are skipped and only the newly-added taxid actually
+        runs through EXTRACT_READS_BY_TAXID + BLASTN_VALIDATION /
+        MINIMAP2_VALIDATION. AGGREGATE_VALIDATION_RESULTS rebuilds the
+        validation_results.json over the full taxid set.
 
         Args:
             taxid: Taxonomy ID
@@ -571,7 +613,9 @@ class OnDemandValidator:
 
         # Determine pipeline source
         pipeline_source = config.get("pipeline_source", "")
-        pipeline_profile = config.get("pipeline_profile", "docker")
+        # Default profile is conda; the operator's environment is built
+        # via the conda profile per the project's nf-core convention.
+        pipeline_profile = config.get("pipeline_profile", "conda")
 
         if not pipeline_source:
             # Try to get from pipeline source config
@@ -594,31 +638,41 @@ class OnDemandValidator:
             if not genome_path:
                 return None
 
-        # Generate pathogen_genomes.json for this single taxid
-        genomes_json_path = self.validation_dir / f"pathogen_genomes_{taxid}.json"
+        # Append the new taxid to the cumulative pathogen_genomes mapping.
+        # Preserves prior taxids so Nextflow's resume cache reuses their
+        # work; only the new (sample, taxid) pair runs end-to-end.
         genome_fasta = self.genomes_dir / f"{taxid}.fasta"
+        mapping = self._load_pathogen_genomes()
+        mapping[str(taxid)] = str(genome_fasta)
         try:
-            import json as _json
-            with open(genomes_json_path, 'w') as f:
-                _json.dump({str(taxid): str(genome_fasta)}, f)
+            genomes_json_path = self._save_pathogen_genomes(mapping)
         except (PermissionError, OSError, TypeError, ValueError) as e:
             logger.exception(f"Failed to write pathogen genomes JSON: {e}")
             return None
 
+        # Comma-separated list of every taxid currently mapped. Nextflow
+        # filters to this set in the validation subworkflow; passing the
+        # whole list is what lets resume keep caches for previously-run
+        # pairs while still adding the new taxid.
+        taxids_to_validate = ",".join(sorted(mapping.keys(), key=int))
+
         if progress_callback:
             progress_callback("Launching nanometanf validation...", 20)
 
-        # Build nextflow command
-        outdir = self.validation_dir / f"nf_{sample}_{taxid}"
+        # Build nextflow command. Reuses the main pipeline's outdir so
+        # the work/ cache is shared with the original run (this is what
+        # makes -resume effective for the on-demand path).
+        outdir = self.results_dir
         cmd = [
             "nextflow", "run", pipeline_source,
+            "-resume",
             "--validation_only",
             "--kraken2_output_dir", str(self.results_dir / "kraken2"),
             "--reads_dir", str(self.input_dir) if self.input_dir else str(self.results_dir),
             "--run_validation",
             "--validation_method", method,
             "--pathogen_genomes", str(genomes_json_path),
-            "--taxids_to_validate", str(taxid),
+            "--taxids_to_validate", taxids_to_validate,
             "--outdir", str(outdir),
             "-profile", pipeline_profile,
         ]
@@ -680,15 +734,21 @@ class OnDemandValidator:
         name: str,
         sample: str,
         method: str = "blast",
-        progress_callback: Optional[Callable[[str, int], None]] = None
+        progress_callback: Optional[Callable[[str, int], None]] = None,
+        config: Optional[Dict[str, Any]] = None,
     ) -> ValidationResult:
         """
         Run full on-demand validation for an organism.
 
-        This is the main entry point that orchestrates the entire validation
-        workflow. When a nanometanf pipeline source is configured, delegates
-        to nanometanf via the validation-only entry point. Otherwise falls
-        back to local BLAST execution.
+        This is the main entry point that orchestrates the entire
+        validation workflow. When the operator has configured a
+        ``pipeline_source`` (the canonical setup), delegates to
+        nanometanf via the validation-only entry point with -resume so
+        BLAST and minimap2 run identically whether triggered by the
+        full pipeline or on-demand. Falls back to a local subprocess
+        BLAST/minimap2 path only if nanometanf is unavailable -- that
+        legacy path duplicates pipeline logic and is retained purely
+        for the no-Nextflow case.
 
         Args:
             taxid: Taxonomy ID
@@ -696,6 +756,10 @@ class OnDemandValidator:
             sample: Sample name
             method: Validation method - 'blast', 'minimap2', or 'both'
             progress_callback: Optional callback(message, percent)
+            config: Optional run configuration. When this carries
+                ``pipeline_source`` / ``pipeline_profile`` /
+                ``pipeline_branch`` keys the call routes through
+                nanometanf rather than the legacy subprocess path.
 
         Returns:
             ValidationResult with validation statistics
@@ -703,6 +767,33 @@ class OnDemandValidator:
         job_id = self._get_job_id(taxid, sample)
         job = ValidationJob(taxid=taxid, name=name, sample=sample)
         self._jobs[job_id] = job
+
+        # Preferred path: delegate to nanometanf so the pipeline owns
+        # all data processing. validate_via_nanometanf maintains the
+        # cumulative pathogen_genomes.json + uses -resume so previously-
+        # validated taxids are cached and only the new (sample, taxid)
+        # pair runs end-to-end. Returns None if no pipeline source is
+        # configured or the nextflow run fails; in that case we fall
+        # through to the legacy subprocess path below.
+        if config and config.get("pipeline_source"):
+            nf_result = self.validate_via_nanometanf(
+                taxid=taxid,
+                name=name,
+                sample=sample,
+                method=method,
+                config=config,
+                progress_callback=progress_callback,
+            )
+            if nf_result is not None:
+                # Mirror the legacy job state for callers tracking jobs
+                job.status = ValidationStatus.COMPLETED
+                job.status_message = "Validated via nanometanf"
+                job.progress_percent = 100
+                return nf_result
+            logger.info(
+                "nanometanf delegation returned None; falling back to "
+                "local subprocess BLAST/minimap2 path"
+            )
 
         def update_job(status: ValidationStatus, msg: str, pct: int):
             job.status = status
