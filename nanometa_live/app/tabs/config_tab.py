@@ -17,6 +17,7 @@ from dash import html
 
 from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.config.config_loader import ConfigLoader
+from nanometa_live.app.utils.github_branches import fetch_nanometanf_branches
 
 
 def _build_config_list_items(configs):
@@ -273,6 +274,34 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             )
 
     @app.callback(
+        Output("pipeline-branch-input", "options"),
+        Input("pipeline-source-type-input", "value"),
+        State("app-config", "data"),
+    )
+    def populate_pipeline_branch_options(source_type, config):
+        """Populate the pipeline-branch dropdown with the live nanometanf
+        branch list from GitHub.
+
+        Fires once on initial load (when ``pipeline-source-type-input``
+        first emits its default value) and again whenever the operator
+        flips between Remote and Local. The fetcher is cached for 10
+        minutes so flipping the dropdown back and forth does not spam
+        GitHub. Offline-mode runs short-circuit to the fallback list.
+        """
+        offline = bool(config and config.get("offline_mode"))
+        # When using a Local pipeline path the branch dropdown is
+        # hidden by the layout, but we still populate it so the value
+        # round-trips through saved configs without losing options.
+        branches = fetch_nanometanf_branches(offline_mode=offline)
+        # Keep the option labels operator-friendly.
+        labels = {
+            "main": "main (default)",
+            "master": "master (legacy default)",
+            "dev": "dev (development)",
+        }
+        return [{"label": labels.get(b, b), "value": b} for b in branches]
+
+    @app.callback(
         Output("save-config-modal", "is_open"),
         [
             Input("save-config-button", "n_clicks"),
@@ -419,7 +448,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             State("memory-mapping-input", "value"),
             State("blast-validation-input", "value"),
             State("validation-method-input", "value"),
-            State("min-identity-input", "value"),
             State("e-value-cutoff-input", "value"),
             State("genome-cache-dir-input", "value"),
             State("cores-input", "value"),
@@ -465,7 +493,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         memory_mapping,
         blast_validation,
         validation_method,
-        min_identity,
         e_value_cutoff,
         genome_cache_dir,
         cores,
@@ -579,9 +606,9 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             if min_reads_per_level < 1:
                 errors.append("Minimum Reads per Level must be at least 1")
 
-        if min_identity is not None:
-            if min_identity < 50 or min_identity > 100:
-                errors.append("Validation Threshold must be between 50-100%")
+        # The legacy min_identity input was collapsed into
+        # validation_identity_threshold on 2026-04-30; no separate
+        # validation here.
 
         if e_value_cutoff is not None:
             if e_value_cutoff < 0 or e_value_cutoff > 1:
@@ -661,8 +688,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         if minimap2_min_mapq is not None:
             config["minimap2_min_mapq"] = minimap2_min_mapq
 
-        if min_identity is not None:
-            config["min_perc_identity"] = min_identity
+        # min_perc_identity is now sourced from validation_identity_threshold
+        # (single canonical input in the Read Filtering and Validation card).
+        # See parameter_mapping.create_nextflow_params -- both nanometanf
+        # params (blast_perc_identity AND validation_identity_threshold)
+        # are populated from the same operator-facing value.
 
         if e_value_cutoff is not None:
             config["e_val_cutoff"] = e_value_cutoff
@@ -853,7 +883,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("validation-method-input", "value"),
             Output("minimap2-preset-input", "value"),
             Output("minimap2-min-mapq-input", "value"),
-            Output("min-identity-input", "value"),
             Output("e-value-cutoff-input", "value"),
             Output("genome-cache-dir-input", "value"),
             Output("cores-input", "value"),
@@ -920,7 +949,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         minimap2_preset = config.get("minimap2_preset", "map-ont")
         minimap2_min_mapq = config.get("minimap2_min_mapq", 30)
 
-        min_identity = config.get("min_perc_identity", 90)
         e_value_cutoff = config.get("e_val_cutoff", 0.01)
         genome_cache_dir = config.get("genome_cache_dir", "~/.nanometa")
         cores = config.get("pipeline_cores", config.get("snakemake_cores", 1))  # Backward compatibility
@@ -1002,7 +1030,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             validation_method,
             minimap2_preset,
             minimap2_min_mapq,
-            min_identity,
             e_value_cutoff,
             genome_cache_dir,
             cores,
@@ -1583,7 +1610,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("memory-mapping-input", "value"),
             Input("blast-validation-input", "value"),
             Input("validation-method-input", "value"),
-            Input("min-identity-input", "value"),
             Input("e-value-cutoff-input", "value"),
             Input("minimap2-preset-input", "value"),
             Input("minimap2-min-mapq-input", "value"),
@@ -1615,7 +1641,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         analysis_name, nanopore_dir, kraken_db, results_dir, update_interval,
         danger_threshold, taxonomy, check_interval, realtime_timeout_minutes,
         min_reads_per_level, memory_mapping, blast_validation, validation_method,
-        min_identity, e_value_cutoff, minimap2_preset, minimap2_min_mapq,
+        e_value_cutoff, minimap2_preset, minimap2_min_mapq,
         genome_cache_dir, cores, gui_port, clean_temp,
         qc_tool, skip_nanoplot, kraken2_incremental, enable_krona, enable_nanopore_stats,
         chopper_minlength, chopper_quality, filtlong_minlength,
@@ -1652,7 +1678,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "validation_method": validation_method or "blast",
             "minimap2_preset": minimap2_preset or "map-ont",
             "minimap2_min_mapq": minimap2_min_mapq,
-            "min_perc_identity": min_identity,
             "e_val_cutoff": e_value_cutoff,
             "genome_cache_dir": genome_cache_dir or "~/.nanometa",
             "pipeline_cores": cores,
