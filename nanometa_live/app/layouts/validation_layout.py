@@ -168,7 +168,7 @@ def _create_blast_tab() -> dbc.Tab:
                                     )
                                 ]
                             )
-                        ], title="Match Quality Chart (Advanced)")
+                        ], title="Match % Distribution (Advanced)")
                     ], start_collapsed=True, className="mb-4"),
 
                     # Stats table (collapsible)
@@ -611,7 +611,7 @@ def create_validation_result_card(
                 ], md=3),
                 dbc.Col([
                     html.Div([
-                        html.Small("Match Quality", className="text-muted d-block"),
+                        html.Small("Match %", className="text-muted d-block"),
                         html.Strong(f"{percent_identity:.1f}%", style={"fontSize": "1.2rem"})
                     ])
                 ], md=3),
@@ -656,4 +656,4 @@ def create_validation_result_card(
                 className="float-end",
             ) if show_coverage_button else html.Span(),
         ], className="py-1")
-    ], className=f"mb-3 {config['border']}", style={"borderLeftWidth": "4px"})
+    ], className=f"mb-3 {config['border']}", style={"borderLeftWidth": "6px"})

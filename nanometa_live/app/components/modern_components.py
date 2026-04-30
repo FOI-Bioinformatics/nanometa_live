@@ -17,12 +17,12 @@ def WorkflowStepper(active_step: int = 1) -> html.Div:
     """
     Reusable workflow step indicator for the setup sequence.
 
-    Shows a 4-step horizontal stepper: Configure -> Watchlist -> Prepare -> Analyse.
+    Shows a 4-step horizontal stepper: Configure -> Watchlist -> Prepare -> Analyze.
     Completed steps are green, the active step is blue, and future steps are grey.
 
     Args:
         active_step: Which step is currently active (1-4).
-            1 = Configuration, 2 = Watchlist, 3 = Preparation, 4 = Analyse
+            1 = Configuration, 2 = Watchlist, 3 = Preparation, 4 = Analyze
 
     Returns:
         html.Div containing the step indicator row
@@ -31,7 +31,7 @@ def WorkflowStepper(active_step: int = 1) -> html.Div:
         {"num": "1", "label": "Configure"},
         {"num": "2", "label": "Watchlist"},
         {"num": "3", "label": "Prepare"},
-        {"num": "4", "label": "Analyse", "icon": "bi-play-fill"},
+        {"num": "4", "label": "Analyze", "icon": "bi-play-fill"},
     ]
 
     children = []
