@@ -475,3 +475,173 @@ class TestBlastValidationParserCache:
         # Next call must re-parse (different fingerprint).
         parser.get_validation_results()
         assert parser._results_cache_mtime != old_mtime
+
+
+
+# ---------------------------------------------------------------------------
+# Cumulative pathogen_genomes for resume-friendly on-demand validation
+# ---------------------------------------------------------------------------
+
+
+class TestCumulativePathogenGenomes:
+    """The 2026-04-30 refactor switched validate_via_nanometanf from
+    per-call ``pathogen_genomes_<taxid>.json`` files to a single
+    accumulating ``pathogen_genomes.json`` so Nextflow's per-(sample,
+    taxid) work cache can resume across calls. These tests pin that
+    behaviour."""
+
+    def _make_validator(self, tmp_path):
+        from nanometa_live.core.workflow.on_demand_validator import OnDemandValidator
+        results_dir = tmp_path / "results"
+        results_dir.mkdir()
+        return OnDemandValidator(
+            results_dir=str(results_dir),
+            cache_dir=str(tmp_path / "cache"),
+        )
+
+    def test_load_returns_empty_dict_when_file_missing(self, tmp_path):
+        v = self._make_validator(tmp_path)
+        assert v._load_pathogen_genomes() == {}
+
+    def test_save_then_load_roundtrip(self, tmp_path):
+        v = self._make_validator(tmp_path)
+        v._save_pathogen_genomes({"562": "/tmp/562.fasta", "1280": "/tmp/1280.fasta"})
+        loaded = v._load_pathogen_genomes()
+        assert loaded == {"562": "/tmp/562.fasta", "1280": "/tmp/1280.fasta"}
+
+    def test_save_writes_to_validation_dir(self, tmp_path):
+        from nanometa_live.core.workflow.on_demand_validator import OnDemandValidator
+        v = self._make_validator(tmp_path)
+        path = v._save_pathogen_genomes({"562": "/tmp/562.fasta"})
+        assert path.parent == v.validation_dir
+        assert path.name == OnDemandValidator.PATHOGEN_GENOMES_FILENAME
+
+    def test_load_recovers_from_corrupt_json(self, tmp_path):
+        v = self._make_validator(tmp_path)
+        path = v.validation_dir / v.PATHOGEN_GENOMES_FILENAME
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{ this is not json")
+        # Corrupt file -> empty mapping (lets the next call rebuild)
+        assert v._load_pathogen_genomes() == {}
+
+    def test_load_rejects_non_dict_root(self, tmp_path):
+        v = self._make_validator(tmp_path)
+        path = v.validation_dir / v.PATHOGEN_GENOMES_FILENAME
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("[1, 2, 3]")
+        # Schema mismatch (list at root) -> empty mapping
+        assert v._load_pathogen_genomes() == {}
+
+    def test_save_atomically_replaces_existing_file(self, tmp_path):
+        v = self._make_validator(tmp_path)
+        v._save_pathogen_genomes({"562": "/tmp/562.fasta"})
+        # Second save with different content should fully replace
+        v._save_pathogen_genomes({"1280": "/tmp/1280.fasta"})
+        assert v._load_pathogen_genomes() == {"1280": "/tmp/1280.fasta"}
+
+    def test_pathogen_genomes_filename_is_stable(self):
+        """Module-level constant; the GUI subprocess path and any
+        external tooling rely on it not changing without notice."""
+        from nanometa_live.core.workflow.on_demand_validator import OnDemandValidator
+        assert OnDemandValidator.PATHOGEN_GENOMES_FILENAME == "pathogen_genomes.json"
+
+
+# ---------------------------------------------------------------------------
+# validate_organism dispatches to validate_via_nanometanf when configured
+# ---------------------------------------------------------------------------
+
+
+class TestValidateOrganismDispatch:
+    """When ``config['pipeline_source']`` is set, validate_organism must
+    delegate to validate_via_nanometanf (the canonical path that runs
+    BLAST/minimap2 inside nanometanf with -resume). When unset or when
+    delegation returns None, the legacy subprocess path takes over."""
+
+    def _make_validator(self, tmp_path):
+        from nanometa_live.core.workflow.on_demand_validator import OnDemandValidator
+        results_dir = tmp_path / "results"
+        results_dir.mkdir()
+        return OnDemandValidator(
+            results_dir=str(results_dir),
+            cache_dir=str(tmp_path / "cache"),
+        )
+
+    def test_dispatches_to_nanometanf_when_pipeline_source_set(self, tmp_path, monkeypatch):
+        from nanometa_live.core.workflow.on_demand_validator import (
+            OnDemandValidator,
+            ValidationResult,
+        )
+        v = self._make_validator(tmp_path)
+
+        sentinel = ValidationResult(
+            taxid=562, name="Escherichia coli", sample="barcode01",
+            total_classified_reads=100, extracted_reads=100,
+            validated_reads=85, validation_rate=85.0,
+            avg_identity=99.0, min_identity=95.0, max_identity=100.0,
+            success=True,
+        )
+
+        captured = {}
+        def fake_nf(self, taxid, name, sample, method, config, progress_callback):
+            captured["taxid"] = taxid
+            captured["sample"] = sample
+            captured["config"] = config
+            return sentinel
+
+        monkeypatch.setattr(OnDemandValidator, "validate_via_nanometanf", fake_nf)
+
+        result = v.validate_organism(
+            taxid=562, name="Escherichia coli", sample="barcode01",
+            config={"pipeline_source": "FOI-Bioinformatics/nanometanf"},
+        )
+        assert result is sentinel
+        assert captured["taxid"] == 562
+        assert captured["config"]["pipeline_source"] == "FOI-Bioinformatics/nanometanf"
+
+    def test_falls_back_when_no_pipeline_source(self, tmp_path, monkeypatch):
+        """No pipeline_source -> skip nanometanf delegation, go straight
+        to legacy path. We don't actually run subprocess BLAST in the
+        test; we only verify validate_via_nanometanf is NOT called."""
+        from nanometa_live.core.workflow.on_demand_validator import OnDemandValidator
+        v = self._make_validator(tmp_path)
+
+        called = {"nf": False}
+        def fake_nf(self, *a, **kw):
+            called["nf"] = True
+            return None
+        monkeypatch.setattr(OnDemandValidator, "validate_via_nanometanf", fake_nf)
+
+        # No config -> nf path is not entered. The legacy path will
+        # fail gracefully (no Kraken2 output exists in tmp_path) and
+        # return a failed ValidationResult; we only assert dispatch
+        # behaviour here.
+        v.validate_organism(taxid=562, name="E. coli", sample="barcode01")
+        assert called["nf"] is False
+
+    def test_falls_back_when_nanometanf_returns_none(self, tmp_path, monkeypatch):
+        """Pipeline source IS set but the nanometanf call returns None
+        (e.g. genome download failed). The legacy subprocess path
+        should still be reachable -- the caller must not silently
+        get None back."""
+        from nanometa_live.core.workflow.on_demand_validator import OnDemandValidator
+        v = self._make_validator(tmp_path)
+
+        monkeypatch.setattr(
+            OnDemandValidator,
+            "validate_via_nanometanf",
+            lambda self, *a, **kw: None,
+        )
+
+        # Legacy path will fail (no kraken2 output) but it should at
+        # least be entered -- verified by getting back a ValidationResult
+        # rather than the None that nanometanf returned.
+        result = v.validate_organism(
+            taxid=562, name="E. coli", sample="barcode01",
+            config={"pipeline_source": "FOI-Bioinformatics/nanometanf"},
+        )
+        assert result is not None
+        # The legacy path returns a ValidationResult; success may be
+        # False because there's no real Kraken2 output, but the type
+        # contract is preserved.
+        from nanometa_live.core.workflow.on_demand_validator import ValidationResult
+        assert isinstance(result, ValidationResult)
