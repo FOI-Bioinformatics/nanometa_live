@@ -195,8 +195,8 @@ def _create_blast_tab() -> dbc.Tab:
                                              "headerTooltip": "Percentage of sequences confirmed. 80%+ is strong evidence."},
                                             {"headerName": "Match %", "field": "percent_identity_mean", "type": "numericColumn",
                                              "headerTooltip": "How closely sequences match the reference. 95%+ is a strong match."},
-                                            {"headerName": "Query Coverage (%)", "field": "coverage_breadth", "type": "numericColumn",
-                                             "headerTooltip": "Percentage of the reference genome covered by sequences"},
+                                            {"headerName": "Read Alignment %", "field": "coverage_breadth", "type": "numericColumn",
+                                             "headerTooltip": "Average percentage of each sequence that aligned to the reference. Higher = stronger matches. Computed per-method: BLAST uses qcovs, minimap2 uses span/qlen."},
                                             {
                                                 "headerName": "Status",
                                                 "field": "status",
@@ -286,7 +286,7 @@ def _create_coverage_tab() -> dbc.Tab:
                                 persistence=True,
                                 persistence_type="session",
                             ),
-                        ], md=6),
+                        ], md=4),
                         dbc.Col([
                             dbc.Label([
                                 "Confidence filter:",
@@ -312,6 +312,37 @@ def _create_coverage_tab() -> dbc.Tab:
                                 value=0,
                                 min=0,
                                 max=60,
+                                step=1,
+                                className="form-control",
+                                style={"maxWidth": "120px"},
+                            ),
+                        ], md=2),
+                        dbc.Col([
+                            dbc.Label([
+                                "Depth threshold:",
+                                dbc.Badge(
+                                    "?",
+                                    color="secondary",
+                                    pill=True,
+                                    className="ms-1",
+                                    id="depth-threshold-help-badge",
+                                    style={"cursor": "pointer", "fontSize": "0.7rem"},
+                                ),
+                                dbc.Tooltip(
+                                    "Below this depth (x), regions are highlighted red on the depth plot. "
+                                    "The default of 10x is a reasonable starting point for whole-genome data. "
+                                    "Lower it (1-5x) for amplicon or low-coverage protocols; "
+                                    "raise it (20-50x) for high-depth WGS runs where 10x is below the noise floor.",
+                                    target="depth-threshold-help-badge",
+                                    placement="top",
+                                ),
+                            ], className="fw-bold"),
+                            dcc.Input(
+                                id="coverage-depth-threshold",
+                                type="number",
+                                value=10,
+                                min=1,
+                                max=1000,
                                 step=1,
                                 className="form-control",
                                 style={"maxWidth": "120px"},
@@ -623,14 +654,28 @@ def create_validation_result_card(
                 ], md=3),
                 dbc.Col([
                     html.Div([
+                        # 4th metric is method-conditional. minimap2's
+                        # mapq is a 0-60 confidence scale; we render
+                        # it as ``X / 60`` so the operator sees the
+                        # scale anchor without needing a tooltip.
+                        # BLAST has no equivalent confidence metric;
+                        # we show the read-alignment percentage
+                        # (coverage_breadth) instead and rename
+                        # "Query Coverage" -> "Read Alignment %"
+                        # for consistency with the stats-table header.
                         html.Small(
-                            "Alignment Score" if validation_method == "minimap2" else "Query Coverage",
+                            "Mapping Confidence" if validation_method == "minimap2" else "Read Alignment %",
                             className="text-muted d-block"
                         ),
                         html.Strong(
-                            f"{avg_mapq:.1f}" if validation_method == "minimap2" else f"{coverage*100:.1f}%",
+                            f"{avg_mapq:.0f} / 60" if validation_method == "minimap2" else f"{coverage*100:.1f}%",
                             style={"fontSize": "1.2rem"}
-                        )
+                        ),
+                        html.Small(
+                            "30+ reliable" if validation_method == "minimap2" else "",
+                            className="text-muted d-block",
+                            style={"fontSize": "0.7rem"},
+                        ) if validation_method == "minimap2" else html.Span(),
                     ])
                 ], md=3),
             ]),

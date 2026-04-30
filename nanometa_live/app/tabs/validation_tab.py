@@ -715,10 +715,11 @@ def register_validation_callbacks(app: Dash):
         [
             Input("coverage-species-selector", "value"),
             Input("coverage-mapq-filter", "value"),
+            Input("coverage-depth-threshold", "value"),
         ],
         State("app-config", "data"),
     )
-    def update_coverage_plots(selected_key, min_mapq, config):
+    def update_coverage_plots(selected_key, min_mapq, depth_threshold, config):
         """Load PAF data and render coverage plots."""
         empty = create_empty_coverage_figure
         hidden = {"display": "none"}
@@ -731,6 +732,13 @@ def register_validation_callbacks(app: Dash):
             min_mapq = int(min_mapq or 0)
         except (ValueError, TypeError):
             min_mapq = 0
+
+        try:
+            threshold = int(depth_threshold) if depth_threshold is not None else 10
+            if threshold < 1:
+                threshold = 1
+        except (ValueError, TypeError):
+            threshold = 10
 
         coverage = _load_real_coverage(selected_key, config, min_mapq)
 
@@ -746,7 +754,7 @@ def register_validation_callbacks(app: Dash):
                 className="text-center",
             ), hidden
 
-        depth_fig = create_coverage_depth_figure(coverage)
+        depth_fig = create_coverage_depth_figure(coverage, threshold=threshold)
         cum_fig = create_cumulative_coverage_figure(coverage)
         hist_fig = create_depth_histogram_figure(coverage)
         stats = create_coverage_stats_summary(coverage)
