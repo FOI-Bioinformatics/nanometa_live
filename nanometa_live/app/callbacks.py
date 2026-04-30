@@ -186,7 +186,8 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             Output("status-text", "children"),
             Output("status-details", "children"),
         ],
-        [Input("backend-status", "data"), Input("app-config", "data")],
+        Input("backend-status", "data"),
+        Input("app-config", "data"),
     )
     def update_status_display(status, config):
         """Update the status display based on backend status."""
@@ -233,7 +234,9 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             Output("start-stop-button", "color"),
             Output("start-stop-button", "disabled"),
         ],
-        [Input("backend-status", "data"), Input("app-config", "data"), Input("readiness-state", "data")],
+        Input("backend-status", "data"),
+        Input("app-config", "data"),
+        Input("readiness-state", "data"),
     )
     def update_control_button(status, config, readiness):
         """Update the start/stop button based on backend status and readiness."""
@@ -256,7 +259,8 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
 
     @app.callback(
         Output("start-analysis-tooltip", "children"),
-        [Input("app-config", "data"), Input("backend-status", "data")],
+        Input("app-config", "data"),
+        Input("backend-status", "data"),
     )
     def update_start_tooltip(config, status):
         """Update Start/Stop button tooltip based on mode and state."""
@@ -330,7 +334,8 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             Output("stop-confirm-modal", "is_open", allow_duplicate=True),
         ],
         Input("start-stop-button", "n_clicks"),
-        [State("app-config", "data"), State("backend-status", "data")],
+        State("app-config", "data"),
+        State("backend-status", "data"),
         prevent_initial_call=True,
     )
     def start_or_prompt_stop(n_clicks, config, status):
@@ -427,7 +432,8 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             Output("readiness-state", "data"),
             Output("readiness-popover-body", "children"),
         ],
-        [Input("update-interval", "n_intervals"), Input("app-config", "data")],
+        Input("update-interval", "n_intervals"),
+        Input("app-config", "data"),
     )
     def update_readiness_indicator(n_intervals, config):
         """Update the readiness badge, popover details, and cached readiness state."""
