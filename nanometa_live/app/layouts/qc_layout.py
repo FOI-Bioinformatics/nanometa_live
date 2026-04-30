@@ -296,6 +296,12 @@ def create_qc_layout():
                             # stops being clipped at 12 visible rows on
                             # 1280x800 displays. Closes P1-T03 from
                             # docs/audit-2026-04-28-throughput-ux.md.
+                            # ``getRowId`` keys each row by sample id so
+                            # AgGrid preserves the operator's sort, filter,
+                            # and any selection across the 30s interval
+                            # tick that rewrites rowData. Without it the
+                            # comparison surface re-renders fully every
+                            # tick and the operator loses their place.
                             dashGridOptions={
                                 "pagination": True,
                                 "paginationPageSize": 25,
@@ -306,6 +312,7 @@ def create_qc_layout():
                                 # Group header dominant; column header secondary
                                 "headerHeight": 32,
                                 "groupHeaderHeight": 38,
+                                "getRowId": {"function": "params.data.sample"},
                             },
                             className="ag-theme-alpine qc-sample-breakdown-grid",
                             style={"width": "100%"},
