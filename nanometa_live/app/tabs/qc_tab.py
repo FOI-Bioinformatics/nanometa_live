@@ -704,7 +704,8 @@ def register_qc_callbacks(app: Dash):
 
     @app.callback(
         Output("qc-help-modal", "is_open"),
-        [Input("qc-help-button", "n_clicks"), Input("close-qc-help", "n_clicks")],
+        Input("qc-help-button", "n_clicks"),
+        Input("close-qc-help", "n_clicks"),
         State("qc-help-modal", "is_open"),
         prevent_initial_call=True,
     )

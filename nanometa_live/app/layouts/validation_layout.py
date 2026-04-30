@@ -220,7 +220,22 @@ def _create_blast_tab() -> dbc.Tab:
                                         ],
                                         rowData=[],
                                         defaultColDef={"sortable": True, "filter": True, "resizable": True},
-                                        dashGridOptions={"pagination": True, "paginationPageSize": 25},
+                                        # Composite ``getRowId`` -- the
+                                        # same species can appear in
+                                        # multiple samples, so the row id
+                                        # joins species + sample_id with a
+                                        # delimiter that cannot occur in a
+                                        # taxon name. Preserves sort,
+                                        # filter, and selection across the
+                                        # 30s interval tick that rewrites
+                                        # rowData.
+                                        dashGridOptions={
+                                            "pagination": True,
+                                            "paginationPageSize": 25,
+                                            "getRowId": {
+                                                "function": "params.data.species + '||' + params.data.sample_id"
+                                            },
+                                        },
                                     )
                                 ]
                             )

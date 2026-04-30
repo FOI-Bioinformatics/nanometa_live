@@ -319,12 +319,19 @@ def create_dashboard_layout():
                                 # who want a tighter or looser view.
                                 # Closes P1-T02 from
                                 # docs/audit-2026-04-28-throughput-ux.md.
+                                # ``getRowId`` keys each row by sample id
+                                # so AgGrid preserves the operator's sort,
+                                # filter, and row selection across the 30s
+                                # interval tick that rewrites rowData.
+                                # Without it, every tick rebuilds all DOM
+                                # rows and resets interaction state.
                                 dashGridOptions={
                                     "pagination": True,
                                     "paginationPageSize": 25,
                                     "paginationPageSizeSelector": [10, 25, 50, 100],
                                     "rowSelection": {"mode": "singleRow"},
                                     "tooltipShowDelay": 500,
+                                    "getRowId": {"function": "params.data.sample"},
                                 },
                                 style={"width": "100%"},
                             ),

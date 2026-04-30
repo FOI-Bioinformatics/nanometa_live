@@ -544,8 +544,9 @@ def register_dashboard_callbacks(app: Dash):
     # ================================================================
     @app.callback(
         Output("dashboard-quality-card-content", "children"),
-        [Input("update-interval", "n_intervals")],
-        [State("app-config", "data"), State("backend-status", "data")]
+        Input("update-interval", "n_intervals"),
+        State("app-config", "data"),
+        State("backend-status", "data"),
     )
     def update_quality_card(n_intervals, config, status):
         """Update the Sample Quality card with Q-score level and value."""
@@ -765,7 +766,7 @@ def register_dashboard_callbacks(app: Dash):
             Output("dashboard-pathogen-alert-container", "children"),
             Output("dashboard-pathogen-alert-container", "style")
         ],
-        [Input("update-interval", "n_intervals")],
+        Input("update-interval", "n_intervals"),
         [
             State("app-config", "data"),
             State("backend-status", "data"),
@@ -1132,7 +1133,7 @@ def register_dashboard_callbacks(app: Dash):
             Output("dashboard-last-updated", "data"),
             Output("dashboard-last-updated-badge", "children")
         ],
-        [Input("update-interval", "n_intervals")],
+        Input("update-interval", "n_intervals"),
         [
             State("app-config", "data"),
             State("dashboard-last-updated", "data")
@@ -1171,9 +1172,9 @@ def register_dashboard_callbacks(app: Dash):
     # ---- Export Results callbacks ----
     @app.callback(
         Output("report-export-modal", "is_open"),
-        [Input("dashboard-export-btn", "n_clicks"),
-         Input("export-cancel-btn", "n_clicks"),
-         Input("export-generate-btn", "n_clicks")],
+        Input("dashboard-export-btn", "n_clicks"),
+        Input("export-cancel-btn", "n_clicks"),
+        Input("export-generate-btn", "n_clicks"),
         State("report-export-modal", "is_open"),
         prevent_initial_call=True
     )
@@ -1190,9 +1191,9 @@ def register_dashboard_callbacks(app: Dash):
     @app.callback(
         Output("export-status-message", "children"),
         Input("export-generate-btn", "n_clicks"),
-        [State("export-output-dir", "value"),
-         State("export-include-raw", "value"),
-         State("app-config", "data")],
+        State("export-output-dir", "value"),
+        State("export-include-raw", "value"),
+        State("app-config", "data"),
         prevent_initial_call=True
     )
     def generate_export(n_clicks, output_dir, include_raw, config):

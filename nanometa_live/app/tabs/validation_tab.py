@@ -516,7 +516,8 @@ def register_validation_callbacks(app: Dash):
     @app.callback(
         Output("download-blast-report", "data"),
         Input("export-blast-button", "n_clicks"),
-        [State("validation-data-store", "data"), State("app-config", "data")],
+        State("validation-data-store", "data"),
+        State("app-config", "data"),
         prevent_initial_call=True,
     )
     def export_blast_report(n_clicks, data, config):
@@ -755,7 +756,8 @@ def register_validation_callbacks(app: Dash):
     @app.callback(
         Output("download-coverage-report", "data"),
         Input("export-coverage-button", "n_clicks"),
-        [State("validation-data-store", "data"), State("app-config", "data")],
+        State("validation-data-store", "data"),
+        State("app-config", "data"),
         prevent_initial_call=True,
     )
     def export_coverage_report(n_clicks, data, config):

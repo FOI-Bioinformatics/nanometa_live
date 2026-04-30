@@ -273,7 +273,18 @@ def create_main_layout():
                         ],
                         rowData=[],
                         defaultColDef={"sortable": True, "filter": True, "resizable": True},
-                        dashGridOptions={"pagination": True, "paginationPageSize": 25},
+                        # ``getRowId`` keys each row by its taxid so AgGrid
+                        # can match rows across rowData updates on the 30s
+                        # interval tick. Without it, every tick rebuilds
+                        # all DOM rows from scratch and clobbers the
+                        # operator's sort, filter, and row selection. With
+                        # it, AgGrid updates only the cells whose values
+                        # changed and preserves interaction state.
+                        dashGridOptions={
+                            "pagination": True,
+                            "paginationPageSize": 25,
+                            "getRowId": {"function": "params.data.taxid"},
+                        },
                     )
                 ])
             ], title="Detailed Data Table (Advanced)")
