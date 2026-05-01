@@ -910,38 +910,11 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     # Timer and Progress Display Callbacks
     # ========================================================================
 
-    @app.callback(
-        [
-            Output("elapsed-time-display", "children"),
-            Output("elapsed-time-container", "style"),
-        ],
-        Input("countdown-tick", "n_intervals"),
-        State("backend-status", "data"),
-    )
-    def update_elapsed_time(n_intervals, status):
-        """
-        Update the elapsed time display showing time since analysis started.
-
-        Displays in HH:MM:SS format, visible only when backend is running.
-        """
-        from datetime import datetime
-
-        if not status or not status.get("running"):
-            return "00:00:00", {"display": "none"}
-
-        start_time = status.get("start_time")
-        if not start_time:
-            return "00:00:00", {"display": "none"}
-
-        try:
-            start_dt = datetime.fromisoformat(start_time)
-            elapsed = datetime.now() - start_dt
-            hours, remainder = divmod(int(elapsed.total_seconds()), 3600)
-            minutes, seconds = divmod(remainder, 60)
-            return f"{hours:02d}:{minutes:02d}:{seconds:02d}", {"display": "flex", "alignItems": "center"}
-        except Exception as e:
-            log_callback_error("update_elapsed_time", e, level=logging.WARNING)
-            return "00:00:00", {"display": "none"}
+    # update_elapsed_time was a 1 Hz server callback. It is now a
+    # clientside callback registered in app.register_callbacks; the
+    # browser computes elapsed time directly from backend_status.start_time
+    # using Date.now(), which removes one Flask round-trip per second
+    # for the lifetime of the session.
 
     @app.callback(
         [
