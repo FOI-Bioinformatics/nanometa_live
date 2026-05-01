@@ -615,7 +615,17 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         "run_validation": run_validation_enabled,
         "validation_method": config.get("validation_method", "blast"),
         "blast_evalue": config.get("e_val_cutoff", 1e-10),
-        "blast_perc_identity": config.get("min_perc_identity", 90),
+        # The legacy ``min_perc_identity`` config key was removed when the
+        # operator-facing duplicate input was collapsed into the canonical
+        # ``validation_identity_threshold`` (2026-04-30). For backwards
+        # compatibility with existing config.yaml files we still read
+        # ``min_perc_identity`` first if set, then fall through to
+        # ``validation_identity_threshold``. New configs only carry the
+        # latter.
+        "blast_perc_identity": config.get(
+            "min_perc_identity",
+            config.get("validation_identity_threshold", 90),
+        ),
         "validation_hit_rate_threshold": config.get("validation_hit_rate_threshold", 0.5),
         "validation_identity_threshold": config.get("validation_identity_threshold", 90.0),
         "minimap2_preset": config.get("minimap2_preset", "map-ont"),
@@ -845,7 +855,11 @@ def create_nextflow_config(config: Dict[str, Any]) -> str:
     validation_cores = config.get("validation_cores", 2)
     qc_tool = str(config.get("qc_tool", "chopper")).lower()
 
-    profile = config.get("pipeline_profile", "docker")
+    # Default to ``conda`` to match the project convention documented in
+    # CLAUDE.md ("Nanometa pipeline_profile is conda, never docker").
+    # The legacy "docker" default was a remnant of the original nf-core
+    # template and contradicted every actual deployment.
+    profile = config.get("pipeline_profile", "conda")
 
     # Profile-specific container runtime settings. Using explicit string
     # concatenation (rather than nested f-strings with doubled braces) to avoid
