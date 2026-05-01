@@ -792,7 +792,8 @@ def _create_pathogen_alert_panel(
     detected_organisms: List[Dict[str, Any]],
     watched_species: Optional[List[Dict[str, Any]]] = None,
     config: Optional[Dict[str, Any]] = None,
-    taxid_to_samples: Optional[Dict[int, List[Dict[str, Any]]]] = None
+    taxid_to_samples: Optional[Dict[int, List[Dict[str, Any]]]] = None,
+    main_dir: Optional[str] = None,
 ) -> Tuple[html.Div, Dict[str, str]]:
     """
     Create pathogen alert panel based on detected dangerous organisms.
@@ -803,6 +804,13 @@ def _create_pathogen_alert_panel(
         config: Application configuration dict (used for taxid mapping)
         taxid_to_samples: Per-taxid sample attribution dict built by
             _load_per_sample_organisms (keyed by Kraken2 db taxid)
+        main_dir: Pipeline results directory; used to load
+            ``validation_results.json`` so each pathogen-alert card can
+            render a "Validated 95%" / "Partial" / "Not validated" /
+            "Pending" badge. Falls through to no badge when main_dir
+            is empty or no validation entry exists for the
+            (sample, taxid) pair (the case for runs where validation
+            has not been enabled).
 
     Returns:
         Tuple of (alert_panel_component, container_style)
@@ -811,6 +819,10 @@ def _create_pathogen_alert_panel(
         return html.Div(), {"display": "none"}
 
     taxid_to_samples = taxid_to_samples or {}
+    # Load validation lookup once per call. Cheap (single JSON read +
+    # in-memory dict build) and avoids re-parsing inside the per-detection
+    # loop below. Returns {} when validation has not run.
+    validation_lookup = _load_validation_lookup(main_dir or "")
 
     try:
         # Check for dangerous pathogens using proper taxid mapping
@@ -843,6 +855,27 @@ def _create_pathogen_alert_panel(
             if not samples_for_detection and kraken_taxid != taxid:
                 samples_for_detection = taxid_to_samples.get(taxid, [])
 
+            # Cross-sample validation summary for this watchlist hit. Returns
+            # None when no sample in the detection has a validation entry --
+            # the alert components treat None as "validation not run" and
+            # render "Pending" only when validation_lookup is non-empty (i.e.
+            # validation has run for OTHER taxids), suppressing the badge
+            # entirely otherwise.
+            validation = _summarise_validation_for_taxid(
+                samples_for_detection, taxid, validation_lookup
+            )
+            if validation is None and validation_lookup:
+                # Validation has run elsewhere but produced no result for
+                # this (sample, taxid). Surface as "Pending" so the operator
+                # sees the gap rather than a silent omission.
+                validation = {
+                    "status": "pending",
+                    "identity": 0.0,
+                    "method": "",
+                    "n_validated": 0,
+                    "n_samples": len(samples_for_detection),
+                }
+
             if threat_level == "critical":
                 critical_count += 1
                 alert_components.append(
@@ -854,7 +887,8 @@ def _create_pathogen_alert_panel(
                         confidence="HIGH" if reads >= 100 else "MODERATE",
                         taxid=taxid,
                         recommendation=action,
-                        samples=samples_for_detection
+                        samples=samples_for_detection,
+                        validation=validation,
                     )
                 )
             elif threat_level in ["high", "high_risk"]:
@@ -867,7 +901,8 @@ def _create_pathogen_alert_panel(
                         abundance_pct=abundance,
                         taxid=taxid,
                         recommendation=action,
-                        samples=samples_for_detection
+                        samples=samples_for_detection,
+                        validation=validation,
                     )
                 )
             else:
@@ -879,7 +914,8 @@ def _create_pathogen_alert_panel(
                         read_count=reads,
                         abundance_pct=abundance,
                         taxid=taxid,
-                        samples=samples_for_detection
+                        samples=samples_for_detection,
+                        validation=validation,
                     )
                 )
 
@@ -1110,3 +1146,148 @@ def _check_pathogens_with_mapping(
         # Fall back to old method on error
         watched_species = _get_active_watchlist_entries(config) if config else []
         return check_for_dangerous_pathogens(detected_organisms, watched_species)
+
+
+# ---------------------------------------------------------------------------
+# Validation overlay for pathogen alert cards (2026-05-01)
+# ---------------------------------------------------------------------------
+#
+# When the operator has enabled validation, every (sample, taxid) pair that
+# was classified above the read-count floor should have a corresponding
+# validation_results.json entry. The helpers below load that file once per
+# alerts-callback tick and summarise validation across the samples a
+# single watchlist hit was detected in. The summary is then attached to
+# each alert dict so the pathogen-alert components (CriticalPathogenAlert,
+# HighRiskPathogenAlert, WatchedSpeciesAlert) can render a small badge:
+#
+#   green  "Validated 95.2%"   -- all samples confirmed; high confidence
+#   amber  "Partial 78.4%"     -- some samples partial / mixed
+#   red    "Not validated"     -- no sample reached confirmed status
+#   grey   "Pending"           -- validation enabled but no result for this
+#                                 (sample, taxid) yet
+#
+# The intent is to let operators distinguish a real ACTION REQUIRED detection
+# from a Kraken2 false-positive that validation already rejected -- the
+# original feature ask was "to avoid false alarms".
+
+
+def _load_validation_lookup(main_dir: str) -> Dict[Tuple[str, int], Dict[str, Any]]:
+    """Build a per-(sample, taxid) validation-status lookup.
+
+    Reads ``<main_dir>/validation/validation_results.json`` via the canonical
+    ``BlastValidationParser``. Returns an empty dict when validation has not
+    run, the file is missing, or any parse error occurs -- the caller treats
+    "no entry" as "not validated yet" rather than "rejected".
+
+    Args:
+        main_dir: Pipeline results directory.
+
+    Returns:
+        ``{(sample_id, taxid): {"status": str, "identity": float,
+                                "method": str, "validated_reads": int,
+                                "total_reads": int}}``
+    """
+    if not main_dir:
+        return {}
+    try:
+        from nanometa_live.core.parsers.blast_validation_parser import (
+            BlastValidationParser,
+        )
+        parser = BlastValidationParser(main_dir)
+        if not parser.has_validation_data():
+            return {}
+        results = parser.get_validation_results()
+    except Exception as e:
+        logger.debug(f"Could not load validation_results.json: {e}")
+        return {}
+
+    lookup: Dict[Tuple[str, int], Dict[str, Any]] = {}
+    for r in results:
+        try:
+            sample_id = getattr(r, "sample_id", "")
+            raw_taxid = getattr(r, "taxid", None)
+            if not sample_id or raw_taxid is None:
+                continue
+            taxid = int(raw_taxid)
+            # status_display normalises ValidationStatus.UNCERTAIN to "low" and
+            # ValidationStatus.CONFIRMED to "validated"; fall back to .status.value
+            # if the parser version still returns the enum directly.
+            status_attr = getattr(r, "status_display", None) or getattr(r, "status", None)
+            if hasattr(status_attr, "value"):
+                status = str(status_attr.value)
+            else:
+                status = str(status_attr) if status_attr is not None else "no_data"
+            lookup[(sample_id, taxid)] = {
+                "status": status,
+                "identity": float(getattr(r, "percent_identity_mean", 0.0) or 0.0),
+                "method": str(getattr(r, "validation_method", "blast") or "blast"),
+                "validated_reads": int(getattr(r, "validated_reads", 0) or 0),
+                "total_reads": int(getattr(r, "total_reads", 0) or 0),
+                "percent_validated": float(getattr(r, "percent_validated", 0.0) or 0.0),
+            }
+        except (AttributeError, ValueError, TypeError) as exc:
+            logger.debug(f"Skipping malformed validation result: {exc}")
+            continue
+    return lookup
+
+
+# Status priority for cross-sample summary. Higher value = stronger signal.
+# We pick the BEST status across samples so a pathogen confirmed in one
+# sample is not under-reported as "partial" on the dashboard just because
+# another sample has fewer reads.
+_VALIDATION_RANK = {
+    "confirmed": 4,
+    "validated": 4,
+    "partial": 3,
+    "uncertain": 2,
+    "low": 1,
+    "no_data": 0,
+    "failed": 0,
+}
+
+
+def _summarise_validation_for_taxid(
+    samples: List[Dict[str, Any]],
+    taxid: Optional[int],
+    lookup: Dict[Tuple[str, int], Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Summarise validation status across a list of samples for one taxid.
+
+    Args:
+        samples: Per-sample attribution list (dicts with at least ``sample``).
+        taxid: NCBI / Kraken2 db taxid for the watchlist hit.
+        lookup: Output of ``_load_validation_lookup``.
+
+    Returns:
+        ``{"status", "identity", "method", "n_validated", "n_samples"}`` or
+        ``None`` when no sample in this detection has a validation entry.
+    """
+    if not lookup or taxid is None or not samples:
+        return None
+    try:
+        taxid_int = int(taxid)
+    except (TypeError, ValueError):
+        return None
+
+    rows = []
+    for s in samples:
+        sample_id = s.get("sample") if isinstance(s, dict) else None
+        if not sample_id:
+            continue
+        entry = lookup.get((sample_id, taxid_int))
+        if entry is not None:
+            rows.append(entry)
+
+    if not rows:
+        return None
+
+    best = max(rows, key=lambda e: _VALIDATION_RANK.get(e.get("status", "no_data"), 0))
+    avg_identity = sum(r["identity"] for r in rows) / len(rows)
+    method = best.get("method", "blast")
+    return {
+        "status": best.get("status", "no_data"),
+        "identity": avg_identity,
+        "method": method,
+        "n_validated": len(rows),
+        "n_samples": len(samples),
+    }

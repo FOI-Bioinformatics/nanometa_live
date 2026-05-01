@@ -661,9 +661,13 @@ def register_dashboard_callbacks(app: Dash):
             # Get only ENABLED watchlist entries for alerting
             watched_species = _get_active_watchlist_entries(config)
 
-            # Create alert panel with per-sample attribution
+            # Create alert panel with per-sample attribution +
+            # validation badges. main_dir lets the panel load
+            # validation_results.json so each card can show whether the
+            # detection has been validated and at what confidence.
             return _create_pathogen_alert_panel(
-                detected_organisms, watched_species, config, taxid_to_samples
+                detected_organisms, watched_species, config, taxid_to_samples,
+                main_dir=main_dir,
             )
 
         except Exception as e:

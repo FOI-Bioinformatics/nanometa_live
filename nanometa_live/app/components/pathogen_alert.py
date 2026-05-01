@@ -276,6 +276,147 @@ THREAT_LEVELS = {
 }
 
 
+# Validation status -> badge appearance.
+# Used by the three pathogen-alert components to show whether the
+# detection has been confirmed by the BLAST/minimap2 validation
+# subworkflow (run inside nanometanf with -resume on the dashboard's
+# Validate flow). Tokens align with the WCAG-AA palette tightened on
+# 2026-04-29 (#155724 dark green, #664d03 dark amber, #721c24 dark red,
+# #6c757d slate-grey for the pending state).
+_VALIDATION_BADGE_STYLES = {
+    "confirmed": {
+        "label": "Validated",
+        "icon": "bi-shield-check",
+        "bg":   "#d4edda",
+        "fg":   "#155724",
+        "tooltip": "Sequences confirmed by reference-genome comparison",
+    },
+    "validated": {  # alias produced by ValidationStatus.status_display
+        "label": "Validated",
+        "icon": "bi-shield-check",
+        "bg":   "#d4edda",
+        "fg":   "#155724",
+        "tooltip": "Sequences confirmed by reference-genome comparison",
+    },
+    "partial": {
+        "label": "Partial",
+        "icon": "bi-shield-exclamation",
+        "bg":   "#fff3cd",
+        "fg":   "#664d03",
+        "tooltip": "Some samples confirmed; review per-sample detail",
+    },
+    "uncertain": {
+        "label": "Partial",
+        "icon": "bi-shield-exclamation",
+        "bg":   "#fff3cd",
+        "fg":   "#664d03",
+        "tooltip": "Mixed validation outcome; review per-sample detail",
+    },
+    "low": {
+        "label": "Not validated",
+        "icon": "bi-shield-x",
+        "bg":   "#f8d7da",
+        "fg":   "#721c24",
+        "tooltip": "Below validation threshold; treat with caution",
+    },
+    "failed": {
+        "label": "Validation failed",
+        "icon": "bi-shield-slash",
+        "bg":   "#f8d7da",
+        "fg":   "#721c24",
+        "tooltip": "Validation pipeline error; check pipeline logs",
+    },
+    "pending": {
+        "label": "Pending",
+        "icon": "bi-hourglass-split",
+        "bg":   "#e9ecef",
+        "fg":   "#495057",
+        "tooltip": (
+            "Validation has run for other detections in this run, but "
+            "this one has not been confirmed yet. Click Validate on the "
+            "Main tab to add it."
+        ),
+    },
+}
+
+
+def _validation_badge(
+    validation: Optional[Dict[str, Any]],
+    *,
+    show_identity: bool = True,
+    badge_id: Optional[str] = None,
+) -> html.Span:
+    """Build a small validation badge for a pathogen-alert card.
+
+    Returns ``html.Span()`` (an empty span) when ``validation`` is None,
+    so callers can drop the result into their layout unconditionally
+    without checking.
+
+    Args:
+        validation: Output of ``_summarise_validation_for_taxid`` -- or
+            ``None`` to render nothing.
+        show_identity: When True (default) and the badge is "Validated"
+            or "Partial", append the average identity (e.g. "Validated
+            95%"). The "Not validated" / "Pending" / "Failed" badges
+            never show an identity number.
+        badge_id: Optional component id for the wrapping span; useful
+            for testing.
+
+    Returns:
+        html.Span containing an icon + status label, or an empty span.
+    """
+    if not validation:
+        return html.Span()
+
+    status = validation.get("status", "no_data")
+    style = _VALIDATION_BADGE_STYLES.get(status)
+    if style is None:
+        return html.Span()
+
+    label = style["label"]
+    if show_identity and status in ("confirmed", "validated", "partial", "uncertain"):
+        identity = validation.get("identity") or 0.0
+        if identity > 0:
+            label = f"{label} {identity:.0f}%"
+
+    n_validated = validation.get("n_validated", 0)
+    n_samples = validation.get("n_samples", 0)
+    method = validation.get("method", "")
+    detail_lines = [style.get("tooltip", "")]
+    if n_samples > 0:
+        if n_validated == n_samples:
+            detail_lines.append(f"{n_validated}/{n_samples} samples have validation results")
+        else:
+            detail_lines.append(
+                f"{n_validated} of {n_samples} samples have validation results"
+            )
+    if method:
+        detail_lines.append(f"Method: {method}")
+    tooltip_text = " . ".join(s for s in detail_lines if s)
+
+    span_id = badge_id or f"validation-badge-{abs(hash(tooltip_text)) & 0xffff:x}"
+    span = html.Span(
+        [
+            html.I(className=f"bi {style['icon']} me-1"),
+            label,
+        ],
+        id=span_id,
+        title=tooltip_text,
+        style={
+            "backgroundColor": style["bg"],
+            "color": style["fg"],
+            "padding": "2px 8px",
+            "borderRadius": "4px",
+            "fontSize": "0.75rem",
+            "fontWeight": 600,
+            "marginLeft": "8px",
+            "verticalAlign": "middle",
+            "display": "inline-block",
+        },
+    )
+    return span
+
+
 def CriticalPathogenAlert(
     pathogen_name: str,
     common_name: Optional[str] = None,
@@ -285,7 +426,8 @@ def CriticalPathogenAlert(
     blast_verified: bool = False,
     taxid: Optional[int] = None,
     recommendation: Optional[str] = None,
-    samples: Optional[List[Dict[str, Any]]] = None
+    samples: Optional[List[Dict[str, Any]]] = None,
+    validation: Optional[Dict[str, Any]] = None,
 ) -> html.Div:
     """
     Full-width critical pathogen alert banner.
@@ -359,6 +501,12 @@ def CriticalPathogenAlert(
             )
         )
 
+    # Validation badge built from cumulative validation_results.json --
+    # operators see at a glance whether this critical alert was confirmed
+    # or rejected by the BLAST/minimap2 validation flow. Empty span when
+    # validation has not run for this run.
+    validation_badge = _validation_badge(validation)
+
     if taxid:
         metrics.append(
             dbc.Badge(
@@ -411,7 +559,8 @@ def CriticalPathogenAlert(
                             "fontSize": "12px",
                             "letterSpacing": "0.05em"
                         }
-                    )
+                    ),
+                    validation_badge,
                 ], className="mb-1"),
 
                 # Pathogen name
@@ -479,7 +628,8 @@ def HighRiskPathogenAlert(
     confidence: str = "HIGH",
     taxid: Optional[int] = None,
     recommendation: Optional[str] = None,
-    samples: Optional[List[Dict[str, Any]]] = None
+    samples: Optional[List[Dict[str, Any]]] = None,
+    validation: Optional[Dict[str, Any]] = None,
 ) -> html.Div:
     """
     High-risk pathogen alert (less severe than critical).
@@ -526,7 +676,8 @@ def HighRiskPathogenAlert(
                     html.Span(
                         name_display,
                         style={"fontStyle": "italic"}
-                    )
+                    ),
+                    _validation_badge(validation),
                 ]),
                 html.Small([
                     f"{read_count:,} DNA matches | ",
@@ -573,7 +724,8 @@ def WatchedSpeciesAlert(
     read_count: int = 0,
     abundance_pct: float = 0.0,
     taxid: Optional[int] = None,
-    samples: Optional[List[Dict[str, Any]]] = None
+    samples: Optional[List[Dict[str, Any]]] = None,
+    validation: Optional[Dict[str, Any]] = None,
 ) -> html.Div:
     """
     Alert for monitored/watched species (informational level).
@@ -609,7 +761,8 @@ def WatchedSpeciesAlert(
                 style={"color": threat["color"]}
             ),
             html.Span(pathogen_name, style={"fontStyle": "italic"}),
-            html.Span(f" - {read_count:,} matches", className="text-muted ms-2")
+            html.Span(f" - {read_count:,} matches", className="text-muted ms-2"),
+            _validation_badge(validation),
         ], className="flex-grow-1"),
         dbc.Button(
             [html.I(className="bi bi-file-text me-1"), "Details"],
