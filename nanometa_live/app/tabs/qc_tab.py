@@ -233,7 +233,7 @@ def register_qc_callbacks(app: Dash):
             Output("bp-graph", "figure"),
         ],
         [
-            Input("update-interval", "n_intervals"),
+            Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
         ],
         [
@@ -241,7 +241,7 @@ def register_qc_callbacks(app: Dash):
             State("backend-status", "data"),
         ],
     )
-    def update_qc_plots(n_intervals, selected_sample, config, status):
+    def update_qc_plots(_fingerprint, selected_sample, config, status):
         """
         Update the QC plots based on actual processed data from FASTP/Kraken2.
 
@@ -469,7 +469,7 @@ def register_qc_callbacks(app: Dash):
             Output("qc-waiting-files", "children"),
         ],
         [
-            Input("update-interval", "n_intervals"),
+            Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
         ],
         [
@@ -477,7 +477,7 @@ def register_qc_callbacks(app: Dash):
             State("backend-status", "data"),
         ],
     )
-    def update_qc_stats(n_intervals, selected_sample, config, status):
+    def update_qc_stats(_fingerprint, selected_sample, config, status):
         """Update the QC statistics based on the latest data."""
         if get_trigger_type(ctx) == "interval":
             if should_skip_update("qc_stats", debounce_ms=2000):
@@ -806,7 +806,7 @@ def register_qc_callbacks(app: Dash):
     @app.callback(
         Output("per-sample-table", "rowData"),
         [
-            Input("update-interval", "n_intervals"),
+            Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
         ],
         [
@@ -814,7 +814,7 @@ def register_qc_callbacks(app: Dash):
             State("backend-status", "data"),
         ],
     )
-    def update_per_sample_table(n_intervals, selected_sample, config, status):
+    def update_per_sample_table(_fingerprint, selected_sample, config, status):
         """
         Update the per-sample breakdown table with statistics for each barcode.
 
@@ -847,7 +847,7 @@ def register_qc_callbacks(app: Dash):
     @app.callback(
         Output("base-quality-card-container", "children"),
         [
-            Input("update-interval", "n_intervals"),
+            Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
         ],
         [
@@ -855,7 +855,7 @@ def register_qc_callbacks(app: Dash):
             State("backend-status", "data"),
         ],
     )
-    def update_base_quality_card(n_intervals, selected_sample, config, status):
+    def update_base_quality_card(_fingerprint, selected_sample, config, status):
         """
         Update the base quality card showing Q20/Q30 rates and optional sparkline.
 
@@ -957,7 +957,7 @@ def register_qc_callbacks(app: Dash):
     @app.callback(
         Output("read-statistics-card-container", "children"),
         [
-            Input("update-interval", "n_intervals"),
+            Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
         ],
         [
@@ -965,7 +965,7 @@ def register_qc_callbacks(app: Dash):
             State("backend-status", "data"),
         ],
     )
-    def update_read_statistics_card(n_intervals, selected_sample, config, status):
+    def update_read_statistics_card(_fingerprint, selected_sample, config, status):
         """
         Update the read statistics card showing mean length, N50, and GC content.
 
@@ -1078,14 +1078,14 @@ def register_qc_callbacks(app: Dash):
     @app.callback(
         Output("qc-stage-strip", "children"),
         [
-            Input("update-interval", "n_intervals"),
+            Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
         ],
         [
             State("app-config", "data"),
         ],
     )
-    def update_stage_strip(n_intervals, selected_sample, config):
+    def update_stage_strip(_fingerprint, selected_sample, config):
         """
         Render the Stage Strip: Raw -> Quality-filtered -> Classified pipeline overview.
 
@@ -1250,14 +1250,14 @@ def register_qc_callbacks(app: Dash):
     @app.callback(
         Output("qc-action-guidance-container", "children"),
         [
-            Input("update-interval", "n_intervals"),
+            Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
         ],
         [
             State("app-config", "data"),
         ],
     )
-    def update_qc_action_guidance(n_intervals, selected_sample, config):
+    def update_qc_action_guidance(_fingerprint, selected_sample, config):
         """
         Generate a contextual action guidance banner based on QC metrics.
 

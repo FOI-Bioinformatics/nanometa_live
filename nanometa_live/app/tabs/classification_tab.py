@@ -126,7 +126,7 @@ def register_classification_callbacks(app: Dash):
             Output("classification-plot", "style"),
         ],
         [
-            Input("update-interval", "n_intervals"),
+            Input("results-fingerprint", "data"),
             Input("apply-classification-settings", "n_clicks"),
             Input("classification-view-type", "value"),
             Input("selected-sample", "data"),  # Sample changes trigger updates
@@ -144,7 +144,7 @@ def register_classification_callbacks(app: Dash):
         ],
     )
     def update_classification_plot(
-        n_intervals,
+        _fingerprint,
         filter_clicks,
         view_type,
         selected_sample,

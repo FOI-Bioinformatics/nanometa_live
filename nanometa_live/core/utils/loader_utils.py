@@ -288,8 +288,14 @@ def check_data_freshness(main_dir: str) -> str:
     """
     Return a fingerprint string representing the freshness of result data.
 
-    Scans the kraken2/, fastp/, and validation/ subdirectories and hashes
-    the latest file mtimes. A changed fingerprint means new data is available.
+    Scans the kraken2/, fastp/, seqkit/, and validation/ subdirectories
+    and hashes the latest file mtimes. A changed fingerprint means new
+    data is available.
+
+    seqkit/ is the QC output directory for the chopper and filtlong
+    pipelines (fastp/ is the alternative when qc_tool=fastp). Including
+    it here means the fingerprint advances on every QC update regardless
+    of which tool the run used.
 
     This function is intended to be called once per polling interval by a
     single centralized callback, rather than having each tab poll independently.
@@ -301,7 +307,7 @@ def check_data_freshness(main_dir: str) -> str:
     main_dir = resolve_analysis_directory(main_dir)
 
     parts = []
-    for subdir in ("kraken2", "fastp", "validation"):
+    for subdir in ("kraken2", "fastp", "seqkit", "validation"):
         dirpath = os.path.join(main_dir, subdir)
         mt = _get_dir_latest_mtime(dirpath)
         parts.append(f"{subdir}:{mt}")

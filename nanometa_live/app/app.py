@@ -248,6 +248,13 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
         dcc.Store(id='aggregate-kraken-cache', data={"fingerprint": "", "all_samples": None}),
         dcc.Store(id='per-sample-kraken-cache', data={"fingerprint": "", "by_sample": {}}),
 
+        # Event-driven refresh gate. compute_results_fingerprint scans the
+        # nanometanf output dirs once per update-interval tick; data-bound
+        # callbacks that switched their Input from update-interval to
+        # results-fingerprint only fire when the fingerprint actually
+        # advances (i.e. when nanometanf wrote a new file).
+        dcc.Store(id='results-fingerprint', data={"fp": "", "ts": 0}),
+
         # Shared stores for cross-tab communication (Watchlist <-> Preparation)
         dcc.Store(id='taxmap-collection', data=None),
         dcc.Store(id='taxmap-database-info', data=None),

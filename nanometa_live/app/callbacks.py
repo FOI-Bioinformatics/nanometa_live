@@ -16,6 +16,7 @@ import dash_bootstrap_components as dbc
 
 from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.utils.sample_detector import get_available_samples, get_sample_file_mapping
+from nanometa_live.core.utils.loader_utils import check_data_freshness
 from nanometa_live.app.utils.callback_helpers import log_callback_error
 
 
@@ -179,6 +180,39 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     def update_backend_status(_):
         """Update the backend status."""
         return backend_manager.get_status()
+
+    @app.callback(
+        Output("results-fingerprint", "data"),
+        Input("update-interval", "n_intervals"),
+        State("app-config", "data"),
+        State("results-fingerprint", "data"),
+    )
+    def compute_results_fingerprint(_n_intervals, config, prev):
+        """
+        Scan the nanometanf output directories and emit a fingerprint
+        update only when at least one of them has changed.
+
+        Data-bound callbacks consume this Store as their Input instead of
+        ``update-interval``. PreventUpdate on an unchanged fingerprint
+        means downstream callbacks do not run, so unchanged ticks become
+        zero-cost. The gate itself is four ``os.scandir`` calls plus an
+        MD5 -- microseconds at any realistic dataset size.
+        """
+        if not config:
+            raise PreventUpdate
+        main_dir = config.get("main_dir") or config.get("results_output_directory") or ""
+        if not main_dir:
+            raise PreventUpdate
+
+        try:
+            fp = check_data_freshness(main_dir)
+        except Exception as e:
+            log_callback_error("compute_results_fingerprint", e)
+            raise PreventUpdate
+
+        if fp == (prev or {}).get("fp"):
+            raise PreventUpdate
+        return {"fp": fp, "ts": time.time()}
 
     @app.callback(
         [
