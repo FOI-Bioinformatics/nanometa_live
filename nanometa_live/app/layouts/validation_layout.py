@@ -481,7 +481,47 @@ def create_validation_layout() -> html.Div:
             "correct by comparing the DNA sequences against known reference genomes. "
             "Species marked 'Confirmed' have strong evidence; 'Partial' or 'Low Confidence' "
             "results should be interpreted with caution.",
-            className="text-muted mb-4",
+            className="text-muted mb-3",
+        ),
+
+        # Scope + criteria banner. The Validation tab's species set is
+        # NOT the same as the Dashboard / Organism tab's species set --
+        # validation only runs for taxids that the operator has added
+        # to the watchlist AND for which a reference genome is
+        # available. Organism / Dashboard tabs show every Kraken2
+        # detection (subject to the abundance threshold). Operators
+        # have repeatedly asked why species seen on the Organism tab
+        # don't appear here; this banner spells out the reason and
+        # the active cutoffs in one place.
+        dbc.Alert(
+            [
+                html.Div([
+                    html.I(className="bi bi-info-circle me-2"),
+                    html.Strong("What you see here vs Dashboard / Organism tabs"),
+                ], className="mb-2"),
+                html.Ul([
+                    html.Li([
+                        html.Strong("Scope: "),
+                        "validation runs only for species you have enabled in the ",
+                        html.Em("Watchlist"),
+                        " tab and for which a reference genome has been downloaded ",
+                        "(Preparation tab). A Kraken2 hit on the Organism tab will not ",
+                        "appear here unless those two preconditions are met.",
+                    ]),
+                    html.Li([
+                        html.Strong("Sample filter: "),
+                        "the global sample selector at the top of the dashboard "
+                        "applies here too. ",
+                        html.Span(id="validation-sample-scope-note", className="text-muted"),
+                    ]),
+                    html.Li([
+                        html.Strong("Validation status thresholds: "),
+                        html.Span(id="validation-criteria-note", className="text-muted"),
+                    ]),
+                ], className="mb-0 small"),
+            ],
+            color="light",
+            className="border mb-4",
         ),
 
         # Shared data store

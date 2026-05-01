@@ -172,6 +172,68 @@ def _filter_by_method(results, method):
         return [r for r in results if r.get("validation_method") in ("minimap2", "both")]
 
 
+def _filter_results_by_sample(results, selected_sample):
+    """Filter validation results to a single sample.
+
+    Treats ``"All Samples"`` and any falsy value as "no filter applied"
+    -- matches the convention used by ``load_kraken_data`` on the
+    Dashboard and Organism tabs.
+
+    Args:
+        results: List of result dicts (each with ``sample_id``).
+        selected_sample: The current value of the ``selected-sample``
+            store, or None / ``"All Samples"``.
+
+    Returns:
+        Filtered list of result dicts.
+    """
+    if not selected_sample or selected_sample == "All Samples":
+        return list(results)
+    return [r for r in results if r.get("sample_id") == selected_sample]
+
+
+def _format_scope_text(selected_sample):
+    """Build the scope line for the validation tab's intro banner."""
+    if selected_sample and selected_sample != "All Samples":
+        return f"Currently showing: {selected_sample}"
+    return (
+        "Currently showing: all samples (use the sample selector at "
+        "the top of the dashboard to narrow to one)."
+    )
+
+
+def _format_criteria_text(config):
+    """Build the criteria line for the validation tab's intro banner.
+
+    Pulls the active thresholds from config so the operator always
+    sees the live cutoffs, not the documented defaults.
+    """
+    cfg = config or {}
+    identity = cfg.get("validation_identity_threshold", 90)
+    hit_rate = cfg.get("validation_hit_rate_threshold", 0.5)
+    mapq = cfg.get("minimap2_min_mapq", 10)
+    try:
+        identity_str = f"{float(identity):.0f}%"
+    except (TypeError, ValueError):
+        identity_str = "90%"
+    try:
+        hit_rate_str = f"{float(hit_rate):.0%}"
+    except (TypeError, ValueError):
+        hit_rate_str = "50%"
+    try:
+        mapq_str = str(int(mapq))
+    except (TypeError, ValueError):
+        mapq_str = "10"
+    return (
+        f"Confirmed: hit rate >= {hit_rate_str} of classified reads "
+        f"AND mean identity >= {identity_str}. "
+        f"Partial: at least half the hit-rate threshold OR within 90% "
+        f"of the identity floor. "
+        f"Low Confidence: below both. "
+        f"Minimap2 also requires alignment MAPQ >= {mapq_str}."
+    )
+
+
 def _compute_summary(results):
     """Compute summary stats from a validation result list.
 
@@ -228,28 +290,65 @@ def register_validation_callbacks(app: Dash):
     # -----------------------------------------------------------------
 
     @app.callback(
+        [
+            Output("validation-sample-scope-note", "children"),
+            Output("validation-criteria-note", "children"),
+        ],
+        [
+            Input("selected-sample", "data"),
+            Input("app-config", "data"),
+        ],
+    )
+    def update_validation_scope_note(selected_sample, config):
+        """Live-update the scope-and-criteria banner so operators always
+        see which sample is in view + the active cutoffs.
+
+        Pulls thresholds from the config: ``validation_identity_threshold``
+        (post-aggregation identity gate, default 90%),
+        ``validation_hit_rate_threshold`` (fraction of reads that must
+        hit, default 0.5), and ``minimap2_min_mapq`` (mapq floor,
+        default 10). Falls back to the documented defaults when the
+        config does not supply a value.
+        """
+        return _format_scope_text(selected_sample), _format_criteria_text(config)
+
+    @app.callback(
         Output("validation-data-store", "data"),
-        Input("update-interval", "n_intervals"),
+        [
+            Input("update-interval", "n_intervals"),
+            Input("selected-sample", "data"),
+        ],
         State("app-config", "data"),
         prevent_initial_call=True,
     )
-    def load_validation_data(n_intervals, config):
-        """Load validation data from results directory."""
+    def load_validation_data(n_intervals, selected_sample, config):
+        """Load validation data filtered by the selected sample.
+
+        The Validation tab honours the same sample selector as the
+        Dashboard and Organism tabs: when the operator chooses a
+        specific barcode, the validation results, summary card, cards,
+        and stats table all narrow to that sample. ``All Samples`` (or
+        an empty value) returns the full result set so cross-sample
+        aggregates still work.
+        """
 
         try:
             if not config:
-                return {"results": [], "summary": {}, "message": "No configuration loaded"}
+                return {"results": [], "summary": {}, "message": "No configuration loaded",
+                        "selected_sample": selected_sample}
 
             if not config.get("blast_validation", True):
                 return {
                     "results": [],
                     "summary": {},
                     "message": "Validation is disabled. Enable it in Configuration tab.",
+                    "selected_sample": selected_sample,
                 }
 
             results_dir = config.get("results_output_directory") or config.get("main_dir", "")
             if not results_dir or not os.path.isdir(results_dir):
-                return {"results": [], "summary": {}, "message": "Results directory not found"}
+                return {"results": [], "summary": {}, "message": "Results directory not found",
+                        "selected_sample": selected_sample}
 
             parser = BlastValidationParser(results_dir)
             if not parser.has_validation_data():
@@ -257,22 +356,37 @@ def register_validation_callbacks(app: Dash):
                     "results": [],
                     "summary": {},
                     "message": "Waiting for validation results from pipeline...",
+                    "selected_sample": selected_sample,
                 }
 
             results = parser.get_validation_results()
             summary = parser.get_validation_summary()
 
-            logger.info("Loaded %d validation results from %s", len(results), results_dir)
+            # Apply sample filter via the pure helper. ``All Samples`` and
+            # empty sentinel values mean "no filter" -- matches the
+            # convention used by the Dashboard and Organism tabs.
+            results_dicts = [r.to_dict() for r in results]
+            filtered = _filter_results_by_sample(results_dicts, selected_sample)
+            if selected_sample and selected_sample != "All Samples":
+                logger.info(
+                    "Validation: %d/%d results match selected sample %s",
+                    len(filtered), len(results_dicts), selected_sample,
+                )
+            results_dicts = filtered
+
+            logger.info("Loaded %d validation results from %s", len(results_dicts), results_dir)
 
             return {
-                "results": [r.to_dict() for r in results],
+                "results": results_dicts,
                 "summary": summary,
                 "message": None,
+                "selected_sample": selected_sample,
             }
 
         except Exception as e:
             log_callback_error("load_validation_data", e)
-            return {"results": [], "summary": {}, "message": f"Error loading data: {e}"}
+            return {"results": [], "summary": {}, "message": f"Error loading data: {e}",
+                    "selected_sample": selected_sample}
 
     # =================================================================
     # BLAST sub-tab callbacks
