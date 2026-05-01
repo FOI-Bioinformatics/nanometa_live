@@ -5,10 +5,13 @@ This module contains the core callbacks that are used across multiple tabs
 and components of the application.
 """
 
+import hashlib
+import json
 import os
 import logging
 import threading
 import time
+from typing import Any, Dict, Optional, Tuple
 
 from dash import Dash, Input, Output, State, callback, ctx, html, no_update
 from dash.exceptions import PreventUpdate
@@ -18,6 +21,46 @@ from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.utils.sample_detector import get_available_samples, get_sample_file_mapping
 from nanometa_live.core.utils.loader_utils import check_data_freshness
 from nanometa_live.app.utils.callback_helpers import log_callback_error
+
+
+# update_readiness_indicator runs the full ReadinessChecker every
+# update-interval tick. Each invocation does ~7 shutil.which calls plus
+# os.stat / glob over the configured Kraken2 DB and BLAST DB directories,
+# i.e. 10+ syscalls every 30 s for a state that almost never changes.
+# This module-level cache reuses a recent ReadinessReport when the
+# relevant config has not changed AND less than _READINESS_TTL seconds
+# have elapsed. The TTL guarantees that "operator just installed
+# bowtie / dropped a Kraken2 DB into place" surfaces within 60 s.
+_READINESS_TTL = 60.0
+_readiness_cache: Dict[str, Tuple[float, Any]] = {}
+_readiness_cache_lock = threading.Lock()
+
+
+def _readiness_cache_key(config: Optional[Dict[str, Any]]) -> str:
+    """Build a stable cache key from the config fields that affect readiness.
+
+    The full config dict is not used because the dashboard mutates
+    unrelated keys (UI flags, last-selected sample) on every save, which
+    would invalidate the cache for no reason. Only the fields the
+    readiness checks actually read are included.
+    """
+    if not config:
+        return "no-config"
+    relevant = {
+        k: config.get(k) for k in (
+            "kraken_db",
+            "main_dir",
+            "results_output_directory",
+            "nanopore_output_directory",
+            "pipeline_source",
+            "pipeline_profile",
+            "pipeline_cache_dir",
+            "blast_validation",
+            "network_check_enabled",
+            "offline_mode",
+        )
+    }
+    return hashlib.md5(json.dumps(relevant, sort_keys=True).encode()).hexdigest()
 
 
 def register_core_callbacks(app: Dash, backend_manager: BackendManager):
@@ -482,8 +525,17 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             )
 
         try:
-            checker = ReadinessChecker()
-            report = checker.check_readiness(config)
+            cache_key = _readiness_cache_key(config)
+            now = time.time()
+            with _readiness_cache_lock:
+                cached = _readiness_cache.get(cache_key)
+            if cached is not None and (now - cached[0]) < _READINESS_TTL:
+                report = cached[1]
+            else:
+                checker = ReadinessChecker()
+                report = checker.check_readiness(config)
+                with _readiness_cache_lock:
+                    _readiness_cache[cache_key] = (now, report)
             summary = report.summary()
 
             if report.ready:
