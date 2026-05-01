@@ -792,7 +792,8 @@ def _create_pathogen_alert_panel(
     detected_organisms: List[Dict[str, Any]],
     watched_species: Optional[List[Dict[str, Any]]] = None,
     config: Optional[Dict[str, Any]] = None,
-    taxid_to_samples: Optional[Dict[int, List[Dict[str, Any]]]] = None
+    taxid_to_samples: Optional[Dict[int, List[Dict[str, Any]]]] = None,
+    main_dir: Optional[str] = None,
 ) -> Tuple[html.Div, Dict[str, str]]:
     """
     Create pathogen alert panel based on detected dangerous organisms.
@@ -803,6 +804,13 @@ def _create_pathogen_alert_panel(
         config: Application configuration dict (used for taxid mapping)
         taxid_to_samples: Per-taxid sample attribution dict built by
             _load_per_sample_organisms (keyed by Kraken2 db taxid)
+        main_dir: Pipeline results directory; used to load
+            ``validation_results.json`` so each pathogen-alert card can
+            render a "Validated 95%" / "Partial" / "Not validated" /
+            "Pending" badge. Falls through to no badge when main_dir
+            is empty or no validation entry exists for the
+            (sample, taxid) pair (the case for runs where validation
+            has not been enabled).
 
     Returns:
         Tuple of (alert_panel_component, container_style)
@@ -811,6 +819,10 @@ def _create_pathogen_alert_panel(
         return html.Div(), {"display": "none"}
 
     taxid_to_samples = taxid_to_samples or {}
+    # Load validation lookup once per call. Cheap (single JSON read +
+    # in-memory dict build) and avoids re-parsing inside the per-detection
+    # loop below. Returns {} when validation has not run.
+    validation_lookup = _load_validation_lookup(main_dir or "")
 
     try:
         # Check for dangerous pathogens using proper taxid mapping
@@ -843,6 +855,27 @@ def _create_pathogen_alert_panel(
             if not samples_for_detection and kraken_taxid != taxid:
                 samples_for_detection = taxid_to_samples.get(taxid, [])
 
+            # Cross-sample validation summary for this watchlist hit. Returns
+            # None when no sample in the detection has a validation entry --
+            # the alert components treat None as "validation not run" and
+            # render "Pending" only when validation_lookup is non-empty (i.e.
+            # validation has run for OTHER taxids), suppressing the badge
+            # entirely otherwise.
+            validation = _summarise_validation_for_taxid(
+                samples_for_detection, taxid, validation_lookup
+            )
+            if validation is None and validation_lookup:
+                # Validation has run elsewhere but produced no result for
+                # this (sample, taxid). Surface as "Pending" so the operator
+                # sees the gap rather than a silent omission.
+                validation = {
+                    "status": "pending",
+                    "identity": 0.0,
+                    "method": "",
+                    "n_validated": 0,
+                    "n_samples": len(samples_for_detection),
+                }
+
             if threat_level == "critical":
                 critical_count += 1
                 alert_components.append(
@@ -854,7 +887,8 @@ def _create_pathogen_alert_panel(
                         confidence="HIGH" if reads >= 100 else "MODERATE",
                         taxid=taxid,
                         recommendation=action,
-                        samples=samples_for_detection
+                        samples=samples_for_detection,
+                        validation=validation,
                     )
                 )
             elif threat_level in ["high", "high_risk"]:
@@ -867,7 +901,8 @@ def _create_pathogen_alert_panel(
                         abundance_pct=abundance,
                         taxid=taxid,
                         recommendation=action,
-                        samples=samples_for_detection
+                        samples=samples_for_detection,
+                        validation=validation,
                     )
                 )
             else:
@@ -879,7 +914,8 @@ def _create_pathogen_alert_panel(
                         read_count=reads,
                         abundance_pct=abundance,
                         taxid=taxid,
-                        samples=samples_for_detection
+                        samples=samples_for_detection,
+                        validation=validation,
                     )
                 )
 
@@ -920,3 +956,338 @@ def _create_pathogen_alert_panel(
     except Exception as e:
         logger.error(f"Error creating pathogen alert panel: {e}")
         return html.Div(), {"display": "none"}
+
+
+def _species_df_to_organisms(species_df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """
+    Convert species DataFrame to list of organism dicts (vectorized).
+
+    Args:
+        species_df: DataFrame with species-level classifications
+
+    Returns:
+        List of organism dicts with taxid, name, reads, abundance
+    """
+    if species_df.empty:
+        return []
+
+    # Vectorized extraction - much faster than iterrows
+    # Use '%' column if available (kraken report standard), otherwise try 'fraction_total_reads'
+    if '%' in species_df.columns:
+        abundance_col = species_df['%'].fillna(0).astype(float)
+    elif 'fraction_total_reads' in species_df.columns:
+        abundance_col = species_df['fraction_total_reads'].fillna(0).astype(float) * 100
+    else:
+        abundance_col = pd.Series([0.0] * len(species_df))
+
+    result_df = pd.DataFrame({
+        'taxid': species_df['taxid'].fillna(0).astype(int),
+        'name': species_df['name'].fillna('Unknown'),
+        'reads': species_df['reads'].fillna(0).astype(int),
+        'abundance': abundance_col
+    })
+    return result_df.to_dict('records')
+
+def _load_per_sample_organisms(
+    main_dir: str,
+    available_samples: List[str]
+) -> Dict[int, List[Dict[str, Any]]]:
+    """
+    Load species-level organisms from each sample and return a per-taxid attribution dict.
+
+    Keyed by the Kraken2 database taxid (as it appears in reports), each value is a
+    list of sample-level dicts sorted descending by reads. A sample is flagged as
+    negative control when its name contains "negative" (case-insensitive) — the
+    codebase has no explicit manifest NC flag at this stage.
+
+    Args:
+        main_dir: Results output directory
+        available_samples: All sample names including "All Samples"
+
+    Returns:
+        Dict[int, List[{sample, reads, abundance, is_negative_control}]]
+    """
+    real_samples = [s for s in available_samples if s != "All Samples"]
+    if not real_samples:
+        return {}
+
+    taxid_to_samples: Dict[int, List[Dict[str, Any]]] = {}
+
+    for sample in real_samples:
+        is_nc = "negative" in sample.lower()
+        try:
+            kraken_df = load_kraken_data(main_dir, sample)
+            if kraken_df.empty:
+                continue
+            species_df = kraken_df[
+                (kraken_df["rank"] == "S") & (kraken_df["reads"] >= 5)
+            ]
+            if species_df.empty:
+                continue
+            for org in _species_df_to_organisms(species_df):
+                taxid = org["taxid"]
+                if taxid not in taxid_to_samples:
+                    taxid_to_samples[taxid] = []
+                taxid_to_samples[taxid].append({
+                    "sample": sample,
+                    "reads": org["reads"],
+                    "abundance": org["abundance"],
+                    "is_negative_control": is_nc,
+                })
+        except Exception as exc:
+            logger.debug(f"Per-sample organism load failed for {sample}: {exc}")
+
+    # Sort each sample list descending by reads
+    for taxid in taxid_to_samples:
+        taxid_to_samples[taxid].sort(key=lambda x: x["reads"], reverse=True)
+
+    return taxid_to_samples
+
+def _get_active_watchlist_entries(config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Get only ENABLED watchlist entries for alerting.
+
+    Returns active entries from WatchlistManager.
+
+    Args:
+        config: Application configuration dict
+
+    Returns:
+        List of enabled watchlist entries with 'enabled': True
+    """
+    active_entries = []
+
+    # Get active entries from WatchlistManager
+    try:
+        manager = get_watchlist_manager()
+        # Load watchlist manager if not already loaded
+        if not manager._loaded and config:
+            manager.load_config(config)
+            logger.debug(f"Dashboard: Loaded WatchlistManager with {len(manager.get_active_entries())} active entries")
+        if manager._loaded:
+            for entry in manager.get_active_entries().values():
+                active_entries.append({
+                    "name": entry.name,
+                    "taxid": entry.taxid,  # WatchlistEntry uses 'taxid', not 'taxid_ncbi'
+                    "common_name": entry.common_name,
+                    "threat_level": entry.threat_level.value if entry.threat_level else "moderate",
+                    "alert_threshold": entry.alert_threshold,
+                    "enabled": True,  # Already filtered to active
+                })
+    except Exception as e:
+        logger.debug(f"Could not get WatchlistManager entries: {e}")
+
+    # Also include legacy species_of_interest (but only enabled ones)
+    legacy_species = config.get("species_of_interest", [])
+    for species in legacy_species:
+        if species.get("enabled", True):  # Default to enabled if not specified
+            # Avoid duplicates by taxid
+            taxid = species.get("taxid")
+            if taxid and any(e.get("taxid") == taxid for e in active_entries):
+                continue
+            active_entries.append({
+                **species,
+                "enabled": True,
+            })
+
+    return active_entries
+
+def _check_pathogens_with_mapping(
+    detected_organisms: List[Dict[str, Any]],
+    config: Optional[Dict[str, Any]] = None
+) -> List[Dict[str, Any]]:
+    """
+    Check detected organisms against pathogen database using proper taxid mapping.
+
+    This function uses the WatchlistManager's check_organisms_with_mapping() method
+    which properly handles GTDB and custom Kraken2 databases where taxids differ
+    from NCBI taxids.
+
+    Args:
+        detected_organisms: List of dicts with 'taxid', 'name', 'reads', 'abundance'
+        config: Optional config dict (for loading watchlist if needed)
+
+    Returns:
+        List of detected dangerous pathogens with full information
+    """
+    if not detected_organisms:
+        return []
+
+    try:
+        # Get WatchlistManager
+        manager = get_watchlist_manager()
+
+        # Ensure manager is loaded
+        if not manager._loaded and config:
+            manager.load_config(config)
+
+        # Get taxid mapping collection for proper db_taxid -> ncbi_taxid lookup
+        from nanometa_live.core.taxonomy.taxid_mapping import get_mapping_collection
+        mapping_collection = get_mapping_collection()
+
+        # Use the proper mapping-aware check function
+        if mapping_collection:
+            # WatchlistManager.check_organisms_with_mapping() properly handles:
+            # 1. Direct NCBI taxid match
+            # 2. Reverse mapping from Kraken2 db_taxid to NCBI taxid
+            # 3. Name-based matching as fallback
+            return manager.check_organisms_with_mapping(
+                detected_organisms,
+                mapping_collection
+            )
+        else:
+            # Fall back to standard method if no mapping available
+            # This still uses name matching as backup
+            logger.debug("No taxid mapping available, falling back to standard organism check")
+            return manager.check_organisms(detected_organisms)
+
+    except Exception as e:
+        logger.warning(f"Error in pathogen check with mapping: {e}")
+        # Fall back to old method on error
+        watched_species = _get_active_watchlist_entries(config) if config else []
+        return check_for_dangerous_pathogens(detected_organisms, watched_species)
+
+
+# ---------------------------------------------------------------------------
+# Validation overlay for pathogen alert cards (2026-05-01)
+# ---------------------------------------------------------------------------
+#
+# When the operator has enabled validation, every (sample, taxid) pair that
+# was classified above the read-count floor should have a corresponding
+# validation_results.json entry. The helpers below load that file once per
+# alerts-callback tick and summarise validation across the samples a
+# single watchlist hit was detected in. The summary is then attached to
+# each alert dict so the pathogen-alert components (CriticalPathogenAlert,
+# HighRiskPathogenAlert, WatchedSpeciesAlert) can render a small badge:
+#
+#   green  "Validated 95.2%"   -- all samples confirmed; high confidence
+#   amber  "Partial 78.4%"     -- some samples partial / mixed
+#   red    "Not validated"     -- no sample reached confirmed status
+#   grey   "Pending"           -- validation enabled but no result for this
+#                                 (sample, taxid) yet
+#
+# The intent is to let operators distinguish a real ACTION REQUIRED detection
+# from a Kraken2 false-positive that validation already rejected -- the
+# original feature ask was "to avoid false alarms".
+
+
+def _load_validation_lookup(main_dir: str) -> Dict[Tuple[str, int], Dict[str, Any]]:
+    """Build a per-(sample, taxid) validation-status lookup.
+
+    Reads ``<main_dir>/validation/validation_results.json`` via the canonical
+    ``BlastValidationParser``. Returns an empty dict when validation has not
+    run, the file is missing, or any parse error occurs -- the caller treats
+    "no entry" as "not validated yet" rather than "rejected".
+
+    Args:
+        main_dir: Pipeline results directory.
+
+    Returns:
+        ``{(sample_id, taxid): {"status": str, "identity": float,
+                                "method": str, "validated_reads": int,
+                                "total_reads": int}}``
+    """
+    if not main_dir:
+        return {}
+    try:
+        from nanometa_live.core.parsers.blast_validation_parser import (
+            BlastValidationParser,
+        )
+        parser = BlastValidationParser(main_dir)
+        if not parser.has_validation_data():
+            return {}
+        results = parser.get_validation_results()
+    except Exception as e:
+        logger.debug(f"Could not load validation_results.json: {e}")
+        return {}
+
+    lookup: Dict[Tuple[str, int], Dict[str, Any]] = {}
+    for r in results:
+        try:
+            sample_id = getattr(r, "sample_id", "")
+            raw_taxid = getattr(r, "taxid", None)
+            if not sample_id or raw_taxid is None:
+                continue
+            taxid = int(raw_taxid)
+            # status_display normalises ValidationStatus.UNCERTAIN to "low" and
+            # ValidationStatus.CONFIRMED to "validated"; fall back to .status.value
+            # if the parser version still returns the enum directly.
+            status_attr = getattr(r, "status_display", None) or getattr(r, "status", None)
+            if hasattr(status_attr, "value"):
+                status = str(status_attr.value)
+            else:
+                status = str(status_attr) if status_attr is not None else "no_data"
+            lookup[(sample_id, taxid)] = {
+                "status": status,
+                "identity": float(getattr(r, "percent_identity_mean", 0.0) or 0.0),
+                "method": str(getattr(r, "validation_method", "blast") or "blast"),
+                "validated_reads": int(getattr(r, "validated_reads", 0) or 0),
+                "total_reads": int(getattr(r, "total_reads", 0) or 0),
+                "percent_validated": float(getattr(r, "percent_validated", 0.0) or 0.0),
+            }
+        except (AttributeError, ValueError, TypeError) as exc:
+            logger.debug(f"Skipping malformed validation result: {exc}")
+            continue
+    return lookup
+
+
+# Status priority for cross-sample summary. Higher value = stronger signal.
+# We pick the BEST status across samples so a pathogen confirmed in one
+# sample is not under-reported as "partial" on the dashboard just because
+# another sample has fewer reads.
+_VALIDATION_RANK = {
+    "confirmed": 4,
+    "validated": 4,
+    "partial": 3,
+    "uncertain": 2,
+    "low": 1,
+    "no_data": 0,
+    "failed": 0,
+}
+
+
+def _summarise_validation_for_taxid(
+    samples: List[Dict[str, Any]],
+    taxid: Optional[int],
+    lookup: Dict[Tuple[str, int], Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Summarise validation status across a list of samples for one taxid.
+
+    Args:
+        samples: Per-sample attribution list (dicts with at least ``sample``).
+        taxid: NCBI / Kraken2 db taxid for the watchlist hit.
+        lookup: Output of ``_load_validation_lookup``.
+
+    Returns:
+        ``{"status", "identity", "method", "n_validated", "n_samples"}`` or
+        ``None`` when no sample in this detection has a validation entry.
+    """
+    if not lookup or taxid is None or not samples:
+        return None
+    try:
+        taxid_int = int(taxid)
+    except (TypeError, ValueError):
+        return None
+
+    rows = []
+    for s in samples:
+        sample_id = s.get("sample") if isinstance(s, dict) else None
+        if not sample_id:
+            continue
+        entry = lookup.get((sample_id, taxid_int))
+        if entry is not None:
+            rows.append(entry)
+
+    if not rows:
+        return None
+
+    best = max(rows, key=lambda e: _VALIDATION_RANK.get(e.get("status", "no_data"), 0))
+    avg_identity = sum(r["identity"] for r in rows) / len(rows)
+    method = best.get("method", "blast")
+    return {
+        "status": best.get("status", "no_data"),
+        "identity": avg_identity,
+        "method": method,
+        "n_validated": len(rows),
+        "n_samples": len(samples),
+    }

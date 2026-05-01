@@ -44,6 +44,10 @@ from nanometa_live.app.components.pathogen_alert import (
     WatchedSpeciesAlert,
 )
 from nanometa_live.app.tabs.dashboard_helpers import (
+    _species_df_to_organisms,
+    _load_per_sample_organisms,
+    _get_active_watchlist_entries,
+    _check_pathogens_with_mapping,
     _count_input_files,
     _make_banner_content,
     _verdict_banner_style,
@@ -63,201 +67,6 @@ from nanometa_live.app.tabs.dashboard_helpers import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _species_df_to_organisms(species_df: pd.DataFrame) -> List[Dict[str, Any]]:
-    """
-    Convert species DataFrame to list of organism dicts (vectorized).
-
-    Args:
-        species_df: DataFrame with species-level classifications
-
-    Returns:
-        List of organism dicts with taxid, name, reads, abundance
-    """
-    if species_df.empty:
-        return []
-
-    # Vectorized extraction - much faster than iterrows
-    # Use '%' column if available (kraken report standard), otherwise try 'fraction_total_reads'
-    if '%' in species_df.columns:
-        abundance_col = species_df['%'].fillna(0).astype(float)
-    elif 'fraction_total_reads' in species_df.columns:
-        abundance_col = species_df['fraction_total_reads'].fillna(0).astype(float) * 100
-    else:
-        abundance_col = pd.Series([0.0] * len(species_df))
-
-    result_df = pd.DataFrame({
-        'taxid': species_df['taxid'].fillna(0).astype(int),
-        'name': species_df['name'].fillna('Unknown'),
-        'reads': species_df['reads'].fillna(0).astype(int),
-        'abundance': abundance_col
-    })
-    return result_df.to_dict('records')
-
-
-def _load_per_sample_organisms(
-    main_dir: str,
-    available_samples: List[str]
-) -> Dict[int, List[Dict[str, Any]]]:
-    """
-    Load species-level organisms from each sample and return a per-taxid attribution dict.
-
-    Keyed by the Kraken2 database taxid (as it appears in reports), each value is a
-    list of sample-level dicts sorted descending by reads. A sample is flagged as
-    negative control when its name contains "negative" (case-insensitive) — the
-    codebase has no explicit manifest NC flag at this stage.
-
-    Args:
-        main_dir: Results output directory
-        available_samples: All sample names including "All Samples"
-
-    Returns:
-        Dict[int, List[{sample, reads, abundance, is_negative_control}]]
-    """
-    real_samples = [s for s in available_samples if s != "All Samples"]
-    if not real_samples:
-        return {}
-
-    taxid_to_samples: Dict[int, List[Dict[str, Any]]] = {}
-
-    for sample in real_samples:
-        is_nc = "negative" in sample.lower()
-        try:
-            kraken_df = load_kraken_data(main_dir, sample)
-            if kraken_df.empty:
-                continue
-            species_df = kraken_df[
-                (kraken_df["rank"] == "S") & (kraken_df["reads"] >= 5)
-            ]
-            if species_df.empty:
-                continue
-            for org in _species_df_to_organisms(species_df):
-                taxid = org["taxid"]
-                if taxid not in taxid_to_samples:
-                    taxid_to_samples[taxid] = []
-                taxid_to_samples[taxid].append({
-                    "sample": sample,
-                    "reads": org["reads"],
-                    "abundance": org["abundance"],
-                    "is_negative_control": is_nc,
-                })
-        except Exception as exc:
-            logger.debug(f"Per-sample organism load failed for {sample}: {exc}")
-
-    # Sort each sample list descending by reads
-    for taxid in taxid_to_samples:
-        taxid_to_samples[taxid].sort(key=lambda x: x["reads"], reverse=True)
-
-    return taxid_to_samples
-
-
-def _get_active_watchlist_entries(config: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    Get only ENABLED watchlist entries for alerting.
-
-    Returns active entries from WatchlistManager.
-
-    Args:
-        config: Application configuration dict
-
-    Returns:
-        List of enabled watchlist entries with 'enabled': True
-    """
-    active_entries = []
-
-    # Get active entries from WatchlistManager
-    try:
-        manager = get_watchlist_manager()
-        # Load watchlist manager if not already loaded
-        if not manager._loaded and config:
-            manager.load_config(config)
-            logger.debug(f"Dashboard: Loaded WatchlistManager with {len(manager.get_active_entries())} active entries")
-        if manager._loaded:
-            for entry in manager.get_active_entries().values():
-                active_entries.append({
-                    "name": entry.name,
-                    "taxid": entry.taxid,  # WatchlistEntry uses 'taxid', not 'taxid_ncbi'
-                    "common_name": entry.common_name,
-                    "threat_level": entry.threat_level.value if entry.threat_level else "moderate",
-                    "alert_threshold": entry.alert_threshold,
-                    "enabled": True,  # Already filtered to active
-                })
-    except Exception as e:
-        logger.debug(f"Could not get WatchlistManager entries: {e}")
-
-    # Also include legacy species_of_interest (but only enabled ones)
-    legacy_species = config.get("species_of_interest", [])
-    for species in legacy_species:
-        if species.get("enabled", True):  # Default to enabled if not specified
-            # Avoid duplicates by taxid
-            taxid = species.get("taxid")
-            if taxid and any(e.get("taxid") == taxid for e in active_entries):
-                continue
-            active_entries.append({
-                **species,
-                "enabled": True,
-            })
-
-    return active_entries
-
-
-def _check_pathogens_with_mapping(
-    detected_organisms: List[Dict[str, Any]],
-    config: Optional[Dict[str, Any]] = None
-) -> List[Dict[str, Any]]:
-    """
-    Check detected organisms against pathogen database using proper taxid mapping.
-
-    This function uses the WatchlistManager's check_organisms_with_mapping() method
-    which properly handles GTDB and custom Kraken2 databases where taxids differ
-    from NCBI taxids.
-
-    Args:
-        detected_organisms: List of dicts with 'taxid', 'name', 'reads', 'abundance'
-        config: Optional config dict (for loading watchlist if needed)
-
-    Returns:
-        List of detected dangerous pathogens with full information
-    """
-    if not detected_organisms:
-        return []
-
-    try:
-        # Get WatchlistManager
-        manager = get_watchlist_manager()
-
-        # Ensure manager is loaded
-        if not manager._loaded and config:
-            manager.load_config(config)
-
-        # Get taxid mapping collection for proper db_taxid -> ncbi_taxid lookup
-        from nanometa_live.core.taxonomy.taxid_mapping import get_mapping_collection
-        mapping_collection = get_mapping_collection()
-
-        # Use the proper mapping-aware check function
-        if mapping_collection:
-            # WatchlistManager.check_organisms_with_mapping() properly handles:
-            # 1. Direct NCBI taxid match
-            # 2. Reverse mapping from Kraken2 db_taxid to NCBI taxid
-            # 3. Name-based matching as fallback
-            return manager.check_organisms_with_mapping(
-                detected_organisms,
-                mapping_collection
-            )
-        else:
-            # Fall back to standard method if no mapping available
-            # This still uses name matching as backup
-            logger.debug("No taxid mapping available, falling back to standard organism check")
-            return manager.check_organisms(detected_organisms)
-
-    except Exception as e:
-        logger.warning(f"Error in pathogen check with mapping: {e}")
-        # Fall back to old method on error
-        watched_species = _get_active_watchlist_entries(config) if config else []
-        return check_for_dangerous_pathogens(detected_organisms, watched_species)
-
-
 def register_dashboard_callbacks(app: Dash):
     """
     Register callbacks for the dashboard tab.
@@ -852,9 +661,13 @@ def register_dashboard_callbacks(app: Dash):
             # Get only ENABLED watchlist entries for alerting
             watched_species = _get_active_watchlist_entries(config)
 
-            # Create alert panel with per-sample attribution
+            # Create alert panel with per-sample attribution +
+            # validation badges. main_dir lets the panel load
+            # validation_results.json so each card can show whether the
+            # detection has been validated and at what confidence.
             return _create_pathogen_alert_panel(
-                detected_organisms, watched_species, config, taxid_to_samples
+                detected_organisms, watched_species, config, taxid_to_samples,
+                main_dir=main_dir,
             )
 
         except Exception as e:
