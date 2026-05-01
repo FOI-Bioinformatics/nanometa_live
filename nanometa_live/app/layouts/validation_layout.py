@@ -19,27 +19,46 @@ def create_validation_status_card(
     partial: int = 0,
     low_confidence: int = 0,
     no_data: int = 0,
-    total: int = 0
+    total: int = 0,
+    reads_validated: int = 0,
+    reads_total: int = 0,
 ) -> dbc.Card:
     """
-    Create a summary card showing validation status counts.
+    Create a summary card showing validation status counts plus the
+    aggregate read totals.
+
+    The status counts (top row) tell the operator how many *species*
+    fell into each confidence tier. The aggregate read row underneath
+    answers a different question -- "of the reads we tested across
+    those species, how many actually validated?" -- which is the
+    metric clinical users keep asking for ("show absolute reads
+    confirmed AND the percentage").
 
     Args:
-        confirmed: Number of confirmed detections (>80% validated)
+        confirmed: Number of confirmed detections (>=80% validated reads)
         partial: Number of partial confirmations (50-80%)
         low_confidence: Low confidence detections (<50%)
         no_data: Species with no validation data
         total: Total species checked
+        reads_validated: Reads that passed validation across all species
+        reads_total: Total reads tested by the validation flow
+            (Kraken2-classified reads handed to BLAST/minimap2)
 
     Returns:
         dbc.Card component
     """
+    pct_validated = (
+        (reads_validated / reads_total * 100.0) if reads_total > 0 else 0.0
+    )
+
     return dbc.Card([
         dbc.CardHeader([
             html.I(className="bi bi-shield-check me-2"),
             html.H5("Validation Summary", className="mb-0 d-inline")
         ]),
         dbc.CardBody([
+            # Per-tier species counts. The H2 captions give a quick
+            # at-a-glance read across the four confidence buckets.
             dbc.Row([
                 dbc.Col([
                     html.Div([
@@ -67,12 +86,37 @@ def create_validation_status_card(
                 ], md=3),
             ]),
             html.Hr(className="my-3"),
-            html.Div([
-                html.Small([
-                    html.Strong("Total species checked: "),
-                    str(total)
-                ], className="text-muted")
-            ], className="text-center")
+            # Aggregate footer. Two lines: species-checked count, then
+            # the actual read totals so operators can answer "is this
+            # 5/5 reads or 5000/10000 reads?". Without absolute counts
+            # the species-tier badges above are easy to misinterpret.
+            dbc.Row([
+                dbc.Col([
+                    html.Small([
+                        html.Strong("Species checked: "),
+                        str(total),
+                    ], className="text-muted d-block"),
+                ], md=6, className="text-center text-md-end"),
+                dbc.Col([
+                    html.Small([
+                        html.Strong(
+                            f"{reads_validated:,} of {reads_total:,}",
+                            className="me-1",
+                        ),
+                        html.Span(
+                            "reads validated",
+                            className="me-1 text-muted",
+                        ),
+                        html.Span(
+                            f"({pct_validated:.1f}%)",
+                            className="text-muted",
+                        ),
+                    ], className="d-block") if reads_total > 0 else html.Small(
+                        "Reads validated: -- (no validation data)",
+                        className="text-muted d-block",
+                    ),
+                ], md=6, className="text-center text-md-start"),
+            ]),
         ])
     ], className="mb-4")
 
@@ -633,36 +677,57 @@ def create_validation_result_card(
                     style={"fontSize": "12px", "fontWeight": "500"}
                 )
             ], className="mb-2"),
+            # Three operator-facing metrics. The previous layout had
+            # four columns where "Confirmed %" and "Sequences X/Y"
+            # were two views of the same number; operators had to
+            # mentally combine them to interpret. The new column 1
+            # shows BOTH the absolute count (primary, since it
+            # conveys statistical scale -- "5/5" vs "500/500" reads
+            # very differently) and the percentage (secondary, for
+            # at-a-glance comparison across cards).
             dbc.Row([
+                # Validated reads -- absolute count + percentage in
+                # one place
                 dbc.Col([
                     html.Div([
-                        html.Small("Confirmed", className="text-muted d-block"),
-                        html.Strong(f"{percent_validated:.1f}%", style={"fontSize": "1.2rem"})
+                        html.Small(
+                            "Reads validated",
+                            className="text-muted d-block",
+                        ),
+                        html.Strong(
+                            f"{validated_reads:,} of {total_reads:,}",
+                            style={"fontSize": "1.2rem"},
+                        ),
+                        html.Small(
+                            f"({percent_validated:.1f}%)",
+                            className=f"text-{config['color']} d-block",
+                            style={"fontSize": "0.85rem", "fontWeight": "500"},
+                        ),
                     ])
-                ], md=3),
+                ], md=4),
+                # Mean identity across the validated reads
                 dbc.Col([
                     html.Div([
-                        html.Small("Match %", className="text-muted d-block"),
-                        html.Strong(f"{percent_identity:.1f}%", style={"fontSize": "1.2rem"})
+                        html.Small(
+                            "Mean identity",
+                            className="text-muted d-block",
+                        ),
+                        html.Strong(
+                            f"{percent_identity:.1f}%",
+                            style={"fontSize": "1.2rem"},
+                        ),
+                        html.Small(
+                            "95%+ is a strong match",
+                            className="text-muted d-block",
+                            style={"fontSize": "0.75rem"},
+                        ),
                     ])
-                ], md=3),
+                ], md=4),
+                # Method-conditional: minimap2 mapq (0-60 scale) or
+                # BLAST read-alignment % (qcovs averaged across
+                # validated reads).
                 dbc.Col([
                     html.Div([
-                        html.Small("Sequences", className="text-muted d-block"),
-                        html.Strong(f"{validated_reads:,}/{total_reads:,}", style={"fontSize": "1.1rem"})
-                    ])
-                ], md=3),
-                dbc.Col([
-                    html.Div([
-                        # 4th metric is method-conditional. minimap2's
-                        # mapq is a 0-60 confidence scale; we render
-                        # it as ``X / 60`` so the operator sees the
-                        # scale anchor without needing a tooltip.
-                        # BLAST has no equivalent confidence metric;
-                        # we show the read-alignment percentage
-                        # (coverage_breadth) instead and rename
-                        # "Query Coverage" -> "Read Alignment %"
-                        # for consistency with the stats-table header.
                         html.Small(
                             "Mapping Confidence" if validation_method == "minimap2" else "Read Alignment %",
                             className="text-muted d-block"
@@ -672,12 +737,12 @@ def create_validation_result_card(
                             style={"fontSize": "1.2rem"}
                         ),
                         html.Small(
-                            "30+ reliable" if validation_method == "minimap2" else "",
+                            "30+ reliable" if validation_method == "minimap2" else "Higher = stronger",
                             className="text-muted d-block",
-                            style={"fontSize": "0.7rem"},
-                        ) if validation_method == "minimap2" else html.Span(),
+                            style={"fontSize": "0.75rem"},
+                        ),
                     ])
-                ], md=3),
+                ], md=4),
             ]),
             html.Div([
                 dbc.Progress(

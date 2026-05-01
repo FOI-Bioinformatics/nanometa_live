@@ -173,8 +173,31 @@ def _filter_by_method(results, method):
 
 
 def _compute_summary(results):
-    """Compute confirmed/partial/low/no_data counts from a result list."""
-    counts = {"confirmed": 0, "partial": 0, "low_confidence": 0, "no_data": 0}
+    """Compute summary stats from a validation result list.
+
+    Returns the four per-status species counts AND the aggregate
+    read totals across all results so the Validation Summary card
+    can show "X of Y reads validated" in addition to the species
+    bucket counts.
+
+    Returns:
+        ``{
+            "confirmed": int,
+            "partial": int,
+            "low_confidence": int,
+            "no_data": int,
+            "reads_validated": int,
+            "reads_total": int,
+        }``
+    """
+    counts = {
+        "confirmed": 0,
+        "partial": 0,
+        "low_confidence": 0,
+        "no_data": 0,
+        "reads_validated": 0,
+        "reads_total": 0,
+    }
     for r in results:
         status = r.get("status", "no_data")
         if status == "confirmed":
@@ -185,6 +208,11 @@ def _compute_summary(results):
             counts["low_confidence"] += 1
         else:
             counts["no_data"] += 1
+        try:
+            counts["reads_validated"] += int(r.get("validated_reads", 0) or 0)
+            counts["reads_total"] += int(r.get("total_reads", 0) or 0)
+        except (TypeError, ValueError):
+            continue
     return counts
 
 
@@ -273,6 +301,8 @@ def register_validation_callbacks(app: Dash):
             low_confidence=counts["low_confidence"],
             no_data=counts["no_data"],
             total=len(blast_results),
+            reads_validated=counts["reads_validated"],
+            reads_total=counts["reads_total"],
         )
 
     @app.callback(
@@ -573,6 +603,8 @@ def register_validation_callbacks(app: Dash):
             low_confidence=counts["low_confidence"],
             no_data=counts["no_data"],
             total=len(cov_results),
+            reads_validated=counts["reads_validated"],
+            reads_total=counts["reads_total"],
         )
 
     @app.callback(
