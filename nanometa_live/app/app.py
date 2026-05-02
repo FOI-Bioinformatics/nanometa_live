@@ -45,6 +45,7 @@ from nanometa_live.app.layouts.watchlist_layout import create_watchlist_layout
 from nanometa_live.app.layouts.validation_layout import create_validation_layout
 from nanometa_live.app.layouts.preparation_layout import create_preparation_layout
 from nanometa_live.app.components.header import create_header
+from nanometa_live.app.components.collision_modal import create_collision_modal
 from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.config.config_loader import ConfigLoader
 
@@ -595,6 +596,17 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
             )
         ], id="welcome-modal", is_open=False, centered=True, size="lg"),
         dcc.Store(id="welcome-shown", storage_type="local", data=False),
+
+        # Output-directory collision modal: warns the operator when the
+        # results-output dir already contains nanometanf result subdirs
+        # so a new run does not silently mix data from different inputs.
+        # The collision-decision-pending Store carries the detected outdir
+        # and subdir list while the operator picks an action.
+        dcc.Store(
+            id='collision-decision-pending',
+            data={"outdir": "", "found": []},
+        ),
+        create_collision_modal(),
     ])
 
     # Initialize offline mode on all API clients and managers if configured
