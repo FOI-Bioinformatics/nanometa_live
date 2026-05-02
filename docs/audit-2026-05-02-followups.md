@@ -50,21 +50,20 @@ with a parse error), launch Nanometa Live, click Organisms tab.
 Today the tab is silently empty; with F1 the operator sees a
 toast pointing at the broken file.
 
-### F2 — Mark dashboard estimator fallbacks as estimated
+### F2 — Mark dashboard estimator fallbacks as estimated -- OBSOLETE
 
-**Severity:** low. **Blast radius:** Zone 3 stat label.
+**Status:** obsolete. The auditor's recommendation referenced a
+"Zone 3 classification-rate stat" that does not exist in the
+current 4-zone Dashboard architecture (CLAUDE.md "Dashboard
+Architecture": Zone 3 has Sequences Analyzed, Sample Quality,
+Species Detected, Run Time -- no classification-rate card). The
+estimator fallback in
+`app/tabs/dashboard_helpers.py:_generate_alerts` only feeds
+`alert_engine.generate_alerts`, not a user-visible stat label.
 
-When `compute_qc_stats_for_zone3` falls back to the
-organism-count estimator (already logged after the inline fix)
-the Zone 3 classification-rate stat looks plausible but is
-synthetic. Append an `(estimated)` annotation to the stat's
-label and downgrade the colour ramp by one tier so the operator
-sees that the number is approximate.
-
-Repro: temporarily rename `kraken2/` under
-`results_output_directory` to `_kraken2/`, refresh the
-dashboard. The estimator fires; today the resulting number
-appears in the same colour as a real measurement.
+The terminal-side WARNING log added in commit `3270785` is the
+right surface for this case. If a future cycle reintroduces a
+classification-rate stat to Zone 3, re-open this item.
 
 ### F3 — Wire or remove the cancel UI for genome download / BLAST build
 
@@ -210,7 +209,7 @@ Python tracebacks.
 | ID | Title | Severity | From |
 |---|---|---|---|
 | F1 | Notification-trigger routing | medium | frontend §3 |
-| F2 | Mark estimator stats | low | frontend §5 |
+| F2 | Mark estimator stats | OBSOLETE | frontend §5 |
 | F3 | Cancel UI for downloads | medium | frontend §1 |
 | F4 | nanorunner chunk filenames | **high** | compat §1.4 |
 | F5 | nanorunner exit code | medium | compat §1.2 |
