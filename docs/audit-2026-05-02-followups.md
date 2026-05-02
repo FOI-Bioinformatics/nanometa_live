@@ -221,13 +221,15 @@ from cycle 18 (2026-04-28); this followup just made the
 documentation discoverable and links the build-platform
 restriction (Linux x86_64 vs macOS arm64 cannot share envs).
 
-### F13 — Operator-facing error messages in `parameter_mapping.create_nextflow_params`
+### F13 — Operator-facing error messages in `parameter_mapping.create_nextflow_params` -- DONE
 
-**Severity:** low. **Blast radius:** one helper.
-
-Validation errors today read like internal exception strings.
-Polish them so a bench operator can act on them without reading
-Python tracebacks.
+**Status:** landed in commit `541fc02` on `dev2` (2026-05-02).
+Four messages reworded to name the offending field, suggest a
+concrete next action, and link wording back to the
+Configuration tab labels operators actually see (e.g.
+'Nanopore output directory', 'Sample handling'). The
+"no input mode" / "multiple input modes" pair stays
+substring-matchable for the existing parameter_mapping tests.
 
 ---
 
@@ -248,7 +250,7 @@ Python tracebacks.
 | F10 | Operator-guide host doc | DONE | frontend §7 |
 | F11 | NXF_VER pin doc | DONE | backend §7 |
 | F12 | Conda pre-warm | DONE | (general) |
-| F13 | parameter_mapping error UX | low | frontend §3 |
+| F13 | parameter_mapping error UX | DONE | frontend §3 |
 
 The `backend §...` references will resolve once the
 backend audit lands; this index will be updated then.
