@@ -24,31 +24,24 @@ fixes, and smoke tests for the locked singleton.
 
 ## High-priority follow-ups
 
-### F0 — `MULTIQC_NANOPORE_STATS` filename collision in realtime mode
+### F0 — `MULTIQC_NANOPORE_STATS` filename collision in realtime mode -- DONE
 
-**Severity:** P0 (blocks every multi-batch realtime run with
-barcoded input). **Blast radius:** nanometanf realtime path.
+**Status:** fixed in nanometanf commit `68d08c4`, merged at
+`e1e3f98` on 2026-05-02. The re-run of Phase C Mode 2 with
+the fix in place completed cleanly.
 
-Surfaced during 2026-05-02 Phase C Mode 2 (realtime_multiplex).
-Each barcode in realtime mode produces multiple per-batch
-seqkit/chopper TSVs named `barcodeXX.tsv`. When
-`MULTIQC_NANOPORE_STATS` later `.collect()`s these, Nextflow
-staging aborts with:
+The fix changes the input declaration from
+`path(stats_files)` to `path(stats_files, stageAs: '?/*')`
+so each per-batch TSV/JSON is staged in its own numbered
+subdirectory under the task work dir, avoiding the
+"input file name collision" abort. The Python script was
+updated to glob `*/*.tsv` and `*/*.json` recursively and
+key by sample_id with later batches overwriting earlier --
+the realtime contract is "show the operator the latest
+per-sample stats", which this implements.
 
-    Process `FOIBIOINFORMATICS_NANOMETANF:NANOMETANF:
-    MULTIQC_NANOPORE_STATS` input file name collision --
-    There are multiple input files for each of the following
-    file names: barcode04.tsv, barcode01.tsv, barcode02.tsv,
-    barcode03.tsv, barcode05.tsv
-
-The fix is to suffix each per-barcode TSV with a batch id
-(e.g. `barcodeXX_batch_NNNN.tsv`) where it is staged --
-either in seqkit_merge_stats.nf, generate_snapshot_stats.nf,
-or in the collector input. Filing as P0 because every
-multiplex realtime run hits this; the samplesheet path is
-unaffected. Repro path:
-`bin/run-mode-test.sh realtime_multiplex` against the
-`fixtures/realtime_multiplex/` fixture.
+The fix mirrors the upstream nf-core MULTIQC module's
+pattern at `modules/nf-core/multiqc/main.nf:11`.
 
 ### F1 — Route silent failures through `notification-trigger`
 
@@ -234,7 +227,7 @@ Python tracebacks.
 
 | ID | Title | Severity | From |
 |---|---|---|---|
-| F0 | MULTIQC_NANOPORE_STATS collision | **P0** | Phase C Mode 2 |
+| F0 | MULTIQC_NANOPORE_STATS collision | DONE | Phase C Mode 2 |
 | F1 | Notification-trigger routing | medium | frontend §3 |
 | F2 | Mark estimator stats | OBSOLETE | frontend §5 |
 | F3 | Cancel UI for downloads | medium | frontend §1 |

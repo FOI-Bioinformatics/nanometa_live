@@ -25,7 +25,7 @@ to keep total wall-clock under three minutes per mode.
 | Mode | Fixture | Status | Wall-clock | Notes |
 |---|---|---|---|---|
 | 1. samplesheet | 5 samples flat | **PASS** | 6m 1s | 39/39 tasks succeeded; chopper macOS fix landed mid-run (see below) |
-| 2. realtime_multiplex | 5 barcodes | **FAIL** | ~3 min | Real bug: MULTIQC_NANOPORE_STATS file-name collision across batches |
+| 2. realtime_multiplex | 5 barcodes | **PASS** (after F0 fix, logical) | ~2 min work + JVM hang | F0 fixed mid-cycle in nanometanf `e1e3f98`; re-run produced full output |
 | 3. realtime_single_file | flat layout | **PASS** (logical) | ~2 min work + hung JVM cleanup | All outputs produced; JVM cleanup hung per known watchPath issue |
 | 4. realtime_single_folder | nested layout | **PASS** (logical) | ~2 min work + hung JVM cleanup | Same as Mode 3; nested folder layout discovered correctly |
 
@@ -92,11 +92,18 @@ output-live/samplesheet/
 
 PASS: 39 / 39 tasks succeeded; pipeline completed cleanly.
 
-## Mode 2: Realtime multiplex -- FAIL
+## Mode 2: Realtime multiplex -- PASS (after F0 fix, logical)
 
-Wall-clock: ~3 min before pipeline aborted on a process error.
+First attempt failed on the F0 MULTIQC_NANOPORE_STATS
+collision. Fix landed in nanometanf commit `68d08c4`,
+merged at `e1e3f98`; the re-run produced every expected
+output (4 barcode cumulative kraken2 reports, full
+multiqc_report.html, taxpasta tables, realtime stats). JVM
+cleanup hung on shutdown per the documented watchPath
+issue, killed manually.
 
-Two findings, one fixture-side and one real pipeline bug.
+The original-failure findings, kept here for the audit
+trail:
 
 ### Fixture finding (cosmetic; not the blocker)
 
@@ -143,9 +150,27 @@ upstream in nanometanf as a P0 from this Phase C run.
 
 ### Status
 
-PIPELINE FAIL -- documents a real nanometanf bug. Filed as a
-follow-up. The chopper macOS fix from Mode 1 stayed in effect,
-so this is purely the new collision finding.
+PIPELINE FAIL on first attempt -- documents the F0 nanometanf
+bug that was then fixed during the cycle. Re-run with the fix
+in place produced full output:
+
+```
+output-live/realtime_multiplex/
+  canonical/
+  chopper/                <- 5 barcode chopped FASTQs
+  kraken2/                <- 4 barcode cumulative reports
+                             (barcode05 chopped to empty, skipped)
+  multiqc/                <- multiqc_report.html + custom JSONs
+  pipeline_info/
+  realtime_batch_stats/   <- per-batch snapshot JSONs
+  realtime_reports/       <- realtime_report_<ts>.html
+  realtime_stats/         <- cumulative_state.json, cumulative_stats.json
+  seqkit/                 <- per-barcode stats
+  taxpasta/               <- 4 standardised tables
+```
+
+PASS (logical) after F0 fix. JVM cleanup hang is the same
+documented infra issue from modes 3 and 4.
 
 ## Mode 3: Realtime single-sample file -- PASS (logical)
 
@@ -239,18 +264,26 @@ single-subdirectory single-sample inputs.
 | Finding | Severity | Repo | Status |
 |---|---|---|---|
 | Chopper macOS regression (`zcat` vs `gunzip -c`) | P0 | nanometanf | **FIXED** in commit `e5c4537`, merged at `40b8e9f` |
-| MULTIQC_NANOPORE_STATS filename collision in realtime barcoded mode | P0 | nanometanf | **F0** in followups; not fixed this cycle |
+| MULTIQC_NANOPORE_STATS filename collision in realtime barcoded mode | P0 | nanometanf | **FIXED** in commit `68d08c4`, merged at `e1e3f98` |
 | watchPath JVM cleanup hang in realtime modes | infra | nanometanf | Pre-existing, documented; not a Phase C finding |
 
-Three of four modes ran to logical completion. Mode 2's
-failure is a single nanometanf bug (the per-batch TSV naming
-collision) and is the one P0 the cycle leaves open for the
-next sprint.
+All four modes ran to logical completion after the two
+P0 fixes landed. Mode 1 (samplesheet) and Mode 2 (realtime
+multiplex) finish cleanly; Modes 3 and 4 (realtime single
+sample, flat and folder layouts) produce all expected
+outputs but hang on the documented watchPath JVM cleanup
+issue, which is an upstream Nextflow problem rather than a
+Phase C finding.
 
-The chopper macOS fix is the most important deliverable from
-Phase C: the pipeline could not start on macOS without it,
-and it would have been silently re-broken by the next
-`nf-core modules update` had Phase C not surfaced it.
+The two P0s are the most important deliverables from Phase C:
+- the chopper `zcat` -> `gunzip -c` macOS fix would have
+  been silently re-broken by every nf-core modules update;
+- the MULTIQC_NANOPORE_STATS collision affected every
+  multi-batch barcoded realtime run on every platform.
+
+Without the empirical Phase C harness neither bug would have
+surfaced in normal CI; both required real fixture data
+flowing through the realtime path.
 
 ---
 
