@@ -137,24 +137,30 @@ Advanced Settings.
 
 ## Medium-priority follow-ups
 
-### F8 — Add tests for `core/utils/alert_engine.py`
+### F8 — Add tests for `core/utils/alert_engine.py` -- DONE
 
-**Severity:** medium (operator-facing; drives the verdict
-banner). **Blast radius:** new test file.
+**Status:** landed in commit `e676dd5` on `dev2` (2026-05-02).
 
-`alert_engine.py` generates the Zone 1 verdict banner copy. Has
-zero direct tests today. Even a small scenario-driven test (one
-case per banner state: ALL CLEAR, ACTION REQUIRED, MONITORING,
-SCREENING IN PROGRESS, STANDBY) would catch the most likely
-class of regressions.
+21 tests covering Alert.to_dict shape, generate_alerts under
+five scenarios (no samples, low quality, error counts above and
+below threshold, healthy samples, dangerous pathogens), severity
+ordering, alert history retention and capping, deduplication,
+and the singleton thread-safety guard. Test count moved from
+781 to 802.
 
-### F9 — Add tests for `core/utils/auto_detect.py`
+### F9 — Add tests for `core/utils/auto_detect.py` -- DONE
 
-**Severity:** medium. **Blast radius:** new test file.
+**Status:** landed in commit `84f8689` on `dev2` (2026-05-02).
 
-`auto_detect.py` selects the sample-handling layout
-(`by_barcode`, `single_sample`, or `per_file`). A
-misclassification produces empty dashboards. Today untested.
+18 tests covering detect_sample_handling (missing dir,
+file-instead-of-dir, barcoded layout, empty-barcode
+fallthrough, case-insensitive regex, flat-dir-no-fastq,
+fastq-in-non-barcode-subdirs, distinct sample prefixes,
+sequential names, many uniform files, few distinct files),
+get_barcode_list (missing dir, only barcodes-with-FASTQ
+returned, sort order, unclassified excluded), and
+detect_file_format (missing dir, compressed, uncompressed,
+recursive walk). Test count moved from 802 to 820.
 
 ### F10 — Document `127.0.0.1` binding in the Operator Guide
 
@@ -210,8 +216,8 @@ Python tracebacks.
 | F5 | nanorunner exit code | medium | compat §1.2 |
 | F6 | nanorunner empty source | low | compat §1.3 |
 | F7 | Schema drift | low | compat §2.2 |
-| F8 | alert_engine tests | medium | frontend §6 |
-| F9 | auto_detect tests | medium | frontend §6 |
+| F8 | alert_engine tests | DONE | frontend §6 |
+| F9 | auto_detect tests | DONE | frontend §6 |
 | F10 | Operator-guide host doc | low | frontend §7 |
 | F11 | NXF_VER pin doc | low | backend §7 |
 | F12 | Conda pre-warm | low | (general) |
