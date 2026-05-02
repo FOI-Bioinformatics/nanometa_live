@@ -691,6 +691,12 @@ def register_main_callbacks(app: Dash):
             entries = manager.get_active_entries()
             return [{"name": e.name, "taxid": e.taxid} for e in entries.values()]
         except Exception:
+            # The store fed callbacks for the Organisms tab and the
+            # watched-species alert; an empty return makes those tabs
+            # silently look like the watchlist is empty. Log the failure
+            # with a traceback so it surfaces in the terminal where the
+            # operator launched Nanometa Live.
+            logging.exception("sync_watchlist failed; main-watchlist-store will be empty")
             return []
 
     # Show more organisms toggle
@@ -1020,6 +1026,16 @@ def register_main_callbacks(app: Dash):
                     if taxid:
                         results[taxid] = data
                 except Exception:
+                    # Skipping this file on failure is the right thing
+                    # (other on-demand results in the directory are
+                    # still loaded), but a silent skip hid file-system
+                    # errors and malformed JSON during the 2026-04-30
+                    # validation refactor. Log the file name so the
+                    # operator can find the bad on-demand artefact.
+                    logging.warning(
+                        f"reload_on_demand_results: skipped malformed file {f}",
+                        exc_info=True,
+                    )
                     continue
 
         return results if results else no_update
