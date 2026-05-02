@@ -24,17 +24,16 @@ to keep total wall-clock under three minutes per mode.
 
 | Mode | Fixture | Status | Wall-clock | Notes |
 |---|---|---|---|---|
-| 1. samplesheet | 5 samples flat | _running_ | _tbd_ | _tbd_ |
-| 2. realtime_multiplex | 5 barcodes | _not run_ | _tbd_ | Sequenced after Mode 1 confirms the path |
+| 1. samplesheet | 5 samples flat | **PASS** | 6m 1s | 39/39 tasks succeeded; chopper macOS fix landed mid-run (see below) |
+| 2. realtime_multiplex | 5 barcodes | _running_ | _tbd_ | _tbd_ |
 | 3. realtime_single_file | flat layout | _not run_ | _tbd_ | _tbd_ |
 | 4. realtime_single_folder | nested layout | _not run_ | _tbd_ | _tbd_ |
 
 ---
 
-## Mode 1: Samplesheet
+## Mode 1: Samplesheet -- PASS
 
-_Running. Results will be appended here when the pipeline
-returns._
+Wall-clock: 6m 1s. Total tasks: 39 / 39 succeeded.
 
 Configured with:
 ```
@@ -45,16 +44,53 @@ nextflow run main.nf -profile conda \
   -work-dir output-live/samplesheet/work
 ```
 
-Fixture content: 5 chunked FASTQs and a `samplesheet.csv` with
-columns `sample,fastq,barcode` covering LVS_1, D6300_2,
-Turex_3, Ricin_crude_1, and negative.
+### Mid-run finding: nanometanf chopper macOS regression
 
-Expected outputs (per nanometanf's standard layout):
-- `output-live/samplesheet/kraken2/<sample>.kraken2.report.txt`
-- `output-live/samplesheet/seqkit/<sample>.tsv` (chopper QC tool)
-- `output-live/samplesheet/multiqc/multiqc_report.html`
-- `output-live/samplesheet/pipeline_info/execution_trace_*.txt`
-- `output-live/samplesheet/taxpasta/*.tsv`
+The first attempt failed for all 5 samples with `zcat: can't
+stat: <file>.fastq.gz` followed by an opaque "Invalid method
+invocation `call`" Groovy error. Root cause: nanometanf's
+chopper module
+(`modules/nf-core/chopper/main.nf:30`) uses `zcat`, which on
+macOS BSD only handles legacy `.Z` files. The macOS fix from
+commit `0da485e` had been silently reverted by `982a70b` when
+chopper was bumped to the upstream topic-channel version.
+
+Fixed in nanometanf commit `e5c4537` (merged to `dev` at
+`40b8e9f`); the second mode-1 run picked up the fix and
+completed cleanly.
+
+### Per-sample outcome (CHOPPER -> KRAKEN2)
+
+| Sample | Reads after chopper (--minlength 1000) | Kraken2 ran |
+|---|---:|---|
+| LVS_1 | nonzero | yes |
+| D6300_2 | nonzero | yes |
+| Turex_3 | nonzero | yes |
+| Ricin_crude_1 | nonzero | yes |
+| negative | 0 | skipped (empty input) |
+
+The negative control's chopper output was empty (all 500
+subsampled reads under the 1 kb minimum). The pipeline
+correctly skipped Kraken2 for the empty input rather than
+erroring; 4/4 KRAKEN2 tasks succeeded with all 4 producing
+real reports.
+
+### Outputs verified
+
+```
+output-live/samplesheet/
+  canonical/         <- canonical_qc_writer + canonical_classification_writer
+  chopper/           <- 5 *.chopped.fastq.gz
+  fastqc/            <- 5 *_fastqc.html + zip
+  kraken2/           <- 4 *.kraken2.report.txt
+  multiqc/           <- multiqc_report.html, custom mqc JSONs
+  nanoplot/          <- 4 sample dirs with NanoPlot output
+  pipeline_info/     <- execution_trace_*, pipeline_dag, software_versions
+  seqkit/            <- 5 *.tsv (chopper QC source)
+  taxpasta/          <- 4 standardised tables
+```
+
+PASS: 39 / 39 tasks succeeded; pipeline completed cleanly.
 
 ## Mode 2: Realtime multiplex
 
