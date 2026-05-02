@@ -409,6 +409,9 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             Output("notification-trigger", "data", allow_duplicate=True),
             Output("app-config", "data", allow_duplicate=True),
             Output("stop-confirm-modal", "is_open", allow_duplicate=True),
+            Output("collision-modal", "is_open", allow_duplicate=True),
+            Output("collision-modal-body", "children", allow_duplicate=True),
+            Output("collision-decision-pending", "data", allow_duplicate=True),
         ],
         Input("start-stop-button", "n_clicks"),
         State("app-config", "data"),
@@ -416,37 +419,186 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         prevent_initial_call=True,
     )
     def start_or_prompt_stop(n_clicks, config, status):
-        """Start analysis or open stop confirmation dialog."""
+        """Start analysis, prompt to stop, or warn about output collision.
+
+        When the user clicks Start with a results dir that already
+        contains nanometanf output, this callback opens the collision
+        modal instead of starting the run. The actual run is then
+        triggered by handle_collision_choice based on which button the
+        user picks.
+        """
         from nanometa_live.app.utils.config_manager import merge_config_safely
+        from nanometa_live.app.components.collision_modal import (
+            render_collision_body,
+        )
 
         if not n_clicks:
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update, no_update, no_update
 
         if status.get("running", False):
-            # Open confirmation modal instead of stopping directly
-            return no_update, no_update, True
-        else:
-            # Start the analysis
-            if not config:
-                return {
+            # Open stop-confirmation modal instead of stopping directly
+            return no_update, no_update, True, no_update, no_update, no_update
+
+        if not config:
+            return (
+                {
                     "title": "Error",
                     "message": "No configuration loaded. Please load or configure settings first.",
                     "color": "danger",
-                }, no_update, no_update
-            backend_manager.config = config
-            success, message = backend_manager.start()
-            color = "success" if success else "danger"
+                },
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+                no_update,
+            )
 
-            if success:
-                updated_config = merge_config_safely(config, backend_manager.config)
-            else:
-                updated_config = no_update
+        # Determine the results directory the run will write to. The
+        # GUI accepts either explicit `results_output_directory` or
+        # falls back to `main_dir`; mirror parameter_mapping's choice.
+        outdir = (
+            config.get("results_output_directory")
+            or config.get("main_dir")
+            or ""
+        )
+        found = backend_manager.detect_existing_results(outdir)
+        if found:
+            # Open the collision modal; do NOT start the run yet.
+            return (
+                no_update,
+                no_update,
+                no_update,
+                True,
+                render_collision_body(outdir, found),
+                {"outdir": outdir, "found": found},
+            )
 
-            return {
+        # Clean outdir -- start the analysis directly.
+        backend_manager.config = config
+        success, message = backend_manager.start()
+        color = "success" if success else "danger"
+
+        if success:
+            updated_config = merge_config_safely(config, backend_manager.config)
+        else:
+            updated_config = no_update
+
+        return (
+            {
                 "title": "Analysis Started" if success else "Error",
                 "message": message,
                 "color": color,
-            }, updated_config, no_update
+            },
+            updated_config,
+            no_update,
+            no_update,
+            no_update,
+            no_update,
+        )
+
+    @app.callback(
+        [
+            Output("collision-modal", "is_open", allow_duplicate=True),
+            Output("notification-trigger", "data", allow_duplicate=True),
+            Output("app-config", "data", allow_duplicate=True),
+        ],
+        [
+            Input("collision-archive-btn", "n_clicks"),
+            Input("collision-resume-btn", "n_clicks"),
+            Input("collision-cancel-btn", "n_clicks"),
+        ],
+        [
+            State("collision-decision-pending", "data"),
+            State("app-config", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def handle_collision_choice(
+        archive_clicks, resume_clicks, cancel_clicks, pending, config
+    ):
+        """Dispatch the collision modal's three buttons.
+
+        Cancel just closes the modal with an info toast. Archive moves
+        existing result subdirs into a timestamped subfolder and starts
+        a fresh run. Continue runs the pipeline with -resume so
+        Nextflow reuses cached work where it can.
+        """
+        from nanometa_live.app.utils.config_manager import merge_config_safely
+
+        triggered = ctx.triggered_id
+        if not triggered:
+            raise PreventUpdate
+
+        outdir = (pending or {}).get("outdir", "")
+
+        if triggered == "collision-cancel-btn":
+            return (
+                False,
+                {
+                    "title": "Run cancelled",
+                    "message": (
+                        "Update Results Output Directory in the "
+                        "Configuration tab and try again."
+                    ),
+                    "color": "info",
+                },
+                no_update,
+            )
+
+        # Both Archive and Resume need to actually start the pipeline.
+        if not config:
+            return (
+                False,
+                {
+                    "title": "Error",
+                    "message": "No configuration loaded.",
+                    "color": "danger",
+                },
+                no_update,
+            )
+
+        backend_manager.config = config
+
+        if triggered == "collision-archive-btn":
+            try:
+                archive_path = backend_manager.archive_existing_results(outdir)
+            except OSError as e:
+                logging.error(f"archive_existing_results failed: {e}")
+                return (
+                    False,
+                    {
+                        "title": "Archive failed",
+                        "message": str(e),
+                        "color": "danger",
+                    },
+                    no_update,
+                )
+            success, message = backend_manager.start(resume=False)
+            if success and archive_path:
+                message = (
+                    f"{message}\nPrevious results archived to "
+                    f"{archive_path}"
+                )
+        elif triggered == "collision-resume-btn":
+            success, message = backend_manager.start(resume=True)
+        else:
+            raise PreventUpdate
+
+        color = "success" if success else "danger"
+        if success:
+            updated_config = merge_config_safely(config, backend_manager.config)
+        else:
+            updated_config = no_update
+
+        return (
+            False,
+            {
+                "title": "Analysis Started" if success else "Error",
+                "message": message,
+                "color": color,
+            },
+            updated_config,
+        )
 
     @app.callback(
         [

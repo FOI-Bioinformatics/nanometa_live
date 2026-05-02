@@ -375,6 +375,87 @@ class BackendManager:
 
         return has_cache or has_work
 
+    # Subdirectory names that nanometanf writes into the results dir.
+    # detect_existing_results scans for these so the GUI can warn the
+    # operator before silently mixing data from different runs.
+    RESULT_SUBDIRS = (
+        "kraken2",
+        "fastp",
+        "seqkit",
+        "validation",
+        "taxpasta",
+        "multiqc",
+        "on_demand_validation",
+        "pipeline_info",
+        "nanoplot",
+    )
+
+    @staticmethod
+    def detect_existing_results(outdir: str) -> list:
+        """Return the names of result subdirs that already contain files.
+
+        A subdir counts as "non-empty" only if it exists AND contains at
+        least one regular file (recursively). An empty directory does
+        not trigger the collision modal because the pipeline will refill
+        it harmlessly.
+
+        Returns an empty list when outdir does not exist or has no
+        result-shaped contents -- i.e. when a fresh run is safe.
+        """
+        if not outdir or not os.path.isdir(outdir):
+            return []
+
+        found = []
+        for name in BackendManager.RESULT_SUBDIRS:
+            sub = os.path.join(outdir, name)
+            if not os.path.isdir(sub):
+                continue
+            try:
+                has_file = any(
+                    os.path.isfile(os.path.join(root, f))
+                    for root, _, files in os.walk(sub)
+                    for f in files
+                )
+            except OSError:
+                has_file = False
+            if has_file:
+                found.append(name)
+        return found
+
+    @staticmethod
+    def archive_existing_results(outdir: str) -> Optional[str]:
+        """Move detected result subdirs into ``<outdir>/_archive_<ts>/``.
+
+        Returns the absolute path of the archive directory, or None when
+        nothing needed archiving. The timestamp is local-time
+        ``YYYY-MM-DD_HH-MM-SS``; if a same-second collision occurs (two
+        rapid clicks), a numeric suffix ``_2``, ``_3`` is appended so
+        prior archives are never overwritten.
+        """
+        found = BackendManager.detect_existing_results(outdir)
+        if not found:
+            return None
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        archive_path = os.path.join(outdir, f"_archive_{timestamp}")
+        suffix = 2
+        while os.path.exists(archive_path):
+            archive_path = os.path.join(
+                outdir, f"_archive_{timestamp}_{suffix}"
+            )
+            suffix += 1
+
+        os.makedirs(archive_path, exist_ok=False)
+        for name in found:
+            src = os.path.join(outdir, name)
+            dst = os.path.join(archive_path, name)
+            os.rename(src, dst)
+
+        logging.info(
+            f"Archived {len(found)} existing result subdirs to {archive_path}"
+        )
+        return archive_path
+
     def start(self, profile: str = None, resume: bool = False) -> Tuple[bool, str]:
         """
         Start the backend processes.
