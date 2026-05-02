@@ -307,7 +307,7 @@ def register_main_callbacks(app: Dash):
             Output("watched-organisms-count", "children"),
         ],
         [
-            Input("update-interval", "n_intervals"),
+            Input("results-fingerprint", "data"),
             Input("apply-organism-filters", "n_clicks"),
             Input("selected-sample", "data"),
             Input("main-watchlist-store", "data"),  # React to watchlist changes
@@ -319,9 +319,10 @@ def register_main_callbacks(app: Dash):
             State("app-config", "data"),
             State("backend-status", "data"),
         ],
+        prevent_initial_call=True,
     )
     def update_main_results(
-        n_intervals, apply_clicks, selected_sample, watchlist_store,
+        _fingerprint, apply_clicks, selected_sample, watchlist_store,
         top_count, min_abundance, tax_ranks, config, status,
     ):
         """

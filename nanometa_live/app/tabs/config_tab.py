@@ -8,16 +8,27 @@ users to configure the application before starting the analysis.
 import logging
 import os
 import json
+import threading
 from datetime import datetime
 
 import dash
 from dash import Dash, Input, Output, State, ctx, no_update
+from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 from dash import html
 
 from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.config.config_loader import ConfigLoader
 from nanometa_live.app.utils.github_branches import fetch_nanometanf_branches
+
+
+# Module-level cache of the configs directory mtime. update_available_configs
+# fires on every update-interval tick (it stays on the wall-clock interval
+# because saved-config detection is independent of pipeline output files);
+# rather than re-walking the directory each time, we only re-emit when the
+# directory's mtime has advanced (i.e. the user saved or deleted a config).
+_configs_dir_mtime: float = -1.0
+_configs_dir_mtime_lock = threading.Lock()
 
 
 def _build_config_list_items(configs):
@@ -105,13 +116,29 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         State("app-data-dir", "data"),
     )
     def update_available_configs(_, data_dir):
-        """Update the list of available configurations."""
+        """Update the list of available configurations.
+
+        Gated on the configs/ directory mtime so the per-tick os.walk and
+        YAML-metadata read only run when the operator actually saved,
+        renamed, or removed a configuration.
+        """
         if not data_dir:
             return "[]"
 
-        config_loader = ConfigLoader(os.path.join(data_dir, "configs"))
-        configs = config_loader.get_available_configs()
+        configs_dir = os.path.join(data_dir, "configs")
+        try:
+            mt = os.stat(configs_dir).st_mtime if os.path.isdir(configs_dir) else 0.0
+        except OSError:
+            mt = 0.0
 
+        global _configs_dir_mtime
+        with _configs_dir_mtime_lock:
+            if mt == _configs_dir_mtime:
+                raise PreventUpdate
+            _configs_dir_mtime = mt
+
+        config_loader = ConfigLoader(configs_dir)
+        configs = config_loader.get_available_configs()
         return json.dumps(configs)
 
     @app.callback(

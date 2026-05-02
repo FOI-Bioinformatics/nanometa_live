@@ -695,9 +695,22 @@ def register_preparation_callbacks(app):
         State("app-config", "data"),
         State("watchlist-table-refresh", "data"),
         prevent_initial_call=True,
+        background=True,
+        manager=background_callback_manager,
+        running=[
+            (Output("taxmap-rescan-btn", "disabled"), True, False),
+            (Output("taxmap-rescan-progress-container", "style", allow_duplicate=True),
+             {"display": "block"}, {"display": "none"}),
+        ],
     )
     def run_rescan(n_clicks, config, current_refresh):
-        """Callback for Kraken2 database rescan."""
+        """Callback for Kraken2 database rescan.
+
+        Runs in a DiskcacheManager-backed background process so the
+        operator can keep interacting with the rest of the UI while the
+        Kraken2 inspect.txt index loads and fuzzy mapping runs (5-30 s
+        depending on watchlist size).
+        """
         from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
 
         logger.info(f"[RESCAN] run_rescan called: n_clicks={n_clicks}")

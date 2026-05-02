@@ -5,10 +5,13 @@ This module contains the core callbacks that are used across multiple tabs
 and components of the application.
 """
 
+import hashlib
+import json
 import os
 import logging
 import threading
 import time
+from typing import Any, Dict, Optional, Tuple
 
 from dash import Dash, Input, Output, State, callback, ctx, html, no_update
 from dash.exceptions import PreventUpdate
@@ -16,7 +19,48 @@ import dash_bootstrap_components as dbc
 
 from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.utils.sample_detector import get_available_samples, get_sample_file_mapping
+from nanometa_live.core.utils.loader_utils import check_data_freshness
 from nanometa_live.app.utils.callback_helpers import log_callback_error
+
+
+# update_readiness_indicator runs the full ReadinessChecker every
+# update-interval tick. Each invocation does ~7 shutil.which calls plus
+# os.stat / glob over the configured Kraken2 DB and BLAST DB directories,
+# i.e. 10+ syscalls every 30 s for a state that almost never changes.
+# This module-level cache reuses a recent ReadinessReport when the
+# relevant config has not changed AND less than _READINESS_TTL seconds
+# have elapsed. The TTL guarantees that "operator just installed
+# bowtie / dropped a Kraken2 DB into place" surfaces within 60 s.
+_READINESS_TTL = 60.0
+_readiness_cache: Dict[str, Tuple[float, Any]] = {}
+_readiness_cache_lock = threading.Lock()
+
+
+def _readiness_cache_key(config: Optional[Dict[str, Any]]) -> str:
+    """Build a stable cache key from the config fields that affect readiness.
+
+    The full config dict is not used because the dashboard mutates
+    unrelated keys (UI flags, last-selected sample) on every save, which
+    would invalidate the cache for no reason. Only the fields the
+    readiness checks actually read are included.
+    """
+    if not config:
+        return "no-config"
+    relevant = {
+        k: config.get(k) for k in (
+            "kraken_db",
+            "main_dir",
+            "results_output_directory",
+            "nanopore_output_directory",
+            "pipeline_source",
+            "pipeline_profile",
+            "pipeline_cache_dir",
+            "blast_validation",
+            "network_check_enabled",
+            "offline_mode",
+        )
+    }
+    return hashlib.md5(json.dumps(relevant, sort_keys=True).encode()).hexdigest()
 
 
 def register_core_callbacks(app: Dash, backend_manager: BackendManager):
@@ -179,6 +223,39 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     def update_backend_status(_):
         """Update the backend status."""
         return backend_manager.get_status()
+
+    @app.callback(
+        Output("results-fingerprint", "data"),
+        Input("update-interval", "n_intervals"),
+        State("app-config", "data"),
+        State("results-fingerprint", "data"),
+    )
+    def compute_results_fingerprint(_n_intervals, config, prev):
+        """
+        Scan the nanometanf output directories and emit a fingerprint
+        update only when at least one of them has changed.
+
+        Data-bound callbacks consume this Store as their Input instead of
+        ``update-interval``. PreventUpdate on an unchanged fingerprint
+        means downstream callbacks do not run, so unchanged ticks become
+        zero-cost. The gate itself is four ``os.scandir`` calls plus an
+        MD5 -- microseconds at any realistic dataset size.
+        """
+        if not config:
+            raise PreventUpdate
+        main_dir = config.get("main_dir") or config.get("results_output_directory") or ""
+        if not main_dir:
+            raise PreventUpdate
+
+        try:
+            fp = check_data_freshness(main_dir)
+        except Exception as e:
+            log_callback_error("compute_results_fingerprint", e)
+            raise PreventUpdate
+
+        if fp == (prev or {}).get("fp"):
+            raise PreventUpdate
+        return {"fp": fp, "ts": time.time()}
 
     @app.callback(
         [
@@ -448,8 +525,17 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             )
 
         try:
-            checker = ReadinessChecker()
-            report = checker.check_readiness(config)
+            cache_key = _readiness_cache_key(config)
+            now = time.time()
+            with _readiness_cache_lock:
+                cached = _readiness_cache.get(cache_key)
+            if cached is not None and (now - cached[0]) < _READINESS_TTL:
+                report = cached[1]
+            else:
+                checker = ReadinessChecker()
+                report = checker.check_readiness(config)
+                with _readiness_cache_lock:
+                    _readiness_cache[cache_key] = (now, report)
             summary = report.summary()
 
             if report.ready:
@@ -876,38 +962,11 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     # Timer and Progress Display Callbacks
     # ========================================================================
 
-    @app.callback(
-        [
-            Output("elapsed-time-display", "children"),
-            Output("elapsed-time-container", "style"),
-        ],
-        Input("countdown-tick", "n_intervals"),
-        State("backend-status", "data"),
-    )
-    def update_elapsed_time(n_intervals, status):
-        """
-        Update the elapsed time display showing time since analysis started.
-
-        Displays in HH:MM:SS format, visible only when backend is running.
-        """
-        from datetime import datetime
-
-        if not status or not status.get("running"):
-            return "00:00:00", {"display": "none"}
-
-        start_time = status.get("start_time")
-        if not start_time:
-            return "00:00:00", {"display": "none"}
-
-        try:
-            start_dt = datetime.fromisoformat(start_time)
-            elapsed = datetime.now() - start_dt
-            hours, remainder = divmod(int(elapsed.total_seconds()), 3600)
-            minutes, seconds = divmod(remainder, 60)
-            return f"{hours:02d}:{minutes:02d}:{seconds:02d}", {"display": "flex", "alignItems": "center"}
-        except Exception as e:
-            log_callback_error("update_elapsed_time", e, level=logging.WARNING)
-            return "00:00:00", {"display": "none"}
+    # update_elapsed_time was a 1 Hz server callback. It is now a
+    # clientside callback registered in app.register_callbacks; the
+    # browser computes elapsed time directly from backend_status.start_time
+    # using Date.now(), which removes one Flask round-trip per second
+    # for the lifetime of the session.
 
     @app.callback(
         [

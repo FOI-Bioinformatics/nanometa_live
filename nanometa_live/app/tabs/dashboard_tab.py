@@ -107,7 +107,7 @@ def register_dashboard_callbacks(app: Dash):
     @app.callback(
         Output("dashboard-overall-status-cache", "data"),
         [
-            Input("update-interval", "n_intervals"),
+            Input("results-fingerprint", "data"),
         ],
         [
             State("app-config", "data"),
@@ -115,7 +115,7 @@ def register_dashboard_callbacks(app: Dash):
             State("available-samples", "data"),
         ]
     )
-    def compute_overall_status_cache(n_intervals, config, status, available_samples):
+    def compute_overall_status_cache(_fingerprint, config, status, available_samples):
         """Compute overall status once per interval and cache for other callbacks."""
         if should_skip_update("dashboard_overall_status", debounce_ms=2000):
             raise PreventUpdate
@@ -150,7 +150,7 @@ def register_dashboard_callbacks(app: Dash):
             Output("dashboard-run-state-badge", "color"),
         ],
         [
-            Input("update-interval", "n_intervals"),
+            Input("results-fingerprint", "data"),
             Input("watchlist-tab-state", "data"),
         ],
         [
@@ -160,7 +160,7 @@ def register_dashboard_callbacks(app: Dash):
             State("validation-data-store", "data"),
         ]
     )
-    def update_verdict_banner(n_intervals, watchlist_state, config, status,
+    def update_verdict_banner(_fingerprint, watchlist_state, config, status,
                               overall_status, validation_data):
         """Update the clinical verdict banner based on analysis status and pathogen screening."""
         if get_trigger_type(ctx) == "interval":
@@ -371,11 +371,11 @@ def register_dashboard_callbacks(app: Dash):
     # ================================================================
     @app.callback(
         Output("dashboard-quality-card-content", "children"),
-        Input("update-interval", "n_intervals"),
+        Input("results-fingerprint", "data"),
         State("app-config", "data"),
         State("backend-status", "data"),
     )
-    def update_quality_card(n_intervals, config, status):
+    def update_quality_card(_fingerprint, config, status):
         """Update the Sample Quality card with Q-score level and value."""
         if should_skip_update("dashboard_quality_card", debounce_ms=2000):
             raise PreventUpdate
@@ -593,7 +593,7 @@ def register_dashboard_callbacks(app: Dash):
             Output("dashboard-pathogen-alert-container", "children"),
             Output("dashboard-pathogen-alert-container", "style")
         ],
-        Input("update-interval", "n_intervals"),
+        Input("results-fingerprint", "data"),
         [
             State("app-config", "data"),
             State("backend-status", "data"),
@@ -602,7 +602,7 @@ def register_dashboard_callbacks(app: Dash):
         prevent_initial_call=False
     )
     def update_pathogen_alert_panel(
-        n_intervals: int,
+        _fingerprint: Dict[str, Any],
         config: Dict[str, Any],
         status: Dict[str, Any],
         available_samples: Optional[List[str]]

@@ -315,13 +315,13 @@ def register_validation_callbacks(app: Dash):
     @app.callback(
         Output("validation-data-store", "data"),
         [
-            Input("update-interval", "n_intervals"),
+            Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
         ],
         State("app-config", "data"),
         prevent_initial_call=True,
     )
-    def load_validation_data(n_intervals, selected_sample, config):
+    def load_validation_data(_fingerprint, selected_sample, config):
         """Load validation data filtered by the selected sample.
 
         The Validation tab honours the same sample selector as the

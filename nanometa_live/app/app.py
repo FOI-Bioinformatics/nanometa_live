@@ -248,6 +248,13 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
         dcc.Store(id='aggregate-kraken-cache', data={"fingerprint": "", "all_samples": None}),
         dcc.Store(id='per-sample-kraken-cache', data={"fingerprint": "", "by_sample": {}}),
 
+        # Event-driven refresh gate. compute_results_fingerprint scans the
+        # nanometanf output dirs once per update-interval tick; data-bound
+        # callbacks that switched their Input from update-interval to
+        # results-fingerprint only fire when the fingerprint actually
+        # advances (i.e. when nanometanf wrote a new file).
+        dcc.Store(id='results-fingerprint', data={"fp": "", "ts": 0}),
+
         # Shared stores for cross-tab communication (Watchlist <-> Preparation)
         dcc.Store(id='taxmap-collection', data=None),
         dcc.Store(id='taxmap-database-info', data=None),
@@ -682,4 +689,58 @@ def register_callbacks(app: Dash, backend_manager: BackendManager):
             Input("backend-status", "data"),
             Input("last-update-time", "data")
         ]
+    )
+
+    # Clientside elapsed-time display. Replaces the former server-side
+    # update_elapsed_time callback that ran once per second per session.
+    # The browser computes HH:MM:SS from backend_status.start_time using
+    # its local clock, so no round-trip is needed.
+    app.clientside_callback(
+        """
+        function(n_intervals, backend_status) {
+            if (!backend_status || !backend_status.running) {
+                return ["00:00:00", {"display": "none"}];
+            }
+            var start = backend_status.start_time;
+            if (!start) {
+                return ["00:00:00", {"display": "none"}];
+            }
+            var start_ms = Date.parse(start);
+            if (isNaN(start_ms)) {
+                return ["00:00:00", {"display": "none"}];
+            }
+            var elapsed_sec = Math.max(0, Math.floor((Date.now() - start_ms) / 1000));
+            var h = Math.floor(elapsed_sec / 3600);
+            var m = Math.floor((elapsed_sec % 3600) / 60);
+            var s = elapsed_sec % 60;
+            var pad = function(n) { return n < 10 ? "0" + n : "" + n; };
+            return [
+                pad(h) + ":" + pad(m) + ":" + pad(s),
+                {"display": "flex", "alignItems": "center"}
+            ];
+        }
+        """,
+        [
+            Output("elapsed-time-display", "children"),
+            Output("elapsed-time-container", "style"),
+        ],
+        [
+            Input("countdown-tick", "n_intervals"),
+            Input("backend-status", "data"),
+        ],
+    )
+
+    # Clientside disable for countdown-tick. The 1 Hz interval only
+    # exists to advance the elapsed-time display and the next-update
+    # countdown. When no run is active neither needs ticking, so we
+    # disable the interval and stop the per-second server-bound
+    # backend-status query that follows the (re-enabled) tick.
+    app.clientside_callback(
+        """
+        function(backend_status) {
+            return !(backend_status && backend_status.running);
+        }
+        """,
+        Output("countdown-tick", "disabled"),
+        Input("backend-status", "data"),
     )
