@@ -149,6 +149,16 @@ def register_preparation_callbacks(app):
         prevent_initial_call=True,
         background=True,
         manager=background_callback_manager,
+        # `cancel=` lets the operator abort the multi-stage preparation
+        # (genome download + BLAST DB build) mid-flight via the
+        # cancel-prep-btn that the running= block reveals while the
+        # callback is in progress. Dash's DiskcacheManager terminates
+        # the worker process when the cancel input fires; on cleanup
+        # the running= block hides the cancel button and re-enables
+        # the start button. Same pattern as
+        # genome-download-cancel-btn (line 986) and
+        # blast-build-cancel-btn (line 1288). Audit followup F3.
+        cancel=[Input("cancel-prep-btn", "n_clicks")],
         running=[
             (Output("start-prep-btn", "disabled"), True, False),
             (Output("cancel-prep-btn", "style"), {"display": "inline-block"}, {"display": "none"}),
