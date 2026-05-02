@@ -677,27 +677,48 @@ def register_main_callbacks(app: Dash):
 
     # Sync watchlist from config to main tab store
     @app.callback(
-        Output("main-watchlist-store", "data"),
+        [
+            Output("main-watchlist-store", "data"),
+            Output("notification-trigger", "data", allow_duplicate=True),
+        ],
         Input("app-config", "data"),
+        prevent_initial_call=True,
     )
     def sync_watchlist(config):
-        """Sync watchlist entries from WatchlistManager to main tab store."""
+        """Sync watchlist entries from WatchlistManager to main tab store.
+
+        On the failure path the store is set to the empty list (so
+        downstream callbacks fail closed rather than crashing), AND a
+        toast is fired so the operator sees that something went wrong.
+        Without the toast, the Organisms tab and the watched-species
+        alert silently look like the watchlist is empty -- exactly the
+        symptom the 2026-05-02 audit followup F1 flagged.
+        """
         if not config:
-            return []
+            return [], no_update
         try:
             manager = get_watchlist_manager()
             if not manager._loaded:
                 manager.load_config(config)
             entries = manager.get_active_entries()
-            return [{"name": e.name, "taxid": e.taxid} for e in entries.values()]
-        except Exception:
-            # The store fed callbacks for the Organisms tab and the
-            # watched-species alert; an empty return makes those tabs
-            # silently look like the watchlist is empty. Log the failure
-            # with a traceback so it surfaces in the terminal where the
-            # operator launched Nanometa Live.
-            logging.exception("sync_watchlist failed; main-watchlist-store will be empty")
-            return []
+            return (
+                [{"name": e.name, "taxid": e.taxid} for e in entries.values()],
+                no_update,
+            )
+        except Exception as e:
+            logging.exception(
+                "sync_watchlist failed; main-watchlist-store will be empty"
+            )
+            return [], {
+                "title": "Watchlist failed to load",
+                "message": (
+                    "Could not read the active watchlist. The Organisms "
+                    "tab and watched-species alert will look empty until "
+                    "this is fixed. Check the terminal log for details. "
+                    f"({type(e).__name__}: {e})"
+                ),
+                "color": "danger",
+            }
 
     # Show more organisms toggle
     @app.callback(
@@ -997,14 +1018,24 @@ def register_main_callbacks(app: Dash):
     # =========================================================================
 
     @app.callback(
-        Output("on-demand-validation-results", "data"),
+        [
+            Output("on-demand-validation-results", "data"),
+            Output("notification-trigger", "data", allow_duplicate=True),
+        ],
         Input("update-interval", "n_intervals"),
         State("app-config", "data"),
         State("on-demand-validation-results", "data"),
-        prevent_initial_call=False,
+        prevent_initial_call=True,
     )
     def reload_on_demand_results(n_intervals, config, existing_results):
-        """Load existing on-demand validation results from disk on initial page load."""
+        """Load existing on-demand validation results from disk on initial page load.
+
+        On a per-file failure (malformed JSON, file-system error) we
+        skip the file but record its name and surface a single warning
+        toast naming the offending files. Without the toast a
+        partially-corrupt on_demand_validation directory looked exactly
+        like a clean empty one (audit followup F1).
+        """
         if existing_results:
             raise PreventUpdate
 
@@ -1017,6 +1048,7 @@ def register_main_callbacks(app: Dash):
             raise PreventUpdate
 
         results = {}
+        skipped_files: list[str] = []
         for f in os.listdir(od_dir):
             if f.endswith("_validation.json"):
                 try:
@@ -1026,19 +1058,37 @@ def register_main_callbacks(app: Dash):
                     if taxid:
                         results[taxid] = data
                 except Exception:
-                    # Skipping this file on failure is the right thing
-                    # (other on-demand results in the directory are
-                    # still loaded), but a silent skip hid file-system
-                    # errors and malformed JSON during the 2026-04-30
-                    # validation refactor. Log the file name so the
-                    # operator can find the bad on-demand artefact.
                     logging.warning(
                         f"reload_on_demand_results: skipped malformed file {f}",
                         exc_info=True,
                     )
+                    skipped_files.append(f)
                     continue
 
-        return results if results else no_update
+        if skipped_files:
+            sample = ", ".join(skipped_files[:5])
+            extra = (
+                f" (and {len(skipped_files) - 5} more)"
+                if len(skipped_files) > 5
+                else ""
+            )
+            notification = {
+                "title": "Some on-demand results were skipped",
+                "message": (
+                    f"{len(skipped_files)} validation result file(s) in "
+                    f"{od_dir} could not be parsed: {sample}{extra}. "
+                    "Check the terminal log for details."
+                ),
+                "color": "warning",
+            }
+        else:
+            notification = no_update
+
+        if results:
+            return results, notification
+        # No new results to deliver, but still surface the warning if
+        # any files were skipped this tick.
+        return no_update, notification
 
     @app.callback(
         [
