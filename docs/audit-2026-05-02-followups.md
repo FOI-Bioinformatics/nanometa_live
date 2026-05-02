@@ -120,23 +120,33 @@ The fixture builder at `bin/build-test-fixtures.sh` works around
 this by running nanorunner once per sample with a single-file
 staging directory.
 
-### F5 — `nanorunner` exits 0 on visible errors
+### F5 / F6 — Empty source: silent zero-exit -- DONE
 
-**Severity:** medium (CI defeat).
-**Blast radius:** nanorunner CLI top-level.
+**Status:** fixed in nanorunner commit `93037b4`, merged at
+`8755a25` on 2026-05-02. F5 (the auditor's broader
+"rich-progress monitor swallows exit codes" claim) was
+partially refuted in the synthesis pass; the genuine silent-
+zero-exit path was the empty-manifest case in
+`runner.py:186-188`.
 
-Auditor 3 found that when the rich-progress monitor is the
-default, errors print but the process exits with code 0
-(`cli_replay.py:227-234`). CI pipelines that check `$?` cannot
-catch failures.
+The fix:
 
-### F6 — Empty source directory: nanorunner exits silently
+- New `EmptySourceError(RuntimeError)` in
+  `nanorunner/nanopore_simulator/runner.py`. `run_replay`
+  raises it on empty manifest with a message naming the
+  offending source dir; `run_generate` raises it when no
+  genome input is given.
+- `cli_replay.py` and `cli_generate.py` catch
+  `EmptySourceError` and exit with code **3** (distinct from
+  the generic code 1 so CI pipelines can branch on the
+  cause).
+- Three new CliRunner cases pin exit-code 3, the message
+  naming the offending path, and that a missing-source
+  error path stays distinct (not exit 3). Plus the
+  inverted assertion in the existing
+  `TestRunReplayEmpty::test_empty_source_raises`.
 
-**Severity:** low. **Blast radius:** `runner.py:186-188`.
-
-`nanorunner replay --source <empty>` exits 0 with no output and
-no warning. The operator has no signal that nothing was done.
-Should error with a clear message.
+Test count moved from 726 to 729.
 
 ### F7 — Schema drift: `max_avg_file_age_minutes`
 
@@ -232,8 +242,8 @@ Python tracebacks.
 | F2 | Mark estimator stats | OBSOLETE | frontend §5 |
 | F3 | Cancel UI for downloads | medium | frontend §1 |
 | F4 | nanorunner chunk filenames | **high** | compat §1.4 |
-| F5 | nanorunner exit code | medium | compat §1.2 |
-| F6 | nanorunner empty source | low | compat §1.3 |
+| F5 | nanorunner exit code | DONE | compat §1.2 |
+| F6 | nanorunner empty source | DONE | compat §1.3 |
 | F7 | Schema drift | low | compat §2.2 |
 | F8 | alert_engine tests | DONE | frontend §6 |
 | F9 | auto_detect tests | DONE | frontend §6 |
