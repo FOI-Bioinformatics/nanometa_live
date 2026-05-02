@@ -233,22 +233,6 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
         dcc.Store(id='blast-show-all', data=False),
         dcc.Store(id='coverage-show-all', data=False),
 
-        # Cached Kraken2 aggregates fed by a single feeder callback in
-        # dashboard_tab.py. Replaces five redundant load_kraken_data
-        # calls per interval tick (P0-G01) and the 24-iteration serial
-        # per-sample loop in _load_per_sample_organisms (P0-G02).
-        # Schema:
-        #   aggregate-kraken-cache: {
-        #       "fingerprint": str,                 # mtime hash; used for change detection
-        #       "all_samples": list[dict] | None,   # df.to_dict('records')
-        #   }
-        #   per-sample-kraken-cache: {
-        #       "fingerprint": str,
-        #       "by_sample": {sample_name: list[dict]},
-        #   }
-        dcc.Store(id='aggregate-kraken-cache', data={"fingerprint": "", "all_samples": None}),
-        dcc.Store(id='per-sample-kraken-cache', data={"fingerprint": "", "by_sample": {}}),
-
         # Event-driven refresh gate. compute_results_fingerprint scans the
         # nanometanf output dirs once per update-interval tick; data-bound
         # callbacks that switched their Input from update-interval to
@@ -652,22 +636,6 @@ def register_callbacks(app: Dash, backend_manager: BackendManager):
     register_preparation_callbacks(app)
 
     # Clientside callback: watchlist collapse toggle (pure UI, no server needed)
-    app.clientside_callback(
-        """
-        function(n_clicks, is_open) {
-            if (!n_clicks) { return [window.dash_clientside.no_update, window.dash_clientside.no_update]; }
-            var new_state = !is_open;
-            return [new_state, new_state ? "Collapse" : "Details"];
-        }
-        """,
-        [
-            Output("dashboard-watchlist-collapse", "is_open"),
-            Output("dashboard-watchlist-expand-btn", "children"),
-        ],
-        Input("dashboard-watchlist-expand-btn", "n_clicks"),
-        State("dashboard-watchlist-collapse", "is_open"),
-    )
-
     # Clientside callback for countdown timer (smooth, no server round-trips)
     app.clientside_callback(
         """

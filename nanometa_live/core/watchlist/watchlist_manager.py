@@ -1210,7 +1210,7 @@ class WatchlistManager:
             - gtdb_found: True if found in GTDB
             - entry: Updated WatchlistEntry (or None if not found)
         """
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         # Lazy import to avoid circular dependency
         try:
@@ -1275,7 +1275,12 @@ class WatchlistManager:
         # Update validation status
         if result["ncbi_found"] or result["gtdb_found"]:
             entry.validated = True
-            entry.validation_date = datetime.utcnow().isoformat() + "Z"
+            # Timezone-aware UTC instead of the deprecated datetime.utcnow().
+            # The trailing "Z" is preserved by stripping the +00:00 offset
+            # that isoformat() would otherwise emit.
+            entry.validation_date = (
+                datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
+            )
             result["success"] = True
             result["entry"] = entry
 

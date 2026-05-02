@@ -24,6 +24,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import xml.etree.ElementTree as ET
 import zipfile
@@ -1946,8 +1947,12 @@ class GenomeDownloadManager:
         return True
 
 
-# Singleton instance
+# Module-level singleton instance with thread-safe initialization and
+# reinitialization. Mirrors the locking pattern in
+# core/watchlist/watchlist_manager.py:1572-1579 so the two singletons
+# behave consistently under Dash's threaded Flask worker model.
 _genome_manager: Optional[GenomeDownloadManager] = None
+_gm_lock = threading.Lock()
 
 
 def get_genome_manager(
@@ -1974,25 +1979,45 @@ def get_genome_manager(
     else:
         normalized_cache = None
 
-    # Check if we need to create a new instance
+    # First-time creation -- double-checked locking so the global is
+    # only ever assigned by one thread; concurrent first callers
+    # otherwise overwrite each other and orphan in-flight downloads.
     if _genome_manager is None:
-        _genome_manager = GenomeDownloadManager(
-            cache_dir=cache_dir,
-            offline_mode=bool(offline_mode) if offline_mode is not None else False,
-        )
-    elif cache_dir is not None:
-        # Check if cache_dir differs from current instance
-        current_cache = _genome_manager.cache_dir
-        if normalized_cache and normalized_cache != current_cache:
-            logger.info(f"Reinitializing genome manager with new cache_dir: {cache_dir}")
-            _genome_manager = GenomeDownloadManager(
-                cache_dir=cache_dir,
-                offline_mode=bool(offline_mode) if offline_mode is not None else _genome_manager.offline_mode,
-            )
+        with _gm_lock:
+            if _genome_manager is None:
+                _genome_manager = GenomeDownloadManager(
+                    cache_dir=cache_dir,
+                    offline_mode=bool(offline_mode) if offline_mode is not None else False,
+                )
 
-    # Update offline_mode on existing instance if explicitly provided
-    if offline_mode is not None and _genome_manager.offline_mode != offline_mode:
-        _genome_manager.offline_mode = offline_mode
-        logger.info(f"Genome manager offline_mode updated to {offline_mode}")
+    # Reinitialize-on-cache-dir-change and offline_mode toggle both
+    # mutate _genome_manager; serialize them under the same lock so a
+    # caller observing the new instance also sees the offline_mode
+    # update consistently.
+    if cache_dir is not None or offline_mode is not None:
+        with _gm_lock:
+            if cache_dir is not None and normalized_cache is not None:
+                current_cache = _genome_manager.cache_dir
+                if normalized_cache != current_cache:
+                    logger.info(
+                        f"Reinitializing genome manager with new cache_dir: {cache_dir}"
+                    )
+                    _genome_manager = GenomeDownloadManager(
+                        cache_dir=cache_dir,
+                        offline_mode=(
+                            bool(offline_mode)
+                            if offline_mode is not None
+                            else _genome_manager.offline_mode
+                        ),
+                    )
+
+            if (
+                offline_mode is not None
+                and _genome_manager.offline_mode != offline_mode
+            ):
+                _genome_manager.offline_mode = offline_mode
+                logger.info(
+                    f"Genome manager offline_mode updated to {offline_mode}"
+                )
 
     return _genome_manager

@@ -39,7 +39,6 @@ def create_watchlist_layout() -> html.Div:
         dcc.Store(id="watchlist-table-refresh", data=0),  # Counter to force table refresh
         dcc.Store(id="api-lookup-result", data=None),
         # Watchlist-local stores
-        dcc.Store(id="taxmap-selected-entry", data=None),
         # Note: taxmap-collection, taxmap-database-info, taxmap-rescan-complete,
         # genome-status-data, genome-download-complete,
         # blast-build-complete are shared stores defined in app.py

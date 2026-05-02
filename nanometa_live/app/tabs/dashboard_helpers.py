@@ -706,6 +706,14 @@ def _generate_alerts(
             if total_kr > 0:
                 actual_classified_rate = (classified_reads / total_kr) * 100
     except Exception:
+        # Falling back to an organism-count estimator means the operator
+        # sees a plausible but synthetic Zone 3 number. Log the fallback
+        # so it surfaces in the terminal; the dashboard itself remains
+        # responsive rather than crashing on a transient kraken read.
+        logger.warning(
+            "compute_qc_stats_for_zone3: kraken load failed; using estimator",
+            exc_info=True,
+        )
         actual_classified_rate = _estimate_classified_rate(overall_status.get("organisms_detected", 0))
 
     qc_stats = {
