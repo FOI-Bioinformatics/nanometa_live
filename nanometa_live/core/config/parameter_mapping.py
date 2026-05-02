@@ -298,7 +298,14 @@ def generate_samplesheet(
         if os.path.isdir(unclassified_dir):
             barcode_dirs.append(unclassified_dir)
         if not barcode_dirs:
-            raise ValueError(f"No barcode directories found in {input_dir}")
+            raise ValueError(
+                f"No barcode subdirectories found in {input_dir!r}. "
+                f"Expected directories named 'barcode01', 'barcode02', "
+                f"... (case-sensitive) and optionally 'unclassified'. "
+                f"If your input is not multiplexed, switch the "
+                f"'Sample handling' setting in the Configuration tab to "
+                f"'single_sample' or 'per_file'."
+            )
 
         for barcode_dir in barcode_dirs:
             if os.path.isdir(barcode_dir):
@@ -308,7 +315,13 @@ def generate_samplesheet(
                     rows.append([barcode_name, str(Path(fastq_file).resolve())])
 
         if not rows:
-            raise ValueError(f"No FASTQ files found in barcode directories under {input_dir}")
+            raise ValueError(
+                f"Found barcode directories under {input_dir!r} but none "
+                f"contain FASTQ files (matching '*.fastq*'). Wait for the "
+                f"sequencer to deliver reads, or check that 'Nanopore "
+                f"output directory' in the Configuration tab points at "
+                f"the correct path."
+            )
 
     else:
         # Direct FASTQ files in directory
@@ -316,7 +329,12 @@ def generate_samplesheet(
         fastq_files.sort()
 
         if not fastq_files:
-            raise ValueError(f"No FASTQ files found in {input_dir}")
+            raise ValueError(
+                f"No FASTQ files found in {input_dir!r} (looked for "
+                f"'*.fastq*'). Wait for the sequencer to deliver reads, "
+                f"or check that 'Nanopore output directory' in the "
+                f"Configuration tab points at the correct path."
+            )
 
         for fastq_file in fastq_files:
             if sample_handling == "single_sample":
@@ -378,18 +396,19 @@ def _validate_single_input_source(params: Dict[str, Any]) -> None:
 
     if not populated:
         raise ValueError(
-            "no input mode configured: one of "
-            f"{list(_INPUT_SOURCE_KEYS)} must be set so nanometanf "
-            "INPUT_SCANNER has a source to read from."
+            "No input source is configured (no input mode set). "
+            "In the Configuration tab, set either 'Nanopore Output "
+            "Directory' (for live runs and directory scans) or "
+            "'Samplesheet' (for batch processing) before clicking "
+            f"Start. Internal keys: {list(_INPUT_SOURCE_KEYS)}."
         )
 
     if len(populated) > 1:
         raise ValueError(
-            "multiple input modes configured: "
-            f"{populated}. Only one of "
-            "--input, --input_dir, --fastq_input_dir, "
-            "--barcode_input_dir, or --nanopore_output_dir may be set; "
-            "check processing_mode and sample_handling settings."
+            "Multiple input modes are configured at once: "
+            f"{populated}. The pipeline needs exactly one. In the "
+            "Configuration tab, clear all input fields except the one "
+            "you intend to use, then click Start again."
         )
 
 

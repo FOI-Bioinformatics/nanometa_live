@@ -352,8 +352,12 @@ class TestSingleInputGuard:
         }
         with pytest.raises(ValueError) as exc:
             _validate_single_input_source(params)
+        # Case-insensitive match -- the operator-facing message starts
+        # with a capital letter (F13 polish, 2026-05-02), but the
+        # substring locks the contract that the message names the
+        # category of failure.
         msg = str(exc.value)
-        assert "multiple input modes" in msg
+        assert "multiple input modes" in msg.lower()
         assert "input" in msg
         assert "nanopore_output_dir" in msg
 
@@ -365,10 +369,10 @@ class TestSingleInputGuard:
         }
         with pytest.raises(ValueError) as exc:
             _validate_single_input_source(params)
-        assert "multiple input modes" in str(exc.value)
+        assert "multiple input modes" in str(exc.value).lower()
 
     def test_all_five_input_keys_raises(self):
         params = {key: "/some/path" for key in self.INPUT_KEYS}
         with pytest.raises(ValueError) as exc:
             _validate_single_input_source(params)
-        assert "multiple input modes" in str(exc.value)
+        assert "multiple input modes" in str(exc.value).lower()
