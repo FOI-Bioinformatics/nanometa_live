@@ -24,6 +24,32 @@ fixes, and smoke tests for the locked singleton.
 
 ## High-priority follow-ups
 
+### F0 — `MULTIQC_NANOPORE_STATS` filename collision in realtime mode
+
+**Severity:** P0 (blocks every multi-batch realtime run with
+barcoded input). **Blast radius:** nanometanf realtime path.
+
+Surfaced during 2026-05-02 Phase C Mode 2 (realtime_multiplex).
+Each barcode in realtime mode produces multiple per-batch
+seqkit/chopper TSVs named `barcodeXX.tsv`. When
+`MULTIQC_NANOPORE_STATS` later `.collect()`s these, Nextflow
+staging aborts with:
+
+    Process `FOIBIOINFORMATICS_NANOMETANF:NANOMETANF:
+    MULTIQC_NANOPORE_STATS` input file name collision --
+    There are multiple input files for each of the following
+    file names: barcode04.tsv, barcode01.tsv, barcode02.tsv,
+    barcode03.tsv, barcode05.tsv
+
+The fix is to suffix each per-barcode TSV with a batch id
+(e.g. `barcodeXX_batch_NNNN.tsv`) where it is staged --
+either in seqkit_merge_stats.nf, generate_snapshot_stats.nf,
+or in the collector input. Filing as P0 because every
+multiplex realtime run hits this; the samplesheet path is
+unaffected. Repro path:
+`bin/run-mode-test.sh realtime_multiplex` against the
+`fixtures/realtime_multiplex/` fixture.
+
 ### F1 — Route silent failures through `notification-trigger`
 
 **Severity:** medium. **Blast radius:** small (per call site).
@@ -208,6 +234,7 @@ Python tracebacks.
 
 | ID | Title | Severity | From |
 |---|---|---|---|
+| F0 | MULTIQC_NANOPORE_STATS collision | **P0** | Phase C Mode 2 |
 | F1 | Notification-trigger routing | medium | frontend §3 |
 | F2 | Mark estimator stats | OBSOLETE | frontend §5 |
 | F3 | Cancel UI for downloads | medium | frontend §1 |
