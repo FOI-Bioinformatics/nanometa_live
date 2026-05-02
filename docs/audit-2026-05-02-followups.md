@@ -84,19 +84,33 @@ The terminal-side WARNING log added in commit `3270785` is the
 right surface for this case. If a future cycle reintroduces a
 classification-rate stat to Zone 3, re-open this item.
 
-### F3 — Wire or remove the cancel UI for genome download / BLAST build
+### F3 — Wire or remove the cancel UI -- DONE
 
-**Severity:** medium (operator-facing; abandoned half-feature).
-**Blast radius:** Preparation tab, ~150 LOC across button +
-callback.
+**Status:** landed in commit `babc012` on `dev2` (2026-05-02).
 
-The `download-cancel-flag` and `blast-cancel-flag` Stores were
-removed inline because they were dead. The operator still has no
-way to abort a 30-minute genome download or a multi-hour BLAST
-DB build mid-flight. Wiring up the cancel button to set the
-flag, having `genome_manager` and the BLAST builder poll it on
-each long-running step, and reporting cancellation back to the
-UI is the right scope for this follow-up.
+The audit framing turned out to be partially obsolete: two of
+the three Preparation-tab cancel buttons were already wired to
+Dash's `cancel=[Input(...)]` background-callback parameter
+(`genome-download-cancel-btn` at
+`preparation_tab.py:986`, and `blast-build-cancel-btn` at
+`preparation_tab.py:1288`). Only `cancel-prep-btn` had a
+`running=` toggle but no `cancel=` wiring, so a click hid the
+button without stopping the work.
+
+Fix was a one-line addition of
+`cancel=[Input("cancel-prep-btn", "n_clicks")]` to
+`run_preparation`'s decorator. Dash's DiskcacheManager
+terminates the worker process when the cancel input fires;
+the `running=` block then hides the cancel button and
+re-enables Start.
+
+The dead `download-cancel-flag` and `blast-cancel-flag` Stores
+the auditor flagged were the wrong tool for this -- they were
+the half of an OLDER design that was superseded by
+`cancel=[Input(...)]` for the two already-wired buttons but
+never reapplied to the third. Removing them in commit
+`8024a68` was correct; the genuine fix is the missing
+`cancel=` parameter, not a reinstated flag store.
 
 ### F4 — `nanorunner` singleplex chunk-filename bug
 
@@ -240,7 +254,7 @@ substring-matchable for the existing parameter_mapping tests.
 | F0 | MULTIQC_NANOPORE_STATS collision | DONE | Phase C Mode 2 |
 | F1 | Notification-trigger routing | DONE | frontend §3 |
 | F2 | Mark estimator stats | OBSOLETE | frontend §5 |
-| F3 | Cancel UI for downloads | medium | frontend §1 |
+| F3 | Cancel UI for downloads | DONE | frontend §1 |
 | F4 | nanorunner chunk filenames | **high** | compat §1.4 |
 | F5 | nanorunner exit code | DONE | compat §1.2 |
 | F6 | nanorunner empty source | DONE | compat §1.3 |
