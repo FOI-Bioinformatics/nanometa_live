@@ -511,5 +511,37 @@ Mark when you've successfully completed each task:
 
 ---
 
+## Network access
+
+By default the dashboard listens only on the local machine
+(`127.0.0.1`). Open it in a browser running on the SAME
+machine at `http://localhost:8050`. Other workstations on the
+network cannot reach it -- this is intentional. The dashboard
+has no login.
+
+Two ways to view results from a different workstation:
+
+1. **SSH tunnel** (recommended). On your laptop:
+   ```bash
+   ssh -N -L 8050:localhost:8050 user@analysis-machine
+   ```
+   Then open `http://localhost:8050` on your laptop while the
+   tunnel is up.
+
+2. **Bind to all interfaces** (only on a trusted network). On
+   the analysis machine, restart with:
+   ```bash
+   python -m nanometa_live.app --host 0.0.0.0 --port 8050
+   ```
+   The dashboard is now reachable at
+   `http://<machine-ip>:8050` from anywhere on the network.
+   Only do this on a network you trust -- the dashboard has no
+   authentication and exposes pathogen results.
+
+If you are unsure which option is appropriate, ask your IT
+team.
+
+---
+
 *Nanometa Live v2.0 - Designed for operators, tested by operators*
 *Questions? Contact your bioinformatics support team*

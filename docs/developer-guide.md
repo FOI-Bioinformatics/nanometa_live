@@ -446,6 +446,72 @@ def load_detail(sample):
     return create_detailed_view(load_detailed_data(sample))
 ```
 
+## Operations
+
+### Host binding (F10)
+
+The Dash server binds to `127.0.0.1` (loopback only) by default.
+This is intentional: it prevents accidentally exposing an
+operator's running analysis to the local network. The CLI
+exposes `--host` as a documented escape hatch:
+
+```bash
+# Default -- localhost only, browser must be on the same machine
+python -m nanometa_live.app --port 8050
+
+# Network-accessible -- bind on all interfaces (use behind a
+# trusted firewall or SSH tunnel; the dashboard has no auth)
+python -m nanometa_live.app --host 0.0.0.0 --port 8050
+```
+
+If the operator is running on a head node and wants to reach
+the GUI from a workstation, prefer an SSH tunnel rather than
+`--host 0.0.0.0`:
+
+```bash
+# From the workstation:
+ssh -N -L 8050:localhost:8050 user@head-node
+# Then browse to http://localhost:8050 on the workstation
+```
+
+The `--host` argument is defined in
+`nanometa_live/app/__main__.py:46-49`.
+
+### nanometanf nf-test runner pin (F11)
+
+The repository ships
+`nanometanf/bin/run-nf-tests.sh` which pins
+`NXF_VER=25.04.7` and sets `NXF_OFFLINE=true`. Reason: Nextflow
+25.10.4 does not release the watchPath DirWatcherV2 thread
+after the realtime timeout sentinel fires, so any nf-test that
+exercises `realtime_mode = true` hangs indefinitely once the
+run logically completes (the test runner waits for the JVM to
+exit before reporting success).
+
+Use the wrapper rather than `nf-test` directly when running
+realtime tests:
+
+```bash
+cd ~/Code/nanometanf
+bash bin/run-nf-tests.sh test subworkflows/local/realtime_monitoring/tests/main.nf.test
+```
+
+Status (2026-05-02): the pin is still required. Track upstream
+[Nextflow #26](https://github.com/nextflow-io/nextflow/issues/26)
+(or the relevant follow-up) before lifting it.
+
+### Pre-warmed conda envs (F12 / cycle 18)
+
+`BundleManager.export_bundle(..., pre_warm_conda_envs=True)`
+runs the eight pipeline scenarios listed in
+`core/workflow/bundle_manager.py` to populate
+`~/.nanometa/work/conda/`, which the offline-deployment bundle
+then carries to the field machine. Adds about 30 minutes and
+~5 GB to the build; default off so the existing flow is
+unaffected. See `CLAUDE.md` "Pre-warm conda envs" for the
+build-platform restriction (Linux x86_64 vs macOS arm64
+cannot share envs).
+
 ## Contributing
 
 1. Fork the repository

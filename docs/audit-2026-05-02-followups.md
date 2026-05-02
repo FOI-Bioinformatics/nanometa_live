@@ -190,38 +190,36 @@ returned, sort order, unclassified excluded), and
 detect_file_format (missing dir, compressed, uncompressed,
 recursive walk). Test count moved from 802 to 820.
 
-### F10 — Document `127.0.0.1` binding in the Operator Guide
+### F10 — Document `127.0.0.1` binding -- DONE
 
-**Severity:** low (documentation gap, NOT a security
-vulnerability). **Blast radius:** docs.
+**Status:** documented in
+`docs/OPERATOR_GUIDE.md` (network-access section near the end)
+and in `docs/developer-guide.md` (new "Operations" section).
+Both note the default `127.0.0.1` binding, the SSH-tunnel
+recommendation, and the `--host 0.0.0.0` escape hatch with the
+"trusted network only" caveat.
 
-Auditor 1 noted that Nanometa Live binds to `127.0.0.1` only by
-default — operators running on a head node who want to reach the
-GUI from a different host need to set `--host 0.0.0.0` and
-ideally tunnel via SSH. The Operator Guide does not yet say so
-explicitly.
+### F11 — `bin/run-nf-tests.sh` NXF_VER pin documentation -- DONE
 
-### F11 — `bin/run-nf-tests.sh` NXF_VER pin documentation
-
-**Severity:** low. **Blast radius:** README + CI workflow doc.
-
-The wrapper at `bin/run-nf-tests.sh` pins `NXF_VER=25.04.7` to
-mitigate the watchPath JVM cleanup hang. The pin lives in the
-script and a comment in `nf-test.config`; it should also be
-called out in the developer guide so an unfamiliar contributor
-running `nf-test` directly does not silently hit the hang.
+**Status:** documented in
+`docs/developer-guide.md` "Operations" section. Explains why
+`NXF_VER=25.04.7` is pinned (Nextflow 25.10.4 watchPath
+DirWatcherV2 cleanup hang), how to use the wrapper rather
+than `nf-test` directly, and which upstream issue to track
+before lifting the pin.
 
 ---
 
 ## Lower-priority polish
 
-### F12 — Pre-warm conda envs at install time
+### F12 — Pre-warm conda envs at install time -- DONE
 
-**Severity:** low. **Blast radius:** docs / install instructions.
-
-First-run conda env creation can take several minutes. A
-pre-warm step at install time would make first-run timing
-predictable.
+**Status:** documented in `docs/developer-guide.md`
+"Operations" section. The pre-warm machinery already exists
+in `BundleManager.export_bundle(..., pre_warm_conda_envs=True)`
+from cycle 18 (2026-04-28); this followup just made the
+documentation discoverable and links the build-platform
+restriction (Linux x86_64 vs macOS arm64 cannot share envs).
 
 ### F13 — Operator-facing error messages in `parameter_mapping.create_nextflow_params`
 
@@ -238,7 +236,7 @@ Python tracebacks.
 | ID | Title | Severity | From |
 |---|---|---|---|
 | F0 | MULTIQC_NANOPORE_STATS collision | DONE | Phase C Mode 2 |
-| F1 | Notification-trigger routing | medium | frontend §3 |
+| F1 | Notification-trigger routing | DONE | frontend §3 |
 | F2 | Mark estimator stats | OBSOLETE | frontend §5 |
 | F3 | Cancel UI for downloads | medium | frontend §1 |
 | F4 | nanorunner chunk filenames | **high** | compat §1.4 |
@@ -247,9 +245,9 @@ Python tracebacks.
 | F7 | Schema drift | low | compat §2.2 |
 | F8 | alert_engine tests | DONE | frontend §6 |
 | F9 | auto_detect tests | DONE | frontend §6 |
-| F10 | Operator-guide host doc | low | frontend §7 |
-| F11 | NXF_VER pin doc | low | backend §7 |
-| F12 | Conda pre-warm | low | (general) |
+| F10 | Operator-guide host doc | DONE | frontend §7 |
+| F11 | NXF_VER pin doc | DONE | backend §7 |
+| F12 | Conda pre-warm | DONE | (general) |
 | F13 | parameter_mapping error UX | low | frontend §3 |
 
 The `backend §...` references will resolve once the
