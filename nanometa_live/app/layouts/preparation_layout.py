@@ -121,9 +121,6 @@ def create_preparation_layout():
         # to the plain wizard-step-state store (MATCH and plain IDs cannot be mixed
         # in a single callback's outputs).
         dcc.Store(id="wizard-step-state-relay", data=None),
-        dcc.Store(id="prep-job-state", data=None),
-        dcc.Store(id="download-cancel-flag", data=False),
-        dcc.Store(id="blast-cancel-flag", data=False),
         dcc.Store(id="genome-import-unrecognized", data=[]),
 
         # Workflow step indicator
