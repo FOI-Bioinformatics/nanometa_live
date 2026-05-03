@@ -308,15 +308,18 @@ The watchlist system manages which pathogens to monitor, with support for built-
 **Watchlist sources** (searched in priority order):
 1. **Project**: `{project_dir}/watchlists/*.yaml`
 2. **User**: `~/.nanometa/watchlists/*.yaml` (custom uploads persist here)
-3. **Built-in**: `core/config/data/watchlists/*.yaml` (6 predefined lists)
+3. **Built-in**: `core/config/data/watchlists/*.yaml` (9 predefined lists)
 
 **Built-in watchlists** (ordered to match quick-start buttons):
 1. `clinical_pathogens` - Clinical diagnostics
-2. `foodborne` - Food safety monitoring
-3. `who_drinking_water` - Water quality
-4. `respiratory` - Respiratory pathogens
-5. `cdc_bioterrorism` - CDC Category A/B agents
-6. `who_priority` - WHO priority pathogens
+2. `cdc_bioterrorism` - CDC Category A/B select agents
+3. `who_priority` - WHO priority pathogens
+4. `foodborne` - Food safety monitoring
+5. `respiratory` - Respiratory pathogens
+6. `who_drinking_water` - Drinking water surveillance
+7. `nosocomial_eskape` - ESKAPE nosocomial pathogens
+8. `wastewater_surveillance` - Wastewater surveillance
+9. `zoonotic_one_health` - Zoonotic / One Health pathogens
 
 ### Custom Watchlist YAML Format
 
@@ -385,7 +388,7 @@ User Input (Pathogen Name)
 
 ## Dashboard Architecture (4-zone clinical layout)
 
-The Dashboard is targeted at first responders and clinicians with a 30-second scan. Four zones, top-to-bottom:
+The Dashboard is laid out for fast operator triage during a run. Four zones, top to bottom:
 
 **Zone 1 — Clinical Verdict Banner** (full-width, ~120px minimum, 8px radius, 6px left border)
 Single unified banner whose background color is the answer. Replaces three older fragmented elements (traffic-light status, decision banner, threat indicator card).

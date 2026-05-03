@@ -1,6 +1,6 @@
 # Configuration Reference
 
-Complete reference for all Nanometa Live configuration options.
+Reference for Nanometa Live configuration options.
 
 ## Configuration File Format
 
@@ -46,7 +46,7 @@ nanopore_output_directory: "/path/to/input"
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `pipeline_profile` | string | "conda"  | `conda` (recommended for nanometanf), `docker`, or `singularity` |
+| `pipeline_profile` | string | "conda"  | `conda` is the canonical and supported profile for nanometanf. `docker` and `singularity` exist but are not used by Nanometa Live. |
 | `pipeline_source` | string | "remote:master" | Pipeline location (see below) |
 | `pipeline_cores` | int | 1 | CPU cores for pipeline |
 | `kraken_cores` | int | 1 | CPU cores for Kraken2 classification |
@@ -140,7 +140,7 @@ Nanometa Live uses structured YAML watchlists for pathogen screening. The applic
 | Watchlist | Pathogens | Focus |
 |-----------|-----------|-------|
 | Clinical Pathogens | 17 | Common healthcare-associated organisms |
-| Federal Select Agents | 34 | FSAP-regulated bioterrorism agents |
+| CDC Bioterrorism | 34 | CDC Category A/B agents and select-agent overlap |
 | WHO Priority | 19 | WHO 2024 Bacterial Priority Pathogens |
 | Foodborne | 20 | Food safety and outbreak pathogens |
 | Respiratory | 20 | Respiratory tract pathogens |

@@ -1,6 +1,6 @@
 # Developer Guide
 
-Architecture, extension points, and contribution guidelines for Nanometa Live.
+Architecture, extension points, and contribution notes for Nanometa Live.
 
 ## Architecture Overview
 
@@ -99,7 +99,7 @@ nanometa_live/
 └── docs/
 ```
 
-For detailed architecture documentation including data flow, watchlist system, validation system, and genome management, see [CLAUDE.md](../CLAUDE.md).
+For detailed architecture notes including data flow, the watchlist system, validation, and genome management, see [CLAUDE.md](../CLAUDE.md).
 
 ### Data Flow
 
@@ -503,7 +503,7 @@ Status (2026-05-02): the pin is still required. Track upstream
 ### Pre-warmed conda envs (F12 / cycle 18)
 
 `BundleManager.export_bundle(..., pre_warm_conda_envs=True)`
-runs the eight pipeline scenarios listed in
+runs the nine pipeline scenarios listed in
 `core/workflow/bundle_manager.py` to populate
 `~/.nanometa/work/conda/`, which the offline-deployment bundle
 then carries to the field machine. Adds about 30 minutes and

@@ -201,7 +201,7 @@ manager.update_config({
 })
 
 # Start pipeline
-success, message = manager.start(profile="docker")
+success, message = manager.start(profile="conda")
 
 # Check status
 status = manager.get_status()

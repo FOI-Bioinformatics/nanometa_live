@@ -9,8 +9,8 @@ Nanometa Live is a real-time visualization dashboard for Oxford Nanopore metagen
 ### Prerequisites
 
 - Python 3.9 or higher
-- Docker (recommended) or Conda/Mamba
-- Nextflow 23.04+ (for running analysis pipelines)
+- Conda or Mamba (the canonical and supported pipeline profile)
+- Nextflow 25.10 or newer (for running analysis pipelines)
 - A Kraken2 database
 
 ### Install with pip
@@ -96,7 +96,7 @@ input_directory/
 
 ### Dashboard Tab
 
-Targeted at a 30-second clinical scan. Four zones, top to bottom:
+Operator-facing summary view. Four zones, top to bottom:
 
 - **Zone 1 — Clinical verdict banner**. A full-width card whose background color is the answer: green "ALL CLEAR", red "ACTION REQUIRED", amber "MONITORING", blue "SCREENING IN PROGRESS", grey "STANDBY". Shows run state, elapsed time, last-updated timestamp, and (when applicable) a "pending confirmatory validation" qualifier.
 - **Zone 2 — Pathogen alert cards** (shown only when alerts exist). Each alert card names the detected organism, read count and abundance, confidence level, and a "DETECTED IN:" row with per-sample chips indicating which samples the pathogen was found in. Chips are colored by severity tier. Samples marked as negative controls appear as flat gray chips with an `(NC)` suffix.
@@ -139,7 +139,7 @@ Organism identity verification:
 ### Watchlist Tab
 
 Pathogen monitoring management:
-- Browse and activate built-in watchlists (clinical, foodborne, respiratory, etc.)
+- Browse and activate the 9 built-in watchlists (clinical_pathogens, cdc_bioterrorism, who_priority, foodborne, respiratory, who_drinking_water, nosocomial_eskape, wastewater_surveillance, zoonotic_one_health)
 - Upload custom watchlist YAML files
 - Toggle individual pathogen entries on/off
 - Kraken2 taxid mapping for database compatibility
@@ -251,8 +251,10 @@ update_interval_seconds: 30
 pipeline_profile: "conda"
 blast_validation: false
 
-# Watchlists are managed via the Watchlist tab in the GUI
-# Built-in watchlists: clinical_pathogens, foodborne, respiratory, etc.
+# Watchlists are managed via the watchlist tab in the GUI
+# 9 built-in watchlists: clinical_pathogens, cdc_bioterrorism, who_priority,
+# foodborne, respiratory, who_drinking_water, nosocomial_eskape,
+# wastewater_surveillance, zoonotic_one_health
 ```
 
 ## Tips
@@ -274,7 +276,7 @@ blast_validation: false
 - Verify the results directory contains expected output files
 
 **Pipeline errors:**
-- Check Docker/Singularity is running
+- Verify the conda environment is activated and `nextflow -version` reports 25.10 or newer
 - Verify Kraken2 database path is correct
 - Review Nextflow logs in the results directory
 

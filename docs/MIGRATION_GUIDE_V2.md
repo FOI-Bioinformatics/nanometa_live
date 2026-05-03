@@ -1,16 +1,16 @@
 # Nanometa Live v2.0 Migration Guide
 
-**Migrating from Snakemake (v1.x) to Nextflow/nanometanf Backend (v2.0)**
+Migrating from Snakemake (v1.x) to the Nextflow/nanometanf backend (v2.0).
 
 ## Overview
 
-Nanometa Live v2.0 introduces a major architectural change: the Snakemake workflow engine has been replaced with the **nanometanf** Nextflow pipeline as the backend. This provides:
+Nanometa Live v2.0 replaces the Snakemake workflow engine with the **nanometanf** Nextflow pipeline as the backend. Practical effects of the change:
 
-- ✅ **Better Performance**: ~10-15% faster processing with dynamic resource allocation
-- ✅ **Production-Ready Backend**: Built on nf-core standards with comprehensive testing
-- ✅ **Improved Resource Management**: Intelligent CPU/memory allocation
-- ✅ **Better Real-time Monitoring**: Native batch statistics with detailed process tracking
-- ✅ **Enhanced Maintainability**: Separation of GUI and pipeline logic
+- Roughly 10-15% faster processing with dynamic resource allocation.
+- Backend built on nf-core conventions with its own test suite.
+- CPU and memory allocation handled by Nextflow rather than ad-hoc Snakemake rules.
+- Real-time monitoring uses native `watchPath` and emits per-batch statistics.
+- GUI and pipeline logic are now separated.
 
 ## Breaking Changes
 
@@ -48,7 +48,7 @@ conda install -c bioconda nextflow
 **Verify Installation:**
 ```bash
 nextflow -version
-# Expected: nextflow version 24.x.x or higher
+# Expected: nextflow version 25.10 or higher
 ```
 
 ### Step 2: Update Nanometa Live
@@ -69,7 +69,7 @@ pip install --upgrade nanometa-live
 
 ### Automatic Migration
 
-Existing v1.x configurations will be **automatically converted** when loaded in v2.0.
+Existing v1.x configurations are automatically converted when loaded in v2.0.
 
 **What Changes:**
 ```yaml
@@ -78,7 +78,7 @@ kraken_memory_mapping: "--memory-mapping"  # String flag
 remove_temp_files: "yes"                    # String "yes"/"no"
 ```
 
-↓ **Converted to** ↓
+Converted to:
 
 ```yaml
 kraken_memory_mapping: true            # Boolean
@@ -207,16 +207,16 @@ All Nanometa Live v1.x functionality is preserved in v2.0:
 
 | Feature | v1.x (Snakemake) | v2.0 (nanometanf) | Status |
 |---------|------------------|-------------------|--------|
-| Real-time FASTQ monitoring | ✅ | ✅ | **Improved** (native watchPath) |
-| Kraken2 classification | ✅ | ✅ | **Same** |
-| BLAST validation | ✅ | ✅ | **Same** |
-| Quality control (FASTP) | ✅ | ✅ | **Same** |
-| NanoPlot QC | ✅ | ✅ | **Same** |
-| Species of interest tracking | ✅ | ✅ | **Same** |
-| MultiQC aggregation | ✅ | ✅ | **Enhanced** (more metrics) |
-| Batch processing | ✅ | ✅ | **Enhanced** (native batching) |
-| Memory mapping | ✅ | ✅ | **Simplified** (boolean param) |
-| Custom databases | ✅ | ✅ | **Same** |
+| Real-time FASTQ monitoring | yes | yes | Now uses native `watchPath` |
+| Kraken2 classification | yes | yes | Same |
+| BLAST validation | yes | yes | Same |
+| Quality control (FASTP) | yes | yes | Same |
+| NanoPlot QC | yes | yes | Same |
+| Species of interest tracking | yes | yes | Same |
+| MultiQC aggregation | yes | yes | More metrics surfaced |
+| Batch processing | yes | yes | Native Nextflow batching |
+| Memory mapping | yes | yes | Now a boolean parameter |
+| Custom databases | yes | yes | Same |
 
 ## Performance Improvements
 
@@ -232,9 +232,9 @@ All Nanometa Live v1.x functionality is preserved in v2.0:
 ## Known Limitations
 
 ### Temporary Limitations (v2.0.0)
-1. **Config UI**: GUI still shows "Snakemake Cores" label (functional, just naming)
-2. **Legacy Configs**: Old YAML files with string flags auto-convert to boolean parameters
-3. **Docker Requirement**: Docker is the default profile (Singularity/Conda available but not yet in GUI)
+1. **Config UI**: GUI still shows "Snakemake Cores" label (functional, just naming).
+2. **Legacy Configs**: Old YAML files with string flags auto-convert to boolean parameters.
+3. **Pipeline profile**: Conda is the canonical and supported profile. Docker and Singularity profiles exist in the underlying nanometanf pipeline but are not exercised by Nanometa Live.
 
 ### No Longer Supported
 1. **Snakemake-specific rules**: Custom Snakefile modifications no longer apply
@@ -256,10 +256,10 @@ sudo mv nextflow /usr/local/bin/
 
 ### Issue: "Pipeline fails to start"
 **Solution:**
-1. Check Nextflow installation: `nextflow -version`
-2. Verify Docker is running (if using Docker profile)
-3. Check logs: `~/nanometa_data/logs/nextflow.log`
-4. Verify Kraken2 database exists
+1. Check Nextflow installation: `nextflow -version` (must be 25.10 or newer).
+2. Verify the conda environment is available and `pipeline_profile: conda`.
+3. Check logs: `~/nanometa_data/logs/nextflow.log`.
+4. Verify the Kraken2 database exists.
 
 ### Issue: "Old results not visible"
 **Explanation:** v2.0 cannot parse v1.x output structure directly.
@@ -338,8 +338,8 @@ A: No, existing databases work with v2.0.
 **Q: What about my species of interest lists?**
 A: Fully compatible - no changes needed.
 
-**Q: Can I use Singularity instead of Docker?**
-A: Yes, set `profile="singularity"` in start() call. GUI support coming in v2.1.
+**Q: Which container/runtime profile should I use?**
+A: Conda is the canonical and supported profile for Nanometa Live with nanometanf. Docker and Singularity profiles exist in the upstream pipeline but are not used or tested through the GUI.
 
 **Q: Does the pipeline basecall signal-level data?**
 A: No. Nanometa Live v2 and the nanometanf pipeline accept only basecalled FASTQ input (live or batch). Run MinKNOW with basecalling enabled, or basecall separately, and point `nanopore_output_directory` at the resulting FASTQ directory.
