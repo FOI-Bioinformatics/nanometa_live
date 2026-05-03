@@ -2,11 +2,12 @@
 
 ## User documentation
 
-| Document                                | Description |
-|-----------------------------------------|-------------|
-| [User Guide](user-guide.md)             | End-to-end usage instructions |
-| [Operator Guide](OPERATOR_GUIDE.md)     | Field-deployment reference |
-| [Configuration Reference](configuration.md) | All configuration options |
+| Document                                                    | Description |
+|-------------------------------------------------------------|-------------|
+| [Quick start with nanorunner](quickstart-with-nanorunner.md)| End-to-end demo using simulated input |
+| [User Guide](user-guide.md)                                 | End-to-end usage instructions |
+| [Operator Guide](OPERATOR_GUIDE.md)                         | Field-deployment reference |
+| [Configuration Reference](configuration.md)                 | All configuration options |
 
 ## Developer documentation
 
