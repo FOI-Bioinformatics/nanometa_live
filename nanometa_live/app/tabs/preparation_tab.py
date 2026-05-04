@@ -693,6 +693,39 @@ def register_preparation_callbacks(app):
     # =========================================================================
 
     @app.callback(
+        Output("watchlist-entries-snapshot", "data"),
+        Input("watchlist-table-refresh", "data"),
+        State("app-config", "data"),
+        prevent_initial_call=False,
+    )
+    def hydrate_watchlist_entries_snapshot(_refresh, config):
+        """Mirror the current watchlist entries into a Store.
+
+        Runs in the main process so the WatchlistManager singleton is
+        populated. The rescan callback reads this snapshot via State,
+        which lets it run in a background worker process where the
+        manager singleton is empty.
+        """
+        from nanometa_live.core.watchlist.watchlist_manager import (
+            get_watchlist_manager,
+        )
+
+        manager = get_watchlist_manager()
+        if not manager._loaded and config:
+            manager.load_config(config)
+
+        entries = manager.get_entries_with_toggle_state()
+        return [
+            {
+                "name": e.get("name", ""),
+                "taxid": e.get("taxid", 0),
+                "rank": e.get("api_rank", "species"),
+                "names_alt": e.get("names_alt", []),
+            }
+            for e in entries
+        ]
+
+    @app.callback(
         Output("taxmap-collection", "data", allow_duplicate=True),
         Output("taxmap-database-info", "data", allow_duplicate=True),
         Output("taxmap-rescan-complete", "data", allow_duplicate=True),
@@ -704,6 +737,7 @@ def register_preparation_callbacks(app):
         Input("taxmap-rescan-btn", "n_clicks"),
         State("app-config", "data"),
         State("watchlist-table-refresh", "data"),
+        State("watchlist-entries-snapshot", "data"),
         prevent_initial_call=True,
         background=True,
         manager=background_callback_manager,
@@ -713,7 +747,7 @@ def register_preparation_callbacks(app):
              {"display": "block"}, {"display": "none"}),
         ],
     )
-    def run_rescan(n_clicks, config, current_refresh):
+    def run_rescan(n_clicks, config, current_refresh, watchlist_entries_snapshot):
         """Callback for Kraken2 database rescan.
 
         Runs in a DiskcacheManager-backed background process so the
@@ -721,8 +755,6 @@ def register_preparation_callbacks(app):
         Kraken2 inspect.txt index loads and fuzzy mapping runs (5-30 s
         depending on watchlist size).
         """
-        from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
-
         logger.info(f"[RESCAN] run_rescan called: n_clicks={n_clicks}")
         hide_progress = {"display": "none"}
         show_progress = {"display": "block"}
@@ -746,13 +778,13 @@ def register_preparation_callbacks(app):
                 logger.error("Failed to load database")
                 raise PreventUpdate
 
-            manager = get_watchlist_manager()
-            entries = manager.get_entries_with_toggle_state()
-            watchlist_entries = [
-                {"name": e.get("name", ""), "taxid": e.get("taxid", 0), "rank": e.get("api_rank", "species"),
-                 "names_alt": e.get("names_alt", [])}
-                for e in entries
-            ]
+            # Read entries from the snapshot store hydrated by the main
+            # process; the WatchlistManager singleton in this background
+            # worker is empty (load_config only ran in the main process).
+            watchlist_entries = list(watchlist_entries_snapshot or [])
+            logger.info(
+                f"[RESCAN] Snapshot entries received: {len(watchlist_entries)}"
+            )
 
             if not watchlist_entries:
                 logger.info("No watchlist entries to map")

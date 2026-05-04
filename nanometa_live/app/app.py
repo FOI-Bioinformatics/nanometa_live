@@ -244,6 +244,11 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
         dcc.Store(id='taxmap-collection', data=None),
         dcc.Store(id='taxmap-database-info', data=None),
         dcc.Store(id='taxmap-rescan-complete', data=None),
+        # Snapshot of current watchlist entries, hydrated in the main
+        # process whenever watchlist-table-refresh ticks. Background
+        # callbacks read this as State instead of the WatchlistManager
+        # singleton, which is empty in worker processes.
+        dcc.Store(id='watchlist-entries-snapshot', data=[]),
         dcc.Store(id='genome-status-data', data={}),
         dcc.Store(id='genome-download-complete', data=None),
         dcc.Store(id='blast-build-complete', data=None),
