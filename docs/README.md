@@ -1,36 +1,28 @@
 # Nanometa Live documentation
 
-## User documentation
+## Getting started
 
 | Document                                                    | Description |
 |-------------------------------------------------------------|-------------|
 | [Quick start with nanorunner](quickstart-with-nanorunner.md)| End-to-end demo using simulated input |
-| [User Guide](user-guide.md)                                 | End-to-end usage instructions |
-| [Operator Guide](OPERATOR_GUIDE.md)                         | Field-deployment reference |
-| [Configuration Reference](configuration.md)                 | All configuration options |
-
-## Developer documentation
-
-| Document                              | Description |
-|---------------------------------------|-------------|
-| [Developer Guide](developer-guide.md) | Architecture and contribution notes |
-| [API Reference](api-reference.md)     | Parser and data loader APIs |
+| [User guide](user-guide.md)                                 | End-to-end usage instructions |
+| [Operator guide](OPERATOR_GUIDE.md)                         | Field-deployment reference |
 
 ## Reference
 
-| Document                                       | Description |
-|------------------------------------------------|-------------|
-| [nanometanf parser guide](nanometanf_parser_guide.md) | Output file parsing |
-| [Parser quick reference](parser_quick_reference.md)   | Common parser operations |
-| [Migration guide](MIGRATION_GUIDE_V2.md)              | Upgrading from v1.x to v2.0 |
-| [Validation walkthrough](validation-walkthrough-checklist.md) | Validation feature checklist |
+| Document                                                    | Description |
+|-------------------------------------------------------------|-------------|
+| [Configuration reference](configuration.md)                 | All configuration options |
+| [Developer guide](developer-guide.md)                       | Architecture and contribution notes |
+| [API reference](api-reference.md)                           | Parser and data loader APIs |
+| [Migration guide](MIGRATION_GUIDE_V2.md)                    | Upgrading from v1.x to v2.0 |
+| [nanometanf parser guide](nanometanf_parser_guide.md)       | Output file parsing |
+| [Parser quick reference](parser_quick_reference.md)         | Common parser operations |
+| [Validation walkthrough checklist](validation-walkthrough-checklist.md) | Manual QA template |
 
-## Working artifacts
+## Archive
 
-The `audit-*.md`, `plan-*.md`, and `plans/` directories contain dated audit
-reports and design plans produced during development cycles. They are
-preserved as a historical record. The current state of the codebase is the
-source of truth; if an audit and the code disagree, trust the code.
-
-The `archive/` directory contains older implementation documents that are no
-longer actively maintained.
+Working artifacts from development cycles -- audit reports, design plans,
+migration notes, and historical implementation summaries -- live in
+[`archive/`](archive/README.md). They are preserved for reference but are
+not actively maintained.

@@ -13,7 +13,8 @@ nanometa_live/
 │   │   ├── config_form.py          # Configuration form
 │   │   ├── coverage_plots.py       # Coverage depth/cumulative/histogram figures
 │   │   ├── header.py               # App header with status
-│   │   ├── modern_components.py    # Operator-friendly cards, badges, meters
+│   │   ├── collision_modal.py      # Watchlist taxid collision resolution modal
+│   │   ├── modern_components.py    # Operator-facing cards, badges, meters
 │   │   ├── organism_components.py  # Organism display cards
 │   │   ├── pathogen_alert.py       # Critical pathogen alert banners
 │   │   ├── taxid_mapping_ui.py     # Kraken2 taxid mapping modal
@@ -31,9 +32,11 @@ nanometa_live/
 │   ├── tabs/               # Tab-specific callbacks
 │   │   ├── classification_tab.py
 │   │   ├── config_tab.py
+│   │   ├── dashboard_helpers.py   # Dashboard zone-1 verdict logic (extracted)
 │   │   ├── dashboard_tab.py
 │   │   ├── kraken2_helpers.py     # Kraken2-specific logic (extracted from classification_tab)
 │   │   ├── main_tab.py
+│   │   ├── preparation_helpers.py # Preparation tab helpers (extracted from preparation_tab)
 │   │   ├── preparation_tab.py
 │   │   ├── qc_tab.py
 │   │   ├── validation_tab.py
@@ -79,13 +82,14 @@ nanometa_live/
 │   │   └── taxonomy_matcher.py     # Name matching utilities
 │   └── workflow/           # Backend/Nextflow management
 │       ├── backend_manager.py      # Pipeline lifecycle management
+│       ├── bundle_manager.py       # Offline deployment bundle export/import
+│       ├── container_inventory.py  # Container image inventory for bundle export
+│       ├── mobile_lab_preparer.py  # Field lab preparation
 │       ├── nextflow_manager.py     # Nextflow execution and monitoring
 │       ├── on_demand_validator.py  # On-demand BLAST/minimap2 validation
 │       ├── pipeline_runner.py      # Pipeline execution
-│       ├── bundle_manager.py       # Offline deployment bundle export/import
-│       ├── mobile_lab_preparer.py  # Field lab preparation
 │       └── readiness_checker.py    # Pre-flight readiness checks
-└── docs/                   # Documentation
+└── docs/                   # Documentation (active docs in top level; archive/ for historical)
 ```
 
 ## Architecture
@@ -663,7 +667,7 @@ access) or a separate `conda-pack` workflow not currently automated.
 ### Running Tests
 
 ```bash
-# Full test suite (549 tests, 1 skipped)
+# Full test suite (821 tests as of 2026-05-04)
 pytest tests/ -v
 
 # Individual test modules
@@ -701,12 +705,14 @@ Kraken2 DB: /Users/andreassjodin/Desktop/ONT/demodata_ONT/database/kraken2.gtdb_
 
 | Document | Location | Content |
 |----------|----------|---------|
+| Quick start with nanorunner | `docs/quickstart-with-nanorunner.md` | End-to-end demo using simulated input |
 | User Guide | `docs/user-guide.md` | Usage instructions for operators |
 | Operator Guide | `docs/OPERATOR_GUIDE.md` | Field deployment guide |
 | Configuration | `docs/configuration.md` | All config options |
 | Developer Guide | `docs/developer-guide.md` | Architecture details |
 | API Reference | `docs/api-reference.md` | Parser and loader APIs |
 | Migration Guide | `docs/MIGRATION_GUIDE_V2.md` | v1 to v2 migration |
+| Archive | `docs/archive/` | Audit reports, design plans, and migration notes (not actively maintained) |
 
 ## Links
 
