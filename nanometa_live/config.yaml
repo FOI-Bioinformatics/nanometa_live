@@ -1,7 +1,6 @@
 # CONFIG FILE FOR NANOMETA LIVE
 
 # Settings and parameters for each project are customized here.
-# To check which project this config belongs to, see the final entry, "main_dir".
 
 ########## General Project Settings ##########################################
 
@@ -11,7 +10,7 @@
 # Restrictions: No special characters. Max length:50 characters.
 # Example: "Analysis of Soil Samples"
 
-analysis_name: "Metagenomic analysis"
+analysis_name: "Real-time Integration Test"
 
 
 ## NANOPORE FASTQ OUTPUT DIRECTORY ##
@@ -19,14 +18,14 @@ analysis_name: "Metagenomic analysis"
 # Note: If the path is invalid, the system will prompt for a correct path.
 # Default: "/home/user/nanopore_out" (Replace with your directory path)
 
-nanopore_output_directory: "/home/user/nanopore_out"
+nanopore_output_directory: "/Users/andreassjodin/Desktop/claude-team/sim_output"
 
 
 ## SPECIES OF INTEREST ##
 # Description: List of species to highlight in the GUI.
 # For instructions, see readme/wiki.
 # Any number of species can be listed.
-species_of_interest:
+species_of_interest: []
 
 
 ########## GUI Configuration #################################################
@@ -83,8 +82,8 @@ default_reads_per_level: 10
 ## Core Allocation for Workflow Components ##
 # Description: Number of CPU cores assigned to different components of the workflow.
 # Note: Assign more cores for faster processing if your system allows.
-# Example: If you have a 4-core CPU, assigning 2 cores to snakemake_cores may optimize performance.
-snakemake_cores: 1
+# Example: If you have a 4-core CPU, assigning 2 cores may optimize performance.
+pipeline_cores: 1
 kraken_cores: 1
 validation_cores: 1
 blast_cores: 1
@@ -98,6 +97,32 @@ blast_cores: 1
 check_intervals_seconds: 15
 
 
+########## Input Mode Configuration ##########################################
+
+## PROCESSING MODE ##
+# Description: Controls how the pipeline processes input files.
+# Options:
+#   - "batch": Process all existing files at once (recommended for completed sequencing runs)
+#   - "realtime": Watch directory for new files as they appear (for active sequencing)
+# Default: "batch"
+processing_mode: "realtime"
+
+## SAMPLE HANDLING ##
+# Description: Controls how files in the input directory are treated as samples.
+# Options:
+#   - "single_sample": All files in the directory belong to ONE sample
+#   - "per_file": Each file is treated as a separate sample
+#   - "by_barcode": Files are organized in barcode subdirectories (barcode01/, barcode02/, etc.)
+# Default: "single_sample"
+sample_handling: "by_barcode"
+
+## SAMPLE NAME ##
+# Description: Name to use when sample_handling is "single_sample".
+# Only used when all files should be treated as one sample.
+# Default: "sample"
+sample_name: "sample"
+
+
 ########## Database and Tools Configuration ##################################
 
 
@@ -106,15 +131,15 @@ check_intervals_seconds: 15
 # Note: Ensure the database is updated regularly for accurate classification.
 # Supported Taxonomies: "gtdb" and "ncbi"
 # Example Path: "/path/to/kraken2/database"
-kraken_db: "/home/user/kraken2.gtdb_bac120_4Gb"
-kraken_taxonomy: "gtdb"
+kraken_db: "/Volumes/Orico/kraken_db/k2_pluspfp_08_GB_20251015"
+kraken_taxonomy: "ncbi"
 
 
 ## KRAKEN 2 HIGH RAM REQUIREMENTS ##
 # Description: Toggle for memory-mapping in Kraken2 to manage RAM usage.
-# Note: Enable this on systems with ample RAM for better performance.
-# Usage: Use "--memory-mapping" to enable or leave empty to disable.
-kraken_memory_mapping: "--memory-mapping"
+# Note: Enable this on systems with limited RAM for better performance.
+# Usage: Use "true"to enable or "false" to disable.
+kraken_memory_mapping: False
 
 
 ## External Kraken2 Databases ##
@@ -185,30 +210,24 @@ external_kraken2_info:
     inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/nt_20230502/inspect.txt"
     kraken_taxonomy: "ncbi"
 
-  # EuPathDB:
-  #   description: "Eukaryotic pathogen genomes with contaminants removed"
-  #   database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_eupathdb48_20230407.tar.gz"
-  #   inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_eupathdb48_20230407/kraken2inspect_output.txt"
-  #   kraken_taxonomy: "ncbi"
-  #
-  # Viral:
-  #   description: "Refeq viral"
-  #   database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_viral_20231009.tar.gz"
-  #   inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/viral_20231009/inspect.txt"
-  #   kraken_taxonomy: "ncbi"
-  #
-  # MinusB:
-  #   description: "Refeq archaea, viral, plasmid, human, UniVec_Core"
-  #   database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_minusb_20231009.tar.gz"
-  #   inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/minusb_20231009/inspect.txt"
-  #   kraken_taxonomy: "ncbi"
+  Viral:
+    description: "Refeq viral"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_viral_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/viral_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
+
+  MinusB:
+    description: "Refeq archaea, viral, plasmid, human, UniVec_Core"
+    database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_minusb_20231009.tar.gz"
+    inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/minusb_20231009/inspect.txt"
+    kraken_taxonomy: "ncbi"
 
 ########## Quality and Validation Settings ###################################
 
 ## BLAST VALIDATION ##
 # Description: Controls the activation of sequence validation using BLAST.
 # Note: Enabling validation enhances accuracy but may increase processing time.
-# Options: True (enable validation), False (disable validation)
+# Options: true (enable validation), False (disable validation)
 blast_validation: True
 
 
@@ -222,23 +241,50 @@ e_val_cutoff: 0.01
 
 ########## Advanced/Optional Settings ########################################
 
-## GENERIC SNAKEMAKE SETTINGS ##
-# Description: Settings for managing Snakemake dependencies.
-# Options for local_package_management:
-# - None (assumes all applications are installed)
-# - "conda" (Snakemake creates a local environment during runtime)
-# Choosing "conda" with "mamba" as the frontend can speed up environment creation.
+## PACKAGE MANAGEMENT ##
+# Description: Settings for managing pipeline dependencies (deprecated - kept for compatibility).
+# Note: Package management is now handled by Nextflow/nf-core modules.
+# Options: None (default - assumes all applications are installed)
 local_package_management: None
 conda_frontend: "mamba"
+
+## PIPELINE PROFILE ##
+# Description: Nextflow execution profile controlling how tools are run.
+# Options: "docker", "singularity", "conda"
+# Default: "docker"
+pipeline_profile: "docker"
+
+## QC TOOL ##
+# Description: Quality control tool used for read filtering.
+# Options: "chopper", "fastp"
+# Default: "chopper"
+qc_tool: "chopper"
 
 ## REMOVE TEMP FILES ##
 # Description: Option to remove temporary files created during workflow execution.
 # Note: Keeping temporary files can be useful for debugging but may consume significant disk space.
-# Options: "yes" (remove files), "no" (keep files)
-remove_temp_files: "yes"
+# Options: "true" (remove files), "false" (keep files)
+remove_temp_files: True
 
 ## PROJECT MAIN DIRECTORY ##
 # Description: The primary directory for the project, automatically set during project creation.
 # Note: Changing this path after project creation can lead to data misplacement or loss.
 # Typically set as an absolute path.
 # Example: "/path/to/project/main_directory"
+main_dir: "/Users/andreassjodin/Desktop/claude-team/results"
+
+## PIPELINE SOURCE ##
+# Description: Controls where the nanometanf pipeline is loaded from.
+# Options:
+#   - "remote:main" - GitHub repo with main branch (default, stable)
+#   - "remote:dev" - GitHub repo with dev branch
+#   - "local:/path/to/pipeline" - Local directory (for development)
+# Default: "remote:main"
+pipeline_source: "local:/Users/andreassjodin/Code/nanometanf"
+
+########## Watchlist Configuration #############################################
+watchlist:
+  enabled: true
+  taxonomy_mode: "auto"
+  builtin:
+    - "clinical_pathogens"

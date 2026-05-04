@@ -1,0 +1,175 @@
+# Nosocomial / ESKAPE+ Pathogens Watchlist
+# Extended ESKAPE panel for hospital infection control surveillance
+# Includes the six canonical ESKAPE organisms and additional nosocomial pathogens
+
+version: "2.0"
+taxonomy_support: ["ncbi", "gtdb"]
+
+metadata:
+  name: "Nosocomial / ESKAPE+ Pathogens"
+  description: "Extended ESKAPE panel and associated nosocomial pathogens for hospital infection control"
+  source: "WHO/CDC"
+  reference: "Healthcare-associated infection surveillance"
+
+pathogens:
+  # =========================================================================
+  # ESKAPE pathogens (WHO critical priority)
+  # =========================================================================
+
+  - name: "Enterococcus faecium"
+    names_alt: ["Enterococcus_faecium"]
+    taxid_ncbi: 1352
+    common_name: "E. faecium"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Nosocomial"
+    alert_threshold: 10
+    action_required: "Screen for vancomycin resistance (VRE). Implement contact precautions."
+    notes: "Leading cause of hospital-acquired bloodstream infections. Vancomycin-resistant strains are a WHO critical priority pathogen."
+
+  - name: "Staphylococcus aureus"
+    names_alt: ["Staphylococcus_aureus"]
+    taxid_ncbi: 1280
+    common_name: "S. aureus"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Nosocomial"
+    alert_threshold: 10
+    action_required: "Assess for methicillin resistance (MRSA). Implement contact precautions if indicated."
+    notes: "Major nosocomial pathogen causing surgical site infections, bacteremia, and device-related infections. MRSA strains are a persistent healthcare challenge."
+
+  - name: "Klebsiella pneumoniae"
+    names_alt: ["Klebsiella_pneumoniae"]
+    taxid_ncbi: 573
+    common_name: "K. pneumoniae"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Nosocomial"
+    alert_threshold: 10
+    action_required: "Monitor for carbapenem and ESBL resistance. Infection control alert."
+    notes: "WHO critical priority pathogen. Carbapenem-resistant strains represent a substantial threat in intensive care settings."
+
+  - name: "Acinetobacter baumannii"
+    names_alt: ["Acinetobacter_baumannii"]
+    taxid_ncbi: 470
+    common_name: "A. baumannii"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Nosocomial"
+    alert_threshold: 10
+    action_required: "Monitor for carbapenem resistance. Enhanced environmental cleaning. Infection control alert."
+    notes: "WHO critical priority pathogen. Persists on hospital surfaces and medical devices. Multi-drug resistant strains are frequently encountered in ICU outbreaks."
+
+  - name: "Pseudomonas aeruginosa"
+    names_alt: ["Pseudomonas_aeruginosa"]
+    taxid_ncbi: 287
+    common_name: "P. aeruginosa"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Nosocomial"
+    alert_threshold: 10
+    action_required: "Monitor for multi-drug resistance. Assess ventilator-associated pneumonia risk."
+    notes: "Opportunistic nosocomial pathogen with intrinsic resistance to many antibiotics. Commonly associated with ventilator-associated pneumonia and burn wound infections."
+
+  - name: "Enterobacter cloacae"
+    names_alt: ["Enterobacter_cloacae"]
+    taxid_ncbi: 550
+    common_name: "Enterobacter"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Nosocomial"
+    alert_threshold: 15
+    action_required: "Monitor for cephalosporin and carbapenem resistance. Avoid cephalosporins empirically."
+    notes: "ESKAPE pathogen with inducible AmpC beta-lactamase. WHO high priority. Resistance can emerge during cephalosporin therapy."
+
+  # =========================================================================
+  # Additional nosocomial pathogens
+  # =========================================================================
+
+  - name: "Clostridioides difficile"
+    names_alt: ["Clostridioides_difficile", "Clostridium_difficile"]
+    taxid_ncbi: 1496
+    common_name: "C. diff"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Nosocomial"
+    alert_threshold: 10
+    action_required: "Contact precautions. Antibiotic stewardship review. Enhanced environmental cleaning with sporicidal agents."
+    notes: "Leading cause of healthcare-associated diarrhea. Spore-forming anaerobe that persists on environmental surfaces. Antibiotic exposure is a primary risk factor."
+
+  - name: "Candida auris"
+    names_alt: ["Candida_auris"]
+    taxid_ncbi: 498019
+    common_name: "C. auris"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Nosocomial"
+    alert_threshold: 5
+    action_required: "Contact precautions. Enhanced environmental cleaning. Report to public health authorities."
+    notes: "CDC urgent threat. Multi-drug resistant fungus with high nosocomial transmission potential. Often misidentified by conventional phenotypic methods."
+
+  - name: "Stenotrophomonas maltophilia"
+    names_alt: ["Stenotrophomonas_maltophilia"]
+    taxid_ncbi: 40324
+    common_name: "S. maltophilia"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Nosocomial"
+    alert_threshold: 15
+    action_required: "Assess for co-trimoxazole susceptibility. Monitor immunocompromised patients."
+    notes: "Intrinsically resistant to carbapenems and aminoglycosides. Increasingly recognized as a cause of hospital-acquired pneumonia and bloodstream infections in immunocompromised patients."
+
+  - name: "Serratia marcescens"
+    names_alt: ["Serratia_marcescens"]
+    taxid_ncbi: 615
+    common_name: "Serratia"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Nosocomial"
+    alert_threshold: 20
+    action_required: "Investigate potential environmental reservoir. Monitor for resistance."
+    notes: "Opportunistic nosocomial pathogen associated with outbreaks linked to contaminated medical products and hand transmission. Intrinsic AmpC beta-lactamase."
+
+  - name: "Proteus mirabilis"
+    names_alt: ["Proteus_mirabilis"]
+    taxid_ncbi: 584
+    common_name: "Proteus"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Nosocomial"
+    alert_threshold: 20
+    action_required: "Assess for catheter-associated urinary tract infection. Monitor resistance profile."
+    notes: "Common cause of catheter-associated urinary tract infections. Produces urease, which may contribute to urinary stone formation and catheter encrustation."
+
+  - name: "Citrobacter freundii"
+    names_alt: ["Citrobacter_freundii"]
+    taxid_ncbi: 546
+    common_name: "Citrobacter"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Nosocomial"
+    alert_threshold: 20
+    action_required: "Monitor for cephalosporin and carbapenem resistance."
+    notes: "Opportunistic pathogen with inducible AmpC beta-lactamase. Associated with nosocomial bloodstream infections and urinary tract infections, particularly in neonatal units."
+
+  - name: "Elizabethkingia meningoseptica"
+    names_alt: ["Elizabethkingia_meningoseptica", "Chryseobacterium meningosepticum"]
+    taxid_ncbi: 238
+    common_name: "Elizabethkingia"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Nosocomial"
+    alert_threshold: 15
+    action_required: "Investigate environmental sources. Assess susceptibility to fluoroquinolones and vancomycin."
+    notes: "Intrinsically multi-drug resistant. Notable cause of neonatal meningitis and hospital outbreaks associated with contaminated water systems and medical devices."
+
+  - name: "Burkholderia cepacia"
+    names_alt: ["Burkholderia_cepacia", "Burkholderia cepacia complex"]
+    taxid_ncbi: 292
+    common_name: "B. cepacia"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Nosocomial"
+    alert_threshold: 15
+    action_required: "Investigate for contaminated medical products. Segregation protocols for CF patients."
+    notes: "Intrinsically resistant to many antibiotics. Particularly concerning in cystic fibrosis patients. Hospital outbreaks have been linked to contaminated pharmaceutical products and medical devices."

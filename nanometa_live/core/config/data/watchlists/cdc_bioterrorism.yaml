@@ -1,0 +1,435 @@
+# Federal Select Agents and Toxins Watchlist
+# Based on the Federal Select Agent Program (FSAP) Select Agents and Toxins list
+# Includes HHS Select Agents and Overlap Select Agents detectable by metagenomics
+# Toxin-only entries are excluded (not detectable by sequencing)
+# Uses current ICTV binomial nomenclature for viral species
+
+version: "2.0"
+taxonomy_support: ["ncbi", "gtdb"]
+
+metadata:
+  name: "Federal Select Agents"
+  description: "HHS and Overlap Select Agents detectable by metagenomic sequencing"
+  source: "Federal Select Agent Program (FSAP)"
+  reference: "https://www.selectagents.gov/sat/list.htm"
+  database_note: "Viral agents require PlusPF or PlusPFP Kraken2 database for detection"
+
+pathogens:
+  # =========================================================================
+  # Tier 1 Select Agents (highest consequence)
+  # =========================================================================
+
+  - name: "Bacillus anthracis"
+    names_alt: ["Bacillus_anthracis"]
+    taxid_ncbi: 1392
+    common_name: "Anthrax"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "Overlap-SA-Tier1"
+    alert_threshold: 5
+    action_required: "Contact biosafety officer immediately. Isolate sample. Do not open outside BSL-3."
+    notes: "Forms resistant endospores. Tier 1 Select Agent. Also covers B. cereus Biovar anthracis."
+
+  - name: "Yersinia pestis"
+    names_alt: ["Yersinia_pestis"]
+    taxid_ncbi: 632
+    common_name: "Plague"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "HHS-SA-Tier1"
+    alert_threshold: 5
+    action_required: "Contact biosafety officer immediately. Quarantine protocols may apply."
+    notes: "Causative agent of bubonic and pneumonic plague. Tier 1 Select Agent."
+
+  - name: "Francisella tularensis"
+    names_alt: ["Francisella_tularensis"]
+    taxid_ncbi: 263
+    common_name: "Tularemia"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "HHS-SA-Tier1"
+    alert_threshold: 5
+    action_required: "Contact biosafety officer. Handle with extreme caution."
+    notes: "Extremely infectious. Tier 1 Select Agent. Low infectious dose."
+
+  - name: "Clostridium botulinum"
+    names_alt: ["Clostridium_botulinum"]
+    taxid_ncbi: 1491
+    common_name: "Botulism"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "HHS-SA-Tier1"
+    alert_threshold: 5
+    action_required: "Contact public health authorities. Assess for toxin production."
+    notes: "Produces botulinum neurotoxin. Tier 1 Select Agent."
+
+  - name: "Orthopoxvirus variola"
+    names_alt: ["Variola major", "Variola_major", "Variola minor", "Smallpox virus"]
+    taxid_ncbi: 3431487
+    common_name: "Smallpox"
+    threat_level: "critical"
+    bsl_level: 4
+    category: "HHS-SA-Tier1"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. Contact CDC immediately. Extreme containment required."
+    notes: "Eradicated disease. Tier 1 Select Agent. Formerly Variola major (taxid 10255)."
+
+  - name: "Burkholderia mallei"
+    names_alt: ["Burkholderia_mallei"]
+    taxid_ncbi: 13373
+    common_name: "Glanders"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "Overlap-SA-Tier1"
+    alert_threshold: 5
+    action_required: "Contact biosafety officer. Handle with extreme caution."
+    notes: "Causative agent of glanders. Tier 1 Overlap Select Agent."
+
+  - name: "Burkholderia pseudomallei"
+    names_alt: ["Burkholderia_pseudomallei"]
+    taxid_ncbi: 28450
+    common_name: "Melioidosis"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "Overlap-SA-Tier1"
+    alert_threshold: 5
+    action_required: "Contact biosafety officer. Endemic in Southeast Asia and Australia."
+    notes: "Causative agent of melioidosis. Tier 1 Overlap Select Agent. High mortality."
+
+  # =========================================================================
+  # Viral Hemorrhagic Fevers - Tier 1
+  # =========================================================================
+
+  - name: "Orthoebolavirus zairense"
+    names_alt: ["Ebola virus", "Ebolavirus", "Ebola_virus", "Zaire ebolavirus"]
+    taxid_ncbi: 3052462
+    common_name: "Ebola"
+    threat_level: "critical"
+    bsl_level: 4
+    category: "HHS-SA-Tier1"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
+    notes: "Viral hemorrhagic fever. Tier 1 Select Agent. Formerly Ebola virus (taxid 186538)."
+
+  - name: "Orthomarburgvirus marburgense"
+    names_alt: ["Marburg virus", "Marburgvirus", "Marburg_virus"]
+    taxid_ncbi: 3052505
+    common_name: "Marburg"
+    threat_level: "critical"
+    bsl_level: 4
+    category: "HHS-SA-Tier1"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
+    notes: "Viral hemorrhagic fever. Tier 1 Select Agent. Formerly Marburg virus (taxid 11269)."
+
+  # =========================================================================
+  # Viral Hemorrhagic Fevers - HHS Select Agents
+  # =========================================================================
+
+  - name: "Mammarenavirus lassaense"
+    names_alt: ["Lassa virus", "Lassa_virus", "Lassa mammarenavirus"]
+    taxid_ncbi: 3052310
+    common_name: "Lassa fever"
+    threat_level: "critical"
+    bsl_level: 4
+    category: "HHS-SA"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
+    notes: "Viral hemorrhagic fever endemic to West Africa. HHS Select Agent. Formerly Lassa virus (taxid 11620)."
+
+  - name: "Orthonairovirus haemorrhagiae"
+    names_alt: ["Crimean-Congo hemorrhagic fever virus", "CCHFV", "CCHF virus"]
+    taxid_ncbi: 3052518
+    common_name: "Crimean-Congo hemorrhagic fever"
+    threat_level: "critical"
+    bsl_level: 4
+    category: "HHS-SA"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
+    notes: "Tick-borne VHF. HHS Select Agent. Wide geographic distribution. Formerly CCHFV (taxid 1980519)."
+
+  - name: "Mammarenavirus juninense"
+    names_alt: ["Junin virus", "Junin_virus", "Argentine hemorrhagic fever virus"]
+    taxid_ncbi: 2169991
+    common_name: "Argentine hemorrhagic fever"
+    threat_level: "critical"
+    bsl_level: 4
+    category: "HHS-SA"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
+    # NOTE: taxid 2169991 is the ICTV species-level taxid for Mammarenavirus juninense.
+    # Verify against current NCBI taxonomy if 305xxxx-range taxids become available.
+    notes: "South American hemorrhagic fever. HHS Select Agent."
+
+  - name: "Mammarenavirus machupoense"
+    names_alt: ["Machupo virus", "Machupo_virus", "Bolivian hemorrhagic fever virus"]
+    taxid_ncbi: 3052317
+    common_name: "Bolivian hemorrhagic fever"
+    threat_level: "critical"
+    bsl_level: 4
+    category: "HHS-SA"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
+    notes: "South American hemorrhagic fever. HHS Select Agent."
+
+  - name: "Mammarenavirus guanaritoense"
+    names_alt: ["Guanarito virus", "Guanarito_virus", "Venezuelan hemorrhagic fever virus"]
+    taxid_ncbi: 3052307
+    common_name: "Venezuelan hemorrhagic fever"
+    threat_level: "critical"
+    bsl_level: 4
+    category: "HHS-SA"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
+    notes: "South American hemorrhagic fever. HHS Select Agent."
+
+  - name: "Mammarenavirus brazilense"
+    names_alt: ["Sabia virus", "Sabia_virus", "Brazilian hemorrhagic fever virus"]
+    taxid_ncbi: 3052299
+    common_name: "Brazilian hemorrhagic fever"
+    threat_level: "critical"
+    bsl_level: 4
+    category: "HHS-SA"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
+    notes: "South American hemorrhagic fever. HHS Select Agent. Formerly Sabia virus."
+
+  - name: "Mammarenavirus chapareense"
+    names_alt: ["Chapare virus", "Chapare_virus", "Chapare hemorrhagic fever virus"]
+    taxid_ncbi: 3052302
+    common_name: "Chapare hemorrhagic fever"
+    threat_level: "critical"
+    bsl_level: 4
+    category: "HHS-SA"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
+    notes: "South American hemorrhagic fever. HHS Select Agent."
+
+  - name: "Mammarenavirus lujoense"
+    names_alt: ["Lujo virus", "Lujo_virus"]
+    taxid_ncbi: 3052314
+    common_name: "Lujo hemorrhagic fever"
+    threat_level: "critical"
+    bsl_level: 4
+    category: "HHS-SA"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
+    notes: "Viral hemorrhagic fever. HHS Select Agent. High case fatality rate."
+
+  - name: "Phlebovirus riftense"
+    names_alt: ["Rift Valley fever virus", "RVFV", "Rift_Valley_fever_virus"]
+    taxid_ncbi: 3052676
+    common_name: "Rift Valley fever"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "Overlap-SA"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. Contact biosafety officer. BSL-3 containment."
+    notes: "Zoonotic VHF. Overlap Select Agent. Mosquito-borne. Formerly RVFV (taxid 11588)."
+
+  # =========================================================================
+  # Other Viral Select Agents
+  # =========================================================================
+
+  - name: "Henipavirus nipahense"
+    names_alt: ["Nipah virus", "Nipah_virus", "Nipah henipavirus"]
+    taxid_ncbi: 3052225
+    common_name: "Nipah"
+    threat_level: "critical"
+    bsl_level: 4
+    category: "Overlap-SA-Tier1"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
+    notes: "Zoonotic paramyxovirus. Tier 1 Overlap Select Agent. Formerly Nipah virus (taxid 121791)."
+
+  - name: "Henipavirus hendraense"
+    names_alt: ["Hendra virus", "Hendra_virus"]
+    taxid_ncbi: 3052223
+    common_name: "Hendra"
+    threat_level: "critical"
+    bsl_level: 4
+    category: "HHS-SA"
+    alert_threshold: 1
+    action_required: "IMMEDIATE ALERT. BSL-4 containment required. Contact CDC."
+    notes: "Zoonotic paramyxovirus. HHS Select Agent. Bat reservoir, equine host. Formerly Hendra virus (taxid 63330)."
+
+  - name: "Orthopoxvirus monkeypox"
+    names_alt: ["Monkeypox virus", "Mpox virus", "MPXV"]
+    taxid_ncbi: 3431483
+    common_name: "Mpox"
+    threat_level: "high"
+    bsl_level: 3
+    category: "HHS-SA"
+    alert_threshold: 5
+    action_required: "Contact public health. Isolation precautions. Contact tracing."
+    notes: "HHS Select Agent. Ongoing global outbreaks since 2022. Formerly Monkeypox virus (taxid 10244)."
+
+  - name: "Alphavirus eastern"
+    names_alt: ["Eastern equine encephalitis virus", "EEEV", "EEE virus"]
+    taxid_ncbi: 3426299
+    common_name: "Eastern equine encephalitis"
+    threat_level: "high"
+    bsl_level: 3
+    category: "HHS-SA"
+    alert_threshold: 5
+    action_required: "Contact public health. Mosquito-borne arbovirus assessment."
+    notes: "HHS Select Agent. High case fatality rate (~30%). Mosquito-borne. Formerly EEEV (taxid 11021)."
+
+  - name: "Alphavirus venezuelan"
+    names_alt: ["Venezuelan equine encephalitis virus", "VEEV", "VEE virus"]
+    taxid_ncbi: 3426322
+    common_name: "Venezuelan equine encephalitis"
+    threat_level: "high"
+    bsl_level: 3
+    category: "Overlap-SA"
+    alert_threshold: 5
+    action_required: "Contact public health. Mosquito-borne arbovirus assessment."
+    notes: "Overlap Select Agent. Mosquito-borne. Formerly VEEV (taxid 11036)."
+
+  # =========================================================================
+  # Tick-borne Encephalitis Complex (HHS Select Agents)
+  # =========================================================================
+
+  - name: "Orthoflavivirus encephalitidis"
+    names_alt: ["Tick-borne encephalitis virus", "TBEV", "Far Eastern TBEV", "Siberian TBEV"]
+    taxid_ncbi: 3052465
+    common_name: "Tick-borne encephalitis"
+    threat_level: "high"
+    bsl_level: 3
+    category: "HHS-SA"
+    alert_threshold: 5
+    action_required: "Contact biosafety officer. Tick-borne arbovirus."
+    notes: "HHS Select Agent (Far Eastern and Siberian subtypes). Species covers all TBEV subtypes. Formerly TBEV (taxid 11084)."
+
+  - name: "Orthoflavivirus kyasanurense"
+    names_alt: ["Kyasanur Forest disease virus", "KFDV"]
+    taxid_ncbi: 3048170
+    common_name: "Kyasanur Forest disease"
+    threat_level: "high"
+    bsl_level: 3
+    category: "HHS-SA"
+    alert_threshold: 5
+    action_required: "Contact biosafety officer. Tick-borne VHF."
+    notes: "HHS Select Agent. Tick-borne hemorrhagic fever endemic to India. Formerly KFDV (taxid 33743)."
+
+  - name: "Orthoflavivirus omskense"
+    names_alt: ["Omsk hemorrhagic fever virus", "OHFV"]
+    taxid_ncbi: 3048233
+    common_name: "Omsk hemorrhagic fever"
+    threat_level: "high"
+    bsl_level: 3
+    category: "HHS-SA"
+    alert_threshold: 5
+    action_required: "Contact biosafety officer. Tick-borne VHF."
+    notes: "HHS Select Agent. Tick-borne hemorrhagic fever endemic to Siberia. Formerly OHFV (taxid 12542)."
+
+  # =========================================================================
+  # Bacterial Select Agents (non-Tier 1)
+  # =========================================================================
+
+  - name: "Coxiella burnetii"
+    names_alt: ["Coxiella_burnetii"]
+    taxid_ncbi: 777
+    common_name: "Q fever"
+    threat_level: "high"
+    bsl_level: 3
+    category: "HHS-SA"
+    alert_threshold: 10
+    action_required: "Contact biosafety officer. Highly infectious."
+    notes: "Causative agent of Q fever. HHS Select Agent. Extremely low infectious dose."
+
+  - name: "Rickettsia prowazekii"
+    names_alt: ["Rickettsia_prowazekii"]
+    taxid_ncbi: 782
+    common_name: "Epidemic typhus"
+    threat_level: "high"
+    bsl_level: 3
+    category: "HHS-SA"
+    alert_threshold: 10
+    action_required: "Contact biosafety officer. Historical epidemic pathogen."
+    notes: "Causative agent of epidemic typhus. HHS Select Agent."
+
+  - name: "Brucella melitensis"
+    names_alt: ["Brucella_melitensis"]
+    taxid_ncbi: 29459
+    common_name: "Brucellosis"
+    threat_level: "high"
+    bsl_level: 3
+    category: "HHS-SA"
+    alert_threshold: 10
+    action_required: "Contact biosafety officer. BSL-3 handling required."
+    notes: "Zoonotic pathogen. HHS Select Agent."
+
+  - name: "Brucella abortus"
+    names_alt: ["Brucella_abortus"]
+    taxid_ncbi: 235
+    common_name: "Brucellosis"
+    threat_level: "high"
+    bsl_level: 3
+    category: "HHS-SA"
+    alert_threshold: 10
+    action_required: "Contact biosafety officer. BSL-3 handling required."
+    notes: "Zoonotic pathogen causing brucellosis. HHS Select Agent."
+
+  - name: "Brucella suis"
+    names_alt: ["Brucella_suis"]
+    taxid_ncbi: 29461
+    common_name: "Swine brucellosis"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "Overlap-SA"
+    alert_threshold: 10
+    action_required: "Contact biosafety officer. BSL-3 handling required."
+    notes: "Zoonotic pathogen. Overlap Select Agent."
+
+  # =========================================================================
+  # Fungal Overlap Select Agents
+  # =========================================================================
+
+  - name: "Coccidioides immitis"
+    names_alt: ["Coccidioides_immitis"]
+    taxid_ncbi: 5501
+    common_name: "Valley fever"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "Overlap-SA"
+    alert_threshold: 5
+    action_required: "Contact biosafety officer. BSL-3 handling required."
+    notes: "Dimorphic fungus. Overlap Select Agent."
+
+  - name: "Coccidioides posadasii"
+    names_alt: ["Coccidioides_posadasii"]
+    taxid_ncbi: 199306
+    common_name: "Valley fever"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "Overlap-SA"
+    alert_threshold: 5
+    action_required: "Contact biosafety officer. BSL-3 handling required."
+    notes: "More geographically widespread than C. immitis."
+
+  # =========================================================================
+  # Hantaviruses (HHS Select Agents)
+  # =========================================================================
+
+  - name: "Orthohantavirus hantanense"
+    names_alt: ["Hantaan virus", "Hantaan_virus"]
+    taxid_ncbi: 3052480
+    common_name: "Hemorrhagic fever with renal syndrome"
+    threat_level: "high"
+    bsl_level: 3
+    category: "HHS-SA"
+    alert_threshold: 5
+    action_required: "Contact public health. Assess for rodent exposure."
+    notes: "Causes HFRS. Rodent-borne. Formerly Hantaan virus (taxid 1980471)."
+
+  - name: "Orthohantavirus sinnombreense"
+    names_alt: ["Sin Nombre virus", "Sin_Nombre_virus", "Sin Nombre orthohantavirus"]
+    taxid_ncbi: 3052487
+    common_name: "Hantavirus pulmonary syndrome"
+    threat_level: "high"
+    bsl_level: 3
+    category: "HHS-SA"
+    alert_threshold: 5
+    action_required: "Contact public health. Assess for rodent exposure."
+    notes: "Causes HPS. Rodent-borne. Primary hantavirus in the Americas."

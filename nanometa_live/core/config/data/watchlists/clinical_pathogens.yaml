@@ -1,0 +1,199 @@
+# Clinical Pathogens Watchlist
+# Common clinical pathogens for healthcare settings
+
+version: "2.0"
+taxonomy_support: ["ncbi", "gtdb"]
+
+metadata:
+  name: "Clinical Pathogens"
+  description: "Common clinical pathogens for healthcare and diagnostic settings"
+  source: "Clinical"
+  reference: "Healthcare-associated infection surveillance"
+
+pathogens:
+  - name: "Staphylococcus aureus"
+    names_alt: ["Staphylococcus_aureus"]
+    taxid_ncbi: 1280
+    common_name: "S. aureus"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 15
+    action_required: "Assess for MRSA. Implement contact precautions if indicated."
+    notes: "Leading cause of skin infections and healthcare-associated infections."
+
+  - name: "Klebsiella pneumoniae"
+    names_alt: ["Klebsiella_pneumoniae"]
+    taxid_ncbi: 573
+    common_name: "K. pneumoniae"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 10
+    action_required: "Monitor for carbapenem/ESBL resistance. Infection control alert."
+    notes: "WHO 2024 critical priority. Carbapenem-resistant and ESBL-producing strains."
+
+  - name: "Pseudomonas aeruginosa"
+    names_alt: ["Pseudomonas_aeruginosa"]
+    taxid_ncbi: 287
+    common_name: "P. aeruginosa"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 15
+    action_required: "Monitor for multi-drug resistance. Assess infection control."
+    notes: "Opportunistic pathogen. Common in CF patients and burns."
+
+  - name: "Enterococcus faecalis"
+    names_alt: ["Enterococcus_faecalis"]
+    taxid_ncbi: 1351
+    common_name: "Enterococcus"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 20
+    action_required: "Monitor for vancomycin resistance."
+    notes: "Common healthcare-associated pathogen."
+
+  - name: "Enterococcus faecium"
+    names_alt: ["Enterococcus_faecium"]
+    taxid_ncbi: 1352
+    common_name: "E. faecium"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 15
+    action_required: "Monitor for vancomycin resistance. Contact precautions."
+    notes: "Vancomycin-resistant strains are WHO high priority."
+
+  - name: "Streptococcus pneumoniae"
+    names_alt: ["Streptococcus_pneumoniae"]
+    taxid_ncbi: 1313
+    common_name: "Pneumococcus"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 20
+    action_required: "Respiratory pathogen assessment. Monitor penicillin resistance."
+    notes: "Leading cause of community-acquired pneumonia."
+
+  - name: "Clostridioides difficile"
+    names_alt: ["Clostridioides_difficile", "Clostridium_difficile"]
+    taxid_ncbi: 1496
+    common_name: "C. diff"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 10
+    action_required: "Contact precautions. Antibiotic stewardship review."
+    notes: "Healthcare-associated diarrhea. Spore-forming anaerobe."
+
+  - name: "Acinetobacter baumannii"
+    names_alt: ["Acinetobacter_baumannii"]
+    taxid_ncbi: 470
+    common_name: "A. baumannii"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 10
+    action_required: "Monitor for carbapenem resistance. Infection control alert."
+    notes: "Multi-drug resistant nosocomial pathogen."
+
+  - name: "Mycobacterium tuberculosis"
+    names_alt: ["Mycobacterium_tuberculosis"]
+    taxid_ncbi: 1773
+    common_name: "Tuberculosis"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "Clinical"
+    alert_threshold: 5
+    action_required: "Airborne precautions. TB reporting required. Assess for drug resistance."
+    notes: "Leading infectious disease killer globally. WHO 2024 critical priority."
+
+  - name: "Candida auris"
+    names_alt: ["Candida_auris"]
+    taxid_ncbi: 498019
+    common_name: "C. auris"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 5
+    action_required: "Contact precautions. Enhanced environmental cleaning. Report to public health."
+    notes: "CDC urgent threat. Multi-drug resistant fungus. High nosocomial transmission risk."
+
+  - name: "Enterobacter cloacae"
+    names_alt: ["Enterobacter_cloacae"]
+    taxid_ncbi: 550
+    common_name: "Enterobacter"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 15
+    action_required: "Monitor for cephalosporin/carbapenem resistance."
+    notes: "ESKAPE pathogen. Intrinsic AmpC beta-lactamase. WHO high priority."
+
+  - name: "Escherichia coli"
+    names_alt: ["Escherichia_coli"]
+    taxid_ncbi: 562
+    common_name: "E. coli"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 25
+    action_required: "Assess for pathogenic strains and resistance profile."
+    notes: "Common commensal, but pathogenic strains cause UTI and sepsis."
+
+  - name: "Listeria monocytogenes"
+    names_alt: ["Listeria_monocytogenes"]
+    taxid_ncbi: 1639
+    common_name: "Listeria"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 10
+    action_required: "High risk for pregnant women and immunocompromised."
+    notes: "Invasive listeriosis has high mortality."
+
+  - name: "Salmonella enterica"
+    names_alt: ["Salmonella_enterica"]
+    taxid_ncbi: 28901
+    common_name: "Salmonella"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 20
+    action_required: "Source tracking. Report to public health."
+    notes: "Enteric fever and gastroenteritis."
+
+  - name: "Streptococcus pyogenes"
+    names_alt: ["Streptococcus_pyogenes", "Group A Streptococcus", "GAS"]
+    taxid_ncbi: 1314
+    common_name: "Group A Strep"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 15
+    action_required: "Monitor for macrolide resistance. Assess for invasive disease."
+    notes: "Causes pharyngitis, necrotizing fasciitis, streptococcal toxic shock. iGAS surge in multiple countries. WHO 2024 medium priority."
+
+  - name: "Streptococcus agalactiae"
+    names_alt: ["Streptococcus_agalactiae", "Group B Streptococcus", "GBS"]
+    taxid_ncbi: 1311
+    common_name: "Group B Strep"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 20
+    action_required: "Monitor for penicillin resistance. Neonatal screening."
+    notes: "Key neonatal pathogen. WHO 2024 medium priority for penicillin-resistant strains."
+
+  - name: "Neisseria meningitidis"
+    names_alt: ["Neisseria_meningitidis"]
+    taxid_ncbi: 487
+    common_name: "Meningococcus"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Clinical"
+    alert_threshold: 10
+    action_required: "Droplet precautions. Report to public health. Contact prophylaxis."
+    notes: "Causes bacterial meningitis and septicemia. Vaccine-preventable."

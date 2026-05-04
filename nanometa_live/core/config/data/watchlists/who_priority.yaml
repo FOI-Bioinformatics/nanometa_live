@@ -1,0 +1,230 @@
+# WHO Bacterial Priority Pathogens List (BPPL) Watchlist
+# Updated to WHO 2024 BPPL (published 2024-05-17)
+# Critical, High, and Medium priority pathogens for AMR
+
+version: "2.0"
+taxonomy_support: ["ncbi", "gtdb"]
+
+metadata:
+  name: "WHO Priority Pathogens (2024)"
+  description: "WHO 2024 Bacterial Priority Pathogens List for antimicrobial resistance"
+  source: "WHO"
+  reference: "https://www.who.int/publications/i/item/9789240093461"
+
+pathogens:
+  # Critical Priority
+  - name: "Acinetobacter baumannii"
+    names_alt: ["Acinetobacter_baumannii"]
+    taxid_ncbi: 470
+    common_name: "A. baumannii"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "WHO-Critical"
+    alert_threshold: 10
+    action_required: "Monitor for carbapenem resistance. Infection control alert."
+    notes: "Carbapenem-resistant strains are critical priority. Healthcare-associated infections."
+
+  - name: "Mycobacterium tuberculosis"
+    names_alt: ["Mycobacterium_tuberculosis"]
+    taxid_ncbi: 1773
+    common_name: "Tuberculosis"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "WHO-Critical"
+    alert_threshold: 5
+    action_required: "Airborne precautions. TB reporting required. Assess for rifampicin resistance."
+    notes: "Rifampicin-resistant TB is critical priority. Added in 2024 BPPL. Leading infectious disease killer globally."
+
+  - name: "Klebsiella pneumoniae"
+    names_alt: ["Klebsiella_pneumoniae"]
+    taxid_ncbi: 573
+    common_name: "K. pneumoniae"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "WHO-Critical"
+    alert_threshold: 10
+    action_required: "Monitor for carbapenem/ESBL resistance. Infection control."
+    notes: "Carbapenem-resistant and ESBL-producing strains are critical priority."
+
+  - name: "Escherichia coli"
+    names_alt: ["Escherichia_coli"]
+    taxid_ncbi: 562
+    common_name: "E. coli"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "WHO-Critical"
+    alert_threshold: 10
+    action_required: "Assess for pathogenic strains and resistance profile."
+    notes: "Carbapenem-resistant and ESBL-producing strains are critical priority."
+
+  - name: "Enterobacter cloacae"
+    names_alt: ["Enterobacter_cloacae"]
+    taxid_ncbi: 550
+    common_name: "Enterobacter"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "WHO-Critical"
+    alert_threshold: 10
+    action_required: "Monitor for carbapenem/cephalosporin resistance. Infection control."
+    notes: "Part of 3rd-gen cephalosporin-resistant Enterobacterales. Intrinsic AmpC beta-lactamase."
+
+  # High Priority
+  - name: "Salmonella enterica serovar Typhi"
+    names_alt: ["Salmonella_typhi", "Salmonella Typhi"]
+    taxid_ncbi: 90370
+    common_name: "Typhoid fever"
+    threat_level: "high"
+    bsl_level: 2
+    category: "WHO-High"
+    alert_threshold: 10
+    action_required: "Enteric fever assessment. Monitor fluoroquinolone resistance."
+    notes: "Fluoroquinolone-resistant S. Typhi is high priority. Added in 2024 BPPL."
+
+  - name: "Salmonella enterica"
+    names_alt: ["Salmonella_enterica", "Non-typhoidal Salmonella"]
+    taxid_ncbi: 28901
+    common_name: "Salmonellosis"
+    threat_level: "high"
+    bsl_level: 2
+    category: "WHO-High"
+    alert_threshold: 15
+    action_required: "Foodborne illness assessment. Monitor fluoroquinolone resistance."
+    notes: "Non-typhoidal Salmonella, fluoroquinolone-resistant. Added in 2024 BPPL."
+
+  - name: "Enterococcus faecium"
+    names_alt: ["Enterococcus_faecium"]
+    taxid_ncbi: 1352
+    common_name: "VRE"
+    threat_level: "high"
+    bsl_level: 2
+    category: "WHO-High"
+    alert_threshold: 15
+    action_required: "Monitor for vancomycin resistance. Contact precautions."
+    notes: "Vancomycin-resistant enterococci (VRE) are high priority."
+
+  - name: "Staphylococcus aureus"
+    names_alt: ["Staphylococcus_aureus"]
+    taxid_ncbi: 1280
+    common_name: "S. aureus"
+    threat_level: "high"
+    bsl_level: 2
+    category: "WHO-High"
+    alert_threshold: 15
+    action_required: "Assess for MRSA. Implement contact precautions if indicated."
+    notes: "Methicillin-resistant (MRSA) and vancomycin-intermediate strains are high priority."
+
+  - name: "Pseudomonas aeruginosa"
+    names_alt: ["Pseudomonas_aeruginosa"]
+    taxid_ncbi: 287
+    common_name: "P. aeruginosa"
+    threat_level: "high"
+    bsl_level: 2
+    category: "WHO-High"
+    alert_threshold: 15
+    action_required: "Monitor for carbapenem resistance. Assess infection control."
+    notes: "Carbapenem-resistant strains are high priority. Downgraded from critical in 2024 BPPL."
+
+  - name: "Neisseria gonorrhoeae"
+    names_alt: ["Neisseria_gonorrhoeae"]
+    taxid_ncbi: 485
+    common_name: "Gonorrhea"
+    threat_level: "high"
+    bsl_level: 2
+    category: "WHO-High"
+    alert_threshold: 15
+    action_required: "STI surveillance. Monitor cephalosporin/fluoroquinolone resistance."
+    notes: "Multi-drug resistant strains are high priority. STI concern."
+
+  - name: "Shigella sonnei"
+    names_alt: ["Shigella_sonnei"]
+    taxid_ncbi: 624
+    common_name: "Shigellosis"
+    threat_level: "high"
+    bsl_level: 2
+    category: "WHO-High"
+    alert_threshold: 15
+    action_required: "Gastrointestinal illness. Report to public health."
+    notes: "Fluoroquinolone-resistant strains are high priority. Upgraded from medium in 2024 BPPL."
+
+  - name: "Shigella flexneri"
+    names_alt: ["Shigella_flexneri"]
+    taxid_ncbi: 623
+    common_name: "Shigellosis"
+    threat_level: "high"
+    bsl_level: 2
+    category: "WHO-High"
+    alert_threshold: 15
+    action_required: "Gastrointestinal illness. Report to public health."
+    notes: "Fluoroquinolone-resistant strains are high priority. Upgraded from medium in 2024 BPPL."
+
+  - name: "Shigella dysenteriae"
+    names_alt: ["Shigella_dysenteriae"]
+    taxid_ncbi: 622
+    common_name: "Bacillary dysentery"
+    threat_level: "high"
+    bsl_level: 2
+    category: "WHO-High"
+    alert_threshold: 10
+    action_required: "Severe dysentery assessment. Report to public health."
+    notes: "Produces Shiga toxin. Fluoroquinolone-resistant strains are high priority."
+
+  - name: "Shigella boydii"
+    names_alt: ["Shigella_boydii"]
+    taxid_ncbi: 621
+    common_name: "Shigellosis"
+    threat_level: "high"
+    bsl_level: 2
+    category: "WHO-High"
+    alert_threshold: 15
+    action_required: "Gastrointestinal illness. Report to public health."
+    notes: "Fluoroquinolone-resistant strains are high priority."
+
+  # Medium Priority
+  - name: "Streptococcus pneumoniae"
+    names_alt: ["Streptococcus_pneumoniae"]
+    taxid_ncbi: 1313
+    common_name: "Pneumococcus"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "WHO-Medium"
+    alert_threshold: 25
+    action_required: "Respiratory pathogen assessment. Monitor penicillin resistance."
+    notes: "Penicillin-non-susceptible strains are medium priority."
+
+  - name: "Haemophilus influenzae"
+    names_alt: ["Haemophilus_influenzae"]
+    taxid_ncbi: 727
+    common_name: "H. influenzae"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "WHO-Medium"
+    alert_threshold: 25
+    action_required: "Respiratory pathogen assessment. Monitor ampicillin resistance."
+    notes: "Ampicillin-resistant strains are medium priority."
+
+  - name: "Streptococcus pyogenes"
+    names_alt: ["Streptococcus_pyogenes", "Group A Streptococcus", "GAS"]
+    taxid_ncbi: 1314
+    common_name: "Group A Strep"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "WHO-Medium"
+    alert_threshold: 20
+    action_required: "Monitor for macrolide resistance. Assess for invasive disease."
+    notes: "Macrolide-resistant strains are medium priority. Added in 2024 BPPL."
+
+  - name: "Streptococcus agalactiae"
+    names_alt: ["Streptococcus_agalactiae", "Group B Streptococcus", "GBS"]
+    taxid_ncbi: 1311
+    common_name: "Group B Strep"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "WHO-Medium"
+    alert_threshold: 20
+    action_required: "Monitor for penicillin resistance. Neonatal screening."
+    notes: "Penicillin-resistant strains are medium priority. Added in 2024 BPPL. Key neonatal pathogen."
+
+  # Removed from 2024 BPPL (retained for reference, disabled by default)
+  # Helicobacter pylori - was WHO-High in 2017, removed in 2024
+  # Campylobacter jejuni - was WHO-High in 2017, removed in 2024
+  # Campylobacter coli - was WHO-High in 2017, removed in 2024

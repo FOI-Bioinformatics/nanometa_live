@@ -160,6 +160,27 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# Worktrees
+.worktrees/
+
+
+# Development plans and internal docs
+DEVELOPMENT_ROADMAP.md
+PLAN_nanometa_live.md
+docs/plans/
+docs/archive/
+
+# Temporary test configs
+test_config.yaml
+test_barcode_config.yaml
+
+# Generated test datasets
+/tmp/nanometa_test_datasets/
+
+# Dev-only scripts (not part of the package)
+generate_demo_data.py
+verify_visualizations.py
+
 # macOS system files
 .DS_Store
 .AppleDouble

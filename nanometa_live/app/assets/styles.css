@@ -1,0 +1,3793 @@
+/* Nanometa Live Custom Styles - Operator-Focused Design */
+/* Version 2.1 - Enhanced with Dark Mode, Accessibility, and Modern UI */
+
+/* ============================================
+   CSS VARIABLES - Operator-Focused Color System
+   ============================================ */
+:root {
+    /* Color scheme preference */
+    color-scheme: light dark;
+
+    /* Status Colors - Traffic Light System */
+    --status-good: #28a745;          /* Green - Safe to proceed */
+    --status-good-bg: #d4edda;       /* Light green background */
+    --status-good-border: #c3e6cb;   /* Green border */
+    --status-good-text: #0f5132;     /* WCAG AA compliant text */
+
+    --status-warning: #ffc107;       /* Amber - Attention needed */
+    --status-warning-bg: #fff3cd;    /* Light amber background */
+    --status-warning-border: #ffeaa7; /* Amber border */
+    --status-warning-text: #664d03;  /* WCAG AA compliant text */
+
+    --status-danger: #dc3545;        /* Red - Critical issue */
+    --status-danger-bg: #f8d7da;     /* Light red background */
+    --status-danger-border: #f5c6cb; /* Red border */
+    --status-danger-text: #842029;   /* WCAG AA compliant text */
+
+    --status-info: #17a2b8;          /* Blue - Information */
+    --status-info-bg: #d1ecf1;       /* Light blue background */
+    --status-info-border: #bee5eb;   /* Blue border */
+    --status-info-text: #055160;     /* WCAG AA compliant text */
+
+    --status-neutral: #6c757d;       /* Gray - Inactive/Idle */
+    --status-neutral-bg: #e9ecef;    /* Light gray background */
+    --status-neutral-border: #dee2e6; /* Gray border */
+
+    /* Semantic Colors */
+    --primary: #007bff;              /* Primary actions */
+    --secondary: #6c757d;            /* Secondary actions */
+    --light: #f8f9fa;                /* Light backgrounds */
+    --dark: #343a40;                 /* Dark text */
+
+    /* Card colors (for dark mode support) */
+    --card-bg: #ffffff;
+    --card-border: #dee2e6;
+    --body-bg: #f8f9fa;
+
+    /* Typography Scale (1.25 ratio) */
+    --font-family-base: 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-size-xs: 0.75rem;         /* 12px */
+    --font-size-sm: 0.875rem;        /* 14px */
+    --font-size-base: 1rem;          /* 16px */
+    --font-size-md: 1.125rem;        /* 18px */
+    --font-size-lg: 1.25rem;         /* 20px */
+    --font-size-xl: 1.5rem;          /* 24px */
+    --font-size-2xl: 2rem;           /* 32px */
+    --font-size-3xl: 2.5rem;         /* 40px */
+
+    /* Line heights */
+    --line-height-tight: 1.2;
+    --line-height-base: 1.5;
+    --line-height-relaxed: 1.75;
+
+    --font-weight-normal: 400;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --font-weight-bold: 700;
+
+    /* Spacing Scale - Mobile-first */
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+    --space-xxl: 48px;
+
+    /* Border Radius */
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-full: 9999px;
+
+    /* Shadows - Subtle depth */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+    --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.15);
+
+    /* Z-index layers */
+    --z-dropdown: 1000;
+    --z-sticky: 1020;
+    --z-fixed: 1030;
+    --z-modal: 1050;
+    --z-tooltip: 1070;
+
+    /* Transitions */
+    --transition-fast: 150ms ease-in-out;
+    --transition-base: 250ms ease-in-out;
+    --transition-slow: 350ms ease-in-out;
+}
+
+/* ============================================
+   DARK MODE SUPPORT - For Lab Environments
+   ============================================ */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --light: #1a1a2e;
+        --dark: #eaeaea;
+        --body-bg: #16213e;
+        --card-bg: #1a1a2e;
+        --card-border: #2d2d5a;
+
+        --status-neutral-bg: #2d2d44;
+        --status-neutral-border: #404060;
+
+        /* Adjusted status colors for dark mode */
+        --status-good-bg: #0d3320;
+        --status-good-border: #1a5a3c;
+        --status-warning-bg: #3d3218;
+        --status-warning-border: #5a4a20;
+        --status-danger-bg: #3d1a20;
+        --status-danger-border: #5a2530;
+        --status-info-bg: #163040;
+        --status-info-border: #204560;
+    }
+
+    body {
+        background-color: var(--body-bg);
+        color: var(--dark);
+    }
+
+    .card {
+        background-color: var(--card-bg);
+        border-color: var(--card-border);
+    }
+
+    .card-header {
+        background-color: rgba(255, 255, 255, 0.05);
+        border-color: var(--card-border);
+    }
+
+    .header {
+        background-color: var(--card-bg);
+        border-bottom: 1px solid var(--card-border);
+    }
+
+    .footer {
+        background-color: var(--card-bg);
+        border-top: 1px solid var(--card-border);
+        color: var(--dark);
+    }
+
+    /* Form inputs in dark mode */
+    .form-control, .form-select, input, select, textarea {
+        background-color: var(--status-neutral-bg);
+        border-color: var(--card-border);
+        color: var(--dark);
+    }
+
+    .form-control:focus, .form-select:focus {
+        background-color: var(--status-neutral-bg);
+        border-color: var(--primary);
+        color: var(--dark);
+    }
+
+    /* Dropdown menus in dark mode (Dash 4 uses .dash-dropdown for dcc.Dropdown) */
+    .dash-dropdown .dash-dropdown-menu, .dropdown-menu {
+        background-color: var(--card-bg);
+        border-color: var(--card-border);
+    }
+
+    /* Nav tabs in dark mode */
+    .nav-tabs .nav-link {
+        color: #9ca3af;
+    }
+
+    .nav-tabs .nav-link:hover {
+        color: var(--dark);
+        background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    .tab-group-start {
+        border-left-color: var(--card-border) !important;
+    }
+
+    /* Alerts in dark mode */
+    .alert-info {
+        background-color: var(--status-info-bg);
+        border-color: var(--status-info-border);
+        color: #7dd3fc;
+    }
+
+    .alert-warning {
+        background-color: var(--status-warning-bg);
+        border-color: var(--status-warning-border);
+        color: #fcd34d;
+    }
+
+    .alert-danger {
+        background-color: var(--status-danger-bg);
+        border-color: var(--status-danger-border);
+        color: #fca5a5;
+    }
+
+    .alert-success {
+        background-color: var(--status-good-bg);
+        border-color: var(--status-good-border);
+        color: #86efac;
+    }
+
+    /* Plotly charts in dark mode */
+    .js-plotly-plot .plotly .main-svg {
+        background-color: var(--card-bg) !important;
+    }
+
+    /* Text colors */
+    .text-muted {
+        color: #9ca3af !important;
+    }
+
+    /* Accordion in dark mode */
+    .accordion-item {
+        background-color: var(--card-bg);
+        border-color: var(--card-border);
+    }
+
+    .accordion-button {
+        background-color: var(--card-bg);
+        color: var(--dark);
+    }
+
+    .accordion-button:not(.collapsed) {
+        background-color: rgba(0, 123, 255, 0.15);
+        color: var(--primary);
+    }
+}
+
+/* Manual dark mode toggle support */
+[data-theme="dark"] {
+    --light: #1a1a2e;
+    --dark: #eaeaea;
+    --body-bg: #16213e;
+    --card-bg: #1a1a2e;
+    --card-border: #2d2d5a;
+}
+
+[data-theme="dark"] .nav-tabs .nav-link {
+    color: #9ca3af;
+}
+
+[data-theme="dark"] .nav-tabs .nav-link:hover {
+    color: var(--dark);
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="dark"] .tab-group-start {
+    border-left-color: var(--card-border) !important;
+}
+
+/* Global styling */
+body {
+    font-family: var(--font-family-base);
+    font-size: var(--font-size-base);
+    line-height: 1.6;
+    margin: 0;
+    padding: 0;
+    background-color: var(--light);
+    color: var(--dark);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Header styling */
+  .header {
+    padding: 15px 20px;
+    background-color: #fff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+  }
+
+  /* Footer styling */
+  .footer {
+    margin-top: 30px;
+    padding: 15px 20px;
+    background-color: #f1f1f1;
+    text-align: center;
+    font-size: 0.8rem;
+    color: #666;
+    border-top: 1px solid #ddd;
+  }
+
+  /* Card styling */
+  .card {
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+    margin-bottom: 20px;
+    border-radius: 5px;
+    overflow: hidden;
+    transition: all 0.3s ease;
+  }
+
+  .card-header {
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+    padding: 12px 15px;
+  }
+
+  .card-body {
+    padding: 20px;
+  }
+
+  /* ============================================
+     BUTTON STYLING - Touch-friendly, clear states
+     ============================================ */
+  .btn {
+    font-family: var(--font-family-base);
+    font-weight: var(--font-weight-medium);
+    border-radius: var(--radius-md);
+    transition: all var(--transition-fast);
+    min-height: 44px; /* Minimum touch target */
+    padding: var(--space-sm) var(--space-lg);
+    border: 2px solid transparent;
+    box-shadow: var(--shadow-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+  }
+
+  .btn:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+  }
+
+  .btn:active {
+    transform: translateY(0);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
+  }
+
+  /* Primary action button */
+  .btn-primary {
+    background-color: var(--primary);
+    border-color: var(--primary);
+  }
+
+  .btn-primary:hover {
+    background-color: #0056b3;
+    border-color: #0056b3;
+  }
+
+  /* Success/Good action button */
+  .btn-success {
+    background-color: var(--status-good);
+    border-color: var(--status-good);
+  }
+
+  .btn-success:hover {
+    background-color: #218838;
+    border-color: #1e7e34;
+  }
+
+  /* Warning/Caution button */
+  .btn-warning {
+    background-color: var(--status-warning);
+    border-color: var(--status-warning);
+    color: var(--dark);
+  }
+
+  .btn-warning:hover {
+    background-color: #e0a800;
+    border-color: #d39e00;
+  }
+
+  /* Danger/Critical button */
+  .btn-danger {
+    background-color: var(--status-danger);
+    border-color: var(--status-danger);
+  }
+
+  .btn-danger:hover {
+    background-color: #c82333;
+    border-color: #bd2130;
+  }
+
+  /* Tab styling */
+  .nav-tabs {
+    border-bottom: 1px solid var(--status-neutral-border);
+    padding-top: 16px;
+  }
+
+  .nav-tabs .nav-link {
+    border: 1px solid transparent;
+    border-top-left-radius: 0.25rem;
+    border-top-right-radius: 0.25rem;
+    color: var(--secondary);
+    background-color: transparent;
+    margin-right: 2px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    white-space: nowrap;
+  }
+
+  .nav-tabs .nav-link:hover {
+    border-color: var(--status-neutral-border) var(--status-neutral-border) transparent;
+    color: var(--dark);
+    background-color: rgba(0, 123, 255, 0.05);
+  }
+
+  .nav-tabs .nav-link.active {
+    color: var(--primary);
+    background-color: var(--card-bg);
+    border-color: var(--status-neutral-border) var(--status-neutral-border) var(--card-bg);
+  }
+
+  /* Tab group separators */
+  .tab-group-start {
+    margin-left: 12px !important;
+    padding-left: 12px !important;
+    border-left: 2px solid var(--status-neutral-border) !important;
+    position: relative;
+  }
+
+  /* Tab group labels */
+  .tab-group-start::before {
+    position: absolute;
+    top: -14px;
+    left: 12px;
+    font-size: 0.6rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #6c757d;
+    pointer-events: none;
+  }
+
+  .tab-organisms.tab-group-start::before {
+    content: "Results";
+  }
+
+  .tab-config.tab-group-start::before {
+    content: "Setup";
+  }
+
+  /* Tab icon styling - icons are embedded inline in label props */
+  .nav-tabs .nav-link .bi {
+    opacity: 0.7;
+    transition: opacity var(--transition-fast);
+  }
+
+  .nav-tabs .nav-link.active .bi,
+  .nav-tabs .nav-link:hover .bi {
+    opacity: 1;
+  }
+
+  /* Form styling */
+  label {
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+  }
+
+  .form-group {
+    margin-bottom: 1.5rem;
+  }
+
+  .form-text {
+    color: #6c757d;
+    margin-top: 0.25rem;
+    font-size: 0.875rem;
+  }
+
+  /* Upload component styling */
+  .Upload {
+    border: 2px dashed #ced4da;
+    border-radius: 5px;
+    padding: 20px;
+    text-align: center;
+    transition: border-color 0.15s ease-in-out;
+  }
+
+  .Upload:hover {
+    border-color: #007bff;
+  }
+
+  /* Dashboard components */
+  .dashboard-card {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .dashboard-card .card-body {
+    flex: 1;
+  }
+
+  .status-indicator {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+
+  .status-indicator .status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 8px;
+  }
+
+  /* Plot styling */
+  .js-plotly-plot {
+    border-radius: 5px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  /* Configuration form styling */
+  .config-section {
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #e9ecef;
+  }
+
+  .config-section:last-child {
+    border-bottom: none;
+  }
+
+  .config-section-title {
+    font-size: 1.25rem;
+    margin-bottom: 1rem;
+    color: #495057;
+  }
+
+  /* Notification container */
+  .notification-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    max-width: 400px;
+    z-index: 1000;
+  }
+
+  /* Species list */
+  .species-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid #e9ecef;
+    border-radius: 5px;
+    padding: 10px;
+  }
+
+  .species-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px;
+    margin-bottom: 5px;
+    border-bottom: 1px solid #f1f1f1;
+  }
+
+  .species-item:last-child {
+    border-bottom: none;
+  }
+
+  /* Helper utility classes */
+  .text-muted {
+    color: #6c757d;
+  }
+
+  .font-weight-bold {
+    font-weight: 600;
+  }
+
+  .text-success {
+    color: #28a745;
+  }
+
+  .text-danger {
+    color: #dc3545;
+  }
+
+  .text-warning {
+    color: #ffc107;
+  }
+
+  .text-info {
+    color: #17a2b8;
+  }
+
+  /* ============================================
+     STATUS BADGES - Operator-focused visual indicators
+     ============================================ */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-full);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border: 2px solid transparent;
+  }
+
+  /* Good status - Green */
+  .status-badge-good,
+  .badge-success {
+    background-color: var(--status-good-bg);
+    color: var(--status-good);
+    border-color: var(--status-good-border);
+  }
+
+  /* Warning status - Amber */
+  .status-badge-warning,
+  .status-badge-review,
+  .badge-warning {
+    background-color: var(--status-warning-bg);
+    color: #664d03; /* Darker amber for readability */
+    border-color: var(--status-warning-border);
+  }
+
+  /* Danger/Issue status - Red */
+  .status-badge-danger,
+  .status-badge-issue,
+  .badge-danger {
+    background-color: var(--status-danger-bg);
+    color: var(--status-danger);
+    border-color: var(--status-danger-border);
+  }
+
+  /* Info/Processing status - Blue */
+  .status-badge-info,
+  .status-badge-processing,
+  .badge-info {
+    background-color: var(--status-info-bg);
+    color: #0c5460;
+    border-color: var(--status-info-border);
+  }
+
+  /* Neutral/Idle status - Gray */
+  .status-badge-neutral,
+  .badge-secondary {
+    background-color: var(--status-neutral-bg);
+    color: var(--status-neutral);
+    border-color: var(--status-neutral-border);
+  }
+
+  /* ============================================
+     ALERT COMPONENTS - Critical information display
+     ============================================ */
+  .alert-modern {
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    border-left: 4px solid transparent;
+    margin-bottom: var(--space-md);
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-md);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .alert-modern-icon {
+    font-size: 24px;
+    line-height: 1;
+    min-width: 24px;
+  }
+
+  .alert-modern-content {
+    flex: 1;
+  }
+
+  .alert-modern-title {
+    font-weight: var(--font-weight-semibold);
+    margin-bottom: var(--space-xs);
+    font-size: var(--font-size-base);
+  }
+
+  .alert-modern-message {
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+    margin-bottom: var(--space-sm);
+  }
+
+  .alert-modern-recommendation {
+    font-size: var(--font-size-sm);
+    font-style: italic;
+    opacity: 0.9;
+  }
+
+  /* Alert severity variants */
+  .alert-critical,
+  .alert-danger {
+    background-color: var(--status-danger-bg);
+    border-left-color: var(--status-danger);
+    color: #721c24;
+  }
+
+  .alert-warning {
+    background-color: var(--status-warning-bg);
+    border-left-color: var(--status-warning);
+    color: #664d03;
+  }
+
+  .alert-info {
+    background-color: var(--status-info-bg);
+    border-left-color: var(--status-info);
+    color: #0c5460;
+  }
+
+  .alert-success {
+    background-color: var(--status-good-bg);
+    border-left-color: var(--status-good);
+    color: #155724;
+  }
+
+  /* ============================================
+     STAT CARDS - Dashboard metrics display
+     ============================================ */
+  .stat-card {
+    padding: var(--space-lg);
+    border-radius: var(--radius-lg);
+    background: white;
+    box-shadow: var(--shadow-md);
+    border-left: 4px solid var(--primary);
+    transition: transform var(--transition-fast);
+  }
+
+  .stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .stat-card-value {
+    font-size: 2.5rem;
+    font-weight: var(--font-weight-bold);
+    line-height: 1;
+    margin-bottom: var(--space-sm);
+  }
+
+  .stat-card-label {
+    font-size: var(--font-size-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--secondary);
+    font-weight: var(--font-weight-medium);
+  }
+
+  /* Stat card color variants */
+  .stat-card-primary { border-left-color: var(--primary); }
+  .stat-card-success { border-left-color: var(--status-good); }
+  .stat-card-warning { border-left-color: var(--status-warning); }
+  .stat-card-danger { border-left-color: var(--status-danger); }
+  .stat-card-info { border-left-color: var(--status-info); }
+
+  /* ============================================
+     TRAFFIC LIGHT INDICATORS - Visual status system
+     ============================================ */
+  .traffic-light {
+    width: 60px;
+    height: 60px;
+    border-radius: var(--radius-full);
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
+    display: inline-block;
+    position: relative;
+    transition: all var(--transition-base);
+  }
+
+  .traffic-light::before {
+    content: '';
+    position: absolute;
+    inset: -8px;
+    border-radius: var(--radius-full);
+    opacity: 0.3;
+    transition: all var(--transition-base);
+  }
+
+  .traffic-light-good {
+    background-color: var(--status-good);
+  }
+
+  .traffic-light-good::before {
+    background-color: var(--status-good);
+    box-shadow: 0 0 30px var(--status-good);
+  }
+
+  .traffic-light-warning {
+    background-color: var(--status-warning);
+  }
+
+  .traffic-light-warning::before {
+    background-color: var(--status-warning);
+    box-shadow: 0 0 30px var(--status-warning);
+  }
+
+  .traffic-light-danger {
+    background-color: var(--status-danger);
+  }
+
+  .traffic-light-danger::before {
+    background-color: var(--status-danger);
+    box-shadow: 0 0 30px var(--status-danger);
+  }
+
+  .traffic-light-neutral {
+    background-color: var(--status-neutral);
+  }
+
+  /* ============================================
+     TOOLTIP SYSTEM - Contextual help
+     ============================================ */
+  .tooltip-trigger {
+    cursor: help;
+    border-bottom: 1px dotted var(--secondary);
+  }
+
+  .help-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: var(--radius-full);
+    background-color: var(--status-info);
+    color: white;
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-bold);
+    cursor: help;
+    transition: all var(--transition-fast);
+  }
+
+  .help-icon:hover {
+    background-color: #117a8b;
+    transform: scale(1.1);
+  }
+
+  /* ============================================
+     ACCESSIBILITY ENHANCEMENTS
+     ============================================ */
+  /* Screen reader only content */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  /* High contrast mode support */
+  @media (prefers-contrast: high) {
+    .btn {
+      border-width: 3px;
+    }
+
+    .status-badge {
+      border-width: 3px;
+    }
+  }
+
+  /* Reduced motion support */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* Dashboard-specific styles */
+  .status-indicator-circle {
+    transition: background-color var(--transition-base), box-shadow var(--transition-base);
+  }
+
+  .progress-ring-container {
+    padding: 10px;
+  }
+
+  .data-quality-meter {
+    padding: 10px;
+  }
+
+  .alert-message {
+    line-height: 1.5;
+  }
+
+  /* Dashboard metric cards - compact with subtle left accent */
+  .dashboard-metric-card {
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+    border-left: 3px solid transparent;
+  }
+
+  .dashboard-metric-card:hover {
+    box-shadow: var(--shadow-md);
+  }
+
+  /* Alerts card accent when alerts are active */
+  #dashboard-alerts-card.has-alerts {
+    border-left: 3px solid var(--status-warning);
+    box-shadow: 0 0 8px rgba(255, 193, 7, 0.15);
+  }
+
+  #dashboard-alerts-card.has-critical-alerts {
+    border-left: 3px solid var(--status-danger);
+    box-shadow: 0 0 8px rgba(220, 53, 69, 0.15);
+  }
+
+  /* Alert panel scrollbar styling */
+  #dashboard-alerts-panel::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  #dashboard-alerts-panel::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+  }
+
+  #dashboard-alerts-panel::-webkit-scrollbar-thumb {
+    background: #aaa;
+    border-radius: 10px;
+  }
+
+  #dashboard-alerts-panel::-webkit-scrollbar-thumb:hover {
+    background: #777;
+  }
+
+  /* Responsive adjustments */
+  @media (max-width: 768px) {
+    .col-md-6 {
+      flex: 0 0 100%;
+      max-width: 100%;
+    }
+
+    .hstack {
+      flex-direction: column;
+    }
+
+    .hstack > div {
+      margin-right: 0 !important;
+      margin-bottom: 15px;
+    }
+
+    /* Dashboard status card stacking */
+    #dashboard-status-card .row > div {
+      text-align: center;
+      margin-bottom: 15px;
+    }
+
+    /* Stack metric cards 2x2 on mobile */
+    .dashboard-metric-card {
+      margin-bottom: 8px;
+    }
+  }
+
+  /* ============================================
+     SPECIES SELECTOR - Watchlist management
+     ============================================ */
+  .species-selector-compact {
+    min-width: 200px;
+  }
+
+  .sample-selector-compact {
+    min-width: 200px;
+  }
+
+  /* ============================================
+     WATCHED ORGANISMS - Highlighted display
+     ============================================ */
+  .watched-organism-card {
+    border: 2px solid var(--status-warning) !important;
+    background-color: #fffbeb !important;
+  }
+
+  .watched-organism-card .card-body {
+    background-color: #fffbeb;
+  }
+
+  .watched-badge {
+    background-color: var(--status-warning);
+    color: #664d03;
+    font-weight: var(--font-weight-semibold);
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .watch-btn {
+    transition: all var(--transition-fast);
+  }
+
+  .watch-btn.watched {
+    background-color: var(--status-warning) !important;
+    border-color: var(--status-warning) !important;
+    color: #664d03 !important;
+  }
+
+  .watch-btn:hover {
+    transform: scale(1.05);
+  }
+
+  /* Star icon - subtle highlight only, no animation to avoid visual fatigue */
+  .bi-star-fill {
+    color: #ffc107;
+  }
+
+  /* ============================================
+     ORGANISM CARDS - Enhanced display
+     ============================================ */
+  .organism-card {
+    transition: all var(--transition-fast);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+
+  .organism-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .abundance-bar-container {
+    background-color: var(--status-neutral-bg);
+    border-radius: var(--radius-sm);
+    height: 12px;
+    overflow: hidden;
+  }
+
+  .abundance-bar {
+    height: 100%;
+    border-radius: var(--radius-sm);
+    transition: width var(--transition-base);
+  }
+
+  .abundance-bar-primary {
+    background-color: var(--primary);
+  }
+
+  .abundance-bar-warning {
+    background-color: var(--status-warning);
+  }
+
+  .confidence-badge-high {
+    background-color: var(--status-good-bg);
+    color: var(--status-good);
+    border: 1px solid var(--status-good-border);
+  }
+
+  .confidence-badge-medium {
+    background-color: var(--status-warning-bg);
+    color: #664d03;
+    border: 1px solid var(--status-warning-border);
+  }
+
+  .confidence-badge-low {
+    background-color: var(--status-danger-bg);
+    color: var(--status-danger);
+    border: 1px solid var(--status-danger-border);
+  }
+
+  /* ============================================
+     ALERT BANNER - Species detection
+     ============================================ */
+  .species-alert-banner {
+    animation: slideIn 0.3s ease-out;
+  }
+
+  @keyframes slideIn {
+    from {
+      transform: translateY(-20px);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  /* ============================================
+     DASHBOARD STATUS INDICATORS
+     ============================================ */
+  .status-running {
+    background-color: #0d6efd !important;
+    animation: pulse-blue 2s ease-in-out infinite;
+  }
+
+  .status-idle {
+    background-color: var(--status-neutral) !important;
+  }
+
+  .status-error {
+    background-color: var(--status-danger) !important;
+    animation: shake 0.5s ease-in-out;
+  }
+
+  .status-warning-state {
+    background-color: var(--status-warning) !important;
+  }
+
+  @keyframes pulse {
+    0%, 100% {
+      box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.4);
+    }
+    50% {
+      box-shadow: 0 0 0 15px rgba(40, 167, 69, 0);
+    }
+  }
+
+  @keyframes pulse-blue {
+    0%, 100% {
+      box-shadow: 0 0 0 0 rgba(13, 110, 253, 0.4);
+    }
+    50% {
+      box-shadow: 0 0 0 15px rgba(13, 110, 253, 0);
+    }
+  }
+
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    75% { transform: translateX(5px); }
+  }
+
+  /* Spin animation for loading/running indicators */
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .spin-animation {
+    animation: spin 1s linear infinite;
+  }
+
+  /* Spinning class for pipeline stage indicator */
+  .spinning {
+    animation: spin 1s linear infinite;
+  }
+
+  /* Spin alias for screening/active process icons */
+  .spin {
+    animation: spin 1s linear infinite;
+  }
+
+  /* ============================================
+     DASHBOARD ZONE TYPOGRAPHY & SPACING
+     ============================================ */
+
+  /* Zone 1 verdict banner typography */
+  .dashboard-verdict-h3 {
+    font-size: 32px;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    margin-bottom: 0;
+  }
+
+  .dashboard-verdict-sub {
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.4;
+    margin-bottom: 0;
+  }
+
+  /* Zone 3 metric card values and labels */
+  .dashboard-metric-value {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 0;
+  }
+
+  .dashboard-metric-label {
+    font-size: 13px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0;
+  }
+
+  /* Zone 2 critical card headline */
+  .pathogen-critical-headline {
+    font-size: 22px;
+    font-weight: 600;
+  }
+
+  /* Inter-zone gap: 24px desktop / 16px mobile */
+  .dashboard-zone-gap {
+    margin-bottom: 16px;
+  }
+
+  @media (min-width: 768px) {
+    .dashboard-zone-gap {
+      margin-bottom: 24px;
+    }
+  }
+
+  /* Dashboard card border radius consistency */
+  .dashboard-metric-card {
+    border-radius: 8px !important;
+  }
+
+  /* ============================================
+     HEADER TIMER AND PROGRESS DISPLAY
+     ============================================ */
+  .update-timer {
+    color: var(--secondary);
+    font-weight: var(--font-weight-medium);
+    display: flex;
+    align-items: center;
+  }
+
+  .elapsed-time {
+    color: var(--status-good);
+    font-weight: var(--font-weight-semibold);
+    display: flex;
+    align-items: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .pipeline-info {
+    display: flex;
+    align-items: center;
+    color: var(--primary);
+    font-weight: var(--font-weight-medium);
+  }
+
+  .pipeline-info .text-muted {
+    color: var(--secondary) !important;
+  }
+
+  /* Dark mode support for timer elements */
+  @media (prefers-color-scheme: dark) {
+    .update-timer {
+      color: #9ca3af;
+    }
+
+    .elapsed-time {
+      color: #eaeaea;
+    }
+  }
+
+  [data-theme="dark"] .update-timer {
+    color: #9ca3af;
+  }
+
+  [data-theme="dark"] .elapsed-time {
+    color: #eaeaea;
+  }
+
+  /* Metric card hover effects */
+  .metric-card {
+    transition: all var(--transition-fast);
+    cursor: pointer;
+  }
+
+  .metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .metric-card-value {
+    font-size: 2rem;
+    font-weight: var(--font-weight-bold);
+    line-height: 1.2;
+  }
+
+  .metric-card-label {
+    font-size: var(--font-size-sm);
+    color: var(--secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* Quality badge colors */
+  .q-badge-excellent {
+    background-color: var(--status-good);
+    color: white;
+  }
+
+  .q-badge-good {
+    background-color: #20c997;
+    color: white;
+  }
+
+  .q-badge-fair {
+    background-color: var(--status-warning);
+    color: #664d03;
+  }
+
+  .q-badge-poor {
+    background-color: var(--status-danger);
+    color: white;
+  }
+
+  /* ============================================
+     CONFIGURATION TAB IMPROVEMENTS
+     ============================================ */
+
+  /* Config Status Banner */
+  .config-status-banner {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border: 1px solid #dee2e6;
+    border-left: 4px solid var(--primary);
+    border-radius: var(--radius-md);
+    padding: var(--space-md) var(--space-lg);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  }
+
+  .config-status-banner.modified {
+    border-left-color: #ffc107;
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  }
+
+  .config-status-banner.saved {
+    border-left-color: #28a745;
+  }
+
+  .config-source-info {
+    font-size: 0.95rem;
+  }
+
+  .config-source-info .bi {
+    color: var(--primary);
+  }
+
+  /* Dark mode support for config banner */
+  [data-theme="dark"] .config-status-banner {
+    background: linear-gradient(135deg, #1f2937 0%, #374151 100%);
+    border-color: #4b5563;
+    border-left-color: var(--primary);
+  }
+
+  [data-theme="dark"] .config-status-banner.modified {
+    background: linear-gradient(135deg, #422006 0%, #713f12 100%);
+    border-left-color: #ffc107;
+  }
+
+  /* ============================================
+     QC TAB VISUAL IMPROVEMENTS
+     ============================================ */
+  .filtering-breakdown-bar {
+    height: 40px;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    display: flex;
+  }
+
+  .filtering-segment {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: var(--font-weight-medium);
+    font-size: var(--font-size-sm);
+    transition: all var(--transition-fast);
+  }
+
+  .filtering-segment:hover {
+    filter: brightness(1.1);
+  }
+
+  .filtering-segment-passed {
+    background-color: var(--status-good);
+  }
+
+  .filtering-segment-low-quality {
+    background-color: var(--status-danger);
+  }
+
+  .filtering-segment-too-short {
+    background-color: #fd7e14;
+  }
+
+  .filtering-segment-low-complexity {
+    background-color: #6f42c1;
+  }
+
+  /* ============================================
+     BOOTSTRAP ICON OVERRIDES
+     ============================================ */
+  .bi {
+    vertical-align: -0.125em;
+  }
+
+  /* Large icons */
+  .bi-lg {
+    font-size: 1.5rem;
+  }
+
+  .bi-xl {
+    font-size: 2rem;
+  }
+
+  .bi-xxl {
+    font-size: 3rem;
+  }
+
+  /* ============================================
+     LOADING & REFRESH INDICATORS
+     ============================================ */
+  /* Refresh pulse animation */
+  @keyframes refreshPulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+  }
+
+  .refreshing {
+    animation: refreshPulse 1s ease-in-out infinite;
+  }
+
+  /* Live data indicator */
+  .live-indicator {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: var(--font-size-sm);
+  }
+
+  .live-indicator-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: var(--status-good);
+    animation: livePulse 2s ease-in-out infinite;
+    margin-right: 6px;
+  }
+
+  @keyframes livePulse {
+    0%, 100% {
+      box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.4);
+    }
+    50% {
+      box-shadow: 0 0 0 8px rgba(40, 167, 69, 0);
+    }
+  }
+
+  .live-indicator-dot.offline {
+    background-color: var(--status-neutral);
+    animation: none;
+  }
+
+  /* Update indicator (bottom corner) */
+  .update-indicator {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: var(--card-bg);
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    font-size: var(--font-size-sm);
+    z-index: var(--z-fixed);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    border: 1px solid var(--card-border);
+  }
+
+  /* Last update timestamp */
+  .last-update {
+    font-size: var(--font-size-xs);
+    color: var(--secondary);
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+  }
+
+  /* Status icon in tables */
+  .status-icon {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+  }
+
+  .status-icon::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  .status-icon.status-good::before {
+    background-color: var(--status-good);
+  }
+
+  .status-icon.status-warning::before {
+    background-color: var(--status-warning);
+  }
+
+  .status-icon.status-danger::before {
+    background-color: var(--status-danger);
+  }
+
+  /* ============================================
+     ENHANCED ACCESSIBILITY
+     ============================================ */
+  /* Skip to main content link */
+  .skip-to-main {
+    position: absolute;
+    top: -100px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--primary);
+    color: white;
+    padding: var(--space-md) var(--space-lg);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    font-weight: var(--font-weight-semibold);
+    z-index: calc(var(--z-modal) + 1);
+    transition: top 0.3s ease;
+  }
+
+  .skip-to-main:focus {
+    top: 10px;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.5);
+  }
+
+  /* High-visibility focus ring */
+  *:focus-visible {
+    outline: 3px solid var(--primary);
+    outline-offset: 3px;
+    border-radius: var(--radius-sm);
+  }
+
+  /* Ensure focus is visible on dark backgrounds */
+  .btn:focus-visible {
+    outline-color: white;
+    box-shadow: 0 0 0 4px rgba(0, 123, 255, 0.5);
+  }
+
+  /* Ensure links are distinguishable (not just by color) */
+  a:not(.btn):not(.nav-link) {
+    text-decoration: underline;
+    text-decoration-color: rgba(0, 123, 255, 0.3);
+    text-underline-offset: 2px;
+  }
+
+  a:not(.btn):not(.nav-link):hover {
+    text-decoration-color: var(--primary);
+  }
+
+  /* ============================================
+     MOBILE RESPONSIVE ENHANCEMENTS
+     ============================================ */
+  @media (max-width: 767px) {
+    /* Increase touch targets */
+    .btn, .nav-link {
+      min-height: 48px;
+      padding: var(--space-md) var(--space-lg);
+    }
+
+    /* Full-width sample selector */
+    #sample-selector {
+      width: 100% !important;
+      max-width: none !important;
+    }
+
+    /* Larger tap targets for checkboxes */
+    .form-check-input {
+      width: 1.5em;
+      height: 1.5em;
+    }
+
+    /* Stack status banner vertically */
+    #dashboard-status-card .row > div {
+      text-align: center;
+      margin-bottom: 15px;
+    }
+  }
+
+  /* Tablet adjustments */
+  @media (min-width: 768px) and (max-width: 1024px) {
+    /* Two-column layout for metrics */
+    .metrics-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+
+    #dashboard-sample-table {
+      font-size: 13px;
+    }
+  }
+
+  /* ============================================
+     STALE DATA WARNING
+     ============================================ */
+  .stale-data-warning {
+    background-color: var(--status-warning-bg);
+    border: 2px solid var(--status-warning);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+
+  .stale-indicator {
+    color: var(--status-warning);
+    font-weight: var(--font-weight-semibold);
+  }
+
+  /* ============================================
+     ACCORDION EXPANSION INDICATORS
+     ============================================ */
+  .accordion-button {
+    position: relative;
+  }
+
+  .accordion-button::after {
+    content: '';
+    width: 1.25rem;
+    height: 1.25rem;
+    margin-left: auto;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23495057' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' d='M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-size: 1.25rem;
+    transition: transform var(--transition-base);
+    flex-shrink: 0;
+  }
+
+  .accordion-button:not(.collapsed)::after {
+    transform: rotate(-180deg);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .accordion-button::after {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23eaeaea' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' d='M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z'/%3E%3C/svg%3E");
+    }
+  }
+
+  /* ============================================
+     TOAST NOTIFICATIONS
+     ============================================ */
+  .toast-container {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: var(--z-tooltip);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .toast-notification {
+    min-width: 300px;
+    max-width: 400px;
+    background: var(--card-bg);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    padding: var(--space-md);
+    border-left: 4px solid var(--primary);
+    animation: slideInRight 0.3s ease-out, toastFadeOut 0.5s ease-in 4s forwards;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-md);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+
+  @keyframes toastFadeOut {
+    to {
+      opacity: 0;
+      transform: translateX(100%);
+    }
+  }
+
+  @keyframes slideInRight {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  .toast-success {
+    border-left-color: var(--status-good);
+  }
+
+  .toast-warning {
+    border-left-color: var(--status-warning);
+  }
+
+  .toast-danger {
+    border-left-color: var(--status-danger);
+  }
+
+  .toast-info {
+    border-left-color: var(--status-info);
+  }
+
+  .toast-icon {
+    font-size: 1.5rem;
+    line-height: 1;
+  }
+
+  .toast-content {
+    flex: 1;
+  }
+
+  .toast-title {
+    font-weight: var(--font-weight-semibold);
+    margin-bottom: var(--space-xs);
+  }
+
+  .toast-message {
+    font-size: var(--font-size-sm);
+    color: var(--secondary);
+  }
+
+  .toast-close {
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    cursor: pointer;
+    opacity: 0.5;
+    transition: opacity var(--transition-fast);
+    padding: 0;
+    line-height: 1;
+  }
+
+  .toast-close:hover {
+    opacity: 1;
+  }
+
+  /* ============================================
+     TAB STYLING ENHANCEMENT
+     ============================================ */
+  .nav-tabs .nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    padding: var(--space-md) var(--space-lg);
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+  }
+
+  .nav-tabs .nav-link:hover {
+    background-color: rgba(0, 123, 255, 0.05);
+  }
+
+  /* Active tab indicator line */
+  .nav-tabs .nav-link.active {
+    position: relative;
+    font-weight: var(--font-weight-semibold);
+    color: var(--primary);
+  }
+
+  .nav-tabs .nav-link.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background-color: var(--primary);
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  }
+
+  /* ============================================
+     DARK MODE TOGGLE BUTTON
+     ============================================ */
+  .theme-toggle {
+    background: none;
+    border: 2px solid var(--status-neutral-border);
+    border-radius: var(--radius-full);
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    color: var(--secondary);
+  }
+
+  .theme-toggle:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+    background-color: rgba(0, 123, 255, 0.1);
+  }
+
+  .theme-toggle .bi {
+    font-size: 1.25rem;
+    transition: transform var(--transition-base);
+  }
+
+  .theme-toggle:hover .bi {
+    transform: rotate(15deg);
+  }
+
+  /* ============================================
+     ENHANCED DASHBOARD STATUS INDICATOR
+     ============================================ */
+  .dashboard-traffic-light {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    transition: all var(--transition-base);
+  }
+
+  .dashboard-traffic-light::before {
+    content: '';
+    position: absolute;
+    inset: -10px;
+    border-radius: 50%;
+    opacity: 0.3;
+    transition: all var(--transition-base);
+  }
+
+  .dashboard-traffic-light.status-good {
+    background-color: var(--status-good);
+    box-shadow: 0 0 30px rgba(40, 167, 69, 0.4);
+  }
+
+  .dashboard-traffic-light.status-good::before {
+    background-color: var(--status-good);
+    animation: trafficPulse 2s ease-in-out infinite;
+  }
+
+  .dashboard-traffic-light.status-running {
+    background-color: #0d6efd;
+    box-shadow: 0 0 30px rgba(13, 110, 253, 0.4);
+  }
+
+  .dashboard-traffic-light.status-running::before {
+    background-color: #0d6efd;
+    animation: trafficPulse 1.5s ease-in-out infinite;
+  }
+
+  .dashboard-traffic-light.status-warning {
+    background-color: var(--status-warning);
+    box-shadow: 0 0 30px rgba(255, 193, 7, 0.4);
+  }
+
+  .dashboard-traffic-light.status-warning::before {
+    background-color: var(--status-warning);
+    animation: trafficPulse 2.5s ease-in-out infinite;
+  }
+
+  .dashboard-traffic-light.status-danger {
+    background-color: var(--status-danger);
+    box-shadow: 0 0 30px rgba(220, 53, 69, 0.4);
+    animation: dangerShake 0.5s ease-in-out;
+  }
+
+  .dashboard-traffic-light.status-idle {
+    background-color: var(--status-neutral);
+    box-shadow: 0 0 15px rgba(108, 117, 125, 0.3);
+  }
+
+  @keyframes trafficPulse {
+    0%, 100% {
+      transform: scale(1);
+      opacity: 0.3;
+    }
+    50% {
+      transform: scale(1.1);
+      opacity: 0.15;
+    }
+  }
+
+  @keyframes dangerShake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-3px); }
+    40% { transform: translateX(3px); }
+    60% { transform: translateX(-3px); }
+    80% { transform: translateX(3px); }
+  }
+
+  /* ============================================
+     AUTO-REFRESH COUNTDOWN
+     ============================================ */
+  .refresh-countdown {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: var(--font-size-sm);
+    color: var(--secondary);
+  }
+
+  .refresh-countdown-ring {
+    width: 24px;
+    height: 24px;
+    position: relative;
+  }
+
+  .refresh-countdown-ring svg {
+    transform: rotate(-90deg);
+  }
+
+  .refresh-countdown-ring circle {
+    fill: none;
+    stroke-width: 3;
+  }
+
+  .refresh-countdown-ring .bg {
+    stroke: var(--status-neutral-bg);
+  }
+
+  .refresh-countdown-ring .progress {
+    stroke: var(--primary);
+    stroke-linecap: round;
+    transition: stroke-dashoffset 1s linear;
+  }
+
+  /* ============================================
+     METRIC VALUE ANIMATION
+     ============================================ */
+  .metric-value-update {
+    animation: countUp 0.3s ease-out;
+  }
+
+  @keyframes countUp {
+    from {
+      opacity: 0.5;
+      transform: translateY(5px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Number change highlight */
+  .value-changed {
+    animation: valueHighlight 1s ease-out;
+  }
+
+  @keyframes valueHighlight {
+    0% {
+      background-color: rgba(0, 123, 255, 0.2);
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
+
+  /* ============================================
+     PATHOGEN ALERT SYSTEM
+     Critical alerts for dangerous pathogen detection
+     ============================================ */
+
+  /* Critical Alert - Highest severity (BSL-3/4 pathogens) */
+  .pathogen-alert-critical {
+    background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+    border-left: 6px solid #8b0000;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    animation: criticalAlertPulse 3s ease-in-out infinite;
+  }
+
+  .pathogen-alert-critical:hover {
+    box-shadow: var(--shadow-lg);
+  }
+
+  /* Icon container for critical alerts */
+  .pathogen-alert-icon-container {
+    width: 64px;
+    height: 64px;
+    min-width: 64px;
+    border-radius: 50%;
+    background-color: #8b0000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 20px rgba(139, 0, 0, 0.4);
+    flex-shrink: 0;
+  }
+
+  /* Pulsing animation for critical alerts */
+  @keyframes criticalAlertPulse {
+    0%, 100% {
+      box-shadow: 0 4px 12px rgba(139, 0, 0, 0.3);
+    }
+    50% {
+      box-shadow: 0 4px 24px rgba(139, 0, 0, 0.5);
+    }
+  }
+
+  /* High Risk Alert styling */
+  .pathogen-alert-high {
+    background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+    border-left: 4px solid #dc3545;
+    border-radius: var(--radius-sm);
+  }
+
+  /* Moderate/Watch Alert styling */
+  .pathogen-alert-moderate {
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+    border-left: 4px solid #fd7e14;
+    border-radius: var(--radius-sm);
+  }
+
+  /* Info/Watch Alert styling */
+  .pathogen-alert-watch {
+    background: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%);
+    border-left: 3px solid #17a2b8;
+    border-radius: var(--radius-sm);
+  }
+
+  /* Pathogen name styling (scientific nomenclature) */
+  .pathogen-name {
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-bold);
+    font-style: italic;
+    color: var(--dark);
+  }
+
+  .pathogen-common-name {
+    font-size: var(--font-size-base);
+    font-style: normal;
+    color: var(--secondary);
+  }
+
+  /* Alert recommendation text */
+  .alert-recommendation {
+    background-color: rgba(255, 255, 255, 0.5);
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(139, 0, 0, 0.2);
+  }
+
+  /* All Clear indicator */
+  .pathogen-all-clear {
+    background-color: var(--status-good-bg);
+    border: 1px solid var(--status-good-border);
+    border-radius: var(--radius-md);
+    text-align: center;
+  }
+
+  /* Threat summary indicator */
+  #threat-summary-indicator {
+    transition: all var(--transition-fast);
+  }
+
+  #threat-summary-indicator:hover {
+    transform: translateY(-1px);
+  }
+
+  /* Pathogen alert panel */
+  .pathogen-alert-panel {
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+/* ============================================
+   PER-SAMPLE ATTRIBUTION ROW
+   Appears inside pathogen alert cards to show
+   which barcodes/samples carry each pathogen.
+   ============================================ */
+
+/* Flex row that holds the label + chip set */
+.dashboard-attribution-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+/* "DETECTED IN:" label — full-length version */
+.dashboard-attribution-label-full {
+  font-size: 10px;
+  font-weight: 600;
+  color: #6c757d;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-right: 6px;
+  white-space: nowrap;
+}
+
+/* Abbreviated "IN:" label shown on narrow viewports */
+.dashboard-attribution-label-short {
+  display: none;
+  font-size: 10px;
+  font-weight: 600;
+  color: #6c757d;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-right: 6px;
+  white-space: nowrap;
+}
+
+/* Below 768 px: swap label text to the short form */
+@media (max-width: 768px) {
+  .dashboard-attribution-label-full  { display: none; }
+  .dashboard-attribution-label-short { display: inline; }
+}
+
+/* ============================================
+   THREAT SUMMARY INDICATOR
+   Always-visible threat status card
+   ============================================ */
+
+/* Threat card base styling */
+#dashboard-threat-card {
+  transition: all 0.3s ease;
+}
+
+/* Critical threat state */
+#dashboard-threat-card[style*="8b0000"] {
+  animation: threatCardPulse 2s ease-in-out infinite;
+}
+
+/* Threat card pulse animation */
+@keyframes threatCardPulse {
+  0%, 100% {
+    box-shadow: 0 4px 12px rgba(139, 0, 0, 0.2);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 6px 20px rgba(139, 0, 0, 0.4);
+    transform: scale(1.01);
+  }
+}
+
+/* Threat icon animation for critical state */
+#dashboard-threat-icon[style*="8b0000"],
+#dashboard-threat-icon[style*="dc3545"] {
+  animation: threatIconPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes threatIconPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.05);
+  }
+}
+
+/* Safe state styling */
+#dashboard-threat-card[style*="28a745"] {
+  animation: none;
+}
+
+/* Pathogen summary list styling */
+#dashboard-pathogen-summary {
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+/* ============================================
+   WATCHLIST EXPANDABLE STYLES
+   ============================================ */
+
+/* Watchlist file item container */
+.watchlist-file-item {
+  transition: background-color 0.15s ease-in-out;
+}
+
+.watchlist-file-item:hover {
+  background-color: rgba(0, 0, 0, 0.02);
+  cursor: pointer;
+}
+
+/* Enabled/disabled row states */
+.watchlist-file-item.watchlist-disabled {
+  opacity: 0.7;
+}
+
+.watchlist-file-item.watchlist-enabled {
+  border-left: 3px solid var(--status-good, #28a745);
+  padding-left: calc(var(--space-md, 1rem) - 3px);
+}
+
+/* Expand trigger hover state */
+.watchlist-expand-trigger {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  margin: -4px -8px;
+  border-radius: var(--radius-sm, 4px);
+  transition: background-color 0.15s ease-in-out;
+}
+
+.watchlist-expand-trigger:hover {
+  background-color: rgba(0, 123, 255, 0.08);
+}
+
+/* Nested pathogen row styling */
+.nested-pathogen-row {
+  transition: background-color 0.15s ease-in-out;
+}
+
+/* Zebra striping for nested rows */
+.nested-pathogen-row:nth-child(even) {
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+.nested-pathogen-row:hover {
+  background-color: rgba(0, 123, 255, 0.06) !important;
+  cursor: pointer;
+}
+
+/* Chevron icon rotation animation */
+.watchlist-expand-icon {
+  transition: transform 0.2s ease-in-out;
+}
+
+/* Nested pathogen list scrollable container */
+.watchlist-pathogen-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* Sticky header for nested pathogen list */
+.watchlist-pathogen-list .sticky-top,
+.watchlist-pathogen-list-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: white;
+  border-bottom: 2px solid var(--status-neutral-border, #dee2e6);
+}
+
+/* Collapse animation smoothing */
+.collapse {
+  transition: height 0.2s ease-in-out;
+}
+
+/* Dark mode support for watchlist */
+@media (prefers-color-scheme: dark) {
+  .watchlist-expand-trigger:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .nested-pathogen-row:nth-child(even) {
+    background-color: rgba(255, 255, 255, 0.03);
+  }
+
+  .nested-pathogen-row:hover {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+  }
+
+  .watchlist-file-item:hover {
+    background-color: rgba(255, 255, 255, 0.03);
+  }
+
+  .watchlist-pathogen-list .sticky-top,
+  .watchlist-pathogen-list-header {
+    background-color: var(--card-bg, #1e1e1e);
+  }
+}
+
+/* ============================================
+   WATCHLIST TAB - ENHANCED STATS BAR
+   ============================================ */
+
+/* Stats bar with subtle left-border accent */
+.watchlist-stats-bar {
+  border-left: 3px solid var(--primary, #007bff);
+}
+
+/* Table header with sticky positioning */
+.watchlist-table-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: #f8f9fa;
+}
+
+/* Pathogen row hover highlight */
+.pathogen-row:hover {
+  background-color: rgba(0, 123, 255, 0.04);
+}
+
+/* Kraken2 match badge - "Not Scanned" uses muted style */
+.kraken2-match-badge.btn-light {
+  color: #6c757d;
+  border-color: #dee2e6;
+  font-style: italic;
+}
+
+/* Quick-start button active states (filled when watchlist is enabled) */
+.quick-start-active {
+  font-weight: 600;
+}
+
+/* Dark mode support for enhanced watchlist */
+@media (prefers-color-scheme: dark) {
+  .watchlist-stats-bar {
+    border-left-color: var(--primary, #007bff);
+  }
+
+  .watchlist-table-header {
+    background-color: var(--card-bg, #1e1e1e) !important;
+  }
+
+  .pathogen-row:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+}
+
+/* ============================================
+   QC TAB - ENHANCED COMPONENTS
+   ============================================ */
+
+/* Sticky Key Metrics Summary Bar */
+.qc-summary-bar {
+  z-index: var(--z-sticky);
+  border-radius: var(--radius-md);
+}
+
+.qc-metric-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: var(--space-sm);
+}
+
+.qc-metric-label {
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--secondary);
+  font-weight: var(--font-weight-medium);
+  margin-bottom: var(--space-xs);
+}
+
+.qc-metric-value {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--dark);
+}
+
+/* Quality Indicator Compact - New design without gauge */
+.quality-indicator-compact {
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+@media (max-width: 576px) {
+  .quality-indicator-compact .d-flex {
+    flex-direction: column !important;
+    gap: var(--space-md) !important;
+  }
+
+  .quality-indicator-compact .d-flex > div[style*="width: 1px"] {
+    display: none !important;
+  }
+}
+
+/* Key Metrics Summary Card - Matches QualityScoreIndicator design */
+.key-metrics-summary-card {
+  max-width: 600px;
+  margin: 0 auto;
+  transition: all var(--transition-fast);
+}
+
+.key-metrics-summary-card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+/* Responsive layout for Key Metrics Summary Card */
+@media (max-width: 768px) {
+  .key-metrics-summary-card {
+    flex-wrap: wrap !important;
+    justify-content: center !important;
+    gap: var(--space-md) !important;
+  }
+
+  .key-metrics-summary-card > div[style*="width: 1px"] {
+    display: none !important;
+  }
+
+  .key-metrics-summary-card > div:first-child,
+  .key-metrics-summary-card > div:last-child {
+    flex: 0 0 45%;
+  }
+
+  .key-metrics-summary-card > div:nth-child(3) {
+    flex: 0 0 100%;
+    margin-top: var(--space-sm);
+    padding-top: var(--space-sm);
+    border-top: 1px solid rgba(0, 0, 0, 0.1);
+  }
+}
+
+@media (max-width: 480px) {
+  .key-metrics-summary-card {
+    flex-direction: column !important;
+    text-align: center;
+  }
+
+  .key-metrics-summary-card > div {
+    flex: 0 0 100% !important;
+    width: 100%;
+  }
+
+  .key-metrics-summary-card > div:nth-child(3) {
+    border-top: none;
+    padding-top: 0;
+  }
+}
+
+/* Base Quality Card - Q20/Q30 metrics with sparkline */
+.base-quality-card {
+  transition: all var(--transition-fast);
+}
+
+.base-quality-card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+/* Responsive layout for Base Quality Card */
+@media (max-width: 576px) {
+  .base-quality-card .d-flex.align-items-stretch {
+    flex-wrap: wrap !important;
+    gap: var(--space-md) !important;
+  }
+
+  .base-quality-card .d-flex.align-items-stretch > div[style*="width: 1px"] {
+    display: none !important;
+  }
+
+  .base-quality-card .d-flex.align-items-stretch > div[style*="flex: 1"] {
+    flex: 0 0 48% !important;
+  }
+}
+
+/* Read Statistics Card - Length, N50, GC content */
+.read-statistics-card {
+  transition: all var(--transition-fast);
+}
+
+.read-statistics-card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+/* Responsive layout for Read Statistics Card */
+@media (max-width: 576px) {
+  .read-statistics-card .d-flex.align-items-stretch {
+    flex-wrap: wrap !important;
+    gap: var(--space-md) !important;
+  }
+
+  .read-statistics-card .d-flex.align-items-stretch > div[style*="width: 1px"] {
+    display: none !important;
+  }
+
+  .read-statistics-card .d-flex.align-items-stretch > div[style*="flex: 1"] {
+    flex: 0 0 48% !important;
+  }
+}
+
+/* Dark Mode Support for new QC cards */
+@media (prefers-color-scheme: dark) {
+  .base-quality-card,
+  .read-statistics-card {
+    background-color: var(--card-bg, #2d2d2d) !important;
+    border-color: var(--card-border, #444) !important;
+  }
+}
+
+/* Status Icons - WCAG 1.4.1 Compliant */
+.status-icon {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-full);
+}
+
+.status-icon-success {
+  background-color: var(--status-good);
+}
+
+.status-icon-warning {
+  background-color: var(--status-warning);
+}
+
+.status-icon-danger {
+  background-color: var(--status-danger);
+}
+
+.status-icon-neutral {
+  background-color: var(--status-neutral);
+}
+
+/* Filtering Breakdown Container */
+.filtering-breakdown-container {
+  background-color: var(--light);
+  padding: var(--space-lg);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--card-border);
+}
+
+.filtering-reason-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: white;
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-sm);
+  margin-right: var(--space-sm);
+}
+
+.filtering-reason-item {
+  display: flex;
+  align-items: center;
+  padding: var(--space-sm);
+  background-color: white;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--card-border);
+}
+
+.filtering-breakdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+/* Dark Mode Support for QC Components */
+@media (prefers-color-scheme: dark) {
+  .qc-summary-bar {
+    background-color: var(--card-bg, #2d2d2d) !important;
+    border-color: var(--card-border, #444) !important;
+  }
+
+  .qc-metric-value {
+    color: var(--light);
+  }
+
+  .filtering-breakdown-container {
+    background-color: var(--card-bg, #2d2d2d);
+    border-color: var(--card-border, #444);
+  }
+
+  .filtering-reason-item {
+    background-color: var(--card-bg, #1e1e1e);
+    border-color: var(--card-border, #444);
+  }
+}
+
+/* ============================================
+   TAXID MAPPING STYLES
+   ============================================ */
+
+/* Mapping Dashboard */
+.taxmap-dashboard {
+  border-left: 4px solid var(--status-info);
+}
+
+.taxmap-dashboard.fully-mapped {
+  border-left-color: var(--status-good);
+}
+
+.taxmap-dashboard.needs-attention {
+  border-left-color: var(--status-warning);
+}
+
+.taxmap-dashboard.has-errors {
+  border-left-color: var(--status-danger);
+}
+
+/* Match Type Indicators */
+.match-type-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-sm);
+  border-radius: var(--radius-sm);
+  background: var(--light);
+  min-width: 80px;
+}
+
+.match-type-indicator .count {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  line-height: 1.2;
+}
+
+.match-type-indicator .label {
+  font-size: var(--font-size-xs);
+  color: var(--secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.match-type-indicator.exact .count {
+  color: var(--status-good);
+}
+
+.match-type-indicator.fuzzy .count {
+  color: var(--status-info);
+}
+
+.match-type-indicator.manual .count {
+  color: var(--primary);
+}
+
+.match-type-indicator.unmapped .count {
+  color: var(--status-danger);
+}
+
+/* Mapping Table Rows */
+.mapping-row {
+  transition: background-color var(--transition-fast);
+  border-bottom: 1px solid var(--card-border);
+}
+
+.mapping-row:hover {
+  background-color: var(--light);
+}
+
+.mapping-row.status-exact {
+  border-left: 3px solid var(--status-good);
+}
+
+.mapping-row.status-fuzzy {
+  border-left: 3px solid var(--status-info);
+}
+
+.mapping-row.status-manual {
+  border-left: 3px solid var(--primary);
+}
+
+.mapping-row.status-unmapped {
+  border-left: 3px solid var(--status-danger);
+  background-color: var(--status-danger-bg);
+}
+
+/* Status Icons */
+.mapping-status-icon {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-sm);
+}
+
+.mapping-status-icon.exact {
+  background-color: var(--status-good-bg);
+  color: var(--status-good);
+}
+
+.mapping-status-icon.fuzzy {
+  background-color: var(--status-info-bg);
+  color: var(--status-info);
+}
+
+.mapping-status-icon.manual {
+  background-color: #e7f1ff;
+  color: var(--primary);
+}
+
+.mapping-status-icon.unmapped {
+  background-color: var(--status-danger-bg);
+  color: var(--status-danger);
+}
+
+/* Score Badge */
+.mapping-score-badge {
+  font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-sm);
+}
+
+.mapping-score-badge.high {
+  color: var(--status-good);
+}
+
+.mapping-score-badge.medium {
+  color: var(--status-warning-text);
+}
+
+.mapping-score-badge.low {
+  color: var(--status-danger);
+}
+
+/* Manual Mapping Modal */
+.mapping-modal-header {
+  background: linear-gradient(135deg, var(--primary) 0%, #0056b3 100%);
+  color: white;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.mapping-suggestion-item {
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  border-left: 3px solid transparent;
+}
+
+.mapping-suggestion-item:hover {
+  background-color: var(--light);
+  border-left-color: var(--primary);
+}
+
+.mapping-suggestion-item.selected {
+  background-color: #e7f1ff;
+  border-left-color: var(--primary);
+}
+
+.mapping-suggestion-similarity {
+  font-weight: var(--font-weight-medium);
+}
+
+.mapping-suggestion-similarity.high {
+  color: var(--status-good);
+}
+
+.mapping-suggestion-similarity.medium {
+  color: var(--status-warning-text);
+}
+
+.mapping-suggestion-similarity.low {
+  color: var(--status-neutral);
+}
+
+/* Progress Container */
+.mapping-progress-container {
+  padding: var(--space-md);
+  background: var(--light);
+  border-radius: var(--radius-md);
+}
+
+/* Mapping Section Collapse */
+.mapping-section {
+  transition: all var(--transition-base);
+}
+
+/* Dark mode support for taxid mapping */
+@media (prefers-color-scheme: dark) {
+  .taxmap-dashboard {
+    background-color: var(--card-bg, #1e1e1e);
+  }
+
+  .match-type-indicator {
+    background: var(--card-bg, #2d2d2d);
+  }
+
+  .mapping-row:hover {
+    background-color: var(--card-bg, #2d2d2d);
+  }
+
+  .mapping-row.status-unmapped {
+    background-color: rgba(220, 53, 69, 0.15);
+  }
+
+  .mapping-status-icon.exact {
+    background-color: rgba(40, 167, 69, 0.2);
+  }
+
+  .mapping-status-icon.fuzzy {
+    background-color: rgba(23, 162, 184, 0.2);
+  }
+
+  .mapping-status-icon.manual {
+    background-color: rgba(0, 123, 255, 0.2);
+  }
+
+  .mapping-status-icon.unmapped {
+    background-color: rgba(220, 53, 69, 0.2);
+  }
+
+  .mapping-suggestion-item:hover {
+    background-color: var(--card-bg, #2d2d2d);
+  }
+
+  .mapping-suggestion-item.selected {
+    background-color: rgba(0, 123, 255, 0.15);
+  }
+
+  .mapping-progress-container {
+    background: var(--card-bg, #2d2d2d);
+  }
+}
+
+/* ============================================
+   KRAKEN2 MATCH BADGE - Pathogens Table
+   ============================================ */
+
+/* Interactive badge styling */
+.kraken2-match-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border-radius: var(--radius-sm, 4px);
+  cursor: pointer;
+  transition: all var(--transition-fast, 150ms ease-in-out);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.05));
+}
+
+.kraken2-match-badge:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md, 0 4px 6px rgba(0, 0, 0, 0.1));
+  filter: brightness(1.1);
+}
+
+.kraken2-match-badge:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.05));
+}
+
+/* Badge icon spacing */
+.kraken2-match-badge .bi {
+  font-size: 0.85em;
+}
+
+/* Pathogen row hover - highlight related badge */
+.pathogen-row:hover .kraken2-match-badge {
+  filter: brightness(1.05);
+}
+
+/* Dark mode support for Kraken2 Match badge */
+@media (prefers-color-scheme: dark) {
+  .kraken2-match-badge {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+
+  .kraken2-match-badge:hover {
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+  }
+}
+
+
+  /* Print styles consolidated into single block below */
+
+  /* ============================================
+     RESPONSIVE LAYOUT FIXES
+     ============================================ */
+
+  /* Mobile: sample selector full width */
+  @media (max-width: 576px) {
+    .sample-selector-compact,
+    .sample-selector-compact .dash-dropdown {
+      min-width: 100% !important;
+      width: 100% !important;
+    }
+
+    /* Dropdown menus constrained to viewport */
+    .dropdown-menu {
+      max-width: calc(100vw - 2rem);
+    }
+
+    /* Header buttons stack vertically */
+    .header .d-flex.justify-content-end {
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    /* Export dropdown opens upward on mobile */
+    .dropup .dropdown-menu {
+      bottom: 100%;
+      top: auto;
+    }
+  }
+
+  /* Tablet: header status indicators stack */
+  @media (max-width: 768px) {
+    .header .d-flex.align-items-center {
+      flex-wrap: wrap;
+    }
+
+    /* Status indicators vertical on tablet */
+    .update-timer,
+    .elapsed-time,
+    .pipeline-info {
+      margin-left: 0 !important;
+      margin-top: 0.25rem;
+    }
+
+  }
+
+  /* ============================================
+     DECISION-SUPPORT ANIMATIONS
+     ============================================ */
+  .pathogen-flash {
+    animation: pathogen-border-flash 1s ease-in-out infinite;
+  }
+
+  @keyframes pathogen-border-flash {
+    0%, 100% { border-color: #dc3545; }
+    50% { border-color: #fd7e14; box-shadow: 0 0 15px rgba(220, 53, 69, 0.5); }
+  }
+
+  .metric-trend-up { color: #28a745; }
+  .metric-trend-down { color: #dc3545; }
+
+  /* ============================================
+     MOBILE/TABLET RESPONSIVENESS
+     ============================================ */
+  @media (max-width: 768px) {
+    .dashboard-metric-card { margin-bottom: 8px; }
+    .header { padding: 10px 15px; }
+    .header h2 { font-size: 1.2rem; }
+    .btn { min-height: 48px; }
+    #sample-selector { min-width: 100% !important; max-width: 100% !important; }
+    .card-body { padding: 12px; }
+    .pathogen-alert-critical { flex-direction: column; }
+    .pathogen-alert-icon-container { margin-bottom: 12px; }
+  }
+
+  /* ============================================
+     PRINT STYLESHEET (consolidated)
+     ============================================ */
+  @media print {
+    /* Hide interactive/nav elements */
+    .header, .footer, .nav-tabs, .theme-toggle,
+    #update-interval, #countdown-tick, .btn,
+    .live-indicator, .skip-to-main, #toast-container,
+    .toast-container, .accordion-button, .update-indicator,
+    .refresh-countdown { display: none !important; }
+
+    .collapse:not(.show) { display: block !important; height: auto !important; }
+
+    .card { break-inside: avoid; box-shadow: none !important; border: 1px solid #dee2e6 !important; }
+
+    body {
+      font-size: 12pt;
+      line-height: 1.4;
+      background: white !important;
+      color: black !important;
+    }
+
+    .container-fluid { padding: 0 !important; }
+
+    body::before {
+      content: "Nanometa Live Report";
+      display: block;
+      text-align: right;
+      font-size: 10px;
+      color: #6c757d !important;
+      margin-bottom: 10px;
+    }
+
+    /* Charts sized for print */
+    .js-plotly-plot {
+      break-inside: avoid;
+      page-break-inside: avoid;
+      max-width: 100%;
+    }
+  }
+
+  /* ============================================
+     FIELD DEPLOYMENT READINESS - v1.0
+     For gloved hands, small screens, low light,
+     time pressure. Soldiers & first-responders.
+     ============================================ */
+
+  /* ---- 1. TOUCH TARGET ENFORCEMENT ---- */
+  /* All interactive elements minimum 44x44px (WCAG 2.5.8) */
+
+  /* Nav tabs - larger for gloved tapping */
+  .nav-tabs .nav-link {
+    min-height: 48px;
+    padding: 12px 20px;
+    font-size: var(--font-size-base);
+  }
+
+  /* Dropdowns - larger touch area */
+  .dash-dropdown .Select-control,
+  .dash-dropdown input,
+  .dash-dropdown .Select-value {
+    min-height: 44px !important;
+  }
+
+  /* Form controls - gloved-friendly sizing */
+  .form-control,
+  .form-select,
+  input[type="number"],
+  input[type="text"],
+  select,
+  textarea {
+    min-height: 44px;
+    font-size: var(--font-size-base);
+    padding: 8px 12px;
+  }
+
+  /* Checkboxes and radio buttons - enlarged for gloves */
+  .form-check-input {
+    width: 1.5em;
+    height: 1.5em;
+    margin-top: 0.15em;
+  }
+
+  .form-check-label {
+    font-size: var(--font-size-base);
+    padding-left: 0.25em;
+    line-height: 1.5em;
+  }
+
+  /* dbc.RadioItems / dbc.Checklist items - touch-friendly spacing */
+  .form-check {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    margin-bottom: 4px;
+  }
+
+  /* Accordion buttons - larger touch target */
+  .accordion-button {
+    min-height: 48px;
+    font-size: var(--font-size-base);
+    padding: 12px 20px;
+  }
+
+  /* Badge buttons and pill badges - minimum tap size */
+  .badge[style*="cursor: pointer"],
+  .badge.cursor-pointer,
+  #readiness-badge {
+    min-height: 36px;
+    min-width: 36px;
+    padding: 8px 12px !important;
+    font-size: 0.85rem !important;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /* Kraken2 match badge - field-operable size */
+  .kraken2-match-badge {
+    min-height: 36px;
+    min-width: 44px;
+    padding: 8px 12px;
+    font-size: 0.85rem;
+  }
+
+  /* Small buttons upgraded for touch */
+  .btn-sm {
+    min-height: 40px;
+    padding: 6px 16px;
+    font-size: var(--font-size-sm);
+  }
+
+  /* Toast close button */
+  .toast-close {
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* AG Grid pagination buttons */
+  .ag-paging-button {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+
+  /* Adjacent interactive element spacing */
+  .btn + .btn,
+  .form-check + .form-check {
+    margin-left: 8px;
+  }
+
+  /* ---- 2. FONT SIZE ENFORCEMENT ---- */
+  /* Body text minimum 16px, labels minimum 14px */
+
+  /* Footer - was 0.8rem, field minimum 14px */
+  .footer {
+    font-size: var(--font-size-sm);
+  }
+
+  /* Form help text - was 0.875rem, keep but ensure readability */
+  .form-text {
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+  }
+
+  /* Tab group labels - was 0.6rem, unreadable in field */
+  .tab-group-start::before {
+    font-size: 0.7rem;
+    letter-spacing: 0.8px;
+  }
+
+  /* QC metric labels - was xs (12px), field minimum */
+  .qc-metric-label {
+    font-size: var(--font-size-sm);
+  }
+
+  /* Last-update and similar small metadata */
+  .last-update,
+  .live-indicator {
+    font-size: var(--font-size-sm);
+  }
+
+  /* Stat card labels */
+  .stat-card-label,
+  .metric-card-label {
+    font-size: var(--font-size-sm);
+  }
+
+  /* Alert messages - ensure readability */
+  .alert-modern-message {
+    font-size: var(--font-size-base);
+  }
+
+  /* Status badge text */
+  .status-badge {
+    font-size: var(--font-size-sm);
+  }
+
+  /* Validation progress log - was 12px, hard to read */
+  #validation-progress-log {
+    font-size: var(--font-size-sm) !important;
+  }
+
+  /* ---- 3. CONTRAST FIXES (WCAG AA) ---- */
+
+  /* Warning text on light bg: Bootstrap default #ffc107 is ~1.6:1 on
+   * white (massive AA fail). The earlier audit pass tightened this to
+   * #b38600 (~3.3:1, still fails normal-text AA). Use #664d03 -- the
+   * amber token CLAUDE.md locks for the QC stage strip and verdict
+   * banner. #664d03 on white is ~7.8:1; on the fff3cd amber-banner
+   * background it remains ~7.5:1. Single source of truth for amber
+   * text across the app. */
+  .text-warning {
+    color: #664d03 !important;
+  }
+
+  /* Danger text on light bg: Bootstrap default #dc3545 is ~4.5:1 on
+   * pure white (borderline AA) but only ~3.6:1 on the f8d7da pink
+   * pathogen-alert background (fails normal-text AA). Use #721c24,
+   * the dark-red token used by the action-required verdict banner.
+   * #721c24 on white is ~9.5:1; on f8d7da it is ~7.1:1. */
+  .text-danger {
+    color: #721c24 !important;
+  }
+
+  /* Info text on light bg: Bootstrap default #17a2b8 is ~2.5:1 on
+   * the d1ecf1 info-card background. #0c5460 is ~7.5:1 on the same
+   * background and ~9:1 on white. */
+  .text-info {
+    color: #0c5460 !important;
+  }
+
+  /* Warning button: ensure text is readable on amber bg */
+  .btn-warning {
+    color: #212529;
+  }
+
+  .btn-warning:hover {
+    color: #212529;
+  }
+
+  /* Muted text - ensure 4.5:1 on both themes */
+  .text-muted {
+    color: #5a6370 !important;
+  }
+
+  /* Form text uses muted - same fix */
+  .form-text {
+    color: #5a6370;
+  }
+
+  /* Secondary color text on white bg */
+  .text-secondary {
+    color: #545b62 !important;
+  }
+
+  /* Config section title - was #495057, slightly improve */
+  .config-section-title {
+    color: #343a40;
+  }
+
+  /* ---- 4. COLOR-BLIND SAFE INDICATORS ---- */
+  /* Supplement color with shape/text/pattern */
+
+  /* Status dots - add border shapes to distinguish */
+  .status-dot {
+    border: 2px solid transparent;
+  }
+
+  /* Good status dot: circle with checkmark border */
+  .status-icon.status-good::before,
+  .status-dot.status-good {
+    border-radius: 50%;
+    border: 2px solid var(--status-good);
+  }
+
+  /* Warning status dot: diamond shape via rotation */
+  .status-icon.status-warning::before,
+  .status-dot.status-warning {
+    border-radius: 2px;
+    transform: rotate(45deg);
+    border: 2px solid var(--status-warning);
+  }
+
+  /* Danger status dot: triangle shape (square with clipped corners) */
+  .status-icon.status-danger::before,
+  .status-dot.status-danger {
+    border-radius: 0;
+    border: 2px solid var(--status-danger);
+  }
+
+  /* Traffic light - add text overlay for color-blind users */
+  .dashboard-traffic-light {
+    font-weight: var(--font-weight-bold);
+    font-size: var(--font-size-sm);
+    color: white;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  }
+
+  /* Filtering breakdown segments - add pattern overlay for distinction */
+  .filtering-segment-passed {
+    background-image: none;
+  }
+
+  .filtering-segment-low-quality {
+    background-image: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 4px,
+      rgba(255, 255, 255, 0.15) 4px,
+      rgba(255, 255, 255, 0.15) 8px
+    );
+  }
+
+  .filtering-segment-too-short {
+    background-image: repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 4px,
+      rgba(255, 255, 255, 0.15) 4px,
+      rgba(255, 255, 255, 0.15) 8px
+    );
+  }
+
+  .filtering-segment-low-complexity {
+    background-image: repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 4px,
+      rgba(255, 255, 255, 0.2) 4px,
+      rgba(255, 255, 255, 0.2) 8px
+    );
+  }
+
+  /* ---- 5. DARK MODE PARITY ---- */
+  /* Ensure [data-theme="dark"] matches @media (prefers-color-scheme: dark) */
+
+  [data-theme="dark"] {
+    --status-neutral-bg: #2d2d44;
+    --status-neutral-border: #404060;
+    --status-good-bg: #0d3320;
+    --status-good-border: #1a5a3c;
+    --status-warning-bg: #3d3218;
+    --status-warning-border: #5a4a20;
+    --status-danger-bg: #3d1a20;
+    --status-danger-border: #5a2530;
+    --status-info-bg: #163040;
+    --status-info-border: #204560;
+  }
+
+  [data-theme="dark"] body,
+  [data-theme="dark"] {
+    background-color: var(--body-bg);
+    color: var(--dark);
+  }
+
+  [data-theme="dark"] .card {
+    background-color: var(--card-bg);
+    border-color: var(--card-border);
+  }
+
+  [data-theme="dark"] .card-header {
+    background-color: rgba(255, 255, 255, 0.05);
+    border-color: var(--card-border);
+  }
+
+  [data-theme="dark"] .header {
+    background-color: var(--card-bg);
+    border-bottom: 1px solid var(--card-border);
+  }
+
+  [data-theme="dark"] .footer {
+    background-color: var(--card-bg);
+    border-top: 1px solid var(--card-border);
+    color: var(--dark);
+  }
+
+  [data-theme="dark"] .form-control,
+  [data-theme="dark"] .form-select,
+  [data-theme="dark"] input,
+  [data-theme="dark"] select,
+  [data-theme="dark"] textarea {
+    background-color: var(--status-neutral-bg);
+    border-color: var(--card-border);
+    color: var(--dark);
+  }
+
+  [data-theme="dark"] .form-control:focus,
+  [data-theme="dark"] .form-select:focus {
+    background-color: var(--status-neutral-bg);
+    border-color: var(--primary);
+    color: var(--dark);
+  }
+
+  [data-theme="dark"] .dash-dropdown .dash-dropdown-menu,
+  [data-theme="dark"] .dropdown-menu {
+    background-color: var(--card-bg);
+    border-color: var(--card-border);
+  }
+
+  [data-theme="dark"] .alert-info {
+    background-color: var(--status-info-bg);
+    border-color: var(--status-info-border);
+    color: #7dd3fc;
+  }
+
+  [data-theme="dark"] .alert-warning {
+    background-color: var(--status-warning-bg);
+    border-color: var(--status-warning-border);
+    color: #fcd34d;
+  }
+
+  [data-theme="dark"] .alert-danger {
+    background-color: var(--status-danger-bg);
+    border-color: var(--status-danger-border);
+    color: #fca5a5;
+  }
+
+  [data-theme="dark"] .alert-success {
+    background-color: var(--status-good-bg);
+    border-color: var(--status-good-border);
+    color: #86efac;
+  }
+
+  [data-theme="dark"] .js-plotly-plot .plotly .main-svg {
+    background-color: var(--card-bg) !important;
+  }
+
+  [data-theme="dark"] .text-muted {
+    color: #9ca3af !important;
+  }
+
+  [data-theme="dark"] .accordion-item {
+    background-color: var(--card-bg);
+    border-color: var(--card-border);
+  }
+
+  [data-theme="dark"] .accordion-button {
+    background-color: var(--card-bg);
+    color: var(--dark);
+  }
+
+  [data-theme="dark"] .accordion-button:not(.collapsed) {
+    background-color: rgba(0, 123, 255, 0.15);
+    color: var(--primary);
+  }
+
+  [data-theme="dark"] .accordion-button::after {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23eaeaea' viewBox='0 0 16 16'%3E%3Cpath fill-rule='evenodd' d='M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z'/%3E%3C/svg%3E");
+  }
+
+  /* Dark mode: config banner */
+  [data-theme="dark"] .config-status-banner {
+    background: linear-gradient(135deg, #1f2937 0%, #374151 100%);
+    border-color: #4b5563;
+  }
+
+  /* Dark mode: QC components */
+  [data-theme="dark"] .qc-summary-bar {
+    background-color: var(--card-bg) !important;
+    border-color: var(--card-border) !important;
+  }
+
+  [data-theme="dark"] .qc-metric-value {
+    color: var(--dark);
+  }
+
+  [data-theme="dark"] .filtering-breakdown-container {
+    background-color: var(--card-bg);
+    border-color: var(--card-border);
+  }
+
+  [data-theme="dark"] .filtering-reason-item {
+    background-color: var(--card-bg);
+    border-color: var(--card-border);
+  }
+
+  [data-theme="dark"] .base-quality-card,
+  [data-theme="dark"] .read-statistics-card {
+    background-color: var(--card-bg) !important;
+    border-color: var(--card-border) !important;
+  }
+
+  /* Dark mode: watchlist */
+  [data-theme="dark"] .watchlist-expand-trigger:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+  }
+
+  [data-theme="dark"] .nested-pathogen-row:nth-child(even) {
+    background-color: rgba(255, 255, 255, 0.03);
+  }
+
+  [data-theme="dark"] .nested-pathogen-row:hover {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+  }
+
+  [data-theme="dark"] .watchlist-table-header {
+    background-color: var(--card-bg) !important;
+  }
+
+  [data-theme="dark"] .pathogen-row:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+
+  [data-theme="dark"] .watchlist-pathogen-list .sticky-top,
+  [data-theme="dark"] .watchlist-pathogen-list-header {
+    background-color: var(--card-bg);
+  }
+
+  /* Dark mode: watched organism card */
+  [data-theme="dark"] .watched-organism-card {
+    background-color: #3d3218 !important;
+    border-color: var(--status-warning) !important;
+  }
+
+  [data-theme="dark"] .watched-organism-card .card-body {
+    background-color: #3d3218;
+  }
+
+  /* Dark mode: stat card */
+  [data-theme="dark"] .stat-card {
+    background: var(--card-bg);
+  }
+
+  /* Dark mode: Kraken2 badge */
+  [data-theme="dark"] .kraken2-match-badge {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+
+  /* Dark mode: taxid mapping */
+  [data-theme="dark"] .taxmap-dashboard {
+    background-color: var(--card-bg);
+  }
+
+  [data-theme="dark"] .match-type-indicator {
+    background: var(--card-bg);
+  }
+
+  /* Dark mode: scrollbar */
+  [data-theme="dark"] #dashboard-alerts-panel::-webkit-scrollbar-track {
+    background: var(--card-bg);
+  }
+
+  [data-theme="dark"] #dashboard-alerts-panel::-webkit-scrollbar-thumb {
+    background: #555;
+  }
+
+  /* Dark mode: help cards with bg-light */
+  [data-theme="dark"] .card[style*="backgroundColor: #f8f9fa"],
+  [data-theme="dark"] .bg-light {
+    background-color: var(--card-bg) !important;
+  }
+
+  /* ---- 6. RESPONSIVE FIELD BREAKPOINTS ---- */
+
+  /* 1280px laptop - ensure critical info above fold */
+  @media (max-width: 1280px) {
+    /* Reduce card padding to fit more above fold */
+    .card-body {
+      padding: 16px;
+    }
+
+    /* Compact header on smaller laptops */
+    .header {
+      padding: 10px 16px;
+    }
+
+    .header h2 {
+      font-size: 1.3rem;
+    }
+
+    /* Reduce spacing between metric cards */
+    .dashboard-metric-card {
+      margin-bottom: 8px;
+    }
+
+    /* Sankey/Sunburst chart controls - 2-column on small laptop */
+    .classification-controls .col-md-3 {
+      flex: 0 0 50%;
+      max-width: 50%;
+      margin-bottom: 8px;
+    }
+  }
+
+  /* 1024px - tablet landscape / small laptop */
+  @media (max-width: 1024px) {
+    /* Tab labels - allow wrapping to prevent overflow */
+    .nav-tabs {
+      flex-wrap: wrap;
+    }
+
+    .nav-tabs .nav-link {
+      font-size: var(--font-size-sm);
+      padding: 10px 14px;
+      white-space: normal;
+      text-align: center;
+    }
+
+    /* Two-column for validation cards */
+    .validation-card-row .col-md-3 {
+      flex: 0 0 50%;
+      max-width: 50%;
+    }
+
+    /* Stack status indicators */
+    .header .d-flex.align-items-center {
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+  }
+
+  /* 768px - tablet portrait */
+  @media (max-width: 768px) {
+    /* Stack all metric grids single column */
+    .col-md-3, .col-md-4, .col-md-6 {
+      flex: 0 0 100%;
+      max-width: 100%;
+    }
+
+    /* Enlarge touch targets further */
+    .btn {
+      min-height: 52px;
+      font-size: var(--font-size-base);
+    }
+
+    .nav-tabs .nav-link {
+      min-height: 52px;
+      padding: 14px 16px;
+    }
+
+    /* Full-width dropdowns */
+    .dash-dropdown {
+      width: 100% !important;
+    }
+
+    /* Single column for pathogen alert layout */
+    .pathogen-alert-critical {
+      flex-direction: column;
+      text-align: center;
+    }
+
+    .pathogen-alert-icon-container {
+      margin: 0 auto 12px auto;
+    }
+
+    /* Increase traffic light for tablet */
+    .dashboard-traffic-light {
+      width: 120px;
+      height: 120px;
+      font-size: var(--font-size-base);
+    }
+
+    /* Stack header controls */
+    .header .row > [class*="col-"] {
+      width: 100%;
+      text-align: center !important;
+      margin-bottom: 8px;
+    }
+
+    .header .d-flex.justify-content-end {
+      justify-content: center !important;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+  }
+
+  /* ---- 7. WORKFLOW STEPPER FIELD FIXES ---- */
+  /* Stepper circles are 28px - too small for gloved hands */
+  /* Override inline styles via class targeting */
+  .workflow-stepper-circle {
+    width: 40px !important;
+    height: 40px !important;
+    font-size: var(--font-size-base) !important;
+  }
+
+  /* ---- 8. SAMPLE SELECTOR FIELD SIZING ---- */
+  .sample-selector-compact {
+    min-width: 250px;
+  }
+
+  .sample-selector-compact .dash-dropdown .Select-control {
+    min-height: 44px !important;
+  }
+
+  /* ---- 9. FOCUS VISIBILITY ENHANCEMENT ---- */
+  /* High-contrast focus ring for field conditions */
+  *:focus-visible {
+    outline: 3px solid #005fcc;
+    outline-offset: 3px;
+    box-shadow: 0 0 0 6px rgba(0, 95, 204, 0.25);
+  }
+
+  /* Dark mode focus */
+  [data-theme="dark"] *:focus-visible {
+    outline-color: #66b2ff;
+    box-shadow: 0 0 0 6px rgba(102, 178, 255, 0.3);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    *:focus-visible {
+      outline-color: #66b2ff;
+      box-shadow: 0 0 0 6px rgba(102, 178, 255, 0.3);
+    }
+  }
+
+  /* ---- 10. DECISION BANNER FIELD SIZING ---- */
+  /* Decision banners must be immediately visible */
+  .pathogen-alert-critical,
+  .pathogen-all-clear {
+    padding: 20px;
+    font-size: var(--font-size-md);
+  }
+
+  .pathogen-alert-critical .pathogen-name {
+    font-size: var(--font-size-xl);
+  }
+
+  /* Threat summary card - larger for field visibility */
+  #dashboard-threat-card {
+    min-height: 80px;
+  }
+
+  /* ---- 11. AG-GRID FIELD READABILITY ---- */
+  /* Grid text and row height for readability */
+  .ag-root-wrapper {
+    font-size: var(--font-size-sm) !important;
+  }
+
+  .ag-row {
+    min-height: 40px !important;
+  }
+
+  .ag-header-cell {
+    font-weight: var(--font-weight-semibold);
+  }
+}
+
+/* ============================================
+   QC TAB - STAGE STRIP
+   ============================================ */
+.stage-strip-container {
+    position: relative;
+    padding: 28px 4px 4px;
+}
+
+.stage-strip-timestamp {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    font-size: 12px;
+    color: #6c757d;
+}
+
+.stage-strip-slots {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+}
+
+.stage-strip-slot {
+    flex: 1;
+    padding: 16px;
+    background: #ffffff;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    min-width: 0;
+}
+
+.stage-strip-slot--raw {
+    background: #ffffff;
+    border: 1px dashed #dee2e6;
+}
+
+/* 6px left-border accents match the Dashboard verdict-banner language */
+.stage-strip-slot--filtered {
+    border-left: 6px solid #084298;
+}
+
+.stage-strip-slot--classified {
+    border-left: 6px solid #155724;
+}
+
+.stage-strip-slot-heading {
+    font-size: 13px;
+    font-weight: 500;
+    text-transform: uppercase;
+    color: #6c757d;
+    margin-bottom: 4px;
+    letter-spacing: 0.04em;
+}
+
+.stage-strip-count {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: #212529;
+    margin-bottom: 2px;
+}
+
+.stage-strip-count--unavailable {
+    color: #adb5bd;
+}
+
+.stage-strip-subtitle {
+    font-size: 12px;
+    color: #6c757d;
+}
+
+.stage-strip-unavailable-note {
+    font-size: 11px;
+    color: #6c757d;
+    margin-top: 2px;
+}
+
+.stage-strip-arrow-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0 12px;
+    min-width: 60px;
+    flex-shrink: 0;
+}
+
+.stage-strip-arrow-icon {
+    font-size: 18px;
+    color: #6c757d;
+}
+
+.stage-strip-delta {
+    font-size: 13px;
+    margin-top: 4px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* Delta colors aligned with locked WCAG AA token pairs (Dashboard spec) */
+.stage-strip-delta--green { color: #155724; font-weight: 600; }
+.stage-strip-delta--amber { color: #664d03; font-weight: 600; }
+.stage-strip-delta--red   { color: #721c24; font-weight: 600; }
+.stage-strip-delta--muted { color: #6c757d; }
+
+/* QC Sample Breakdown: distinguish cumulative (primary) from latest-batch (secondary) */
+.qc-sample-breakdown-grid .ag-header-group-cell.qc-col-group-cumul {
+    background: #e7f1ff;
+    color: #084298;
+    font-weight: 600;
+    border-bottom: 2px solid #084298;
+}
+.qc-sample-breakdown-grid .ag-header-group-cell.qc-col-group-latest {
+    background: #f8f9fa;
+    color: #495057;
+    font-weight: 500;
+    border-bottom: 2px solid #adb5bd;
+}
+.qc-sample-breakdown-grid .qc-col-latest-cell {
+    background: #fafbfc;
+    color: #495057;
+}
+
+@media (max-width: 767px) {
+    .stage-strip-slots {
+        flex-direction: column;
+    }
+
+    .stage-strip-arrow-col {
+        flex-direction: row;
+        justify-content: center;
+        padding: 4px 0;
+    }
+
+    .stage-strip-arrow-col .stage-strip-arrow-icon::before {
+        content: "\f282";  /* bi-chevron-down */
+    }
+}

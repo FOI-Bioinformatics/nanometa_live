@@ -1,62 +1,69 @@
 """
-Setup file for the Nanometa Live project.
+Setup file for the Nanometa Live application.
 
-This script specifies the Python packages, additional files, and entry points needed for the project.
-It also creates the bash commands used to run the program and maps them to the corresponding Python functions.
-
-Installation instructions:
-- Detailed installation instructions can be found in the README file on GitHub.
-
-Structure:
-- `name`: Specifies the package name.
-- `version`: Specifies the package version, imported from __init__.py.
-- `description`: Brief description of the package.
-- `packages`: Lists the Python packages included in the project.
-- `package_data`: Specifies additional non-Python files and Snakemake scripts.
-- `entry_points`: Defines the bash commands and maps them to Python functions.
-- `data_files`: Ensures that specified files are found after installation.
-- `install_requires`: Lists the package dependencies, read from requirements.txt.
-
+This script specifies the Python packages, entry points, and dependencies needed
+for installing and running the Nanometa Live application.
 """
 
 from setuptools import setup, find_packages
-import os
 
-# Import the version number
-from nanometa_live import __version__
 
-# Read requirements.txt and store its content in a list
-with open("requirements.txt", "r") as f:
-    requirements = f.read().splitlines()
+# Read version from __init__.py without importing the package, which would
+# fail during installation before dependencies are available.
+def _read_version() -> str:
+    import re
+    with open("nanometa_live/__init__.py") as f:
+        match = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', f.read(), re.M)
+        if match:
+            return match.group(1)
+        raise RuntimeError("Unable to find __version__ in nanometa_live/__init__.py")
+
+
+# Read requirements.txt for dependencies, filtering comments and blank lines
+with open('requirements.txt', 'r') as f:
+    requirements = [
+        line.split('#')[0].strip()
+        for line in f
+        if line.strip() and not line.strip().startswith('#')
+    ]
 
 setup(
-      name = "Nanometa_Live",
-      version = __version__,
-      description = "Real-time metagenomic analysis.",
-      # Specifying python packages.
-      packages = find_packages(),
-      # Specifying non-pyscript files and snakemake scripts.
-      package_data={'nanometa_live': ['Snakefile',
-                                      'config.yaml',
-                                      'snakemake_envs/*.yaml',
-                                      'snakemake_scripts/*.py']
-                    },
-      # These are the bash commands and the functions they map to.
-      # "run_app" is a solution to make the main gui script into a command,
-      # since a function needs to be specified.
-      entry_points = {'console_scripts':
-                      ['nanometa-sim = nanometa_live.nanopore_simulator:nano_sim', # nanopore simulator
-                       'nanometa-new = nanometa_live.nanometa_new:main', # create new project
-                       'nanometa-backend = nanometa_live.nanometa_backend:main', # run backend pipeline
-                       'nanometa-gui = nanometa_live.nanometa_gui:run_app', # run gui
-                       'nanometa-live = nanometa_live.nanometa_runner:main',  # wrapper to run both backend and GUI.
-                       'nanometa-prepare = nanometa_live.nanometa_prepare:main',  # Autmatically download genomes and create blast databases
-                       'nanometa-demo = nanometa_live.nanometa_demo:main'  # Automatically download demo files
-                       ]
-                      },
-      # Makes sure the files are found after install.
-      data_files=[('nanometa_live/',['nanometa_live/config.yaml']),
-                  ('nanometa_live/snakemake_envs',
-                   ['nanometa_live/snakemake_envs/' + f for f in os.listdir('nanometa_live/snakemake_envs') if f.endswith('.yaml')])],
-      install_requires=requirements  # Read from requirements.txt
-      )
+    name="Nanometa_Live",
+    version=_read_version(),
+    description="Real-time metagenomic analysis with a user-friendly interface",
+    long_description=open("README.md").read(),
+    long_description_content_type="text/markdown",
+    author="Nanometa Live Team",
+    url="https://github.com/FOI-Bioinformatics/nanometa_live",
+    packages=find_packages(),
+    include_package_data=True,
+    package_data={
+        'nanometa_live': [
+            'config.yaml',
+            'kraken2_databases.yaml',
+            'app/assets/*',
+            'core/config/data/*.yaml',
+            'core/config/data/watchlists/*.yaml',
+            'core/config/data/watchlists/examples/*.yaml',
+        ]
+    },
+    entry_points={
+        'console_scripts': [
+            'nanometa-live=nanometa_live.nanometa_live:main',
+            'nanometa-prepare=nanometa_live.cli.prepare:main'
+        ]
+    },
+    install_requires=requirements,
+    python_requires='>=3.9',
+    classifiers=[
+        'Development Status :: 4 - Beta',
+        'Intended Audience :: Science/Research',
+        'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
+        'Topic :: Scientific/Engineering :: Bio-Informatics',
+    ],
+)

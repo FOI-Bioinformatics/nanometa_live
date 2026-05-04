@@ -1,0 +1,232 @@
+# Respiratory Pathogens Watchlist
+# Pathogens associated with respiratory infections
+
+version: "2.0"
+taxonomy_support: ["ncbi", "gtdb"]
+
+metadata:
+  name: "Respiratory Pathogens"
+  description: "Pathogens associated with respiratory infections and pneumonia"
+  source: "Clinical/Respiratory"
+  reference: "Respiratory pathogen surveillance"
+
+pathogens:
+  - name: "Mycobacterium tuberculosis"
+    names_alt: ["Mycobacterium_tuberculosis"]
+    taxid_ncbi: 1773
+    common_name: "Tuberculosis"
+    threat_level: "high"
+    bsl_level: 3
+    category: "Respiratory"
+    alert_threshold: 10
+    action_required: "Airborne precautions. TB reporting required. Contact public health."
+    notes: "Leading infectious disease killer globally. Drug resistance concern."
+
+  - name: "Streptococcus pneumoniae"
+    names_alt: ["Streptococcus_pneumoniae"]
+    taxid_ncbi: 1313
+    common_name: "Pneumococcus"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 20
+    action_required: "Respiratory pathogen assessment. Vaccine-preventable."
+    notes: "Leading cause of community-acquired pneumonia and meningitis."
+
+  - name: "Haemophilus influenzae"
+    names_alt: ["Haemophilus_influenzae"]
+    taxid_ncbi: 727
+    common_name: "H. influenzae"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 25
+    action_required: "Respiratory pathogen assessment."
+    notes: "Type b (Hib) is vaccine-preventable. Non-typeable strains common."
+
+  - name: "Moraxella catarrhalis"
+    names_alt: ["Moraxella_catarrhalis"]
+    taxid_ncbi: 480
+    common_name: "M. catarrhalis"
+    threat_level: "low"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 50
+    action_required: "Assess for respiratory infection."
+    notes: "Common cause of otitis media and exacerbations of COPD."
+
+  - name: "Bordetella pertussis"
+    names_alt: ["Bordetella_pertussis"]
+    taxid_ncbi: 520
+    common_name: "Whooping cough"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 10
+    action_required: "Report to public health. Droplet precautions. Contact tracing."
+    notes: "Vaccine-preventable. Resurgence in some populations."
+
+  - name: "Mycoplasma pneumoniae"
+    names_alt: ["Mycoplasma_pneumoniae"]
+    taxid_ncbi: 2104
+    common_name: "Walking pneumonia"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 25
+    action_required: "Assess for atypical pneumonia. Consider macrolide therapy."
+    notes: "Atypical pneumonia. Common in young adults."
+
+  - name: "Chlamydia pneumoniae"
+    names_alt: ["Chlamydia_pneumoniae", "Chlamydophila_pneumoniae"]
+    taxid_ncbi: 83558
+    common_name: "C. pneumoniae"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 25
+    action_required: "Assess for atypical pneumonia."
+    notes: "Atypical pneumonia pathogen. Often mild disease."
+
+  - name: "Legionella pneumophila"
+    names_alt: ["Legionella_pneumophila"]
+    taxid_ncbi: 446
+    common_name: "Legionnaires disease"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 10
+    action_required: "Report to public health. Water system assessment."
+    notes: "Environmental pathogen. Associated with cooling towers and plumbing."
+
+  - name: "Staphylococcus aureus"
+    names_alt: ["Staphylococcus_aureus"]
+    taxid_ncbi: 1280
+    common_name: "S. aureus pneumonia"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 15
+    action_required: "Assess for MRSA. Post-influenza bacterial pneumonia risk."
+    notes: "Community and hospital-acquired pneumonia. MRSA strains are high priority."
+
+  - name: "Klebsiella pneumoniae"
+    names_alt: ["Klebsiella_pneumoniae"]
+    taxid_ncbi: 573
+    common_name: "K. pneumoniae"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 15
+    action_required: "Monitor for carbapenem resistance."
+    notes: "Healthcare-associated pneumonia. Rising resistance."
+
+  - name: "Acinetobacter baumannii"
+    names_alt: ["Acinetobacter_baumannii"]
+    taxid_ncbi: 470
+    common_name: "A. baumannii"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 10
+    action_required: "Monitor for carbapenem resistance. Ventilator-associated pneumonia assessment."
+    notes: "WHO critical priority. Major cause of ventilator-associated pneumonia."
+
+  - name: "Pseudomonas aeruginosa"
+    names_alt: ["Pseudomonas_aeruginosa"]
+    taxid_ncbi: 287
+    common_name: "P. aeruginosa"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 15
+    action_required: "Assess for CF or ventilator-associated pneumonia."
+    notes: "Common in CF patients and ventilator-associated pneumonia."
+
+  - name: "Mycobacterium avium"
+    names_alt: ["Mycobacterium_avium"]
+    taxid_ncbi: 1764
+    common_name: "MAC"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 20
+    action_required: "Assess immunocompromised status. Environmental source investigation."
+    notes: "Opportunistic mycobacteria. MAC complex infections."
+
+  - name: "Coccidioides immitis"
+    names_alt: ["Coccidioides_immitis"]
+    taxid_ncbi: 5501
+    common_name: "Valley fever"
+    threat_level: "high"
+    bsl_level: 3
+    category: "Respiratory"
+    alert_threshold: 10
+    action_required: "Endemic area assessment. Antifungal consideration."
+    notes: "Dimorphic fungus. Endemic to southwestern US and parts of Central/South America."
+
+  - name: "Coccidioides posadasii"
+    names_alt: ["Coccidioides_posadasii"]
+    taxid_ncbi: 199306
+    common_name: "Valley fever"
+    threat_level: "high"
+    bsl_level: 3
+    category: "Respiratory"
+    alert_threshold: 10
+    action_required: "Endemic area assessment. Antifungal consideration."
+    notes: "Dimorphic fungus. More geographically widespread than C. immitis."
+
+  - name: "Histoplasma capsulatum"
+    names_alt: ["Histoplasma_capsulatum"]
+    taxid_ncbi: 5037
+    common_name: "Histoplasmosis"
+    threat_level: "high"
+    bsl_level: 3
+    category: "Respiratory"
+    alert_threshold: 10
+    action_required: "Endemic area assessment. Bird/bat exposure history."
+    notes: "Dimorphic fungus. Endemic to Ohio and Mississippi River valleys."
+
+  - name: "Blastomyces dermatitidis"
+    names_alt: ["Blastomyces_dermatitidis"]
+    taxid_ncbi: 5039
+    common_name: "Blastomycosis"
+    threat_level: "high"
+    bsl_level: 3
+    category: "Respiratory"
+    alert_threshold: 10
+    action_required: "Endemic area assessment. Antifungal consideration."
+    notes: "Dimorphic fungus. Endemic to Great Lakes region and Mississippi/Ohio River valleys."
+
+  - name: "Aspergillus fumigatus"
+    names_alt: ["Aspergillus_fumigatus"]
+    taxid_ncbi: 5085
+    common_name: "Aspergillosis"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 15
+    action_required: "Assess immunocompromised status. Environmental mold assessment."
+    notes: "Using taxid 5085 for broader Kraken2 database compatibility."
+
+  - name: "Corynebacterium diphtheriae"
+    names_alt: ["Corynebacterium_diphtheriae"]
+    taxid_ncbi: 1717
+    common_name: "Diphtheria"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 5
+    action_required: "Report to public health. Droplet precautions. Contact tracing. Antitoxin assessment."
+    notes: "Vaccine-preventable. Re-emerging in under-vaccinated populations. Toxin-mediated disease."
+
+  - name: "Pneumocystis jirovecii"
+    names_alt: ["Pneumocystis_jirovecii", "Pneumocystis_carinii"]
+    taxid_ncbi: 42068
+    common_name: "PCP"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Respiratory"
+    alert_threshold: 10
+    action_required: "Assess immunocompromised status. HIV testing if not known positive."
+    notes: "Causes Pneumocystis pneumonia (PCP) in immunocompromised. Key AIDS-defining illness."

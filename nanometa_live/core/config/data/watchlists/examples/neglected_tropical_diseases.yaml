@@ -1,0 +1,156 @@
+# Neglected Tropical Diseases Watchlist
+# Organisms associated with WHO-designated neglected tropical diseases
+
+version: "2.0"
+taxonomy_support: ["ncbi", "gtdb"]
+
+metadata:
+  name: "Neglected Tropical Diseases"
+  description: "Organisms associated with WHO-designated neglected tropical diseases, for surveillance in endemic regions"
+  source: "WHO NTD Programme"
+  reference: "https://www.who.int/health-topics/neglected-tropical-diseases"
+  notes: "Primarily relevant for laboratories in tropical/subtropical regions. Several organisms are eukaryotic parasites requiring appropriate Kraken2 databases."
+
+pathogens:
+  - name: "Mycobacterium leprae"
+    names_alt: ["Mycobacterium_leprae", "leprosy bacillus", "Hansen bacillus"]
+    taxid_ncbi: 1769
+    common_name: "Leprosy"
+    threat_level: "high"
+    bsl_level: 2
+    category: "NTD"
+    alert_threshold: 5
+    action_required: "Multidrug therapy initiation. Contact tracing. Report to public health authorities."
+    notes: "Causative agent of leprosy (Hansen disease). Cannot be cultured in vitro. Metagenomic detection may be challenging due to slow growth and low organism burden."
+
+  - name: "Burkholderia pseudomallei"
+    names_alt: ["Burkholderia_pseudomallei", "melioidosis agent"]
+    taxid_ncbi: 28450
+    common_name: "Melioidosis"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "NTD"
+    alert_threshold: 3
+    action_required: "BSL-3 containment. Prolonged antimicrobial therapy required. Report to public health. Assess for disseminated disease."
+    notes: "BSL-3 organism. Endemic in Southeast Asia and northern Australia. Soil and water saprophyte with high case fatality if untreated."
+
+  - name: "Orthoflavivirus denguei"
+    names_alt: ["Orthoflavivirus_denguei", "dengue virus", "DENV"]
+    taxid_ncbi: 3052464
+    common_name: "Dengue"
+    threat_level: "high"
+    bsl_level: 2
+    category: "NTD"
+    alert_threshold: 5
+    action_required: "Serotype determination if possible. Monitor for severe dengue. Vector control notification."
+    notes: "Mosquito-borne flavivirus with four serotypes. Most prevalent arboviral disease globally. Viral reads may be transient in blood samples."
+
+  - name: "Orthoflavivirus zikaense"
+    names_alt: ["Orthoflavivirus_zikaense", "Zika virus", "ZIKV"]
+    taxid_ncbi: 3048448
+    common_name: "Zika"
+    threat_level: "high"
+    bsl_level: 2
+    category: "NTD"
+    alert_threshold: 5
+    action_required: "Assess pregnancy status. Report to public health. Differentiate from dengue and chikungunya."
+    notes: "Mosquito-borne flavivirus. Associated with congenital Zika syndrome and Guillain-Barre syndrome."
+
+  - name: "Alphavirus chikungunya"
+    names_alt: ["Alphavirus_chikungunya", "chikungunya virus", "CHIKV"]
+    taxid_ncbi: 3426295
+    common_name: "Chikungunya"
+    threat_level: "high"
+    bsl_level: 2
+    category: "NTD"
+    alert_threshold: 5
+    action_required: "Supportive care. Report to public health. Vector control notification."
+    notes: "Mosquito-borne alphavirus causing febrile illness with polyarthralgia. Co-circulation with dengue and Zika is common in endemic areas."
+
+  - name: "Leishmania donovani"
+    names_alt: ["Leishmania_donovani", "visceral leishmaniasis agent", "kala-azar"]
+    taxid_ncbi: 5661
+    common_name: "Visceral leishmaniasis"
+    threat_level: "high"
+    bsl_level: 2
+    category: "NTD"
+    alert_threshold: 10
+    action_required: "Species confirmation. Assess for visceral involvement. Treatment with liposomal amphotericin B or miltefosine."
+    notes: "Eukaryotic protozoan parasite. Requires Kraken2 databases with protozoan reference genomes for reliable detection."
+
+  - name: "Trypanosoma cruzi"
+    names_alt: ["Trypanosoma_cruzi", "Chagas disease agent"]
+    taxid_ncbi: 5693
+    common_name: "Chagas disease"
+    threat_level: "high"
+    bsl_level: 2
+    category: "NTD"
+    alert_threshold: 10
+    action_required: "Confirm acute vs chronic phase. Assess cardiac involvement. Antiparasitic therapy in acute phase."
+    notes: "Eukaryotic protozoan transmitted by triatomine vectors. Endemic in Latin America. Chronic phase may cause cardiomyopathy."
+
+  - name: "Trypanosoma brucei"
+    names_alt: ["Trypanosoma_brucei", "sleeping sickness agent", "African trypanosomiasis"]
+    taxid_ncbi: 5691
+    common_name: "Sleeping sickness"
+    threat_level: "high"
+    bsl_level: 2
+    category: "NTD"
+    alert_threshold: 10
+    action_required: "Subspecies determination (gambiense vs rhodesiense). CSF examination for CNS staging. Initiate appropriate therapy."
+    notes: "Eukaryotic protozoan transmitted by tsetse flies. Endemic in sub-Saharan Africa. CNS involvement defines disease stage and treatment."
+
+  - name: "Schistosoma mansoni"
+    names_alt: ["Schistosoma_mansoni", "blood fluke", "bilharzia"]
+    taxid_ncbi: 6183
+    common_name: "Schistosomiasis"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "NTD"
+    alert_threshold: 15
+    action_required: "Praziquantel treatment. Assess for hepatosplenic involvement in chronic cases."
+    notes: "Helminth parasite with a large genome. Metagenomic detection of free-living cercariae or eggs may yield variable results depending on sample type."
+
+  - name: "Wuchereria bancrofti"
+    names_alt: ["Wuchereria_bancrofti", "lymphatic filariasis agent", "elephantiasis"]
+    taxid_ncbi: 6293
+    common_name: "Lymphatic filariasis"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "NTD"
+    alert_threshold: 15
+    action_required: "Mass drug administration context assessment. Antifilarial therapy."
+    notes: "Nematode parasite causing lymphatic filariasis. Primarily detected in nocturnal blood samples. Metagenomic detection may require enrichment."
+
+  - name: "Onchocerca volvulus"
+    names_alt: ["Onchocerca_volvulus", "river blindness agent"]
+    taxid_ncbi: 6282
+    common_name: "River blindness"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "NTD"
+    alert_threshold: 15
+    action_required: "Ivermectin therapy. Ophthalmological assessment for ocular involvement."
+    notes: "Filarial nematode transmitted by blackflies. Endemic in sub-Saharan Africa. Skin snip biopsies are the traditional sample type."
+
+  - name: "Madurella mycetomatis"
+    names_alt: ["Madurella_mycetomatis", "mycetoma agent"]
+    taxid_ncbi: 100816
+    common_name: "Mycetoma"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "NTD"
+    alert_threshold: 15
+    action_required: "Differentiate eumycetoma from actinomycetoma. Prolonged antifungal therapy for eumycetoma."
+    notes: "Fungal cause of eumycetoma. Added to the WHO NTD list in 2016. Endemic in the mycetoma belt (tropical and subtropical arid regions)."
+
+  - name: "Chromobacterium violaceum"
+    names_alt: ["Chromobacterium_violaceum"]
+    taxid_ncbi: 536
+    common_name: "Chromobacterium"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "NTD"
+    alert_threshold: 15
+    action_required: "Assess for septicemia. Combination antimicrobial therapy. Monitor for relapse."
+    notes: "Environmental Gram-negative bacterium found in tropical soils and water. Opportunistic infections are uncommon but carry high mortality."

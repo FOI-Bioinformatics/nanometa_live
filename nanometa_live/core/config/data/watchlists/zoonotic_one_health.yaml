@@ -1,0 +1,198 @@
+# Zoonotic / One Health Surveillance Watchlist
+# Targets for zoonotic disease surveillance under the One Health framework
+# Covers bacterial, viral, and parasitic pathogens with animal reservoirs
+
+version: "2.0"
+taxonomy_support: ["ncbi", "gtdb"]
+
+metadata:
+  name: "Zoonotic / One Health"
+  description: "Zoonotic pathogens for One Health surveillance across human, animal, and environmental interfaces"
+  source: "One Health Initiative"
+  reference: "One Health zoonotic disease surveillance"
+
+pathogens:
+  # =========================================================================
+  # Brucella spp. - livestock reservoirs
+  # =========================================================================
+
+  - name: "Brucella melitensis"
+    names_alt: ["Brucella_melitensis"]
+    taxid_ncbi: 29459
+    common_name: "Brucellosis"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "Zoonotic"
+    alert_threshold: 5
+    action_required: "Contact biosafety officer. BSL-3 handling required. Report to public health and veterinary authorities."
+    notes: "Primary reservoir in goats and sheep. Transmitted through unpasteurized dairy products or direct animal contact. Most pathogenic Brucella species for humans. Low infectious dose."
+
+  - name: "Brucella abortus"
+    names_alt: ["Brucella_abortus"]
+    taxid_ncbi: 235
+    common_name: "Bovine brucellosis"
+    threat_level: "high"
+    bsl_level: 3
+    category: "Zoonotic"
+    alert_threshold: 10
+    action_required: "Contact biosafety officer. BSL-3 handling required. Report to veterinary authorities."
+    notes: "Primary reservoir in cattle. Transmitted through unpasteurized dairy products, direct contact with infected animals, or inhalation of aerosols during parturition. Occupational risk for veterinarians and livestock workers."
+
+  # =========================================================================
+  # Obligate intracellular pathogens
+  # =========================================================================
+
+  - name: "Coxiella burnetii"
+    names_alt: ["Coxiella_burnetii"]
+    taxid_ncbi: 777
+    common_name: "Q fever"
+    threat_level: "high"
+    bsl_level: 3
+    category: "Zoonotic"
+    alert_threshold: 10
+    action_required: "Contact biosafety officer. BSL-3 handling required. Assess occupational exposure history."
+    notes: "Reservoir in cattle, sheep, and goats. Transmitted primarily through inhalation of contaminated aerosols from birth products, manure, or dust. Extremely low infectious dose. Highly resistant spore-like forms persist in the environment."
+
+  - name: "Rickettsia rickettsii"
+    names_alt: ["Rickettsia_rickettsii"]
+    taxid_ncbi: 783
+    common_name: "Rocky Mountain spotted fever"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "Zoonotic"
+    alert_threshold: 5
+    action_required: "Contact biosafety officer. BSL-3 handling required. Assess tick exposure history."
+    notes: "Transmitted by Dermacentor tick species. Reservoir maintained in ticks and small mammals. Most lethal rickettsial disease in the Americas. Early treatment is essential for favorable outcome."
+
+  - name: "Anaplasma phagocytophilum"
+    names_alt: ["Anaplasma_phagocytophilum"]
+    taxid_ncbi: 948
+    common_name: "Anaplasmosis"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Zoonotic"
+    alert_threshold: 20
+    action_required: "Assess tick exposure history. Monitor for co-infections with other tick-borne pathogens."
+    notes: "Transmitted by Ixodes tick species. Reservoir in white-footed mice and white-tailed deer. Shares tick vector with Borrelia burgdorferi and Babesia microti, making co-infections a recognized concern."
+
+  - name: "Ehrlichia chaffeensis"
+    names_alt: ["Ehrlichia_chaffeensis"]
+    taxid_ncbi: 945
+    common_name: "Ehrlichiosis"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Zoonotic"
+    alert_threshold: 20
+    action_required: "Assess tick exposure history. Monitor for complications in immunocompromised patients."
+    notes: "Transmitted by Amblyomma americanum (lone star tick). Reservoir in white-tailed deer. Geographic distribution expanding with vector range expansion."
+
+  # =========================================================================
+  # Vector-borne and environmental pathogens
+  # =========================================================================
+
+  - name: "Francisella tularensis"
+    names_alt: ["Francisella_tularensis"]
+    taxid_ncbi: 263
+    common_name: "Tularemia"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "Zoonotic"
+    alert_threshold: 5
+    action_required: "Contact biosafety officer. BSL-3 handling required. Report to public health authorities."
+    notes: "Reservoir in rabbits, hares, and rodents. Transmitted through tick bites, direct contact with infected animals, inhalation of contaminated aerosols, or ingestion of contaminated water. Extremely low infectious dose."
+
+  - name: "Leptospira interrogans"
+    names_alt: ["Leptospira_interrogans"]
+    taxid_ncbi: 173
+    common_name: "Leptospirosis"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Zoonotic"
+    alert_threshold: 15
+    action_required: "Assess animal and water exposure history. Report to public health authorities."
+    notes: "Reservoir in rodents, dogs, livestock, and wildlife. Transmitted through contact with water or soil contaminated by urine of infected animals. Risk increases following flooding events. Most widespread zoonosis globally."
+
+  - name: "Bartonella henselae"
+    names_alt: ["Bartonella_henselae"]
+    taxid_ncbi: 32188
+    common_name: "Cat scratch disease"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Zoonotic"
+    alert_threshold: 20
+    action_required: "Assess cat exposure history. Monitor immunocompromised patients for disseminated disease."
+    notes: "Reservoir in domestic and feral cats. Transmitted through cat scratches or bites, or via cat flea (Ctenocephalides felis) feces. Typically self-limiting in immunocompetent individuals."
+
+  - name: "Borrelia burgdorferi"
+    names_alt: ["Borrelia_burgdorferi"]
+    taxid_ncbi: 139
+    common_name: "Lyme disease"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Zoonotic"
+    alert_threshold: 15
+    action_required: "Assess tick exposure history. Monitor for disseminated disease manifestations."
+    notes: "Transmitted by Ixodes tick species. Reservoir in small mammals, particularly white-footed mice. Most commonly reported vector-borne disease in temperate regions of the Northern Hemisphere."
+
+  # =========================================================================
+  # Viral zoonoses
+  # =========================================================================
+
+  - name: "Orthohantavirus sinnombreense"
+    names_alt: ["Sin Nombre virus", "Sin_Nombre_virus", "Sin Nombre orthohantavirus"]
+    taxid_ncbi: 3052487
+    common_name: "Hantavirus pulmonary syndrome"
+    threat_level: "high"
+    bsl_level: 3
+    category: "Zoonotic"
+    alert_threshold: 5
+    action_required: "Contact public health authorities. Assess rodent exposure history. BSL-3 handling required."
+    notes: "Reservoir in deer mice (Peromyscus maniculatus). Transmitted through inhalation of aerosolized virus from rodent urine, droppings, or nesting materials. No person-to-person transmission documented for this species."
+
+  - name: "Rabies lyssavirus"
+    names_alt: ["Rabies virus", "Rabies_lyssavirus"]
+    taxid_ncbi: 11292
+    common_name: "Rabies"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "Zoonotic"
+    alert_threshold: 5
+    action_required: "Assess animal bite or exposure history. Post-exposure prophylaxis evaluation. Report to public health and veterinary authorities."
+    notes: "Reservoir in bats, raccoons, skunks, foxes, and domestic dogs (regionally). Transmitted through saliva of infected animals, typically via bite. Nearly 100% case fatality once symptoms develop. Canine rabies remains endemic in parts of Africa and Asia."
+
+  # =========================================================================
+  # Parasitic zoonoses
+  # =========================================================================
+
+  - name: "Echinococcus granulosus"
+    names_alt: ["Echinococcus_granulosus"]
+    taxid_ncbi: 6210
+    common_name: "Hydatid disease"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Zoonotic"
+    alert_threshold: 20
+    action_required: "Assess animal contact and geographic exposure history. Coordinate with veterinary public health."
+    notes: "Definitive hosts are canids (dogs, wolves). Intermediate hosts include sheep, cattle, and other herbivores. Humans are accidental intermediate hosts. Transmitted through ingestion of eggs from contaminated food, water, or direct contact with infected canids."
+
+  - name: "Toxoplasma gondii"
+    names_alt: ["Toxoplasma_gondii"]
+    taxid_ncbi: 5811
+    common_name: "Toxoplasmosis"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Zoonotic"
+    alert_threshold: 20
+    action_required: "Assess risk for pregnant and immunocompromised patients. Evaluate cat exposure and dietary history."
+    notes: "Definitive hosts are felids (domestic and wild cats). Transmitted through ingestion of oocysts from cat feces, undercooked meat containing tissue cysts, or congenital transmission. Particularly concerning during pregnancy and in immunocompromised individuals."
+
+  - name: "Campylobacter jejuni"
+    names_alt: ["Campylobacter_jejuni"]
+    taxid_ncbi: 197
+    common_name: "Campylobacter"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Zoonotic"
+    alert_threshold: 20
+    action_required: "Assess food animal exposure. Monitor for fluoroquinolone resistance. Report to public health if part of an outbreak."
+    notes: "Reservoir in poultry, cattle, and wild birds. Transmitted primarily through consumption of contaminated poultry or unpasteurized milk. Leading bacterial cause of gastroenteritis in many countries. A key One Health surveillance target at the food-animal interface."
