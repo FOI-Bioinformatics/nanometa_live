@@ -163,21 +163,14 @@ python -m nanometa_live.app --config config.yaml
 DASH_DEBUG=true python -m nanometa_live.app --main_dir /path/to/results
 ```
 
-### Adding a New Tab
+### Adding a new tab
 
-1. Create layout in `app/layouts/my_layout.py`
-2. Create callbacks in `app/tabs/my_tab.py`
-3. Register in `app/app.py`:
-   ```python
-   from nanometa_live.app.layouts.my_layout import create_my_layout
-   from nanometa_live.app.tabs.my_tab import register_my_callbacks
+The pattern is: create a layout in `app/layouts/`, register callbacks in
+`app/tabs/`, then wire both into `app/app.py`. See
+[`docs/developer-guide.md`](docs/developer-guide.md) for the full
+walkthrough with examples.
 
-   # In create_app():
-   dbc.Tab(label="My Tab", children=create_my_layout())
-   register_my_callbacks(app)
-   ```
-
-### Callback Patterns
+### Callback patterns
 
 ```python
 # Standard callback with sample filtering
@@ -452,12 +445,10 @@ The QC tab's primary element is a horizontal three-slot **Stage Strip**: Raw →
 
 A "Last updated HH:MM:SS" timestamp sits in the Stage Strip's top-right corner.
 
-Earlier layouts shipped three cards that are now deleted entirely:
-`KeyMetricsSummaryCard` (triple-count bug source), `FilteringBreakdownVisual`
-(dead code for Chopper), and `QualityScoreIndicator` (replaced by the
-verdict banner + Stage Strip combination). They are not in the
-component module, not re-exported, and not referenced from any
-layout. Phase-5 cleanup, 2026-04-29.
+Three earlier components were removed and should not be reintroduced:
+`KeyMetricsSummaryCard` (caused triple-count bug), `FilteringBreakdownVisual`
+(dead code under the Chopper QC path), and `QualityScoreIndicator`
+(superseded by the verdict banner + Stage Strip combination).
 
 ## Validation System
 
@@ -543,30 +534,18 @@ per-(sample, taxid) process for A's pairs and only B's pairs run end
 to end. The aggregator (AGGREGATE_VALIDATION_RESULTS) re-runs to
 rebuild ``validation_results.json`` over the union.
 
-**Bug-fixes shipped during the 2026-04-30 e2e audit:**
-- ``subworkflows/local/validation/main.nf:82`` -- coerce
-  ``taxids_to_validate`` to string before ``.split()``; Nextflow's
-  CLI parser auto-promotes single all-digit values to Integer despite
-  the schema declaring string, so ``--taxids_to_validate 9606`` was
-  failing every single-taxid GUI call.
-- ``modules/local/minimap2_validation/main.nf:136-153`` -- double-
-  escape ``\\n`` in the awk JSON writer; bare ``\n`` in the Groovy
-  triple-quoted string was expanding to a literal newline at parse
-  time, producing unterminated awk string literals. 100% of minimap2
-  invocations were exiting code 2 before this fix.
-- ``modules/local/blastn_validation/main.nf:113-128`` -- dedupe by
-  qseqid so ``hit_rate`` is bounded to [0, 1]; previously every HSP
-  row counted, so a 654-HSP/499-read result rendered as "1.3%
-  Confirmed" in the GUI.
-
-**UX fixes shipped at the same time:**
-- Coverage depth threshold is now operator-controllable via a numeric
-  input next to the MAPQ filter (was hardcoded at 10x).
-- BLAST stats-table column "Query Coverage (%)" -> "Read Alignment %"
-  (clearer + method-agnostic).
-- Result-card 4th metric: minimap2 "Alignment Score" -> "Mapping
-  Confidence: X / 60" with a "30+ reliable" caption. BLAST: "Query
-  Coverage" -> "Read Alignment %" (consistent with stats-table).
+**Durable invariants in the validation pipeline (worth knowing when
+changing it):**
+- `subworkflows/local/validation/main.nf` coerces `taxids_to_validate`
+  to string before `.split()`. Nextflow's CLI parser silently promotes
+  all-digit single values to `Integer` regardless of the schema; the
+  coercion is required for single-taxid GUI calls to work.
+- `modules/local/minimap2_validation/main.nf` double-escapes `\\n` in
+  the awk JSON writer because bare `\n` in a Groovy triple-quoted
+  string expands at parse time into a literal newline.
+- `modules/local/blastn_validation/main.nf` deduplicates BLAST hits by
+  `qseqid` so `hit_rate` stays bounded to `[0, 1]`. Counting raw HSPs
+  produces hit rates well above 1.
 
 ### Validation Result Card "View Coverage" Button
 

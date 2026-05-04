@@ -16,7 +16,7 @@
    ```
 2. Launch app:
    ```
-   python -m nanometa_live.app --main_dir /tmp/nanometa_validation_data --port 8050
+   nanometa-live --main_dir /tmp/nanometa_validation_data --port 8050
    ```
 3. Open browser to http://localhost:8050
 

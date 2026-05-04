@@ -1,8 +1,8 @@
-# Nanometa Live User Guide
+# Nanometa Live user guide
 
 ## Overview
 
-Nanometa Live is a real-time visualization dashboard for Oxford Nanopore metagenomic sequencing. It displays taxonomic classification results, quality metrics, and provides interactive visualizations as your sequencing run progresses.
+Nanometa Live is a real-time visualisation dashboard for Oxford Nanopore metagenomic sequencing. It displays taxonomic classification results, quality metrics, and interactive visualisations as a sequencing run progresses.
 
 ## Installation
 
@@ -24,7 +24,7 @@ source nanometa_env/bin/activate
 pip install nanometa-live
 ```
 
-### Install with Conda
+### Install with conda
 
 ```bash
 conda create -n nanometa python=3.10
@@ -40,29 +40,29 @@ cd nanometa_live
 pip install -e .
 ```
 
-## Quick Start
+## Quick start
 
-### View Existing Results
+### View existing results
 
 If you already have nanometanf pipeline output:
 
 ```bash
-python -m nanometa_live.app --main_dir /path/to/results
+nanometa-live --main_dir /path/to/results
 ```
 
 Open http://localhost:8050 in your browser.
 
-### Run New Analysis
+### Run new analysis
 
-To analyze new sequencing data:
+To analyse new sequencing data:
 
 ```bash
-python -m nanometa_live.app --config my_config.yaml
+nanometa-live --config my_config.yaml
 ```
 
-## Input Data
+## Input data
 
-### Supported Input Formats
+### Supported input formats
 
 | Format | Description | Example |
 |--------|-------------|---------|
@@ -70,7 +70,7 @@ python -m nanometa_live.app --config my_config.yaml
 | Flat FASTQ | All files in one directory | `*.fastq.gz` |
 | nanometanf output | Pre-analyzed results | `kraken2/`, `fastp/` subdirs |
 
-### Barcoded Data Structure
+### Barcoded data structure
 
 ```
 input_directory/
@@ -83,7 +83,7 @@ input_directory/
     └── reads.fastq.gz
 ```
 
-### Flat Directory Structure
+### Flat directory structure
 
 ```
 input_directory/
@@ -92,9 +92,9 @@ input_directory/
 └── sample_003.fastq.gz
 ```
 
-## Dashboard Tabs
+## Dashboard tabs
 
-### Dashboard Tab
+### Dashboard tab
 
 Operator-facing summary view. Four zones, top to bottom:
 
@@ -103,7 +103,7 @@ Operator-facing summary view. Four zones, top to bottom:
 - **Zone 3 — Supporting metrics** (four cards): Sequences Analyzed, Sample Quality (Excellent / Good / Fair / Poor with Q-score subtitle), Species Detected, Run Time.
 - **Zone 4 — Sample Details** (collapsed accordion). Per-sample table with plain-language column names: "Sequences Analyzed", "Sample Quality", "Read Length", "Match Rate".
 
-### Organisms Tab
+### Organisms tab
 
 Detected organisms and classification results:
 
@@ -112,7 +112,7 @@ Detected organisms and classification results:
 - **Watchlist matches**: organisms matching active watchlist entries are highlighted
 - **On-demand validation**: validate unexpected organisms with BLAST
 
-### Quality Control Tab
+### Quality Control tab
 
 Quality control metrics:
 
@@ -122,21 +122,21 @@ Quality control metrics:
 - **Sample Breakdown** table: per-sample filtered reads, classification rate, and average Q score with tool-source tooltips
 - **Advanced** sections (accordion): detailed processing charts and technical statistics
 
-### Taxonomy Tab
+### Taxonomy tab
 
 Interactive taxonomic visualizations:
 - **Sankey Diagram**: Flow visualization of taxonomic hierarchy
 - **Sunburst Chart**: Radial hierarchical view
 - Filters for minimum reads, domains, and taxonomy levels
 
-### Validation Tab
+### Validation tab
 
 Organism identity verification:
 - **BLAST Sub-tab**: Read-centric validation with identity scores, filtering, and statistics
 - **Coverage Sub-tab**: Genome-centric minimap2 coverage plots (depth, cumulative, histogram)
 - Species selector and mapping quality filters
 
-### Watchlist Tab
+### Watchlist tab
 
 Pathogen monitoring management:
 - Browse and activate the 9 built-in watchlists (clinical_pathogens, cdc_bioterrorism, who_priority, foodborne, respiratory, who_drinking_water, nosocomial_eskape, wastewater_surveillance, zoonotic_one_health)
@@ -144,7 +144,7 @@ Pathogen monitoring management:
 - Toggle individual pathogen entries on/off
 - Kraken2 taxid mapping for database compatibility
 
-### Configuration Tab
+### Configuration tab
 
 Analysis settings:
 - Input/output directories
@@ -152,16 +152,16 @@ Analysis settings:
 - Processing mode (batch/real-time)
 - Start/stop analysis controls
 
-### Preparation Tab
+### Preparation tab
 
 Pre-run setup:
 - Reference genome downloads for watchlist pathogens
 - BLAST database preparation
 - Genome management status
 
-## Processing Modes
+## Processing modes
 
-### Batch Mode
+### Batch mode
 
 Processes all existing FASTQ files once:
 
@@ -172,7 +172,7 @@ Processes all existing FASTQ files once:
 
 Best for: Completed sequencing runs, re-analysis
 
-### Real-time Mode
+### Real-time mode
 
 Continuously monitors for new files:
 
@@ -183,46 +183,46 @@ Continuously monitors for new files:
 
 Best for: Active sequencing runs, live monitoring
 
-## Sample Handling
+## Sample handling
 
-### By Barcode
+### By barcode
 
 Use when your data is in barcode subdirectories:
 - Automatically detects `barcode01/`, `barcode02/`, etc.
 - Each subdirectory becomes a separate sample
 - Use sample selector to view individual barcodes
 
-### Single Sample
+### Single sample
 
 Use when all files belong to one sample:
 - All FASTQ files merged for analysis
 - Enter a sample name in the configuration
 - Good for non-multiplexed runs
 
-### Per File
+### Per file
 
 Use when each file is a separate sample:
 - Sample names derived from filenames
 - Each file processed independently
 - Useful for plate-based experiments
 
-## Status Indicators
+## Status indicators
 
-### Header Status
+### Header status
 
 - **Status light**: Green (running), Gray (idle), Red (error)
 - **Timer**: Countdown to next data refresh
 - **Elapsed time**: Time since analysis started
 - **Current stage**: Active pipeline process
 
-### Pipeline Progress
+### Pipeline progress
 
 When analysis is running:
 - Stage name (Chopper, Kraken2, SeqKit, etc.)
 - Process counts (completed/total)
 - Batch number (in real-time mode)
 
-### Dashboard Verdict States
+### Dashboard verdict states
 
 The Dashboard verdict banner color is the primary signal:
 
@@ -234,7 +234,7 @@ The Dashboard verdict banner color is the primary signal:
 | SCREENING IN PROGRESS | Blue | Run is active; first batch not yet processed |
 | STANDBY | Grey | No run active |
 
-## Configuration File
+## Configuration file
 
 Save your settings for reuse:
 
@@ -280,8 +280,8 @@ blast_validation: false
 - Verify Kraken2 database path is correct
 - Review Nextflow logs in the results directory
 
-## Next Steps
+## Next steps
 
-- [Configuration Reference](configuration.md) - All available options
-- [Operator Guide](OPERATOR_GUIDE.md) - Quick reference card
-- [Developer Guide](developer-guide.md) - Extending Nanometa Live
+- [Configuration reference](configuration.md) -- all available options
+- [Operator guide](OPERATOR_GUIDE.md) -- field-deployment reference and decision trees
+- [Developer guide](developer-guide.md) -- extending Nanometa Live

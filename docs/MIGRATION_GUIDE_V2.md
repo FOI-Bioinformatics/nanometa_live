@@ -356,7 +356,8 @@ A: No. Nanometa Live v2 and the nanometanf pipeline accept only basecalled FASTQ
 
 **Added:**
 - Nextflow/nanometanf v1.1.0 backend integration
-- NanometanfOutputParser for structured data access
+- Category-specific data loaders (`classification_loaders`,
+  `qc_loaders`, `validation_loaders`) re-exported via `data_loaders`
 - Real-time batch statistics monitoring
 - Dynamic resource allocation
 - Nextflow execution reports (HTML timeline, trace)
@@ -385,7 +386,7 @@ A: No. Nanometa Live v2 and the nanometanf pipeline accept only basecalled FASTQ
 - [ ] Test with existing configuration (auto-converts)
 - [ ] Verify Kraken2 database compatibility
 - [ ] Review new output structure
-- [ ] Update custom scripts to use NanometanfOutputParser
+- [ ] Update custom scripts to import from `nanometa_live.core.utils.data_loaders`
 - [ ] Test real-time monitoring
 - [ ] Benchmark performance vs v1.x (optional)
 - [ ] Update documentation/SOPs to reference v2.0

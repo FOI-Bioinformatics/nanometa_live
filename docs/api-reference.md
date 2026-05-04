@@ -250,28 +250,42 @@ loader.save(config, "/path/to/new_config.yaml")
 
 ## Parsers
 
-### `nanometa_live.core.parsers`
+### `nanometa_live.core.parsers.blast_validation_parser`
 
-#### `NanometanfOutputParser`
+#### `ValidationParser`
 
-Unified parser for all pipeline outputs.
+Parses BLAST and minimap2 validation output (`validation_results.json` and
+per-sample stats JSONs) produced by the nanometanf VALIDATION_ONLY workflow.
 
 ```python
-from nanometa_live.core.parsers import NanometanfOutputParser
+from nanometa_live.core.parsers.blast_validation_parser import ValidationParser
 
-parser = NanometanfOutputParser("/path/to/results")
-
-# Get top species
-top = parser.get_top_species(n=10)
-
-# Get QC summary
-qc = parser.get_qc_summary()
-
-# Get sample list
-samples = parser.get_samples()
+parser = ValidationParser("/path/to/results")
+results = parser.parse_all()  # list[ValidationResult]
 ```
 
-See [Parser Guide](nanometanf_parser_guide.md) for detailed documentation.
+Yields `ValidationResult` dataclasses with fields including `sample`,
+`taxid`, `status` (`ValidationStatus` enum), per-method statistics, and
+identity / coverage / hit-rate metrics. See the source for the full
+schema; the dashboard validation tab consumes these directly.
+
+### `nanometa_live.core.parsers.paf_coverage_parser`
+
+#### `parse_paf_coverage(paf_path, ...) -> CoverageData`
+
+Parse a minimap2 PAF file into per-position depth arrays and summary
+statistics.
+
+```python
+from nanometa_live.core.parsers.paf_coverage_parser import parse_paf_coverage
+
+cov = parse_paf_coverage("/path/to/results/validation/minimap2/barcode01_taxid562.paf")
+cov.mean_depth, cov.breadth, cov.depth_array  # numpy uint32
+```
+
+#### `aggregate_contig_coverage(coverage_list) -> CoverageData`
+
+Aggregate per-contig coverage into a single record for multi-contig references.
 
 ---
 

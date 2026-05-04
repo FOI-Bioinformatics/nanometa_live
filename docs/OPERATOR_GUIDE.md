@@ -19,75 +19,10 @@ The dashboard uses three colors throughout:
 - Amber: review recommended; quality is fair but not ideal.
 - Red: action required; a critical condition was detected.
 
-## Dashboard overview
-
-When you open Nanometa Live, the Dashboard tab is the default view. It has four zones, top to bottom.
-
-### Zone 1 - Verdict banner
-
-A single large banner across the top of the page. The background color summarises the run state:
-
-```
-ALL CLEAR                          0 of 42 monitored pathogens found
-   No action required              Sample: barcode01 | ACTIVE  02:14:06
-                                   Last updated 14:23:45
-```
-
-```
-ACTION REQUIRED                    2 of 42 monitored pathogens found
-   Act immediately                 Sample: barcode01 | ACTIVE  02:14:06
-                                   Last updated 14:23:45
-```
-
-Verdict states:
-
-| State | Color | What it means |
-|-------|-------|---------------|
-| ALL CLEAR | Green | No watched pathogens detected. Run is progressing or complete. |
-| ACTION REQUIRED | Red | A critical or high-risk pathogen on your watchlist was detected. Follow your safety protocol. |
-| MONITORING | Amber | Only moderate-risk watched species detected. Review. |
-| SCREENING IN PROGRESS | Blue | Run is active; first results pending. |
-| STANDBY | Grey | No run is active. |
-
-If validation (BLAST / minimap2) has not yet run on a detected pathogen, the ACTION REQUIRED banner appends "- pending confirmatory validation" to the sub-line.
-
-### Zone 2 - Pathogen alert cards (only when alerts exist)
-
-When a pathogen is detected, one or more cards appear beneath Zone 1:
-
-```
-CRITICAL - Bacillus anthracis (Anthrax)
-   4,521 matches | 3.62% of sample | HIGH confidence | BLAST Verified
-   DETECTED IN: [barcode03] [barcode11]
-   Contact your safety officer immediately.
-```
-
-`DETECTED IN:` tells you which samples each pathogen was found in. Colored chips list the samples.
-- Normal sample chips use the alert severity color.
-- Negative-control samples appear as flat gray chips with `(NC)` after the name.
-- If a pathogen appears in many samples, the first three are shown inline and the rest indicated as `+X more`.
-
-### Zone 3 - Supporting metrics (four cards)
-```
-┌──────────────────┬──────────────┬──────────────────┬──────────┐
-│    10,000        │  Good        │  12 species      │  ACTIVE  │
-│ Sequences        │  Q17 Quality │  detected        │ 02:14:06 │
-│ Analyzed         │              │                  │          │
-└──────────────────┴──────────────┴──────────────────┴──────────┘
-```
-
-1. **Sequences Analyzed**: total reads processed so far
-2. **Sample Quality**: plain-language level (Excellent / Good / Fair / Poor) with the Q-score as a subtitle
-3. **Species Detected**: count of distinct organisms found
-4. **Run Time**: elapsed time + run state badge
-
-### Zone 4 - Sample details (collapsed accordion)
-
-Click to expand a per-sample table with plain-language columns:
-- Sequences Analyzed: reads processed for that sample.
-- Sample Quality: Q-score with color coding.
-- Read Length: typical read length.
-- Match Rate: how many reads were classified.
+For the full list of verdict banner states, the four-zone Dashboard
+layout, and per-tab behaviour, see the
+[User guide](user-guide.md). This document focuses on operational
+decisions: how to interpret what you see and what to do about it.
 
 ---
 
@@ -178,56 +113,17 @@ Priority: urgent if it is blocking your work.
 
 ## Tab guide
 
-### Dashboard tab (default)
-- Purpose: summary verdict.
-- When to use: always check first.
-- Key info: Zone 1 verdict banner, Zone 2 pathogen cards with sample attribution, Zone 3 metrics, Zone 4 per-sample details.
-- Action buttons: View Report, Confirm (on pathogen cards).
+For per-tab descriptions, see the [User guide](user-guide.md#dashboard-tabs).
+The most operationally relevant tabs:
 
-### Configuration tab
-- Purpose: set up new analyses.
-- When to use: before starting a new run.
-- Key settings: database selection, processing mode.
-- Note: usually pre-configured, but verify before critical runs.
-
-### Organisms tab
-- Purpose: detected organisms and classification results.
-- When to use: after analysis completes.
-- Key info: organism cards with abundance bars and confidence badges.
-- Export: download species lists.
-
-### Quality control tab
-- Purpose: data quality metrics across pipeline stages.
-- When to use: when quality alerts appear, or to verify data is trustworthy.
-- Key info:
-  - Stage Strip at top: `Raw -> Quality-filtered -> Classified` with counts and a classification-rate delta.
-  - Read Quality card: Q20/Q30/average quality with color-coded thresholds.
-  - Read Length card: N50 and average length.
-  - Sample Breakdown table: per-sample filtered reads, classification rate, average Q score.
-- Pipeline note: when running Chopper (the default), the "Raw" slot shows "Not available" because Chopper does not produce a pre-filter read count.
-
-### Taxonomy tab
-- Purpose: visual organism relationships.
-- When to use: investigating complex samples.
-- Key views: Sankey diagram (flow), Sunburst (hierarchy).
-- Tip: switch between views with the radio buttons.
-
-### Validation tab
-- Purpose: verify organism identifications.
-- When to use: when a detection needs confirmation.
-- Key views: BLAST identity scores, minimap2 coverage plots.
-- Tip: use "Validate" buttons on organism cards to trigger on-demand validation.
-
-### Watchlist tab
-- Purpose: manage which pathogens to monitor.
-- When to use: setting up monitoring for specific organisms.
-- Key features: 9 built-in watchlists (clinical_pathogens, cdc_bioterrorism, who_priority, foodborne, respiratory, who_drinking_water, nosocomial_eskape, wastewater_surveillance, zoonotic_one_health) and custom uploads.
-- Tip: quick-start buttons activate common watchlists with one click.
-
-### Preparation tab
-- Purpose: download reference genomes and prepare BLAST databases.
-- When to use: before running validation on new organisms.
-- Key info: genome download status, database readiness.
+- **Dashboard** (default) -- always check first; verdict banner, pathogen
+  alerts, sample details accordion.
+- **Quality control** -- when a quality alert appears or you want to
+  confirm the data is trustworthy.
+- **Watchlist** -- to switch between or activate one of the nine built-in
+  watchlists or load a custom one.
+- **Preparation** -- before running validation on a new organism, or when
+  setting up an offline-deployment bundle.
 
 ---
 
@@ -469,7 +365,7 @@ Two ways to view results from a different workstation:
 2. **Bind to all interfaces** (only on a trusted network). On
    the analysis machine, restart with:
    ```bash
-   python -m nanometa_live.app --host 0.0.0.0 --port 8050
+   nanometa-live --host 0.0.0.0 --port 8050
    ```
    The dashboard is now reachable at
    `http://<machine-ip>:8050` from anywhere on the network.
