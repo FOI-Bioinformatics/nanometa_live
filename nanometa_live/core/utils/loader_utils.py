@@ -215,28 +215,42 @@ def _get_path_fingerprint(paths: List[str]) -> Tuple[float, int]:
     """
     Compute a (max_mtime, total_size) fingerprint for a list of paths.
 
-    For directories, scans contained files for the latest mtime and total size.
+    For directories, walks the entire tree (capped at MAX_FINGERPRINT_FILES
+    to bound I/O on very large outdirs) and records the latest file mtime
+    and total size. The recursive walk is required so the fingerprint
+    advances when files land in nested subdirectories such as the v1.5
+    incremental Kraken2 layout (``kraken2/<sample>/batch_reports/*``);
+    a non-recursive scandir of ``kraken2/`` finds no direct files there
+    and the cache would otherwise lock in an empty result.
+
     For regular files, uses their individual stat values.
     """
     combined_mtime = 0.0
     combined_size = 0
+    files_seen = 0
     for fp in paths:
         try:
             st = os.stat(fp)
         except OSError:
             continue
         if os.path.isdir(fp):
-            # Scan directory entries for latest mtime and accumulated size
+            # Walk the tree so files in nested subdirectories advance the
+            # fingerprint. Bounded to keep latency predictable on large outdirs.
             try:
-                for entry in os.scandir(fp):
-                    if entry.is_file():
+                for root, _dirs, files in os.walk(fp):
+                    for name in files:
+                        if files_seen >= _MAX_FINGERPRINT_FILES:
+                            break
                         try:
-                            est = entry.stat()
-                            if est.st_mtime > combined_mtime:
-                                combined_mtime = est.st_mtime
-                            combined_size += est.st_size
+                            est = os.stat(os.path.join(root, name))
                         except OSError:
-                            pass
+                            continue
+                        if est.st_mtime > combined_mtime:
+                            combined_mtime = est.st_mtime
+                        combined_size += est.st_size
+                        files_seen += 1
+                    if files_seen >= _MAX_FINGERPRINT_FILES:
+                        break
             except OSError:
                 pass
         else:
@@ -244,6 +258,14 @@ def _get_path_fingerprint(paths: List[str]) -> Tuple[float, int]:
                 combined_mtime = st.st_mtime
             combined_size += st.st_size
     return (combined_mtime, combined_size)
+
+
+# Cap the number of files inspected per fingerprint computation. Picked to
+# comfortably cover several samples each with hundreds of incremental
+# batch reports while still being fast enough to run on every callback
+# poll. If a real outdir ever exceeds this, the fingerprint will plateau
+# but the loader's TTL cache still expires and triggers a fresh parse.
+_MAX_FINGERPRINT_FILES = 5000
 
 
 def _check_mtime_cache(
