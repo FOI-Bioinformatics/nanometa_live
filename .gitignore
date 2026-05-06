@@ -185,3 +185,11 @@ verify_visualizations.py
 .DS_Store
 .AppleDouble
 .LSOverride
+
+# Local AI assistant tool caches (per-developer, not shared)
+.claude/
+.playwright-mcp/
+
+# Playwright scratch screenshots from interactive scenario runs
+scenario*.png
+page-*.png
