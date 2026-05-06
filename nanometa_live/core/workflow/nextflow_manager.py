@@ -8,6 +8,7 @@ workflow manager while maintaining a compatible interface.
 
 import os
 import json
+import shutil
 import signal
 import time
 import glob
@@ -181,6 +182,45 @@ class NextflowManager:
         except (subprocess.CalledProcessError, PermissionError, OSError) as e:
             logging.exception("Conda availability check failed")
             return False, f"Error checking Conda: {e}"
+
+    @staticmethod
+    def _purge_broken_conda_envs(work_dir: str) -> list:
+        """Remove half-built conda env dirs in ``<work_dir>/conda``.
+
+        Nextflow stores per-recipe conda envs as
+        ``<work_dir>/conda/env-<hash>/``. A successful build leaves a
+        ``conda-meta/history`` file (written last by conda). If a
+        previous nanometa-live run was killed mid-build, the env dir
+        exists but ``conda-meta/history`` does not, and Nextflow's
+        cache treats the directory as already built. Subsequent runs
+        then activate an empty env and fail with "command not found".
+
+        Returns the list of paths removed (empty if everything was
+        clean or the conda cache directory does not exist yet).
+        """
+        conda_cache = os.path.join(work_dir, "conda")
+        if not os.path.isdir(conda_cache):
+            return []
+        removed = []
+        for name in os.listdir(conda_cache):
+            if not name.startswith("env-"):
+                continue
+            env_path = os.path.join(conda_cache, name)
+            if not os.path.isdir(env_path):
+                continue
+            history_marker = os.path.join(env_path, "conda-meta", "history")
+            if os.path.isfile(history_marker):
+                # Fully-built env; leave it alone.
+                continue
+            try:
+                shutil.rmtree(env_path)
+                removed.append(env_path)
+            except OSError as e:
+                logging.warning(
+                    "Could not remove half-built conda env %s: %s",
+                    env_path, e,
+                )
+        return removed
 
     def _parse_pipeline_source(self) -> Tuple[str, Optional[str]]:
         """
@@ -467,6 +507,21 @@ class NextflowManager:
                     if not conda_check[0]:
                         return False, conda_check[1]
                     logging.info(conda_check[1])
+                    # Sweep half-built conda env dirs from a previously
+                    # interrupted run. Nextflow's conda cache treats the
+                    # presence of an env directory as "already built" and
+                    # will silently activate an empty env, producing a
+                    # downstream "command not found" failure such as
+                    # `multiqc: command not found`. Removing the partial
+                    # dir forces a clean rebuild on this run.
+                    purged = self._purge_broken_conda_envs(self.work_dir)
+                    if purged:
+                        logging.warning(
+                            "Purged %d incomplete conda env(s) from prior "
+                            "interrupted run: %s",
+                            len(purged),
+                            ", ".join(os.path.basename(p) for p in purged),
+                        )
 
                 # Parse pipeline source configuration
                 pipeline_path, revision = self._parse_pipeline_source()
