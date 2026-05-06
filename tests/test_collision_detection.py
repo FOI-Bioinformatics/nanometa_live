@@ -171,3 +171,83 @@ class TestArchiveExistingResults:
         archive = BackendManager.archive_existing_results(str(tmp_path))
         assert archive is not None
         assert Path(archive).parent == tmp_path
+
+
+# ---------------------------------------------------------------------------
+# Input fingerprinting
+# ---------------------------------------------------------------------------
+
+
+class TestInputFingerprint:
+    """The fingerprint exists so a re-run with different inputs into a
+    populated outdir gets a loud warning instead of silently mixing
+    results from two unrelated datasets."""
+
+    def _cfg(self, **overrides):
+        base = {
+            "nanopore_output_directory": "/data/run1",
+            "sample_handling": "by_barcode",
+            "processing_mode": "batch",
+            "kraken_db": "/dbs/k2",
+        }
+        base.update(overrides)
+        return base
+
+    def test_identical_configs_match(self):
+        a = BackendManager.compute_input_fingerprint(self._cfg())
+        b = BackendManager.compute_input_fingerprint(self._cfg())
+        assert a == b
+        assert a  # non-empty
+
+    def test_different_input_dir_changes_hash(self):
+        a = BackendManager.compute_input_fingerprint(self._cfg())
+        b = BackendManager.compute_input_fingerprint(
+            self._cfg(nanopore_output_directory="/data/run2")
+        )
+        assert a != b
+
+    def test_unrelated_keys_do_not_change_hash(self):
+        # Adding/changing keys outside the fingerprint set must not
+        # invalidate a resume; otherwise toggling BLAST or moving the
+        # GUI to a different port would force a full rerun.
+        a = BackendManager.compute_input_fingerprint(self._cfg())
+        b = BackendManager.compute_input_fingerprint(
+            self._cfg(blast_validation=True, port=9000)
+        )
+        assert a == b
+
+    def test_empty_config_returns_empty_string(self):
+        assert BackendManager.compute_input_fingerprint({}) == ""
+
+    def test_write_then_read_roundtrip(self, tmp_path):
+        cfg = self._cfg()
+        BackendManager.write_run_metadata(str(tmp_path), cfg)
+        meta = BackendManager.read_run_metadata(str(tmp_path))
+        assert meta is not None
+        assert meta["fingerprint"] == BackendManager.compute_input_fingerprint(cfg)
+        assert meta["inputs"]["sample_handling"] == "by_barcode"
+
+    def test_read_returns_none_when_no_metadata(self, tmp_path):
+        assert BackendManager.read_run_metadata(str(tmp_path)) is None
+
+    def test_read_returns_none_on_malformed_json(self, tmp_path):
+        (tmp_path / BackendManager.RUN_METADATA_FILENAME).write_text("{not json")
+        assert BackendManager.read_run_metadata(str(tmp_path)) is None
+
+    def test_fingerprint_matches_returns_none_without_prior(self, tmp_path):
+        assert BackendManager.fingerprint_matches(str(tmp_path), self._cfg()) is None
+
+    def test_fingerprint_matches_true_for_same_input(self, tmp_path):
+        cfg = self._cfg()
+        BackendManager.write_run_metadata(str(tmp_path), cfg)
+        assert BackendManager.fingerprint_matches(str(tmp_path), cfg) is True
+
+    def test_fingerprint_matches_false_when_input_changes(self, tmp_path):
+        BackendManager.write_run_metadata(str(tmp_path), self._cfg())
+        other = self._cfg(nanopore_output_directory="/data/different")
+        assert BackendManager.fingerprint_matches(str(tmp_path), other) is False
+
+    def test_write_is_no_op_when_outdir_missing(self, tmp_path):
+        # Should not raise; just silently skip.
+        BackendManager.write_run_metadata(str(tmp_path / "missing"), self._cfg())
+        assert not (tmp_path / "missing").exists()

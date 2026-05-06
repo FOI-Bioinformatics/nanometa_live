@@ -32,17 +32,20 @@ class NextflowManager:
     # Default remote repository
     DEFAULT_REMOTE_REPO = "foi-bioinformatics/nanometanf"
 
-    def __init__(self, data_dir: str, pipeline_source: str = "remote:main"):
+    def __init__(self, data_dir: str, pipeline_source: str = "remote:dev"):
         """
         Initialize the Nextflow manager.
 
         Args:
             data_dir: Base directory for storing data, logs, and work files
             pipeline_source: Pipeline source specification. Options:
-                - "remote:main" - GitHub repo with main branch (pinned default)
-                - "remote:dev" - GitHub repo with dev branch (active development)
-                - "remote:master" - GitHub repo with master branch (legacy)
-                - "/path/to/local/nanometanf" - Local filesystem path
+                - "remote:dev" - GitHub repo, dev branch (default; active development)
+                - "remote:master" - GitHub repo, master branch (legacy default branch)
+                - "local:/path/to/nanometanf" - Local filesystem path
+                - "/path/to/nanometanf" - Local filesystem path (no prefix)
+            Note: the upstream FOI-Bioinformatics/nanometanf repository
+            does not have a "main" branch; use "remote:dev" or
+            "remote:master" instead.
         """
         self.data_dir = data_dir
         self.log_dir = os.path.join(data_dir, "logs")
@@ -211,8 +214,7 @@ class NextflowManager:
             # Local filesystem path (no prefix)
             return source, None
 
-        elif source in ("master", "main", "dev"):
-            # Shorthand for remote:branch
+        elif source in ("master", "dev"):
             return self.DEFAULT_REMOTE_REPO, source
 
         else:
@@ -1087,105 +1089,3 @@ class NextflowManager:
             return ""
 
 
-class NextflowExecutor:
-    """
-    Alternative Nextflow executor using direct subprocess (for compatibility).
-
-    This class provides a simpler interface similar to SnakemakeExecutor.
-    """
-
-    def __init__(self, data_dir: str):
-        """
-        Initialize the Nextflow executor.
-
-        Args:
-            data_dir: Base directory for storing data and logs
-        """
-        self.data_dir = data_dir
-        self.log_dir = os.path.join(data_dir, "logs")
-        self.process = None
-        self.status_thread = None
-        self.running = False
-        self.status = {"running": False, "last_updated": None, "errors": []}
-
-        # Create logs directory
-        os.makedirs(self.log_dir, exist_ok=True)
-
-    def start(
-        self,
-        config_path: str,
-        profile: str = "docker",
-        cores: int = 1
-    ) -> Tuple[bool, str]:
-        """
-        Start the Nextflow pipeline as a subprocess.
-
-        Args:
-            config_path: Path to configuration file
-            profile: Nextflow profile to use
-            cores: Number of CPU cores to use
-
-        Returns:
-            Tuple of (success, message)
-        """
-        if self.running:
-            return False, "Workflow is already running"
-
-        try:
-            # Use NextflowManager for actual execution
-            manager = NextflowManager(self.data_dir)
-            success, message = manager.setup(config_path)
-
-            if not success:
-                return False, message
-
-            success, message = manager.start(profile=profile, cores=cores)
-
-            if success:
-                self.running = True
-                self.status["running"] = True
-                self.status["last_updated"] = time.time()
-
-            return success, message
-
-        except (OSError, RuntimeError, ValueError) as e:
-            logging.exception("Error starting Nextflow workflow")
-            return False, f"Error starting Nextflow workflow: {e}"
-
-    def stop(self) -> Tuple[bool, str]:
-        """
-        Stop the Nextflow workflow.
-
-        Returns:
-            Tuple of (success, message)
-        """
-        if not self.running:
-            return False, "Workflow is not running"
-
-        self._user_stopped = True
-        try:
-            if self.process:
-                self.process.terminate()
-                try:
-                    self.process.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    self.process.kill()
-
-            self.running = False
-            self.status["running"] = False
-            self.status["last_updated"] = time.time()
-
-            return True, "Nextflow workflow stopped"
-
-        except (subprocess.TimeoutExpired, ProcessLookupError, PermissionError, OSError) as e:
-            logging.exception("Error stopping Nextflow workflow")
-            return False, f"Error stopping Nextflow workflow: {e}"
-
-    def get_status(self) -> Dict[str, Any]:
-        """
-        Get the current status of the workflow.
-
-        Returns:
-            Dictionary with status information
-        """
-        return self.status

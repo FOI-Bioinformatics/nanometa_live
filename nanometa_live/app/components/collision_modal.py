@@ -81,17 +81,44 @@ def create_collision_modal() -> dbc.Modal:
     )
 
 
-def render_collision_body(outdir: str, found: List[str]) -> html.Div:
+def render_collision_body(
+    outdir: str,
+    found: List[str],
+    input_match: object = None,
+) -> html.Div:
     """Return the body children for the modal given the detection result.
 
     Kept as a pure function so it can be unit-tested without spinning
     up the Dash callback graph.
+
+    ``input_match`` reflects the prior-run input fingerprint:
+        * True  -- the new input matches the previous run; resume is safe.
+        * False -- the new input differs; warn loudly because resuming
+                   would mix unrelated data.
+        * None  -- no prior fingerprint on disk; stay neutral.
     """
     if not found:
         # Should not normally render; defensive fallback.
         return html.Div(
             "No existing results were detected. You can safely start.",
             className="text-muted small",
+        )
+
+    mismatch_banner = None
+    if input_match is False:
+        mismatch_banner = dbc.Alert(
+            [
+                html.I(
+                    className="bi bi-exclamation-triangle-fill me-2"
+                ),
+                html.Strong("Input differs from the previous run."),
+                " ",
+                "Resuming would mix results from two unrelated "
+                "datasets. Move the existing results to a subfolder, "
+                "or cancel and choose a different output directory.",
+            ],
+            color="danger",
+            className="mb-3",
         )
 
     subdir_chips = [
@@ -104,8 +131,10 @@ def render_collision_body(outdir: str, found: List[str]) -> html.Div:
         for name in found
     ]
 
-    return html.Div(
-        [
+    body_children = []
+    if mismatch_banner is not None:
+        body_children.append(mismatch_banner)
+    body_children.extend([
             html.P(
                 [
                     html.Strong("Output directory:"),
@@ -169,5 +198,5 @@ def render_collision_body(outdir: str, found: List[str]) -> html.Div:
                 ],
                 className="mb-0",
             ),
-        ]
-    )
+        ])
+    return html.Div(body_children)

@@ -10,6 +10,7 @@ This module manages the backend processes for the application, including:
 import os
 import time
 import json
+import hashlib
 import logging
 import platform
 import threading
@@ -322,7 +323,15 @@ class BackendManager:
             json.dump(self.config, f, indent=2)
 
         # Update pipeline source if specified in config
-        pipeline_source = self.config.get("pipeline_source", "remote:main")
+        pipeline_source = self.config.get("pipeline_source")
+        if not pipeline_source:
+            pipeline_source = "remote:dev"
+            logging.warning(
+                "config['pipeline_source'] is missing; falling back to "
+                "'remote:dev'. Set pipeline_source explicitly in config.yaml "
+                "(e.g. 'local:/path/to/nanometanf' or 'remote:dev') to silence "
+                "this warning."
+            )
         self.workflow_manager.set_pipeline_source(pipeline_source)
 
         # Offline guard: reject remote sources before any network attempt.
@@ -422,6 +431,100 @@ class BackendManager:
                 found.append(name)
         return found
 
+    # File written into the output directory at every successful
+    # pipeline start. Read on the next launch so the GUI can warn the
+    # operator when they are about to point a *different* input at an
+    # outdir that holds results from a prior, *different* run -- the
+    # exact case where silently mixing data would be hardest to spot
+    # after the fact.
+    RUN_METADATA_FILENAME = ".nanometa.run.json"
+
+    # Config keys that, taken together, identify the logical "input"
+    # of a run. Two runs with identical values for these keys are
+    # considered the same input and are safe to resume against.
+    _FINGERPRINT_KEYS = (
+        "nanopore_output_directory",
+        "sample_handling",
+        "processing_mode",
+        "kraken_db",
+    )
+
+    @staticmethod
+    def compute_input_fingerprint(config: Dict[str, Any]) -> str:
+        """Return a stable hash of the input-identifying config keys.
+
+        The hash deliberately excludes runtime-only knobs (port,
+        update interval, validation toggles) so that turning BLAST on
+        or off between runs against the same data is *not* flagged as
+        an input change. Order-independent: keys are sorted before
+        hashing so dict iteration order does not matter.
+        """
+        if not config:
+            return ""
+        parts = []
+        for key in BackendManager._FINGERPRINT_KEYS:
+            value = config.get(key, "")
+            parts.append(f"{key}={value}")
+        payload = "\n".join(parts).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    @staticmethod
+    def read_run_metadata(outdir: str) -> Optional[Dict[str, Any]]:
+        """Return the persisted run metadata for ``outdir`` or None.
+
+        Never raises; a missing or malformed metadata file just means
+        we have no prior fingerprint to compare against.
+        """
+        if not outdir:
+            return None
+        path = os.path.join(outdir, BackendManager.RUN_METADATA_FILENAME)
+        if not os.path.isfile(path):
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            return None
+        return data if isinstance(data, dict) else None
+
+    @staticmethod
+    def write_run_metadata(outdir: str, config: Dict[str, Any]) -> None:
+        """Persist input fingerprint + identifying fields under outdir.
+
+        Best-effort: a write failure is logged but never fails the
+        run. The metadata is informational; missing it just means the
+        next launch falls back to "input identical/unknown" handling.
+        """
+        if not outdir or not os.path.isdir(outdir):
+            return
+        payload = {
+            "fingerprint": BackendManager.compute_input_fingerprint(config),
+            "written_at": datetime.now().isoformat(timespec="seconds"),
+            "inputs": {
+                key: config.get(key, "")
+                for key in BackendManager._FINGERPRINT_KEYS
+            },
+        }
+        path = os.path.join(outdir, BackendManager.RUN_METADATA_FILENAME)
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, indent=2, sort_keys=True)
+        except OSError as e:
+            logging.warning(f"Could not write run metadata to {path}: {e}")
+
+    @staticmethod
+    def fingerprint_matches(outdir: str, config: Dict[str, Any]) -> Optional[bool]:
+        """Compare current config to the prior run's fingerprint.
+
+        Returns True if matched, False if mismatched, or None when no
+        prior fingerprint is available (so the caller can decide
+        whether to warn or stay silent).
+        """
+        prior = BackendManager.read_run_metadata(outdir)
+        if not prior or "fingerprint" not in prior:
+            return None
+        return prior["fingerprint"] == BackendManager.compute_input_fingerprint(config)
+
     @staticmethod
     def archive_existing_results(outdir: str) -> Optional[str]:
         """Move detected result subdirs into ``<outdir>/_archive_<ts>/``.
@@ -501,6 +604,16 @@ class BackendManager:
         if not success:
             self._release_lock()  # Release lock on failure
             return False, message
+
+        # Persist input fingerprint so the next launch can detect when
+        # the operator is about to point a different input at this
+        # outdir (the case where mixing data is hardest to spot later).
+        outdir_for_meta = (
+            self.config.get("results_output_directory")
+            or self.config.get("main_dir")
+            or results_dir
+        )
+        BackendManager.write_run_metadata(outdir_for_meta, self.config)
 
         # Mark as running with start time for elapsed time tracking (thread-safe)
         with self._status_lock:

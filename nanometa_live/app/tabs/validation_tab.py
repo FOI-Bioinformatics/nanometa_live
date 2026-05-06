@@ -337,7 +337,7 @@ def register_validation_callbacks(app: Dash):
                 return {"results": [], "summary": {}, "message": "No configuration loaded",
                         "selected_sample": selected_sample}
 
-            if not config.get("blast_validation", True):
+            if not config.get("blast_validation", False):
                 return {
                     "results": [],
                     "summary": {},

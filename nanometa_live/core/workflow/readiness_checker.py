@@ -681,8 +681,9 @@ class ReadinessChecker:
             return CheckResult(
                 "Pipeline Source", False, Severity.CRITICAL,
                 "No pipeline_source configured. Set pipeline_source in "
-                "config.yaml to 'remote:main' or a local path; otherwise "
-                "the pipeline cannot be launched.",
+                "config.yaml to 'remote:dev' or a local path (e.g. "
+                "'local:/path/to/nanometanf'); otherwise the pipeline "
+                "cannot be launched.",
             )
         # Strip "local:" prefix if present (used by nextflow_manager convention)
         normalized = source
@@ -707,7 +708,7 @@ class ReadinessChecker:
                 "Pipeline Source", False, Severity.CRITICAL,
                 f"Local pipeline path does not exist: {p}. Set "
                 f"pipeline_source in config.yaml to a valid local path or "
-                f"to a remote spec such as 'remote:main'.",
+                f"to a remote spec such as 'remote:dev'.",
             )
         # Remote source: verify it's a recognised form
         if not (normalized.startswith("remote:")
@@ -715,7 +716,7 @@ class ReadinessChecker:
             return CheckResult(
                 "Pipeline Source", False, Severity.WARNING,
                 f"Pipeline source '{source}' is not a recognised remote "
-                f"form. Expected 'remote:<branch>' (e.g. 'remote:main').",
+                f"form. Expected 'remote:<branch>' (e.g. 'remote:dev').",
             )
         # Remote source (well-formed): first run will fetch the pipeline
         # from GitHub. Surfaced as INFO rather than silently skipped.

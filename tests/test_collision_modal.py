@@ -105,3 +105,25 @@ class TestRenderCollisionBody:
         body = render_collision_body("/tmp/results", [])
         text = _flatten_text(body).lower()
         assert "no existing results" in text
+
+    def test_no_mismatch_banner_when_input_unknown(self):
+        body = render_collision_body(
+            "/tmp/results", ["kraken2"], input_match=None
+        )
+        text = _flatten_text(body).lower()
+        assert "input differs" not in text
+
+    def test_no_mismatch_banner_when_input_matches(self):
+        body = render_collision_body(
+            "/tmp/results", ["kraken2"], input_match=True
+        )
+        text = _flatten_text(body).lower()
+        assert "input differs" not in text
+
+    def test_mismatch_banner_when_input_differs(self):
+        body = render_collision_body(
+            "/tmp/results", ["kraken2"], input_match=False
+        )
+        text = _flatten_text(body).lower()
+        assert "input differs" in text
+        assert "mix" in text

@@ -463,14 +463,16 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         )
         found = backend_manager.detect_existing_results(outdir)
         if found:
-            # Open the collision modal; do NOT start the run yet.
+            # Compare current input fingerprint with the prior run's
+            # (None when no .nanometa.run.json exists yet).
+            input_match = backend_manager.fingerprint_matches(outdir, config)
             return (
                 no_update,
                 no_update,
                 no_update,
                 True,
-                render_collision_body(outdir, found),
-                {"outdir": outdir, "found": found},
+                render_collision_body(outdir, found, input_match=input_match),
+                {"outdir": outdir, "found": found, "input_match": input_match},
             )
 
         # Clean outdir -- start the analysis directly.

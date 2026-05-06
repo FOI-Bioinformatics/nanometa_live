@@ -2,15 +2,12 @@
 Workflow management module for Nanometa Live.
 
 This package handles the processing pipeline and all associated
-workflow management functionality using Nextflow.
-
-Note: SnakemakeManager is deprecated. The application now uses NextflowManager
-via BackendManager. snakemake_manager.py is kept for backward compatibility
-with standalone scripts but is not imported by default.
+workflow management functionality using Nextflow via the nanometanf
+pipeline. Earlier versions also shipped a Snakemake backend; that
+code path has been removed.
 """
 
 from nanometa_live.core.workflow.backend_manager import BackendManager
-from nanometa_live.core.workflow.pipeline_runner import run_pipeline  # Deprecated stub
 from nanometa_live.core.workflow.on_demand_validator import (
     OnDemandValidator,
     ValidationJob,
@@ -21,11 +18,8 @@ from nanometa_live.core.workflow.readiness_checker import ReadinessChecker, Read
 from nanometa_live.core.workflow.mobile_lab_preparer import MobileLabPreparer, PreparationResult
 from nanometa_live.core.workflow.bundle_manager import BundleManager
 
-# SnakemakeManager removed from imports - use NextflowManager via BackendManager
-
 __all__ = [
     "BackendManager",
-    "run_pipeline",
     "OnDemandValidator",
     "ValidationJob",
     "ValidationResult",

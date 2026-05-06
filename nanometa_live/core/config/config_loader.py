@@ -10,16 +10,16 @@ It provides functionality to:
 """
 
 import os
+import glob
 import logging
 import datetime
-
-logger = logging.getLogger(__name__)
-import glob
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 # Use ruamel.yaml for comment preservation
 from ruamel.yaml import YAML, YAMLError, constructor as yaml_constructor
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigLoader:
@@ -116,7 +116,7 @@ class ConfigLoader:
             # "pipeline not found" after the first run attempt. Override in
             # config.yaml (e.g. "remote:dev" for active development, or a
             # local path "local:/path/to/checkout") as needed.
-            "pipeline_source": "remote:main",
+            "pipeline_source": "remote:dev",
             # Realtime mode settings
             "max_file_age_minutes": 1000000,
             # Stop real-time monitoring after N minutes with no new files (null = run indefinitely)
