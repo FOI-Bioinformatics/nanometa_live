@@ -720,23 +720,24 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
             os.makedirs(samplesheet_dir, exist_ok=True)
             samplesheet_path = os.path.join(samplesheet_dir, "input_samplesheet.csv")
 
-            try:
-                generate_samplesheet(
-                    nanopore_dir,
-                    samplesheet_path,
-                    sample_handling=sample_handling,
-                    sample_name=sample_name
-                )
-                params["input"] = samplesheet_path
-                logging.info(f"Batch mode ({sample_handling}): Generated samplesheet at {samplesheet_path}")
-            except ValueError as e:
-                # Fall back to realtime mode if samplesheet generation fails
-                logging.warning(f"Samplesheet generation failed: {e}")
-                logging.warning("Falling back to realtime mode")
-                params["realtime_mode"] = True
-                params["nanopore_output_dir"] = nanopore_dir
-                params["batch_size"] = config.get("batch_size", 10)
-                params["batch_interval"] = format_duration(check_interval)
+            # Let ValueError propagate. The previous behaviour silently
+            # flipped the run into realtime mode on samplesheet failure,
+            # which masked configuration mistakes (wrong sample_handling
+            # for the actual directory layout, missing FASTQ files,
+            # mismatched barcode subdirs) and produced a different
+            # pipeline mode than the operator chose. NextflowManager.setup
+            # catches this and surfaces the message to the GUI.
+            generate_samplesheet(
+                nanopore_dir,
+                samplesheet_path,
+                sample_handling=sample_handling,
+                sample_name=sample_name,
+            )
+            params["input"] = samplesheet_path
+            logging.info(
+                f"Batch mode ({sample_handling}): "
+                f"Generated samplesheet at {samplesheet_path}"
+            )
 
     else:
         # Realtime mode: Use watchPath for new files

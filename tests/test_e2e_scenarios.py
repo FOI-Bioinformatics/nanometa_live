@@ -285,6 +285,38 @@ class TestBatchInputDirAutoDetect:
         assert "input" in params and params["input"]
         assert "input_dir" not in params
 
+    def test_samplesheet_failure_raises_instead_of_silent_realtime(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Operator-visible misconfigurations must surface, not be hidden.
+
+        Pointing single_sample mode at an empty input directory used to
+        flip params silently into realtime mode. The fix is to let the
+        ValueError from generate_samplesheet propagate so NextflowManager
+        surfaces it to the GUI as a clear "Setup error".
+        """
+        from nanometa_live.core.config.parameter_mapping import create_nextflow_params
+
+        empty_dir = tmp_path / "no_fastqs_here"
+        empty_dir.mkdir()
+        results_dir = tmp_path / "results"
+        results_dir.mkdir()
+
+        config = {
+            "nanopore_output_directory": str(empty_dir),
+            "results_output_directory": str(results_dir),
+            "kraken_db": str(tmp_path / "kraken2_db"),
+            "processing_mode": "batch",
+            "sample_handling": "single_sample",
+            "sample_name": "sample",
+            "analysis_name": "EmptyInput",
+            "check_intervals_seconds": 15,
+            "blast_validation": False,
+        }
+
+        with pytest.raises(ValueError):
+            create_nextflow_params(config)
+
 
 # ---------------------------------------------------------------------------
 # Offline-mode environment injection tests

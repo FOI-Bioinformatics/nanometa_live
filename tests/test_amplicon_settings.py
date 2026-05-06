@@ -186,12 +186,29 @@ class TestAmpliconParamsRouted:
     """The five new pipeline params must flow through
     ``create_nextflow_params`` when the operator has set them."""
 
-    def _amplicon_config(self):
+    @staticmethod
+    def _seed_input(tmp_path):
+        """Create a minimal but valid input directory.
+
+        ``create_nextflow_params`` calls ``generate_samplesheet``, which
+        (rightly) raises if the directory has no FASTQ files. These
+        tests only care about parameter routing, so a single empty
+        FASTQ is enough.
+        """
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        (input_dir / "reads.fastq.gz").write_bytes(b"")
+        results_dir = tmp_path / "results"
+        results_dir.mkdir()
+        return input_dir, results_dir
+
+    def _amplicon_config(self, tmp_path):
+        input_dir, results_dir = self._seed_input(tmp_path)
         return {
             # Required basics so create_nextflow_params does not error
-            "nanopore_output_directory": "/tmp/test_amplicon",
-            "kraken_db": "/tmp/test_db",
-            "results_output_directory": "/tmp/test_results",
+            "nanopore_output_directory": str(input_dir),
+            "kraken_db": str(tmp_path / "kraken_db"),
+            "results_output_directory": str(results_dir),
             "processing_mode": "batch",
             "sample_handling": "single_sample",
             "blast_validation": False,
@@ -204,8 +221,8 @@ class TestAmpliconParamsRouted:
             "kraken2_minimum_hit_groups": 2,
         }
 
-    def test_amplicon_config_flows_to_pipeline_params(self):
-        params = create_nextflow_params(self._amplicon_config())
+    def test_amplicon_config_flows_to_pipeline_params(self, tmp_path):
+        params = create_nextflow_params(self._amplicon_config(tmp_path))
         assert params["chopper_minlength"] == 100
         assert params["chopper_quality"] == 7
         assert params["filtlong_min_length"] == 100
@@ -213,14 +230,15 @@ class TestAmpliconParamsRouted:
         assert params["kraken2_confidence"] == 0.05
         assert params["kraken2_minimum_hit_groups"] == 2
 
-    def test_long_read_defaults_when_keys_absent(self):
+    def test_long_read_defaults_when_keys_absent(self, tmp_path):
         """When the operator has not set any of the new keys, the
         defaults match the nanometanf pipeline-side defaults so
         existing long-read flows are unaffected."""
+        input_dir, results_dir = self._seed_input(tmp_path)
         baseline = {
-            "nanopore_output_directory": "/tmp/test",
-            "kraken_db": "/tmp/db",
-            "results_output_directory": "/tmp/results",
+            "nanopore_output_directory": str(input_dir),
+            "kraken_db": str(tmp_path / "kraken_db"),
+            "results_output_directory": str(results_dir),
             "processing_mode": "batch",
             "sample_handling": "single_sample",
             "blast_validation": False,
