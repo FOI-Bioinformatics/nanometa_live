@@ -195,17 +195,33 @@ def clear_data_cache():
 
 
 def _get_dir_latest_mtime(directory: str) -> float:
-    """Return the most recent mtime among files in a directory (non-recursive)."""
+    """Return the most recent mtime among files in a directory (recursive).
+
+    Walks the entire tree, capped at ``_MAX_FINGERPRINT_FILES`` to bound I/O on
+    very large outdirs. The recursive walk is required so the freshness
+    fingerprint advances when files land in nested subdirectories such as the
+    real-time Kraken2 layout (``kraken2/<sample>/batch_reports/*``); a
+    non-recursive scandir of ``kraken2/`` finds no direct files there and the
+    fingerprint would otherwise lock in a constant value, leaving fingerprint-
+    gated callbacks permanently stale.
+
+    Mirrors the bounded-walk behaviour of ``_get_path_fingerprint`` so the two
+    helpers stay paired.
+    """
     latest = 0.0
+    files_seen = 0
     try:
-        for entry in os.scandir(directory):
-            if entry.is_file():
+        for root, _dirs, files in os.walk(directory):
+            for name in files:
+                if files_seen >= _MAX_FINGERPRINT_FILES:
+                    return latest
                 try:
-                    mt = entry.stat().st_mtime
-                    if mt > latest:
-                        latest = mt
+                    mt = os.stat(os.path.join(root, name)).st_mtime
                 except OSError:
-                    pass
+                    continue
+                if mt > latest:
+                    latest = mt
+                files_seen += 1
     except OSError:
         pass
     return latest

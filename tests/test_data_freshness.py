@@ -92,6 +92,32 @@ class TestValidationInFreshnessScan:
         assert fp1 != fp2
 
 
+class TestNestedKraken2BatchReports:
+    """Realtime mode writes per-sample, per-batch kraken2 reports under
+    ``kraken2/<sample>/batch_reports/*``. The freshness fingerprint must
+    advance when a new batch lands there, so any callback gated on the
+    centralized fingerprint sees fresh data. A non-recursive scan of
+    ``kraken2/`` finds zero direct files in this layout and would lock
+    the fingerprint at a constant value (B1 in the 2026-05-07 audit).
+    """
+
+    def test_nested_batch_report_advances_fingerprint(self, tmp_path):
+        for sub in ("kraken2", "fastp", "validation", "seqkit"):
+            (tmp_path / sub).mkdir()
+
+        fp1 = check_data_freshness(str(tmp_path))
+
+        nested = tmp_path / "kraken2" / "barcode01" / "batch_reports" / "batch_1.kraken2.report.txt"
+        _touch(nested, mtime=1_700_000_000)
+        fp2 = check_data_freshness(str(tmp_path))
+        assert fp2 != fp1
+
+        # Update the same nested file's mtime -- fingerprint must advance again.
+        _touch(nested, mtime=1_700_000_999)
+        fp3 = check_data_freshness(str(tmp_path))
+        assert fp3 != fp2
+
+
 class TestEmptyDirsDoNotRaise:
     def test_missing_subdirs_do_not_raise(self, tmp_path):
         # Pipeline output that hasn't started yet may be missing some
