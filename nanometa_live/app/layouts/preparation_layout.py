@@ -142,16 +142,6 @@ def create_preparation_layout():
             ]),
         ], className="mb-3"),
 
-        # Recommended order guidance
-        dbc.Alert([
-            html.I(className="bi bi-signpost-2 me-2"),
-            html.Strong("Recommended order: "),
-            html.Span("1) Run the Readiness Checklist below. "),
-            html.Span("2) Fix any issues it reports. "),
-            html.Span("3) If needed, download a species database. "),
-            html.Span("4) If using confirmation testing, download reference genomes."),
-        ], color="light", className="small py-2 mb-3 border"),
-
         # Readiness checklist
         dbc.Card([
             dbc.CardHeader([
@@ -197,63 +187,80 @@ def create_preparation_layout():
             ),
         ], className="mb-4"),
 
-        # Kraken2 Database Download (moved from Configuration tab)
-        html.Div(_create_kraken_db_download_card(), id="kraken2-db-card"),
+        # Recommended order guidance (rewritten to describe auto vs manual split)
+        dbc.Alert([
+            html.I(className="bi bi-signpost-2 me-2"),
+            html.Strong("Recommended order: "),
+            html.Span(
+                "Most operators should use Run Preparation (left) for one-shot prep, "
+                "then Export Bundle. Use the manual cards on the right only to inspect "
+                "or re-run individual stages."
+            ),
+        ], color="light", className="small py-2 mb-3 border"),
 
-        # Taxid Mapping / Rescan DB (moved from Watchlist tab)
-        html.Div(_create_rescan_db_card(), id="taxid-mapping-card"),
-
-        # Genome Downloads (moved from Watchlist tab)
-        html.Div(_create_genome_downloads_card(), id="genome-downloads-card"),
-
-        # Import Genomes (manual / archive)
-        html.Div(_create_import_genomes_card(), id="import-genomes-card"),
-
-        # Run Preparation
-        dbc.Card([
-            dbc.CardHeader([
-                html.H5([
-                    html.I(className="bi bi-gear-wide-connected me-2"),
-                    "Run Preparation"
-                ], className="mb-0"),
-            ]),
-            dbc.CardBody([
-                html.P(
-                    "Run all preparation steps automatically: verify the database, "
-                    "check organism mappings, download reference genomes, and build "
-                    "search indexes.",
-                    className="text-muted"
-                ),
-                dbc.Checklist(
-                    id="prep-options",
-                    options=[
-                        {"label": " Skip already-completed steps", "value": "skip_existing"},
-                    ],
-                    value=["skip_existing"],
-                    className="mb-3",
-                ),
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Button(
-                            [html.I(className="bi bi-play-circle me-2"), "Start Preparation"],
-                            id="start-prep-btn",
-                            color="primary",
-                            className="me-2",
-                        ),
-                        dbc.Button(
-                            [html.I(className="bi bi-x-circle me-2"), "Cancel"],
-                            id="cancel-prep-btn",
-                            color="outline-danger",
-                            style={"display": "none"},
-                        ),
+        # Auto path (left) vs manual cards (right)
+        dbc.Row([
+            # AUTO PATH
+            dbc.Col([
+                # Run Preparation
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.H5([
+                            html.I(className="bi bi-gear-wide-connected me-2"),
+                            "Run Preparation"
+                        ], className="mb-0"),
                     ]),
-                ]),
-                # Progress area
-                html.Div(id="prep-progress-area", children=[], className="mt-3"),
-                # Result area
-                html.Div(id="prep-result-area", children=[], className="mt-3"),
-            ]),
-        ], className="mb-4"),
+                    dbc.CardBody([
+                        html.P(
+                            "Run all preparation steps automatically: verify the database, "
+                            "check organism mappings, download reference genomes, and build "
+                            "search indexes.",
+                            className="text-muted"
+                        ),
+                        dbc.Checklist(
+                            id="prep-options",
+                            options=[
+                                {"label": " Skip already-completed steps", "value": "skip_existing"},
+                            ],
+                            value=["skip_existing"],
+                            className="mb-3",
+                        ),
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Button(
+                                    [html.I(className="bi bi-play-circle me-2"), "Start Preparation"],
+                                    id="start-prep-btn",
+                                    color="primary",
+                                    className="me-2",
+                                ),
+                                dbc.Button(
+                                    [html.I(className="bi bi-x-circle me-2"), "Cancel"],
+                                    id="cancel-prep-btn",
+                                    color="outline-danger",
+                                    style={"display": "none"},
+                                ),
+                            ]),
+                        ]),
+                        # Progress area
+                        html.Div(id="prep-progress-area", children=[], className="mt-3"),
+                        # Result area
+                        html.Div(id="prep-result-area", children=[], className="mt-3"),
+                    ]),
+                ], className="mb-4 border-primary shadow-sm"),
+            ], md=7),
+
+            # MANUAL CARDS
+            dbc.Col([
+                # Kraken2 Database Download (moved from Configuration tab)
+                html.Div(_create_kraken_db_download_card(), id="kraken2-db-card"),
+                # Taxid Mapping / Rescan DB (moved from Watchlist tab)
+                html.Div(_create_rescan_db_card(), id="taxid-mapping-card"),
+                # Genome Downloads (moved from Watchlist tab)
+                html.Div(_create_genome_downloads_card(), id="genome-downloads-card"),
+                # Import Genomes (manual / archive)
+                html.Div(_create_import_genomes_card(), id="import-genomes-card"),
+            ], md=5),
+        ]),
 
         # Deploy Offline Wizard
         _create_deploy_wizard_card(),
