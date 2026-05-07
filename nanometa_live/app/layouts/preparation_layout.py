@@ -187,87 +187,102 @@ def create_preparation_layout():
             ),
         ], className="mb-4"),
 
-        # Recommended order guidance (rewritten to describe auto vs manual split)
+        # Recommended order guidance (rewritten to describe primary vs manual split)
         dbc.Alert([
             html.I(className="bi bi-signpost-2 me-2"),
             html.Strong("Recommended order: "),
             html.Span(
-                "Most operators should use Run Preparation (left) for one-shot prep, "
-                "then Export Bundle. Use the manual cards on the right only to inspect "
-                "or re-run individual stages."
+                "Run the readiness checklist, then click Start Preparation for "
+                "one-shot setup. The Manual stages and Offline deployment "
+                "sections below are collapsed by default; expand them only "
+                "to inspect or re-run individual stages."
             ),
         ], color="light", className="small py-2 mb-3 border"),
 
-        # Auto path (left) vs manual cards (right)
-        dbc.Row([
-            # AUTO PATH
-            dbc.Col([
-                # Run Preparation
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.H5([
-                            html.I(className="bi bi-gear-wide-connected me-2"),
-                            "Run Preparation"
-                        ], className="mb-0"),
-                    ]),
-                    dbc.CardBody([
-                        html.P(
-                            "Run all preparation steps automatically: verify the database, "
-                            "check organism mappings, download reference genomes, and build "
-                            "search indexes.",
-                            className="text-muted"
+        # PRIMARY PATH: Run Preparation (full width)
+        dbc.Card([
+            dbc.CardHeader([
+                html.H5([
+                    html.I(className="bi bi-gear-wide-connected me-2"),
+                    "Run Preparation"
+                ], className="mb-0"),
+            ]),
+            dbc.CardBody([
+                html.P(
+                    "Run all preparation steps automatically: verify the database, "
+                    "check organism mappings, download reference genomes, and build "
+                    "search indexes.",
+                    className="text-muted"
+                ),
+                dbc.Checklist(
+                    id="prep-options",
+                    options=[
+                        {"label": " Skip already-completed steps", "value": "skip_existing"},
+                    ],
+                    value=["skip_existing"],
+                    className="mb-3",
+                ),
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Button(
+                            [html.I(className="bi bi-play-circle me-2"), "Start Preparation"],
+                            id="start-prep-btn",
+                            color="primary",
+                            size="lg",
+                            className="me-2",
                         ),
-                        dbc.Checklist(
-                            id="prep-options",
-                            options=[
-                                {"label": " Skip already-completed steps", "value": "skip_existing"},
-                            ],
-                            value=["skip_existing"],
-                            className="mb-3",
+                        dbc.Button(
+                            [html.I(className="bi bi-x-circle me-2"), "Cancel"],
+                            id="cancel-prep-btn",
+                            color="outline-danger",
+                            size="lg",
+                            style={"display": "none"},
                         ),
-                        dbc.Row([
-                            dbc.Col([
-                                dbc.Button(
-                                    [html.I(className="bi bi-play-circle me-2"), "Start Preparation"],
-                                    id="start-prep-btn",
-                                    color="primary",
-                                    className="me-2",
-                                ),
-                                dbc.Button(
-                                    [html.I(className="bi bi-x-circle me-2"), "Cancel"],
-                                    id="cancel-prep-btn",
-                                    color="outline-danger",
-                                    style={"display": "none"},
-                                ),
-                            ]),
-                        ]),
-                        # Progress area
-                        html.Div(id="prep-progress-area", children=[], className="mt-3"),
-                        # Result area
-                        html.Div(id="prep-result-area", children=[], className="mt-3"),
                     ]),
-                ], className="mb-4 border-primary shadow-sm"),
-            ], md=7),
+                ]),
+                # Progress area
+                html.Div(id="prep-progress-area", children=[], className="mt-3"),
+                # Result area
+                html.Div(id="prep-result-area", children=[], className="mt-3"),
+            ]),
+        ], className="mb-4 border-primary shadow-sm"),
 
-            # MANUAL CARDS
-            dbc.Col([
-                # Kraken2 Database Download (moved from Configuration tab)
-                html.Div(_create_kraken_db_download_card(), id="kraken2-db-card"),
-                # Taxid Mapping / Rescan DB (moved from Watchlist tab)
-                html.Div(_create_rescan_db_card(), id="taxid-mapping-card"),
-                # Genome Downloads (moved from Watchlist tab)
-                html.Div(_create_genome_downloads_card(), id="genome-downloads-card"),
-                # Import Genomes (manual / archive)
-                html.Div(_create_import_genomes_card(), id="import-genomes-card"),
-            ], md=5),
-        ]),
-
-        # Deploy Offline Wizard
-        _create_deploy_wizard_card(),
-
-        # Export / Import (collapsed by default)
+        # SECONDARY: Manual stages (collapsed accordion)
         dbc.Accordion([
             dbc.AccordionItem([
+                html.P(
+                    "Run individual preparation stages. Use these only to "
+                    "inspect, debug, or re-run a single step; the primary "
+                    "Run Preparation flow above covers all of them.",
+                    className="text-muted small mb-3",
+                ),
+                # Kraken2 Database Download
+                html.Div(_create_kraken_db_download_card(), id="kraken2-db-card"),
+                # Taxid Mapping / Rescan DB
+                html.Div(_create_rescan_db_card(), id="taxid-mapping-card"),
+                # Genome Downloads
+                html.Div(_create_genome_downloads_card(), id="genome-downloads-card"),
+                # Import Genomes
+                html.Div(_create_import_genomes_card(), id="import-genomes-card"),
+            ], title=html.Span([
+                html.I(className="bi bi-tools me-2"),
+                "Manual stages (advanced)",
+            ])),
+        ], start_collapsed=True, className="mb-4"),
+
+        # OFFLINE DEPLOYMENT: wizard + export + import (collapsed accordion)
+        dbc.Accordion([
+            dbc.AccordionItem([
+                html.P(
+                    "Tools for preparing a portable bundle for field "
+                    "deployment. Use the wizard to step through each "
+                    "stage, or the Export / Import controls if you "
+                    "already have a prepared bundle.",
+                    className="text-muted small mb-3",
+                ),
+                # Deploy Offline Wizard
+                _create_deploy_wizard_card(),
+                # Export / Import side by side
                 dbc.Row([
                     dbc.Col([
                         dbc.Card([
@@ -407,7 +422,10 @@ def create_preparation_layout():
                         ]),
                     ], md=6),
                 ]),
-            ], title="Export / Import Bundle (Advanced)"),
+            ], title=html.Span([
+                html.I(className="bi bi-rocket-takeoff me-2"),
+                "Offline deployment (wizard, export, import)",
+            ])),
         ], start_collapsed=True, className="mb-4"),
 
         # Modals
