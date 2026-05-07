@@ -27,8 +27,11 @@ nanometa_live/
 └── docs/        # Active docs at top; archive/ for historical
 ```
 
-Re-export hub: `core/utils/data_loaders.py` re-exports from `classification_loaders.py`,
-`qc_loaders.py`, `validation_loaders.py`, `canonical_loaders.py`, `loader_utils.py`.
+Loader package: import directly from the leaf module that owns the symbol
+(`classification_loaders`, `qc_loaders`, `validation_loaders`,
+`canonical_loaders`, `loader_utils`). The previous re-export hub was
+collapsed in the 2026-05-07 audit pass; symbol-to-source is now visible at
+every import site.
 
 ### Processing Modes
 
@@ -82,6 +85,15 @@ Full walkthrough: [`docs/developer-guide.md`](docs/developer-guide.md).
 in a separate OS process, so Python singletons (e.g. `WatchlistManager`) are empty there.
 Share state via a `dcc.Store` populated in a main-process callback and read via `State`.
 
+**Run metadata on disk:** every successful pipeline start writes
+`<results_output_directory>/.nanometa.run.json` (see
+`BackendManager.write_run_metadata`). It carries a sha256 fingerprint over the
+input-identifying config keys (`nanopore_output_directory`, `sample_handling`,
+`processing_mode`, `kraken_db`) so the next launch can detect when the
+operator is about to point a different input at a populated outdir. The
+collision modal renders a red mismatch banner in that case. Companion helpers:
+`compute_input_fingerprint`, `read_run_metadata`, `fingerprint_matches`.
+
 ## Output File Formats
 
 ### Kraken2 Reports
@@ -98,6 +110,13 @@ selects the highest-numbered batch and never sums across them.
 
 **Authoritative taxonomy:** `apply_authoritative_taxonomy()` in `app/tabs/kraken2_helpers.py`
 parses `inspect.txt` from the Kraken2 DB to correct parent_taxid for Sankey/Sunburst.
+
+**Sequences-analyzed metric:** the dashboard tile uses
+`get_classification_stats(kraken_df)` from `app/utils/callback_helpers.py` —
+which returns `(classified_reads, unclassified_reads, rate)` from
+`root.cumul_reads + unclassified.cumul_reads`. Do not use `kraken_df['reads'].sum()`;
+the per-rank assignment column collapses to 0 when every read is parked at
+root level (the degenerate single-read input case caught by the audit).
 
 ### PAF Files (minimap2 validation)
 
@@ -141,7 +160,9 @@ sample_handling: "by_barcode"   # or "single_sample", "per_file"
 
 # Pipeline
 pipeline_profile: "conda"       # always conda for nanometanf
-pipeline_source: "remote:main"  # or "/local/path"
+# Upstream nanometanf has no `main` branch -- use `remote:dev` (active
+# development), `remote:master` (legacy default), or a local checkout path.
+pipeline_source: "remote:dev"   # or "/Users/.../nanometanf"
 
 # Validation
 blast_validation: true
@@ -198,8 +219,12 @@ Genome list `<outdir>/validation/pathogen_genomes.json` is cumulative across cal
 (atomic `.replace()`). Aggregator re-runs each invocation to rebuild
 `validation_results.json` over the union.
 
-Requirements: `pipeline_source` configured, `save_reads_assignment: true`, original FASTQ accessible.
-Legacy local-subprocess path remains as fallback when no `pipeline_source`.
+Requirements: `pipeline_source` configured, `save_reads_assignment: true`,
+original FASTQ accessible. `pipeline_source` is now mandatory: missing config
+or a `None` return from `validate_via_nanometanf` produces a failed
+`ValidationResult` with a descriptive `error_message` instead of silently
+running a parallel subprocess path. The legacy local-subprocess fallback was
+removed in the 2026-05-07 audit pass (commit `4c7c284`).
 
 ### Durable invariants in the validation pipeline
 
@@ -239,6 +264,29 @@ Conda envs built by Nextflow embed absolute build-machine paths and per-arch bin
 requires either shipping without pre-warmed envs or a separate `conda-pack` workflow
 (not currently automated).
 
+### Backend hardening
+
+Three guards run on every pipeline launch and shape what an operator sees when
+something goes wrong:
+
+- **Half-built conda env purge** (`NextflowManager._purge_broken_conda_envs`).
+  Sweeps `<work_dir>/conda/env-*/` before each conda-profile run, removing any
+  env directory missing `conda-meta/history` (the marker conda writes last on
+  successful build). Without this, a SIGTERM-killed env build leaves a stub
+  directory that Nextflow's cache treats as ready -- the next run activates an
+  empty env and the first process needing it exits 127 (`command not found`).
+- **Loader nested-mtime walk** (`_get_path_fingerprint` in
+  `core/utils/loader_utils.py`). Bounded recursive walk (5000 files) so the
+  kraken2 cache fingerprint advances when realtime-mode files land under
+  `kraken2/<sample>/batch_reports/`. The non-recursive predecessor saw zero
+  direct files in `kraken2/`, locked in an empty result on the first poll,
+  and the dashboard sat at 0 sequences for the entire run.
+- **Output-collision modal** (`detect_existing_results` +
+  `archive_existing_results` in `BackendManager`). Pre-run scan of
+  `RESULT_SUBDIRS`; modal offers Archive (`_archive_<ts>/`), Continue (with
+  `-resume`), or Cancel. The fingerprint above tags the modal red when the
+  new input differs from what the prior run wrote.
+
 ### macOS bind-mount gotcha
 
 macOS writes AppleDouble (`._*`) sidecar files when writing to non-HFS+ filesystems,
@@ -253,7 +301,7 @@ Linux-native path (Docker volume or `/root/.nextflow`); short-term workaround is
 pytest tests/ -v
 ```
 
-821 tests as of 2026-05-04. Synthetic datasets are auto-generated under
+861 tests as of 2026-05-07. Synthetic datasets are auto-generated under
 `/tmp/nanometa_test_datasets/` by `conftest.py` via `scripts/generate_test_datasets.py`.
 Mock Kraken2/FASTP generators live in `core/testing/mock_data_generator.py`.
 
