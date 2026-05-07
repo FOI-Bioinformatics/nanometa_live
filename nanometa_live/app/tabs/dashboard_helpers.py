@@ -261,8 +261,13 @@ def _calculate_overall_status(
     # Load Kraken data for all samples (with safe error handling)
     kraken_df = safe_load_kraken_data(main_dir, "All Samples")
 
-    # Calculate metrics
-    total_reads = int(kraken_df["reads"].sum()) if not kraken_df.empty else 0
+    # Calculate metrics. Use root.cumul_reads + unclassified.cumul_reads
+    # (i.e. the total number of reads classified plus those rejected),
+    # not sum(reads) which only counts per-rank assignments and
+    # collapses to 0 when every read is parked at root level (the
+    # degenerate-input case caught by the 2026-05-06 audit).
+    classified, unclassified, _ = get_classification_stats(kraken_df)
+    total_reads = classified + unclassified
 
     # Estimate quality score from data (simplified)
     quality_score = _estimate_quality_score(main_dir, kraken_df)

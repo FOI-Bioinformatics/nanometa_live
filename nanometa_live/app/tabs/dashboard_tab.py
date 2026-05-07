@@ -471,7 +471,13 @@ def register_dashboard_callbacks(app: Dash):
 
             if metric_sample and metric_sample != "All Samples":
                 sample_kraken_df = load_kraken_data(main_dir, metric_sample)
-                sample_reads = int(sample_kraken_df["reads"].sum()) if not sample_kraken_df.empty else 0
+                # Same root.cumul_reads + unclassified accounting as the
+                # All-Samples branch; sum(reads) misses anything parked
+                # at root level (degenerate small-input case).
+                sample_classified, sample_unclassified, _ = get_classification_stats(
+                    sample_kraken_df
+                )
+                sample_reads = sample_classified + sample_unclassified
                 sequences_count = f"{sample_reads:,}"
                 if not sample_kraken_df.empty:
                     org_df = sample_kraken_df[sample_kraken_df["rank"].isin(["S", "G"])]
