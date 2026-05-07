@@ -151,10 +151,11 @@ class TestVerdictBannerAttributionRuns:
             "nanometa_live.app.tabs.dashboard_tab.get_trigger_type",
             return_value="store",
         ):
-            # Args follow the State-declared order: fingerprint, watchlist_state,
-            # config, status, overall_status, validation_data, available_samples
+            # Args follow the declared order: fingerprint, watchlist_state,
+            # n_intervals, config, status, overall_status, validation_data,
+            # available_samples
             outputs = callback_fn(
-                "fp1", None,
+                "fp1", None, 0,
                 config, status, overall_status, validation_data,
                 available_samples,
             )

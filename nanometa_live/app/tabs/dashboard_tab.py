@@ -108,6 +108,7 @@ def register_dashboard_callbacks(app: Dash):
         Output("dashboard-overall-status-cache", "data"),
         [
             Input("results-fingerprint", "data"),
+            Input("update-interval", "n_intervals"),
         ],
         [
             State("app-config", "data"),
@@ -115,7 +116,7 @@ def register_dashboard_callbacks(app: Dash):
             State("available-samples", "data"),
         ]
     )
-    def compute_overall_status_cache(_fingerprint, config, status, available_samples):
+    def compute_overall_status_cache(_fingerprint, _n_intervals, config, status, available_samples):
         """Compute overall status once per interval and cache for other callbacks."""
         if should_skip_update("dashboard_overall_status", debounce_ms=2000):
             raise PreventUpdate
@@ -152,6 +153,7 @@ def register_dashboard_callbacks(app: Dash):
         [
             Input("results-fingerprint", "data"),
             Input("watchlist-tab-state", "data"),
+            Input("update-interval", "n_intervals"),
         ],
         [
             State("app-config", "data"),
@@ -161,8 +163,9 @@ def register_dashboard_callbacks(app: Dash):
             State("available-samples", "data"),
         ]
     )
-    def update_verdict_banner(_fingerprint, watchlist_state, config, status,
-                              overall_status, validation_data, available_samples):
+    def update_verdict_banner(_fingerprint, watchlist_state, _n_intervals,
+                              config, status, overall_status, validation_data,
+                              available_samples):
         """Update the clinical verdict banner based on analysis status and pathogen screening."""
         if get_trigger_type(ctx) == "interval":
             if should_skip_update("dashboard_verdict_banner", debounce_ms=2000):
