@@ -23,7 +23,10 @@ import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
+
+if TYPE_CHECKING:
+    from nanometa_live.core.taxonomy.taxid_mapping import TaxidMappingCollection
 
 import yaml
 
