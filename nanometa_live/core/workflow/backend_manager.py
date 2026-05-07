@@ -395,7 +395,7 @@ class BackendManager:
         "taxpasta",
         "multiqc",
         "on_demand_validation",
-        "pipeline_info",
+        "logs",
         "nanoplot",
     )
 
