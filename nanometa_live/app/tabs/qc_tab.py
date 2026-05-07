@@ -505,8 +505,6 @@ def register_qc_callbacks(app: Dash):
         try:
             # Load necessary files from nanometanf structure
             batch_stats_dir = os.path.join(main_dir, "realtime_batch_stats")
-            fastp_dir = os.path.join(main_dir, "fastp")
-            kraken_dir = os.path.join(main_dir, "kraken2")
             nanopore_dir = config.get("nanopore_output_directory", "")
 
             # Initialize variables

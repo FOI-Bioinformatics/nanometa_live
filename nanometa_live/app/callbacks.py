@@ -696,7 +696,6 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 badge_children = [html.I(className="bi bi-check-circle-fill me-1"), "Ready"]
                 badge_color = "success"
             else:
-                n_failed = summary["failed"]
                 badge_children = [
                     html.I(className="bi bi-exclamation-triangle-fill me-1"),
                     f"{summary['passed']}/{summary['total']} checks",

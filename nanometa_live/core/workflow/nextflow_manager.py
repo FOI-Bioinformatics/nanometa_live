@@ -871,7 +871,6 @@ class NextflowManager:
 
             name_idx = name_col
             status_idx = status_col
-            duration_idx = col_indices.get('duration', col_indices.get('realtime', -1))
 
             # Parse process status (skip header)
             completed = 0
@@ -1127,13 +1126,13 @@ class NextflowManager:
             # Return the most relevant error lines (up to 3)
             if error_lines:
                 # Prioritize lines with "ERROR" or specific error messages
-                priority_errors = [l for l in error_lines if 'ERROR' in l.upper()]
+                priority_errors = [ln for ln in error_lines if 'ERROR' in ln.upper()]
                 if priority_errors:
                     return "; ".join(priority_errors[:2])
                 return "; ".join(error_lines[:2])
 
             # If no specific error pattern found, return last few non-empty lines
-            non_empty_lines = [l.strip() for l in tail_lines if l.strip()]
+            non_empty_lines = [ln.strip() for ln in tail_lines if ln.strip()]
             if non_empty_lines:
                 return non_empty_lines[-1][:200]  # Last line, truncated
 

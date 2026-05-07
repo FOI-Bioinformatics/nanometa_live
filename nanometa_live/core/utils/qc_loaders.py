@@ -19,8 +19,6 @@ from nanometa_live.core.utils.sample_detector import (
     resolve_analysis_directory
 )
 from nanometa_live.core.utils.loader_utils import (
-    _fastp_cache,
-    _cache_lock,
     _get_cache_key,
     _check_mtime_cache,
     _store_mtime_cache,

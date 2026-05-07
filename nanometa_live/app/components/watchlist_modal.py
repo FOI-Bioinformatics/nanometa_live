@@ -321,7 +321,7 @@ def create_pathogen_detail_content(pathogen: Dict[str, Any]) -> html.Div:
             ] if names_alt else [
                 html.Small("None specified", className="text-muted")
             ]),
-        ], className="mb-3") if names_alt or True else html.Div(),
+        ], className="mb-3"),
 
         # Notes
         html.Div([
