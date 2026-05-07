@@ -93,7 +93,7 @@ def create_config_layout():
                     html.I(className="bi bi-lightbulb me-2"),
                     html.Strong("Tip: "),
                     "If this is your first time, just set the ",
-                    html.Strong("Nanopore Output Directory"),
+                    html.Strong("Nanopore Sequence Data Folder (input)"),
                     " and the ",
                     html.Strong("Species Identification Database"),
                     ", then click ",

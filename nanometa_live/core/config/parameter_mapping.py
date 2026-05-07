@@ -413,7 +413,7 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     # Validate critical parameters early
     if not main_dir:
         raise ValueError(
-            "No output directory configured. Please set 'Results Output Directory' in the UI."
+            "No output directory configured. Please set 'Nanometa Live Results Folder (output)' in the UI."
         )
 
     # In batch mode an operator may bring their own samplesheet
@@ -435,7 +435,7 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
 
     if not nanopore_dir and not samplesheet_only_mode:
         raise ValueError(
-            "No input directory configured. Please set 'Nanopore Output Directory' in the UI."
+            "No input directory configured. Please set 'Nanopore Sequence Data Folder (input)' in the UI."
         )
 
     check_interval = config.get("check_intervals_seconds", 15)

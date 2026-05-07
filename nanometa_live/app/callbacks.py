@@ -539,7 +539,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 {
                     "title": "Run cancelled",
                     "message": (
-                        "Update Results Output Directory in the "
+                        "Update the Nanometa Live Results Folder (output) in the "
                         "Configuration tab and try again."
                     ),
                     "color": "info",

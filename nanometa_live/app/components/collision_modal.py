@@ -191,7 +191,7 @@ def render_collision_body(
                             html.Strong("Cancel"),
                             " -- ",
                             "Close this dialog so you can change the "
-                            "Results Output Directory in the "
+                            "Nanometa Live Results Folder (output) in the "
                             "Configuration tab.",
                         ]
                     ),

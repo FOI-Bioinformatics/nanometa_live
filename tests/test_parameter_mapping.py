@@ -220,7 +220,7 @@ class TestSamplesheetOnlyMode:
 
         with pytest.raises(ValueError) as exc:
             create_nextflow_params(base_config)
-        assert "Nanopore Output Directory" in str(exc.value)
+        assert "Nanopore Sequence Data Folder" in str(exc.value)
 
     def test_batch_without_samplesheet_still_requires_nanopore_dir(
         self, base_config, tmp_path
@@ -231,7 +231,7 @@ class TestSamplesheetOnlyMode:
 
         with pytest.raises(ValueError) as exc:
             create_nextflow_params(base_config)
-        assert "Nanopore Output Directory" in str(exc.value)
+        assert "Nanopore Sequence Data Folder" in str(exc.value)
 
 
 # ---- F3 / P1-5: use_input_dir_mode -----------------------------------------

@@ -32,11 +32,20 @@ def create_config_form():
                 ], className="d-flex align-items-center")
             ]),
             dbc.CardBody([
-                # Data Directory
+                # Data Directory.
+                # Label clarified 2026-05-07: "Nanopore Output Directory"
+                # was easily confused with "Results Output Directory"
+                # because both contained the word *output*. The new label
+                # tags this field as INPUT to Nanometa Live (= the
+                # sequencer's output directory) so operators do not mix
+                # them up. The underlying config key
+                # ``nanopore_output_directory`` is unchanged.
                 dbc.Row([
                     dbc.Col([
                         dbc.Label([
-                            "Nanopore Output Directory ",
+                            "Nanopore Sequence Data Folder ",
+                            dbc.Badge("input", color="info", className="me-1",
+                                      style={"fontSize": "0.65rem", "verticalAlign": "middle"}),
                             html.Span("*", className="text-danger"),
                             html.I(className="bi bi-info-circle text-muted ms-1", id="nanopore-dir-info")
                         ], html_for="nanopore-dir-input"),
@@ -56,9 +65,15 @@ def create_config_form():
                                 html.Span(id="nanopore-dir-status", children="")
                             )
                         ]),
+                        dbc.FormText([
+                            html.I(className="bi bi-arrow-down-circle me-1"),
+                            "Where the sequencer writes FASTQ files; this is the input "
+                            "Nanometa Live reads from.",
+                        ]),
                         dbc.Tooltip(
                             "The folder where your sequencer writes data files. "
-                            "Look for a folder containing .fastq or .fastq.gz files.",
+                            "Look for a folder containing .fastq or .fastq.gz files. "
+                            "This is the INPUT to Nanometa Live, not where results go.",
                             target="nanopore-dir-info"
                         ),
                         html.Div(id="nanopore-dir-feedback", className="mt-1")
@@ -170,11 +185,18 @@ def create_config_form():
                     ], md=12)
                 ], className="mb-4"),
 
-                # Results Output Directory (NEW)
+                # Results Output Directory.
+                # Label clarified 2026-05-07 (see input field above): the
+                # field name now starts with "Nanometa Live" so the
+                # ownership is unambiguous, and the *output* badge mirrors
+                # the *input* badge above. Backend key
+                # ``results_output_directory`` is unchanged.
                 dbc.Row([
                     dbc.Col([
                         dbc.Label([
-                            "Results Output Directory ",
+                            "Nanometa Live Results Folder ",
+                            dbc.Badge("output", color="success", className="me-1",
+                                      style={"fontSize": "0.65rem", "verticalAlign": "middle"}),
                             html.I(className="bi bi-info-circle text-muted ms-1", id="results-dir-info")
                         ], html_for="results-dir-input"),
                         dbc.InputGroup([
@@ -196,13 +218,15 @@ def create_config_form():
                         dbc.Tooltip(
                             "Where the analysis saves its output files (species reports, "
                             "quality data, and validation results). Defaults to a folder "
-                            "in your home directory if left empty.",
+                            "in your home directory if left empty. This is OUTPUT from "
+                            "Nanometa Live, not the sequencer's data folder.",
                             target="results-dir-info"
                         ),
-                        dbc.FormText(
-                            "Where to save analysis results and reports",
-                            className="text-muted"
-                        )
+                        dbc.FormText([
+                            html.I(className="bi bi-arrow-up-circle me-1"),
+                            "Destination for Nanometa Live's analysis output (species "
+                            "reports, QC, validation). Created if it does not exist.",
+                        ])
                     ], md=12)
                 ], className="mb-4"),
 

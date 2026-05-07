@@ -563,7 +563,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
         # Validate required fields
         if not nanopore_dir or not nanopore_dir.strip():
-            errors.append("Nanopore Output Directory is required")
+            errors.append("Nanopore Sequence Data Folder (input) is required")
 
         if not kraken_db or not kraken_db.strip():
             errors.append("Kraken2 Database is required")
@@ -1141,6 +1141,17 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         [
             Output("directory-tree", "children"),
             Output("current-path-display", "value"),
+            # Bug fix 2026-05-07: clicking a folder in the tree previously
+            # only updated the path-display textbox; the canonical
+            # ``current-browse-path`` store kept its old value, so when the
+            # operator hit "Select" the original (e.g. ``~``) was written
+            # to the input field instead of the navigated-to directory.
+            # Routing the navigated path back into the store keeps every
+            # downstream consumer (confirm callback, regression tests) in
+            # sync. allow_duplicate is required because
+            # ``toggle_folder_browser`` and ``navigate_directories`` also
+            # write this store.
+            Output("current-browse-path", "data", allow_duplicate=True),
         ],
         [
             Input("current-browse-path", "data"),
@@ -1152,9 +1163,13 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     def update_directory_tree(current_path, dir_clicks, dir_ids):
         """Update the directory tree display with parent directory option."""
         triggered_id = ctx.triggered_id if ctx.triggered else None
+        navigated_via_tree = (
+            isinstance(triggered_id, dict)
+            and triggered_id.get("type") == "browse-dir"
+        )
 
         # If a directory was clicked, navigate to it
-        if isinstance(triggered_id, dict) and triggered_id.get("type") == "browse-dir":
+        if navigated_via_tree:
             current_path = triggered_id.get("path")
 
         if not current_path or not os.path.exists(current_path):
@@ -1222,7 +1237,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 color="danger",
             )
 
-        return directory_list, current_path
+        # Only push back to ``current-browse-path`` when the user navigated
+        # via a tree click; otherwise we would re-emit on every store-driven
+        # render and cause an unnecessary callback loop.
+        store_update = current_path if navigated_via_tree else no_update
+        return directory_list, current_path, store_update
 
     @app.callback(
         Output("current-browse-path", "data", allow_duplicate=True),
