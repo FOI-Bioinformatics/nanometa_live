@@ -27,12 +27,17 @@ def create_header(title="Nanometa Live"):
             # Title and logo
             dbc.Col([
                 html.Div([
-                    html.I(className="bi bi-moisture", style={
-                        "fontSize": "28px",
-                        "color": "#0d6efd",
-                        "marginRight": "8px"
-                    }),
-                    html.H2(id="header-title", className="mb-0", children=title),
+                    html.Img(
+                        src="/assets/logo.png",
+                        alt="Nanometa Live",
+                        style={"height": "44px", "width": "auto"},
+                        className="me-2",
+                    ),
+                    html.H2(
+                        id="header-title",
+                        className="mb-0 visually-hidden",
+                        children=title,
+                    ),
                     dbc.Badge(
                         "OFFLINE",
                         id="offline-mode-badge",
