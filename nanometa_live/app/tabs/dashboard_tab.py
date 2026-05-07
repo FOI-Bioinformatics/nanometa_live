@@ -158,10 +158,11 @@ def register_dashboard_callbacks(app: Dash):
             State("backend-status", "data"),
             State("dashboard-overall-status-cache", "data"),
             State("validation-data-store", "data"),
+            State("available-samples", "data"),
         ]
     )
     def update_verdict_banner(_fingerprint, watchlist_state, config, status,
-                              overall_status, validation_data):
+                              overall_status, validation_data, available_samples):
         """Update the clinical verdict banner based on analysis status and pathogen screening."""
         if get_trigger_type(ctx) == "interval":
             if should_skip_update("dashboard_verdict_banner", debounce_ms=2000):
@@ -289,8 +290,10 @@ def register_dashboard_callbacks(app: Dash):
                                             seen.add(name)
                                             triggering_samples.append(name)
                             except Exception as exc:
-                                logger.debug(
-                                    f"Verdict-banner attribution unavailable: {exc}"
+                                logger.warning(
+                                    "Verdict-banner attribution unavailable: %s",
+                                    exc,
+                                    exc_info=True,
                                 )
 
                             return (
