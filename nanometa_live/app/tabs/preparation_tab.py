@@ -769,7 +769,7 @@ def register_preparation_callbacks(app):
             raise PreventUpdate
 
         try:
-            from nanometa_live.core.taxonomy import get_taxid_mapper
+            from nanometa_live.core.taxonomy.taxid_mapping import get_taxid_mapper
 
             mapper = get_taxid_mapper()
             success = mapper.load_database(kraken_db)

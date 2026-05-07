@@ -13,54 +13,13 @@ Search order for custom watchlists:
 3. Built-in core/config/data/watchlists/ - System defaults
 
 Usage:
-    from nanometa_live.core.watchlist import get_watchlist_manager
+    from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
 
     manager = get_watchlist_manager()
     manager.load_config(config)
     alerts = manager.check_organisms(detected_organisms)
+
+Import directly from leaf modules (watchlist_manager, taxonomy_matcher,
+watchlist_loader); the package level re-export hub was collapsed in the
+2026-05-07 audit pass.
 """
-
-from .watchlist_manager import (
-    WatchlistManager,
-    WatchlistEntry,
-    WatchlistSource,
-    BUILTIN_CATEGORIES,
-    get_watchlist_manager,
-    reset_watchlist_manager,
-)
-
-from .taxonomy_matcher import (
-    TaxonomyMatcher,
-    TaxonomyType,
-    get_taxonomy_matcher,
-    reset_taxonomy_matcher,
-)
-
-from .watchlist_loader import (
-    WatchlistLoader,
-    WatchlistMetadata,
-    WatchlistPathogenEntry,
-    get_watchlist_loader,
-    reset_watchlist_loader,
-)
-
-__all__ = [
-    # Manager
-    "WatchlistManager",
-    "WatchlistEntry",
-    "WatchlistSource",
-    "BUILTIN_CATEGORIES",
-    "get_watchlist_manager",
-    "reset_watchlist_manager",
-    # Taxonomy
-    "TaxonomyMatcher",
-    "TaxonomyType",
-    "get_taxonomy_matcher",
-    "reset_taxonomy_matcher",
-    # Loader
-    "WatchlistLoader",
-    "WatchlistMetadata",
-    "WatchlistPathogenEntry",
-    "get_watchlist_loader",
-    "reset_watchlist_loader",
-]

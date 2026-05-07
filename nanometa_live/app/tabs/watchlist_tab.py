@@ -508,7 +508,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
         # Fallback: try global collection if store is empty
         if not mapping_dict:
             try:
-                from nanometa_live.core.taxonomy import get_mapping_collection
+                from nanometa_live.core.taxonomy.taxid_mapping import get_mapping_collection
                 collection = get_mapping_collection()
                 if collection:
                     for entry in entries:
