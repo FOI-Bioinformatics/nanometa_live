@@ -17,10 +17,10 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
 
-from nanometa_live.core.utils.data_loaders import (
+from nanometa_live.core.utils.classification_loaders import load_kraken_data
+from nanometa_live.core.utils.qc_loaders import (
     get_qc_stats,
     load_fastp_data,
-    load_kraken_data,
 )
 from nanometa_live.core.utils.sample_detector import (
     get_available_samples,

@@ -3,10 +3,12 @@
 import os
 import pytest
 import pandas as pd
-from nanometa_live.core.utils.data_loaders import (
-    load_kraken_data,
-    clear_data_cache,
+from nanometa_live.core.utils.loader_utils import clear_data_cache
+from nanometa_live.core.utils.classification_loaders import (
     KRAKEN2_EXPECTED_COLUMNS,
+    load_kraken_data,
+)
+from nanometa_live.core.utils.qc_loaders import (
     _empty_fastp_stats,
     _empty_nanoplot_stats,
 )

@@ -11,7 +11,7 @@ import importlib.util
 from pathlib import Path
 
 # Import core functions
-from nanometa_live.core.utils.data_loaders import load_kraken_data
+from nanometa_live.core.utils.classification_loaders import load_kraken_data
 from nanometa_live.app.tabs.classification_tab import create_sankey_data, create_sunburst_data
 from nanometa_live.app.tabs.kraken2_helpers import filter_by_domains
 

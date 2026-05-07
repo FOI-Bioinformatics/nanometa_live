@@ -18,12 +18,12 @@ from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 import plotly.express as px
 
-from nanometa_live.core.utils.data_loaders import (
-    load_fastp_data,
-    load_kraken_data,
-    get_sample_statistics_summary,
+from nanometa_live.core.utils.classification_loaders import load_kraken_data
+from nanometa_live.core.utils.qc_loaders import (
     get_qc_stats,
-    load_seqkit_stats
+    get_sample_statistics_summary,
+    load_fastp_data,
+    load_seqkit_stats,
 )
 from nanometa_live.app.components.organism_components import (
     BaseQualityCard,

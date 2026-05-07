@@ -93,28 +93,28 @@ def dataset_path(request, test_datasets) -> Path:
 @pytest.fixture
 def kraken_data_single(test_datasets) -> pd.DataFrame:
     """Load single species Kraken2 data."""
-    from nanometa_live.core.utils.data_loaders import load_kraken_data
+    from nanometa_live.core.utils.classification_loaders import load_kraken_data
     return load_kraken_data(str(test_datasets["single_species"]))
 
 
 @pytest.fixture
 def kraken_data_medium(test_datasets) -> pd.DataFrame:
     """Load medium diversity Kraken2 data."""
-    from nanometa_live.core.utils.data_loaders import load_kraken_data
+    from nanometa_live.core.utils.classification_loaders import load_kraken_data
     return load_kraken_data(str(test_datasets["medium_diversity"]))
 
 
 @pytest.fixture
 def kraken_data_high(test_datasets) -> pd.DataFrame:
     """Load high diversity Kraken2 data."""
-    from nanometa_live.core.utils.data_loaders import load_kraken_data
+    from nanometa_live.core.utils.classification_loaders import load_kraken_data
     return load_kraken_data(str(test_datasets["high_diversity"]))
 
 
 @pytest.fixture
 def kraken_data_all(test_datasets) -> Dict[str, pd.DataFrame]:
     """Load all test datasets."""
-    from nanometa_live.core.utils.data_loaders import load_kraken_data
+    from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
     data = {}
     for name, path in test_datasets.items():

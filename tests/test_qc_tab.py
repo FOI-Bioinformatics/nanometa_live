@@ -24,7 +24,7 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 
 from nanometa_live.app.tabs.qc_tab import register_qc_callbacks
-from nanometa_live.core.utils.data_loaders import get_sample_statistics_summary
+from nanometa_live.core.utils.qc_loaders import get_sample_statistics_summary
 
 
 class TestQCTabPlots:

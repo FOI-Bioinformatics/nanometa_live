@@ -24,7 +24,8 @@ from dash import Dash, Input, Output, State, ctx, no_update, html
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
-from nanometa_live.core.utils.data_loaders import load_kraken_data, load_blast_validation_data
+from nanometa_live.core.utils.classification_loaders import load_kraken_data
+from nanometa_live.core.utils.validation_loaders import load_blast_validation_data
 from nanometa_live.app.components.organism_components import (
     OrganismCard,
     OrganismSummaryCard,

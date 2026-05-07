@@ -16,7 +16,7 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import plotly.express as px
 
-from nanometa_live.core.utils.data_loaders import load_kraken_data
+from nanometa_live.core.utils.classification_loaders import load_kraken_data
 from nanometa_live.app.utils.callback_helpers import (
     validate_config_and_get_main_dir,
     log_callback_error,

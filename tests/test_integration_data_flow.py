@@ -25,7 +25,8 @@ class TestKraken2FileDiscoveryPrecedence:
 
     def test_cumulative_preferred_over_standard(self, realtime_output_dir: Path) -> None:
         """Cumulative reports should take precedence over standard reports."""
-        from nanometa_live.core.utils.data_loaders import load_kraken_data, clear_data_cache
+        from nanometa_live.core.utils.loader_utils import clear_data_cache
+        from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
         clear_data_cache()
         df = load_kraken_data(str(realtime_output_dir), sample="barcode01")
@@ -36,7 +37,8 @@ class TestKraken2FileDiscoveryPrecedence:
 
     def test_standard_preferred_over_batch(self, batch_output_dir: Path) -> None:
         """Standard reports should be selected when no cumulative report exists."""
-        from nanometa_live.core.utils.data_loaders import load_kraken_data, clear_data_cache
+        from nanometa_live.core.utils.loader_utils import clear_data_cache
+        from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
         clear_data_cache()
         df = load_kraken_data(str(batch_output_dir), sample="barcode01")
@@ -52,7 +54,8 @@ class TestKraken2FileDiscoveryPrecedence:
         batch0. Summing them would double-count shared reads. The correct behaviour is
         to read only the latest batch file.
         """
-        from nanometa_live.core.utils.data_loaders import load_kraken_data, clear_data_cache
+        from nanometa_live.core.utils.loader_utils import clear_data_cache
+        from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
         kraken_dir = tmp_path / "kraken2"
         kraken_dir.mkdir()
@@ -86,7 +89,8 @@ class TestKraken2FileDiscoveryPrecedence:
 
     def test_batch_excluded_when_cumulative_exists(self, realtime_output_dir: Path) -> None:
         """Batch files should be ignored when a cumulative report is available."""
-        from nanometa_live.core.utils.data_loaders import load_kraken_data, clear_data_cache
+        from nanometa_live.core.utils.loader_utils import clear_data_cache
+        from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
         clear_data_cache()
         df = load_kraken_data(str(realtime_output_dir), sample="barcode01")
@@ -103,7 +107,7 @@ class TestSampleDetection:
     def test_detect_from_all_data_sources(self, realtime_output_dir: Path) -> None:
         """Samples should be detected from kraken2 and fastp output files."""
         from nanometa_live.core.utils.sample_detector import get_available_samples
-        from nanometa_live.core.utils.data_loaders import clear_data_cache
+        from nanometa_live.core.utils.loader_utils import clear_data_cache
 
         clear_data_cache()
         samples = get_available_samples(str(realtime_output_dir))
@@ -112,7 +116,7 @@ class TestSampleDetection:
     def test_strip_batch_suffix(self) -> None:
         """Batch suffixes should be removed to unify sample names."""
         from nanometa_live.core.utils.sample_detector import extract_sample_name
-        from nanometa_live.core.utils.data_loaders import clear_data_cache
+        from nanometa_live.core.utils.loader_utils import clear_data_cache
 
         clear_data_cache()
         assert extract_sample_name("barcode01_batch0.kreport2.txt") == "barcode01"
@@ -120,7 +124,7 @@ class TestSampleDetection:
     def test_strip_cumulative_suffix(self) -> None:
         """Cumulative report suffixes should be removed from sample names."""
         from nanometa_live.core.utils.sample_detector import extract_sample_name
-        from nanometa_live.core.utils.data_loaders import clear_data_cache
+        from nanometa_live.core.utils.loader_utils import clear_data_cache
 
         clear_data_cache()
         assert extract_sample_name("barcode01.cumulative.kraken2.report.txt") == "barcode01"
@@ -128,7 +132,7 @@ class TestSampleDetection:
     def test_resolve_most_recent_analysis_dir(self, multi_analysis_dir: Path) -> None:
         """The most recent timestamped analysis directory should be selected."""
         from nanometa_live.core.utils.sample_detector import resolve_analysis_directory
-        from nanometa_live.core.utils.data_loaders import clear_data_cache
+        from nanometa_live.core.utils.loader_utils import clear_data_cache
 
         clear_data_cache()
         resolved = resolve_analysis_directory(str(multi_analysis_dir))
@@ -137,7 +141,7 @@ class TestSampleDetection:
     def test_skip_empty_analysis_dir(self, tmp_path: Path) -> None:
         """Empty analysis directories should be skipped in favour of those with data."""
         from nanometa_live.core.utils.sample_detector import resolve_analysis_directory
-        from nanometa_live.core.utils.data_loaders import clear_data_cache
+        from nanometa_live.core.utils.loader_utils import clear_data_cache
 
         # Empty analysis dir (has kraken2/ but no files)
         empty_dir = tmp_path / "analysis_20240101_120000" / "kraken2"
@@ -165,7 +169,8 @@ class TestTaxidConsistency:
 
     def test_taxid_int_after_kraken_parse(self, realtime_output_dir: Path) -> None:
         """Taxid column should contain integer values after Kraken2 report parsing."""
-        from nanometa_live.core.utils.data_loaders import load_kraken_data, clear_data_cache
+        from nanometa_live.core.utils.loader_utils import clear_data_cache
+        from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
         clear_data_cache()
         df = load_kraken_data(str(realtime_output_dir), sample="barcode01")
@@ -175,7 +180,8 @@ class TestTaxidConsistency:
 
     def test_taxid_int_in_validation_results(self, tmp_path: Path) -> None:
         """Taxid values in validation JSON output should parse as integers."""
-        from nanometa_live.core.utils.data_loaders import load_validation_data, clear_data_cache
+        from nanometa_live.core.utils.loader_utils import clear_data_cache
+        from nanometa_live.core.utils.validation_loaders import load_validation_data
 
         validation_dir = tmp_path / "validation"
         validation_dir.mkdir()
@@ -207,7 +213,8 @@ class TestTaxidConsistency:
 
     def test_taxid_type_matches_watchlist(self, realtime_output_dir: Path) -> None:
         """Kraken2 taxid values should be directly comparable to watchlist integer taxids."""
-        from nanometa_live.core.utils.data_loaders import load_kraken_data, clear_data_cache
+        from nanometa_live.core.utils.loader_utils import clear_data_cache
+        from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
         clear_data_cache()
         df = load_kraken_data(str(realtime_output_dir), sample="barcode01")
@@ -223,8 +230,10 @@ class TestErrorPaths:
 
     def test_missing_kraken_dir_returns_empty_df(self, tmp_path: Path) -> None:
         """Loading from a directory without kraken2/ should return an empty DataFrame."""
-        from nanometa_live.core.utils.data_loaders import (
-            load_kraken_data, clear_data_cache, KRAKEN2_EXPECTED_COLUMNS,
+        from nanometa_live.core.utils.loader_utils import clear_data_cache
+        from nanometa_live.core.utils.classification_loaders import (
+            KRAKEN2_EXPECTED_COLUMNS,
+            load_kraken_data,
         )
 
         clear_data_cache()
@@ -235,7 +244,8 @@ class TestErrorPaths:
 
     def test_malformed_report_skipped(self, malformed_output_dir: Path) -> None:
         """Reports with incorrect column counts should be rejected."""
-        from nanometa_live.core.utils.data_loaders import _parse_kraken2_report, clear_data_cache
+        from nanometa_live.core.utils.loader_utils import clear_data_cache
+        from nanometa_live.core.utils.classification_loaders import _parse_kraken2_report
 
         clear_data_cache()
         bad_file = str(malformed_output_dir / "kraken2" / "bad_columns.kraken2.report.txt")
@@ -244,7 +254,8 @@ class TestErrorPaths:
 
     def test_truncated_file_skipped(self, malformed_output_dir: Path) -> None:
         """Truncated files that are too small should be rejected."""
-        from nanometa_live.core.utils.data_loaders import _parse_kraken2_report, clear_data_cache
+        from nanometa_live.core.utils.loader_utils import clear_data_cache
+        from nanometa_live.core.utils.classification_loaders import _parse_kraken2_report
 
         clear_data_cache()
         truncated_file = str(malformed_output_dir / "kraken2" / "truncated.kraken2.report.txt")
@@ -253,8 +264,10 @@ class TestErrorPaths:
 
     def test_corrupt_fastp_returns_empty_stats(self, malformed_output_dir: Path) -> None:
         """Corrupt FASTP JSON should result in empty default statistics."""
-        from nanometa_live.core.utils.data_loaders import (
-            load_fastp_data, clear_data_cache, _empty_fastp_stats,
+        from nanometa_live.core.utils.loader_utils import clear_data_cache
+        from nanometa_live.core.utils.qc_loaders import (
+            _empty_fastp_stats,
+            load_fastp_data,
         )
 
         clear_data_cache()
@@ -266,7 +279,7 @@ class TestErrorPaths:
     def test_empty_paf_returns_empty_dict(self, malformed_output_dir: Path) -> None:
         """An empty PAF file should produce an empty coverage dictionary."""
         from nanometa_live.core.parsers.paf_coverage_parser import parse_paf_coverage
-        from nanometa_live.core.utils.data_loaders import clear_data_cache
+        from nanometa_live.core.utils.loader_utils import clear_data_cache
 
         clear_data_cache()
         paf_file = malformed_output_dir / "validation" / "minimap2" / "empty.paf"
@@ -279,7 +292,8 @@ class TestCacheManagement:
 
     def test_cache_returns_copy(self, realtime_output_dir: Path) -> None:
         """Cached DataFrames should be independent copies to prevent mutation leaks."""
-        from nanometa_live.core.utils.data_loaders import load_kraken_data, clear_data_cache
+        from nanometa_live.core.utils.loader_utils import clear_data_cache
+        from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
         clear_data_cache()
         df1 = load_kraken_data(str(realtime_output_dir), sample="barcode01")
@@ -290,10 +304,12 @@ class TestCacheManagement:
 
     def test_cache_expires_after_ttl(self, realtime_output_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Cached entries should be considered invalid after the TTL elapses."""
-        from nanometa_live.core.utils import data_loaders
-        from nanometa_live.core.utils.data_loaders import (
-            load_kraken_data, clear_data_cache, _is_cache_valid, CACHE_TTL_SECONDS,
+        from nanometa_live.core.utils.loader_utils import (
+            _is_cache_valid,
+            CACHE_TTL_SECONDS,
+            clear_data_cache,
         )
+        from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
         clear_data_cache()
         load_kraken_data(str(realtime_output_dir), sample="barcode01")
@@ -306,9 +322,11 @@ class TestCacheManagement:
 
     def test_clear_cache(self, realtime_output_dir: Path) -> None:
         """Clearing the cache should remove all stored entries."""
-        from nanometa_live.core.utils.data_loaders import (
-            load_kraken_data, clear_data_cache, _kraken_cache,
+        from nanometa_live.core.utils.loader_utils import (
+            _kraken_cache,
+            clear_data_cache,
         )
+        from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
         clear_data_cache()
         load_kraken_data(str(realtime_output_dir), sample="barcode01")

@@ -17,8 +17,8 @@ from unittest.mock import patch, MagicMock
 import pandas as pd
 import pytest
 
-from nanometa_live.core.utils.data_loaders import (
-    clear_data_cache,
+from nanometa_live.core.utils.loader_utils import clear_data_cache
+from nanometa_live.core.utils.classification_loaders import (
     KRAKEN2_EXPECTED_COLUMNS,
     load_kraken_data,
 )

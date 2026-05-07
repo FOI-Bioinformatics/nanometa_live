@@ -85,7 +85,7 @@ aken2 and BLAST data."""
         app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
         # Import the callback function directly for testing
-        from nanometa_live.core.utils.data_loaders import load_kraken_data
+        from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
         # Load Kraken data
         kraken_df = load_kraken_data(str(mock_data_dir), None)
@@ -97,7 +97,7 @@ aken2 and BLAST data."""
 
     def test_top_matches_filtering(self, mock_data_dir):
         """Test top matches table filtering by taxonomy and domain."""
-        from nanometa_live.core.utils.data_loaders import load_kraken_data
+        from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
         kraken_df = load_kraken_data(str(mock_data_dir), None)
 
@@ -225,7 +225,7 @@ aken2 and BLAST data."""
 
     def test_multi_sample_support(self, mock_data_dir):
         """Test loading data for multiple samples."""
-        from nanometa_live.core.utils.data_loaders import load_kraken_data
+        from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
         # Test loading all samples
         all_samples_df = load_kraken_data(str(mock_data_dir), None)
@@ -245,7 +245,7 @@ aken2 and BLAST data."""
 
     def test_species_not_found_handling(self, mock_data_dir, config_with_species):
         """Test handling of species not found in Kraken results."""
-        from nanometa_live.core.utils.data_loaders import load_kraken_data
+        from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
         kraken_df = load_kraken_data(str(mock_data_dir), None)
 

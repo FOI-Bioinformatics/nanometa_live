@@ -17,7 +17,7 @@ import dash_bootstrap_components as dbc
 from dash import html, no_update
 import plotly.graph_objects as go
 
-from nanometa_live.core.utils.data_loaders import load_kraken_data
+from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
 
 # =============================================================================

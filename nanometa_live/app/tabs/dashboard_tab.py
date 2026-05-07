@@ -17,11 +17,11 @@ from dash import Dash, Input, Output, State, ctx, no_update, html, ALL
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
-from nanometa_live.core.utils.data_loaders import (
-    load_kraken_data,
+from nanometa_live.core.utils.classification_loaders import load_kraken_data
+from nanometa_live.core.utils.qc_loaders import (
+    get_qc_stats,
     load_nanoplot_stats,
     load_seqkit_stats,
-    get_qc_stats
 )
 from nanometa_live.core.utils.alert_engine import get_alert_engine
 from nanometa_live.core.utils.pathogen_database import check_for_dangerous_pathogens
@@ -753,7 +753,7 @@ def register_dashboard_callbacks(app: Dash):
         taxid = triggered.get("taxid", 0)
 
         # Look up actual read count and abundance from Kraken2 data
-        from nanometa_live.core.utils.data_loaders import load_kraken_data
+        from nanometa_live.core.utils.classification_loaders import load_kraken_data
         organism_reads = "N/A"
         organism_abundance = "N/A"
         organism_name = None

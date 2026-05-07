@@ -13,7 +13,14 @@ import pytest
 # ---- Import tests ----
 
 CORE_MODULES = [
-    "nanometa_live.core.utils.data_loaders",
+    # Loader package was split: the data_loaders re-export hub was
+    # collapsed in the 2026-05-07 audit pass, so import each leaf
+    # module directly to verify they all parse cleanly.
+    "nanometa_live.core.utils.classification_loaders",
+    "nanometa_live.core.utils.qc_loaders",
+    "nanometa_live.core.utils.validation_loaders",
+    "nanometa_live.core.utils.canonical_loaders",
+    "nanometa_live.core.utils.loader_utils",
     "nanometa_live.core.utils.sample_detector",
     "nanometa_live.core.config.config_loader",
     "nanometa_live.core.parsers.paf_coverage_parser",
@@ -59,7 +66,7 @@ def test_sample_detection(synthetic_data_dir):
 
 def test_kraken_data_loads(synthetic_data_dir):
     """Kraken2 data should load for each barcode."""
-    from nanometa_live.core.utils.data_loaders import load_kraken_data
+    from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
     for bc in ["barcode01", "barcode02", "barcode03", "barcode04"]:
         df = load_kraken_data(str(synthetic_data_dir), bc)
@@ -69,7 +76,7 @@ def test_kraken_data_loads(synthetic_data_dir):
 
 def test_fastp_data_loads(synthetic_data_dir):
     """FASTP data should load for each barcode."""
-    from nanometa_live.core.utils.data_loaders import load_fastp_data
+    from nanometa_live.core.utils.qc_loaders import load_fastp_data
 
     for bc in ["barcode01", "barcode02", "barcode03", "barcode04"]:
         data = load_fastp_data(str(synthetic_data_dir), bc)

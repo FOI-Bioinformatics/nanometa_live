@@ -25,7 +25,7 @@ def synthetic_data_dir(tmp_path):
 
 def test_clinical_pathogens_detected(synthetic_data_dir):
     """barcode01 should contain M. tuberculosis (1773) and S. aureus (1280) at species level."""
-    from nanometa_live.core.utils.data_loaders import load_kraken_data
+    from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
     df = load_kraken_data(str(synthetic_data_dir), "barcode01")
     species_df = df[df["rank"] == "S"]
@@ -37,7 +37,7 @@ def test_clinical_pathogens_detected(synthetic_data_dir):
 
 def test_clinical_pathogen_reads_above_threshold(synthetic_data_dir):
     """Both clinical pathogens in barcode01 should have >= 100 reads."""
-    from nanometa_live.core.utils.data_loaders import load_kraken_data
+    from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
     df = load_kraken_data(str(synthetic_data_dir), "barcode01")
 
@@ -52,7 +52,7 @@ def test_clinical_pathogen_reads_above_threshold(synthetic_data_dir):
 
 def test_foodborne_pathogens_detected(synthetic_data_dir):
     """barcode02 should contain L. monocytogenes (1639) and S. enterica (28901)."""
-    from nanometa_live.core.utils.data_loaders import load_kraken_data
+    from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
     df = load_kraken_data(str(synthetic_data_dir), "barcode02")
     species_df = df[df["rank"] == "S"]
@@ -66,7 +66,7 @@ def test_foodborne_pathogens_detected(synthetic_data_dir):
 
 def test_water_pathogen_detected(synthetic_data_dir):
     """barcode03 should contain L. pneumophila (446)."""
-    from nanometa_live.core.utils.data_loaders import load_kraken_data
+    from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
     df = load_kraken_data(str(synthetic_data_dir), "barcode03")
     species_df = df[df["rank"] == "S"]
@@ -77,7 +77,7 @@ def test_water_pathogen_detected(synthetic_data_dir):
 
 def test_water_ecoli_low_level(synthetic_data_dir):
     """barcode03 E. coli (562) should have < 500 reads (low-level contamination)."""
-    from nanometa_live.core.utils.data_loaders import load_kraken_data
+    from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
     df = load_kraken_data(str(synthetic_data_dir), "barcode03")
     ecoli = df[df["taxid"] == 562]
@@ -90,7 +90,7 @@ def test_water_ecoli_low_level(synthetic_data_dir):
 
 def test_negative_no_pathogens(synthetic_data_dir):
     """barcode04 should have no watchlisted pathogen taxids at species level."""
-    from nanometa_live.core.utils.data_loaders import load_kraken_data
+    from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
     watchlisted = {1773, 1280, 1639, 28901, 446, 83334, 1491, 287, 573}
     df = load_kraken_data(str(synthetic_data_dir), "barcode04")
@@ -105,7 +105,7 @@ def test_negative_no_pathogens(synthetic_data_dir):
 
 def test_qc_metrics_all_barcodes(synthetic_data_dir):
     """All barcodes should have valid FASTP data with sensible read counts."""
-    from nanometa_live.core.utils.data_loaders import load_fastp_data
+    from nanometa_live.core.utils.qc_loaders import load_fastp_data
 
     for bc in ["barcode01", "barcode02", "barcode03", "barcode04"]:
         data = load_fastp_data(str(synthetic_data_dir), bc)
@@ -120,7 +120,7 @@ def test_qc_metrics_all_barcodes(synthetic_data_dir):
 
 def test_sample_data_differs_between_barcodes(synthetic_data_dir):
     """barcode01 and barcode02 should have different species taxid sets."""
-    from nanometa_live.core.utils.data_loaders import load_kraken_data
+    from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
     df1 = load_kraken_data(str(synthetic_data_dir), "barcode01")
     df2 = load_kraken_data(str(synthetic_data_dir), "barcode02")

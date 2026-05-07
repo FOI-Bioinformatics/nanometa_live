@@ -12,12 +12,12 @@ import threading
 import pytest
 import pandas as pd
 
-from nanometa_live.core.utils.data_loaders import (
+from nanometa_live.core.utils.loader_utils import (
     _is_file_stable,
-    _parse_kraken2_report,
     FILE_STABILITY_CHECK_INTERVAL_MS,
     FILE_STABILITY_MIN_SIZE_BYTES,
 )
+from nanometa_live.core.utils.classification_loaders import _parse_kraken2_report
 
 
 def _backdate_mtime(path, seconds=5):
@@ -196,7 +196,7 @@ class TestVectorizedTaxaAggregation:
 
     def test_aggregation_preserves_first_occurrence(self, tmp_path):
         """Ensure taxa ordering preserves first occurrence from reports."""
-        from nanometa_live.core.utils.data_loaders import load_kraken_data
+        from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
         # Create test directory structure
         kraken_dir = tmp_path / "kraken2"
@@ -239,7 +239,7 @@ class TestVectorizedTaxaAggregation:
 
     def test_aggregation_handles_empty_reports(self, tmp_path):
         """Ensure aggregation handles mix of empty and valid reports."""
-        from nanometa_live.core.utils.data_loaders import load_kraken_data
+        from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
         kraken_dir = tmp_path / "kraken2"
         kraken_dir.mkdir()
