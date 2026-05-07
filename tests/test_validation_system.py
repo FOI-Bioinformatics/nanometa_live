@@ -552,10 +552,11 @@ class TestCumulativePathogenGenomes:
 
 
 class TestValidateOrganismDispatch:
-    """When ``config['pipeline_source']`` is set, validate_organism must
-    delegate to validate_via_nanometanf (the canonical path that runs
-    BLAST/minimap2 inside nanometanf with -resume). When unset or when
-    delegation returns None, the legacy subprocess path takes over."""
+    """validate_organism now delegates exclusively to
+    validate_via_nanometanf. The local-subprocess fallback was removed
+    in the 2026-05-07 audit pass; missing pipeline_source or a None
+    return from delegation must produce a clean ValidationResult with
+    success=False rather than entering a parallel code path."""
 
     def _make_validator(self, tmp_path):
         from nanometa_live.core.workflow.on_demand_validator import OnDemandValidator
@@ -598,11 +599,15 @@ class TestValidateOrganismDispatch:
         assert captured["taxid"] == 562
         assert captured["config"]["pipeline_source"] == "FOI-Bioinformatics/nanometanf"
 
-    def test_falls_back_when_no_pipeline_source(self, tmp_path, monkeypatch):
-        """No pipeline_source -> skip nanometanf delegation, go straight
-        to legacy path. We don't actually run subprocess BLAST in the
-        test; we only verify validate_via_nanometanf is NOT called."""
-        from nanometa_live.core.workflow.on_demand_validator import OnDemandValidator
+    def test_missing_pipeline_source_returns_failed_result(self, tmp_path, monkeypatch):
+        """No pipeline_source in config: the legacy subprocess fallback
+        used to take over. After the 2026-05-07 removal, validate_organism
+        must return a failed ValidationResult with a descriptive error
+        and must NOT call validate_via_nanometanf at all."""
+        from nanometa_live.core.workflow.on_demand_validator import (
+            OnDemandValidator,
+            ValidationResult,
+        )
         v = self._make_validator(tmp_path)
 
         called = {"nf": False}
@@ -611,19 +616,21 @@ class TestValidateOrganismDispatch:
             return None
         monkeypatch.setattr(OnDemandValidator, "validate_via_nanometanf", fake_nf)
 
-        # No config -> nf path is not entered. The legacy path will
-        # fail gracefully (no Kraken2 output exists in tmp_path) and
-        # return a failed ValidationResult; we only assert dispatch
-        # behaviour here.
-        v.validate_organism(taxid=562, name="E. coli", sample="barcode01")
+        result = v.validate_organism(taxid=562, name="E. coli", sample="barcode01")
         assert called["nf"] is False
+        assert isinstance(result, ValidationResult)
+        assert result.success is False
+        assert "pipeline_source" in result.error_message.lower()
 
-    def test_falls_back_when_nanometanf_returns_none(self, tmp_path, monkeypatch):
+    def test_nanometanf_returning_none_surfaces_failure(self, tmp_path, monkeypatch):
         """Pipeline source IS set but the nanometanf call returns None
-        (e.g. genome download failed). The legacy subprocess path
-        should still be reachable -- the caller must not silently
-        get None back."""
-        from nanometa_live.core.workflow.on_demand_validator import OnDemandValidator
+        (e.g. genome download failed, or the Nextflow run errored).
+        Pre-fix this entered the legacy subprocess path; now it must
+        surface a clean failure with a pointer to the pipeline log."""
+        from nanometa_live.core.workflow.on_demand_validator import (
+            OnDemandValidator,
+            ValidationResult,
+        )
         v = self._make_validator(tmp_path)
 
         monkeypatch.setattr(
@@ -632,16 +639,11 @@ class TestValidateOrganismDispatch:
             lambda self, *a, **kw: None,
         )
 
-        # Legacy path will fail (no kraken2 output) but it should at
-        # least be entered -- verified by getting back a ValidationResult
-        # rather than the None that nanometanf returned.
         result = v.validate_organism(
             taxid=562, name="E. coli", sample="barcode01",
             config={"pipeline_source": "FOI-Bioinformatics/nanometanf"},
         )
-        assert result is not None
-        # The legacy path returns a ValidationResult; success may be
-        # False because there's no real Kraken2 output, but the type
-        # contract is preserved.
-        from nanometa_live.core.workflow.on_demand_validator import ValidationResult
         assert isinstance(result, ValidationResult)
+        assert result.success is False
+        assert "nanometanf" in result.error_message.lower()
+        assert "logs" in result.error_message.lower()

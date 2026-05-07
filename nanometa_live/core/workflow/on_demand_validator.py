@@ -271,273 +271,6 @@ class OnDemandValidator:
             logger.exception(f"Error building BLAST database for taxid {taxid}: {e}")
             return False
 
-    def run_blast(
-        self,
-        query_file: Path,
-        taxid: int,
-        sample: str,
-        percent_identity: float = 90.0,
-        evalue: float = 0.01,
-        num_threads: int = 4,
-        progress_callback: Optional[Callable[[str, int], None]] = None
-    ) -> Optional[Path]:
-        """
-        Run BLAST validation.
-
-        Args:
-            query_file: Path to query FASTA file (extracted reads)
-            taxid: Taxonomy ID
-            sample: Sample name
-            percent_identity: Minimum percent identity
-            evalue: Maximum E-value
-            num_threads: Number of threads
-            progress_callback: Optional callback(message, percent)
-
-        Returns:
-            Path to BLAST output file or None if failed
-        """
-        blast_db = self.blast_dir / f"{taxid}.fasta"
-        output_file = self.validation_dir / f"{sample}_{taxid}_ondemand.blast.txt"
-
-        if not query_file.exists():
-            logger.error(f"Query file not found: {query_file}")
-            return None
-
-        if not self.has_blast_db(taxid):
-            logger.error(f"BLAST database not found for taxid {taxid}")
-            return None
-
-        try:
-            if progress_callback:
-                progress_callback("Running BLAST...", 0)
-
-            cmd = [
-                "blastn",
-                "-db", str(blast_db),
-                "-query", str(query_file),
-                "-out", str(output_file),
-                "-outfmt", "6",
-                "-perc_identity", str(percent_identity),
-                "-evalue", str(evalue),
-                "-num_threads", str(num_threads),
-            ]
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=1800,
-            )
-
-            logger.info(f"BLAST completed: {output_file}")
-            return output_file
-
-        except subprocess.TimeoutExpired:
-            logger.error("BLAST search timed out (30 min limit)")
-            return None
-        except subprocess.CalledProcessError as e:
-            logger.error(f"BLAST failed: {e.stderr}")
-            return None
-        except FileNotFoundError:
-            logger.error("blastn not found - BLAST+ toolkit not installed?")
-            return None
-        except (PermissionError, OSError) as e:
-            logger.exception(f"Error running BLAST: {e}")
-            return None
-
-    def parse_blast_results(self, blast_output: Path) -> Dict[str, Any]:
-        """
-        Parse BLAST tabular output.
-
-        Args:
-            blast_output: Path to BLAST output file
-
-        Returns:
-            Dictionary with validation statistics
-        """
-        if not blast_output.exists():
-            return {
-                "validated_reads": 0,
-                "avg_identity": 0.0,
-                "min_identity": 0.0,
-                "max_identity": 0.0,
-                "total_hits": 0
-            }
-
-        unique_reads = set()
-        identities = []
-
-        try:
-            with open(blast_output, 'r') as f:
-                for line in f:
-                    if line.strip():
-                        parts = line.strip().split('\t')
-                        if len(parts) >= 3:
-                            read_id = parts[0]
-                            identity = float(parts[2])
-
-                            unique_reads.add(read_id)
-                            identities.append(identity)
-
-            return {
-                "validated_reads": len(unique_reads),
-                "avg_identity": sum(identities) / len(identities) if identities else 0.0,
-                "min_identity": min(identities) if identities else 0.0,
-                "max_identity": max(identities) if identities else 0.0,
-                "total_hits": len(identities)
-            }
-
-        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
-                ValueError, IndexError) as e:
-            logger.exception(f"Error parsing BLAST results: {e}")
-            return {
-                "validated_reads": 0,
-                "avg_identity": 0.0,
-                "min_identity": 0.0,
-                "max_identity": 0.0,
-                "total_hits": 0
-            }
-
-    def _run_minimap2(
-        self,
-        query_file: Path,
-        taxid: int,
-        sample: str,
-        preset: str = "map-ont",
-        min_mapq: int = 10,
-        progress_callback: Optional[Callable[[str, int], None]] = None
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Run minimap2 validation against a reference genome.
-
-        Args:
-            query_file: Path to query FASTA file (extracted reads)
-            taxid: Taxonomy ID
-            sample: Sample name
-            preset: minimap2 preset (map-ont, map-hifi, map-pb)
-            min_mapq: Minimum mapping quality to count as mapped
-            progress_callback: Optional progress callback
-
-        Returns:
-            Dict with validation stats or None if failed
-        """
-        genome_path = self.genomes_dir / f"{taxid}.fasta"
-        output_file = self.validation_dir / f"{sample}_{taxid}_ondemand.paf"
-
-        if not genome_path.exists():
-            logger.error(f"Reference genome not found for taxid {taxid}")
-            return None
-
-        if not query_file.exists():
-            logger.error(f"Query file not found: {query_file}")
-            return None
-
-        try:
-            if progress_callback:
-                progress_callback("Running minimap2 alignment...", 0)
-
-            cmd = [
-                "minimap2",
-                "-x", preset,
-                "--secondary=no",
-                "-o", str(output_file),
-                str(genome_path),
-                str(query_file)
-            ]
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=1800,
-            )
-
-            logger.info(f"minimap2 completed: {output_file}")
-
-            # Parse PAF output
-            return self._parse_paf_results(output_file, min_mapq)
-
-        except subprocess.CalledProcessError as e:
-            logger.error(f"minimap2 failed: {e.stderr}")
-            return None
-        except FileNotFoundError:
-            logger.error("minimap2 not found in PATH")
-            return None
-        except (subprocess.TimeoutExpired, PermissionError, OSError) as e:
-            logger.exception(f"Error running minimap2: {e}")
-            return None
-
-    def _parse_paf_results(
-        self,
-        paf_file: Path,
-        min_mapq: int = 10
-    ) -> Dict[str, Any]:
-        """
-        Parse minimap2 PAF output.
-
-        PAF columns: qname qlen qstart qend strand tname tlen tstart tend nmatch alen mapq ...
-
-        Args:
-            paf_file: Path to PAF output
-            min_mapq: Minimum mapping quality threshold
-
-        Returns:
-            Dict with mapped_reads, hit_rate, avg_mapq, avg_identity
-        """
-        unique_reads = set()
-        mapq_values = []
-        identities = []
-        total_reads_seen = set()
-
-        try:
-            with open(paf_file, 'r') as f:
-                for line in f:
-                    parts = line.strip().split('\t')
-                    if len(parts) < 12:
-                        continue
-
-                    qname = parts[0]
-                    qlen = int(parts[1])
-                    nmatch = int(parts[9])
-                    alen = int(parts[10])
-                    mapq = int(parts[11])
-
-                    total_reads_seen.add(qname)
-
-                    if mapq >= min_mapq:
-                        unique_reads.add(qname)
-                        mapq_values.append(mapq)
-                        if alen > 0:
-                            identities.append(nmatch / alen * 100)
-
-            mapped = len(unique_reads)
-            total = len(total_reads_seen) if total_reads_seen else 0
-
-            return {
-                "mapped_reads": mapped,
-                "total_reads": total,
-                "hit_rate": mapped / total if total > 0 else 0.0,
-                "avg_mapq": sum(mapq_values) / len(mapq_values) if mapq_values else 0.0,
-                "avg_identity": sum(identities) / len(identities) if identities else 0.0,
-                "min_identity": min(identities) if identities else 0.0,
-                "max_identity": max(identities) if identities else 0.0,
-            }
-
-        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
-                ValueError, IndexError) as e:
-            logger.exception(f"Error parsing PAF results: {e}")
-            return {
-                "mapped_reads": 0,
-                "total_reads": 0,
-                "hit_rate": 0.0,
-                "avg_mapq": 0.0,
-                "avg_identity": 0.0,
-                "min_identity": 0.0,
-                "max_identity": 0.0,
-            }
-
     # Single accumulating pathogen genomes JSON. Living in
     # ``self.validation_dir`` keeps it next to the validation outputs
     # nanometanf writes; the same path is read back across calls so
@@ -738,17 +471,16 @@ class OnDemandValidator:
         config: Optional[Dict[str, Any]] = None,
     ) -> ValidationResult:
         """
-        Run full on-demand validation for an organism.
+        Run full on-demand validation for an organism via nanometanf.
 
-        This is the main entry point that orchestrates the entire
-        validation workflow. When the operator has configured a
-        ``pipeline_source`` (the canonical setup), delegates to
-        nanometanf via the validation-only entry point with -resume so
-        BLAST and minimap2 run identically whether triggered by the
-        full pipeline or on-demand. Falls back to a local subprocess
-        BLAST/minimap2 path only if nanometanf is unavailable -- that
-        legacy path duplicates pipeline logic and is retained purely
-        for the no-Nextflow case.
+        Delegates to ``validate_via_nanometanf`` so BLAST and minimap2
+        run inside the pipeline with ``-resume`` -- previously-validated
+        taxids are cached and only the new ``(sample, taxid)`` pair runs
+        end-to-end. The legacy local-subprocess fallback was removed in
+        the 2026-05-07 audit pass: maintaining a parallel implementation
+        of the same validation logic was a bug source (drift from the
+        pipeline) and it required users to install blastn/minimap2/
+        samtools system-wide instead of letting conda do it.
 
         Args:
             taxid: Taxonomy ID
@@ -756,226 +488,58 @@ class OnDemandValidator:
             sample: Sample name
             method: Validation method - 'blast', 'minimap2', or 'both'
             progress_callback: Optional callback(message, percent)
-            config: Optional run configuration. When this carries
-                ``pipeline_source`` / ``pipeline_profile`` /
-                ``pipeline_branch`` keys the call routes through
-                nanometanf rather than the legacy subprocess path.
+            config: Run configuration. Must include ``pipeline_source``
+                (and optionally ``pipeline_profile`` / ``pipeline_branch``)
+                so the call can route through nanometanf. Validation now
+                requires the pipeline; configure it in the GUI's
+                Configuration tab before invoking on-demand validation.
 
         Returns:
-            ValidationResult with validation statistics
+            ValidationResult with validation statistics. Failure cases
+            (missing pipeline_source, nanometanf returned no result)
+            produce a ValidationResult with ``success=False`` and a
+            descriptive ``error_message`` rather than raising.
         """
         job_id = self._get_job_id(taxid, sample)
         job = ValidationJob(taxid=taxid, name=name, sample=sample)
         self._jobs[job_id] = job
 
-        # Preferred path: delegate to nanometanf so the pipeline owns
-        # all data processing. validate_via_nanometanf maintains the
-        # cumulative pathogen_genomes.json + uses -resume so previously-
-        # validated taxids are cached and only the new (sample, taxid)
-        # pair runs end-to-end. Returns None if no pipeline source is
-        # configured or the nextflow run fails; in that case we fall
-        # through to the legacy subprocess path below.
-        if config and config.get("pipeline_source"):
-            nf_result = self.validate_via_nanometanf(
-                taxid=taxid,
-                name=name,
-                sample=sample,
-                method=method,
-                config=config,
-                progress_callback=progress_callback,
+        if not (config and config.get("pipeline_source")):
+            error = (
+                "On-demand validation requires the nanometanf pipeline. "
+                "Set 'pipeline_source' in the Configuration tab "
+                "(e.g. 'remote:dev' or a local path to nanometanf)."
             )
-            if nf_result is not None:
-                # Mirror the legacy job state for callers tracking jobs
-                job.status = ValidationStatus.COMPLETED
-                job.status_message = "Validated via nanometanf"
-                job.progress_percent = 100
-                return nf_result
-            logger.info(
-                "nanometanf delegation returned None; falling back to "
-                "local subprocess BLAST/minimap2 path"
-            )
-
-        def update_job(status: ValidationStatus, msg: str, pct: int):
-            job.status = status
-            job.status_message = msg
-            job.progress_percent = pct
-            if progress_callback:
-                progress_callback(msg, pct)
-
-        try:
-            # Step 1: Check/download genome (0-20%)
-            update_job(ValidationStatus.DOWNLOADING_GENOME, f"Checking genome for {name}...", 5)
-
-            if not self.has_genome(taxid):
-                update_job(ValidationStatus.DOWNLOADING_GENOME, f"Downloading genome for {name}...", 10)
-                genome_path = self.download_genome(taxid, name)
-                if not genome_path:
-                    job.status = ValidationStatus.FAILED
-                    job.error_message = "Failed to download reference genome"
-                    return self._create_failed_result(taxid, name, sample, job.error_message)
-            else:
-                genome_path = self.genomes_dir / f"{taxid}.fasta"
-
-            job.genome_path = genome_path
-            update_job(ValidationStatus.DOWNLOADING_GENOME, "Genome ready", 20)
-
-            # Step 2: Check/build BLAST database (20-35%)
-            update_job(ValidationStatus.BUILDING_BLAST_DB, "Checking BLAST database...", 25)
-
-            if not self.has_blast_db(taxid):
-                update_job(ValidationStatus.BUILDING_BLAST_DB, f"Building BLAST database...", 30)
-                if not self.build_blast_db(taxid):
-                    job.status = ValidationStatus.FAILED
-                    job.error_message = "Failed to build BLAST database"
-                    return self._create_failed_result(taxid, name, sample, job.error_message)
-
-            job.blast_db_path = self.blast_dir / f"{taxid}.fasta"
-            update_job(ValidationStatus.BUILDING_BLAST_DB, "BLAST database ready", 35)
-
-            # Step 3: Extract reads (35-70%)
-            update_job(ValidationStatus.EXTRACTING_READS, "Extracting reads from Kraken2 output...", 40)
-
-            def extraction_progress(msg: str, pct: int):
-                # Scale from 40-70%
-                scaled_pct = 40 + int(30 * pct / 100)
-                update_job(ValidationStatus.EXTRACTING_READS, msg, scaled_pct)
-
-            extraction_result = self.read_extractor.extract_reads_for_taxid(
-                sample, taxid, extraction_progress
-            )
-
-            if not extraction_result.success:
-                job.status = ValidationStatus.FAILED
-                job.error_message = extraction_result.error_message or "Failed to extract reads"
-                return self._create_failed_result(taxid, name, sample, job.error_message)
-
-            job.total_reads = extraction_result.total_reads
-            job.extracted_reads = extraction_result.extracted_reads
-            job.extracted_fasta = extraction_result.output_file
-
-            if extraction_result.extracted_reads == 0:
-                # No reads to validate - not an error, just no data
-                update_job(ValidationStatus.COMPLETED, "No reads to validate", 100)
-                job.completed_at = datetime.now()
-                return ValidationResult(
-                    taxid=taxid,
-                    name=name,
-                    sample=sample,
-                    total_classified_reads=extraction_result.total_reads,
-                    extracted_reads=0,
-                    validated_reads=0,
-                    validation_rate=0.0,
-                    avg_identity=0.0,
-                    min_identity=0.0,
-                    max_identity=0.0,
-                    success=True,
-                    error_message="No reads found for this taxid"
-                )
-
-            update_job(ValidationStatus.EXTRACTING_READS, f"Extracted {extraction_result.extracted_reads} reads", 70)
-
-            # Step 4: Run validation (70-95%)
-            blast_stats = None
-            mm2_stats = None
-
-            if method in ("blast", "both"):
-                update_job(ValidationStatus.RUNNING_BLAST, "Running BLAST validation...", 75)
-
-                if not self.has_blast_db(taxid):
-                    update_job(ValidationStatus.BUILDING_BLAST_DB, "Building BLAST database...", 72)
-                    if not self.build_blast_db(taxid):
-                        if method == "blast":
-                            job.status = ValidationStatus.FAILED
-                            job.error_message = "Failed to build BLAST database"
-                            return self._create_failed_result(taxid, name, sample, job.error_message)
-
-                if self.has_blast_db(taxid):
-                    blast_output = self.run_blast(
-                        extraction_result.output_file,
-                        taxid,
-                        sample
-                    )
-                    if blast_output:
-                        blast_stats = self.parse_blast_results(blast_output)
-                        job.blast_results = blast_output
-
-            if method in ("minimap2", "both"):
-                update_job(ValidationStatus.RUNNING_BLAST, "Running minimap2 validation...", 80)
-                mm2_stats = self._run_minimap2(
-                    extraction_result.output_file,
-                    taxid,
-                    sample
-                )
-
-            # Use best available stats
-            if blast_stats and mm2_stats:
-                # Prefer the one with higher validation rate
-                blast_rate = blast_stats["validated_reads"] / job.extracted_reads * 100 if job.extracted_reads > 0 else 0
-                mm2_rate = mm2_stats["mapped_reads"] / job.extracted_reads * 100 if job.extracted_reads > 0 else 0
-                if mm2_rate > blast_rate:
-                    primary_stats = {
-                        "validated_reads": mm2_stats["mapped_reads"],
-                        "avg_identity": mm2_stats["avg_identity"],
-                        "min_identity": mm2_stats["min_identity"],
-                        "max_identity": mm2_stats["max_identity"],
-                    }
-                else:
-                    primary_stats = blast_stats
-            elif mm2_stats:
-                primary_stats = {
-                    "validated_reads": mm2_stats["mapped_reads"],
-                    "avg_identity": mm2_stats["avg_identity"],
-                    "min_identity": mm2_stats["min_identity"],
-                    "max_identity": mm2_stats["max_identity"],
-                }
-            elif blast_stats:
-                primary_stats = blast_stats
-            else:
-                job.status = ValidationStatus.FAILED
-                job.error_message = "Validation execution failed"
-                return self._create_failed_result(taxid, name, sample, job.error_message)
-
-            update_job(ValidationStatus.RUNNING_BLAST, "Parsing results...", 90)
-
-            # Step 5: Finalize results (95-100%)
-            job.validated_reads = primary_stats["validated_reads"]
-            job.validation_rate = (
-                job.validated_reads / job.extracted_reads * 100
-                if job.extracted_reads > 0 else 0.0
-            )
-            job.avg_identity = primary_stats["avg_identity"]
-            job.status = ValidationStatus.COMPLETED
-            job.completed_at = datetime.now()
-
-            update_job(ValidationStatus.COMPLETED, "Validation complete", 100)
-
-            # Save results to JSON
-            self._save_results(job)
-
-            return ValidationResult(
-                taxid=taxid,
-                name=name,
-                sample=sample,
-                total_classified_reads=extraction_result.total_reads,
-                extracted_reads=extraction_result.extracted_reads,
-                validated_reads=primary_stats["validated_reads"],
-                validation_rate=job.validation_rate,
-                avg_identity=primary_stats["avg_identity"],
-                min_identity=primary_stats["min_identity"],
-                max_identity=primary_stats["max_identity"],
-                success=True,
-                blast_output_file=job.blast_results
-            )
-
-        except Exception as e:
-            # Top-level orchestrator catch: validate_organism is the public entry
-            # point invoked from the UI. A single failure must not crash the
-            # caller, and the cause is recorded on the job for surfacing in the
-            # dashboard. Keep broad catch.
-            logger.exception(f"Validation failed for taxid {taxid}: {e}")
             job.status = ValidationStatus.FAILED
-            job.error_message = str(e)
-            return self._create_failed_result(taxid, name, sample, str(e))
+            job.error_message = error
+            return self._create_failed_result(taxid, name, sample, error)
+
+        nf_result = self.validate_via_nanometanf(
+            taxid=taxid,
+            name=name,
+            sample=sample,
+            method=method,
+            config=config,
+            progress_callback=progress_callback,
+        )
+        if nf_result is not None:
+            job.status = ValidationStatus.COMPLETED
+            job.status_message = "Validated via nanometanf"
+            job.progress_percent = 100
+            return nf_result
+
+        # nanometanf delegation returned None -- the pipeline run
+        # failed, the genome download failed, or another upstream
+        # condition. Surface a clean failure rather than silently
+        # falling back to a different code path.
+        error = (
+            "nanometanf validation did not return a result. Check "
+            "the pipeline log under <results>/logs/ for the underlying "
+            "Nextflow error."
+        )
+        job.status = ValidationStatus.FAILED
+        job.error_message = error
+        return self._create_failed_result(taxid, name, sample, error)
 
     def _create_failed_result(self, taxid: int, name: str, sample: str, error: str) -> ValidationResult:
         """Create a failed validation result."""
