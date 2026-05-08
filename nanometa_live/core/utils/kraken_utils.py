@@ -98,25 +98,67 @@ def download_kraken_database(
         return False, f"I/O error preparing database: {str(e)}"
 
 
-def verify_kraken_db(db_path: str) -> bool:
+# Canonical list of files every Kraken2 database is expected to contain.
+# Single source of truth - all DB-validity checks across the project must
+# delegate to verify_kraken_db / check_kraken_db rather than redefining
+# this list. Adding a new required file (e.g. accmap.k2d for some custom
+# builds) only needs a single edit here.
+KRAKEN_REQUIRED_FILES = ("hash.k2d", "opts.k2d", "taxo.k2d")
+
+
+def check_kraken_db(db_path: str) -> Tuple[bool, List[str]]:
     """
-    Verify that a Kraken2 database is valid.
+    Validate a Kraken2 database directory.
+
+    Returns a tuple of (is_valid, missing_files). The list is empty when
+    the database passes; otherwise it contains the basenames of the
+    expected files that were absent. Use this when the caller wants to
+    format its own error message; use verify_kraken_db for a plain bool.
+
+    The path is consumed as-is - callers are expected to have already
+    normalised it via core.utils.path_utils.normalise_path. We do NOT
+    expand "~" or strip whitespace here on the assumption that paths
+    have already been canonicalised at config write/load time, so a
+    failure here is informative ("really not on disk") rather than a
+    silent unicode-vs-tilde mismatch.
 
     Args:
-        db_path: Path to the Kraken2 database
+        db_path: Absolute path to the candidate Kraken2 database.
 
     Returns:
-        True if the database is valid, False otherwise
+        (True, []) if all required files are present.
+        (False, [...]) listing the missing basenames otherwise. Returns
+        (False, list(KRAKEN_REQUIRED_FILES)) when db_path is empty or
+        not a directory, so the caller can render a single uniform
+        message regardless of the failure mode.
     """
-    # Check for key files that should be present in any Kraken database
-    required_files = ["hash.k2d", "opts.k2d", "taxo.k2d"]
+    if not db_path or not os.path.isdir(db_path):
+        return False, list(KRAKEN_REQUIRED_FILES)
 
-    for file in required_files:
-        if not os.path.isfile(os.path.join(db_path, file)):
-            logging.warning(f"Kraken2 database missing required file: {file}")
-            return False
+    missing = [
+        name for name in KRAKEN_REQUIRED_FILES
+        if not os.path.isfile(os.path.join(db_path, name))
+    ]
+    return (not missing), missing
 
-    return True
+
+def verify_kraken_db(db_path: str) -> bool:
+    """
+    Return True iff db_path is a valid Kraken2 database directory.
+
+    Thin wrapper over check_kraken_db for callers that only care about
+    pass/fail. Logs the missing files at WARNING level on failure so
+    the cause shows up in the app log without the caller having to
+    plumb the list through.
+    """
+    valid, missing = check_kraken_db(db_path)
+    if not valid:
+        logging.warning(
+            "Kraken2 database invalid at %r: missing %s",
+            db_path,
+            ", ".join(missing),
+        )
+    return valid
 
 
 def inspect_kraken_db(db_path: str, output_path: str = None) -> Tuple[bool, str]:

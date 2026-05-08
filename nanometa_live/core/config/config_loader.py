@@ -165,6 +165,34 @@ class ConfigLoader:
             # Ensure boolean parameters are strictly boolean
             self._standardize_boolean_params(config)
 
+            # Self-heal stale path values: a YAML written long ago may
+            # contain "~/data/kraken_db" or a relative path that
+            # resolves against a different cwd today. Normalising at
+            # load time means downstream existence checks compare the
+            # canonical absolute form against the filesystem, which
+            # eliminates the largest class of "directory not found"
+            # errors. report_missing_paths is logged but non-fatal -
+            # we want the GUI to come up so the operator can fix the
+            # stale value rather than crashing on startup.
+            from nanometa_live.core.utils.path_utils import (
+                normalise_config_paths,
+                report_missing_paths,
+            )
+            rewritten = normalise_config_paths(config)
+            if rewritten:
+                logging.info(
+                    "Normalised path keys on load: %s",
+                    ", ".join(sorted(rewritten)),
+                )
+            missing = report_missing_paths(config)
+            if missing:
+                for key, path in missing.items():
+                    logging.warning(
+                        "Configured %s points to a missing location: %s",
+                        key,
+                        path,
+                    )
+
             return config
         except FileNotFoundError:
             logging.error(f"Configuration file {config_path} not found")

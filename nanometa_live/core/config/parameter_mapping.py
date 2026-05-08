@@ -401,11 +401,19 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         ... }
         >>> params = create_nextflow_params(config)
     """
-    # Extract configuration values with defaults
-    nanopore_dir = config.get("nanopore_output_directory", "")
-    kraken_db = config.get("kraken_db", "")
+    # Extract configuration values with defaults. Normalise paths
+    # defensively here as well: most callers go through the
+    # ConfigLoader and config_tab save flow which normalise on the way
+    # in, but pipeline launches that build a config dict from kwargs
+    # (tests, scripts) bypass those gates. Doing it here keeps the
+    # launch path symmetric with the readiness check.
+    from nanometa_live.core.utils.path_utils import normalise_path
+    nanopore_dir = normalise_path(config.get("nanopore_output_directory", ""))
+    kraken_db = normalise_path(config.get("kraken_db", ""))
     # IMPORTANT: Use results_output_directory from UI, falling back to main_dir
-    main_dir = config.get("results_output_directory") or config.get("main_dir", "")
+    main_dir = normalise_path(
+        config.get("results_output_directory") or config.get("main_dir", "")
+    )
 
     # Log configuration for debugging
     logging.info(f"Output directory (results_output_directory/main_dir): {main_dir}")
@@ -986,21 +994,17 @@ def validate_nanometanf_params(params: Dict[str, Any]) -> Tuple[bool, str]:
             "input (samplesheet), input_dir, fastq_input_dir, barcode_input_dir, or nanopore_output_dir"
         )
 
-    # Validate Kraken2 database exists
+    # Validate Kraken2 database. Delegates to the canonical check in
+    # core.utils.kraken_utils so the launch-time gate uses the same
+    # required-files list as the readiness panel and Configuration tab
+    # validation -- if those three diverge, an operator can pass one
+    # check and fail another with the same path.
+    from nanometa_live.core.utils.kraken_utils import check_kraken_db
     kraken_db = params["kraken2_db"]
     if not os.path.isdir(kraken_db):
         return False, f"Kraken2 database directory not found: {kraken_db}"
-
-    # Check for key Kraken2 database files
-    required_kraken_files = ["hash.k2d", "opts.k2d", "taxo.k2d"]
-    missing_files = []
-
-    for file in required_kraken_files:
-        file_path = os.path.join(kraken_db, file)
-        if not os.path.isfile(file_path):
-            missing_files.append(file)
-
-    if missing_files:
+    valid, missing_files = check_kraken_db(kraken_db)
+    if not valid:
         return (
             False,
             f"Kraken2 database missing required files: {', '.join(missing_files)}"

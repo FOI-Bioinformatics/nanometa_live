@@ -183,10 +183,18 @@ class ReadinessChecker:
                 "Kraken2 Database", False, Severity.CRITICAL,
                 "No Kraken2 database path configured"
             )
+        # Single source of truth for the required-files list. See
+        # core.utils.kraken_utils.check_kraken_db.
+        from nanometa_live.core.utils.kraken_utils import check_kraken_db
+        valid, missing = check_kraken_db(db_path)
         p = Path(db_path)
-        required = ["hash.k2d", "opts.k2d", "taxo.k2d"]
-        missing = [f for f in required if not (p / f).exists()]
-        if missing:
+        if not valid:
+            if not p.is_dir():
+                return CheckResult(
+                    "Kraken2 Database", False, Severity.CRITICAL,
+                    f"Database directory not found: {db_path}",
+                    details=str(p)
+                )
             return CheckResult(
                 "Kraken2 Database", False, Severity.CRITICAL,
                 f"Database missing files: {', '.join(missing)}",

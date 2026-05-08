@@ -561,6 +561,17 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         # Validation errors list
         errors = []
 
+        # Canonicalise paths up-front so every check below uses the
+        # absolute, expanded form. Prevents "~/foo" and relative paths
+        # from silently failing existence checks. The canonical value
+        # is what gets written to the config dict at the bottom of
+        # this callback (see normalise_config_paths down there).
+        from nanometa_live.core.utils.path_utils import normalise_path
+        nanopore_dir = normalise_path(nanopore_dir) if nanopore_dir else nanopore_dir
+        kraken_db = normalise_path(kraken_db) if kraken_db else kraken_db
+        if results_dir:
+            results_dir = normalise_path(results_dir)
+
         # Validate required fields
         if not nanopore_dir or not nanopore_dir.strip():
             errors.append("Nanopore Sequence Data Folder (input) is required")
@@ -601,16 +612,17 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             elif not os.path.isdir(kraken_db):
                 errors.append(f"Kraken2 database path is not a directory: {kraken_db}")
             else:
-                # Validate Kraken2 database format - check for required files
-                required_files = ["hash.k2d", "opts.k2d", "taxo.k2d"]
-                missing_files = []
-                for req_file in required_files:
-                    file_path = os.path.join(kraken_db, req_file)
-                    if not os.path.exists(file_path):
-                        missing_files.append(req_file)
-
-                if missing_files:
-                    errors.append(f"Invalid Kraken2 database format. Missing required files: {', '.join(missing_files)}")
+                # Validate Kraken2 database format. Single source of truth
+                # is core.utils.kraken_utils.check_kraken_db so the rule
+                # cannot drift from the launch-time check in
+                # parameter_mapping.validate_nextflow_params.
+                from nanometa_live.core.utils.kraken_utils import check_kraken_db
+                valid, missing_files = check_kraken_db(kraken_db)
+                if not valid:
+                    errors.append(
+                        f"Invalid Kraken2 database format. "
+                        f"Missing required files: {', '.join(missing_files)}"
+                    )
 
         # Validate numeric ranges
         if update_interval is not None:
@@ -795,6 +807,14 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
         # Note: Species watchlist is now managed via the Watchlist tab
         # and WatchlistManager, not through this config form
+
+        # Canonicalise every path-bearing value: strip whitespace,
+        # expand "~", and resolve to an absolute path. Prevents the
+        # most common cause of "Kraken2 database directory not found"
+        # at launch time, where a literal "~/data/..." string never
+        # passes os.path.exists. See core/utils/path_utils.py.
+        from nanometa_live.core.utils.path_utils import normalise_config_paths
+        normalise_config_paths(config)
 
         # If validation errors occurred during pipeline source setup, return them
         if errors:
