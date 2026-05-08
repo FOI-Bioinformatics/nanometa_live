@@ -235,13 +235,14 @@ def register_qc_callbacks(app: Dash):
         [
             Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
+            Input("update-interval", "n_intervals"),
         ],
         [
             State("app-config", "data"),
             State("backend-status", "data"),
         ],
     )
-    def update_qc_plots(_fingerprint, selected_sample, config, status):
+    def update_qc_plots(_fingerprint, selected_sample, _n_intervals, config, status):
         """
         Update the QC plots based on actual processed data from FASTP/Kraken2.
 

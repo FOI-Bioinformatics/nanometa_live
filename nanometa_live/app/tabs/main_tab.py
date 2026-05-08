@@ -312,6 +312,7 @@ def register_main_callbacks(app: Dash):
             Input("apply-organism-filters", "n_clicks"),
             Input("selected-sample", "data"),
             Input("main-watchlist-store", "data"),  # React to watchlist changes
+            Input("update-interval", "n_intervals"),  # Polling backstop
         ],
         [
             State("top-organisms-count", "value"),
@@ -324,7 +325,7 @@ def register_main_callbacks(app: Dash):
     )
     def update_main_results(
         _fingerprint, apply_clicks, selected_sample, watchlist_store,
-        top_count, min_abundance, tax_ranks, config, status,
+        _n_intervals, top_count, min_abundance, tax_ranks, config, status,
     ):
         """
         Update the main results tab with organism summary, cards, table,

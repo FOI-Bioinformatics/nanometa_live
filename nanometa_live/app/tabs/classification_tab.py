@@ -135,6 +135,7 @@ def register_classification_callbacks(app: Dash):
             Input("classification-color-scheme", "value"),  # Color scheme selection
             Input("classification-max-taxa", "value"),  # Max taxa per level filter
             Input("classification-chart-height", "value"),  # Chart height control
+            Input("update-interval", "n_intervals"),  # Polling backstop
         ],
         [
             State("classification-filter-input", "value"),
@@ -153,6 +154,7 @@ def register_classification_callbacks(app: Dash):
         color_scheme,     # Color scheme selection
         max_taxa_value,   # Max taxa per level filter
         chart_height,     # Chart height control
+        _n_intervals,     # Polling backstop
         filter_value,     # State
         domains,          # State
         config,
