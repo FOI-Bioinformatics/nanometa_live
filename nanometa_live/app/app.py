@@ -6,7 +6,7 @@ This module initializes the Dash application and sets up the core layout and cal
 
 import os
 import logging
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 
 import yaml
 import dash
@@ -71,12 +71,26 @@ def _init_offline_mode(offline: bool) -> None:
     get_genome_manager(offline_mode=offline)
 
 
-def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendManager) -> Dash:
+def create_app(
+    config: Dict[str, Any],
+    data_dir: str,
+    backend_manager: BackendManager,
+    *,
+    deferred_session: Optional[Dict[str, Any]] = None,
+) -> Dash:
     """
     Create and configure the Dash application.
 
     Args:
         config: Application configuration
+        data_dir: Per-installation data directory (e.g. ~/.nanometa)
+        backend_manager: BackendManager instance
+        deferred_session: Optional metadata describing a previous
+            session YAML the operator may opt to load. Shape:
+            ``{"path": <abspath>, "mtime": <float>, "mtime_iso": <str>}``.
+            When provided, the GUI surfaces a Resume/Discard banner so
+            visualisation of already-processed data is an explicit
+            choice rather than the silent default.
         data_dir: Directory for application data
         backend_manager: Backend manager instance
 
@@ -221,6 +235,12 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
         dcc.Store(id='backend-status', data={"running": False}),
         dcc.Store(id='app-data-dir', data=data_dir),
         dcc.Store(id='kraken-databases', data=kraken_databases),
+        # Metadata about a previous-session YAML the operator may opt
+        # to resume. None on a clean boot or after the operator
+        # discards the session. See nanometa_live.py main() for the
+        # population logic and app/callbacks.py for the
+        # Resume/Discard handlers.
+        dcc.Store(id='deferred-last-session', data=deferred_session),
 
         # Configuration state tracking stores
         dcc.Store(id='config-source', data={
@@ -284,6 +304,22 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
             interval=1000,  # 1 second
             n_intervals=0,
             disabled=False
+        ),
+
+        # Resume-previous-session banner. Hidden by default; the
+        # callback `update_resume_session_banner` (app/callbacks.py)
+        # toggles its `is_open` and rewrites the body when the
+        # `deferred-last-session` store is non-empty. Boot is fresh by
+        # design (see nanometa_live.py main()): visualising
+        # already-processed data should be an explicit Resume action,
+        # not a silent restore of the last operator's state.
+        dbc.Alert(
+            id="resume-session-banner",
+            color="info",
+            is_open=bool(deferred_session),
+            dismissable=False,
+            className="mb-0 rounded-0 border-start-0 border-end-0 border-top-0",
+            children=html.Div(id="resume-session-banner-body"),
         ),
 
         # Header with title, controls, and status

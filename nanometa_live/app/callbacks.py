@@ -1345,6 +1345,152 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         """Navigate from Watchlist to Preparation tab."""
         return "preparation-tab"
 
+    # ========================================================================
+    # Resume-previous-session banner
+    # ========================================================================
+    # The previous behaviour silently auto-loaded
+    # ~/.nanometa/configs/last-session.yaml on every restart, which
+    # rehydrated stale paths and confused operators who expected a
+    # fresh process to mean a fresh state. Now nanometa_live.py main()
+    # boots with a default config and stashes the YAML metadata in
+    # the deferred-last-session store; the operator chooses to
+    # Resume or Discard from a banner above the header.
+
+    @app.callback(
+        Output("resume-session-banner-body", "children"),
+        Output("resume-session-banner", "is_open"),
+        Input("deferred-last-session", "data"),
+    )
+    def update_resume_session_banner(deferred):
+        """Render the Resume / Discard banner when a previous session
+        YAML is available; collapse it once the operator acts."""
+        if not deferred or not deferred.get("path"):
+            return no_update, False
+
+        body = html.Div(
+            [
+                html.Div(
+                    [
+                        html.I(className="bi bi-clock-history me-2"),
+                        html.Span("Found a previous session at "),
+                        html.Code(deferred["path"]),
+                        html.Span(
+                            f" (saved {deferred.get('mtime_iso', 'unknown time')}). "
+                            "Resume it or start fresh.",
+                        ),
+                    ],
+                    className="me-3",
+                ),
+                html.Div(
+                    [
+                        dbc.Button(
+                            [html.I(className="bi bi-arrow-counterclockwise me-1"),
+                             "Resume session"],
+                            id="resume-session-load-btn",
+                            color="primary",
+                            size="sm",
+                            className="me-2",
+                            n_clicks=0,
+                        ),
+                        dbc.Button(
+                            [html.I(className="bi bi-trash me-1"), "Discard"],
+                            id="resume-session-discard-btn",
+                            color="outline-secondary",
+                            size="sm",
+                            n_clicks=0,
+                        ),
+                    ],
+                    className="ms-auto",
+                ),
+            ],
+            className="d-flex align-items-center flex-wrap",
+        )
+        return body, True
+
+    @app.callback(
+        Output("app-config", "data", allow_duplicate=True),
+        Output("config-source", "data", allow_duplicate=True),
+        Output("saved-config-snapshot", "data", allow_duplicate=True),
+        Output("config-modified", "data", allow_duplicate=True),
+        Output("deferred-last-session", "data", allow_duplicate=True),
+        Output("toast-message", "data", allow_duplicate=True),
+        Input("resume-session-load-btn", "n_clicks"),
+        State("deferred-last-session", "data"),
+        State("app-data-dir", "data"),
+        prevent_initial_call=True,
+    )
+    def load_deferred_session(n_clicks, deferred, data_dir):
+        """Resume the deferred session: load the YAML through the
+        canonical ConfigLoader (which also runs path normalisation
+        and missing-path warnings, per DB-2), wire it into app-config
+        and the saved-config-snapshot, and clear the deferred store
+        so the banner collapses."""
+        if not n_clicks or not deferred or not deferred.get("path"):
+            raise PreventUpdate
+        path = deferred["path"]
+        try:
+            from nanometa_live.core.config.config_loader import ConfigLoader
+            cfg = ConfigLoader(os.path.join(data_dir, "configs")).load_config(path)
+        except Exception as exc:
+            return (
+                no_update, no_update, no_update, no_update, no_update,
+                {
+                    "type": "error",
+                    "title": "Could not resume session",
+                    "message": f"Failed to load {path}: {exc}",
+                },
+            )
+        source_info = {
+            "type": "file",
+            "path": path,
+            "name": os.path.basename(path),
+        }
+        return (
+            cfg,
+            source_info,
+            cfg,
+            False,
+            None,
+            {
+                "type": "success",
+                "title": "Previous session resumed",
+                "message": f"Loaded configuration from {path}.",
+            },
+        )
+
+    @app.callback(
+        Output("deferred-last-session", "data", allow_duplicate=True),
+        Output("toast-message", "data", allow_duplicate=True),
+        Input("resume-session-discard-btn", "n_clicks"),
+        State("deferred-last-session", "data"),
+        prevent_initial_call=True,
+    )
+    def discard_deferred_session(n_clicks, deferred):
+        """Discard the deferred session: remove the YAML from disk so
+        the next process boot is genuinely fresh, then clear the
+        deferred store to collapse the banner."""
+        if not n_clicks or not deferred or not deferred.get("path"):
+            raise PreventUpdate
+        path = deferred["path"]
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass  # Already gone; treat as success.
+        except OSError as exc:
+            return (
+                no_update,
+                {
+                    "type": "error",
+                    "title": "Could not discard previous session",
+                    "message": f"Failed to remove {path}: {exc}",
+                },
+            )
+        return None, {
+            "type": "info",
+            "title": "Previous session discarded",
+            "message": f"Removed {path}.",
+        }
+
     @app.callback(
         Output("start-stop-button", "n_clicks", allow_duplicate=True),
         Input("preparation-start-analysis-btn", "n_clicks"),
