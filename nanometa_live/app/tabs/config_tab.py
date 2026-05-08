@@ -1439,6 +1439,97 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             )
 
     @app.callback(
+        Output("sample-handling-autodetect", "children"),
+        [
+            Input("nanopore-dir-input", "value"),
+            Input("sample-handling-input", "value"),
+        ],
+        prevent_initial_call=False,
+    )
+    def update_sample_handling_autodetect(nanopore_dir, current_mode):
+        """Render a one-line preview of the detected directory layout.
+
+        Helps the operator pick a sample-handling mode that matches the
+        actual input folder. The detection is delegated to
+        ``core.utils.auto_detect.detect_sample_handling`` so the rule
+        cannot drift from the validation path used at Apply Settings.
+        """
+        if not nanopore_dir or not str(nanopore_dir).strip():
+            return ""
+
+        path = os.path.expanduser(str(nanopore_dir).strip())
+        if not os.path.isdir(path):
+            return html.Small(
+                [
+                    html.I(className="bi bi-dash-circle me-1"),
+                    "Auto-detect: enter an existing folder to preview the layout.",
+                ],
+                className="text-muted",
+            )
+
+        try:
+            import glob as _glob
+            from nanometa_live.core.utils.auto_detect import (
+                detect_sample_handling,
+                find_sample_subdirs,
+                is_barcode_named,
+            )
+
+            detected_mode, _reason = detect_sample_handling(path)
+            sample_dirs = find_sample_subdirs(path)
+            flat_fastqs = (
+                _glob.glob(os.path.join(path, "*.fastq*"))
+                + _glob.glob(os.path.join(path, "*.fq*"))
+            )
+
+            if sample_dirs:
+                conventional = [d for d in sample_dirs if is_barcode_named(d.name)]
+                layout_label = "barcoded" if conventional else "subdirectory-per-sample"
+                count_label = (
+                    f"{len(sample_dirs)} sample folder"
+                    + ("s" if len(sample_dirs) != 1 else "")
+                )
+            elif flat_fastqs:
+                layout_label = "flat"
+                count_label = (
+                    f"{len(flat_fastqs)} FASTQ file"
+                    + ("s" if len(flat_fastqs) != 1 else "")
+                )
+            else:
+                return html.Small(
+                    [
+                        html.I(className="bi bi-exclamation-circle me-1"),
+                        "Auto-detect: no FASTQ files or sample subdirectories found.",
+                    ],
+                    className="text-warning",
+                )
+
+            mismatch = current_mode and current_mode != detected_mode
+            icon_class = (
+                "bi bi-exclamation-triangle-fill me-1"
+                if mismatch
+                else "bi bi-check-circle me-1"
+            )
+            text_class = "text-warning" if mismatch else "text-success"
+            tail = (
+                f" Current selection ({current_mode}) does not match; "
+                f"consider switching to {detected_mode}."
+                if mismatch
+                else ""
+            )
+            return html.Small(
+                [
+                    html.I(className=icon_class),
+                    f"Detected layout: {layout_label} with {count_label} -> "
+                    f"suggested mode: {detected_mode}.{tail}",
+                ],
+                className=text_class,
+            )
+        except (OSError, ValueError) as exc:
+            logging.debug(f"Auto-detect preview failed for {path}: {exc}")
+            return ""
+
+    @app.callback(
         [
             Output("kraken-db-status", "children"),
             Output("kraken-db-feedback", "children")

@@ -1264,6 +1264,72 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     # Auto-Navigation on Analysis Completion
     # ========================================================================
 
+    # Track the last error string we surfaced to avoid re-toasting
+    # the same message on every status poll. Status writes are
+    # serialised in BackendManager so this dict-of-one is sufficient.
+    _last_analyze_error = {"text": None}
+
+    @app.callback(
+        Output("toast-message", "data", allow_duplicate=True),
+        Input("backend-status", "data"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
+    )
+    def emit_analyze_error_toast(status, config):
+        """Surface pipeline errors as a toast that names the path the
+        Kraken2 loader scanned and the glob patterns it tried.
+
+        The previous experience was a generic ``Pipeline encountered
+        errors`` message in the status bar; the operator had no way to
+        tell whether the failure was at launch, mid-pipeline, or in
+        the dashboard's loader. Naming the absolute path and the glob
+        patterns turns a 'where did it look?' question into something
+        the operator can verify with ``ls``.
+        """
+        if not status or status.get("pipeline_status") != "error":
+            return no_update
+        errors = status.get("errors") or []
+        if not errors:
+            return no_update
+        error_text = "; ".join(errors)
+        if error_text == _last_analyze_error["text"]:
+            return no_update
+        _last_analyze_error["text"] = error_text
+
+        main_dir = ""
+        if config:
+            main_dir = (
+                config.get("results_output_directory")
+                or config.get("main_dir")
+                or ""
+            )
+
+        try:
+            from nanometa_live.core.utils.classification_loaders import (
+                describe_kraken_scan_locations,
+            )
+            scan = describe_kraken_scan_locations(main_dir)
+        except Exception:
+            scan = {"kraken_dir": "", "exists": False, "patterns": []}
+
+        kraken_dir = scan.get("kraken_dir") or "(results directory not configured)"
+        exists_label = (
+            "(directory present)" if scan.get("exists") else "(directory missing)"
+        )
+        patterns = scan.get("patterns") or []
+        patterns_text = ", ".join(patterns) if patterns else "(none)"
+
+        message = (
+            f"{error_text}\n\n"
+            f"Loader scan path: {kraken_dir} {exists_label}\n"
+            f"Glob patterns tried: {patterns_text}"
+        )
+        return {
+            "type": "error",
+            "title": "Analysis error",
+            "message": message,
+        }
+
     @app.callback(
         [
             Output("tabs", "active_tab", allow_duplicate=True),

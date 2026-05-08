@@ -554,3 +554,40 @@ class TestEmptyKrakenDirDiagnostics:
         )
         msg = _diagnose_empty_kraken_dir(str(tmp_path / "does-not-exist"))
         assert "unreadable" in msg
+
+
+# ---------------------------------------------------------------------------
+# describe_kraken_scan_locations
+# ---------------------------------------------------------------------------
+
+
+class TestDescribeKrakenScanLocations:
+    """Documents the loader's scan path for the Analyze-error toast."""
+
+    def test_returns_absolute_path_and_pattern_list(self, tmp_path):
+        from nanometa_live.core.utils.classification_loaders import (
+            describe_kraken_scan_locations,
+        )
+        scan = describe_kraken_scan_locations(str(tmp_path))
+        assert os.path.isabs(scan["kraken_dir"])
+        assert scan["kraken_dir"].endswith("kraken2")
+        assert scan["exists"] is False
+        assert "*.cumulative.kraken2.report.txt" in scan["patterns"]
+        assert "*.kraken2.report.txt" in scan["patterns"]
+
+    def test_exists_flag_true_when_directory_present(self, tmp_path):
+        from nanometa_live.core.utils.classification_loaders import (
+            describe_kraken_scan_locations,
+        )
+        (tmp_path / "kraken2").mkdir()
+        scan = describe_kraken_scan_locations(str(tmp_path))
+        assert scan["exists"] is True
+
+    def test_empty_main_dir_returns_empty_path(self):
+        from nanometa_live.core.utils.classification_loaders import (
+            describe_kraken_scan_locations,
+        )
+        scan = describe_kraken_scan_locations("")
+        assert scan["kraken_dir"] == ""
+        assert scan["exists"] is False
+        assert isinstance(scan["patterns"], list)

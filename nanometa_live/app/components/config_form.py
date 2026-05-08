@@ -118,19 +118,38 @@ def create_config_form():
                         dbc.Select(
                             id="sample-handling-input",
                             options=[
-                                {"label": "Single sample (all files = 1 sample)", "value": "single_sample"},
-                                {"label": "Per file (each file = 1 sample)", "value": "per_file"},
-                                {"label": "By barcode (subdirectories)", "value": "by_barcode"}
+                                {
+                                    "label": "single_sample - one merged sample (flat folder, e.g. nanorunner singleplex)",
+                                    "value": "single_sample",
+                                },
+                                {
+                                    "label": "per_file - each file is its own sample (flat folder)",
+                                    "value": "per_file",
+                                },
+                                {
+                                    "label": "by_barcode - multiplexed (barcode01/, barcode02/, ...)",
+                                    "value": "by_barcode",
+                                },
                             ],
                             value="single_sample"
                         ),
                         dbc.Tooltip(
-                            "Single sample: All FASTQ files belong to one sample. "
-                            "Per file: Each file is a separate sample. "
-                            "By barcode: Files in barcode01/, barcode02/ etc. are separate samples.",
+                            "single_sample: all FASTQ files in one flat folder are pooled into a single sample "
+                            "(matches nanorunner singleplex output). "
+                            "per_file: each FASTQ file in a flat folder is its own sample. "
+                            "by_barcode: each barcode<NN>/ subdirectory is one sample (multiplexed run).",
                             target="sample-handling-info"
                         ),
-                        dbc.FormText("How to group input files into samples")
+                        # Auto-detect preview line, populated by a callback
+                        # in config_tab.py that watches the Nanopore Sequence
+                        # Data Folder input and the sample-handling selection.
+                        # Empty until a path is entered.
+                        html.Div(
+                            id="sample-handling-autodetect",
+                            className="mt-1",
+                            children="",
+                        ),
+                        dbc.FormText("How to group input files into samples"),
                     ], md=4),
                     dbc.Col([
                         dbc.Label([
