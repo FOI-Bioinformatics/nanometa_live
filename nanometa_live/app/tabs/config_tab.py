@@ -586,24 +586,49 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             elif not os.path.isdir(nanopore_dir):
                 errors.append(f"Nanopore path is not a directory: {nanopore_dir}")
             else:
-                # Validate directory structure matches sample handling mode
+                # Validate directory structure matches sample handling mode.
+                # core.utils.auto_detect already knows how to map a folder
+                # layout to the right sample_handling value; surfacing its
+                # answer in the error message turns "no barcode directories
+                # found" from a dead end into a one-line fix.
                 import glob
+                from nanometa_live.core.utils.auto_detect import (
+                    detect_sample_handling,
+                )
+                detected_mode, detected_reason = detect_sample_handling(nanopore_dir)
                 if sample_handling == "by_barcode":
                     barcode_dirs = glob.glob(os.path.join(nanopore_dir, "barcode*"))
                     if not barcode_dirs:
+                        suggestion = ""
+                        if detected_mode and detected_mode != "by_barcode":
+                            suggestion = (
+                                f" Auto-detection suggests '{detected_mode}' "
+                                f"for this directory ({detected_reason})."
+                            )
                         errors.append(
-                            "By-barcode mode selected but no barcode directories found. "
-                            "Directory should contain barcode01/, barcode02/, etc. "
-                            "For flat file directories, use 'Single sample' or 'Per file' mode."
+                            "By-barcode mode selected but no barcode "
+                            f"directories found in {nanopore_dir}. The "
+                            "directory must contain barcode01/, barcode02/, "
+                            "etc. For flat file directories, use 'Single "
+                            "sample' or 'Per file' mode."
+                            + suggestion
                         )
                 elif sample_handling in ["single_sample", "per_file"] and processing_mode == "batch":
                     # Check for FASTQ files directly in directory
                     fastq_files = glob.glob(os.path.join(nanopore_dir, "*.fastq*"))
                     barcode_dirs = glob.glob(os.path.join(nanopore_dir, "barcode*"))
                     if not fastq_files and barcode_dirs:
+                        suggestion = ""
+                        if detected_mode == "by_barcode":
+                            suggestion = (
+                                f" Auto-detection confirms 'by_barcode' "
+                                f"({detected_reason})."
+                            )
                         errors.append(
-                            f"No FASTQ files found directly in {nanopore_dir}, but barcode directories exist. "
-                            "For barcoded samples, use 'By barcode' handling mode."
+                            f"No FASTQ files found directly in {nanopore_dir}, "
+                            "but barcode directories exist. For barcoded "
+                            "samples, use 'By barcode' handling mode."
+                            + suggestion
                         )
 
         if kraken_db and kraken_db.strip():

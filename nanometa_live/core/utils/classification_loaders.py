@@ -408,7 +408,13 @@ def _parse_kraken_data_uncached(
     callers should use ``load_kraken_data``.
     """
     if not os.path.exists(kraken_dir):
-        logging.warning(f"Kraken2 directory not found: {kraken_dir}")
+        # DEBUG, not WARNING: a missing kraken2/ subdir is the normal
+        # state for a freshly-configured results folder before the
+        # pipeline has run. Logging it at WARNING produced terminal
+        # noise on every callback that touched the loader during
+        # Configuration-tab interactions on a fresh outdir. The
+        # equivalent miss in sample_detector already logs at DEBUG.
+        logging.debug(f"Kraken2 directory not found: {kraken_dir}")
         return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
 
     if sample is None or sample == "All Samples":
