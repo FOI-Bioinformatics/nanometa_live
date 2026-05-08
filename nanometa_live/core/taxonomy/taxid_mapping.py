@@ -747,11 +747,33 @@ class TaxidMapper:
                     )
                 self._index = DatabaseTaxonomyIndex.from_dict(data)
                 load_time = time.time() - start_time
-                logger.info(
-                    f"Loaded cached database index: {len(self._index.by_taxid)} nodes "
-                    f"in {load_time:.2f}s"
-                )
-                index_loaded = True
+                # Treat an empty by_taxid as a stale or corrupt cache: a
+                # prior run may have written a partial index (e.g. crashed
+                # mid-build, or serialised before nodes were populated).
+                # Silently accepting it would surface every watchlist entry
+                # as UNMAPPED ("Not Found") with no way to recover short of
+                # manually wiping ~/.nanometa.
+                if not self._index.by_taxid:
+                    logger.warning(
+                        "Cached database index at %s is empty; deleting and "
+                        "rebuilding from %s",
+                        cache_path, database_path,
+                    )
+                    try:
+                        cache_path.unlink()
+                    except OSError as unlink_err:
+                        logger.warning(
+                            "Could not delete empty cache %s: %s",
+                            cache_path, unlink_err,
+                        )
+                    self._index = None
+                    index_loaded = False
+                else:
+                    logger.info(
+                        f"Loaded cached database index: {len(self._index.by_taxid)} nodes "
+                        f"in {load_time:.2f}s"
+                    )
+                    index_loaded = True
             except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
                 logger.exception(f"Failed to load cached index, rebuilding: {e}")
                 index_loaded = False
@@ -778,6 +800,16 @@ class TaxidMapper:
         if self._index is None:
             logger.error(f"Failed to build index for {database_path}")
             return False
+
+        # A built index with zero nodes is structurally indistinguishable
+        # from a missing one for downstream callers. Refuse rather than
+        # silently produce an all-UNMAPPED collection.
+        if not self._index.by_taxid:
+            raise RuntimeError(
+                f"Database index built from {database_path} contains zero "
+                f"taxa. Inspect the database directory for missing or "
+                f"unreadable taxonomy files (e.g. inspect.txt, taxo.k2d)."
+            )
 
         # Update global index
         set_database_index(self._index)
@@ -811,8 +843,14 @@ class TaxidMapper:
         Returns:
             TaxidMappingCollection with generated mappings
         """
-        if not self._index:
-            raise RuntimeError("Database not loaded. Call load_database() first.")
+        if not self._index or not self._index.by_taxid:
+            raise RuntimeError(
+                "Database index is not loaded or is empty. Call "
+                "load_database() with a valid Kraken2 database before "
+                "generating mappings; if the cache file under "
+                "~/.nanometa/mappings/ is suspect, rerun with "
+                "force_rebuild=True."
+            )
 
         # Create or update collection
         if self._collection is None or not preserve_manual:
