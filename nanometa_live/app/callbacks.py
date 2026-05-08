@@ -13,7 +13,7 @@ import threading
 import time
 from typing import Any, Dict, Optional, Tuple
 
-from dash import Dash, Input, Output, State, callback, ctx, html, no_update
+from dash import ALL, Dash, Input, Output, State, callback, ctx, html, no_update
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
@@ -1489,6 +1489,131 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             "type": "info",
             "title": "Previous session discarded",
             "message": f"Removed {path}.",
+        }
+
+    # ========================================================================
+    # Storage Locations panel
+    # ========================================================================
+    # The 8 storage zones below are surfaced read-only in the
+    # Configuration tab so the operator can see exactly where their
+    # genomes, configs, BLAST DBs, mappings, watchlists, caches,
+    # logs, and DB registry live -- without having to `cd` into a
+    # hidden dot-directory. The Open button shells out to the OS
+    # file manager via app/utils/file_manager_open.py.
+
+    @app.callback(
+        Output("storage-locations-table", "children"),
+        Input("app-data-dir", "data"),
+        Input("app-config", "data"),
+    )
+    def render_storage_locations_table(data_dir, config):
+        """Render one row per storage zone with absolute path + Open
+        button. The genome / BLAST zones honour ``genome_cache_dir``
+        (the only zone that is operator-configurable today); the
+        other zones are rooted at data_dir."""
+        if not data_dir:
+            return html.Div("Data directory not configured.", className="text-muted")
+
+        genome_root_raw = (config or {}).get("genome_cache_dir") or data_dir
+        genome_root = os.path.expanduser(genome_root_raw)
+        data_root = os.path.expanduser(data_dir)
+
+        zones = [
+            ("Configurations", os.path.join(data_root, "configs"),
+             "Saved YAML configs incl. last-session.yaml"),
+            ("Genomes (FASTA)", os.path.join(genome_root, "genomes"),
+             "Downloaded reference genomes for watchlist species"),
+            ("BLAST databases", os.path.join(genome_root, "blast"),
+             "Per-taxid BLAST indices built from downloaded genomes"),
+            ("Taxid mappings", os.path.join(data_root, "mappings"),
+             "Cached Kraken2 taxid -> species mappings"),
+            ("Watchlists", os.path.join(data_root, "watchlists"),
+             "Operator-uploaded custom watchlist YAMLs"),
+            ("Application cache", os.path.join(data_root, "cache"),
+             "Background-callback (Dash) cache; safe to delete"),
+            ("Logs", os.path.join(data_root, "logs"),
+             "App and Nextflow trace logs"),
+            ("Custom DB registry",
+             os.path.join(data_root, "kraken2_databases.local.yaml"),
+             "Operator-managed Kraken2 DB list (merges with bundled)"),
+        ]
+
+        rows = []
+        for name, path, hint in zones:
+            exists = os.path.exists(path)
+            badge = (
+                dbc.Badge("present", color="success", className="ms-2")
+                if exists
+                else dbc.Badge("not yet created", color="secondary", className="ms-2")
+            )
+            rows.append(
+                html.Tr([
+                    html.Td([
+                        html.Strong(name),
+                        badge,
+                        html.Br(),
+                        html.Small(hint, className="text-muted"),
+                    ], style={"verticalAlign": "middle"}),
+                    html.Td(
+                        html.Code(path, style={"wordBreak": "break-all"}),
+                        style={"verticalAlign": "middle"},
+                    ),
+                    html.Td(
+                        dbc.Button(
+                            [html.I(className="bi bi-folder2-open me-1"), "Open"],
+                            id={"type": "storage-open-btn", "path": path},
+                            color="outline-primary",
+                            size="sm",
+                            disabled=not exists,
+                            n_clicks=0,
+                        ),
+                        style={"verticalAlign": "middle", "whiteSpace": "nowrap"},
+                    ),
+                ])
+            )
+
+        return dbc.Table(
+            [
+                html.Thead(html.Tr([
+                    html.Th("Zone", style={"width": "30%"}),
+                    html.Th("Absolute path"),
+                    html.Th("", style={"width": "1%"}),
+                ])),
+                html.Tbody(rows),
+            ],
+            hover=True,
+            responsive=True,
+            className="mb-0",
+        )
+
+    @app.callback(
+        Output("toast-message", "data", allow_duplicate=True),
+        Input({"type": "storage-open-btn", "path": ALL}, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def open_storage_location(_n_clicks_list):
+        """Launch the OS file manager at the path encoded in the
+        clicked button's pattern-matching id. Errors return as a
+        toast rather than raising so a failing helper does not crash
+        the callback."""
+        triggered = ctx.triggered_id
+        if not triggered or not isinstance(triggered, dict):
+            raise PreventUpdate
+        if not any(_n_clicks_list):
+            raise PreventUpdate
+        path = triggered.get("path")
+        from nanometa_live.app.utils.file_manager_open import open_in_file_manager
+        err = open_in_file_manager(path)
+        if err:
+            return {
+                "type": "error",
+                "title": "Could not open location",
+                "message": err,
+            }
+        return {
+            "type": "info",
+            "title": "Opened in file manager",
+            "message": path,
         }
 
     @app.callback(
