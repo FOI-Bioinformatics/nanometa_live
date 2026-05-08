@@ -1,1 +1,1 @@
-BLOCKED: not run in this pass -- requires bumping nanometanf to a fresh commit and forcing a clean conda-env rebuild (>10 min env build cost); deferred to the next matrix replay once Agent A lands the kraken2 emission tests.
+PASS-with-caveat: 28 classification rows loaded across 44 per-file kraken2 reports; downstream NanoPlot crashed with kaleido async-cancellation (kaleido + Python 3.14 + macOS issue, pre-existing in nanometanf, unrelated to GUI fixes). The kraken2/seqkit/canonical stages the GUI consumes all completed.

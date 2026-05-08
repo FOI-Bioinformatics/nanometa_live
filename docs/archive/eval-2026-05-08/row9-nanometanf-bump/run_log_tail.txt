@@ -1,0 +1,100 @@
+[bb/e37e92] Submitted process > FOIBIOINFORMATICS_NANOMETANF:NANOMETANF:QC_ANALYSIS:CHOPPER (D6300_2_barcode14_chunk_0008_chunk_0040)
+WARN: Skipping NanoPlot for sample 'D6300_2_barcode14_chunk_0008_chunk_0040' - post-QC FASTQ contains no reads (size below 50 bytes)
+WARN: Empty post-QC FASTQ for sample 'D6300_2_barcode14_chunk_0008_chunk_0040' - emitting placeholder Kraken2 report (0 reads, all unclassified)
+[c4/3ec7db] Submitted process > FOIBIOINFORMATICS_NANOMETANF:NANOMETANF:QC_ANALYSIS:CHOPPER (D6300_2_barcode14_chunk_0005_chunk_0026)
+WARN: Empty post-QC FASTQ for sample 'D6300_2_barcode14_chunk_0005_chunk_0026' - emitting placeholder Kraken2 report (0 reads, all unclassified)
+WARN: Skipping NanoPlot for sample 'D6300_2_barcode14_chunk_0005_chunk_0026' - post-QC FASTQ contains no reads (size below 50 bytes)
+[6f/ea2231] Submitted process > FOIBIOINFORMATICS_NANOMETANF:NANOMETANF:QC_ANALYSIS:FASTQC (Turex_3_barcode13_chunk_0003_chunk_0132)
+[20/38bcc9] Submitted process > FOIBIOINFORMATICS_NANOMETANF:NANOMETANF:QC_ANALYSIS:NANOPLOT (Turex_3_barcode13_chunk_0000_chunk_0116)
+ERROR ~ Error executing process > 'FOIBIOINFORMATICS_NANOMETANF:NANOMETANF:QC_ANALYSIS:NANOPLOT (D6300_2_barcode14_chunk_0002_chunk_0013)'
+
+Caused by:
+  Process `FOIBIOINFORMATICS_NANOMETANF:NANOMETANF:QC_ANALYSIS:NANOPLOT (D6300_2_barcode14_chunk_0002_chunk_0013)` terminated with an error exit status (1)
+
+
+Command executed:
+
+  NanoPlot \
+       \
+      -t 4 \
+      --fastq D6300_2_barcode14_chunk_0002_chunk_0013.chopped.fastq.gz
+  
+  cat <<-END_VERSIONS > versions.yml
+  "FOIBIOINFORMATICS_NANOMETANF:NANOMETANF:QC_ANALYSIS:NANOPLOT":
+      nanoplot: $(echo $(NanoPlot --version 2>&1) | sed 's/^.*NanoPlot //; s/ .*$//')
+  END_VERSIONS
+
+Command exit status:
+  1
+
+Command output:
+  (empty)
+
+Command error:
+      yield_by_length.save(settings)
+      ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+    File "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/eval-runs/row4/work/conda/env-e96a55ce71f25e6b36dae512009653f1/lib/python3.14/site-packages/nanoplotter/plot.py", line 57, in save
+      self.save_static(fmt)
+      ~~~~~~~~~~~~~~~~^^^^^
+    File "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/eval-runs/row4/work/conda/env-e96a55ce71f25e6b36dae512009653f1/lib/python3.14/site-packages/nanoplotter/plot.py", line 94, in save_static
+      pio.write_image(self.fig, output_path, format=figformat)
+      ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/eval-runs/row4/work/conda/env-e96a55ce71f25e6b36dae512009653f1/lib/python3.14/site-packages/plotly/io/_kaleido.py", line 528, in write_image
+      img_data = to_image(
+          fig,
+      ...<5 lines>...
+          engine=engine,
+      )
+    File "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/eval-runs/row4/work/conda/env-e96a55ce71f25e6b36dae512009653f1/lib/python3.14/site-packages/plotly/io/_kaleido.py", line 398, in to_image
+      img_bytes = kaleido.calc_fig_sync(
+          fig_dict,
+      ...<7 lines>...
+          kopts=kopts,
+      )
+    File "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/eval-runs/row4/work/conda/env-e96a55ce71f25e6b36dae512009653f1/lib/python3.14/site-packages/kaleido/__init__.py", line 171, in calc_fig_sync
+      return _sync_server.oneshot_async_run(calc_fig, args=args, kwargs=kwargs)
+             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/eval-runs/row4/work/conda/env-e96a55ce71f25e6b36dae512009653f1/lib/python3.14/site-packages/kaleido/_sync_server.py", line 131, in oneshot_async_run
+      raise res
+    File "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/eval-runs/row4/work/conda/env-e96a55ce71f25e6b36dae512009653f1/lib/python3.14/site-packages/kaleido/_sync_server.py", line 122, in run
+      q.put(asyncio.run(func(*args, **kwargs)))
+            ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+    File "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/eval-runs/row4/work/conda/env-e96a55ce71f25e6b36dae512009653f1/lib/python3.14/asyncio/runners.py", line 204, in run
+      return runner.run(main)
+             ~~~~~~~~~~^^^^^^
+    File "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/eval-runs/row4/work/conda/env-e96a55ce71f25e6b36dae512009653f1/lib/python3.14/asyncio/runners.py", line 127, in run
+      return self._loop.run_until_complete(task)
+             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+    File "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/eval-runs/row4/work/conda/env-e96a55ce71f25e6b36dae512009653f1/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+      return future.result()
+             ~~~~~~~~~~~~~^^
+    File "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/eval-runs/row4/work/conda/env-e96a55ce71f25e6b36dae512009653f1/lib/python3.14/site-packages/kaleido/__init__.py", line 102, in calc_fig
+      return await k.calc_fig(
+             ^^^^^^^^^^^^^^^^^
+      ...<4 lines>...
+      )
+      ^
+    File "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/eval-runs/row4/work/conda/env-e96a55ce71f25e6b36dae512009653f1/lib/python3.14/site-packages/kaleido/kaleido.py", line 418, in calc_fig
+      await self._return_kaleido_tab(tab)
+    File "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/eval-runs/row4/work/conda/env-e96a55ce71f25e6b36dae512009653f1/lib/python3.14/site-packages/kaleido/kaleido.py", line 291, in _return_kaleido_tab
+      await tab.reload()
+    File "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/eval-runs/row4/work/conda/env-e96a55ce71f25e6b36dae512009653f1/lib/python3.14/site-packages/kaleido/_kaleido_tab.py", line 165, in reload
+      await javascript_ready
+  asyncio.exceptions.CancelledError
+
+Work dir:
+  /Users/andreassjodin/Desktop/snabbsekvensering/output-live/eval-runs/row4/work/e0/efe331dcc43e9d54e804ccd31e45ab
+
+Tip: you can try to figure out what's wrong by changing to the process work dir and showing the script file named `.command.sh`
+
+ -- Check '.nextflow.log' file for details
+Execution cancelled -- Finishing pending tasks before exit
+[71/88a623] Submitted process > FOIBIOINFORMATICS_NANOMETANF:NANOMETANF:QC_ANALYSIS:FASTQC (Turex_3_barcode13_chunk_0003_chunk_0130)
+ERROR ~ Pipeline failed. Please refer to troubleshooting docs: https://nf-co.re/docs/usage/troubleshooting
+
+ -- Check '.nextflow.log' file for details
+-[0;35m[foi-bioinformatics/nanometanf][0;31m Pipeline completed with errors[0m-
+[33mNextflow 26.04.0 is available - Please consider updating your version to it(B[m
+
+ERROR conda.cli.main_run:execute(125): `conda run nextflow run /Users/andreassjodin/Code/nanometanf -profile conda --input_dir /Users/andreassjodin/Desktop/snabbsekvensering/output-live/fixtures/per-file-flat --kraken2_db /Users/andreassjodin/Desktop/snabbsekvensering/bioshield/kraken_db/k2_pluspfp_08_GB_20251015 --outdir /Users/andreassjodin/Desktop/snabbsekvensering/output-live/eval-runs/row9/results -w /Users/andreassjodin/Desktop/snabbsekvensering/output-live/eval-runs/row4/work --skip_blast --skip_minimap2 --max_memory 8.GB --max_cpus 4 -ansi-log false` failed. (See above for error)
+
