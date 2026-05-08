@@ -208,11 +208,24 @@ class TaxonomyCache:
 class TaxonomyAPIClient(ABC):
     """Base class for taxonomy API clients."""
 
+    # Per-host circuit breaker. Once a host has failed
+    # _CIRCUIT_FAILURE_THRESHOLD times in a row in the current process,
+    # subsequent calls are short-circuited for the remainder of the
+    # session. Prevents the GUI lockup that would otherwise hit when
+    # GTDB is degraded -- 17 watchlist entries x 2 APIs x ~5 s per
+    # SSL-failing call would block the Dash callback thread for over
+    # a minute. The breaker is in-memory, per-process, and resets on
+    # app restart so a transient outage does not leave a permanent
+    # disabled flag on disk.
+    _CIRCUIT_FAILURE_THRESHOLD: int = 3
+    _circuit_failures: Dict[str, int] = {}
+    _circuit_open: Dict[str, bool] = {}
+
     def __init__(
         self,
         cache: Optional[TaxonomyCache] = None,
         rate_limit: float = 3.0,
-        timeout: int = 30,
+        timeout: int = 5,
         offline_mode: bool = False,
     ):
         """
@@ -221,7 +234,10 @@ class TaxonomyAPIClient(ABC):
         Args:
             cache: TaxonomyCache instance (shared across clients)
             rate_limit: Maximum requests per second
-            timeout: Request timeout in seconds
+            timeout: Request timeout in seconds. Default lowered to 5 s
+                because every taxonomy lookup runs on the synchronous
+                Dash callback thread; longer waits manifest to the
+                operator as an unresponsive watchlist tab.
             offline_mode: If True, skip all network calls and use cached data only
         """
         self.cache = cache or TaxonomyCache()
@@ -233,6 +249,40 @@ class TaxonomyAPIClient(ABC):
         self._session.headers.update({
             "User-Agent": "NanometaLive/2.1 (taxonomy validation)"
         })
+
+    @classmethod
+    def _circuit_host(cls, url: str) -> str:
+        """Return the host portion used as the circuit-breaker key."""
+        try:
+            from urllib.parse import urlparse
+            return urlparse(url).netloc or url
+        except Exception:
+            return url
+
+    @classmethod
+    def _circuit_record_failure(cls, url: str) -> None:
+        host = cls._circuit_host(url)
+        cls._circuit_failures[host] = cls._circuit_failures.get(host, 0) + 1
+        if cls._circuit_failures[host] >= cls._CIRCUIT_FAILURE_THRESHOLD:
+            if not cls._circuit_open.get(host):
+                logger.warning(
+                    "Taxonomy API circuit breaker OPEN for %s after %d "
+                    "consecutive failures; skipping further calls for "
+                    "this session.",
+                    host,
+                    cls._circuit_failures[host],
+                )
+            cls._circuit_open[host] = True
+
+    @classmethod
+    def _circuit_record_success(cls, url: str) -> None:
+        host = cls._circuit_host(url)
+        cls._circuit_failures.pop(host, None)
+        cls._circuit_open.pop(host, None)
+
+    @classmethod
+    def _circuit_is_open(cls, url: str) -> bool:
+        return cls._circuit_open.get(cls._circuit_host(url), False)
 
     def _rate_limit_wait(self) -> None:
         """Wait to respect rate limit."""
@@ -253,6 +303,13 @@ class TaxonomyAPIClient(ABC):
             logger.debug(f"Offline mode: skipping request to {url}")
             return None
 
+        # Short-circuit if this host has been failing all session.
+        # Avoids the 5 s x N timeout pile-up that locks the Dash
+        # callback thread when GTDB or NCBI is degraded.
+        if self._circuit_is_open(url):
+            logger.debug("Circuit open for %s, skipping request", url)
+            return None
+
         self._rate_limit_wait()
 
         try:
@@ -263,6 +320,7 @@ class TaxonomyAPIClient(ABC):
                 response = self._session.post(url, data=params, timeout=self.timeout)
 
             response.raise_for_status()
+            self._circuit_record_success(url)
             return response.json()
 
         except requests.exceptions.SSLError:
@@ -281,16 +339,20 @@ class TaxonomyAPIClient(ABC):
                         url, data=params, timeout=self.timeout, verify=False
                     )
                 response.raise_for_status()
+                self._circuit_record_success(url)
                 return response.json()
             except requests.exceptions.RequestException as e:
                 logger.warning("API request failed (SSL fallback): %s - %s", url, e)
+                self._circuit_record_failure(url)
                 return None
 
         except requests.exceptions.RequestException as e:
             logger.warning(f"API request failed: {url} - {e}")
+            self._circuit_record_failure(url)
             return None
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse API response: {e}")
+            self._circuit_record_failure(url)
             return None
 
     @abstractmethod

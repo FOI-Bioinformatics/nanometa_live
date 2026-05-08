@@ -840,6 +840,19 @@ def register_watchlist_callbacks(app: Dash) -> None:
         use_gtdb = "gtdb" in (api_options or [])
         offline_mode = bool((config or {}).get("offline_mode", False))
 
+        # Match the validation API set to the configured taxonomy. The
+        # GTDB API is much slower than NCBI and was historically the
+        # source of multi-minute GUI lockups when degraded. If the
+        # operator picked an NCBI-taxonomy database (Standard, MinusB,
+        # Viral, etc.), querying GTDB is wasted work; same the other
+        # direction. The operator can still tick both checkboxes
+        # explicitly when they want the cross-validation.
+        kraken_taxonomy = str((config or {}).get("kraken_taxonomy", "")).lower()
+        if kraken_taxonomy == "ncbi":
+            use_gtdb = False
+        elif kraken_taxonomy == "gtdb":
+            use_ncbi = False
+
         if not use_ncbi and not use_gtdb:
             return (
                 no_update,
