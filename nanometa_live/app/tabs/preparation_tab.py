@@ -1803,6 +1803,7 @@ def register_preparation_callbacks(app):
 
     @app.callback(
         Output("kraken-download-status", "children"),
+        Output("app-config", "data", allow_duplicate=True),
         Input("download-kraken-db-btn", "n_clicks"),
         State("external-kraken-input", "value"),
         State("kraken-databases", "data"),
@@ -1815,7 +1816,14 @@ def register_preparation_callbacks(app):
         ],
     )
     def download_kraken_database(set_progress, n_clicks, selected_db, databases, config):
-        """Download the selected Kraken2 database."""
+        """Download the selected Kraken2 database and wire it into config.
+
+        On success, the freshly extracted database path is written to
+        config["kraken_db"] (and to config["external_kraken2_db"] for
+        backward compatibility with code that consults the latter) so
+        the operator does not have to re-type a path they just
+        downloaded. Closes DB-6 in the database-path audit.
+        """
         if not n_clicks or not selected_db:
             raise PreventUpdate
 
@@ -1827,29 +1835,52 @@ def register_preparation_callbacks(app):
                     "as part of the offline bundle instead of downloading.",
                 ],
                 color="warning",
-            )
+            ), no_update
 
         db_info = (databases or {}).get(selected_db)
         if not db_info:
-            return dbc.Alert(f"Database '{selected_db}' not found.", color="danger")
+            return dbc.Alert(
+                f"Database '{selected_db}' not found.", color="danger"
+            ), no_update
 
-        dest_dir = (config or {}).get("kraken_db", "") or str(Path.home() / ".nanometa" / "kraken2_databases")
+        # The destination is a *parent* directory under which the
+        # download function creates a per-database subdirectory.
+        # Falling back to config["kraken_db"] (the existing DB path)
+        # would extract on top of an already-installed database, so
+        # we anchor the default at ~/.nanometa/kraken2_databases/
+        # regardless of what kraken_db currently points to.
+        dest_dir = str(Path.home() / ".nanometa" / "kraken2_databases")
 
         try:
             from nanometa_live.core.utils.kraken_utils import download_kraken_database as _download
-            success, message = _download(db_info, dest_dir)
-            if success:
+            success, message, extract_path = _download(db_info, dest_dir)
+            if success and extract_path:
+                # Update the active config so kraken_db now points at
+                # the newly extracted DB. Both keys are written so any
+                # code path that still reads external_kraken2_db (which
+                # is empty by default and never written by anything
+                # else today) sees the same canonical value.
+                new_config = dict(config or {})
+                new_config["kraken_db"] = extract_path
+                new_config["external_kraken2_db"] = extract_path
                 return dbc.Alert(
-                    [html.I(className="bi bi-check-circle me-2"), message],
+                    [
+                        html.I(className="bi bi-check-circle me-2"),
+                        message,
+                        html.Div(
+                            f"Configuration updated: kraken_db -> {extract_path}",
+                            className="small text-muted mt-1",
+                        ),
+                    ],
                     color="success",
-                )
+                ), new_config
             return dbc.Alert(
                 [html.I(className="bi bi-x-circle me-2"), message],
                 color="danger",
-            )
+            ), no_update
         except Exception as e:
             logger.error(f"Kraken2 database download failed: {e}", exc_info=True)
-            return dbc.Alert(f"Download failed: {e}", color="danger")
+            return dbc.Alert(f"Download failed: {e}", color="danger"), no_update
 
     # =========================================================================
     # Wizard Cancel button

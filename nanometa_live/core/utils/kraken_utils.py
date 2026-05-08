@@ -20,7 +20,7 @@ import requests
 
 def download_kraken_database(
     db_info: Dict[str, str], dest_dir: str
-) -> Tuple[bool, str]:
+) -> Tuple[bool, str, Optional[str]]:
     """
     Download a Kraken2 database from the specified URL.
 
@@ -29,13 +29,19 @@ def download_kraken_database(
         dest_dir: Directory to download the database to
 
     Returns:
-        Tuple of (success, message)
+        Tuple of (success, message, extract_path). extract_path is the
+        absolute path of the extracted database directory on success
+        and None on any failure path. Callers (the preparation wizard)
+        use it to write the resolved path back to config["kraken_db"]
+        so the operator does not have to re-type the location they
+        just downloaded -- closes the "I just downloaded a DB but
+        launch says directory not found" gap (DB-6).
     """
     db_name = db_info.get("name", "unknown")
     db_url = db_info.get("database_url")
 
     if not db_url:
-        return False, f"No download URL provided for database {db_name}"
+        return False, f"No download URL provided for database {db_name}", None
 
     try:
         # Create destination directory if it doesn't exist
@@ -83,19 +89,21 @@ def download_kraken_database(
             return (
                 True,
                 f"Successfully downloaded and extracted {db_name} to {extract_dir}",
+                os.path.abspath(extract_dir),
             )
         else:
             return (
                 False,
                 f"Database extraction succeeded but verification failed for {db_name}",
+                None,
             )
 
     except requests.exceptions.RequestException as e:
-        return False, f"Error downloading database: {str(e)}"
+        return False, f"Error downloading database: {str(e)}", None
     except tarfile.TarError as e:
-        return False, f"Error extracting database: {str(e)}"
+        return False, f"Error extracting database: {str(e)}", None
     except (FileNotFoundError, PermissionError, OSError) as e:
-        return False, f"I/O error preparing database: {str(e)}"
+        return False, f"I/O error preparing database: {str(e)}", None
 
 
 # Canonical list of files every Kraken2 database is expected to contain.
