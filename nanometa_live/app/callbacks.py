@@ -1316,12 +1316,25 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
 
     @app.callback(
         Output("tabs", "active_tab", allow_duplicate=True),
+        Output("apply-config-button", "n_clicks", allow_duplicate=True),
         Input("config-next-watchlist-btn", "n_clicks"),
+        State("apply-config-button", "n_clicks"),
         prevent_initial_call=True,
     )
-    def navigate_config_to_watchlist(_):
-        """Navigate from Configuration to Watchlist tab."""
-        return "watchlist-tab"
+    def navigate_config_to_watchlist(_n_next, n_apply):
+        """Advance the wizard from Configuration to Watchlist.
+
+        Also auto-fires Apply Settings so any unsaved edits in the
+        Configuration form are persisted before navigation. The
+        existing apply_config_changes callback runs validation and
+        emits a toast on failure -- the toast is visible on every
+        tab via the global notification container, so the operator
+        still sees errors after the tab has switched. Bumping
+        apply-config-button.n_clicks via allow_duplicate keeps the
+        apply logic single-sourced (no duplicated validate-and-save
+        path here).
+        """
+        return "watchlist-tab", (n_apply or 0) + 1
 
     @app.callback(
         Output("tabs", "active_tab", allow_duplicate=True),
@@ -1331,3 +1344,24 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     def navigate_watchlist_to_preparation(_):
         """Navigate from Watchlist to Preparation tab."""
         return "preparation-tab"
+
+    @app.callback(
+        Output("start-stop-button", "n_clicks", allow_duplicate=True),
+        Input("preparation-start-analysis-btn", "n_clicks"),
+        State("start-stop-button", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def proxy_preparation_start_to_header(n_prep, n_header):
+        """Proxy the Preparation-tab Start Analysis button into the
+        header's start-stop-button.
+
+        The existing start_or_prompt_stop callback gates on
+        start-stop-button.n_clicks: bumping that count from here
+        triggers exactly the same readiness check, collision-modal,
+        and backend-launch flow as if the operator had clicked the
+        header button. Keeping the launch logic single-sourced
+        avoids accidental drift between the two CTAs.
+        """
+        if not n_prep:
+            raise PreventUpdate
+        return (n_header or 0) + 1

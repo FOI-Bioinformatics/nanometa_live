@@ -63,12 +63,17 @@ def create_config_layout():
                         ], className="d-flex align-items-center")
                     ], md=8),
                     dbc.Col([
-                        # Config file path (truncated)
+                        # Full absolute path of the loaded config file.
+                        # text-break wraps long paths cleanly within
+                        # the column rather than truncating with an
+                        # ellipsis (operators need to read the path
+                        # to disambiguate between multiple loaded
+                        # configs). text-end keeps the right-alignment.
                         html.Small(
                             id="config-path-display",
                             children="",
-                            className="text-muted text-truncate d-block",
-                            style={"maxWidth": "300px"}
+                            className="text-muted text-break d-block",
+                            style={"wordBreak": "break-all"},
                         )
                     ], md=4, className="text-end")
                 ], className="align-items-center")

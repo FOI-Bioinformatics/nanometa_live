@@ -1671,16 +1671,14 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         source_path = source_info.get("path", "")
         source_type = source_info.get("type", "default")
 
-        # Truncate path for display
-        if source_path:
-            # Show just filename and parent directory
-            path_parts = source_path.split(os.sep)
-            if len(path_parts) > 2:
-                display_path = os.sep.join(["...", path_parts[-2], path_parts[-1]])
-            else:
-                display_path = source_path
-        else:
-            display_path = ""
+        # Show the full absolute path. Operators routinely work
+        # against multiple data roots (different sequencing runs,
+        # backup volumes, shared NAS mounts) and the previous
+        # ".../<parent>/<filename>" truncation hid which file was
+        # loaded -- two different runs both displayed as
+        # ".../configs/last-session.yaml". Pair with the lifted
+        # max-width in config_layout.py so the path is fully visible.
+        display_path = source_path or ""
 
         # Badge visibility
         modified_style = {"display": "inline"} if is_modified else {"display": "none"}
