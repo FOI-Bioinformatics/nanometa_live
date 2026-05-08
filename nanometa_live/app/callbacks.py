@@ -99,6 +99,54 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
 
     _internet_check_lock = threading.Lock()
     _internet_checked = {"done": False}
+    _path_check_lock = threading.Lock()
+    _paths_checked = {"done": False}
+
+    @app.callback(
+        Output("toast-message", "data", allow_duplicate=True),
+        Input("app-config", "data"),
+        prevent_initial_call="initial_duplicate",
+    )
+    def warn_about_missing_paths_on_startup(config):
+        """Surface stale path values from a loaded config as a toast.
+
+        ConfigLoader.load_config already logs WARNING entries for path
+        keys that point to missing locations, but operators rarely
+        watch the terminal. This callback runs once per session and
+        emits a single combined toast naming any path key whose value
+        is set but does not exist on disk -- typically results from a
+        last-session.yaml that was written when the kraken DB lived at
+        a different mount point. We deliberately do NOT clear the
+        field; the operator sees the stale value in Configuration and
+        can re-point or remove it. Closes DB-5.
+        """
+        with _path_check_lock:
+            if _paths_checked["done"]:
+                return no_update
+            _paths_checked["done"] = True
+
+        if not config:
+            return no_update
+
+        try:
+            from nanometa_live.core.utils.path_utils import report_missing_paths
+            missing = report_missing_paths(config)
+        except Exception:
+            return no_update
+
+        if not missing:
+            return no_update
+
+        lines = "\n".join(f"- {key}: {path}" for key, path in missing.items())
+        return {
+            "type": "warning",
+            "title": "Configured paths not found",
+            "message": (
+                "The loaded configuration references paths that do not "
+                "exist on this machine. Review them in the Configuration "
+                "tab before launching:\n" + lines
+            ),
+        }
 
     @app.callback(
         Output("toast-message", "data", allow_duplicate=True),
