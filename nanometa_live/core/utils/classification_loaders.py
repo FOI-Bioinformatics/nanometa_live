@@ -454,6 +454,20 @@ def _parse_kraken_data_uncached(
                         if '.cumulative.' not in basename and '_batch' not in basename and '.batch_' not in basename and not basename.startswith('batch_'):
                             kreport_files.append(f)
 
+            # 2c. Final flat-root re-scan as a defensive fallback for
+            # ``per_file`` and ``single_sample`` layouts emitted by
+            # nanometanf, where reports sit directly under ``kraken2/``
+            # without a per-sample subdirectory. Step 2a already covers
+            # this case in normal operation; the duplicate scan guards
+            # against future filter changes that might drop reports out
+            # of 2a while no nested layout is present.
+            if not kreport_files:
+                for ext_pattern in ("*.kraken2.report.txt", "*.kreport2.txt"):
+                    for f in glob.glob(os.path.join(kraken_dir, ext_pattern)):
+                        basename = os.path.basename(f)
+                        if '.cumulative.' not in basename and '_batch' not in basename and '.batch_' not in basename and not basename.startswith('batch_'):
+                            kreport_files.append(f)
+
             kreport_files = list(dict.fromkeys(os.path.realpath(f) for f in kreport_files))
 
             # 3. Batch files as last resort. The semantics depend on the
@@ -653,6 +667,16 @@ def _parse_kraken_data_uncached(
             if not sample_files:
                 for ext in (f"{sample}.kraken2.report.txt", f"{sample}.kreport2.txt"):
                     p = os.path.join(kraken_dir, sample, ext)
+                    if os.path.exists(p):
+                        sample_files.append(p)
+            # Final flat-root re-check. Mirrors the all-samples branch
+            # above; defensive against the nested fallback claiming a
+            # path that disappeared between checks, and makes the flat
+            # ``per_file``/``single_sample`` layout explicit at the
+            # per-sample call site.
+            if not sample_files:
+                for ext in (f"{sample}.kraken2.report.txt", f"{sample}.kreport2.txt"):
+                    p = os.path.join(kraken_dir, ext)
                     if os.path.exists(p):
                         sample_files.append(p)
             sample_files = list(dict.fromkeys(os.path.realpath(f) for f in sample_files))

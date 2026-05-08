@@ -441,3 +441,85 @@ class TestLoadKrakenDataParseLock:
         assert parse_count["n"] == 1, (
             f"expected exactly one parse under per-key lock, got {parse_count['n']}"
         )
+
+
+class TestLoadKrakenDataFlatLayout:
+    """Regression tests for ``per_file`` and ``single_sample`` modes
+    where nanometanf emits Kraken2 reports flat under ``kraken2/``
+    rather than nested under ``kraken2/<sample>/``.
+    """
+
+    def _clear_caches(self):
+        from nanometa_live.core.utils import loader_utils
+        with loader_utils._cache_lock:
+            loader_utils._kraken_cache.clear()
+            loader_utils._file_mtimes.clear()
+
+    def test_all_samples_flat_layout(self, tmp_path):
+        """All-samples scan must find reports that sit flat in
+        ``kraken2/`` (per_file or single_sample emission)."""
+        self._clear_caches()
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+
+        for sample_name, count in (("barcode01_chunk_0001", 100), ("barcode01_chunk_0002", 200)):
+            report = kraken_dir / f"{sample_name}.kraken2.report.txt"
+            report.write_text(f"100.00\t{count}\t{count}\tS\t562\t  Escherichia coli\n")
+            _backdate_mtime(report)
+
+        df = load_kraken_data(str(tmp_path), sample=None)
+        assert df is not None and not df.empty
+        assert int(df.loc[df["taxid"] == 562, "reads"].iloc[0]) == 300
+
+    def test_per_sample_flat_layout(self, tmp_path):
+        """Per-sample lookup must find a flat ``<sample>.kraken2.report.txt``
+        when no ``<sample>/`` subdirectory exists."""
+        self._clear_caches()
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+
+        report = kraken_dir / "single_run.kraken2.report.txt"
+        report.write_text("100.00\t42\t42\tS\t562\t  Escherichia coli\n")
+        _backdate_mtime(report)
+
+        df = load_kraken_data(str(tmp_path), sample="single_run")
+        assert df is not None and not df.empty
+        assert int(df.iloc[0]["reads"]) == 42
+
+    def test_nested_by_barcode_layout_still_works(self, tmp_path):
+        """Guard the existing nested ``kraken2/<sample>/`` layout
+        used by ``by_barcode`` mode against the flat-layout fallback
+        regressing it."""
+        self._clear_caches()
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+
+        for barcode, count in (("barcode01", 10), ("barcode02", 20)):
+            sample_dir = kraken_dir / barcode
+            sample_dir.mkdir()
+            report = sample_dir / f"{barcode}.kraken2.report.txt"
+            report.write_text(f"100.00\t{count}\t{count}\tS\t562\t  Escherichia coli\n")
+            _backdate_mtime(report)
+
+        df_all = load_kraken_data(str(tmp_path), sample=None)
+        assert df_all is not None and not df_all.empty
+        assert int(df_all.loc[df_all["taxid"] == 562, "reads"].iloc[0]) == 30
+
+        df_one = load_kraken_data(str(tmp_path), sample="barcode01")
+        assert df_one is not None and not df_one.empty
+        assert int(df_one.iloc[0]["reads"]) == 10
+
+    def test_flat_layout_kreport2_extension(self, tmp_path):
+        """The flat fallback must also accept the legacy ``.kreport2.txt``
+        suffix emitted by older nanometanf versions."""
+        self._clear_caches()
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+
+        report = kraken_dir / "legacy_sample.kreport2.txt"
+        report.write_text("100.00\t7\t7\tS\t562\t  Escherichia coli\n")
+        _backdate_mtime(report)
+
+        df = load_kraken_data(str(tmp_path), sample="legacy_sample")
+        assert df is not None and not df.empty
+        assert int(df.iloc[0]["reads"]) == 7
