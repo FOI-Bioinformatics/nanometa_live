@@ -35,6 +35,36 @@ KRAKEN2_EXPECTED_COLUMNS = ["%", "cumul_reads", "reads", "rank", "taxid", "name"
 KRAKEN2_EXPECTED_COLUMN_COUNT = 6
 
 
+def _diagnose_empty_kraken_dir(kraken_dir: str, sample: Optional[str] = None) -> str:
+    """
+    Build a single-line diagnostic for the case where the loader returns no
+    Kraken2 reports. Lists the directory's actual contents (capped) and the
+    glob patterns the loader tried, so an operator can triage from the log
+    without re-running the pipeline.
+    """
+    try:
+        entries = sorted(os.listdir(kraken_dir))
+    except OSError as exc:
+        return f"kraken_dir={kraken_dir!r} unreadable: {exc}"
+    files = [e for e in entries if os.path.isfile(os.path.join(kraken_dir, e))]
+    subdirs = [e for e in entries if os.path.isdir(os.path.join(kraken_dir, e))]
+    sample_hint = f" for sample={sample!r}" if sample else ""
+    patterns = [
+        "*.cumulative.kraken2.report.txt",
+        "*.kraken2.report.txt",
+        "*.kreport2.txt",
+        "*_batch*.kraken2.report.txt",
+    ]
+    return (
+        f"No Kraken2 reports{sample_hint} in {kraken_dir}. "
+        f"Patterns tried: {patterns}. "
+        f"Filename filters dropped any name containing '_batch', '.batch_', "
+        f"'.cumulative.' (when looking for non-cumulative reports). "
+        f"Files present ({len(files)}): {files[:10]}{'...' if len(files) > 10 else ''}. "
+        f"Subdirs ({len(subdirs)}): {subdirs[:10]}{'...' if len(subdirs) > 10 else ''}."
+    )
+
+
 def _scan_subdirs_for_pattern(
     parent_dir: str,
     file_pattern: str,
@@ -545,7 +575,7 @@ def _parse_kraken_data_uncached(
                         )
 
         if not kreport_files:
-            logging.warning("No Kraken2 report files found")
+            logging.warning(_diagnose_empty_kraken_dir(kraken_dir))
             return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
 
         # Deduplicate by (sample, batch) so that copies of the same report
@@ -725,7 +755,7 @@ def _parse_kraken_data_uncached(
                         sample_files = [max(candidate_batches, key=_extract_batch_num)]
 
         if not sample_files:
-            logging.warning(f"No Kraken2 files found for sample {sample}")
+            logging.warning(_diagnose_empty_kraken_dir(kraken_dir, sample=sample))
             return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
 
         # Parse files, using single-file fast path when possible

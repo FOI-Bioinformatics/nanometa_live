@@ -523,3 +523,34 @@ class TestLoadKrakenDataFlatLayout:
         df = load_kraken_data(str(tmp_path), sample="legacy_sample")
         assert df is not None and not df.empty
         assert int(df.iloc[0]["reads"]) == 7
+class TestEmptyKrakenDirDiagnostics:
+    """When the loader returns empty, the warning must list directory state."""
+
+    def test_all_samples_empty_warning_lists_contents(self, tmp_path, caplog):
+        from nanometa_live.core.utils import classification_loaders as cl
+        kraken = tmp_path / "kraken2"
+        kraken.mkdir()
+        with caplog.at_level("WARNING", logger=""):
+            df = cl.load_kraken_data(str(tmp_path))
+        assert df.empty
+        msg = " ".join(rec.message for rec in caplog.records)
+        assert "No Kraken2 reports" in msg
+        assert "Patterns tried" in msg
+        assert "Files present (0)" in msg
+
+    def test_per_sample_empty_warning_names_sample(self, tmp_path, caplog):
+        from nanometa_live.core.utils import classification_loaders as cl
+        (tmp_path / "kraken2").mkdir()
+        with caplog.at_level("WARNING", logger=""):
+            df = cl.load_kraken_data(str(tmp_path), sample="ghost")
+        assert df.empty
+        msg = " ".join(rec.message for rec in caplog.records)
+        assert "sample='ghost'" in msg
+        assert "Patterns tried" in msg
+
+    def test_diagnostic_helper_handles_unreadable_dir(self, tmp_path):
+        from nanometa_live.core.utils.classification_loaders import (
+            _diagnose_empty_kraken_dir,
+        )
+        msg = _diagnose_empty_kraken_dir(str(tmp_path / "does-not-exist"))
+        assert "unreadable" in msg
