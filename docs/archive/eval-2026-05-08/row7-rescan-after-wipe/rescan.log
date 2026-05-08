@@ -1,0 +1,9 @@
+[probe] load_database(/Users/andreassjodin/Desktop/snabbsekvensering/bioshield/kraken_db/k2_pluspfp_08_GB_20251015)
+[probe] index has 57005 nodes after load
+[probe] generate_mappings for 3 probe entries
+[probe] mapped=3 unmapped=0 total=3
+  ncbi=562        confidence=exact      matched=562
+  ncbi=1423       confidence=exact      matched=1423
+  ncbi=1280       confidence=exact      matched=1280
+PASS: at least one probe entry mapped successfully
+

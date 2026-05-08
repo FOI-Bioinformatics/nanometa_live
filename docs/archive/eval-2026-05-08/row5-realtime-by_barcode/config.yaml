@@ -1,0 +1,15 @@
+# Scenario 4: realtime + by_barcode (nanorunner streams 5 barcodes x 3 chunks)
+nanopore_output_directory: "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/_watch/scenario_4"
+results_output_directory: "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/scenario_4_realtime_multiplex"
+main_dir: "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/scenario_4_realtime_multiplex"
+kraken_db: "/Users/andreassjodin/Desktop/snabbsekvensering/bioshield/kraken_db/k2_pluspfp_08_GB_20251015"
+processing_mode: "realtime"
+sample_handling: "by_barcode"
+analysis_name: "Scenario4RealtimeMultiplex"
+pipeline_profile: "conda"
+pipeline_source: "/Users/andreassjodin/Code/nanometanf"
+blast_validation: false
+update_interval_seconds: 30
+realtime_timeout_minutes: 4
+batch_size: 1
+min_batch_size: 1

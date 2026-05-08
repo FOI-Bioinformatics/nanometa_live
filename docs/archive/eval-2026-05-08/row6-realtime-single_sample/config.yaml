@@ -1,0 +1,16 @@
+# Scenario 5: realtime + single_sample (nanorunner streams 5 Turex chunks flat)
+nanopore_output_directory: "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/_watch/scenario_5"
+results_output_directory: "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/scenario_5_realtime_singleplex"
+main_dir: "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/scenario_5_realtime_singleplex"
+kraken_db: "/Users/andreassjodin/Desktop/snabbsekvensering/bioshield/kraken_db/k2_pluspfp_08_GB_20251015"
+processing_mode: "realtime"
+sample_handling: "single_sample"
+sample_name: "turex_realtime"
+analysis_name: "Scenario5RealtimeSingleplex"
+pipeline_profile: "conda"
+pipeline_source: "/Users/andreassjodin/Code/nanometanf"
+blast_validation: false
+update_interval_seconds: 30
+realtime_timeout_minutes: 3
+batch_size: 1
+min_batch_size: 1

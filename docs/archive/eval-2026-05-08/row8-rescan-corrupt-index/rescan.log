@@ -1,0 +1,6 @@
+ERROR conda.cli.main_run:execute(125): `conda run python /Users/andreassjodin/Code/nanometa_live-eval/scripts/eval/rescan_probe.py --kraken-db /Users/andreassjodin/Desktop/snabbsekvensering/bioshield/kraken_db/k2_pluspfp_08_GB_20251015 --corrupt` failed. (See above for error)
+[probe] wrote corrupt cache: /Users/andreassjodin/.nanometa/mappings/9faf0a682e4c_index.json
+[probe] load_database(/Users/andreassjodin/Desktop/snabbsekvensering/bioshield/kraken_db/k2_pluspfp_08_GB_20251015)
+[probe] index has 0 nodes after load
+FAIL: index loaded with 0 nodes -- Bug A signature
+

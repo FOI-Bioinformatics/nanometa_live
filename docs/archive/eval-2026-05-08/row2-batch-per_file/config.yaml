@@ -1,0 +1,15 @@
+# Scenario 3 v3: validates issue 10 fix (placeholder Kraken2 report
+# for empty post-QC samples). Expectation: 5/5 reports in kraken2/
+# (3 placeholders for chunks 0001/0003/0004 where chopper drops all
+# reads, 2 real for chunks 0000/0002).
+nanopore_output_directory: "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/_testdata/singleplex_zymo"
+results_output_directory: "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/scenario_3_batch_perfile_v3"
+main_dir: "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/scenario_3_batch_perfile_v3"
+kraken_db: "/Users/andreassjodin/Desktop/snabbsekvensering/bioshield/kraken_db/k2_pluspfp_08_GB_20251015"
+processing_mode: "batch"
+sample_handling: "per_file"
+analysis_name: "Scenario3v3PlaceholderValidation"
+pipeline_profile: "conda"
+pipeline_source: "/Users/andreassjodin/Code/nanometanf"
+blast_validation: false
+update_interval_seconds: 30

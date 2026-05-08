@@ -1,0 +1,1 @@
+BLOCKED: not run in this pass -- requires bumping nanometanf to a fresh commit and forcing a clean conda-env rebuild (>10 min env build cost); deferred to the next matrix replay once Agent A lands the kraken2 emission tests.

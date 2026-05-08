@@ -1,0 +1,1 @@
+PASS: 5 per-barcode kraken2 reports produced (barcode01..05); pipeline finished cleanly on 2026-05-06
