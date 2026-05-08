@@ -372,13 +372,17 @@ class ReadinessChecker:
                 f"Input directory does not exist: {p}",
                 details="This is expected if the sequencing run has not started yet"
             )
-        # Look for FASTQ files or barcode subdirectories
+        # Look for FASTQ files or per-sample subdirectories. The
+        # canonical detector lives in core.utils.auto_detect; using it
+        # here keeps the readiness panel in sync with the validation
+        # error messages and the samplesheet generator.
+        from nanometa_live.core.utils.auto_detect import find_sample_subdirs
         fastq_files = list(p.glob("*.fastq*"))
-        barcode_dirs = [d for d in p.iterdir() if d.is_dir() and d.name.startswith("barcode")]
-        if fastq_files or barcode_dirs:
+        sample_dirs = find_sample_subdirs(str(p))
+        if fastq_files or sample_dirs:
             content = []
-            if barcode_dirs:
-                content.append(f"{len(barcode_dirs)} barcode dir(s)")
+            if sample_dirs:
+                content.append(f"{len(sample_dirs)} sample dir(s)")
             if fastq_files:
                 content.append(f"{len(fastq_files)} FASTQ file(s)")
             return CheckResult(
@@ -387,7 +391,7 @@ class ReadinessChecker:
             )
         return CheckResult(
             "Input Directory", False, Severity.WARNING,
-            f"No FASTQ files or barcode directories found in {p.name}",
+            f"No FASTQ files or per-sample directories found in {p.name}",
             details="This is expected if the sequencing run has not started yet"
         )
 

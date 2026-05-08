@@ -56,21 +56,19 @@ def validate_sample_handling_layout(sample_handling: str, input_dir: str) -> Non
         # directory; don't double-warn here.
         return
 
-    barcode_dirs = [
-        d for d in glob.glob(os.path.join(input_dir, "barcode*"))
-        if os.path.isdir(d)
-    ]
-    has_barcode_subdirs = any(
-        glob.glob(os.path.join(d, "*.fastq*")) for d in barcode_dirs
-    )
+    # Use the canonical per-sample-subdir detector. Catches Turex/,
+    # Zymo/, and other custom-named pool directories in addition to
+    # the conventional barcode<NN> layout.
+    from nanometa_live.core.utils.auto_detect import find_sample_subdirs
+    has_sample_subdirs = bool(find_sample_subdirs(input_dir))
 
-    if sample_handling in ("per_file", "single_sample") and has_barcode_subdirs:
+    if sample_handling in ("per_file", "single_sample") and has_sample_subdirs:
         raise ValueError(
             f"sample_handling={sample_handling!r} but {input_dir!r} contains "
-            f"barcode subdirectories with FASTQ files. This is almost always "
-            f"a misconfiguration: either set sample_handling='by_barcode' to "
-            f"demultiplex, or point nanopore_output_directory at a flat "
-            f"directory of FASTQ files."
+            f"per-sample subdirectories with FASTQ files. This is almost "
+            f"always a misconfiguration: either set sample_handling="
+            f"'by_barcode' to keep them as separate samples, or point "
+            f"nanopore_output_directory at a flat directory of FASTQ files."
         )
 
 
@@ -250,36 +248,42 @@ def generate_samplesheet(
     rows = []
 
     if sample_handling == "by_barcode":
-        # Look for barcode subdirectories
-        barcode_dirs = sorted(glob.glob(os.path.join(input_dir, "barcode*")))
-        # Also include unclassified reads if present
-        unclassified_dir = os.path.join(input_dir, "unclassified")
-        if os.path.isdir(unclassified_dir):
-            barcode_dirs.append(unclassified_dir)
-        if not barcode_dirs:
+        # "by_barcode" really means "subdirectory-per-sample". Use the
+        # canonical helper so conventional barcode<NN> directories AND
+        # custom-named per-sample subdirectories (e.g. Turex/, Zymo/,
+        # operator-named pools) both produce a valid samplesheet.
+        from nanometa_live.core.utils.auto_detect import find_sample_subdirs
+        sample_dirs = find_sample_subdirs(input_dir)
+        # Also include unclassified reads if present, even if empty.
+        unclassified_dir = Path(input_dir) / "unclassified"
+        if unclassified_dir.is_dir() and unclassified_dir not in sample_dirs:
+            sample_dirs.append(unclassified_dir)
+        if not sample_dirs:
             raise ValueError(
-                f"No barcode subdirectories found in {input_dir!r}. "
-                f"Expected directories named 'barcode01', 'barcode02', "
-                f"... (case-sensitive) and optionally 'unclassified'. "
-                f"If your input is not multiplexed, switch the "
-                f"'Sample handling' setting in the Configuration tab to "
-                f"'single_sample' or 'per_file'."
+                f"No per-sample subdirectories found in {input_dir!r}. "
+                f"by_barcode mode expects each sample in its own "
+                f"subdirectory (conventional 'barcode01', 'barcode02', "
+                f"... or any folder name with FASTQ files inside). "
+                f"If your input is a flat directory of FASTQ files, "
+                f"switch 'Sample handling' to 'single_sample' or "
+                f"'per_file' in the Configuration tab."
             )
 
-        for barcode_dir in barcode_dirs:
-            if os.path.isdir(barcode_dir):
-                barcode_name = os.path.basename(barcode_dir)
-                fastq_files = glob.glob(os.path.join(barcode_dir, "*.fastq*"))
-                for fastq_file in sorted(fastq_files):
-                    rows.append([barcode_name, str(Path(fastq_file).resolve())])
+        for sample_dir in sample_dirs:
+            sample_name = sample_dir.name
+            fastq_files = sorted(
+                list(sample_dir.glob("*.fastq*")) + list(sample_dir.glob("*.fq*"))
+            )
+            for fastq_file in fastq_files:
+                rows.append([sample_name, str(fastq_file.resolve())])
 
         if not rows:
             raise ValueError(
-                f"Found barcode directories under {input_dir!r} but none "
-                f"contain FASTQ files (matching '*.fastq*'). Wait for the "
-                f"sequencer to deliver reads, or check that 'Nanopore "
-                f"output directory' in the Configuration tab points at "
-                f"the correct path."
+                f"Found per-sample subdirectories under {input_dir!r} but "
+                f"none contain FASTQ files (matching '*.fastq*' or "
+                f"'*.fq*'). Wait for the sequencer to deliver reads, or "
+                f"check that 'Nanopore Sequence Data Folder (input)' in "
+                f"the Configuration tab points at the correct path."
             )
 
     else:
@@ -1042,11 +1046,17 @@ def validate_nanometanf_params(params: Dict[str, Any]) -> Tuple[bool, str]:
         input_dir = params["barcode_input_dir"]
         if not os.path.isdir(input_dir):
             return False, f"Barcode input directory not found: {input_dir}"
-        # Verify barcode subdirectories exist
-        barcode_dirs = glob.glob(os.path.join(input_dir, "barcode*"))
-        if not barcode_dirs:
-            return False, f"No barcode subdirectories found in: {input_dir}"
-        logging.info(f"Barcode mode: Found {len(barcode_dirs)} barcode directories in {input_dir}")
+        # Use the canonical per-sample-subdir detector so non-conventional
+        # naming (e.g. Turex/, Zymo/) is accepted alongside barcode<NN>.
+        from nanometa_live.core.utils.auto_detect import find_sample_subdirs
+        sample_dirs = find_sample_subdirs(input_dir)
+        if not sample_dirs:
+            return False, f"No per-sample subdirectories found in: {input_dir}"
+        logging.info(
+            "Barcode mode: Found %d per-sample directories in %s",
+            len(sample_dirs),
+            input_dir,
+        )
 
     elif has_realtime_input:
         input_dir = params["nanopore_output_dir"]

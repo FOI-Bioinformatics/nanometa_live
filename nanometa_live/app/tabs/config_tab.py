@@ -586,19 +586,21 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             elif not os.path.isdir(nanopore_dir):
                 errors.append(f"Nanopore path is not a directory: {nanopore_dir}")
             else:
-                # Validate directory structure matches sample handling mode.
-                # core.utils.auto_detect already knows how to map a folder
-                # layout to the right sample_handling value; surfacing its
-                # answer in the error message turns "no barcode directories
-                # found" from a dead end into a one-line fix.
+                # Validate directory structure matches sample handling
+                # mode. "by_barcode" really means subdirectory-per-sample
+                # (conventional barcode<NN> AND custom-named subdirs like
+                # Turex/, Zymo/, ...). The canonical detector lives in
+                # core.utils.auto_detect; both barcode-related branches
+                # below delegate so the rules cannot drift.
                 import glob
                 from nanometa_live.core.utils.auto_detect import (
                     detect_sample_handling,
+                    find_sample_subdirs,
                 )
                 detected_mode, detected_reason = detect_sample_handling(nanopore_dir)
                 if sample_handling == "by_barcode":
-                    barcode_dirs = glob.glob(os.path.join(nanopore_dir, "barcode*"))
-                    if not barcode_dirs:
+                    sample_dirs = find_sample_subdirs(nanopore_dir)
+                    if not sample_dirs:
                         suggestion = ""
                         if detected_mode and detected_mode != "by_barcode":
                             suggestion = (
@@ -606,18 +608,21 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                                 f"for this directory ({detected_reason})."
                             )
                         errors.append(
-                            "By-barcode mode selected but no barcode "
-                            f"directories found in {nanopore_dir}. The "
-                            "directory must contain barcode01/, barcode02/, "
-                            "etc. For flat file directories, use 'Single "
+                            "By-barcode mode selected but no per-sample "
+                            f"subdirectories with FASTQ files found in "
+                            f"{nanopore_dir}. by_barcode accepts "
+                            "conventional 'barcode01', 'barcode02', ... "
+                            "and any custom-named folder containing "
+                            "FASTQ files (e.g. 'Turex/', 'Zymo/'). For "
+                            "flat file directories, switch to 'Single "
                             "sample' or 'Per file' mode."
                             + suggestion
                         )
                 elif sample_handling in ["single_sample", "per_file"] and processing_mode == "batch":
                     # Check for FASTQ files directly in directory
                     fastq_files = glob.glob(os.path.join(nanopore_dir, "*.fastq*"))
-                    barcode_dirs = glob.glob(os.path.join(nanopore_dir, "barcode*"))
-                    if not fastq_files and barcode_dirs:
+                    sample_dirs = find_sample_subdirs(nanopore_dir)
+                    if not fastq_files and sample_dirs:
                         suggestion = ""
                         if detected_mode == "by_barcode":
                             suggestion = (
@@ -626,8 +631,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                             )
                         errors.append(
                             f"No FASTQ files found directly in {nanopore_dir}, "
-                            "but barcode directories exist. For barcoded "
-                            "samples, use 'By barcode' handling mode."
+                            "but per-sample subdirectories exist "
+                            f"({', '.join(d.name for d in sample_dirs[:3])}"
+                            + (", ..." if len(sample_dirs) > 3 else "")
+                            + "). For per-sample directories, use "
+                            "'By barcode' handling mode."
                             + suggestion
                         )
 

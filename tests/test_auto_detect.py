@@ -94,11 +94,16 @@ class TestDetectSampleHandlingFlat:
         assert "no fastq" in reason.lower()
 
     def test_fastq_in_non_barcode_subdirs(self, tmp_path):
-        # Subdirs that aren't barcodeNN with FASTQs should return per_file.
+        # Subdirs that aren't barcodeNN but DO contain FASTQs are
+        # valid per-sample folders (e.g. Turex/, Zymo/, mock-community
+        # pools). They now classify as by_barcode because "by_barcode"
+        # means "subdirectory-per-sample" regardless of folder naming.
+        # See core.utils.auto_detect.find_sample_subdirs for the rule.
         _touch(tmp_path / "sample_A" / "reads.fastq.gz")
         _touch(tmp_path / "sample_B" / "reads.fastq.gz")
-        mode, _ = detect_sample_handling(str(tmp_path))
-        assert mode == "per_file"
+        mode, reason = detect_sample_handling(str(tmp_path))
+        assert mode == "by_barcode"
+        assert "sample_A" in reason or "sample_B" in reason
 
     def test_distinct_sample_prefixes_per_file(self, tmp_path):
         # The "distinct prefixes" branch fires when N unique prefixes

@@ -749,13 +749,19 @@ class BackendManager:
                 for f in os.listdir(nanopore_dir):
                     if f.endswith(extensions):
                         waiting_files += 1
-                # Also count files in barcode subdirectories
-                for subdir in os.listdir(nanopore_dir):
-                    subdir_path = os.path.join(nanopore_dir, subdir)
-                    if os.path.isdir(subdir_path) and subdir.startswith("barcode"):
-                        for f in os.listdir(subdir_path):
+                # Also count files in per-sample subdirectories. The
+                # canonical detector accepts conventional barcode<NN>
+                # plus custom-named subdirs (Turex/, Zymo/, ...) so
+                # this counter stays accurate for non-multiplex
+                # layouts that still use by_barcode mode.
+                from nanometa_live.core.utils.auto_detect import find_sample_subdirs
+                for sample_dir in find_sample_subdirs(nanopore_dir):
+                    try:
+                        for f in os.listdir(str(sample_dir)):
                             if f.endswith(extensions):
                                 waiting_files += 1
+                    except OSError:
+                        continue
 
             # Update status with waiting files
             # Processed files comes from workflow_manager status
