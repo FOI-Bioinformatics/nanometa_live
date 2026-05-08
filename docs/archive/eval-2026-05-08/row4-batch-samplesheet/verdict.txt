@@ -1,1 +1,1 @@
-BLOCKED: not run in this pass -- batch-with-explicit-samplesheet path needs Agent C's UX confirmation that the GUI emits --input. The fixture samplesheet/samplesheet.csv is built and ready for the next iteration.
+PASS: 47 classification rows loaded across 5 barcodes via samplesheet input; nanometanf finished kraken2/taxpasta/multiqc cleanly.

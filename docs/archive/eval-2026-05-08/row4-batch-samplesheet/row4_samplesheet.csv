@@ -1,0 +1,6 @@
+sample,fastq,barcode
+barcode01,/Users/andreassjodin/Desktop/snabbsekvensering/output-live/fixtures/multiplex-bc5/barcode01/barcode01_chunk_0000.fastq.gz,barcode01
+barcode02,/Users/andreassjodin/Desktop/snabbsekvensering/output-live/fixtures/multiplex-bc5/barcode02/barcode02_chunk_0000.fastq.gz,barcode02
+barcode03,/Users/andreassjodin/Desktop/snabbsekvensering/output-live/fixtures/multiplex-bc5/barcode03/barcode03_chunk_0000.fastq.gz,barcode03
+barcode04,/Users/andreassjodin/Desktop/snabbsekvensering/output-live/fixtures/multiplex-bc5/barcode04/barcode04_chunk_0000.fastq.gz,barcode04
+barcode05,/Users/andreassjodin/Desktop/snabbsekvensering/output-live/fixtures/multiplex-bc5/barcode05/barcode05_chunk_0000.fastq.gz,barcode05
