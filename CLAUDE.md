@@ -29,9 +29,7 @@ nanometa_live/
 
 Loader package: import directly from the leaf module that owns the symbol
 (`classification_loaders`, `qc_loaders`, `validation_loaders`,
-`canonical_loaders`, `loader_utils`). The previous re-export hub was
-collapsed in the 2026-05-07 audit pass; symbol-to-source is now visible at
-every import site.
+`canonical_loaders`, `loader_utils`).
 
 ### Processing Modes
 
@@ -181,6 +179,34 @@ update_interval_seconds: 30
 - `kraken_db` -> `--kraken2_db`
 - `processing_mode: realtime` -> `--realtime_mode`
 
+### Path lifecycle
+
+Every path-bearing config key is canonicalised at write time
+(Configuration tab save) and at load time (`ConfigLoader.load_config`)
+via `core/utils/path_utils.normalise_path`. Stripping, `~` expansion,
+and `os.path.abspath` apply uniformly. Sentinel values are
+deliberately preserved: `remote:...`, `http(s)://`, `git@`, and the
+bundle-relative `./pipeline_source` / `./nextflow_plugins` strings
+are returned unchanged so the bundle import-rebase logic continues to
+work. The full set of normalised keys is `PATH_CONFIG_KEYS` in the
+same module; consumers should call `normalise_config_paths(config)`
+rather than reimplementing the loop.
+
+`report_missing_paths(config)` returns `{key: path}` for every
+path-bearing key whose value is set but does not exist on disk. A
+startup callback (`warn_about_missing_paths_on_startup` in
+`app/callbacks.py`) emits a single combined toast on app load so the
+operator sees the stale path without having to read the terminal log.
+
+`core/utils/kraken_utils.py` is the single source of truth for "is
+this a valid Kraken2 database?". `KRAKEN_REQUIRED_FILES` lists the
+canonical filenames; `check_kraken_db(db_path) -> (bool, list[str])`
+returns a missing-file list for the caller to format. Configuration
+tab save validation, `parameter_mapping.validate_nextflow_params`
+(the launch-time gate), and `readiness_checker._check_kraken_db` all
+delegate. Adding a new required file (e.g. `accmap.k2d`) is a
+single-edit change.
+
 ## Watchlist System
 
 Sources searched in priority order:
@@ -202,6 +228,35 @@ Includes GTDB suffix variants (`_A`...`_Z`) and prefers species-level matches.
 Genome download by kingdom: Bacteria/Archaea use GTDB representative genomes
 (`isGtdbSpeciesRep`); other kingdoms use NCBI RefSeq. Downloads via NCBI Datasets CLI,
 output to `~/.nanometa/genomes/{taxid}.fasta`.
+
+### API circuit breaker and taxonomy auto-selection
+
+GTDB and NCBI taxonomy clients in `core/taxonomy/taxonomy_api.py`
+share a class-level per-host circuit breaker. After
+`_CIRCUIT_FAILURE_THRESHOLD` (default 3) consecutive failures, the
+host is short-circuited for the remainder of the process and
+subsequent calls return `None` immediately. Default HTTP timeout is
+5 s. The breaker is in-memory only — a transient outage does not
+persist a disabled flag. The Verify Taxonomy IDs callback in
+`watchlist_tab.py` reads `config["kraken_taxonomy"]` and skips the
+API that does not match the active database, so an NCBI run does not
+stall on a degraded GTDB endpoint. Operators can still tick both
+checkboxes for explicit cross-validation.
+
+### Database registry: bundled + operator-managed
+
+The Kraken2 download manifest is loaded from two sources on startup
+and merged into the picker store:
+
+1. `nanometa_live/kraken2_databases.yaml` (bundled defaults; public
+   `genome-idx` URLs).
+2. `~/.nanometa/kraken2_databases.local.yaml` (operator-managed;
+   same schema).
+
+Local entries win on key collision. A missing local file is silently
+skipped; a malformed one logs and continues with the bundled
+defaults. Use the local file to register private mirrors or in-house
+custom builds without forking the package.
 
 ## Validation System
 
@@ -287,6 +342,18 @@ something goes wrong:
   `-resume`), or Cancel. The fingerprint above tags the modal red when the
   new input differs from what the prior run wrote.
 
+**Polling-tick backstop on results-driven callbacks.** Lead callbacks
+in `dashboard_tab.py` (verdict banner + status cache),
+`main_tab.py` (Organisms), `qc_tab.py` (QC plots),
+`classification_tab.py` (Sankey/Sunburst), and `validation_tab.py`
+(Validation data store) take `update-interval` as an Input alongside
+`results-fingerprint`. Without the backstop, a tab visited after the
+first fingerprint tick on a quiet outdir leaves the operator looking
+at the empty initial layout because the fingerprint never advances
+again. The 2-second `should_skip_update("...")` debouncer or the
+`get_trigger_type(ctx) == "interval"` guard keeps the new Input from
+multiplying work — the backstop fires at most once per tick.
+
 ### macOS bind-mount gotcha
 
 macOS writes AppleDouble (`._*`) sidecar files when writing to non-HFS+ filesystems,
@@ -301,7 +368,7 @@ Linux-native path (Docker volume or `/root/.nextflow`); short-term workaround is
 pytest tests/ -v
 ```
 
-861 tests as of 2026-05-07. Synthetic datasets are auto-generated under
+864 tests as of 2026-05-08. Synthetic datasets are auto-generated under
 `/tmp/nanometa_test_datasets/` by `conftest.py` via `scripts/generate_test_datasets.py`.
 Mock Kraken2/FASTP generators live in `core/testing/mock_data_generator.py`.
 
