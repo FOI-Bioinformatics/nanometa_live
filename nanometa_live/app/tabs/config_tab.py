@@ -841,6 +841,22 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         # Note: Species watchlist is now managed via the Watchlist tab
         # and WatchlistManager, not through this config form
 
+        # Apply Settings is the operator's explicit signal that they
+        # are taking ownership of pipeline configuration, not just
+        # browsing existing results. Clear visualization_only so the
+        # Start Analysis button, header status, and dashboard cards
+        # come back online. The flag is set in __main__.py whenever
+        # the app is launched with --main_dir; without this clear, an
+        # operator who opened the app on an existing outdir to peek
+        # at the data would have no way to launch a new run from the
+        # GUI without restarting the process.
+        if (
+            config.get("nanopore_output_directory")
+            and config.get("kraken_db")
+            and config.get("visualization_only")
+        ):
+            config["visualization_only"] = False
+
         # Canonicalise every path-bearing value: strip whitespace,
         # expand "~", and resolve to an absolute path. Prevents the
         # most common cause of "Kraken2 database directory not found"
