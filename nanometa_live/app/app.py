@@ -83,14 +83,31 @@ def create_app(config: Dict[str, Any], data_dir: str, backend_manager: BackendMa
     Returns:
         Configured Dash application
     """
-    # Load kraken databases directly
-    try:
-        kraken_db_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "kraken2_databases.yaml")
-        with open(kraken_db_file, 'r') as f:
-            kraken_databases = yaml.safe_load(f).get("kraken2_databases", {})
-    except Exception as e:
-        logging.error(f"Error loading Kraken databases: {e}")
-        kraken_databases = {}
+    # Load Kraken2 database registry. The package ships a download
+    # manifest of public DBs (genome-idx URLs); operators can also
+    # drop a "kraken2_databases.local.yaml" under ~/.nanometa/ with
+    # the same schema to register additional entries (e.g. private
+    # mirrors, in-house custom builds). Keys defined locally win over
+    # the bundled defaults so a deployment can override an entry.
+    # Closes DB-7.
+    kraken_databases: dict = {}
+    bundled = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "kraken2_databases.yaml"
+    )
+    local = os.path.join(
+        os.path.expanduser("~"), ".nanometa", "kraken2_databases.local.yaml"
+    )
+    for source in (bundled, local):
+        if not os.path.isfile(source):
+            continue
+        try:
+            with open(source, "r") as f:
+                data = yaml.safe_load(f) or {}
+            entries = data.get("kraken2_databases", {})
+            if isinstance(entries, dict):
+                kraken_databases.update(entries)
+        except Exception as e:
+            logging.error("Error loading Kraken database registry %s: %s", source, e)
 
     # Ensure assets directory exists
     assets_dir = os.path.join(os.path.dirname(__file__), "assets")
