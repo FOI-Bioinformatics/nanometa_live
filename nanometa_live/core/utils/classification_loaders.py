@@ -909,3 +909,33 @@ def load_kraken_latest_batch(main_dir: str, sample_name: str) -> pd.DataFrame:
         "No latest-batch report found for sample %s in %s", sample_name, kraken_dir
     )
     return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
+
+
+def describe_kraken_scan_locations(main_dir: str) -> Dict[str, object]:
+    """Return a structured description of where the Kraken2 loader looks.
+
+    Used by the Analyze-error toast to tell the operator the absolute
+    path the loader scanned and the glob patterns it tried, so a
+    'Kraken2 reports not found' message can be diagnosed without
+    reading the source. The patterns mirror the priority order in
+    ``_parse_kraken_data_uncached``.
+
+    Returns a dict with keys:
+      - ``kraken_dir``: absolute path scanned (or expected, if absent).
+      - ``exists``: True iff ``kraken_dir`` is a directory on disk.
+      - ``patterns``: ordered list of glob patterns the loader tries.
+    """
+    resolved = resolve_analysis_directory(main_dir) if main_dir else ""
+    kraken_dir = (
+        os.path.abspath(os.path.join(resolved, "kraken2")) if resolved else ""
+    )
+    return {
+        "kraken_dir": kraken_dir,
+        "exists": bool(kraken_dir) and os.path.isdir(kraken_dir),
+        "patterns": [
+            "*.cumulative.kraken2.report.txt",
+            "*.kraken2.report.txt",
+            "*.kreport2.txt",
+            "*.kreport2",
+        ],
+    }

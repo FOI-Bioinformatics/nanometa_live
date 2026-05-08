@@ -525,6 +525,53 @@ def register_watchlist_callbacks(app: Dash) -> None:
             except Exception as e:
                 logger.debug(f"Could not load mapping collection: {e}")
 
+        # Empty-state guard: if the taxonomy index has not been built
+        # (taxmap-collection store empty AND the global collection has no
+        # entries either), every row would otherwise render as
+        # "Not Found" -- which misleads the operator into thinking the
+        # species are absent from the database rather than the index
+        # being absent. Render a single empty-state card pointing at
+        # the Preparation tab control instead.
+        index_appears_empty = not mapping_dict
+        if index_appears_empty:
+            empty_state = dbc.Card(
+                dbc.CardBody(
+                    [
+                        html.Div(
+                            [
+                                html.I(
+                                    className="bi bi-database-exclamation me-2",
+                                    style={"fontSize": "1.5rem"},
+                                ),
+                                html.Strong("Taxonomy index is empty or stale."),
+                            ],
+                            className="mb-2",
+                        ),
+                        html.P(
+                            [
+                                "The watchlist cannot be checked against the "
+                                "Kraken2 database until the taxonomy index "
+                                "has been built. Open the ",
+                                html.Strong("Preparation"),
+                                " tab and click ",
+                                html.Strong("Scan Database"),
+                                " in the 'Verify Watchlist Against Database' "
+                                "card to (re)build the index.",
+                            ],
+                            className="mb-0 text-muted small",
+                        ),
+                    ]
+                ),
+                color="warning",
+                outline=True,
+                className="mb-3",
+            )
+            return (
+                [empty_state],
+                str(len(entries)),
+                {"display": "inline-block"},
+            )
+
         # Get genome status for all entries
         try:
             from nanometa_live.core.utils.genome_manager import get_genome_manager
@@ -562,16 +609,10 @@ def register_watchlist_callbacks(app: Dash) -> None:
             except Exception as e:
                 logger.error(f"Failed to create row for taxid {taxid} ({entry.get('name', 'Unknown')}): {e}")
 
-        # Add guidance note when no mapping data is available
-        if not mapping_dict:
-            rows.insert(0, html.Div(
-                html.Small([
-                    html.I(className="bi bi-info-circle me-1"),
-                    "Run 'Rescan DB' in the Preparation tab to check database compatibility",
-                ], className="text-muted"),
-                className="mb-2",
-            ))
-
+        # The "no mapping data" guidance note that used to live here was
+        # superseded by the empty-state card above (returned early when
+        # mapping_dict is empty); reaching this point implies at least one
+        # mapped entry, so a 'click Rescan' hint would be confusing.
         count = len(entries)
         return (
             rows,
