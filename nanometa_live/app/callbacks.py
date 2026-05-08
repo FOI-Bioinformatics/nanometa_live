@@ -13,7 +13,7 @@ import threading
 import time
 from typing import Any, Dict, Optional, Tuple
 
-from dash import ALL, Dash, Input, Output, State, callback, ctx, html, no_update
+from dash import ALL, Dash, Input, Output, State, callback, ctx, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
@@ -460,6 +460,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             Output("collision-modal", "is_open", allow_duplicate=True),
             Output("collision-modal-body", "children", allow_duplicate=True),
             Output("collision-decision-pending", "data", allow_duplicate=True),
+            Output("backend-status", "data", allow_duplicate=True),
         ],
         Input("start-stop-button", "n_clicks"),
         State("app-config", "data"),
@@ -481,11 +482,11 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         )
 
         if not n_clicks:
-            return no_update, no_update, no_update, no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update, no_update, no_update, no_update
 
         if status.get("running", False):
             # Open stop-confirmation modal instead of stopping directly
-            return no_update, no_update, True, no_update, no_update, no_update
+            return no_update, no_update, True, no_update, no_update, no_update, no_update
 
         if not config:
             return (
@@ -494,6 +495,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                     "message": "No configuration loaded. Please load or configure settings first.",
                     "color": "danger",
                 },
+                no_update,
                 no_update,
                 no_update,
                 no_update,
@@ -521,6 +523,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 True,
                 render_collision_body(outdir, found, input_match=input_match),
                 {"outdir": outdir, "found": found, "input_match": input_match},
+                no_update,
             )
 
         # Clean outdir -- start the analysis directly.
@@ -533,6 +536,26 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         else:
             updated_config = no_update
 
+        # Optimistic backend-status update on successful launch so
+        # the verdict banner flips from STANDBY to SCREENING IN
+        # PROGRESS within ~30 ms instead of waiting up to one full
+        # 30-second polling tick. The next real status poll
+        # (update_backend_status, callbacks.py:269) will overwrite
+        # this with the authoritative dict from
+        # backend_manager.get_status(); on failure the poll reports
+        # running=False and the banner reverts. Showing optimism on
+        # click and recovering on poll beats 30 seconds of dead air.
+        if success:
+            optimistic_status = dict(status or {})
+            optimistic_status.update({
+                "running": True,
+                "starting": True,
+                "start_time": time.time(),
+                "pipeline_status": "starting",
+            })
+        else:
+            optimistic_status = no_update
+
         return (
             {
                 "title": "Analysis Started" if success else "Error",
@@ -544,6 +567,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             no_update,
             no_update,
             no_update,
+            optimistic_status,
         )
 
     @app.callback(
@@ -551,6 +575,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             Output("collision-modal", "is_open", allow_duplicate=True),
             Output("notification-trigger", "data", allow_duplicate=True),
             Output("app-config", "data", allow_duplicate=True),
+            Output("backend-status", "data", allow_duplicate=True),
         ],
         [
             Input("collision-archive-btn", "n_clicks"),
@@ -560,11 +585,12 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         [
             State("collision-decision-pending", "data"),
             State("app-config", "data"),
+            State("backend-status", "data"),
         ],
         prevent_initial_call=True,
     )
     def handle_collision_choice(
-        archive_clicks, resume_clicks, cancel_clicks, pending, config
+        archive_clicks, resume_clicks, cancel_clicks, pending, config, status
     ):
         """Dispatch the collision modal's three buttons.
 
@@ -593,6 +619,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                     "color": "info",
                 },
                 no_update,
+                no_update,
             )
 
         # Both Archive and Resume need to actually start the pipeline.
@@ -604,6 +631,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                     "message": "No configuration loaded.",
                     "color": "danger",
                 },
+                no_update,
                 no_update,
             )
 
@@ -622,6 +650,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                         "color": "danger",
                     },
                     no_update,
+                    no_update,
                 )
             success, message = backend_manager.start(resume=False)
             if success and archive_path:
@@ -637,8 +666,20 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         color = "success" if success else "danger"
         if success:
             updated_config = merge_config_safely(config, backend_manager.config)
+            # Optimistic backend-status update -- see start_or_prompt_stop
+            # for the rationale. Without this the verdict banner sits
+            # at STANDBY for up to one polling tick after the operator
+            # picks Archive or Continue from the collision modal.
+            optimistic_status = dict(status or {})
+            optimistic_status.update({
+                "running": True,
+                "starting": True,
+                "start_time": time.time(),
+                "pipeline_status": "starting",
+            })
         else:
             updated_config = no_update
+            optimistic_status = no_update
 
         return (
             False,
@@ -648,6 +689,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 "color": color,
             },
             updated_config,
+            optimistic_status,
         )
 
     @app.callback(
@@ -1507,10 +1549,21 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         Input("app-config", "data"),
     )
     def render_storage_locations_table(data_dir, config):
-        """Render one row per storage zone with absolute path + Open
-        button. The genome / BLAST zones honour ``genome_cache_dir``
-        (the only zone that is operator-configurable today); the
-        other zones are rooted at data_dir."""
+        """Render the Storage Locations accordion body.
+
+        The body has two parts:
+
+        1. A header row showing the active data_dir with a Copy button
+           and a one-line note that the value is set via the
+           ``--data-dir`` CLI flag (a restart is required to change
+           it; runtime mutation of data_dir would require re-init of
+           BackendManager, DiskcacheManager, and several singleton
+           directory layouts that are wired at app start).
+        2. A per-zone table with absolute paths and Open buttons.
+           The genome / BLAST rows honour ``genome_cache_dir`` (the
+           one zone that is operator-configurable today); the other
+           rows are rooted at data_dir.
+        """
         if not data_dir:
             return html.Div("Data directory not configured.", className="text-muted")
 
@@ -1572,7 +1625,42 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 ])
             )
 
-        return dbc.Table(
+        # data_dir header row. A small alert with the absolute path,
+        # a one-click clipboard copy, and a one-line restart-required
+        # note. dcc.Clipboard avoids hand-rolled JS and is a
+        # first-class Dash 4 component.
+        header = dbc.Alert(
+            [
+                html.Div([
+                    html.Strong("Data root: "),
+                    html.Code(data_root, id="storage-data-root-code",
+                              style={"wordBreak": "break-all"}),
+                    dcc.Clipboard(
+                        target_id="storage-data-root-code",
+                        title="Copy path",
+                        style={
+                            "marginLeft": "8px",
+                            "cursor": "pointer",
+                            "color": "#0d6efd",
+                        },
+                    ),
+                ], className="mb-1"),
+                html.Small(
+                    [
+                        html.I(className="bi bi-info-circle me-1"),
+                        "Set with ",
+                        html.Code("--data-dir /path"),
+                        " on the command line. Restart required to ",
+                        "take effect.",
+                    ],
+                    className="text-muted",
+                ),
+            ],
+            color="light",
+            className="mb-3",
+        )
+
+        table = dbc.Table(
             [
                 html.Thead(html.Tr([
                     html.Th("Zone", style={"width": "30%"}),
@@ -1586,6 +1674,8 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             className="mb-0",
         )
 
+        return [header, table]
+
     @app.callback(
         Output("toast-message", "data", allow_duplicate=True),
         Input({"type": "storage-open-btn", "path": ALL}, "n_clicks"),
@@ -1593,15 +1683,28 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     )
     def open_storage_location(_n_clicks_list):
         """Launch the OS file manager at the path encoded in the
-        clicked button's pattern-matching id. Errors return as a
-        toast rather than raising so a failing helper does not crash
-        the callback."""
+        clicked button's pattern-matching id.
+
+        ``prevent_initial_call=True`` already gates against the
+        startup dispatch where every n_clicks is None / 0, so the
+        only check needed here is that ctx.triggered_id is a real
+        pattern-match dict (it is when a click fires; it is None for
+        the rare degenerate case). The previous ``any()`` guard was
+        redundant and -- because every button rendered with
+        n_clicks=0 -- could be misread as the source of the
+        no-op-on-click bug.
+
+        The INFO log line provides a single point to confirm whether
+        the callback actually fires when the operator clicks Open.
+        Errors come back as a toast rather than an exception so a
+        failing helper does not propagate up the Dash callback
+        chain.
+        """
         triggered = ctx.triggered_id
         if not triggered or not isinstance(triggered, dict):
             raise PreventUpdate
-        if not any(_n_clicks_list):
-            raise PreventUpdate
         path = triggered.get("path")
+        logging.info("Storage Locations: opening %s", path)
         from nanometa_live.app.utils.file_manager_open import open_in_file_manager
         err = open_in_file_manager(path)
         if err:

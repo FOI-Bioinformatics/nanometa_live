@@ -83,6 +83,25 @@ Full walkthrough: [`docs/developer-guide.md`](docs/developer-guide.md).
 in a separate OS process, so Python singletons (e.g. `WatchlistManager`) are empty there.
 Share state via a `dcc.Store` populated in a main-process callback and read via `State`.
 
+**Update cadence and session writes.** A single global
+`dcc.Interval(id='update-interval')` drives all polling, default 30 s
+(configurable via `update_interval_seconds`; the value is re-applied
+at runtime by `callbacks.py:75`). Heavy I/O (kraken2/fastp/seqkit/
+blast scans) is gated on the `results-fingerprint` store rather than
+on raw interval ticks; ~13 callbacks share a uniform 2 s
+`should_skip_update()` debounce so an interval tick that finds
+nothing new is a microsecond-cost short-circuit. Session-state
+writes to `~/.nanometa/configs/last-session.yaml` happen only on
+Apply Settings (`config_tab.py:876`) and watchlist edits
+(`watchlist_tab.py:38`); pipeline Start, Stop, and finish do NOT
+auto-persist. Boot is fresh by design (the Resume/Discard banner
+makes session restore an explicit choice, see commit `8bb4290`).
+The Start callback writes an optimistic
+`{running: True, starting: True}` to the `backend-status` store on
+click so the verdict banner flips within ~30 ms instead of waiting
+for the next poll; the next real status poll overwrites with the
+authoritative value.
+
 **Run metadata on disk:** every successful pipeline start writes
 `<results_output_directory>/.nanometa.run.json` (see
 `BackendManager.write_run_metadata`). It carries a sha256 fingerprint over the

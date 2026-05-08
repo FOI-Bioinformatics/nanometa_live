@@ -343,30 +343,32 @@ def create_config_layout():
             className="mb-4"
         ),
 
-        # Storage Locations panel. Surfaces the absolute path of every
-        # zone Nanometa Live writes to under data_dir (default:
-        # ~/.nanometa) plus the genome cache. The "Open" button on
-        # each row launches the OS file manager via the helper at
-        # app/utils/file_manager_open.py. Read-only display this
-        # round; migration to a non-dot-prefixed default is deferred
-        # so existing operator data (genomes, BLAST DBs that took
-        # hours to build) is not disturbed.
-        dbc.Card(
+        # Storage Locations panel. Collapsed by default so it does
+        # not occupy screen real estate during normal configuration;
+        # operators expand it when they need to back up data, free
+        # disk space, or share a genome cache between machines.
+        # The body (rendered by render_storage_locations_table in
+        # callbacks.py) shows the active data_dir at the top with a
+        # restart-required note, then a per-zone table with Open
+        # buttons. Migration to a non-dot-prefixed default is
+        # deferred -- this round is visibility only.
+        dbc.Accordion(
             [
-                dbc.CardHeader(
-                    html.Div([
+                dbc.AccordionItem(
+                    html.Div(id="storage-locations-table"),
+                    title=html.Span([
                         html.I(className="bi bi-folder2-open me-2"),
-                        html.Strong("Storage Locations"),
+                        "Storage Locations",
                         html.Small(
                             " - where Nanometa Live keeps your data on this computer",
                             className="text-muted ms-2",
                         ),
-                    ], className="d-flex align-items-center"),
-                ),
-                dbc.CardBody(
-                    html.Div(id="storage-locations-table"),
+                    ]),
+                    item_id="storage-locations-item",
                 ),
             ],
+            id="storage-locations-accordion",
+            start_collapsed=True,
             className="mb-4",
         ),
 
