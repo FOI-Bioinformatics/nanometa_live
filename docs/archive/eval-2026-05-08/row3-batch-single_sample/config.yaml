@@ -1,0 +1,13 @@
+# Scenario 2: batch + single_sample + Turex (smallest corpus)
+nanopore_output_directory: "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/_testdata/singleplex_turex"
+results_output_directory: "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/scenario_2_batch_singleplex"
+main_dir: "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/scenario_2_batch_singleplex"
+kraken_db: "/Users/andreassjodin/Desktop/snabbsekvensering/bioshield/kraken_db/k2_pluspfp_08_GB_20251015"
+processing_mode: "batch"
+sample_handling: "single_sample"
+sample_name: "turex"
+analysis_name: "Scenario2BatchSingleplex"
+pipeline_profile: "conda"
+pipeline_source: "/Users/andreassjodin/Code/nanometanf"
+blast_validation: false
+update_interval_seconds: 30

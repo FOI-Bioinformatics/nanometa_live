@@ -1,0 +1,1 @@
+FAIL (rc=1): empty-cache JSON silently accepted -- index loads with 0 nodes; every watchlist entry would render UNMAPPED. This reproduces Bug A.

@@ -1,0 +1,5 @@
+barcode01.kraken2.report.txt
+barcode02.kraken2.report.txt
+barcode03.kraken2.report.txt
+barcode04.kraken2.report.txt
+barcode05.kraken2.report.txt

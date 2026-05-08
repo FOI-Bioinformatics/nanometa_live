@@ -1,0 +1,12 @@
+# Scenario 1: batch + by_barcode + multiplex_5bc_trimmed (5 barcodes x 3 chunks)
+nanopore_output_directory: "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/_testdata/multiplex_5bc_trimmed"
+results_output_directory: "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/scenario_1_batch_multiplex"
+main_dir: "/Users/andreassjodin/Desktop/snabbsekvensering/output-live/scenario_1_batch_multiplex"
+kraken_db: "/Users/andreassjodin/Desktop/snabbsekvensering/bioshield/kraken_db/k2_pluspfp_08_GB_20251015"
+processing_mode: "batch"
+sample_handling: "by_barcode"
+analysis_name: "Scenario1BatchMultiplex"
+pipeline_profile: "conda"
+pipeline_source: "/Users/andreassjodin/Code/nanometanf"
+blast_validation: false
+update_interval_seconds: 30

@@ -1,0 +1,1 @@
+PASS: 5 per-barcode realtime trees under kraken2/<barcode>/; cumulative reports refreshed on each watchPath tick on 2026-05-06

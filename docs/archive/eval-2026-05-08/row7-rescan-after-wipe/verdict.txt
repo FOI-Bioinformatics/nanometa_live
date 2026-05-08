@@ -1,0 +1,1 @@
+PASS: rescan after wipe rebuilt index and mapped 3/3 probe entries

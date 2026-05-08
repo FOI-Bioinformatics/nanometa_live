@@ -1,0 +1,1 @@
+PASS: realtime cumulative kraken2 grew under kraken2/turex_realtime/ on 2026-05-06

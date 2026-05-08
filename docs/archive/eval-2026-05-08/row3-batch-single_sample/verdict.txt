@@ -1,0 +1,1 @@
+PARTIAL: kraken2/turex.kraken2.report.txt produced flat in kraken2/. Same Bug B failure mode as row 2: the GUI's per-sample loader resolves <outdir>/kraken2/turex/ first and never re-globs the flat root. Pipeline finished green; loader regression is on the GUI side.

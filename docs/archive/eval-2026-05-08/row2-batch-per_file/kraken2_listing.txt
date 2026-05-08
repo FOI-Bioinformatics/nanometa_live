@@ -1,0 +1,5 @@
+D6300_2_barcode14_chunk_0000.kraken2.report.txt
+D6300_2_barcode14_chunk_0001.kraken2.report.txt
+D6300_2_barcode14_chunk_0002.kraken2.report.txt
+D6300_2_barcode14_chunk_0003.kraken2.report.txt
+D6300_2_barcode14_chunk_0004.kraken2.report.txt

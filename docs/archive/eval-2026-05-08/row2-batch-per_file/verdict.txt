@@ -1,0 +1,1 @@
+PARTIAL:        5 per-file kraken2 reports produced flat under kraken2/; Bug B predicts the GUI loader cannot find them in this layout because the per-sample loader at classification_loaders.py:648-657 only looks under <sample>/. Manual evidence: dashboard would not display these samples until Agent B's flat-root fallback lands.
