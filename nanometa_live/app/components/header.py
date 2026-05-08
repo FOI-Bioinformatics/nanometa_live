@@ -30,7 +30,7 @@ def create_header(title="Nanometa Live"):
                     html.Img(
                         src="/assets/logo.png",
                         alt="Nanometa Live",
-                        style={"height": "64px", "width": "auto"},
+                        style={"height": "96px", "width": "auto"},
                         className="me-2",
                     ),
                     html.H2(
