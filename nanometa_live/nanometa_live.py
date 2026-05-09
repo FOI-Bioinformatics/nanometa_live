@@ -22,6 +22,7 @@ from nanometa_live.app.app import create_app
 from nanometa_live.core.config.config_loader import ConfigLoader
 from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.utils.logging_utils import setup_logging
+from nanometa_live.core.utils.paths import set_data_dir_env
 
 
 def parse_arguments():
@@ -116,6 +117,13 @@ def main():
     while data_dir.startswith("//"):
         data_dir = data_dir[1:]
 
+    # Set the env var BEFORE any module-level singleton (offline cache,
+    # background-callback Diskcache) gets a chance to read the legacy
+    # default. The env var is the only mechanism available to import-
+    # time consumers; config-aware consumers prefer
+    # ``NanometaPaths.from_config(config)``.
+    set_data_dir_env(data_dir)
+
     create_default_dirs(data_dir)
 
     # Setup logging with file output
@@ -165,6 +173,10 @@ def main():
             logging.info("No previous session found; starting with default configuration.")
 
     # Sync CLI arguments to config
+    # data_dir is now a first-class config key so every subsystem can
+    # read the resolved value via NanometaPaths.from_config(config),
+    # rather than each module embedding its own ~/.nanometa fallback.
+    config["data_dir"] = data_dir
     config["gui_port"] = args.port
     if args.main_dir:
         config["results_output_directory"] = os.path.abspath(args.main_dir)

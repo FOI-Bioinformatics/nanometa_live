@@ -866,7 +866,9 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     )
     def update_config_badge(config):
         """Show config save status in header badge."""
-        last_session = os.path.expanduser("~/.nanometa/configs/last-session.yaml")
+        from nanometa_live.core.utils.paths import NanometaPaths
+        paths = NanometaPaths.from_config(config or {})
+        last_session = str(paths.last_session_yaml)
         badge_style = {"fontSize": "0.75rem", "display": "inline-block"}
         if os.path.exists(last_session):
             return "Auto-saved", "success", badge_style

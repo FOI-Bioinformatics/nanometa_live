@@ -200,7 +200,11 @@ class GenomeDownloadManager:
             offline_mode: If True, refuse all genome downloads
         """
         if cache_dir is None:
-            cache_dir = "~/.nanometa"
+            # Resolve from NANOMETA_DATA_DIR (set by the CLI entry
+            # point from --data-dir) so this default-construction
+            # branch follows the operator's chosen data directory.
+            from nanometa_live.core.utils.paths import get_data_dir_from_env
+            cache_dir = get_data_dir_from_env()
 
         # Always expand user home directory and resolve to absolute path
         self.cache_dir = Path(os.path.expanduser(cache_dir)).resolve()

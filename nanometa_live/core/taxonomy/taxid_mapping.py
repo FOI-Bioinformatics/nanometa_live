@@ -679,9 +679,17 @@ class TaxidMapper:
         Initialize the mapper.
 
         Args:
-            cache_dir: Directory for caching mappings (default: ~/.nanometa/mappings)
+            cache_dir: Directory for caching mappings. When unset,
+                resolves to ``<data_dir>/mappings`` where data_dir is
+                read from the NANOMETA_DATA_DIR env var (set by the
+                CLI entry point from ``--data-dir``) or falls back to
+                ``~/.nanometa``.
         """
-        self._cache_dir = Path(cache_dir) if cache_dir else Path.home() / ".nanometa" / "mappings"
+        if cache_dir:
+            self._cache_dir = Path(cache_dir)
+        else:
+            from nanometa_live.core.utils.paths import get_data_dir_from_env
+            self._cache_dir = Path(get_data_dir_from_env()) / "mappings"
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
         self._index: Optional[DatabaseTaxonomyIndex] = None

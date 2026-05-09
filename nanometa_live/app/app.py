@@ -20,20 +20,35 @@ import multiprocess
 # when DiskcacheManager forks a process with a closed stderr pipe.
 multiprocess.set_start_method("spawn", force=True)
 
-# Initialize cache for background callbacks (enables async progress reporting).
-#
-# FanoutCache shards across multiple SQLite databases (default: 8) so
-# concurrent background callbacks do not serialize behind a single
-# writer-mutex. Closes P1-T05 from
-# docs/audit-2026-04-28-throughput-gui.md, where preparation +
-# genome-download + DB-download clicks could queue silently behind each
-# other when the underlying single-shard diskcache.Cache held its write
-# lock during result persistence. Cache directory tree is unchanged on
-# disk; FanoutCache transparently namespaces shards under shards/00..07.
-_cache_dir = os.path.join(os.path.expanduser("~"), ".nanometa", "cache")
-os.makedirs(_cache_dir, exist_ok=True)
-_cache = diskcache.FanoutCache(_cache_dir, shards=8, timeout=1.0)
-background_callback_manager = DiskcacheManager(_cache, expire=3600)
+# Module-level placeholder; populated lazily by ``create_app`` once the
+# operator's ``data_dir`` is known. Constructing the FanoutCache at
+# import time would force the cache to live under ``~/.nanometa/cache``
+# regardless of ``--data-dir``, which is the leak this refactor closes.
+# See docs/audit-2026-04-28-throughput-gui.md for FanoutCache
+# motivation: 8 shards so concurrent background callbacks do not
+# serialize behind a single writer-mutex.
+background_callback_manager: Optional[DiskcacheManager] = None
+_cache: Optional[diskcache.FanoutCache] = None
+
+
+def _ensure_background_callback_manager(cache_dir: str) -> DiskcacheManager:
+    """Construct the Diskcache-backed background callback manager.
+
+    Idempotent: subsequent calls with the same ``cache_dir`` return the
+    existing manager. A different ``cache_dir`` is honored by
+    rebuilding (the singleton is process-local, not session-pinned).
+    """
+    global background_callback_manager, _cache
+    if (
+        background_callback_manager is not None
+        and _cache is not None
+        and str(_cache.directory) == str(cache_dir)
+    ):
+        return background_callback_manager
+    os.makedirs(cache_dir, exist_ok=True)
+    _cache = diskcache.FanoutCache(cache_dir, shards=8, timeout=1.0)
+    background_callback_manager = DiskcacheManager(_cache, expire=3600)
+    return background_callback_manager
 
 from nanometa_live import __version__
 from nanometa_live.app.layouts.main_layout import create_main_layout
@@ -99,9 +114,22 @@ def create_app(
     Returns:
         Configured Dash application
     """
+    # Resolve the per-installation directory layout once and pass it
+    # into every subsystem that needs it. NanometaPaths reads
+    # ``config["data_dir"]`` (seeded by nanometa_live.py from
+    # ``--data-dir``) and falls back to ``~/.nanometa`` for legacy
+    # operators.
+    from nanometa_live.core.utils.paths import NanometaPaths
+    paths = NanometaPaths.from_config(config)
+    paths.ensure_dirs()
+
+    # Initialise the background-callback Diskcache lazily so its shards
+    # land under ``data_dir/cache`` instead of ``~/.nanometa/cache``.
+    _ensure_background_callback_manager(str(paths.cache))
+
     # Load Kraken2 database registry. The package ships a download
     # manifest of public DBs (genome-idx URLs); operators can also
-    # drop a "kraken2_databases.local.yaml" under ~/.nanometa/ with
+    # drop a "kraken2_databases.local.yaml" under data_dir with
     # the same schema to register additional entries (e.g. private
     # mirrors, in-house custom builds). Keys defined locally win over
     # the bundled defaults so a deployment can override an entry.
@@ -110,9 +138,7 @@ def create_app(
     bundled = os.path.join(
         os.path.dirname(os.path.dirname(__file__)), "kraken2_databases.yaml"
     )
-    local = os.path.join(
-        os.path.expanduser("~"), ".nanometa", "kraken2_databases.local.yaml"
-    )
+    local = str(paths.kraken2_local_registry)
     for source in (bundled, local):
         if not os.path.isfile(source):
             continue

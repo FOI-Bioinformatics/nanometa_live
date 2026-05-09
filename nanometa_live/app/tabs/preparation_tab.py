@@ -1557,7 +1557,10 @@ def register_preparation_callbacks(app):
 
         cache_dir = None
         if config:
-            cache_dir = config.get("genome_cache_dir", "~/.nanometa")
+            from nanometa_live.core.utils.paths import NanometaPaths
+            cache_dir = config.get("genome_cache_dir") or str(
+                NanometaPaths.from_config(config).data_dir
+            )
 
         try:
             genome_mgr = get_genome_manager(cache_dir=cache_dir)

@@ -24,8 +24,17 @@ from functools import wraps
 
 logger = logging.getLogger(__name__)
 
-# Default cache directory
-DEFAULT_CACHE_DIR = os.path.expanduser("~/.nanometa/cache")
+# Default cache directory. Reads NANOMETA_DATA_DIR (set by the CLI
+# entry point as soon as ``--data-dir`` is parsed) so the singleton
+# constructed in ``get_cache()`` lands under the operator-configured
+# directory. Falls back to the legacy ``~/.nanometa/cache`` location
+# when the env var is unset (test runs, library imports).
+def _default_cache_dir() -> str:
+    base = os.environ.get("NANOMETA_DATA_DIR") or os.path.expanduser("~/.nanometa")
+    return os.path.join(base, "cache")
+
+
+DEFAULT_CACHE_DIR = _default_cache_dir()
 
 # Cache TTL (time-to-live) in seconds
 DEFAULT_TTL = 7 * 24 * 60 * 60  # 7 days
@@ -533,7 +542,14 @@ def get_cache(offline_mode: bool = False) -> OfflineTaxonomyCache:
 
     with _cache_instance_lock:
         if _cache_instance is None:
-            _cache_instance = OfflineTaxonomyCache(offline_mode=offline_mode)
+            # Resolve the cache dir at call time, not import time, so a
+            # CLI ``--data-dir`` flag set during startup is honored
+            # (NANOMETA_DATA_DIR is written by nanometa_live.py before
+            # any callback fires).
+            _cache_instance = OfflineTaxonomyCache(
+                cache_dir=_default_cache_dir(),
+                offline_mode=offline_mode,
+            )
         elif offline_mode != _cache_instance.offline_mode:
             _cache_instance.offline_mode = offline_mode
         return _cache_instance

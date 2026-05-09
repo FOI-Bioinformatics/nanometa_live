@@ -842,8 +842,15 @@ class WatchlistManager:
 
     @staticmethod
     def _toggle_state_path() -> Path:
-        """Path to the toggle state persistence file."""
-        return Path(os.path.expanduser("~/.nanometa/watchlist_toggle_state.yaml"))
+        """Path to the toggle state persistence file.
+
+        Honors NANOMETA_DATA_DIR (set by the CLI entry point from
+        ``--data-dir``) so the toggle file follows the operator's
+        chosen data directory; falls back to ``~/.nanometa`` for
+        backward compatibility.
+        """
+        from nanometa_live.core.utils.paths import get_data_dir_from_env
+        return Path(get_data_dir_from_env()) / "watchlist_toggle_state.yaml"
 
     def _save_toggle_state(self) -> None:
         """Save disabled taxid set to disk for persistence across restarts."""

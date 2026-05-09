@@ -881,8 +881,9 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             manager = get_watchlist_manager()
             if manager._loaded:
                 save_config["watchlist"] = manager.export_config()
-            config_dir = os.path.expanduser("~/.nanometa/configs")
-            loader = ConfigLoader(config_dir)
+            from nanometa_live.core.utils.paths import NanometaPaths
+            paths = NanometaPaths.from_config(save_config)
+            loader = ConfigLoader(str(paths.configs))
             loader.save_config(save_config, "last-session.yaml")
             logging.debug("Auto-saved configuration to last-session.yaml")
         except Exception as e:
@@ -1046,7 +1047,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         minimap2_min_mapq = config.get("minimap2_min_mapq", 30)
 
         e_value_cutoff = config.get("e_val_cutoff", 0.01)
-        genome_cache_dir = config.get("genome_cache_dir", "~/.nanometa")
+        from nanometa_live.core.utils.paths import NanometaPaths
+        genome_cache_dir = config.get("genome_cache_dir") or str(
+            NanometaPaths.from_config(config).data_dir
+        )
         cores = config.get("pipeline_cores", config.get("snakemake_cores", 1))  # Backward compatibility
         gui_port = config.get("gui_port", 8050)
 
@@ -1883,7 +1887,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "minimap2_preset": minimap2_preset or "map-ont",
             "minimap2_min_mapq": minimap2_min_mapq,
             "e_val_cutoff": e_value_cutoff,
-            "genome_cache_dir": genome_cache_dir or "~/.nanometa",
+            "genome_cache_dir": genome_cache_dir,
             "pipeline_cores": cores,
             "gui_port": gui_port,
             "remove_temp_files": bool(clean_temp),

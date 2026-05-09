@@ -87,7 +87,14 @@ class ConfigLoader:
             "validation_identity_threshold": 90.0,
             "minimap2_preset": "map-ont",
             "minimap2_min_mapq": 30,
-            # Genome cache directory for downloaded reference genomes
+            # Per-installation directory for app state (configs, cache,
+            # genomes, blast, mappings, logs). The CLI ``--data-dir``
+            # flag overrides this; nanometa_live.py writes the
+            # resolved value back into the config dict so downstream
+            # subsystems can read it via NanometaPaths.from_config.
+            "data_dir": os.path.join(os.path.expanduser("~"), ".nanometa"),
+            # Genome cache directory for downloaded reference genomes.
+            # When unset, NanometaPaths resolves this to <data_dir>.
             "genome_cache_dir": os.path.join(os.path.expanduser("~"), ".nanometa"),
             "external_kraken2_db": "",
             "local_package_management": None,

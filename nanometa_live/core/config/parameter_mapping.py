@@ -478,7 +478,10 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     if config.get("blast_validation", False) and has_species:
         # Generate pathogen_genomes.json from downloaded genomes
         # Use configurable genome cache directory from config
-        genome_cache_dir = config.get("genome_cache_dir", "~/.nanometa")
+        from nanometa_live.core.utils.paths import NanometaPaths
+        genome_cache_dir = config.get("genome_cache_dir") or str(
+            NanometaPaths.from_config(config).data_dir
+        )
         logging.debug(f"Using genome cache directory for validation: {genome_cache_dir}")
 
         genome_manager = get_genome_manager(cache_dir=genome_cache_dir)

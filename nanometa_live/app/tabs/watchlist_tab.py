@@ -38,8 +38,9 @@ def _save_last_session(config: Dict[str, Any]) -> None:
     """Save config to last-session.yaml for persistence across restarts."""
     try:
         from nanometa_live.core.config.config_loader import ConfigLoader
-        config_dir = os.path.expanduser("~/.nanometa/configs")
-        loader = ConfigLoader(config_dir)
+        from nanometa_live.core.utils.paths import NanometaPaths
+        paths = NanometaPaths.from_config(config)
+        loader = ConfigLoader(str(paths.configs))
         loader.save_config(config, "last-session.yaml")
     except Exception:
         logger.debug("Could not save last-session.yaml", exc_info=True)
