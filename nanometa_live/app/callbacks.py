@@ -1747,7 +1747,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         Input({"type": "storage-open-btn", "path": ALL}, "n_clicks"),
         prevent_initial_call=True,
     )
-    def open_storage_location(_n_clicks_list):
+    def open_storage_location(n_clicks_list):
         """Launch the OS file manager at the path encoded in the
         clicked button's pattern-matching id.
 
@@ -1768,6 +1768,12 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         """
         triggered = ctx.triggered_id
         if not triggered or not isinstance(triggered, dict):
+            raise PreventUpdate
+        # Pattern-matching ALL inputs fire when buttons first render
+        # (n_clicks goes from non-existent to 0), even with
+        # prevent_initial_call=True. Require a real click to avoid
+        # the file manager opening at app startup.
+        if not n_clicks_list or not any(n_clicks_list):
             raise PreventUpdate
         path = triggered.get("path")
         logging.info("Storage Locations: opening %s", path)

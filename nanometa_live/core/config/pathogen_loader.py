@@ -298,7 +298,12 @@ class PathogenDatabase:
             self._load_user_watchlist()
 
             self._loaded = True
-            logger.info(f"Loaded {len(self._pathogens)} pathogens into database")
+            # DEBUG, not INFO: dashboard polling instantiates a fresh
+            # PathogenDatabase per check_for_dangerous_pathogens call
+            # (see pathogen_database.py), so this fires every ~30s
+            # during a run. The count is recoverable from the log file
+            # if needed.
+            logger.debug(f"Loaded {len(self._pathogens)} pathogens into database")
             return True
 
         except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, KeyError, ValueError, TypeError, AttributeError) as e:

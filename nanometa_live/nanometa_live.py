@@ -169,6 +169,13 @@ def main():
     # Create and start the Dash application
     app = create_app(config, data_dir, backend_manager, deferred_session=deferred_session)
 
+    # Dash resets its own logger to INFO during construction, undoing
+    # the WARNING level we set in setup_logging. Re-apply here so the
+    # duplicate "Dash is running on..." line stays suppressed.
+    if not args.debug:
+        logging.getLogger("dash.dash").setLevel(logging.WARNING)
+        logging.getLogger("werkzeug").setLevel(logging.WARNING)
+
     # Set up signal handlers for graceful exit
     handle_exit(app, backend_manager)
 

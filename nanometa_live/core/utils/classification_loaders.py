@@ -755,7 +755,23 @@ def _parse_kraken_data_uncached(
                         sample_files = [max(candidate_batches, key=_extract_batch_num)]
 
         if not sample_files:
-            logging.warning(_diagnose_empty_kraken_dir(kraken_dir, sample=sample))
+            # Per-sample miss is DEBUG when the directory already
+            # contains kraken reports for *other* samples (the
+            # requested sample's file simply has not landed yet during
+            # a live run). The full diagnostic stays WARNING when the
+            # directory is genuinely empty / unreadable, since that is
+            # the operator-facing failure mode the helper was added
+            # for. The whole-dir scan path below keeps WARNING
+            # unconditionally.
+            try:
+                has_any_kreports = any(
+                    f.endswith(".kraken2.report.txt") or f.endswith(".kreport2.txt")
+                    for f in os.listdir(kraken_dir)
+                )
+            except OSError:
+                has_any_kreports = False
+            level = logging.DEBUG if has_any_kreports else logging.WARNING
+            logging.log(level, _diagnose_empty_kraken_dir(kraken_dir, sample=sample))
             return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
 
         # Parse files, using single-file fast path when possible

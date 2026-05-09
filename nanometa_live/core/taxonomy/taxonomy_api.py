@@ -324,7 +324,11 @@ class TaxonomyAPIClient(ABC):
             return response.json()
 
         except requests.exceptions.SSLError:
-            logger.warning(
+            # DEBUG, not WARNING: the per-call SSL fallback is
+            # routine on networks with corporate MITM proxies. The
+            # circuit-breaker OPEN warning below covers the case
+            # where the host is genuinely unreachable.
+            logger.debug(
                 "SSL verification failed for %s, retrying without verification", url
             )
             try:
@@ -342,12 +346,15 @@ class TaxonomyAPIClient(ABC):
                 self._circuit_record_success(url)
                 return response.json()
             except requests.exceptions.RequestException as e:
-                logger.warning("API request failed (SSL fallback): %s - %s", url, e)
+                # Per-call failure recorded; the circuit breaker
+                # surfaces the user-visible WARNING once the threshold
+                # is crossed, so individual failures stay at DEBUG.
+                logger.debug("API request failed (SSL fallback): %s - %s", url, e)
                 self._circuit_record_failure(url)
                 return None
 
         except requests.exceptions.RequestException as e:
-            logger.warning(f"API request failed: {url} - {e}")
+            logger.debug(f"API request failed: {url} - {e}")
             self._circuit_record_failure(url)
             return None
         except json.JSONDecodeError as e:

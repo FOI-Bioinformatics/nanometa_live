@@ -91,6 +91,9 @@ class AlertEngine:
         self.alert_history: List[Alert] = []
         self.alert_history_hours = alert_history_hours
         self.alert_rules = self._initialize_alert_rules()
+        # Last logged "PATHOGEN ALERT" signature so the WARNING is
+        # emitted once per state change rather than on every poll.
+        self._last_pathogen_log_sig: Optional[tuple] = None
 
     def _initialize_alert_rules(self) -> Dict:
         """
@@ -361,14 +364,20 @@ class AlertEngine:
                     if d.get("threat_level") in ["high", "high_risk"]
                 )
 
-                if critical_count > 0:
-                    logger.warning(
-                        f"PATHOGEN ALERT: {critical_count} critical pathogen(s) detected!"
-                    )
-                elif high_count > 0:
-                    logger.warning(
-                        f"PATHOGEN ALERT: {high_count} high-risk pathogen(s) detected"
-                    )
+                # Dedup: only log when the (critical, high) tuple
+                # changes. The dashboard polls every 30s so unguarded
+                # this fires every poll for the entire run.
+                sig = (critical_count, high_count)
+                if sig != self._last_pathogen_log_sig:
+                    if critical_count > 0:
+                        logger.warning(
+                            f"PATHOGEN ALERT: {critical_count} critical pathogen(s) detected!"
+                        )
+                    elif high_count > 0:
+                        logger.warning(
+                            f"PATHOGEN ALERT: {high_count} high-risk pathogen(s) detected"
+                        )
+                    self._last_pathogen_log_sig = sig
 
         except (KeyError, AttributeError, ValueError, TypeError) as e:
             logger.exception(f"Error checking for dangerous pathogens: {e}")

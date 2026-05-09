@@ -774,7 +774,7 @@ class BackendManager:
 
     def _monitor_status(self):
         """Monitor the status of the backend processes in a separate thread."""
-        logging.info("Status monitoring thread started")
+        logging.info("BackendManager status monitoring started")
 
         # Determine realtime timeout from config (in minutes, converted to seconds)
         timeout_seconds = None
@@ -896,6 +896,6 @@ class BackendManager:
 
         # Release lock when monitoring thread exits (pipeline completed or stopped)
         self._release_lock()
-        logging.info("Status monitoring thread stopped")
+        logging.info("BackendManager status monitoring stopped")
 
 

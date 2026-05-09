@@ -796,7 +796,7 @@ class NextflowManager:
 
         Polls every 5 seconds while running.
         """
-        logging.info("Status monitoring thread started")
+        logging.info("Nextflow trace monitor started")
         trace_path = os.path.join(self.log_dir, "trace.txt")
 
         while self.running and self.process:
@@ -829,7 +829,7 @@ class NextflowManager:
                 logging.exception("Error in status monitoring")
                 time.sleep(5)
 
-        logging.info("Status monitoring thread stopped")
+        logging.info("Nextflow trace monitor stopped")
 
     def _parse_trace_file(self) -> Dict[str, Any]:
         """
