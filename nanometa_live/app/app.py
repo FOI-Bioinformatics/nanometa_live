@@ -55,11 +55,13 @@ def _tab_label(icon_class: str, text: str):
     return text
 
 
-def _init_offline_mode(offline: bool) -> None:
+def _init_offline_mode(offline: bool, genome_cache_dir: Optional[str] = None) -> None:
     """Propagate offline_mode to all API client singletons.
 
     Must be called before any callback fires so that lazily-created
-    singletons inherit the correct mode.
+    singletons inherit the correct mode. ``genome_cache_dir`` is
+    threaded into the GenomeManager so first-time creation lands at
+    the operator-configured path instead of the legacy default.
     """
     from nanometa_live.core.taxonomy.taxonomy_api import get_ncbi_client, get_gtdb_client
     from nanometa_live.core.utils.offline_cache import get_cache
@@ -68,7 +70,7 @@ def _init_offline_mode(offline: bool) -> None:
     get_cache(offline_mode=offline)
     get_ncbi_client(offline_mode=offline)
     get_gtdb_client(offline_mode=offline)
-    get_genome_manager(offline_mode=offline)
+    get_genome_manager(cache_dir=genome_cache_dir, offline_mode=offline)
 
 
 def create_app(
@@ -655,7 +657,7 @@ def create_app(
     offline = config.get("offline_mode", False)
     if offline:
         logging.info("Offline mode enabled — API clients will use cached data only")
-    _init_offline_mode(offline)
+    _init_offline_mode(offline, genome_cache_dir=config.get("genome_cache_dir"))
 
     # Register all callbacks
     register_callbacks(app, backend_manager)

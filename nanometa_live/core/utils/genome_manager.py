@@ -606,7 +606,8 @@ class GenomeDownloadManager:
 
         except (requests.exceptions.RequestException, json.JSONDecodeError,
                 ValueError, KeyError, AttributeError) as e:
-            logger.exception(f"GTDB API error for '{species_name}': {e}")
+            logger.warning("GTDB API unreachable for '%s': %s", species_name, e)
+            logger.debug("GTDB API traceback for '%s'", species_name, exc_info=True)
             return None
 
     def fetch_ncbi_accession(self, taxid: int) -> Optional[Tuple[str, Dict[str, Any]]]:
@@ -639,7 +640,7 @@ class GenomeDownloadManager:
                 response = requests.get(url, params=params, headers=headers, timeout=30)
 
             if response.status_code == 404:
-                logger.warning(f"No genome assemblies found at NCBI for taxid {taxid}")
+                logger.info(f"No genome assemblies found at NCBI for taxid {taxid}")
                 return None
 
             response.raise_for_status()
@@ -659,7 +660,8 @@ class GenomeDownloadManager:
 
         except (requests.exceptions.RequestException, json.JSONDecodeError,
                 ValueError, KeyError, AttributeError) as e:
-            logger.exception(f"NCBI API error for taxid {taxid}: {e}")
+            logger.warning("NCBI API error for taxid %s: %s", taxid, e)
+            logger.debug("NCBI API traceback for taxid %s", taxid, exc_info=True)
             return None
 
     def download_genome(
@@ -1563,17 +1565,18 @@ class GenomeDownloadManager:
 
             try:
                 if kingdom == "Viruses":
-                    path = self._download_virus_genome(taxid, name)
-                    if path:
+                    virus_path, virus_accession = self._download_virus_genome(taxid, name)
+                    if virus_path:
                         self._metadata[taxid] = GenomeMetadata(
                             taxid=taxid,
                             species_name=name,
-                            accession=f"virus_taxid_{taxid}",
+                            accession=virus_accession or f"virus_taxid_{taxid}",
                             source="ncbi_virus",
                             kingdom="Viruses",
-                            fasta_path=str(path),
-                            file_size=path.stat().st_size if path.exists() else 0,
+                            fasta_path=str(virus_path),
+                            file_size=virus_path.stat().st_size if virus_path.exists() else 0,
                         )
+                        path = virus_path
                 else:
                     accession = None
                     meta_dict: Dict[str, Any] = {}
@@ -1616,20 +1619,21 @@ class GenomeDownloadManager:
                     # Fallback: download directly by taxid via CLI
                     if not path:
                         logger.info(f"Trying direct taxid download for {name}...")
-                        path = self._download_ncbi_genome_by_taxid(taxid, name)
-                        if path:
+                        cli_path, cli_accession = self._download_ncbi_genome_by_taxid(taxid, name)
+                        if cli_path:
                             self._metadata[taxid] = GenomeMetadata(
                                 taxid=taxid,
                                 species_name=name,
-                                accession=f"taxid_{taxid}",
+                                accession=cli_accession or f"taxid_{taxid}",
                                 source="ncbi_cli",
                                 kingdom=kingdom or "Unknown",
-                                fasta_path=str(path),
-                                file_size=path.stat().st_size if path.exists() else 0,
+                                fasta_path=str(cli_path),
+                                file_size=cli_path.stat().st_size if cli_path.exists() else 0,
                             )
+                            path = cli_path
                         else:
                             msg = f"No genome assembly found for {name} (taxid={taxid})"
-                            logger.error(msg)
+                            logger.warning(msg)
                             self._last_errors[taxid] = msg
 
                 if not path and taxid not in self._last_errors:
@@ -1643,7 +1647,13 @@ class GenomeDownloadManager:
                 # already catch their own narrow families, so anything reaching
                 # here is one of: subprocess failure, network failure, JSON or
                 # archive corruption, or a known data-shape error.
-                logger.exception(f"Batch download failed for {name} (taxid={taxid}): {e}")
+                logger.warning(
+                    "Batch download failed for %s (taxid=%s): %s", name, taxid, e
+                )
+                logger.debug(
+                    "Batch download traceback for %s (taxid=%s)",
+                    name, taxid, exc_info=True,
+                )
                 self._last_errors[taxid] = str(e)
 
             with lock:
@@ -1999,7 +2009,7 @@ def get_genome_manager(
             if cache_dir is not None and normalized_cache is not None:
                 current_cache = _genome_manager.cache_dir
                 if normalized_cache != current_cache:
-                    logger.info(
+                    logger.debug(
                         f"Reinitializing genome manager with new cache_dir: {cache_dir}"
                     )
                     _genome_manager = GenomeDownloadManager(
