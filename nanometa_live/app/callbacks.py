@@ -317,9 +317,23 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             log_callback_error("compute_results_fingerprint", e)
             raise PreventUpdate
 
-        if fp == (prev or {}).get("fp"):
+        # U4: sticky 'first batch arrived' flag. Once any tracked
+        # subdirectory holds a non-empty file we leave the flag set for
+        # the remainder of the run; downstream callbacks use it to hide
+        # the waiting banner without re-checking the filesystem.
+        from nanometa_live.app.utils.first_batch import first_batch_seen
+        prev_seen = bool((prev or {}).get("first_batch_seen", False))
+        if prev_seen:
+            seen = True
+        else:
+            try:
+                seen = first_batch_seen(main_dir)
+            except Exception:
+                seen = False
+
+        if fp == (prev or {}).get("fp") and seen == prev_seen:
             raise PreventUpdate
-        return {"fp": fp, "ts": time.time()}
+        return {"fp": fp, "ts": time.time(), "first_batch_seen": seen}
 
     @app.callback(
         [

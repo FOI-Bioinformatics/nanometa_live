@@ -1162,6 +1162,54 @@ def register_dashboard_callbacks(app: Dash):
     # Pre-flight checklist removed — readiness checks are in the top bar
 
     # ========================================================================
+    # U4 — Waiting-for-first-batch banner
+    # ========================================================================
+
+    @app.callback(
+        [
+            Output("waiting-banner-container", "style"),
+            Output("waiting-banner-elapsed", "children"),
+        ],
+        [
+            Input("results-fingerprint", "data"),
+            Input("backend-status", "data"),
+            Input("update-interval", "n_intervals"),
+        ],
+    )
+    def toggle_waiting_banner(fingerprint, status, _n_intervals):
+        """Show the waiting banner only while running and pre-first-batch.
+
+        Hides itself once the fingerprint reports first_batch_seen, after
+        ten minutes (the verdict banner's red treatment owns the failure
+        narrative beyond that point), or whenever the pipeline is not
+        running.
+        """
+        hidden = {"display": "none"}
+        if not status or not status.get("running"):
+            return hidden, ""
+
+        first_batch = bool((fingerprint or {}).get("first_batch_seen", False))
+        if first_batch:
+            return hidden, ""
+
+        # Bound visibility to the first ten minutes; longer than that
+        # implies a real failure rather than normal startup latency.
+        elapsed_text = ""
+        start_iso = status.get("start_time")
+        if start_iso:
+            try:
+                start_dt = datetime.fromisoformat(start_iso)
+                elapsed_s = int((datetime.now() - start_dt).total_seconds())
+            except (TypeError, ValueError):
+                elapsed_s = 0
+            if elapsed_s >= 600:
+                return hidden, ""
+            minutes, seconds = divmod(max(0, elapsed_s), 60)
+            elapsed_text = f"elapsed: {minutes}m {seconds:02d}s"
+
+        return {"display": "block"}, elapsed_text
+
+    # ========================================================================
     # U1 — Throughput tile (header)
     # ========================================================================
 
