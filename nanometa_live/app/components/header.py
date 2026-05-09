@@ -76,6 +76,17 @@ def create_header(title="Nanometa Live"):
                             className="text-muted small",
                             children="Click 'Start Analysis' to begin"
                         ),
+                        # Throughput tile (U1). Lives between status-details
+                        # and the elapsed-time block per the 2026-05-09 UX
+                        # spec; the inner content + className are owned by
+                        # update_throughput_tile.
+                        html.Div(
+                            id="throughput-tile",
+                            children=[],
+                            className="throughput-tile ms-3 small text-muted",
+                            role="status",
+                            **{"aria-live": "polite"},
+                        ),
                         # Elapsed time display (prominent when running)
                         html.Div([
                             html.I(className="bi bi-stopwatch me-1"),

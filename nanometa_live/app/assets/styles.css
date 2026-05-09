@@ -3791,3 +3791,18 @@ body {
         content: "\f282";  /* bi-chevron-down */
     }
 }
+/* U1 throughput tile (stalled state amber accent). */
+.throughput-tile-stalled {
+    background-color: #fff3cd;
+    border-left: 3px solid #fd7e14;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+/* U4 waiting-for-first-batch banner spinner respects reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+    #waiting-banner-container .spinner-border {
+        animation: none;
+        opacity: 0.6;
+    }
+}

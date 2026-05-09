@@ -361,6 +361,19 @@ def create_app(
         dcc.Store(id='selected-sample', data='All Samples'),
         dcc.Store(id='available-samples', data=['All Samples']),
         dcc.Store(id='sample-file-mapping', data={}),
+        # Rolling buffer for the header throughput tile (U1, 2026-05-09 UX
+        # spec). Keeps at most BUFFER_LIMIT (5) ticks of cumulative reads
+        # and file counts; rates and stall detection derive from this.
+        dcc.Store(id='throughput-buffer', data={
+            "ticks": [],
+            "reads_per_min": None,
+            "files_per_min": None,
+            "stalled_since": None,
+        }),
+        # Per-sample freshness map (U2). Wall-clock seconds-since-last-
+        # data is computed in update_sample_freshness; consumers map it to
+        # the green/amber/red pill via freshness_pill().
+        dcc.Store(id='sample-freshness', data={}),
         dcc.Store(id='notification-trigger', data={}),
         dcc.Store(id='last-update-time', data=None),
         dcc.Store(id='toast-message', data=None),

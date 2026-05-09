@@ -34,6 +34,14 @@ from nanometa_live.app.utils.callback_helpers import (
     log_callback_error,
 )
 from nanometa_live.app.utils.debounce import should_skip_update, get_trigger_type
+from nanometa_live.app.utils.throughput import (
+    BUFFER_LIMIT,
+    append_tick,
+    classify_state,
+    compute_rates,
+    format_age_seconds,
+    last_nonzero_delta_ts,
+)
 from nanometa_live.app.layouts.dashboard_layout import create_alerts_list
 from nanometa_live.app.components.modern_components import (
     LastUpdatedBadge,
@@ -1139,6 +1147,107 @@ def register_dashboard_callbacks(app: Dash):
 
     # Pre-flight checklist removed — readiness checks are in the top bar
 
+    # ========================================================================
+    # U1 — Throughput tile (header)
+    # ========================================================================
+
+    @app.callback(
+        [
+            Output("throughput-tile", "children"),
+            Output("throughput-tile", "className"),
+            Output("throughput-buffer", "data"),
+        ],
+        [
+            Input("results-fingerprint", "data"),
+            Input("update-interval", "n_intervals"),
+        ],
+        [
+            State("throughput-buffer", "data"),
+            State("backend-status", "data"),
+            State("dashboard-overall-status-cache", "data"),
+            State("app-config", "data"),
+        ],
+    )
+    def update_throughput_tile(_fp, _n, buffer, status, overall_status, config):
+        """Update the header throughput tile and rolling buffer.
+
+        Pulls cumulative reads from dashboard-overall-status-cache (already
+        computed elsewhere) and the count of nanometanf input files from
+        backend-status. The buffer keeps the last few ticks so reads/min
+        and files/min can be derived from the deltas; state classification
+        flips between idle, normal, and stalled.
+        """
+        import time as _time
+
+        ticks = list((buffer or {}).get("ticks", []) or [])
+        running = bool(status and status.get("running"))
+
+        total_reads = 0
+        if overall_status:
+            try:
+                total_reads = int(overall_status.get("total_reads", 0) or 0)
+            except (TypeError, ValueError):
+                total_reads = 0
+
+        total_files = 0
+        if status:
+            try:
+                total_files = int(status.get("files_processed", 0) or 0)
+            except (TypeError, ValueError):
+                total_files = 0
+
+        now = _time.time()
+        new_ticks = append_tick(ticks, now, total_reads, total_files)
+        rpm, fpm = compute_rates(new_ticks)
+        state = classify_state(new_ticks, now, running)
+
+        new_buffer = {
+            "ticks": new_ticks,
+            "reads_per_min": rpm,
+            "files_per_min": fpm,
+            "stalled_since": (
+                last_nonzero_delta_ts(new_ticks) if state == "stalled" else None
+            ),
+        }
+
+        if state == "idle":
+            children = [
+                html.I(className="bi bi-speedometer2 me-2"),
+                html.Span("--- reads/min", className="me-2"),
+                html.Span("--- files/min"),
+            ]
+            class_name = "throughput-tile ms-3 small text-muted"
+
+        elif state == "stalled":
+            last_progress = last_nonzero_delta_ts(new_ticks)
+            age = (now - last_progress) if last_progress else (
+                now - float(new_ticks[0]["ts"]) if new_ticks else 0
+            )
+            children = [
+                html.I(className="bi bi-exclamation-triangle me-2 text-warning"),
+                html.Span("Throughput stalled ", className="fw-semibold"),
+                html.Span(
+                    f"  0 reads/min   last data {format_age_seconds(age)}",
+                    className="ms-2",
+                ),
+            ]
+            # Amber tokens reused from _verdict_banner_style call sites.
+            class_name = (
+                "throughput-tile ms-3 small fw-semibold "
+                "throughput-tile-stalled"
+            )
+
+        else:
+            rpm_text = f"{int(round(rpm or 0)):,} reads/min"
+            fpm_text = f"{int(round(fpm or 0))} files/min"
+            children = [
+                html.I(className="bi bi-speedometer2 me-2 text-primary"),
+                html.Span(rpm_text, className="fw-semibold me-2"),
+                html.Span(fpm_text, className="text-muted"),
+            ]
+            class_name = "throughput-tile ms-3 small"
+
+        return children, class_name, new_buffer
 
 # Helper functions
 
