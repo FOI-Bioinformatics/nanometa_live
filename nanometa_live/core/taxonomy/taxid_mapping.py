@@ -312,10 +312,6 @@ class DatabaseTaxonomyIndex:
             self._species_cache = [node for node in self.by_taxid.values() if node.rank == "S"]
         return self._species_cache
 
-    def invalidate_caches(self) -> None:
-        """Clear internal caches (call after modifying nodes)."""
-        self._species_cache = None
-
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -467,14 +463,6 @@ class TaxidMappingCollection:
         if mapping and mapping.is_mapped():
             return mapping.db_taxid
         return None
-
-    def get_unmapped_entries(self) -> List[TaxidMapping]:
-        """Get entries that need mapping."""
-        return [m for m in self.mappings.values() if not m.is_mapped()]
-
-    def get_entries_for_review(self) -> List[TaxidMapping]:
-        """Get entries that should be manually reviewed."""
-        return [m for m in self.mappings.values() if m.needs_review()]
 
     def update_statistics(self) -> None:
         """Recalculate statistics from mappings."""
@@ -640,11 +628,6 @@ def set_mapping_collection(collection: TaxidMappingCollection) -> None:
     """Set the current mapping collection."""
     global _mapping_collection
     _mapping_collection = collection
-
-
-def get_database_index() -> Optional[DatabaseTaxonomyIndex]:
-    """Get the current database index."""
-    return _database_index
 
 
 def set_database_index(index: DatabaseTaxonomyIndex) -> None:
@@ -1026,36 +1009,6 @@ class TaxidMapper:
 
         return True
 
-    def get_suggestions(
-        self,
-        ncbi_taxid: int,
-        limit: int = 5
-    ) -> List[Dict[str, Any]]:
-        """
-        Get suggested database taxids for an NCBI taxid.
-
-        Args:
-            ncbi_taxid: NCBI taxonomy ID
-            limit: Maximum suggestions to return
-
-        Returns:
-            List of suggestion dicts with taxid, name, score, and lineage
-        """
-        if not self._collection or ncbi_taxid not in self._collection.mappings:
-            return []
-
-        mapping = self._collection.mappings[ncbi_taxid]
-
-        return [
-            {
-                "db_taxid": alt.db_taxid,
-                "db_name": alt.db_name,
-                "score": alt.score,
-                "rank": alt.rank,
-            }
-            for alt in mapping.alternative_matches[:limit]
-        ]
-
     def get_lineage(self, db_taxid: int) -> str:
         """
         Get the taxonomy lineage string for a database taxid.
@@ -1069,67 +1022,6 @@ class TaxidMapper:
         if not self._index:
             return ""
         return self._index.get_lineage_string(db_taxid)
-
-    def search_database(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """
-        Search the Kraken2 database by name or taxid.
-
-        Args:
-            query: Search term (name substring or taxid)
-            limit: Maximum number of results to return
-
-        Returns:
-            List of matching taxa with db_taxid, db_name, score, rank
-        """
-        if not self._index:
-            return []
-
-        results = []
-        query_stripped = query.strip()
-        query_lower = query_stripped.lower()
-
-        # Try taxid search first (exact match)
-        if query_stripped.isdigit():
-            taxid = int(query_stripped)
-            if taxid in self._index.by_taxid:
-                node = self._index.by_taxid[taxid]
-                results.append({
-                    "db_taxid": node.taxid,
-                    "db_name": node.name,
-                    "score": 1.0,
-                    "rank": node.rank,
-                })
-
-        # Name search (substring match)
-        if len(query_lower) >= 2:  # Require at least 2 chars for name search
-            for taxid, node in self._index.by_taxid.items():
-                # Skip if already added via taxid search
-                if results and results[0].get("db_taxid") == taxid:
-                    continue
-
-                name_lower = node.name.lower()
-                if query_lower in name_lower:
-                    # Score based on match quality
-                    if name_lower == query_lower:
-                        score = 1.0  # Exact match
-                    elif name_lower.startswith(query_lower):
-                        score = 0.95  # Prefix match
-                    else:
-                        score = 0.7  # Substring match
-
-                    results.append({
-                        "db_taxid": node.taxid,
-                        "db_name": node.name,
-                        "score": score,
-                        "rank": node.rank,
-                    })
-
-                    if len(results) >= limit:
-                        break
-
-        # Sort by score descending
-        results.sort(key=lambda x: x["score"], reverse=True)
-        return results[:limit]
 
     def get_statistics(self) -> Dict[str, Any]:
         """Get current mapping statistics."""
