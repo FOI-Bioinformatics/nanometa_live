@@ -413,11 +413,32 @@ class GenomeDownloadManager:
                 logger.warning(f"Failed to load genome metadata: {e}")
 
     def _save_metadata(self) -> None:
-        """Save genome metadata to cache."""
+        """Save genome metadata to cache.
+
+        Uses atomic write-then-rename so a concurrent reader (e.g. a
+        second nanometa-live process sharing the same data_dir) never
+        observes a half-written or zero-byte file. The fcntl lock
+        scopes the read-modify-write sequence so two writers do not
+        clobber each other's additions.
+        """
+        from nanometa_live.core.utils.atomic_write import (
+            atomic_write_json, file_lock,
+        )
         try:
-            data = {str(k): v.to_dict() for k, v in self._metadata.items()}
-            with open(self.metadata_file, "w") as f:
-                json.dump(data, f, indent=2)
+            with file_lock(self.metadata_file):
+                # Re-read inside the lock so a concurrent writer's
+                # additions are merged rather than overwritten.
+                disk_data: Dict[str, Any] = {}
+                if self.metadata_file.exists():
+                    try:
+                        with open(self.metadata_file, "r") as f:
+                            disk_data = json.load(f) or {}
+                    except (json.JSONDecodeError, OSError):
+                        disk_data = {}
+                merged = dict(disk_data)
+                for k, v in self._metadata.items():
+                    merged[str(k)] = v.to_dict()
+                atomic_write_json(self.metadata_file, merged)
         except (PermissionError, OSError, TypeError, ValueError) as e:
             logger.exception(f"Failed to save genome metadata: {e}")
 

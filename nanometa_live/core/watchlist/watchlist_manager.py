@@ -853,13 +853,32 @@ class WatchlistManager:
         return Path(get_data_dir_from_env()) / "watchlist_toggle_state.yaml"
 
     def _save_toggle_state(self) -> None:
-        """Save disabled taxid set to disk for persistence across restarts."""
+        """Save disabled taxid set to disk for persistence across restarts.
+
+        Atomic write-then-rename so a concurrent reader never observes
+        a half-written file. The fcntl lock serialises concurrent
+        writers; we deliberately do not merge state, because a toggle
+        is an explicit per-instance operator action and the most
+        recent click should reflect on disk. Two operators working in
+        parallel against the same data_dir share the toggle state by
+        design (both load the same file at startup).
+        """
+        from nanometa_live.core.utils.atomic_write import (
+            atomic_write_text, file_lock,
+        )
         try:
-            disabled = [taxid for taxid, entry in self._entries.items() if not entry.enabled]
+            disabled = sorted(
+                taxid for taxid, entry in self._entries.items() if not entry.enabled
+            )
             state_path = self._toggle_state_path()
-            state_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(state_path, "w") as f:
-                yaml.dump({"disabled_taxids": disabled}, f, default_flow_style=False)
+            with file_lock(state_path):
+                atomic_write_text(
+                    state_path,
+                    yaml.dump(
+                        {"disabled_taxids": disabled},
+                        default_flow_style=False,
+                    ),
+                )
         except (FileNotFoundError, PermissionError, OSError, yaml.YAMLError) as e:
             logger.debug(f"Could not save toggle state: {e}")
 

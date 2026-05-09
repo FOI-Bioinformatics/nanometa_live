@@ -29,25 +29,103 @@ multiprocess.set_start_method("spawn", force=True)
 # serialize behind a single writer-mutex.
 background_callback_manager: Optional[DiskcacheManager] = None
 _cache: Optional[diskcache.FanoutCache] = None
+_cache_dir_for_atexit: Optional[str] = None
 
 
-def _ensure_background_callback_manager(cache_dir: str) -> DiskcacheManager:
+def _per_run_cache_dir(base_cache_dir: str) -> str:
+    """Return a per-process subdirectory under *base_cache_dir*.
+
+    Each ``nanometa-live`` process owns ``cache/run-<pid>-<unix-ts>/``.
+    Two concurrent instances on the same data_dir get isolated
+    Diskcache trees; a restart of the same instance gets a fresh tree
+    with no carry-over of stale callback results.
+    """
+    import time as _time
+    return os.path.join(base_cache_dir, f"run-{os.getpid()}-{int(_time.time())}")
+
+
+def _sweep_dead_run_caches(base_cache_dir: str) -> None:
+    """Remove ``run-<pid>-*`` directories whose PID is no longer alive.
+
+    Runs once per startup so ungraceful exits do not leave the cache
+    tree bloating indefinitely. Only matches the exact ``run-<int>-<int>``
+    pattern so unrelated operator content under ``cache/`` is left
+    untouched -- this is intentionally conservative.
+    """
+    if not os.path.isdir(base_cache_dir):
+        return
+    import re as _re
+    import shutil as _shutil
+    pattern = _re.compile(r"^run-(\d+)-\d+$")
+    for entry in os.listdir(base_cache_dir):
+        match = pattern.match(entry)
+        if not match:
+            continue
+        pid = int(match.group(1))
+        if pid == os.getpid():
+            continue
+        # Probe whether the PID is alive. ``os.kill(pid, 0)`` raises
+        # ProcessLookupError for dead PIDs, PermissionError for live
+        # PIDs owned by another user (treat as alive -- do not delete).
+        try:
+            os.kill(pid, 0)
+            continue  # PID is alive; leave its cache alone
+        except ProcessLookupError:
+            pass
+        except (PermissionError, OSError):
+            continue  # cannot probe -- be safe, leave alone
+        target = os.path.join(base_cache_dir, entry)
+        try:
+            _shutil.rmtree(target)
+            logging.debug("Removed stale background-cache dir %s", target)
+        except OSError as exc:
+            logging.debug("Could not remove stale cache dir %s: %s", target, exc)
+
+
+def _ensure_background_callback_manager(base_cache_dir: str) -> DiskcacheManager:
     """Construct the Diskcache-backed background callback manager.
 
-    Idempotent: subsequent calls with the same ``cache_dir`` return the
-    existing manager. A different ``cache_dir`` is honored by
-    rebuilding (the singleton is process-local, not session-pinned).
+    The on-disk path is per-process (``run-<pid>-<ts>/``) so concurrent
+    instances on the same ``data_dir`` do not see each other's callback
+    results, and a restart starts with an empty cache. Stale ``run-*``
+    directories from prior crashes are swept on first call.
+    Idempotent for a given base directory.
     """
-    global background_callback_manager, _cache
+    global background_callback_manager, _cache, _cache_dir_for_atexit
     if (
         background_callback_manager is not None
         and _cache is not None
-        and str(_cache.directory) == str(cache_dir)
+        and str(_cache.directory).startswith(base_cache_dir)
     ):
         return background_callback_manager
-    os.makedirs(cache_dir, exist_ok=True)
-    _cache = diskcache.FanoutCache(cache_dir, shards=8, timeout=1.0)
+    os.makedirs(base_cache_dir, exist_ok=True)
+    _sweep_dead_run_caches(base_cache_dir)
+    run_dir = _per_run_cache_dir(base_cache_dir)
+    os.makedirs(run_dir, exist_ok=True)
+    _cache = diskcache.FanoutCache(run_dir, shards=8, timeout=1.0)
     background_callback_manager = DiskcacheManager(_cache, expire=3600)
+
+    # Tear down the per-process cache on graceful exit so the typical
+    # ``Ctrl-C`` flow does not leave stale shards around. Crashes are
+    # handled by the next startup's _sweep_dead_run_caches.
+    if _cache_dir_for_atexit != run_dir:
+        import atexit
+        import shutil as _shutil
+
+        def _cleanup() -> None:
+            try:
+                if _cache is not None:
+                    _cache.close()
+            except Exception:
+                pass
+            try:
+                _shutil.rmtree(run_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+        atexit.register(_cleanup)
+        _cache_dir_for_atexit = run_dir
+
     return background_callback_manager
 
 from nanometa_live import __version__
