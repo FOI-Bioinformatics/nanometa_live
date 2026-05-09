@@ -63,7 +63,7 @@ class ConfigLoader:
             "nanopore_output_directory": "",
             "results_output_directory": default_results_dir,
             "species_of_interest": [],
-            "update_interval_seconds": 30,
+            "update_interval_seconds": 10,
             "gui_port": 8050,
             "danger_lower_limit": 100,
             "taxonomic_hierarchy_letters": ["D", "P", "C", "O", "F", "G", "S"],

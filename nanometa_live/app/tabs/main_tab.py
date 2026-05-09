@@ -38,6 +38,7 @@ from nanometa_live.app.utils.callback_helpers import (
     log_callback_error,
     create_empty_alert,
     create_error_alert,
+    get_classification_stats,
 )
 
 
@@ -309,6 +310,41 @@ def register_main_callbacks(app: Dash):
     """
 
     @app.callback(
+        Output("organisms-freshness-row", "children"),
+        Input("sample-freshness", "data"),
+        Input("available-samples", "data"),
+    )
+    def update_organisms_freshness_row(freshness, available_samples):
+        """Render per-barcode freshness pills above the Organism table.
+
+        The row hides when only the aggregate sample is present so the
+        single-input case does not gain a meaningless single pill.
+        """
+        import time as _time
+        from nanometa_live.app.components.freshness_pill import freshness_pill
+        from nanometa_live.app.utils.freshness import age_seconds_for
+
+        freshness = freshness or {}
+        if not available_samples:
+            return []
+        real_samples = [s for s in available_samples if s != "All Samples"]
+        if len(real_samples) < 2:
+            return []
+        now = _time.time()
+        children = []
+        for sample in real_samples:
+            age = age_seconds_for(freshness.get(sample), now)
+            children.append(
+                html.Span(
+                    [html.Span(sample, className="me-2 fw-medium"),
+                     freshness_pill(sample, age, class_name="")],
+                    className="d-inline-flex align-items-center px-2 py-1 border rounded",
+                    style={"whiteSpace": "nowrap"},
+                )
+            )
+        return children
+
+    @app.callback(
         [
             Output("organism-summary-container", "children"),
             Output("organism-cards-container", "children"),
@@ -409,12 +445,16 @@ def register_main_callbacks(app: Dash):
 
             logging.debug(f"Main Results: Loaded {len(kraken_df)} rows from Kraken2 data")
 
-            # Calculate summary statistics
-            total_reads = int(kraken_df['reads'].sum())
-            unclassified_row = kraken_df[kraken_df['taxid'] == 0]
-            unclassified_reads = int(unclassified_row.iloc[0]['reads']) if not unclassified_row.empty else 0
-            classified_reads = total_reads - unclassified_reads
-            classification_rate = (classified_reads / total_reads * 100) if total_reads > 0 else 0
+            # Calculate summary statistics. Use the shared helper so this tab
+            # agrees with the Dashboard tile, which derives totals from
+            # root.cumul_reads + unclassified.cumul_reads. The per-rank `reads`
+            # column collapses to 0 when every read is parked at root level
+            # (e.g. degenerate single-read inputs), which is why summing it
+            # disagreed with Dashboard's display.
+            classified_reads, unclassified_reads, classification_rate = (
+                get_classification_stats(kraken_df)
+            )
+            total_reads = classified_reads + unclassified_reads
 
             # Filter to selected taxonomic ranks
             filtered_df = kraken_df[kraken_df['rank'].isin(tax_ranks)]

@@ -42,6 +42,15 @@ def create_main_layout():
         # Alert Banner for watched species (dynamic - populated by callback)
         html.Div(id="watched-species-alert-container", className="mb-3"),
 
+        # Per-barcode freshness pills (U2). Populated by
+        # update_organisms_freshness_row in app/tabs/main_tab.py.
+        html.Div(
+            id="organisms-freshness-row",
+            className="d-flex flex-wrap gap-2 mb-3",
+            role="status",
+            **{"aria-live": "polite"},
+        ),
+
         html.Hr(className="my-3"),
 
         # Summary Card (Top of page - most important info)

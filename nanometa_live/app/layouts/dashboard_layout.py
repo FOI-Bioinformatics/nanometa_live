@@ -19,6 +19,9 @@ from nanometa_live.app.components.modern_components import (
     LastUpdatedBadge,
 )
 from nanometa_live.app.components.watchlist_modal import create_all_modals
+from nanometa_live.app.components.waiting_banner import (
+    waiting_for_first_batch_banner as _lazy_waiting_banner,
+)
 
 
 def create_dashboard_layout():
@@ -105,6 +108,18 @@ def create_dashboard_layout():
                 )
             ], width=12)
         ]),
+
+        # U4: subordinate "waiting for first batch" banner. Hidden by
+        # default; toggle_waiting_banner flips the container style when
+        # the pipeline is running but the fingerprint has not yet
+        # observed a non-empty file in any tracked subdirectory.
+        html.Div(
+            id="waiting-banner-container",
+            children=_lazy_waiting_banner(),
+            style={"display": "none"},
+            role="status",
+            **{"aria-live": "polite"},
+        ),
 
         # =============================================
         # Zone 2 — Active Threat Cards (hidden when empty)

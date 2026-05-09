@@ -34,8 +34,8 @@ species_of_interest: []
 # Can be modified in the GUI as well.
 # Data type: Integer (seconds)
 # Note: Lower intervals may increase CPU usage.
-# Default: 30 seconds
-update_interval_seconds: 30
+# Default: 10 seconds
+update_interval_seconds: 10
 
 ## GUI PORT ##
 # Description: The port number on which the GUI runs.

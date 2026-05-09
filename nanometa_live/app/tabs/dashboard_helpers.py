@@ -92,6 +92,7 @@ def _make_banner_content(
     icon_extra_class: str = "",
     triggering_samples: Optional[List[str]] = None,
     total_sample_count: Optional[int] = None,
+    auto_stop_remaining_s: Optional[int] = None,
 ) -> dbc.Row:
     """
     Build the inner content for the Zone 1 clinical verdict banner.
@@ -129,6 +130,29 @@ def _make_banner_content(
         right_children.append(
             html.Div(last_updated_str,
                      style={"fontSize": "12px", "color": "#6c757d", "marginTop": "2px"})
+        )
+
+    # U3: realtime-timeout countdown. Only renders when the backend
+    # surfaced a positive remaining-seconds value; class escalates as
+    # the deadline approaches. No new colour tokens -- text utility
+    # classes only.
+    if auto_stop_remaining_s is not None and auto_stop_remaining_s > 0:
+        from nanometa_live.app.utils.countdown import (
+            countdown_classes,
+            format_countdown,
+        )
+        text_class, icon_class = countdown_classes(auto_stop_remaining_s)
+        formatted = format_countdown(auto_stop_remaining_s)
+        right_children.append(
+            html.Div(
+                [
+                    html.I(className=f"bi {icon_class} me-1"),
+                    html.Span(f"Auto-stop in {formatted}"),
+                ],
+                className=f"small {text_class} mt-1",
+                role="status",
+                **{"aria-live": "polite"},
+            )
         )
 
     # Triggering-sample attribution subhead (closes P0-T02 from

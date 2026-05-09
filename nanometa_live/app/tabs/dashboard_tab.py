@@ -34,6 +34,14 @@ from nanometa_live.app.utils.callback_helpers import (
     log_callback_error,
 )
 from nanometa_live.app.utils.debounce import should_skip_update, get_trigger_type
+from nanometa_live.app.utils.throughput import (
+    BUFFER_LIMIT,
+    append_tick,
+    classify_state,
+    compute_rates,
+    format_age_seconds,
+    last_nonzero_delta_ts,
+)
 from nanometa_live.app.layouts.dashboard_layout import create_alerts_list
 from nanometa_live.app.components.modern_components import (
     LastUpdatedBadge,
@@ -176,6 +184,12 @@ def register_dashboard_callbacks(app: Dash):
         start_time = status.get("start_time") if status else None
         time_elapsed = _format_time_elapsed(start_time)
         last_updated_str = "Last updated " + datetime.now().strftime("%H:%M:%S")
+        # U3: realtime-timeout countdown. Surfaced inside the verdict
+        # banner's right column when the pipeline is running and the
+        # operator configured a timeout. None = render nothing.
+        auto_stop_remaining_s = (
+            status.get("auto_stop_remaining_s") if status else None
+        )
 
         # Check whether any validation results exist (used for confidence qualifier)
         validation_has_results = bool(
@@ -202,6 +216,7 @@ def register_dashboard_callbacks(app: Dash):
                         run_state, time_elapsed,
                         sub_color="#084298",
                         last_updated_str=last_updated_str,
+                        auto_stop_remaining_s=auto_stop_remaining_s,
                         icon_extra_class="spin",
                     ),
                     _verdict_banner_style("#cfe2ff", "#0d6efd"),
@@ -214,6 +229,7 @@ def register_dashboard_callbacks(app: Dash):
                     run_state, time_elapsed,
                     sub_color="#6c757d",
                     last_updated_str=last_updated_str,
+                    auto_stop_remaining_s=auto_stop_remaining_s,
                 ),
                 _verdict_banner_style("#f8f9fa", "#6c757d"),
                 time_elapsed, run_state, run_state_color
@@ -230,6 +246,7 @@ def register_dashboard_callbacks(app: Dash):
                     run_state, time_elapsed,
                     sub_color="#084298",
                     last_updated_str=last_updated_str,
+                    auto_stop_remaining_s=auto_stop_remaining_s,
                     icon_extra_class="spin",
                 ),
                 _verdict_banner_style("#cfe2ff", "#0d6efd"),
@@ -314,6 +331,7 @@ def register_dashboard_callbacks(app: Dash):
                                     sub_color="#721c24",
                                     show_icon_mobile=True,
                                     last_updated_str=last_updated_str,
+                                    auto_stop_remaining_s=auto_stop_remaining_s,
                                     triggering_samples=triggering_samples or None,
                                     total_sample_count=total_real_samples or None,
                                 ),
@@ -328,6 +346,7 @@ def register_dashboard_callbacks(app: Dash):
                                 run_state, time_elapsed,
                                 sub_color="#664d03",
                                 last_updated_str=last_updated_str,
+                                auto_stop_remaining_s=auto_stop_remaining_s,
                             ),
                             _verdict_banner_style("#fff3cd", "#fd7e14"),
                             time_elapsed, run_state, run_state_color
@@ -342,6 +361,7 @@ def register_dashboard_callbacks(app: Dash):
                             run_state, time_elapsed,
                             sub_color="#155724",
                             last_updated_str=last_updated_str,
+                            auto_stop_remaining_s=auto_stop_remaining_s,
                         ),
                         _verdict_banner_style("#d4edda", "#28a745"),
                         time_elapsed, run_state, run_state_color
@@ -355,6 +375,7 @@ def register_dashboard_callbacks(app: Dash):
                             run_state, time_elapsed,
                             sub_color="#084298",
                             last_updated_str=last_updated_str,
+                            auto_stop_remaining_s=auto_stop_remaining_s,
                             icon_extra_class="spin",
                         ),
                         _verdict_banner_style("#cfe2ff", "#0d6efd"),
@@ -372,6 +393,7 @@ def register_dashboard_callbacks(app: Dash):
                 run_state, time_elapsed,
                 sub_color="#6c757d",
                 last_updated_str=last_updated_str,
+                auto_stop_remaining_s=auto_stop_remaining_s,
             ),
             _verdict_banner_style("#f8f9fa", "#6c757d"),
             time_elapsed, run_state, run_state_color
@@ -982,27 +1004,30 @@ def register_dashboard_callbacks(app: Dash):
             Output("dashboard-last-updated", "data"),
             Output("dashboard-last-updated-badge", "children")
         ],
-        Input("update-interval", "n_intervals"),
+        Input("results-fingerprint", "data"),
         [
             State("app-config", "data"),
             State("dashboard-last-updated", "data")
         ]
     )
-    def update_data_freshness(n_intervals, config, last_updated):
+    def update_data_freshness(fingerprint, config, last_updated):
         """
         Update data freshness timestamp and badge.
 
-        Stores the current time when data loads successfully,
-        and shows a stale warning when data age exceeds 2x the polling interval.
+        Driven by ``results-fingerprint`` rather than the polling tick
+        so the badge reflects when results actually changed on disk.
+        Wall-clock-driven updates made the badge wobble forward on
+        every tick and the stale check could not fire.
         """
-        if should_skip_update("dashboard_data_freshness", debounce_ms=2000):
-            raise PreventUpdate
-
         if not config:
             return None, LastUpdatedBadge(timestamp=None)
+        if not fingerprint:
+            # Fingerprint store has not produced a value yet; preserve any
+            # existing badge instead of stamping a wall-clock time.
+            raise PreventUpdate
 
         now = datetime.now().isoformat()
-        update_interval = config.get("update_interval_seconds", 30)
+        update_interval = config.get("update_interval_seconds", 10)
         stale_threshold = update_interval * 2
 
         # Check staleness against previous timestamp
@@ -1136,6 +1161,155 @@ def register_dashboard_callbacks(app: Dash):
 
     # Pre-flight checklist removed — readiness checks are in the top bar
 
+    # ========================================================================
+    # U4 — Waiting-for-first-batch banner
+    # ========================================================================
+
+    @app.callback(
+        [
+            Output("waiting-banner-container", "style"),
+            Output("waiting-banner-elapsed", "children"),
+        ],
+        [
+            Input("results-fingerprint", "data"),
+            Input("backend-status", "data"),
+            Input("update-interval", "n_intervals"),
+        ],
+    )
+    def toggle_waiting_banner(fingerprint, status, _n_intervals):
+        """Show the waiting banner only while running and pre-first-batch.
+
+        Hides itself once the fingerprint reports first_batch_seen, after
+        ten minutes (the verdict banner's red treatment owns the failure
+        narrative beyond that point), or whenever the pipeline is not
+        running.
+        """
+        hidden = {"display": "none"}
+        if not status or not status.get("running"):
+            return hidden, ""
+
+        first_batch = bool((fingerprint or {}).get("first_batch_seen", False))
+        if first_batch:
+            return hidden, ""
+
+        # Bound visibility to the first ten minutes; longer than that
+        # implies a real failure rather than normal startup latency.
+        elapsed_text = ""
+        start_iso = status.get("start_time")
+        if start_iso:
+            try:
+                start_dt = datetime.fromisoformat(start_iso)
+                elapsed_s = int((datetime.now() - start_dt).total_seconds())
+            except (TypeError, ValueError):
+                elapsed_s = 0
+            if elapsed_s >= 600:
+                return hidden, ""
+            minutes, seconds = divmod(max(0, elapsed_s), 60)
+            elapsed_text = f"elapsed: {minutes}m {seconds:02d}s"
+
+        return {"display": "block"}, elapsed_text
+
+    # ========================================================================
+    # U1 — Throughput tile (header)
+    # ========================================================================
+
+    @app.callback(
+        [
+            Output("throughput-tile", "children"),
+            Output("throughput-tile", "className"),
+            Output("throughput-buffer", "data"),
+        ],
+        [
+            Input("results-fingerprint", "data"),
+            Input("update-interval", "n_intervals"),
+        ],
+        [
+            State("throughput-buffer", "data"),
+            State("backend-status", "data"),
+            State("dashboard-overall-status-cache", "data"),
+            State("app-config", "data"),
+        ],
+    )
+    def update_throughput_tile(_fp, _n, buffer, status, overall_status, config):
+        """Update the header throughput tile and rolling buffer.
+
+        Pulls cumulative reads from dashboard-overall-status-cache (already
+        computed elsewhere) and the count of nanometanf input files from
+        backend-status. The buffer keeps the last few ticks so reads/min
+        and files/min can be derived from the deltas; state classification
+        flips between idle, normal, and stalled.
+        """
+        import time as _time
+
+        ticks = list((buffer or {}).get("ticks", []) or [])
+        running = bool(status and status.get("running"))
+
+        total_reads = 0
+        if overall_status:
+            try:
+                total_reads = int(overall_status.get("total_reads", 0) or 0)
+            except (TypeError, ValueError):
+                total_reads = 0
+
+        total_files = 0
+        if status:
+            try:
+                total_files = int(status.get("files_processed", 0) or 0)
+            except (TypeError, ValueError):
+                total_files = 0
+
+        now = _time.time()
+        new_ticks = append_tick(ticks, now, total_reads, total_files)
+        rpm, fpm = compute_rates(new_ticks)
+        state = classify_state(new_ticks, now, running)
+
+        new_buffer = {
+            "ticks": new_ticks,
+            "reads_per_min": rpm,
+            "files_per_min": fpm,
+            "stalled_since": (
+                last_nonzero_delta_ts(new_ticks) if state == "stalled" else None
+            ),
+        }
+
+        if state == "idle":
+            children = [
+                html.I(className="bi bi-speedometer2 me-2"),
+                html.Span("--- reads/min", className="me-2"),
+                html.Span("--- files/min"),
+            ]
+            class_name = "throughput-tile ms-3 small text-muted"
+
+        elif state == "stalled":
+            last_progress = last_nonzero_delta_ts(new_ticks)
+            age = (now - last_progress) if last_progress else (
+                now - float(new_ticks[0]["ts"]) if new_ticks else 0
+            )
+            children = [
+                html.I(className="bi bi-exclamation-triangle me-2 text-warning"),
+                html.Span("Throughput stalled ", className="fw-semibold"),
+                html.Span(
+                    f"  0 reads/min   last data {format_age_seconds(age)}",
+                    className="ms-2",
+                ),
+            ]
+            # Amber tokens reused from _verdict_banner_style call sites.
+            class_name = (
+                "throughput-tile ms-3 small fw-semibold "
+                "throughput-tile-stalled"
+            )
+
+        else:
+            rpm_text = f"{int(round(rpm or 0)):,} reads/min"
+            fpm_text = f"{int(round(fpm or 0))} files/min"
+            children = [
+                html.I(className="bi bi-speedometer2 me-2 text-primary"),
+                html.Span(rpm_text, className="fw-semibold me-2"),
+                html.Span(fpm_text, className="text-muted"),
+            ]
+            class_name = "throughput-tile ms-3 small"
+
+        return children, class_name, new_buffer
 
 # Helper functions
 

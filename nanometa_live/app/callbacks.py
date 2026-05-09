@@ -36,6 +36,13 @@ _readiness_cache: Dict[str, Tuple[float, Any]] = {}
 _readiness_cache_lock = threading.Lock()
 
 
+# Tracks the kraken_db path the taxid mapping callback last initialised
+# from. When the operator points the dashboard at a different Kraken2
+# database mid-session, this lets the callback re-load mappings instead
+# of being permanently gated by a boolean flag in the config dict.
+_taxid_mapping_db_path: Optional[str] = None
+
+
 def _readiness_cache_key(config: Optional[Dict[str, Any]]) -> str:
     """Build a stable cache key from the config fields that affect readiness.
 
@@ -203,6 +210,8 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         """
         from nanometa_live.app.utils.config_manager import atomic_config_update
 
+        global _taxid_mapping_db_path
+
         if not config:
             return no_update, no_update, no_update, no_update
 
@@ -210,8 +219,11 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         if not kraken_db or not os.path.exists(kraken_db):
             return no_update, no_update, no_update, no_update
 
-        # Only initialize once per session
-        if config.get("_taxid_mapping_initialized"):
+        # Only initialize when the configured Kraken2 database changes.
+        # Keying on the path (rather than a one-shot boolean) means the
+        # callback re-loads mappings if the operator switches databases
+        # mid-session.
+        if _taxid_mapping_db_path == kraken_db:
             return no_update, no_update, no_update, no_update
 
         try:
@@ -251,6 +263,10 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                         "path": collection.database_path,
                     }
                     rescan_time = collection.updated_at.isoformat()
+
+            # Record the db path we initialised from so the next tick
+            # short-circuits unless the operator switches databases.
+            _taxid_mapping_db_path = kraken_db
 
             # Use atomic update to properly track version
             updated_config = atomic_config_update(
@@ -301,9 +317,23 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             log_callback_error("compute_results_fingerprint", e)
             raise PreventUpdate
 
-        if fp == (prev or {}).get("fp"):
+        # U4: sticky 'first batch arrived' flag. Once any tracked
+        # subdirectory holds a non-empty file we leave the flag set for
+        # the remainder of the run; downstream callbacks use it to hide
+        # the waiting banner without re-checking the filesystem.
+        from nanometa_live.app.utils.first_batch import first_batch_seen
+        prev_seen = bool((prev or {}).get("first_batch_seen", False))
+        if prev_seen:
+            seen = True
+        else:
+            try:
+                seen = first_batch_seen(main_dir)
+            except Exception:
+                seen = False
+
+        if fp == (prev or {}).get("fp") and seen == prev_seen:
             raise PreventUpdate
-        return {"fp": fp, "ts": time.time()}
+        return {"fp": fp, "ts": time.time(), "first_batch_seen": seen}
 
     @app.callback(
         [
@@ -327,11 +357,18 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             color = "green"
             text = "RUNNING"
 
-            # Cap files_processed: batch stats can sum across batches,
-            # exceeding the actual number of input files
+            # Cap files_processed against the inbox size only in batch
+            # mode. In realtime mode the inbox grows during the run via
+            # watchPath, so files_waiting is a moving snapshot rather
+            # than a fixed total -- clamping there undercounts processed
+            # files while streaming.
             total_files = status.get("files_waiting", 0)
             raw_processed = status.get("files_processed", 0)
-            files_processed = min(raw_processed, total_files) if total_files > 0 else raw_processed
+            processing_mode = (config or {}).get("processing_mode", "batch")
+            if processing_mode == "realtime":
+                files_processed = raw_processed
+            else:
+                files_processed = min(raw_processed, total_files) if total_files > 0 else raw_processed
 
             details = [
                 f"Files processed: {files_processed} / {total_files}",
@@ -935,31 +972,75 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             Output("sample-selector", "value"),
         ],
         Input("available-samples", "data"),
+        Input("sample-freshness", "data"),
         State("sample-selector", "value"),
     )
-    def update_sample_selector_options(available_samples, current_value):
+    def update_sample_selector_options(available_samples, freshness, current_value):
         """
         Update sample selector dropdown options.
 
-        Converts the list of available samples into Dash dropdown options.
-        Resets the selected value to 'All Samples' if the current selection
-        is no longer available (e.g. sample directory was removed).
+        Converts the list of available samples into Dash dropdown options
+        and renders a per-barcode freshness pill (U2) next to each
+        non-aggregated sample. Resets the selected value to 'All Samples'
+        if the current selection is no longer available.
         """
+        from nanometa_live.app.components.freshness_pill import freshness_pill
+        from nanometa_live.app.utils.freshness import age_seconds_for
+
         if not available_samples:
             available_samples = ["All Samples"]
+        freshness = freshness or {}
+        now = time.time()
 
         options = []
         for sample in available_samples:
             if sample == "All Samples":
                 options.append({"label": "All Samples (Aggregated)", "value": sample})
-            else:
-                options.append({"label": sample, "value": sample})
+                continue
+            last_ts = freshness.get(sample)
+            age = age_seconds_for(last_ts, now)
+            label = html.Span(
+                [html.Span(sample, className="text-truncate"),
+                 freshness_pill(sample, age, class_name="ms-2")],
+                className="d-inline-flex align-items-center",
+            )
+            options.append({"label": label, "value": sample})
 
         # Reset to 'All Samples' if current selection is no longer valid
         if current_value and current_value not in available_samples:
             return options, "All Samples"
 
         return options, no_update
+
+    @app.callback(
+        Output("sample-freshness", "data"),
+        Input("results-fingerprint", "data"),
+        Input("update-interval", "n_intervals"),
+        State("available-samples", "data"),
+        State("app-config", "data"),
+    )
+    def update_sample_freshness(_fp, _n, available_samples, config):
+        """Refresh the per-sample last_data_ts map.
+
+        Driven by ``results-fingerprint`` so the map advances when new
+        files land on disk; the interval input is a backstop to keep the
+        age field current even on quiet outdirs.
+        """
+        from nanometa_live.app.utils.freshness import freshness_map
+
+        if not config or not available_samples:
+            return {}
+        main_dir = (
+            config.get("results_output_directory", "")
+            or config.get("main_dir", "")
+        )
+        if not main_dir or not os.path.isdir(main_dir):
+            return {}
+        try:
+            return freshness_map(main_dir, available_samples)
+        except Exception as exc:
+            log_callback_error("update_sample_freshness", exc, level=logging.WARNING)
+            return {}
 
     @app.callback(
         Output("selected-sample", "data"),
@@ -985,46 +1066,56 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         ],
         [
             Input("backend-status", "data"),
-            Input("update-interval", "n_intervals"),
+            Input("results-fingerprint", "data"),
         ],
         State("app-config", "data"),
     )
-    def update_live_indicator(status, n_intervals, config):
+    def update_live_indicator(status, fingerprint, config):
         """
         Update the live indicator in the header.
 
-        Shows whether the system is actively monitoring and when
-        data was last updated.
+        The displayed timestamp reflects the last time the results
+        fingerprint advanced (i.e. real data arrived), not the wall
+        clock of the polling tick. When the configured outdir exists
+        but no data has arrived yet, render "no data yet" instead of
+        a misleading current-time stamp.
         """
-        # Get current time for display
-        current_time = time.strftime("%H:%M:%S")
+        fp_ts = (fingerprint or {}).get("ts") if isinstance(fingerprint, dict) else None
+        if fp_ts:
+            data_time = time.strftime("%H:%M:%S", time.localtime(fp_ts))
+        else:
+            data_time = None
 
         # Check if in visualization-only mode
         if config and config.get("visualization_only", False):
+            label = f"Last data: {data_time}" if data_time else "no data yet"
             return (
                 "live-indicator-dot offline",
                 "View Only",
-                f"Last check: {current_time}"
+                label,
             )
 
         # Check backend status
         if status and status.get("running", False):
+            label = f"Updated: {data_time}" if data_time else "no data yet"
             return (
                 "live-indicator-dot",  # Animated pulse
                 "LIVE",
-                f"Updated: {current_time}"
+                label,
             )
         elif status and status.get("completed", False):
+            label = f"Finished: {data_time}" if data_time else "no data yet"
             return (
                 "live-indicator-dot offline",
                 "Complete",
-                f"Finished: {current_time}"
+                label,
             )
         else:
+            label = f"Last data: {data_time}" if data_time else "no data yet"
             return (
                 "live-indicator-dot offline",
                 "Standby",
-                f"Last check: {current_time}"
+                label,
             )
 
     # ========================================================================
@@ -1052,7 +1143,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             return {"display": "none"}
 
         try:
-            update_interval = config.get("update_interval_seconds", 30)
+            update_interval = config.get("update_interval_seconds", 10)
             stale_threshold = update_interval * 2  # 2x the interval
 
             if last_update_time:
@@ -1071,11 +1162,19 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
 
     @app.callback(
         Output("last-update-time", "data"),
-        Input("update-interval", "n_intervals"),
+        Input("results-fingerprint", "data"),
         State("app-config", "data"),
     )
-    def track_last_update_time(n_intervals, config):
-        """Track when data was last successfully updated."""
+    def track_last_update_time(fingerprint, config):
+        """Track when results last changed.
+
+        Driven by ``results-fingerprint`` rather than the wall-clock
+        polling tick: the fingerprint store only emits a new value
+        when at least one output file changed. The companion stale
+        warning callback can therefore actually fire when data goes
+        quiet -- previously this restamped every tick and the warning
+        was unreachable.
+        """
         import datetime
 
         if not config:
@@ -1084,7 +1183,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         try:
             main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
             if main_dir and os.path.exists(main_dir):
-                # Return current timestamp as ISO format
+                # Stamp at fingerprint-change time.
                 return datetime.datetime.now().isoformat()
             return None
         except Exception as e:
