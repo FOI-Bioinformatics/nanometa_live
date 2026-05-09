@@ -102,11 +102,19 @@ def main():
     # Parse arguments
     args = parse_arguments()
 
-    # Set up data directory
+    # Set up data directory. Normalise the operator-supplied value
+    # so a stray ``~``, trailing ``/``, or accidental leading ``//``
+    # (POSIX preserves ``//`` at the head of a path) does not flow
+    # downstream into the Storage Locations panel and makedirs calls.
     if args.data_dir:
-        data_dir = args.data_dir
+        data_dir = os.path.abspath(os.path.expanduser(args.data_dir))
     else:
         data_dir = os.path.expanduser("~/.nanometa")
+    # os.path.abspath / normpath preserve a leading "//" by POSIX
+    # rule; collapse it explicitly so Storage Locations renders the
+    # same path the operator typed.
+    while data_dir.startswith("//"):
+        data_dir = data_dir[1:]
 
     create_default_dirs(data_dir)
 
@@ -162,6 +170,24 @@ def main():
         config["results_output_directory"] = os.path.abspath(args.main_dir)
         config["main_dir"] = os.path.abspath(args.main_dir)
         logging.info(f"Results directory set to {args.main_dir}")
+
+    # Make the genome / BLAST cache follow --data-dir. The default in
+    # ConfigLoader.create_default_config is the legacy "~/.nanometa"
+    # value; when the operator points the app at a different
+    # data_dir, downloaded genomes and BLAST indices should land
+    # under that root rather than silently writing to ~/.nanometa.
+    # Operator-explicit overrides (anything that does not match the
+    # legacy default after expansion) are preserved.
+    legacy_default = os.path.expanduser("~/.nanometa")
+    current = config.get("genome_cache_dir") or ""
+    if not current or os.path.expanduser(current) == legacy_default:
+        if data_dir != legacy_default:
+            logging.info(
+                "Pointing genome_cache_dir at --data-dir (%s); "
+                "previously-downloaded genomes under %s will not be reused.",
+                data_dir, legacy_default,
+            )
+        config["genome_cache_dir"] = data_dir
 
     # Initialize backend manager (but don't start any processes yet)
     backend_manager = BackendManager(data_dir)
