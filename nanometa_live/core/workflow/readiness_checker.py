@@ -101,7 +101,11 @@ class ReadinessChecker:
             ReadinessReport with all check results.
         """
         if nanometa_home is None:
-            nanometa_home = os.path.expanduser("~/.nanometa")
+            # Prefer the operator-configured data_dir; the legacy
+            # ``~/.nanometa`` fallback only fires when no config has
+            # the key set (e.g. unit tests with bare dicts).
+            from nanometa_live.core.utils.paths import NanometaPaths
+            nanometa_home = str(NanometaPaths.from_config(config).data_dir)
         home = Path(nanometa_home)
 
         report = ReadinessReport()

@@ -105,7 +105,11 @@ class MobileLabPreparer:
         progress_callback: Optional[ProgressCallback] = None,
     ):
         if nanometa_home is None:
-            nanometa_home = os.path.expanduser("~/.nanometa")
+            # Honor config["data_dir"] (seeded by the CLI entry
+            # point from --data-dir); ``~/.nanometa`` is only the
+            # last-resort default when neither is supplied.
+            from nanometa_live.core.utils.paths import NanometaPaths
+            nanometa_home = str(NanometaPaths.from_config(config).data_dir)
         self.config = config
         self.home = Path(nanometa_home)
         self.home.mkdir(parents=True, exist_ok=True)

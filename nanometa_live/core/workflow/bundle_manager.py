@@ -439,7 +439,8 @@ class BundleManager:
                 f"got {containerization!r}"
             )
         if nanometa_home is None:
-            nanometa_home = os.path.expanduser("~/.nanometa")
+            from nanometa_live.core.utils.paths import NanometaPaths
+            nanometa_home = str(NanometaPaths.from_config(config or {}).data_dir)
         home = Path(nanometa_home)
         output = Path(output_path)
 
@@ -704,7 +705,11 @@ class BundleManager:
             Dict with import results (success, warnings, manifest).
         """
         if nanometa_home is None:
-            nanometa_home = os.path.expanduser("~/.nanometa")
+            # import_bundle has no config in scope (it runs before
+            # the bundle's own config.yaml is rebased onto the field
+            # machine), so fall back to NANOMETA_DATA_DIR.
+            from nanometa_live.core.utils.paths import get_data_dir_from_env
+            nanometa_home = get_data_dir_from_env()
         home = Path(nanometa_home)
         home.mkdir(parents=True, exist_ok=True)
 

@@ -96,8 +96,15 @@ def main():
         data_dir = args.data_dir if args.data_dir else os.path.expanduser("~/.nanometa")
         os.makedirs(data_dir, exist_ok=True)
 
+        # Set NANOMETA_DATA_DIR before any singleton (offline cache,
+        # background-callback Diskcache) reads the legacy default. The
+        # full-mode entry point in nanometa_live.py does the same thing.
+        from nanometa_live.core.utils.paths import set_data_dir_env
+        set_data_dir_env(data_dir)
+
         # Create config pointing to the main_dir
         config = {
+            "data_dir": data_dir,
             "main_dir": args.main_dir,
             "visualization_only": True,
         }
