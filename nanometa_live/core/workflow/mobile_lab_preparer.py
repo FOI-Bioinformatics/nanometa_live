@@ -246,7 +246,7 @@ class MobileLabPreparer:
 
     def _run_download_genomes(self, idx: int, result: PreparationResult, skip_existing: bool):
         from nanometa_live.core.utils.genome_manager import get_genome_manager
-        manager = get_genome_manager(str(self.home))
+        manager = get_genome_manager(self.config.get("genome_cache_dir") or str(self.home))
         entries = self._get_watchlist_entries()
         if not entries:
             return
@@ -273,7 +273,7 @@ class MobileLabPreparer:
 
     def _run_build_blast_dbs(self, idx: int, result: PreparationResult, skip_existing: bool):
         from nanometa_live.core.utils.genome_manager import get_genome_manager
-        manager = get_genome_manager(str(self.home))
+        manager = get_genome_manager(self.config.get("genome_cache_dir") or str(self.home))
         self._report(PrepStage.BUILD_BLAST_DBS, idx,
                      "Building missing BLAST databases", 30.0)
         built = manager.build_missing_blast_dbs()

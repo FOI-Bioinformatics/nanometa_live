@@ -161,6 +161,36 @@ class GenomeDownloadManager:
     Caches downloads in ~/.nanometa/genomes/ with metadata tracking.
     """
 
+    # Class-level per-host circuit breaker for GTDB/NCBI lookups.
+    # After CIRCUIT_THRESHOLD consecutive failures the host is marked
+    # OPEN for the rest of the process, subsequent calls return None
+    # without firing more requests or log lines. Without this the same
+    # SSL/timeout/429 failure prints once per watchlist entry (17+ for
+    # a typical clinical_pathogens list).
+    _host_failures: Dict[str, int] = {}
+    _host_open: Dict[str, bool] = {}
+    CIRCUIT_THRESHOLD = 3
+
+    @classmethod
+    def _circuit_is_open(cls, host: str) -> bool:
+        return cls._host_open.get(host, False)
+
+    @classmethod
+    def _circuit_record_failure(cls, host: str, label: str, error: Exception) -> None:
+        count = cls._host_failures.get(host, 0) + 1
+        cls._host_failures[host] = count
+        if count >= cls.CIRCUIT_THRESHOLD and not cls._host_open.get(host, False):
+            cls._host_open[host] = True
+            logger.warning(
+                "%s unreachable after %d failures (%s); skipping further "
+                "lookups for this session.",
+                label, count, error,
+            )
+
+    @classmethod
+    def _circuit_record_success(cls, host: str) -> None:
+        cls._host_failures[host] = 0
+
     def __init__(self, cache_dir: Optional[str] = None, offline_mode: bool = False):
         """
         Initialize the genome download manager.
@@ -373,7 +403,7 @@ class GenomeDownloadManager:
                     data = json.load(f)
                     for taxid_str, meta_dict in data.items():
                         self._metadata[int(taxid_str)] = GenomeMetadata.from_dict(meta_dict)
-                logger.info(f"Loaded metadata for {len(self._metadata)} genomes")
+                logger.debug(f"Loaded metadata for {len(self._metadata)} genomes")
             except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
                     json.JSONDecodeError, ValueError, TypeError) as e:
                 logger.warning(f"Failed to load genome metadata: {e}")
@@ -558,6 +588,8 @@ class GenomeDownloadManager:
         if self.offline_mode:
             logger.debug(f"Offline mode: skipping GTDB lookup for '{species_name}'")
             return None
+        if self._circuit_is_open("gtdb"):
+            return None
         try:
             # Format for GTDB search
             search_term = f"s__{species_name.replace(' ', '_')}"
@@ -578,6 +610,7 @@ class GenomeDownloadManager:
                 timeout=30
             )
             response.raise_for_status()
+            self._circuit_record_success("gtdb")
 
             data = response.json()
             rows = data.get("rows", [])
@@ -606,8 +639,10 @@ class GenomeDownloadManager:
 
         except (requests.exceptions.RequestException, json.JSONDecodeError,
                 ValueError, KeyError, AttributeError) as e:
-            logger.warning("GTDB API unreachable for '%s': %s", species_name, e)
+            if not self._circuit_is_open("gtdb"):
+                logger.warning("GTDB API unreachable for '%s': %s", species_name, e)
             logger.debug("GTDB API traceback for '%s'", species_name, exc_info=True)
+            self._circuit_record_failure("gtdb", "GTDB API", e)
             return None
 
     def fetch_ncbi_accession(self, taxid: int) -> Optional[Tuple[str, Dict[str, Any]]]:
@@ -622,6 +657,8 @@ class GenomeDownloadManager:
         """
         if self.offline_mode:
             logger.debug(f"Offline mode: skipping NCBI accession lookup for taxid {taxid}")
+            return None
+        if self._circuit_is_open("ncbi"):
             return None
         try:
             url = f"{NCBI_DATASETS_API}/genome/taxon/{taxid}"
@@ -640,10 +677,12 @@ class GenomeDownloadManager:
                 response = requests.get(url, params=params, headers=headers, timeout=30)
 
             if response.status_code == 404:
+                self._circuit_record_success("ncbi")
                 logger.info(f"No genome assemblies found at NCBI for taxid {taxid}")
                 return None
 
             response.raise_for_status()
+            self._circuit_record_success("ncbi")
             data = response.json()
 
             reports = data.get("reports", [])
@@ -660,8 +699,10 @@ class GenomeDownloadManager:
 
         except (requests.exceptions.RequestException, json.JSONDecodeError,
                 ValueError, KeyError, AttributeError) as e:
-            logger.warning("NCBI API error for taxid %s: %s", taxid, e)
+            if not self._circuit_is_open("ncbi"):
+                logger.warning("NCBI API error for taxid %s: %s", taxid, e)
             logger.debug("NCBI API traceback for taxid %s", taxid, exc_info=True)
+            self._circuit_record_failure("ncbi", "NCBI Datasets API", e)
             return None
 
     def download_genome(

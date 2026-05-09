@@ -499,7 +499,7 @@ class ReadinessChecker:
             from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
             from nanometa_live.core.utils.genome_manager import get_genome_manager
             wm = get_watchlist_manager()
-            gm = get_genome_manager(str(home))
+            gm = get_genome_manager(config.get("genome_cache_dir") or str(home))
             active = wm.get_active_entries()
             if not active:
                 return CheckResult(
@@ -550,7 +550,7 @@ class ReadinessChecker:
             from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
             from nanometa_live.core.utils.genome_manager import get_genome_manager
             wm = get_watchlist_manager()
-            gm = get_genome_manager(str(home))
+            gm = get_genome_manager(config.get("genome_cache_dir") or str(home))
             active = wm.get_active_entries()
             if not active:
                 return CheckResult(
