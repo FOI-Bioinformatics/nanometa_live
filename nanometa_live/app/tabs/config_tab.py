@@ -1019,7 +1019,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         nanopore_dir = config.get("nanopore_output_directory", "")
         kraken_db = config.get("kraken_db", "")
         results_dir = config.get("results_output_directory", "")
-        update_interval = config.get("update_interval_seconds", 30)
+        update_interval = config.get("update_interval_seconds", 10)
         danger_threshold = config.get("danger_lower_limit", 100)
         taxonomy = config.get("kraken_taxonomy", "gtdb")
         check_interval = config.get("check_intervals_seconds", 15)

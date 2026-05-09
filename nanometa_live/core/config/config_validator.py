@@ -345,7 +345,7 @@ def _validate_gui_settings(config: Dict[str, Any]) -> None:
         or not isinstance(config["update_interval_seconds"], int)
         or config["update_interval_seconds"] < 1
     ):
-        config["update_interval_seconds"] = 30
+        config["update_interval_seconds"] = 10
 
     # GUI port
     if "gui_port" not in config:

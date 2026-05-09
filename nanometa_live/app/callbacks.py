@@ -1085,7 +1085,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             return {"display": "none"}
 
         try:
-            update_interval = config.get("update_interval_seconds", 30)
+            update_interval = config.get("update_interval_seconds", 10)
             stale_threshold = update_interval * 2  # 2x the interval
 
             if last_update_time:

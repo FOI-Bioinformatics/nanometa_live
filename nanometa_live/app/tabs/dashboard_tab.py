@@ -1005,7 +1005,7 @@ def register_dashboard_callbacks(app: Dash):
             raise PreventUpdate
 
         now = datetime.now().isoformat()
-        update_interval = config.get("update_interval_seconds", 30)
+        update_interval = config.get("update_interval_seconds", 10)
         stale_threshold = update_interval * 2
 
         # Check staleness against previous timestamp

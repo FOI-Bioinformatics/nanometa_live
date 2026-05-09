@@ -399,7 +399,7 @@ def create_app(
         # Interval for updating data
         dcc.Interval(
             id='update-interval',
-            interval=config.get('update_interval_seconds', 30) * 1000,  # in milliseconds
+            interval=config.get('update_interval_seconds', 10) * 1000,  # in milliseconds
             n_intervals=0,
             disabled=False
         ),
