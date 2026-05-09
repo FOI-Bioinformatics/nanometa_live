@@ -254,8 +254,14 @@ def register_dashboard_callbacks(app: Dash):
                         high_risk = [d for d in dangerous
                                      if d.get("threat_level") in ["high", "high_risk"]]
                         if critical or high_risk:
+                            # n_found counts only entries above each
+                            # pathogen's alert_threshold. The Organisms
+                            # tab lists every watchlist hit (any reads)
+                            # without that gate, so the two counters
+                            # legitimately differ. The wording below
+                            # makes the threshold gate explicit.
                             action_sub = (
-                                f"{n_found} of {n_watched} monitored pathogens found — act now"
+                                f"{n_found} of {n_watched} watched pathogens above alert threshold"
                             )
                             if not validation_has_results:
                                 action_sub += " — pending confirmatory validation"
@@ -332,7 +338,7 @@ def register_dashboard_callbacks(app: Dash):
                         _make_banner_content(
                             "shield-check", "#28a745",
                             "ALL CLEAR",
-                            f"0 of {n_watched} monitored pathogens found",
+                            f"0 of {n_watched} watched pathogens above alert threshold",
                             run_state, time_elapsed,
                             sub_color="#155724",
                             last_updated_str=last_updated_str,

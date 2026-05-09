@@ -273,17 +273,30 @@ def create_species_alert_banner(detected_species: list) -> html.Div:
     species_names = [s["name"] for s in detected_species[:5]]
     count = len(detected_species)
 
-    if count == 1:
-        message = f"Watched species detected: {species_names[0]}"
-    elif count <= 5:
-        message = f"Watched species detected: {', '.join(species_names)}"
+    # "Detected" here means any reads on a watchlist species at species
+    # rank, regardless of per-pathogen alert_threshold. The Dashboard
+    # verdict banner counts only entries above threshold, so the two
+    # numbers can legitimately differ -- the footnote spells that out.
+    head = (
+        f"{count} watched species with reads"
+        if count != 1
+        else "1 watched species with reads"
+    )
+    if count <= 5:
+        body = ", ".join(species_names)
     else:
-        message = f"Watched species detected: {', '.join(species_names)} (+{count - 5} more)"
+        body = f"{', '.join(species_names)} (+{count - 5} more)"
 
     return dbc.Alert([
         html.I(className="bi bi-exclamation-triangle-fill me-2"),
-        html.Strong("Alert: "),
-        message,
+        html.Strong(f"{head}: "),
+        body,
+        html.Br(),
+        html.Small(
+            "Lists every watchlist hit at species rank. The Dashboard "
+            "banner counts only pathogens above their alert threshold.",
+            className="text-muted",
+        ),
     ], color="warning", className="mb-3")
 
 
