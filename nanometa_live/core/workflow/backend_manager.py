@@ -715,8 +715,40 @@ class BackendManager:
             if self.status.get("running") and self.config:
                 self._update_file_counts()
 
+            # Surface remaining seconds until the realtime timeout fires
+            # so the dashboard verdict banner can render an "Auto-stop
+            # in Nm Ss" countdown (U3, 2026-05-09 UX spec). The monitor
+            # thread already enforces the timeout; this is read-only.
+            self.status["auto_stop_remaining_s"] = self._compute_auto_stop_remaining()
+
             # Return a copy to prevent external modification
             return dict(self.status)
+
+    def _compute_auto_stop_remaining(self) -> Optional[int]:
+        """Return seconds until the realtime timeout fires, or None.
+
+        ``None`` covers the cases where (a) the pipeline is not running,
+        (b) no realtime_timeout_minutes is configured, or (c) the saved
+        start_time cannot be parsed.
+        """
+        if not self.status.get("running"):
+            return None
+        if not self.config:
+            return None
+        timeout_minutes = self.config.get("realtime_timeout_minutes")
+        if not timeout_minutes:
+            return None
+        start_iso = self.status.get("start_time")
+        if not start_iso:
+            return None
+        try:
+            from datetime import datetime as _dt
+            start_dt = _dt.fromisoformat(start_iso)
+            elapsed = (_dt.now() - start_dt).total_seconds()
+        except (TypeError, ValueError):
+            return None
+        remaining = int(int(timeout_minutes) * 60 - elapsed)
+        return max(0, remaining)
 
     # TTL for the cached file count below. Each interval tick on the
     # dashboard ends up calling _update_file_counts at least once; on a

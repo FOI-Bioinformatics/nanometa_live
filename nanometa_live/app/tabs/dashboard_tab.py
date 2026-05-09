@@ -184,6 +184,12 @@ def register_dashboard_callbacks(app: Dash):
         start_time = status.get("start_time") if status else None
         time_elapsed = _format_time_elapsed(start_time)
         last_updated_str = "Last updated " + datetime.now().strftime("%H:%M:%S")
+        # U3: realtime-timeout countdown. Surfaced inside the verdict
+        # banner's right column when the pipeline is running and the
+        # operator configured a timeout. None = render nothing.
+        auto_stop_remaining_s = (
+            status.get("auto_stop_remaining_s") if status else None
+        )
 
         # Check whether any validation results exist (used for confidence qualifier)
         validation_has_results = bool(
@@ -210,6 +216,7 @@ def register_dashboard_callbacks(app: Dash):
                         run_state, time_elapsed,
                         sub_color="#084298",
                         last_updated_str=last_updated_str,
+                        auto_stop_remaining_s=auto_stop_remaining_s,
                         icon_extra_class="spin",
                     ),
                     _verdict_banner_style("#cfe2ff", "#0d6efd"),
@@ -222,6 +229,7 @@ def register_dashboard_callbacks(app: Dash):
                     run_state, time_elapsed,
                     sub_color="#6c757d",
                     last_updated_str=last_updated_str,
+                    auto_stop_remaining_s=auto_stop_remaining_s,
                 ),
                 _verdict_banner_style("#f8f9fa", "#6c757d"),
                 time_elapsed, run_state, run_state_color
@@ -238,6 +246,7 @@ def register_dashboard_callbacks(app: Dash):
                     run_state, time_elapsed,
                     sub_color="#084298",
                     last_updated_str=last_updated_str,
+                    auto_stop_remaining_s=auto_stop_remaining_s,
                     icon_extra_class="spin",
                 ),
                 _verdict_banner_style("#cfe2ff", "#0d6efd"),
@@ -322,6 +331,7 @@ def register_dashboard_callbacks(app: Dash):
                                     sub_color="#721c24",
                                     show_icon_mobile=True,
                                     last_updated_str=last_updated_str,
+                                    auto_stop_remaining_s=auto_stop_remaining_s,
                                     triggering_samples=triggering_samples or None,
                                     total_sample_count=total_real_samples or None,
                                 ),
@@ -336,6 +346,7 @@ def register_dashboard_callbacks(app: Dash):
                                 run_state, time_elapsed,
                                 sub_color="#664d03",
                                 last_updated_str=last_updated_str,
+                                auto_stop_remaining_s=auto_stop_remaining_s,
                             ),
                             _verdict_banner_style("#fff3cd", "#fd7e14"),
                             time_elapsed, run_state, run_state_color
@@ -350,6 +361,7 @@ def register_dashboard_callbacks(app: Dash):
                             run_state, time_elapsed,
                             sub_color="#155724",
                             last_updated_str=last_updated_str,
+                            auto_stop_remaining_s=auto_stop_remaining_s,
                         ),
                         _verdict_banner_style("#d4edda", "#28a745"),
                         time_elapsed, run_state, run_state_color
@@ -363,6 +375,7 @@ def register_dashboard_callbacks(app: Dash):
                             run_state, time_elapsed,
                             sub_color="#084298",
                             last_updated_str=last_updated_str,
+                            auto_stop_remaining_s=auto_stop_remaining_s,
                             icon_extra_class="spin",
                         ),
                         _verdict_banner_style("#cfe2ff", "#0d6efd"),
@@ -380,6 +393,7 @@ def register_dashboard_callbacks(app: Dash):
                 run_state, time_elapsed,
                 sub_color="#6c757d",
                 last_updated_str=last_updated_str,
+                auto_stop_remaining_s=auto_stop_remaining_s,
             ),
             _verdict_banner_style("#f8f9fa", "#6c757d"),
             time_elapsed, run_state, run_state_color
