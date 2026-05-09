@@ -310,6 +310,41 @@ def register_main_callbacks(app: Dash):
     """
 
     @app.callback(
+        Output("organisms-freshness-row", "children"),
+        Input("sample-freshness", "data"),
+        Input("available-samples", "data"),
+    )
+    def update_organisms_freshness_row(freshness, available_samples):
+        """Render per-barcode freshness pills above the Organism table.
+
+        The row hides when only the aggregate sample is present so the
+        single-input case does not gain a meaningless single pill.
+        """
+        import time as _time
+        from nanometa_live.app.components.freshness_pill import freshness_pill
+        from nanometa_live.app.utils.freshness import age_seconds_for
+
+        freshness = freshness or {}
+        if not available_samples:
+            return []
+        real_samples = [s for s in available_samples if s != "All Samples"]
+        if len(real_samples) < 2:
+            return []
+        now = _time.time()
+        children = []
+        for sample in real_samples:
+            age = age_seconds_for(freshness.get(sample), now)
+            children.append(
+                html.Span(
+                    [html.Span(sample, className="me-2 fw-medium"),
+                     freshness_pill(sample, age, class_name="")],
+                    className="d-inline-flex align-items-center px-2 py-1 border rounded",
+                    style={"whiteSpace": "nowrap"},
+                )
+            )
+        return children
+
+    @app.callback(
         [
             Output("organism-summary-container", "children"),
             Output("organism-cards-container", "children"),

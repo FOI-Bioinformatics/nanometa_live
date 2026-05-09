@@ -958,31 +958,75 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             Output("sample-selector", "value"),
         ],
         Input("available-samples", "data"),
+        Input("sample-freshness", "data"),
         State("sample-selector", "value"),
     )
-    def update_sample_selector_options(available_samples, current_value):
+    def update_sample_selector_options(available_samples, freshness, current_value):
         """
         Update sample selector dropdown options.
 
-        Converts the list of available samples into Dash dropdown options.
-        Resets the selected value to 'All Samples' if the current selection
-        is no longer available (e.g. sample directory was removed).
+        Converts the list of available samples into Dash dropdown options
+        and renders a per-barcode freshness pill (U2) next to each
+        non-aggregated sample. Resets the selected value to 'All Samples'
+        if the current selection is no longer available.
         """
+        from nanometa_live.app.components.freshness_pill import freshness_pill
+        from nanometa_live.app.utils.freshness import age_seconds_for
+
         if not available_samples:
             available_samples = ["All Samples"]
+        freshness = freshness or {}
+        now = time.time()
 
         options = []
         for sample in available_samples:
             if sample == "All Samples":
                 options.append({"label": "All Samples (Aggregated)", "value": sample})
-            else:
-                options.append({"label": sample, "value": sample})
+                continue
+            last_ts = freshness.get(sample)
+            age = age_seconds_for(last_ts, now)
+            label = html.Span(
+                [html.Span(sample, className="text-truncate"),
+                 freshness_pill(sample, age, class_name="ms-2")],
+                className="d-inline-flex align-items-center",
+            )
+            options.append({"label": label, "value": sample})
 
         # Reset to 'All Samples' if current selection is no longer valid
         if current_value and current_value not in available_samples:
             return options, "All Samples"
 
         return options, no_update
+
+    @app.callback(
+        Output("sample-freshness", "data"),
+        Input("results-fingerprint", "data"),
+        Input("update-interval", "n_intervals"),
+        State("available-samples", "data"),
+        State("app-config", "data"),
+    )
+    def update_sample_freshness(_fp, _n, available_samples, config):
+        """Refresh the per-sample last_data_ts map.
+
+        Driven by ``results-fingerprint`` so the map advances when new
+        files land on disk; the interval input is a backstop to keep the
+        age field current even on quiet outdirs.
+        """
+        from nanometa_live.app.utils.freshness import freshness_map
+
+        if not config or not available_samples:
+            return {}
+        main_dir = (
+            config.get("results_output_directory", "")
+            or config.get("main_dir", "")
+        )
+        if not main_dir or not os.path.isdir(main_dir):
+            return {}
+        try:
+            return freshness_map(main_dir, available_samples)
+        except Exception as exc:
+            log_callback_error("update_sample_freshness", exc, level=logging.WARNING)
+            return {}
 
     @app.callback(
         Output("selected-sample", "data"),
