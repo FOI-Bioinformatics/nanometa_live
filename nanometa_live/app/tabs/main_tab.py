@@ -38,6 +38,7 @@ from nanometa_live.app.utils.callback_helpers import (
     log_callback_error,
     create_empty_alert,
     create_error_alert,
+    get_classification_stats,
 )
 
 
@@ -409,12 +410,16 @@ def register_main_callbacks(app: Dash):
 
             logging.debug(f"Main Results: Loaded {len(kraken_df)} rows from Kraken2 data")
 
-            # Calculate summary statistics
-            total_reads = int(kraken_df['reads'].sum())
-            unclassified_row = kraken_df[kraken_df['taxid'] == 0]
-            unclassified_reads = int(unclassified_row.iloc[0]['reads']) if not unclassified_row.empty else 0
-            classified_reads = total_reads - unclassified_reads
-            classification_rate = (classified_reads / total_reads * 100) if total_reads > 0 else 0
+            # Calculate summary statistics. Use the shared helper so this tab
+            # agrees with the Dashboard tile, which derives totals from
+            # root.cumul_reads + unclassified.cumul_reads. The per-rank `reads`
+            # column collapses to 0 when every read is parked at root level
+            # (e.g. degenerate single-read inputs), which is why summing it
+            # disagreed with Dashboard's display.
+            classified_reads, unclassified_reads, classification_rate = (
+                get_classification_stats(kraken_df)
+            )
+            total_reads = classified_reads + unclassified_reads
 
             # Filter to selected taxonomic ranks
             filtered_df = kraken_df[kraken_df['rank'].isin(tax_ranks)]
