@@ -337,7 +337,15 @@ def register_qc_callbacks(app: Dash):
                         continue
 
             if not sample_data:
-                message = "No processed data available.<br>Plots will appear once FASTP or Kraken2 analysis is complete."
+                # Empty-state copy now references all three loader
+                # tiers (fastp, seqkit, kraken2) since the chopper QC
+                # tool path lands seqkit/<sample>.tsv first and the
+                # earlier wording made operators think the tab was
+                # broken when only seqkit data was on disk.
+                message = (
+                    "No processed data available.<br>"
+                    "Plots will appear once fastp, seqkit, or Kraken2 outputs land in the results directory."
+                )
                 empty_figures = [
                     px.line(title="Cumulative Sequences").add_annotation(text=message, showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5),
                     px.line(title="Cumulative Base Pairs").add_annotation(text=message, showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5),
