@@ -36,6 +36,13 @@ _readiness_cache: Dict[str, Tuple[float, Any]] = {}
 _readiness_cache_lock = threading.Lock()
 
 
+# Tracks the kraken_db path the taxid mapping callback last initialised
+# from. When the operator points the dashboard at a different Kraken2
+# database mid-session, this lets the callback re-load mappings instead
+# of being permanently gated by a boolean flag in the config dict.
+_taxid_mapping_db_path: Optional[str] = None
+
+
 def _readiness_cache_key(config: Optional[Dict[str, Any]]) -> str:
     """Build a stable cache key from the config fields that affect readiness.
 
@@ -203,6 +210,8 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         """
         from nanometa_live.app.utils.config_manager import atomic_config_update
 
+        global _taxid_mapping_db_path
+
         if not config:
             return no_update, no_update, no_update, no_update
 
@@ -210,8 +219,11 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         if not kraken_db or not os.path.exists(kraken_db):
             return no_update, no_update, no_update, no_update
 
-        # Only initialize once per session
-        if config.get("_taxid_mapping_initialized"):
+        # Only initialize when the configured Kraken2 database changes.
+        # Keying on the path (rather than a one-shot boolean) means the
+        # callback re-loads mappings if the operator switches databases
+        # mid-session.
+        if _taxid_mapping_db_path == kraken_db:
             return no_update, no_update, no_update, no_update
 
         try:
@@ -251,6 +263,10 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                         "path": collection.database_path,
                     }
                     rescan_time = collection.updated_at.isoformat()
+
+            # Record the db path we initialised from so the next tick
+            # short-circuits unless the operator switches databases.
+            _taxid_mapping_db_path = kraken_db
 
             # Use atomic update to properly track version
             updated_config = atomic_config_update(
@@ -327,11 +343,18 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             color = "green"
             text = "RUNNING"
 
-            # Cap files_processed: batch stats can sum across batches,
-            # exceeding the actual number of input files
+            # Cap files_processed against the inbox size only in batch
+            # mode. In realtime mode the inbox grows during the run via
+            # watchPath, so files_waiting is a moving snapshot rather
+            # than a fixed total -- clamping there undercounts processed
+            # files while streaming.
             total_files = status.get("files_waiting", 0)
             raw_processed = status.get("files_processed", 0)
-            files_processed = min(raw_processed, total_files) if total_files > 0 else raw_processed
+            processing_mode = (config or {}).get("processing_mode", "batch")
+            if processing_mode == "realtime":
+                files_processed = raw_processed
+            else:
+                files_processed = min(raw_processed, total_files) if total_files > 0 else raw_processed
 
             details = [
                 f"Files processed: {files_processed} / {total_files}",
