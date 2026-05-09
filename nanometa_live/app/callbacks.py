@@ -985,46 +985,56 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         ],
         [
             Input("backend-status", "data"),
-            Input("update-interval", "n_intervals"),
+            Input("results-fingerprint", "data"),
         ],
         State("app-config", "data"),
     )
-    def update_live_indicator(status, n_intervals, config):
+    def update_live_indicator(status, fingerprint, config):
         """
         Update the live indicator in the header.
 
-        Shows whether the system is actively monitoring and when
-        data was last updated.
+        The displayed timestamp reflects the last time the results
+        fingerprint advanced (i.e. real data arrived), not the wall
+        clock of the polling tick. When the configured outdir exists
+        but no data has arrived yet, render "no data yet" instead of
+        a misleading current-time stamp.
         """
-        # Get current time for display
-        current_time = time.strftime("%H:%M:%S")
+        fp_ts = (fingerprint or {}).get("ts") if isinstance(fingerprint, dict) else None
+        if fp_ts:
+            data_time = time.strftime("%H:%M:%S", time.localtime(fp_ts))
+        else:
+            data_time = None
 
         # Check if in visualization-only mode
         if config and config.get("visualization_only", False):
+            label = f"Last data: {data_time}" if data_time else "no data yet"
             return (
                 "live-indicator-dot offline",
                 "View Only",
-                f"Last check: {current_time}"
+                label,
             )
 
         # Check backend status
         if status and status.get("running", False):
+            label = f"Updated: {data_time}" if data_time else "no data yet"
             return (
                 "live-indicator-dot",  # Animated pulse
                 "LIVE",
-                f"Updated: {current_time}"
+                label,
             )
         elif status and status.get("completed", False):
+            label = f"Finished: {data_time}" if data_time else "no data yet"
             return (
                 "live-indicator-dot offline",
                 "Complete",
-                f"Finished: {current_time}"
+                label,
             )
         else:
+            label = f"Last data: {data_time}" if data_time else "no data yet"
             return (
                 "live-indicator-dot offline",
                 "Standby",
-                f"Last check: {current_time}"
+                label,
             )
 
     # ========================================================================
@@ -1071,11 +1081,19 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
 
     @app.callback(
         Output("last-update-time", "data"),
-        Input("update-interval", "n_intervals"),
+        Input("results-fingerprint", "data"),
         State("app-config", "data"),
     )
-    def track_last_update_time(n_intervals, config):
-        """Track when data was last successfully updated."""
+    def track_last_update_time(fingerprint, config):
+        """Track when results last changed.
+
+        Driven by ``results-fingerprint`` rather than the wall-clock
+        polling tick: the fingerprint store only emits a new value
+        when at least one output file changed. The companion stale
+        warning callback can therefore actually fire when data goes
+        quiet -- previously this restamped every tick and the warning
+        was unreachable.
+        """
         import datetime
 
         if not config:
@@ -1084,7 +1102,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         try:
             main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
             if main_dir and os.path.exists(main_dir):
-                # Return current timestamp as ISO format
+                # Stamp at fingerprint-change time.
                 return datetime.datetime.now().isoformat()
             return None
         except Exception as e:

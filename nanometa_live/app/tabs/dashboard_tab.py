@@ -982,24 +982,27 @@ def register_dashboard_callbacks(app: Dash):
             Output("dashboard-last-updated", "data"),
             Output("dashboard-last-updated-badge", "children")
         ],
-        Input("update-interval", "n_intervals"),
+        Input("results-fingerprint", "data"),
         [
             State("app-config", "data"),
             State("dashboard-last-updated", "data")
         ]
     )
-    def update_data_freshness(n_intervals, config, last_updated):
+    def update_data_freshness(fingerprint, config, last_updated):
         """
         Update data freshness timestamp and badge.
 
-        Stores the current time when data loads successfully,
-        and shows a stale warning when data age exceeds 2x the polling interval.
+        Driven by ``results-fingerprint`` rather than the polling tick
+        so the badge reflects when results actually changed on disk.
+        Wall-clock-driven updates made the badge wobble forward on
+        every tick and the stale check could not fire.
         """
-        if should_skip_update("dashboard_data_freshness", debounce_ms=2000):
-            raise PreventUpdate
-
         if not config:
             return None, LastUpdatedBadge(timestamp=None)
+        if not fingerprint:
+            # Fingerprint store has not produced a value yet; preserve any
+            # existing badge instead of stamping a wall-clock time.
+            raise PreventUpdate
 
         now = datetime.now().isoformat()
         update_interval = config.get("update_interval_seconds", 30)
