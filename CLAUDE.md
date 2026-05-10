@@ -338,23 +338,19 @@ Three concerns:
 
 `nanometanf` floors at `nextflowVersion = '>=26.04.0'` (manifest in
 `nanometanf/nextflow.config`). The matching `nf-core` conda env ships
-Nextflow 26.04.0 / nf-core/tools 4.0.2 / nf-test 0.9.5. Two operational
-notes:
+Nextflow 26.04.0 / nf-core/tools 4.0.2 / nf-test 0.9.5. The pipeline
+parses cleanly under the strict v2 grammar (default in 26+) — no
+`NXF_SYNTAX_PARSER` opt-in needed. Verification is in
+`docs/audit/realtime-2026-05-09.md` sections 13 and 14.
 
-- **`NXF_SYNTAX_PARSER=v1` is required** until nanometanf is ported off
-  legacy Groovy idioms (C-style for-loops, switch/case, `${projectDir}`
-  interpolation in `include` paths). The strict v2 grammar in Nextflow 26
-  rejects all of these and the pipeline does not parse without the env
-  var. The shell that launches `python -m nanometa_live.app` should
-  export it; `_build_nextflow_env` propagates the value through.
-- **`nf-core/tools 4.0.2 pipelines lint` crashes** with `LiveError` from
-  `rocrate.parse_manifest_contributors`. Pin `nf-core==3.5.2` for local
-  lint runs until the rich progress-bar nesting is fixed upstream. This
-  is unrelated to the runtime path — pipelines run normally under 4.0.2.
+One known upstream wrinkle: **`nf-core/tools 4.0.2 pipelines lint`
+crashes** with `LiveError` from `rocrate.parse_manifest_contributors`.
+Pin `nf-core==3.5.2` for local lint runs until the rich progress-bar
+nesting is fixed upstream. This is unrelated to the runtime path —
+pipelines run normally under 4.0.2.
 
 The 25.10.x watchPath JVM cleanup hang (the historical reason for the
-`NXF_VER=25.04.7` workaround) was resolved upstream in 26.04.0;
-verification is in `docs/audit/realtime-2026-05-09.md` section 13.
+`NXF_VER=25.04.7` workaround) was resolved upstream in 26.04.0.
 
 ### Cross-platform restriction
 
