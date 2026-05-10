@@ -41,6 +41,26 @@ from nanometa_live.core.taxonomy.taxonomy_api import get_ncbi_client
 logger = logging.getLogger(__name__)
 
 
+def _default_download_workers() -> int:
+    """Default ThreadPoolExecutor size for genome HTTPS downloads.
+
+    Downloads are network-bound, so we scale generously with cpu_count
+    but cap at 16 to avoid hammering NCBI/GTDB endpoints. Floor of 3
+    keeps tiny hosts (laptops with 2-4 cores) usable.
+    """
+    return max(3, min(os.cpu_count() or 4, 16))
+
+
+def _default_blast_build_workers() -> int:
+    """Default ThreadPoolExecutor size for parallel makeblastdb invocations.
+
+    Each makeblastdb is CPU-bound and consumes 1-2 cores; cap concurrent
+    builds at half the host's cpus to leave headroom for the GUI server
+    process. Floor of 2 preserves the prior default for small hosts.
+    """
+    return max(2, min((os.cpu_count() or 4) // 2, 8))
+
+
 # GTDB API endpoint
 GTDB_API_BASE = "https://api.gtdb.ecogenomic.org"
 
@@ -1527,7 +1547,7 @@ class GenomeDownloadManager:
     def download_genomes_batch(
         self,
         entries: List[Dict[str, Any]],
-        max_workers: int = 3,
+        max_workers: Optional[int] = None,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> Dict[int, Optional[Path]]:
         """
@@ -1539,13 +1559,17 @@ class GenomeDownloadManager:
 
         Args:
             entries: List of dicts with 'taxid' and 'name' keys.
-            max_workers: Maximum concurrent downloads (default 3).
+            max_workers: Maximum concurrent downloads. None (default)
+                derives the size from os.cpu_count() via
+                _default_download_workers() (network-bound, capped at 16).
             progress_callback: Optional callback(completed, total, name)
                 invoked after each download finishes.
 
         Returns:
             Dict mapping taxid to Path (success) or None (failure).
         """
+        if max_workers is None:
+            max_workers = _default_download_workers()
         if not entries:
             return {}
 
@@ -1758,18 +1782,23 @@ class GenomeDownloadManager:
         return results
 
     def build_blast_dbs_batch(
-        self, taxids: List[int], max_workers: int = 2
+        self, taxids: List[int], max_workers: Optional[int] = None
     ) -> int:
         """
         Build BLAST databases for multiple genomes concurrently.
 
         Args:
             taxids: List of taxonomy IDs to build databases for.
-            max_workers: Maximum concurrent makeblastdb processes.
+            max_workers: Maximum concurrent makeblastdb processes. None
+                (default) derives the size from os.cpu_count() via
+                _default_blast_build_workers() (CPU-bound, half cpus,
+                capped at 8).
 
         Returns:
             Number of databases successfully built.
         """
+        if max_workers is None:
+            max_workers = _default_blast_build_workers()
         if not shutil.which("makeblastdb"):
             logger.error("makeblastdb not found. Install BLAST+ toolkit.")
             return 0
