@@ -325,11 +325,36 @@ Three concerns:
    NXF_CONDA_CACHEDIR=<dir>
    ```
    `validate_pipeline_source` rejects `remote:` / `https://` / `git@` sources when offline,
-   before any `git ls-remote` fires.
+   before any `git ls-remote` fires. `_build_nextflow_env` starts from
+   `os.environ.copy()`, so any `NXF_*` variable exported by the shell that
+   launched `python -m nanometa_live.app` propagates to GUI-spawned pipeline
+   runs without code changes.
 
 3. **Offline-mode propagation** to NCBI/GTDB callers. `GenomeManager` methods and watchlist
    Validate / Add-custom-species callbacks read `offline_mode` and short-circuit network calls.
    Caches (`TaxonomyCache` / `OfflineTaxonomyCache`) are consulted first either way.
+
+### Toolchain floor (Nextflow 26.04.0)
+
+`nanometanf` floors at `nextflowVersion = '>=26.04.0'` (manifest in
+`nanometanf/nextflow.config`). The matching `nf-core` conda env ships
+Nextflow 26.04.0 / nf-core/tools 4.0.2 / nf-test 0.9.5. Two operational
+notes:
+
+- **`NXF_SYNTAX_PARSER=v1` is required** until nanometanf is ported off
+  legacy Groovy idioms (C-style for-loops, switch/case, `${projectDir}`
+  interpolation in `include` paths). The strict v2 grammar in Nextflow 26
+  rejects all of these and the pipeline does not parse without the env
+  var. The shell that launches `python -m nanometa_live.app` should
+  export it; `_build_nextflow_env` propagates the value through.
+- **`nf-core/tools 4.0.2 pipelines lint` crashes** with `LiveError` from
+  `rocrate.parse_manifest_contributors`. Pin `nf-core==3.5.2` for local
+  lint runs until the rich progress-bar nesting is fixed upstream. This
+  is unrelated to the runtime path — pipelines run normally under 4.0.2.
+
+The 25.10.x watchPath JVM cleanup hang (the historical reason for the
+`NXF_VER=25.04.7` workaround) was resolved upstream in 26.04.0;
+verification is in `docs/audit/realtime-2026-05-09.md` section 13.
 
 ### Cross-platform restriction
 
