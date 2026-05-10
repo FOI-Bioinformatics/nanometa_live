@@ -21,6 +21,7 @@ from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.utils.sample_detector import get_available_samples, get_sample_file_mapping
 from nanometa_live.core.utils.loader_utils import check_data_freshness
 from nanometa_live.app.utils.callback_helpers import log_callback_error
+from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
 
 
 # update_readiness_indicator runs the full ReadinessChecker every
@@ -307,7 +308,7 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         """
         if not config:
             raise PreventUpdate
-        main_dir = config.get("main_dir") or config.get("results_output_directory") or ""
+        main_dir = resolve_outdir_for_fingerprint(config)
         if not main_dir:
             raise PreventUpdate
 
