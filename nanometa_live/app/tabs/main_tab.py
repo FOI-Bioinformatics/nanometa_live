@@ -369,12 +369,20 @@ def register_main_callbacks(app: Dash):
             State("tax-rank-filter", "value"),
             State("app-config", "data"),
             State("backend-status", "data"),
+            # F1 cross-tab agreement: when the operator views the
+            # aggregated "All Samples" total, take the cached value
+            # produced by Dashboard's compute_overall_status_cache so
+            # both tabs display the same number even when fingerprint
+            # ticks fire faster than the loader's read latency (per_file
+            # mode emits one fingerprint advance per chunk file).
+            State("dashboard-overall-status-cache", "data"),
         ],
         prevent_initial_call=True,
     )
     def update_main_results(
         _fingerprint, apply_clicks, selected_sample, watchlist_store,
         _n_intervals, top_count, min_abundance, tax_ranks, config, status,
+        overall_status_cache,
     ):
         """
         Update the main results tab with organism summary, cards, table,
@@ -455,6 +463,21 @@ def register_main_callbacks(app: Dash):
                 get_classification_stats(kraken_df)
             )
             total_reads = classified_reads + unclassified_reads
+
+            # F1 cross-tab agreement under fast-streaming. When the
+            # operator views aggregated "All Samples", prefer the
+            # cached total computed by Dashboard's
+            # compute_overall_status_cache so both tabs render the same
+            # number on the same fingerprint tick. Falls back to the
+            # locally computed value when the cache is empty (initial
+            # load or single-sample view).
+            is_aggregated_view = (
+                selected_sample is None or selected_sample == "All Samples"
+            )
+            if is_aggregated_view and overall_status_cache:
+                cached_total = overall_status_cache.get("total_reads")
+                if cached_total is not None:
+                    total_reads = int(cached_total)
 
             # Filter to selected taxonomic ranks
             filtered_df = kraken_df[kraken_df['rank'].isin(tax_ranks)]
