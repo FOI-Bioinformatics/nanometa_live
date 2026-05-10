@@ -155,13 +155,13 @@ results/
 │   ├── blast/                         # *.blast.tsv
 │   └── minimap2/                      # *_taxid*.paf
 ├── on_demand_validation/
-└── logs/                              # trace.txt
+└── pipeline_info/                     # execution_trace_*.txt, report.html, timeline.html
 ```
 
 Notes:
 - `fastp/` and `seqkit/` are mutually exclusive; QC loaders try fastp first, fall back to seqkit.
 - `seqkit/<sample>.tsv` is the current flat layout. The older nested `seqkit/<sample>/stats/*.tsv` is still supported.
-- Trace lives in `logs/`, not `pipeline_info/`.
+- Nextflow trace lives at `pipeline_info/execution_trace_*.txt` (per `nextflow.config:407` in nanometanf). The GUI's NextflowManager redirects its own copy to `~/.nanometa/logs/trace.txt` for status polling, but the canonical pipeline emit is under `pipeline_info/`.
 
 ## Configuration
 
