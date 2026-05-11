@@ -209,6 +209,21 @@ Items 1 and 2 cover most of the 8 vs 96 thread gap. Items 3-6 are quality-of-lif
 
 ---
 
+## Status (2026-05-11 follow-up)
+
+All six top recommendations have shipped on `dev`. Summary:
+
+| # | Recommendation | Status | Commit / location |
+|---|---|---|---|
+| 1 | `conf/server.config` profile (drop QC hardcodes, raise resourceLimits, scale `max_classification_forks`) | done | nanometanf `c7f20ed` (merged into dev `c7f20ed`) |
+| 2 | Auto-derive nanometa_live `ThreadPoolExecutor` sizes from `os.cpu_count()` | done | nanometa_live `b1b682c` (+12 regression tests) |
+| 3 | Background-callback the heavy GUI parsers (`update_main_results`, `update_qc_stats`) | done | nanometa_live `0555854` (+5 pinning tests) |
+| 4 | Enable `pytest-xdist` (`-n auto --dist=loadfile`); filelock-guarded shared dataset fixture | done | nanometa_live `f184822` (978 -> 974/1 -> 978/1) |
+| 5 | Bump `_MAX_FINGERPRINT_FILES` 5000 -> 50000; env-var override; count-fallback past stat cap | done | nanometa_live `f184822` (+4 overflow tests) |
+| 6 | Move the readiness-check subprocess wait off the main Dash thread | done | nanometa_live (this commit) -- the audit listed `kraken_utils.py:193` but the actual blocking site is `update_readiness_indicator` in `app/callbacks.py:797`, which itself shells out to `docker info` + `nextflow -version` (~15-20 s on a cold path) on every interval tick after a configuration change. Backgrounding the callback isolates the wait. |
+
+Note on item #6: the 60 s in-memory readiness TTL cache no longer crosses the worker boundary, so the worst-case latency is ~15 s of *worker* time per cold tick rather than ~15 s of request-thread time. A future improvement could move the readiness cache into the shared diskcache so warm-path hits are preserved across workers; not required by the audit's intent.
+
 ## Out of scope
 
 - nanorunner is a single-machine simulator; not in scope.
