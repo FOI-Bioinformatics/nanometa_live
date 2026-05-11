@@ -145,6 +145,14 @@ def filter_detected_species(kraken_df, watchlist: list) -> list:
     )
     matched_df = species_df[mask]
 
+    # Detection means "actually saw reads classify here". Use cumul_reads
+    # so the badge count survives the F1-audit degenerate case (every
+    # read parked at root rank collapses the per-rank ``reads`` column
+    # to zero). Filter out zero-read placeholder rows so the badge
+    # number agrees with the cards' Detected/Not-Detected split.
+    cumul_col = 'cumul_reads' if 'cumul_reads' in matched_df.columns else 'reads'
+    matched_df = matched_df[matched_df[cumul_col].fillna(0).astype(int) > 0]
+
     if matched_df.empty:
         return []
 
@@ -153,7 +161,7 @@ def filter_detected_species(kraken_df, watchlist: list) -> list:
         'taxid': matched_df['taxid_int'],  # Original Kraken2 taxid for display
         'ncbi_taxid': matched_df['mapped_ncbi_taxid'],  # Mapped NCBI taxid
         'name': matched_df['name'].fillna('Unknown'),
-        'reads': matched_df['reads'].fillna(0).astype(int),
+        'reads': matched_df[cumul_col].fillna(0).astype(int),
         'abundance': matched_df['%'].fillna(0.0).astype(float),
         'rank': matched_df['rank_clean']
     })
@@ -191,16 +199,29 @@ def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
     db_to_ncbi = {v: k for k, v in ncbi_to_db.items()}
 
     # Prepare kraken data for matching (if available)
+    # Two lookups: taxid-keyed and name-keyed. The name-keyed path
+    # exists so a watchlist entry that does not match by taxid (because
+    # the kraken DB renamed / reclassified the species) can still be
+    # found via species name -- matching the matching strategy used by
+    # filter_detected_species. Without this the badge count and the
+    # Detected/Not-Detected card split disagree, and "5 detected"
+    # entries silently collapse into the Not Detected section.
     kraken_lookup = {}
+    name_lookup = {}
     if kraken_df is not None and not kraken_df.empty:
         kraken_df = kraken_df.copy()
         kraken_df['taxid_int'] = kraken_df['taxid'].fillna(0).astype(int)
+        # cumul_reads is the F1-audit canonical "actually detected"
+        # signal; ``reads`` collapses to zero when every read is parked
+        # at root rank (the degenerate single-batch case caught by the
+        # 2026-05-09 F1 fix). Use cumul_reads so the count survives.
+        cumul_col = 'cumul_reads' if 'cumul_reads' in kraken_df.columns else 'reads'
 
         # Build lookup vectorized (avoid iterrows for performance with large dataframes)
         valid_mask = kraken_df['taxid_int'] > 0
         for taxid, reads, abundance, name in zip(
             kraken_df.loc[valid_mask, 'taxid_int'],
-            kraken_df.loc[valid_mask, 'reads'].fillna(0).astype(int),
+            kraken_df.loc[valid_mask, cumul_col].fillna(0).astype(int),
             kraken_df.loc[valid_mask, '%'].fillna(0.0).astype(float),
             kraken_df.loc[valid_mask, 'name'].fillna(''),
         ):
@@ -210,6 +231,11 @@ def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
             ncbi_taxid = db_to_ncbi.get(int(taxid), int(taxid))
             if ncbi_taxid != int(taxid):
                 kraken_lookup[ncbi_taxid] = entry
+            # Index by species name too. Lowercase + strip mirrors the
+            # case-insensitive comparison filter_detected_species does.
+            name_key = str(name).strip().lower()
+            if name_key:
+                name_lookup[name_key] = entry
 
     # Build result list from ALL active watchlist entries
     result = []
@@ -223,6 +249,9 @@ def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
         # Try to find detection in Kraken2 data
         # 1. Check by NCBI taxid directly
         # 2. Check by mapped Kraken2 db_taxid
+        # 3. Check by species name (fallback; matches the matching
+        #    strategy used by filter_detected_species so the badge
+        #    count and the cards-render path agree).
         detection = None
         db_taxid = ncbi_to_db.get(entry.taxid, entry.taxid)
 
@@ -230,6 +259,10 @@ def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
             detection = kraken_lookup[entry.taxid]
         elif db_taxid in kraken_lookup:
             detection = kraken_lookup[db_taxid]
+        else:
+            name_key = (entry.name or '').strip().lower()
+            if name_key and name_key in name_lookup:
+                detection = name_lookup[name_key]
 
         result.append({
             'taxid': db_taxid,  # Use Kraken2 db_taxid for display
@@ -242,13 +275,22 @@ def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
             'threat_level': entry.threat_level.value if entry.threat_level else 'unknown'
         })
 
-    # Also include legacy watchlist entries not in WatchlistManager
+    # Also include legacy watchlist entries not in WatchlistManager.
+    # When the GUI runs update_main_results in the background-callback
+    # worker process (audit item #3), the WatchlistManager singleton is
+    # empty and this loop is the ONLY path that hydrates entries from
+    # the dcc.Store-passed watchlist arg. The name fallback below
+    # mirrors filter_detected_species so badge and cards agree.
     for s in watchlist:
         taxid = s.get("taxid")
         if taxid and taxid not in seen_taxids:
             seen_taxids.add(taxid)
             db_taxid = ncbi_to_db.get(taxid, taxid)
-            detection = kraken_lookup.get(taxid) or kraken_lookup.get(db_taxid)
+            detection = (
+                kraken_lookup.get(taxid)
+                or kraken_lookup.get(db_taxid)
+                or name_lookup.get((s.get("name") or '').strip().lower())
+            )
 
             result.append({
                 'taxid': db_taxid,
