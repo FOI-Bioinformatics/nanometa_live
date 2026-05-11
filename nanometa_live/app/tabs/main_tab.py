@@ -33,6 +33,7 @@ from nanometa_live.app.components.organism_components import (
 from nanometa_live.app.components.modern_components import EmptyStateMessage
 # Chart functionality moved to Taxonomy tab - no chart builders needed here
 from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
+from nanometa_live.app.app import background_callback_manager
 from nanometa_live.app.utils.callback_helpers import (
     validate_config_and_get_main_dir,
     log_callback_error,
@@ -378,6 +379,15 @@ def register_main_callbacks(app: Dash):
             State("dashboard-overall-status-cache", "data"),
         ],
         prevent_initial_call=True,
+        # Audit item #3 (docs/audit/threading-2026-05-10.md): heavy kraken
+        # parse + 9-output rebuild was blocking the Werkzeug request thread
+        # under the GIL. Running in a DiskcacheManager worker frees the
+        # main process for concurrent dashboard interactions. The Input/
+        # State design already hydrates everything via dcc.Store values
+        # (watchlist comes from main-watchlist-store, not the in-process
+        # singleton), so this callback is safe to isolate.
+        background=True,
+        manager=background_callback_manager,
     )
     def update_main_results(
         _fingerprint, apply_clicks, selected_sample, watchlist_store,
@@ -434,12 +444,17 @@ def register_main_callbacks(app: Dash):
         min_abundance = min_abundance or 0.1
         tax_ranks = tax_ranks or ["S", "G"]
 
-        # Get watchlist from WatchlistManager (single source of truth)
-        # The store input (watchlist_store) acts as a change trigger only
-        manager = get_watchlist_manager()
+        # Background-callback isolation: the DiskcacheManager worker is a
+        # separate OS process where the WatchlistManager singleton is
+        # empty (CLAUDE.md "Background callback isolation"). Read the
+        # already-hydrated watchlist from main-watchlist-store (populated
+        # by sync_watchlist in this same file) instead of calling
+        # get_watchlist_manager(). The store data shape mirrors the prior
+        # singleton output, so downstream code is unchanged.
         watchlist = [
-            {"taxid": e.taxid, "name": e.name}
-            for e in manager.get_active_entries().values()
+            {"taxid": e.get("taxid"), "name": e.get("name")}
+            for e in (watchlist_store or [])
+            if e.get("taxid") is not None and e.get("name")
         ]
 
         try:
