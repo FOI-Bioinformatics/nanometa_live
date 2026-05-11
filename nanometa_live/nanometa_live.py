@@ -100,6 +100,22 @@ def handle_exit(app_runner, backend_manager):
 
 def main():
     """Main function to run the Nanometa Live application."""
+    # Raise the per-process file descriptor soft limit toward the hard
+    # limit at the earliest possible moment, before any module-level
+    # singletons (diskcache, watchlist manager, taxonomy api clients)
+    # have a chance to open their first handles. Without this lift the
+    # Linux default of 1024-4096 fds is exhausted within hours by the
+    # combination of DiskcacheManager workers, the fingerprint walker
+    # (up to 50000 stat calls per tick), psutil /proc scans, and
+    # Werkzeug threaded request handling.
+    from nanometa_live.core.utils.rlimit import raise_fd_soft_limit
+    _fd_before, _fd_after = raise_fd_soft_limit()
+    if _fd_after > _fd_before > 0:
+        logging.info(
+            "Raised RLIMIT_NOFILE soft limit: %d -> %d",
+            _fd_before, _fd_after,
+        )
+
     # Parse arguments
     args = parse_arguments()
 
