@@ -197,8 +197,8 @@ def clear_data_cache():
 def _get_dir_latest_mtime(directory: str) -> float:
     """Return the most recent mtime among files in a directory (recursive).
 
-    Walks the entire tree, capped at ``_MAX_FINGERPRINT_FILES`` to bound I/O on
-    very large outdirs. The recursive walk is required so the freshness
+    Walks the entire tree, stat'ing the first ``_MAX_FINGERPRINT_FILES`` files
+    for their mtime. The recursive walk is required so the freshness
     fingerprint advances when files land in nested subdirectories such as the
     real-time Kraken2 layout (``kraken2/<sample>/batch_reports/*``); a
     non-recursive scandir of ``kraken2/`` finds no direct files there and the
@@ -227,23 +227,30 @@ def _get_dir_latest_mtime(directory: str) -> float:
     return latest
 
 
-def _get_path_fingerprint(paths: List[str]) -> Tuple[float, int]:
+def _get_path_fingerprint(paths: List[str]) -> Tuple[float, int, int]:
     """
-    Compute a (max_mtime, total_size) fingerprint for a list of paths.
+    Compute a (max_mtime, total_size, file_count) fingerprint for a list of paths.
 
-    For directories, walks the entire tree (capped at MAX_FINGERPRINT_FILES
-    to bound I/O on very large outdirs) and records the latest file mtime
-    and total size. The recursive walk is required so the fingerprint
-    advances when files land in nested subdirectories such as the v1.5
-    incremental Kraken2 layout (``kraken2/<sample>/batch_reports/*``);
-    a non-recursive scandir of ``kraken2/`` finds no direct files there
-    and the cache would otherwise lock in an empty result.
+    For directories, walks the entire tree and records the latest file mtime
+    plus the running total size. ``stat`` is called on the first
+    ``_MAX_FINGERPRINT_FILES`` files to bound I/O on large outdirs; files past
+    that cap still increment ``file_count`` so newly-added files past the cap
+    advance the fingerprint and invalidate the loader cache. Without the count
+    component the fingerprint would silently plateau on million-file outdirs
+    and the GUI would render stale data.
+
+    The recursive walk is required so the fingerprint advances when files land
+    in nested subdirectories such as the v1.5 incremental Kraken2 layout
+    (``kraken2/<sample>/batch_reports/*``); a non-recursive scandir of
+    ``kraken2/`` finds no direct files there and the cache would otherwise
+    lock in an empty result.
 
     For regular files, uses their individual stat values.
     """
     combined_mtime = 0.0
     combined_size = 0
-    files_seen = 0
+    file_count = 0
+    files_stat = 0
     for fp in paths:
         try:
             st = os.stat(fp)
@@ -251,12 +258,15 @@ def _get_path_fingerprint(paths: List[str]) -> Tuple[float, int]:
             continue
         if os.path.isdir(fp):
             # Walk the tree so files in nested subdirectories advance the
-            # fingerprint. Bounded to keep latency predictable on large outdirs.
+            # fingerprint. stat() is bounded by _MAX_FINGERPRINT_FILES for
+            # latency; the bare count walk continues past the cap so newly
+            # added files still bump the fingerprint via file_count.
             try:
                 for root, _dirs, files in os.walk(fp):
                     for name in files:
-                        if files_seen >= _MAX_FINGERPRINT_FILES:
-                            break
+                        file_count += 1
+                        if files_stat >= _MAX_FINGERPRINT_FILES:
+                            continue
                         try:
                             est = os.stat(os.path.join(root, name))
                         except OSError:
@@ -264,24 +274,27 @@ def _get_path_fingerprint(paths: List[str]) -> Tuple[float, int]:
                         if est.st_mtime > combined_mtime:
                             combined_mtime = est.st_mtime
                         combined_size += est.st_size
-                        files_seen += 1
-                    if files_seen >= _MAX_FINGERPRINT_FILES:
-                        break
+                        files_stat += 1
             except OSError:
                 pass
         else:
+            file_count += 1
             if st.st_mtime > combined_mtime:
                 combined_mtime = st.st_mtime
             combined_size += st.st_size
-    return (combined_mtime, combined_size)
+    return (combined_mtime, combined_size, file_count)
 
 
-# Cap the number of files inspected per fingerprint computation. Picked to
-# comfortably cover several samples each with hundreds of incremental
-# batch reports while still being fast enough to run on every callback
-# poll. If a real outdir ever exceeds this, the fingerprint will plateau
-# but the loader's TTL cache still expires and triggers a fresh parse.
-_MAX_FINGERPRINT_FILES = 5000
+# Cap the number of files stat()-ed per fingerprint computation. The walk
+# itself continues past the cap so newly-added files still advance the
+# fingerprint via file_count, but the per-file stat() cost is bounded.
+# Override at runtime by exporting NANOMETA_MAX_FINGERPRINT_FILES (integer).
+# Default sized for a typical PromethION run (24 barcodes x ~100 batches x
+# a handful of intermediate files each); raise for outdirs that warehouse
+# multiple historical runs in the same tree.
+_MAX_FINGERPRINT_FILES = int(
+    os.environ.get("NANOMETA_MAX_FINGERPRINT_FILES", "50000")
+)
 
 
 def _check_mtime_cache(
@@ -300,12 +313,12 @@ def _check_mtime_cache(
     with _cache_lock:
         if cache_key not in _file_mtimes:
             return None
-        stored_mtime, stored_size, cached_result = _file_mtimes[cache_key]
+        stored_fp, cached_result = _file_mtimes[cache_key]
 
     # Filesystem stat is done outside the lock (I/O should not block other threads)
-    current_mtime, current_size = _get_path_fingerprint(paths)
+    current_fp = _get_path_fingerprint(paths)
 
-    if current_mtime == stored_mtime and current_size == stored_size:
+    if current_fp == stored_fp:
         return cached_result
 
     return None
@@ -316,10 +329,10 @@ def _store_mtime_cache(
     paths: List[str],
     result: Any,
 ) -> None:
-    """Store a result keyed by the combined mtime/size fingerprint of paths."""
-    mtime, size = _get_path_fingerprint(paths)
+    """Store a result keyed by the (mtime, size, count) fingerprint of paths."""
+    fp = _get_path_fingerprint(paths)
     with _cache_lock:
-        _file_mtimes[cache_key] = (mtime, size, result)
+        _file_mtimes[cache_key] = (fp, result)
 
 
 def check_data_freshness(main_dir: str) -> str:
