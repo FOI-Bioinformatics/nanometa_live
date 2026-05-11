@@ -30,6 +30,7 @@ from nanometa_live.app.components.organism_components import (
     ReadStatisticsCard
 )
 from nanometa_live.app.components.modern_components import EmptyStateMessage
+from nanometa_live.app.app import background_callback_manager
 from nanometa_live.app.utils.callback_helpers import (
     validate_config_and_get_main_dir,
     log_callback_error,
@@ -485,6 +486,13 @@ def register_qc_callbacks(app: Dash):
             State("app-config", "data"),
             State("backend-status", "data"),
         ],
+        # Audit item #3 (docs/audit/threading-2026-05-10.md): the QC summary
+        # aggregation walks fastp / seqkit output for every sample and was
+        # blocking the Werkzeug request thread on a 1-2 s pandas parse
+        # under the GIL. All Inputs / States are dcc.Store values, no
+        # singletons, so the callback is safe to isolate in a worker.
+        background=True,
+        manager=background_callback_manager,
     )
     def update_qc_stats(_fingerprint, selected_sample, config, status):
         """Update the QC statistics based on the latest data."""
