@@ -54,6 +54,13 @@ setup(
         ]
     },
     install_requires=requirements,
+    extras_require={
+        'dev': [
+            'pytest>=7.2.1',
+            'pytest-xdist>=3.5.0',
+            'filelock>=3.10.0',
+        ],
+    },
     python_requires='>=3.9',
     classifiers=[
         'Development Status :: 4 - Beta',

@@ -59,22 +59,36 @@ DATASETS = {
 
 @pytest.fixture(scope="session")
 def test_datasets() -> Dict[str, Path]:
-    """Provide paths to all test datasets, generating if missing."""
-    missing = [name for name, path in DATASETS.items() if not path.exists()]
-    if missing:
-        # Auto-generate datasets instead of skipping
-        import sys
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-        from generate_test_datasets import main as generate_main
-        generate_main()
+    """Provide paths to all test datasets, generating if missing.
 
-        # Verify generation succeeded
-        still_missing = [name for name, path in DATASETS.items() if not path.exists()]
-        if still_missing:
-            pytest.skip(f"Failed to generate test datasets: {still_missing}")
+    Under ``pytest-xdist``, every worker spawns its own pytest session and
+    therefore enters this session-scoped fixture independently. Without a
+    cross-process lock the workers race on ``TEST_DATA_DIR`` and corrupt
+    the shared dataset. ``filelock.FileLock`` serialises the generation
+    step; subsequent workers find the datasets already on disk and skip
+    the generator.
+    """
+    import filelock
 
-    # Backdate all generated files so they pass the file stability check
-    _backdate_all_files(TEST_DATA_DIR)
+    TEST_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    lockfile = TEST_DATA_DIR.parent / ".nanometa_test_datasets.lock"
+
+    with filelock.FileLock(str(lockfile)):
+        missing = [name for name, path in DATASETS.items() if not path.exists()]
+        if missing:
+            # Auto-generate datasets instead of skipping
+            import sys
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+            from generate_test_datasets import main as generate_main
+            generate_main()
+
+            # Verify generation succeeded
+            still_missing = [name for name, path in DATASETS.items() if not path.exists()]
+            if still_missing:
+                pytest.skip(f"Failed to generate test datasets: {still_missing}")
+
+        # Backdate all generated files so they pass the file stability check
+        _backdate_all_files(TEST_DATA_DIR)
 
     return DATASETS
 
