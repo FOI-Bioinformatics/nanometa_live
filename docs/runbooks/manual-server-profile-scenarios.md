@@ -105,11 +105,13 @@ kraken_db:                 "/Users/andreassjodin/Desktop/snabbsekvensering/biosh
 processing_mode:    "realtime"
 sample_handling:    "by_barcode"
 analysis_name:      "Scenario_A_multiplex"
-pipeline_profile:   "conda"
+# pipeline_profile is passed verbatim to `nextflow run -profile <value>`.
+# Stack multiple profiles with commas; Nextflow merges them in order.
+# Drop the ",server" suffix on hosts with fewer than 32 cores (the
+# server profile raises resourceLimits to 96 cpus / 512 GB and is
+# tuned for production servers).
+pipeline_profile:   "conda,server"
 pipeline_source:    "/Users/andreassjodin/Code/nanometanf"
-pipeline_profiles_extra:
-  - "server"
-nextflow_extra_args: "--max_cpus 8 --max_memory 32.GB --max_classification_forks=2"
 blast_validation: false
 update_interval_seconds: 10
 realtime_timeout_minutes: 10
@@ -117,6 +119,14 @@ batch_size: 2
 report_write_interval: 1
 max_files: 60
 ```
+
+Resource tuning under the `server` profile (`--max_cpus`,
+`--max_memory`, `--max_classification_forks`) is not yet exposed in
+the GUI's config schema. On a host where the `server` profile
+defaults (32 cpus, 128 GB, 8 forks) are not the right shape, edit
+the desired values directly in `nanometanf/conf/server.config` before
+running, or downgrade to `pipeline_profile: "conda"` to use the
+laptop-friendly base.config ladder.
 
 `output-live/scenario_B.yaml` (flat single_sample): copy of A with
 
