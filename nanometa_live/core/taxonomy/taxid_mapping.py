@@ -607,9 +607,27 @@ def get_database_hash(database_path: str) -> str:
 
 
 def get_mapping_cache_path(database_path: str) -> Path:
-    """Get the cache file path for a database's mappings."""
+    """Get the cache file path for a database's mappings.
+
+    The cache lives under ``<data_dir>/mappings/`` where ``data_dir`` is
+    whatever the running process selected at startup (the CLI entry
+    point in nanometa_live.py exports ``NANOMETA_DATA_DIR`` via
+    ``set_data_dir_env`` from a ``--data-dir`` flag or the loaded
+    config). This mirrors the ``TaxidMapper._cache_dir`` default at
+    line 675 and the readiness checker's lookup path at
+    ``readiness_checker.py:265`` so the writer and reader always meet.
+
+    Earlier revisions hardcoded ``Path.home() / ".nanometa"``; that
+    left mappings stranded at ``~/.nanometa/mappings/`` while readiness
+    looked under the operator-configured ``data_dir``, producing a
+    persistent "Taxid mappings not generated" verdict on hosts where
+    the two paths differed (typical on a server with
+    ``/mnt/<vol>/nanometa_data/`` etc.).
+    """
+    from nanometa_live.core.utils.paths import get_data_dir_from_env
+
     db_hash = get_database_hash(database_path)
-    cache_dir = Path.home() / ".nanometa" / "mappings"
+    cache_dir = Path(get_data_dir_from_env()) / "mappings"
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir / f"{db_hash}_mappings.json"
 
