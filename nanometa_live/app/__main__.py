@@ -71,6 +71,19 @@ logger = logging.getLogger(__name__)
 
 def main():
     """Main entry point for app module."""
+    # Raise the per-process file descriptor soft limit toward the hard
+    # limit at startup. See nanometa_live/core/utils/rlimit.py for the
+    # rationale -- defaults of 1024-4096 are too low for the GUI's
+    # long-running DiskcacheManager + Werkzeug + fingerprint walker
+    # combination.
+    from nanometa_live.core.utils.rlimit import raise_fd_soft_limit
+    _fd_before, _fd_after = raise_fd_soft_limit()
+    if _fd_after > _fd_before > 0:
+        logger.info(
+            "Raised RLIMIT_NOFILE soft limit: %d -> %d",
+            _fd_before, _fd_after,
+        )
+
     args = parse_arguments()
 
     # If --main_dir is provided, run in visualization-only mode
