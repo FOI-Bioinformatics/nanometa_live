@@ -22,6 +22,7 @@ from nanometa_live.core.utils.sample_detector import get_available_samples, get_
 from nanometa_live.core.utils.loader_utils import check_data_freshness
 from nanometa_live.app.utils.callback_helpers import log_callback_error
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+from nanometa_live.app.app import background_callback_manager
 
 
 # update_readiness_indicator runs the full ReadinessChecker every
@@ -793,6 +794,19 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         ],
         Input("update-interval", "n_intervals"),
         Input("app-config", "data"),
+        # Audit item #6 (docs/audit/threading-2026-05-10.md): the cold path
+        # of this callback shells out to ``docker info`` (5 s timeout) and
+        # ``nextflow -version`` (10 s timeout) plus a couple of other
+        # readiness probes, blocking the Werkzeug request thread for up to
+        # ~15-20 s on first run after a configuration change. The 60 s
+        # process-local TTL cache covers the warm path, but cold runs hung
+        # every other Dash callback in flight. Running in a DiskcacheManager
+        # worker isolates the subprocess wait from the main process.
+        # Cache state does not cross the worker boundary, so the worst-case
+        # latency is ~15 s of *worker* time per cold tick; the request
+        # thread stays responsive.
+        background=True,
+        manager=background_callback_manager,
     )
     def update_readiness_indicator(n_intervals, config):
         """Update the readiness badge, popover details, and cached readiness state."""
