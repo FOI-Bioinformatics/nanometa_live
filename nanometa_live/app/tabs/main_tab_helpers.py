@@ -9,6 +9,8 @@ data -- no Dash ``app`` capture -- so they are unit-testable in isolation.
 main_tab.py re-exports these names for backward compatibility.
 """
 
+import logging
+
 import pandas as pd
 from dash import html
 import dash_bootstrap_components as dbc
@@ -276,6 +278,110 @@ def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
     result.sort(key=lambda x: (-int(x['detected']), -x['reads'], x['name'].lower()))
 
     return result
+
+
+def build_organism_export(table_data: list, export_format: str, filename: str = "") -> dict:
+    """Build the dcc.Download payload for an organism-table export.
+
+    Pure given the table rows + format. Returns a dict with ``content`` /
+    ``filename`` (+ ``type`` or ``base64``). ``xlsx`` falls back to CSV when
+    openpyxl is unavailable; an unknown format also falls back to CSV.
+    """
+    if not filename:
+        filename = "organism_results"
+
+    df = pd.DataFrame(table_data)
+
+    if export_format == "csv":
+        return {
+            "content": df.to_csv(index=False),
+            "filename": f"{filename}.csv",
+            "type": "text/csv",
+        }
+    elif export_format == "xlsx":
+        # For Excel, try to use openpyxl, fall back to CSV if not available
+        try:
+            import io
+            import openpyxl  # noqa: F401  (availability check)
+            buffer = io.BytesIO()
+            df.to_excel(buffer, index=False, engine='openpyxl')
+            buffer.seek(0)
+            import base64
+            return {
+                "content": base64.b64encode(buffer.getvalue()).decode(),
+                "filename": f"{filename}.xlsx",
+                "base64": True,
+            }
+        except ImportError:
+            logging.warning("openpyxl not installed, falling back to CSV export")
+            return {
+                "content": df.to_csv(index=False),
+                "filename": f"{filename}.csv",
+                "type": "text/csv",
+            }
+    elif export_format == "txt":
+        # Generate a formatted text report
+        from datetime import datetime
+
+        report_lines = [
+            "=" * 60,
+            "           ORGANISM ANALYSIS REPORT",
+            "=" * 60,
+            "",
+            f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"  Total Organisms: {len(df)}",
+            f"  Total DNA Sequences: {df['reads'].sum():,}",
+            "",
+            "-" * 60,
+            "  TOP ORGANISMS BY ABUNDANCE",
+            "-" * 60,
+            "",
+        ]
+
+        # Table header
+        report_lines.append(f"  {'Rank':<6} {'Organism Name':<35} {'Reads':>10} {'%':>8}")
+        report_lines.append("  " + "-" * 56)
+
+        # Vectorized report line building
+        rank_map = {'S': 'Sp.', 'G': 'Gen.', 'F': 'Fam.', 'O': 'Ord.', 'C': 'Cls.', 'P': 'Phy.', 'D': 'Dom.'}
+        ranks = df['rank'].map(lambda r: rank_map.get(r, r)).tolist()
+        names = df['name'].apply(lambda n: n[:33] + '..' if len(n) > 35 else n).tolist()
+        reads_vals = df['reads'].tolist()
+        abundances = df['abundance'].tolist()
+
+        for rank_display, name, reads_val, abundance in zip(ranks, names, reads_vals, abundances):
+            report_lines.append(
+                f"  {rank_display:<6} {name:<35} {reads_val:>10,} {abundance:>7.1f}%"
+            )
+
+        report_lines.extend([
+            "",
+            "-" * 60,
+            "",
+            "  NOTES:",
+            "  - Sp. = Species, Gen. = Genus, Fam. = Family",
+            "  - Reads = Number of DNA sequences classified",
+            "  - % = Percentage of total classified sequences",
+            "",
+            "=" * 60,
+            "                    END OF REPORT",
+            "=" * 60,
+        ])
+
+        report_content = "\n".join(report_lines)
+
+        return {
+            "content": report_content,
+            "filename": f"{filename}_report.txt",
+            "type": "text/plain",
+        }
+    else:
+        # Fallback to CSV
+        return {
+            "content": df.to_csv(index=False),
+            "filename": f"{filename}.csv",
+            "type": "text/csv",
+        }
 
 
 def create_species_alert_banner(detected_species: list) -> html.Div:
