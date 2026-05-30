@@ -14,7 +14,7 @@ taxonomy ID mapping system.
 
 import logging
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -28,6 +28,11 @@ from nanometa_live.core.watchlist.validation.name_normalizer import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _utcnow():
+    """Naive UTC timestamp, replacing the deprecated stdlib utcnow()."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class DatabaseIndexBuilder:
@@ -177,7 +182,7 @@ class DatabaseIndexBuilder:
             index.database_type = self._detect_taxonomy_type(index)
             index.total_nodes = len(index.by_taxid)
             index.species_count = len([n for n in index.by_taxid.values() if n.rank == "S"])
-            index.built_at = datetime.utcnow()
+            index.built_at = _utcnow()
 
             # Build prefix index for fast searches
             index.build_prefix_index()
@@ -255,7 +260,7 @@ class DatabaseIndexBuilder:
             index.database_type = self._detect_taxonomy_type(index)
             index.total_nodes = len(index.by_taxid)
             index.species_count = len([n for n in index.by_taxid.values() if n.rank == "S"])
-            index.built_at = datetime.utcnow()
+            index.built_at = _utcnow()
 
             # Build prefix index for fast searches
             index.build_prefix_index()
@@ -344,7 +349,7 @@ class DatabaseIndexBuilder:
             index.database_type = self._detect_taxonomy_type(index)
             index.total_nodes = len(index.by_taxid)
             index.species_count = len([n for n in index.by_taxid.values() if n.rank == "S"])
-            index.built_at = datetime.utcnow()
+            index.built_at = _utcnow()
 
             # Build prefix index for fast searches
             index.build_prefix_index()

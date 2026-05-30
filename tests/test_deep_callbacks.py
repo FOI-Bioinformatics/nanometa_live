@@ -12,6 +12,8 @@ import datetime as _dt
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+pytestmark = pytest.mark.callback
 from dash import Dash, no_update
 from dash.exceptions import PreventUpdate
 
@@ -27,27 +29,7 @@ def app_backend():
     return app, backend
 
 
-def _fn(app, output_id, *, input_contains=None):
-    """Return the unwrapped callback for output_id, disambiguated by input id."""
-    cands = []
-    for cb_id, spec in app.callback_map.items():
-        if output_id not in cb_id:
-            continue
-        if input_contains is not None:
-            ids = []
-            for i in spec.get("inputs", []):
-                cid = i.get("id") if isinstance(i, dict) else getattr(i, "component_id", None)
-                ids.append(str(cid))
-            if not any(input_contains in x for x in ids):
-                continue
-        cands.append(spec)
-    assert cands, f"no callback for {output_id} (input_contains={input_contains})"
-    fn = cands[0]["callback"]
-    return getattr(fn, "__wrapped__", fn)
-
-
-def _ctx(triggered_id):
-    return patch.object(cb, "ctx", MagicMock(triggered_id=triggered_id))
+from dash_test_utils import get_callback_fn as _fn, ctx_with as _ctx
 
 
 # --------------------------------------------------------------------------

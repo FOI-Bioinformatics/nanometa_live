@@ -16,12 +16,22 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _utcnow() -> datetime:
+    """Naive UTC timestamp, replacing the deprecated stdlib utcnow().
+
+    ``datetime.now(timezone.utc).replace(tzinfo=None)`` is identical in value
+    to the old ``utcnow()`` (naive, UTC), so isoformat strings and round-trips
+    via ``fromisoformat`` are unchanged.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class MappingConfidence(Enum):
@@ -104,8 +114,8 @@ class TaxidMapping:
     override_reason: Optional[str] = None
 
     # Timestamps
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=_utcnow)
+    updated_at: datetime = field(default_factory=_utcnow)
 
     def is_mapped(self) -> bool:
         """Check if this entry has a valid database mapping."""
@@ -158,8 +168,8 @@ class TaxidMapping:
             verified_by=data.get("verified_by"),
             verified_at=datetime.fromisoformat(data["verified_at"]) if data.get("verified_at") else None,
             override_reason=data.get("override_reason"),
-            created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.utcnow(),
-            updated_at=datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else datetime.utcnow()
+            created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else _utcnow(),
+            updated_at=datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else _utcnow()
         )
 
 
@@ -450,8 +460,8 @@ class TaxidMappingCollection:
     needs_review: int = 0
 
     # Timestamps
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=_utcnow)
+    updated_at: datetime = field(default_factory=_utcnow)
 
     def get_mapping(self, ncbi_taxid: int) -> Optional[TaxidMapping]:
         """Get mapping for an NCBI taxid."""
@@ -491,7 +501,7 @@ class TaxidMappingCollection:
             1 for m in self.mappings.values()
             if m.needs_review()
         )
-        self.updated_at = datetime.utcnow()
+        self.updated_at = _utcnow()
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -528,8 +538,8 @@ class TaxidMappingCollection:
             database_hash=data.get("database_hash", ""),
             database_type=DatabaseTaxonomyType(db_type_str),
             watchlist_version=data.get("watchlist_version", ""),
-            created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.utcnow(),
-            updated_at=datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else datetime.utcnow()
+            created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else _utcnow(),
+            updated_at=datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else _utcnow()
         )
 
         # Load statistics
@@ -1001,9 +1011,9 @@ class TaxidMapper:
             mapping.match_method = "manual_override"
             mapping.manually_verified = True
             mapping.verified_by = verified_by
-            mapping.verified_at = datetime.utcnow()
+            mapping.verified_at = _utcnow()
             mapping.override_reason = reason
-            mapping.updated_at = datetime.utcnow()
+            mapping.updated_at = _utcnow()
         else:
             mapping = TaxidMapping(
                 ncbi_taxid=ncbi_taxid,
@@ -1015,7 +1025,7 @@ class TaxidMapper:
                 match_method="manual_override",
                 manually_verified=True,
                 verified_by=verified_by,
-                verified_at=datetime.utcnow(),
+                verified_at=_utcnow(),
                 override_reason=reason
             )
             self._collection.mappings[ncbi_taxid] = mapping

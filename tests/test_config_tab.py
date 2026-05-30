@@ -11,8 +11,11 @@ danger), including the Kraken2 required-files rule.
 from unittest.mock import MagicMock
 
 import pytest
+
+pytestmark = pytest.mark.callback
 from dash import Dash
 
+from dash_test_utils import get_callback_fn as _callback_fn
 from nanometa_live.app.tabs.config_tab import register_config_callbacks
 
 
@@ -21,14 +24,6 @@ def cfg_app():
     app = Dash(__name__, suppress_callback_exceptions=True)
     register_config_callbacks(app, MagicMock())
     return app
-
-
-def _callback_fn(app, output_id):
-    for cb_id, spec in app.callback_map.items():
-        if output_id in cb_id:
-            fn = spec["callback"]
-            return getattr(fn, "__wrapped__", fn)
-    raise AssertionError(f"No callback found for output {output_id!r}")
 
 
 def _class(component):

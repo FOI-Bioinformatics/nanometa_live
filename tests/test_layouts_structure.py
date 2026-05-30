@@ -32,17 +32,7 @@ LAYOUT_BUILDERS = [
 ]
 
 
-def _collect_string_ids(component, acc):
-    cid = getattr(component, "id", None)
-    if isinstance(cid, str):
-        acc.append(cid)
-    children = getattr(component, "children", None)
-    if isinstance(children, (list, tuple)):
-        for c in children:
-            if isinstance(c, Component):
-                _collect_string_ids(c, acc)
-    elif isinstance(children, Component):
-        _collect_string_ids(children, acc)
+from dash_test_utils import collect_string_ids as _collect_string_ids
 
 
 @pytest.mark.parametrize("builder", LAYOUT_BUILDERS, ids=lambda b: b.__name__)

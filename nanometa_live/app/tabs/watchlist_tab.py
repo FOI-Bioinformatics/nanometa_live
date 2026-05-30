@@ -1192,8 +1192,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
                 entry_data["validated"] = True
 
             if entry_data.get("validated"):
-                from datetime import datetime
-                entry_data["validation_date"] = datetime.utcnow().isoformat() + "Z"
+                from datetime import datetime, timezone
+                entry_data["validation_date"] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
 
         try:
             entry = manager.add_custom_entry(entry_data)
