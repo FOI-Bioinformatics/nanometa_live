@@ -30,24 +30,7 @@ from nanometa_live.app.components.waiting_banner import waiting_for_first_batch_
 from nanometa_live.core.parsers.paf_coverage_parser import CoverageData
 
 
-def _collect_string_ids(component, acc):
-    """Recursively collect string ids from a Dash component tree."""
-    cid = getattr(component, "id", None)
-    if isinstance(cid, str):
-        acc.append(cid)
-    children = getattr(component, "children", None)
-    if isinstance(children, (list, tuple)):
-        for c in children:
-            if isinstance(c, Component):
-                _collect_string_ids(c, acc)
-    elif isinstance(children, Component):
-        _collect_string_ids(children, acc)
-
-
-def _assert_no_duplicate_ids(component):
-    ids = []
-    _collect_string_ids(component, ids)
-    assert len(ids) == len(set(ids)), f"duplicate ids: {ids}"
+from dash_test_utils import collect_string_ids as _collect_string_ids, assert_no_duplicate_ids as _assert_no_duplicate_ids
 
 
 @pytest.fixture

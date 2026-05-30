@@ -12,9 +12,12 @@ watchlist manager, asserting which APIs reach bulk_validate_entries.
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+pytestmark = pytest.mark.callback
 from dash import Dash
 from dash.exceptions import PreventUpdate
 
+from dash_test_utils import get_callback_fn
 from nanometa_live.app.tabs import watchlist_tab as wt
 from nanometa_live.app.tabs.watchlist_tab import register_watchlist_callbacks
 
@@ -23,11 +26,7 @@ from nanometa_live.app.tabs.watchlist_tab import register_watchlist_callbacks
 def validate_fn():
     app = Dash(__name__, suppress_callback_exceptions=True)
     register_watchlist_callbacks(app)
-    for cb_id, spec in app.callback_map.items():
-        if "watchlist-progress-modal.is_open" in cb_id:
-            fn = spec["callback"]
-            return getattr(fn, "__wrapped__", fn)
-    raise AssertionError("validate_entries callback not found")
+    return get_callback_fn(app, "watchlist-progress-modal.is_open")
 
 
 def _call(fn, api_options, config, triggered_id="watchlist-validate-all-btn"):

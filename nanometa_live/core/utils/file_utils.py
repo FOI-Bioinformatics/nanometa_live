@@ -119,7 +119,10 @@ def extract_archive(archive_path: str, extract_dir: str) -> bool:
 
         elif archive_path.endswith(".tar.gz") or archive_path.endswith(".tgz"):
             with tarfile.open(archive_path, "r:gz") as tar_ref:
-                tar_ref.extractall(extract_dir)
+                # filter="data" is the safe extraction policy (no absolute paths,
+                # no traversal, no special files) and silences the Python 3.14
+                # change-of-default DeprecationWarning.
+                tar_ref.extractall(extract_dir, filter="data")
 
         elif archive_path.endswith(".gz"):
             # For single-file gzip, extract to file without .gz extension

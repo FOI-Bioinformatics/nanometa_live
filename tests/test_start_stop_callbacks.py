@@ -12,8 +12,11 @@ without launching any pipeline.
 from unittest.mock import MagicMock
 
 import pytest
+
+pytestmark = pytest.mark.callback
 from dash import Dash, no_update
 
+from dash_test_utils import get_callback_fn
 from nanometa_live.app.callbacks import register_core_callbacks
 
 # Output tuple indices for readability.
@@ -25,11 +28,7 @@ def start_stop():
     app = Dash(__name__, suppress_callback_exceptions=True)
     backend = MagicMock()
     register_core_callbacks(app, backend)
-    for cb_id, spec in app.callback_map.items():
-        if "collision-decision-pending.data" in cb_id:
-            fn = spec["callback"]
-            return getattr(fn, "__wrapped__", fn), backend
-    raise AssertionError("start_or_prompt_stop callback not found")
+    return get_callback_fn(app, "collision-decision-pending.data"), backend
 
 
 class TestStartOrPromptStop:

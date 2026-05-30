@@ -456,6 +456,31 @@ def validate_sunburst_data(data: Dict) -> List[str]:
     return errors
 
 
+@pytest.fixture(autouse=True)
+def _reset_app_global_state():
+    """Reset process-global mutable state between tests.
+
+    app/utils/config_manager keeps a module-level version counter and last-update
+    timestamp, and app/utils/debounce keeps a shared LRU dict. These persist
+    across tests within an xdist worker; resetting them here makes order-dependent
+    failures impossible and keeps the version counter meaningful per test. Imports
+    are lazy so this fixture stays free for the non-dash unit tests too.
+    """
+    yield
+    try:
+        import nanometa_live.app.utils.config_manager as _cm
+        _cm._config_version = 0
+        _cm._last_update_time = 0.0
+    except Exception:
+        pass
+    try:
+        from nanometa_live.app.utils import debounce as _db
+        if hasattr(_db, "reset_debounce"):
+            _db.reset_debounce()
+    except Exception:
+        pass
+
+
 # Export validation functions
 __all__ = [
     "test_datasets",

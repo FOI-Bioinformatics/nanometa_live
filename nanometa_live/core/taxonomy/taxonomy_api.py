@@ -19,7 +19,7 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
@@ -30,6 +30,11 @@ import urllib3
 from nanometa_live.core.utils.offline_cache import get_cache as get_offline_cache
 
 logger = logging.getLogger(__name__)
+
+
+def _utcnow():
+    """Naive UTC timestamp, replacing the deprecated stdlib utcnow()."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 # Default cache location
 DEFAULT_CACHE_DIR = Path.home() / ".nanometa" / "cache"
@@ -57,7 +62,7 @@ class NCBIResult:
         if not self.ncbi_link and self.taxid:
             self.ncbi_link = f"https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id={self.taxid}"
         if not self.cached_at:
-            self.cached_at = datetime.utcnow().isoformat() + "Z"
+            self.cached_at = _utcnow().isoformat() + "Z"
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for caching."""
@@ -81,7 +86,7 @@ class GTDBResult:
 
     def __post_init__(self):
         if not self.cached_at:
-            self.cached_at = datetime.utcnow().isoformat() + "Z"
+            self.cached_at = _utcnow().isoformat() + "Z"
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for caching."""
@@ -141,7 +146,7 @@ class TaxonomyCache:
         """Save cache to disk."""
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-            self._data["last_updated"] = datetime.utcnow().isoformat() + "Z"
+            self._data["last_updated"] = _utcnow().isoformat() + "Z"
             with open(self.cache_file, "w", encoding="utf-8") as f:
                 json.dump(self._data, f, indent=2)
             logger.debug(f"Saved taxonomy cache: {self.cache_file}")
