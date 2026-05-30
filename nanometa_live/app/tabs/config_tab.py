@@ -31,56 +31,11 @@ _configs_dir_mtime: float = -1.0
 _configs_dir_mtime_lock = threading.Lock()
 
 
-def _build_config_list_items(configs):
-    """Build ListGroupItem components for a list of config metadata dicts."""
-    items = []
-    for i, config in enumerate(configs):
-        timestamp = config.get("timestamp", "Unknown")
-        try:
-            dt = datetime.fromisoformat(timestamp)
-            timestamp = dt.strftime("%Y-%m-%d %H:%M:%S")
-        except (ValueError, TypeError):
-            pass
-
-        filename = config.get("filename", "Unknown")
-        is_autosave = filename == "last-session.yaml"
-
-        buttons = [
-            dbc.Button(
-                "Load",
-                id={"type": "load-config-item", "index": i},
-                color="primary",
-                size="sm",
-                className="me-1",
-            ),
-        ]
-        if not is_autosave:
-            buttons.append(
-                dbc.Button(
-                    html.I(className="bi bi-trash"),
-                    id={"type": "delete-config-item", "index": i},
-                    color="danger",
-                    outline=True,
-                    size="sm",
-                    title="Delete this preset",
-                )
-            )
-
-        display_name = config.get("name", "Unnamed Configuration")
-        if is_autosave:
-            display_name = "Last Session (auto-saved)"
-
-        items.append(dbc.ListGroupItem(
-            [
-                html.Div([
-                    html.H5(display_name, className="mb-1"),
-                    html.Small(f"Created: {timestamp}", className="text-muted"),
-                ]),
-                html.Div(buttons, className="d-flex align-items-center"),
-            ],
-            className="d-flex justify-content-between align-items-center",
-        ))
-    return items
+# _build_config_list_items extracted to config_tab_helpers.py; re-exported so the
+# callbacks below (and any importers) keep working.
+from nanometa_live.app.tabs.config_tab_helpers import (  # noqa: E402
+    _build_config_list_items,
+)
 
 
 def register_config_callbacks(app: Dash, backend_manager: BackendManager):
