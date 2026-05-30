@@ -1,0 +1,178 @@
+"""
+Unit tests for the pure-logic callbacks in app/callbacks.py.
+
+app/callbacks.py is ~1900 lines and was only exercised indirectly. These tests
+register the core callbacks on a throwaway Dash app, pull each registered
+function out of ``callback_map`` (unwrapping Dash's add_context decorator), and
+drive it directly with constructed Store inputs -- the same technique used by
+test_verdict_banner_callback.py. Coverage targets the deterministic helpers and
+the start/stop + status state machines, plus the results-fingerprint gate.
+"""
+
+from unittest.mock import MagicMock
+
+import pytest
+from dash import Dash
+from dash.exceptions import PreventUpdate
+
+from nanometa_live.app.callbacks import _readiness_cache_key, register_core_callbacks
+
+
+@pytest.fixture
+def core_app():
+    app = Dash(__name__, suppress_callback_exceptions=True)
+    register_core_callbacks(app, MagicMock())
+    return app
+
+
+def _callback_fn(app, output_id):
+    """Return the unwrapped function whose output list includes output_id."""
+    for cb_id, spec in app.callback_map.items():
+        if output_id in cb_id:
+            fn = spec["callback"]
+            return getattr(fn, "__wrapped__", fn)
+    raise AssertionError(f"No callback found for output {output_id!r}")
+
+
+class TestReadinessCacheKey:
+    def test_none_config_sentinel(self):
+        assert _readiness_cache_key(None) == "no-config"
+
+    def test_irrelevant_field_does_not_change_key(self):
+        base = {"kraken_db": "/db", "main_dir": "/m"}
+        with_extra = {**base, "last_selected_sample": "barcode09", "ui_theme": "dark"}
+        assert _readiness_cache_key(base) == _readiness_cache_key(with_extra)
+
+    def test_relevant_field_changes_key(self):
+        a = {"kraken_db": "/db/a"}
+        b = {"kraken_db": "/db/b"}
+        assert _readiness_cache_key(a) != _readiness_cache_key(b)
+
+
+class TestUpdateInterval:
+    def test_uses_config_seconds(self, core_app):
+        fn = _callback_fn(core_app, "update-interval.interval")
+        assert fn({"update_interval_seconds": 10}) == 10000
+
+    def test_default_when_missing(self, core_app):
+        fn = _callback_fn(core_app, "update-interval.interval")
+        assert fn({}) == 30000
+
+
+class TestToggleOfflineBadge:
+    def test_visible_when_offline(self, core_app):
+        fn = _callback_fn(core_app, "offline-mode-badge.style")
+        assert fn({"offline_mode": True}) == {"fontSize": "0.7rem"}
+
+    def test_hidden_otherwise(self, core_app):
+        fn = _callback_fn(core_app, "offline-mode-badge.style")
+        assert fn({})["display"] == "none"
+
+
+class TestUpdateStatusDisplay:
+    def test_standby_when_no_status(self, core_app):
+        fn = _callback_fn(core_app, "status-indicator.color")
+        color, text, _ = fn(None, {})
+        assert (color, text) == ("gray", "STANDBY")
+
+    def test_visualization_mode(self, core_app):
+        fn = _callback_fn(core_app, "status-indicator.color")
+        color, text, _ = fn({"running": False}, {"visualization_only": True})
+        assert (color, text) == ("blue", "VIEWING")
+
+    def test_running_batch_clamps_processed_to_total(self, core_app):
+        fn = _callback_fn(core_app, "status-indicator.color")
+        status = {"running": True, "files_processed": 99, "files_waiting": 10}
+        color, text, details = fn(status, {"processing_mode": "batch"})
+        assert (color, text) == ("green", "RUNNING")
+        assert "10 / 10" in details  # clamped to the inbox total
+
+    def test_running_realtime_does_not_clamp(self, core_app):
+        fn = _callback_fn(core_app, "status-indicator.color")
+        status = {"running": True, "files_processed": 99, "files_waiting": 10}
+        _, _, details = fn(status, {"processing_mode": "realtime"})
+        assert "99 / 10" in details  # realtime inbox is a moving snapshot
+
+    def test_error_status(self, core_app):
+        fn = _callback_fn(core_app, "status-indicator.color")
+        color, text, _ = fn({"pipeline_status": "error", "errors": ["boom"]}, {})
+        assert (color, text) == ("red", "ERROR")
+
+
+class TestUpdateControlButton:
+    def test_disabled_without_status_or_config(self, core_app):
+        fn = _callback_fn(core_app, "start-stop-button.children")
+        children, color, disabled = fn(None, None, None)
+        assert disabled is True
+
+    def test_visualization_mode_disables(self, core_app):
+        fn = _callback_fn(core_app, "start-stop-button.children")
+        _, color, disabled = fn({"running": False}, {"visualization_only": True}, None)
+        assert (color, disabled) == ("secondary", True)
+
+    def test_running_shows_stop(self, core_app):
+        # config must be truthy/non-empty to pass the `not config` guard.
+        fn = _callback_fn(core_app, "start-stop-button.children")
+        _, color, disabled = fn({"running": True}, {"processing_mode": "batch"}, None)
+        assert (color, disabled) == ("danger", False)
+
+    def test_ready_enables_start(self, core_app):
+        fn = _callback_fn(core_app, "start-stop-button.children")
+        _, _, disabled = fn({"running": False}, {"processing_mode": "batch"}, {"ready": True})
+        assert disabled is False
+
+    def test_not_ready_disables_start(self, core_app):
+        fn = _callback_fn(core_app, "start-stop-button.children")
+        _, _, disabled = fn({"running": False}, {"processing_mode": "batch"}, {"ready": False})
+        assert disabled is True
+
+
+class TestUpdateStartTooltip:
+    def test_modes(self, core_app):
+        fn = _callback_fn(core_app, "start-analysis-tooltip.children")
+        assert "visualization mode" in fn({"visualization_only": True}, None)
+        assert "Stop" in fn({}, {"running": True})
+        assert "Begin processing" in fn({}, {"running": False})
+
+
+class TestUpdateHeaderTitle:
+    def test_uses_analysis_name(self, core_app):
+        fn = _callback_fn(core_app, "header-title.children")
+        assert fn({"analysis_name": "Run 7"}) == "Run 7"
+
+    def test_default_title(self, core_app):
+        fn = _callback_fn(core_app, "header-title.children")
+        assert fn({}) == "Nanometa Live Analysis"
+
+
+class TestComputeResultsFingerprint:
+    def test_no_config_prevents_update(self, core_app):
+        fn = _callback_fn(core_app, "results-fingerprint.data")
+        with pytest.raises(PreventUpdate):
+            fn(1, None, None)
+
+    def test_emits_fingerprint_for_populated_dir(self, core_app, tmp_path):
+        kraken = tmp_path / "kraken2"
+        kraken.mkdir()
+        (kraken / "barcode01.kraken2.report.txt").write_text(
+            "100.00\t10\t10\tS\t562\tEscherichia coli\n"
+        )
+        config = {
+            "results_output_directory": str(tmp_path),
+            "main_dir": str(tmp_path),
+        }
+        fn = _callback_fn(core_app, "results-fingerprint.data")
+        result = fn(1, config, None)
+        assert "fp" in result and result["fp"]
+
+    def test_unchanged_fingerprint_prevents_update(self, core_app, tmp_path):
+        kraken = tmp_path / "kraken2"
+        kraken.mkdir()
+        (kraken / "barcode01.kraken2.report.txt").write_text(
+            "100.00\t10\t10\tS\t562\tEscherichia coli\n"
+        )
+        config = {"results_output_directory": str(tmp_path), "main_dir": str(tmp_path)}
+        fn = _callback_fn(core_app, "results-fingerprint.data")
+        first = fn(1, config, None)
+        with pytest.raises(PreventUpdate):
+            fn(2, config, first)
