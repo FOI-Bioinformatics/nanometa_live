@@ -16,9 +16,52 @@ from nanometa_live.app.tabs.qc_tab_helpers import (
     _build_stage_strip_slot,
     _get_empty_qc_figures,
     _is_amplicon_mode,
+    compute_qc_stat_lines,
 )
 
 pytestmark = pytest.mark.unit
+
+
+class TestComputeQcStatLines:
+    def _counts(self, **over):
+        base = dict(
+            tot_reads_pre_filt=1000, tot_passed_reads=900, tot_removed_reads=100,
+            tot_low_quality_reads=60, tot_too_short_reads=30, tot_too_many_N_reads=10,
+            classified_reads=800, unclassified_reads=100, processed_files=5,
+            waiting_files=2, chopper_estimated=False,
+        )
+        base.update(over)
+        return base
+
+    def test_returns_ten_lines(self):
+        lines = compute_qc_stat_lines(**self._counts())
+        assert len(lines) == 10
+
+    def test_percentages_and_separators(self):
+        lines = compute_qc_stat_lines(**self._counts())
+        assert "1,000" in lines[0]                 # raw reads, thousands sep
+        assert "900 (90.0%)" in lines[1]           # passed = 900/1000
+        assert "100 (10.0%)" in lines[2]           # removed = 100/1000
+        assert "60 (60.0%)" in lines[3]            # low quality = 60/100 removed
+        assert "Classified reads: 800 (88.9%)" in lines[6]  # 800/900
+        assert lines[8] == "Files processed: 5"
+        assert lines[9] == "Files awaiting processing: 2"
+
+    def test_chopper_estimated_marks_categories(self):
+        lines = compute_qc_stat_lines(**self._counts(chopper_estimated=True))
+        assert "(est.)" in lines[3]
+
+    def test_zero_prefilter_shows_unavailable(self):
+        lines = compute_qc_stat_lines(**self._counts(tot_reads_pre_filt=0))
+        assert "not available for Chopper pipeline" in lines[0]
+
+    def test_seqkit_overcount_adjusts_baseline(self):
+        # passed > pre_filt -> baseline bumped, removed zeroed, passed shows 100%.
+        lines = compute_qc_stat_lines(**self._counts(
+            tot_reads_pre_filt=500, tot_passed_reads=900, tot_removed_reads=100,
+        ))
+        assert "900 (100.0%)" in lines[1]
+        assert "0 (0.0%)" in lines[2]
 
 
 class TestIsAmpliconMode:

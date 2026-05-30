@@ -165,6 +165,105 @@ def _build_stage_strip(raw_reads, filtered_reads, classified_reads, unclassified
     return html.Div(body_children, className="stage-strip-container")
 
 
+def compute_qc_stat_lines(
+    *,
+    tot_reads_pre_filt: int,
+    tot_passed_reads: int,
+    tot_removed_reads: int,
+    tot_low_quality_reads: int,
+    tot_too_short_reads: int,
+    tot_too_many_N_reads: int,
+    classified_reads: int,
+    unclassified_reads: int,
+    processed_files: int,
+    waiting_files: int,
+    chopper_estimated: bool = False,
+) -> list:
+    """Turn the raw QC read counts into the ten formatted stat-tile strings.
+
+    Pure: takes the counts the update_qc_stats callback gathers from disk and
+    returns the display strings (percentages + thousands separators), including
+    the pre-filter baseline adjustment for the seqkit-over-counts-kraken2 case.
+    """
+    # When post-filter count exceeds pre-filter baseline (seqkit may count
+    # slightly more reads than kraken2 processed), adjust to avoid impossible %
+    if tot_passed_reads > tot_reads_pre_filt and tot_reads_pre_filt > 0:
+        tot_reads_pre_filt = tot_passed_reads
+        tot_removed_reads = 0
+    percentage_passed = 0
+    percentage_removed = 0
+    if tot_reads_pre_filt > 0:
+        percentage_passed = min(round(
+            (tot_passed_reads * 100) / tot_reads_pre_filt, 1
+        ), 100.0)
+        percentage_removed = max(round(
+            (tot_removed_reads * 100) / tot_reads_pre_filt, 1
+        ), 0.0)
+
+    percentage_low_quality = 0
+    percentage_too_many_N = 0
+    percentage_too_short = 0
+    if tot_removed_reads > 0:
+        percentage_low_quality = round(
+            (tot_low_quality_reads * 100) / tot_removed_reads, 1
+        )
+        percentage_too_many_N = round(
+            (tot_too_many_N_reads * 100) / tot_removed_reads, 1
+        )
+        percentage_too_short = round(
+            (tot_too_short_reads * 100) / tot_removed_reads, 1
+        )
+
+    percentage_classified = 0
+    percentage_unclassified = 0
+    total_kraken_reads = classified_reads + unclassified_reads
+    if total_kraken_reads > 0:
+        percentage_classified = round(
+            (classified_reads * 100) / total_kraken_reads, 1
+        )
+        percentage_unclassified = round(
+            (unclassified_reads * 100) / total_kraken_reads, 1
+        )
+
+    # Format output strings
+    if tot_reads_pre_filt > 0:
+        reads_pre_filtering = f"Raw reads (pre-Chopper): {tot_reads_pre_filt:,}"
+    else:
+        reads_pre_filtering = "Raw reads (pre-Chopper): — (not available for Chopper pipeline)"
+    reads_passed = f"Reads that passed filtering: {tot_passed_reads:,} ({percentage_passed}%)"
+    reads_removed = (
+        f"Total reads removed: {tot_removed_reads:,} ({percentage_removed}%)"
+    )
+
+    # When chopper is used, the per-category breakdown is an
+    # approximation (chopper does not report these individually).
+    est = " (est.)" if chopper_estimated else ""
+    low_quality = f"Too low quality{est}: {tot_low_quality_reads:,} ({percentage_low_quality}%)"
+    too_short = f"Too short{est}: {tot_too_short_reads:,} ({percentage_too_short}%)"
+    low_complexity = f"Too low complexity{est}: {tot_too_many_N_reads:,} ({percentage_too_many_N}%)"
+
+    classified = (
+        f"Classified reads: {classified_reads:,} ({percentage_classified}%)"
+    )
+    unclassified = f"Unclassified reads: {unclassified_reads:,} ({percentage_unclassified}%)"
+
+    processed = f"Files processed: {processed_files:,}"
+    waiting = f"Files awaiting processing: {waiting_files:,}"
+
+    return [
+        reads_pre_filtering,
+        reads_passed,
+        reads_removed,
+        low_quality,
+        too_short,
+        low_complexity,
+        classified,
+        unclassified,
+        processed,
+        waiting,
+    ]
+
+
 def _build_stage_strip_empty():
     """Return a minimal Stage Strip placeholder when no data is available."""
     return html.Div([
