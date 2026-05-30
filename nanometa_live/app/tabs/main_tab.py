@@ -57,6 +57,7 @@ from nanometa_live.app.tabs.main_tab_helpers import (  # noqa: E402
     filter_detected_species,
     get_all_watchlist_with_detection,
     create_species_alert_banner,
+    build_organism_export,
 )
 
 
@@ -643,103 +644,8 @@ def register_main_callbacks(app: Dash):
             return no_update
 
         try:
-            # Default filename
-            if not filename:
-                filename = "organism_results"
-
-            df = pd.DataFrame(table_data)
-
-            if export_format == "csv":
-                return {
-                    "content": df.to_csv(index=False),
-                    "filename": f"{filename}.csv",
-                    "type": "text/csv"
-                }
-            elif export_format == "xlsx":
-                # For Excel, try to use openpyxl, fall back to CSV if not available
-                try:
-                    import io
-                    import openpyxl  # Check if available
-                    buffer = io.BytesIO()
-                    df.to_excel(buffer, index=False, engine='openpyxl')
-                    buffer.seek(0)
-                    import base64
-                    return {
-                        "content": base64.b64encode(buffer.getvalue()).decode(),
-                        "filename": f"{filename}.xlsx",
-                        "base64": True
-                    }
-                except ImportError:
-                    logging.warning("openpyxl not installed, falling back to CSV export")
-                    # Fall back to CSV
-                    return {
-                        "content": df.to_csv(index=False),
-                        "filename": f"{filename}.csv",
-                        "type": "text/csv"
-                    }
-            elif export_format == "txt":
-                # Generate a formatted text report
-                from datetime import datetime
-
-                report_lines = [
-                    "=" * 60,
-                    "           ORGANISM ANALYSIS REPORT",
-                    "=" * 60,
-                    "",
-                    f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                    f"  Total Organisms: {len(df)}",
-                    f"  Total DNA Sequences: {df['reads'].sum():,}",
-                    "",
-                    "-" * 60,
-                    "  TOP ORGANISMS BY ABUNDANCE",
-                    "-" * 60,
-                    "",
-                ]
-
-                # Table header
-                report_lines.append(f"  {'Rank':<6} {'Organism Name':<35} {'Reads':>10} {'%':>8}")
-                report_lines.append("  " + "-" * 56)
-
-                # Vectorized report line building
-                rank_map = {'S': 'Sp.', 'G': 'Gen.', 'F': 'Fam.', 'O': 'Ord.', 'C': 'Cls.', 'P': 'Phy.', 'D': 'Dom.'}
-                ranks = df['rank'].map(lambda r: rank_map.get(r, r)).tolist()
-                names = df['name'].apply(lambda n: n[:33] + '..' if len(n) > 35 else n).tolist()
-                reads_vals = df['reads'].tolist()
-                abundances = df['abundance'].tolist()
-
-                for rank_display, name, reads_val, abundance in zip(ranks, names, reads_vals, abundances):
-                    report_lines.append(
-                        f"  {rank_display:<6} {name:<35} {reads_val:>10,} {abundance:>7.1f}%"
-                    )
-
-                report_lines.extend([
-                    "",
-                    "-" * 60,
-                    "",
-                    "  NOTES:",
-                    "  - Sp. = Species, Gen. = Genus, Fam. = Family",
-                    "  - Reads = Number of DNA sequences classified",
-                    "  - % = Percentage of total classified sequences",
-                    "",
-                    "=" * 60,
-                    "                    END OF REPORT",
-                    "=" * 60,
-                ])
-
-                report_content = "\n".join(report_lines)
-
-                return {
-                    "content": report_content,
-                    "filename": f"{filename}_report.txt",
-                    "type": "text/plain"
-                }
-            else:
-                # Fallback to CSV
-                return {
-                    "content": df.to_csv(index=False),
-                    "filename": f"{filename}.csv",
-                    "type": "text/csv"
-                }
+            # Export payload construction is a pure function in main_tab_helpers.
+            return build_organism_export(table_data, export_format, filename)
 
         except Exception as e:
             logging.error(f"Error exporting data: {e}")

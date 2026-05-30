@@ -15,6 +15,7 @@ import dash_bootstrap_components as dbc
 from nanometa_live.app.tabs import main_tab_helpers as mh
 from nanometa_live.app.tabs.main_tab_helpers import (
     add_species_to_watchlist,
+    build_organism_export,
     create_species_alert_banner,
     filter_detected_species,
     get_all_watchlist_with_detection,
@@ -23,6 +24,45 @@ from nanometa_live.app.tabs.main_tab_helpers import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+ORGANISM_ROWS = [
+    {"rank": "S", "name": "Escherichia coli", "reads": 1500, "abundance": 60.0},
+    {"rank": "G", "name": "Staphylococcus", "reads": 500, "abundance": 20.0},
+]
+
+
+class TestBuildOrganismExport:
+    def test_csv(self):
+        out = build_organism_export(ORGANISM_ROWS, "csv", "myrun")
+        assert out["filename"] == "myrun.csv"
+        assert out["type"] == "text/csv"
+        assert "Escherichia coli" in out["content"]
+        assert out["content"].splitlines()[0].startswith("rank,name,reads,abundance")
+
+    def test_default_filename(self):
+        assert build_organism_export(ORGANISM_ROWS, "csv", "")["filename"] == "organism_results.csv"
+
+    def test_txt_report_structure(self):
+        out = build_organism_export(ORGANISM_ROWS, "txt", "run")
+        assert out["filename"] == "run_report.txt"
+        content = out["content"]
+        assert "ORGANISM ANALYSIS REPORT" in content
+        assert "Total Organisms: 2" in content
+        assert "Total DNA Sequences: 2,000" in content  # 1500 + 500
+        assert "Sp." in content and "Gen." in content  # rank abbreviations
+
+    def test_unknown_format_falls_back_to_csv(self):
+        out = build_organism_export(ORGANISM_ROWS, "weird", "x")
+        assert out["filename"] == "x.csv"
+        assert out["type"] == "text/csv"
+
+    def test_xlsx_or_csv_fallback(self):
+        # openpyxl may or may not be installed; either a base64 xlsx or a CSV
+        # fallback is acceptable -- both are valid download payloads.
+        out = build_organism_export(ORGANISM_ROWS, "xlsx", "x")
+        assert out["filename"] in ("x.xlsx", "x.csv")
+        assert "content" in out
 
 
 class TestWatchlistListOps:
