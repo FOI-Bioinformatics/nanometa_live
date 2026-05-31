@@ -54,13 +54,19 @@ class TestUpdateInterval:
 
 
 class TestToggleOfflineBadge:
+    # The callback now returns (badge_style, toggle_value) so the header
+    # toggle stays in sync with the config; assert on the style element.
     def test_visible_when_offline(self, core_app):
         fn = _callback_fn(core_app, "offline-mode-badge.style")
-        assert fn({"offline_mode": True}) == {"fontSize": "0.7rem"}
+        style, value = fn({"offline_mode": True})
+        assert style == {"fontSize": "0.7rem"}
+        assert value is True
 
     def test_hidden_otherwise(self, core_app):
         fn = _callback_fn(core_app, "offline-mode-badge.style")
-        assert fn({})["display"] == "none"
+        style, value = fn({})
+        assert style["display"] == "none"
+        assert value is False
 
 
 class TestUpdateStatusDisplay:

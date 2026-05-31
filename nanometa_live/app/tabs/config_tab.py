@@ -456,9 +456,9 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             State("validation-identity-input", "value"),
             State("kraken2-confidence-input", "value"),
             State("kraken2-hitgroups-input", "value"),
-            # Newly exposed settings (2026-05-31): offline mode, realtime
-            # file-age bound, and the on-demand-validation read gate.
-            State("offline-mode-input", "value"),
+            # Newly exposed settings (2026-05-31): realtime file-age bound and
+            # the on-demand-validation read gate. (Offline mode is toggled
+            # live from the header, not from this form.)
             State("max-file-age-input", "value"),
             State("min-reads-for-validation-input", "value"),
             State("app-config", "data"),
@@ -505,7 +505,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         validation_identity,
         kraken2_confidence,
         kraken2_hitgroups,
-        offline_mode,
         max_file_age_minutes,
         min_reads_for_validation,
         current_config,
@@ -846,8 +845,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             config["kraken2_minimum_hit_groups"] = int(kraken2_hitgroups)
 
         # Newly exposed settings (2026-05-31).
-        if offline_mode is not None:
-            config["offline_mode"] = bool(offline_mode)
         if max_file_age_minutes is not None and max_file_age_minutes != "":
             config["max_file_age_minutes"] = int(max_file_age_minutes)
         if min_reads_for_validation is not None:
@@ -1020,7 +1017,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("kraken2-confidence-input", "value"),
             Output("kraken2-hitgroups-input", "value"),
             # Newly exposed settings (2026-05-31)
-            Output("offline-mode-input", "value"),
             Output("max-file-age-input", "value"),
             Output("min-reads-for-validation-input", "value"),
             Output("config-form-initialized", "data"),
@@ -1031,7 +1027,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     def initialize_form_from_config(refresh_trigger, config):
         """Initialize form fields from the current configuration."""
         if not config:
-            return [no_update] * 43
+            return [no_update] * 42
 
         # Extract values from config
         analysis_name = config.get("analysis_name", "")
@@ -1134,7 +1130,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         kraken2_hitgroups = config.get("kraken2_minimum_hit_groups", 0)
 
         # Newly exposed settings (2026-05-31).
-        offline_mode = bool(config.get("offline_mode", False))
         max_file_age_minutes = config.get("max_file_age_minutes", 1000000)
         min_reads_for_validation = config.get("min_reads_for_validation", 50)
 
@@ -1177,7 +1172,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             validation_identity,
             kraken2_confidence,
             kraken2_hitgroups,
-            offline_mode,
             max_file_age_minutes,
             min_reads_for_validation,
             True,  # Mark form as initialized (suppresses first "Modified" badge)
@@ -1604,34 +1598,70 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
     @app.callback(
         Output("results-dir-status", "children"),
+        Output("results-dir-feedback", "children"),
         Input("results-dir-input", "value"),
         prevent_initial_call=True,
     )
     def validate_results_directory(path):
-        """Provide real-time validation feedback for results output directory."""
+        """Provide real-time validation feedback for results output directory.
+
+        Beyond the writability icon, warn (advisory only) when the folder
+        already contains result data so the operator knows that Start will
+        prompt to archive or resume rather than silently overwrite."""
         if not path or not path.strip():
             # Empty is OK - will use default ~/nanometa_results
-            return html.I(className="bi bi-info-circle text-muted")
+            return html.I(className="bi bi-info-circle text-muted"), ""
 
         expanded_path = os.path.expanduser(path)
+
+        # Existing-results advisory (independent of the writability icon).
+        feedback = ""
+        try:
+            found = backend_manager.detect_existing_results(expanded_path) if backend_manager else []
+        except Exception:
+            found = []
+        if found:
+            has_meta = (
+                backend_manager.read_run_metadata(expanded_path) is not None
+                if backend_manager else False
+            )
+            if has_meta:
+                feedback = html.Small(
+                    [
+                        html.I(className="bi bi-info-circle me-1"),
+                        "This folder already contains Nanometa Live results. "
+                        "Start will prompt to archive or resume.",
+                    ],
+                    className="text-warning",
+                )
+            else:
+                feedback = html.Small(
+                    [
+                        html.I(className="bi bi-exclamation-triangle-fill me-1"),
+                        "This folder contains data not created by Nanometa Live. "
+                        "Start will require moving it to a subfolder first.",
+                    ],
+                    className="text-danger",
+                )
 
         if os.path.exists(expanded_path):
             if os.path.isdir(expanded_path):
                 # Directory exists - check if writable
                 if os.access(expanded_path, os.W_OK):
-                    return html.I(className="bi bi-check-circle text-success")
+                    icon = html.I(className="bi bi-check-circle text-success")
                 else:
-                    return html.I(className="bi bi-exclamation-triangle text-warning")
+                    icon = html.I(className="bi bi-exclamation-triangle text-warning")
             else:
                 # Path exists but is not a directory
-                return html.I(className="bi bi-x-circle text-danger")
+                icon = html.I(className="bi bi-x-circle text-danger")
         else:
             # Directory doesn't exist - will be created (show info icon)
             parent = os.path.dirname(expanded_path)
             if parent and os.path.exists(parent) and os.access(parent, os.W_OK):
-                return html.I(className="bi bi-plus-circle text-info")
+                icon = html.I(className="bi bi-plus-circle text-info")
             else:
-                return html.I(className="bi bi-exclamation-triangle text-warning")
+                icon = html.I(className="bi bi-exclamation-triangle text-warning")
+        return icon, feedback
 
     @app.callback(
         Output("pipeline-path-status", "children"),

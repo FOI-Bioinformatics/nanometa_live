@@ -85,6 +85,7 @@ def render_collision_body(
     outdir: str,
     found: List[str],
     input_match: object = None,
+    has_metadata: bool = True,
 ) -> html.Div:
     """Return the body children for the modal given the detection result.
 
@@ -96,6 +97,11 @@ def render_collision_body(
         * False -- the new input differs; warn loudly because resuming
                    would mix unrelated data.
         * None  -- no prior fingerprint on disk; stay neutral.
+
+    ``has_metadata`` is False when the folder holds result-shaped data but
+    no ``.nanometa.run.json`` -- i.e. data this app did not create. Resuming
+    over foreign data is meaningless and risks clobbering it, so the caller
+    hides the Resume button and this function shows a distinct red warning.
     """
     if not found:
         # Should not normally render; defensive fallback.
@@ -105,7 +111,22 @@ def render_collision_body(
         )
 
     mismatch_banner = None
-    if input_match is False:
+    if not has_metadata:
+        # Foreign data: not produced by Nanometa Live (no run metadata).
+        mismatch_banner = dbc.Alert(
+            [
+                html.I(className="bi bi-exclamation-triangle-fill me-2"),
+                html.Strong("This folder contains data not created by Nanometa Live."),
+                " ",
+                "There is no run record (.nanometa.run.json) here, so its "
+                "contents are unknown. Move the existing data to a subfolder "
+                "to continue, or cancel and choose a different output "
+                "directory. Resuming is disabled to avoid clobbering it.",
+            ],
+            color="danger",
+            className="mb-3",
+        )
+    elif input_match is False:
         mismatch_banner = dbc.Alert(
             [
                 html.I(
@@ -173,19 +194,27 @@ def render_collision_body(
                         ],
                         className="mb-2",
                     ),
-                    html.Li(
-                        [
-                            html.Strong("Continue (resume)"),
-                            " -- ",
-                            "Reuses the existing results and asks "
-                            "Nextflow to skip already-completed steps "
-                            "via ",
-                            html.Code("-resume"),
-                            ". Only safe when the new input is the same "
-                            "as the previous run.",
-                        ],
-                        className="mb-2",
-                    ),
+                ]
+                + (
+                    [
+                        html.Li(
+                            [
+                                html.Strong("Continue (resume)"),
+                                " -- ",
+                                "Reuses the existing results and asks "
+                                "Nextflow to skip already-completed steps "
+                                "via ",
+                                html.Code("-resume"),
+                                ". Only safe when the new input is the same "
+                                "as the previous run.",
+                            ],
+                            className="mb-2",
+                        ),
+                    ]
+                    if has_metadata
+                    else []
+                )
+                + [
                     html.Li(
                         [
                             html.Strong("Cancel"),

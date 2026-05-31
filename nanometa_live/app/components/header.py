@@ -113,6 +113,32 @@ def create_header(title="Nanometa Live"):
             # Control buttons
             dbc.Col([
                 html.Div([
+                    # Offline/online toggle. Flips network access live (NCBI/
+                    # GTDB/genome clients are re-initialised) and persists the
+                    # choice. The OFFLINE badge above mirrors the same state.
+                    html.Div(
+                        [
+                            dbc.Switch(
+                                id="offline-mode-toggle",
+                                label="Offline",
+                                value=False,
+                                className="mb-0",
+                            ),
+                            html.I(className="bi bi-info-circle text-muted ms-1",
+                                   id="offline-toggle-info",
+                                   style={"cursor": "help"}),
+                            dbc.Tooltip(
+                                "Offline mode makes no network calls (no NCBI/GTDB "
+                                "taxonomy or genome downloads, no GitHub pipeline "
+                                "probe). Use it on air-gapped or field machines. "
+                                "The change takes effect immediately and is saved.",
+                                target="offline-toggle-info",
+                            ),
+                        ],
+                        className="d-flex align-items-center me-3 align-self-center",
+                        title="Toggle offline (no network) mode",
+                    ),
+
                     # Readiness indicator with hover details
                     html.Div(
                         id="readiness-indicator",

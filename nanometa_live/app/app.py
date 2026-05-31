@@ -170,24 +170,19 @@ def create_app(
     config: Dict[str, Any],
     data_dir: str,
     backend_manager: BackendManager,
-    *,
-    deferred_session: Optional[Dict[str, Any]] = None,
 ) -> Dash:
     """
     Create and configure the Dash application.
+
+    Boot is always fresh: there is no automatic session restore. A prior
+    configuration can be restored deliberately from Configuration > Load,
+    and a finished run's data can be viewed via the "Open Results" control
+    in the secondary bar.
 
     Args:
         config: Application configuration
         data_dir: Per-installation data directory (e.g. ~/.nanometa)
         backend_manager: BackendManager instance
-        deferred_session: Optional metadata describing a previous
-            session YAML the operator may opt to load. Shape:
-            ``{"path": <abspath>, "mtime": <float>, "mtime_iso": <str>}``.
-            When provided, the GUI surfaces a Resume/Discard banner so
-            visualisation of already-processed data is an explicit
-            choice rather than the silent default.
-        data_dir: Directory for application data
-        backend_manager: Backend manager instance
 
     Returns:
         Configured Dash application
@@ -341,13 +336,6 @@ def create_app(
         dcc.Store(id='backend-status', data={"running": False}),
         dcc.Store(id='app-data-dir', data=data_dir),
         dcc.Store(id='kraken-databases', data=kraken_databases),
-        # Metadata about a previous-session YAML the operator may opt
-        # to resume. None on a clean boot or after the operator
-        # discards the session. See nanometa_live.py main() for the
-        # population logic and app/callbacks.py for the
-        # Resume/Discard handlers.
-        dcc.Store(id='deferred-last-session', data=deferred_session),
-
         # Configuration state tracking stores
         dcc.Store(id='config-source', data={
             "type": "file",  # "file", "default", or "unsaved"
@@ -434,22 +422,6 @@ def create_app(
             disabled=False
         ),
 
-        # Resume-previous-session banner. Hidden by default; the
-        # callback `update_resume_session_banner` (app/callbacks.py)
-        # toggles its `is_open` and rewrites the body when the
-        # `deferred-last-session` store is non-empty. Boot is fresh by
-        # design (see nanometa_live.py main()): visualising
-        # already-processed data should be an explicit Resume action,
-        # not a silent restore of the last operator's state.
-        dbc.Alert(
-            id="resume-session-banner",
-            color="info",
-            is_open=bool(deferred_session),
-            dismissable=False,
-            className="mb-0 rounded-0 border-start-0 border-end-0 border-top-0",
-            children=html.Div(id="resume-session-banner-body"),
-        ),
-
         # Header with title, controls, and status
         create_header(config.get('analysis_name', 'Nanometa Live Analysis')),
 
@@ -477,7 +449,20 @@ def create_app(
                                 persistence=True,
                                 persistence_type='session'
                             ),
-                        ], className="d-flex align-items-center")
+                            # Explicit "view a results folder" control. Loading
+                            # a folder here is a transient view action (sets the
+                            # results dir in the in-memory app-config only); it
+                            # does not restore or persist a configuration.
+                            dbc.Button(
+                                [html.I(className="bi bi-folder2-open me-1"), "Open Results..."],
+                                id="open-results-btn",
+                                color="primary",
+                                outline=True,
+                                size="sm",
+                                className="ms-3",
+                                n_clicks=0,
+                            ),
+                        ], className="d-flex align-items-center flex-wrap")
                     ], md=6),
 
                     dbc.Col([
@@ -492,6 +477,22 @@ def create_app(
                                 ],
                                 className="stale-data-warning me-3",
                                 style={"display": "none"}
+                            ),
+                            # Current results folder being viewed. Populated by
+                            # update_current_results_display; "(no results loaded)"
+                            # on a fresh boot until Open Results or Start Analysis
+                            # points the dashboard at a folder.
+                            html.Span(
+                                [
+                                    html.I(className="bi bi-eye me-1"),
+                                    html.Span("Viewing: ", className="fw-semibold"),
+                                    html.Span(id="current-results-display",
+                                              children="(no results loaded)"),
+                                ],
+                                className="text-muted small me-3",
+                                title="The results folder currently shown in the dashboard",
+                                style={"maxWidth": "420px", "overflow": "hidden",
+                                       "textOverflow": "ellipsis", "whiteSpace": "nowrap"},
                             ),
                             # Live indicator
                             html.Span(id="live-indicator-dot", className="live-indicator-dot offline", **{"aria-hidden": "true"}),

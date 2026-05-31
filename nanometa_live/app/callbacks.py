@@ -113,13 +113,71 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
 
     @app.callback(
         Output("offline-mode-badge", "style"),
+        Output("offline-mode-toggle", "value"),
         Input("app-config", "data"),
     )
     def toggle_offline_badge(config):
-        """Show or hide the OFFLINE badge based on config."""
-        if config and config.get("offline_mode"):
-            return {"fontSize": "0.7rem"}
-        return {"display": "none", "fontSize": "0.7rem"}
+        """Show or hide the OFFLINE badge and keep the header toggle in sync
+        with the config (covers boot and any non-toggle writer of the flag)."""
+        offline = bool(config and config.get("offline_mode"))
+        style = {"fontSize": "0.7rem"} if offline else {"display": "none", "fontSize": "0.7rem"}
+        return style, offline
+
+    @app.callback(
+        Output("app-config", "data", allow_duplicate=True),
+        Output("toast-message", "data", allow_duplicate=True),
+        Input("offline-mode-toggle", "value"),
+        State("app-config", "data"),
+        State("app-data-dir", "data"),
+        prevent_initial_call=True,
+    )
+    def set_offline_mode(offline, config, data_dir):
+        """Flip offline mode live from the header toggle.
+
+        Re-initialises the NCBI/GTDB/cache/genome singletons immediately (no
+        restart needed), persists the flag into last-session.yaml so it
+        survives a relaunch, and updates the app-config store (which drives
+        the OFFLINE badge). No-op when the toggle already matches config, so
+        the badge-sync callback above does not ping-pong with this one."""
+        offline = bool(offline)
+        config = dict(config or {})
+        if bool(config.get("offline_mode", False)) == offline:
+            raise PreventUpdate
+        config["offline_mode"] = offline
+
+        # Live propagation: reconfigure the API/genome singletons in-process.
+        try:
+            from nanometa_live.app.app import _init_offline_mode
+            _init_offline_mode(offline, config.get("genome_cache_dir"))
+        except Exception as e:  # pragma: no cover - defensive
+            log_callback_error("set_offline_mode/_init_offline_mode", e)
+
+        # Persist just this flag so it survives a relaunch, without forcing a
+        # full Apply Settings. Merge into the existing last-session.yaml.
+        try:
+            from nanometa_live.core.config.config_loader import ConfigLoader
+            loader = ConfigLoader(os.path.join(data_dir, "configs"))
+            existing = {}
+            session_path = os.path.join(data_dir, "configs", "last-session.yaml")
+            if os.path.exists(session_path):
+                try:
+                    existing = loader.load_config(session_path)
+                except Exception:
+                    existing = {}
+            existing["offline_mode"] = offline
+            loader.save_config(existing, "last-session.yaml")
+        except Exception as e:  # pragma: no cover - defensive
+            log_callback_error("set_offline_mode/persist", e)
+
+        return config, {
+            "type": "info",
+            "title": "Offline mode " + ("enabled" if offline else "disabled"),
+            "message": (
+                "Network calls are now disabled; using local caches only."
+                if offline
+                else "Network calls are now allowed (NCBI/GTDB/GitHub)."
+            ),
+        }
 
     # ========================================================================
     # Internet Auto-Detection (startup suggestion)
@@ -337,7 +395,10 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     @app.callback(
         Output("results-fingerprint", "data"),
         Input("update-interval", "n_intervals"),
-        State("app-config", "data"),
+        # app-config is an Input (not just State) so that pointing the app at a
+        # new results folder via Open Results or Apply Settings rescans
+        # immediately instead of waiting for the next interval tick.
+        Input("app-config", "data"),
         State("results-fingerprint", "data"),
     )
     def compute_results_fingerprint(_n_intervals, config, prev):
@@ -559,13 +620,25 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             # Compare current input fingerprint with the prior run's
             # (None when no .nanometa.run.json exists yet).
             input_match = backend_manager.fingerprint_matches(outdir, config)
+            # has_metadata is False when the folder holds result-shaped data
+            # but no .nanometa.run.json -- i.e. data this app did not create.
+            # Resuming over it is meaningless and risks clobbering it, so the
+            # modal hides Resume and shows a distinct foreign-data warning.
+            has_metadata = backend_manager.read_run_metadata(outdir) is not None
             return (
                 no_update,
                 no_update,
                 no_update,
                 True,
-                render_collision_body(outdir, found, input_match=input_match),
-                {"outdir": outdir, "found": found, "input_match": input_match},
+                render_collision_body(
+                    outdir, found, input_match=input_match, has_metadata=has_metadata
+                ),
+                {
+                    "outdir": outdir,
+                    "found": found,
+                    "input_match": input_match,
+                    "has_metadata": has_metadata,
+                },
                 no_update,
             )
 
@@ -615,6 +688,18 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             no_update,
             optimistic_status,
         )
+
+    @app.callback(
+        Output("collision-resume-btn", "style"),
+        Input("collision-decision-pending", "data"),
+        prevent_initial_call=True,
+    )
+    def toggle_collision_resume_button(pending):
+        """Hide the Resume button when the existing folder is foreign data
+        (no .nanometa.run.json) -- resuming over it is disallowed."""
+        if pending and not pending.get("has_metadata", True):
+            return {"display": "none"}
+        return {}
 
     @app.callback(
         [
@@ -705,6 +790,25 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                     f"{archive_path}"
                 )
         elif triggered == "collision-resume-btn":
+            # Refuse to resume over foreign data even if the button is
+            # somehow reachable: the Resume button is hidden in that case,
+            # but guard server-side so a stale/forced click cannot clobber
+            # data Nanometa Live did not create.
+            if not (pending or {}).get("has_metadata", True):
+                return (
+                    False,
+                    {
+                        "title": "Resume not allowed",
+                        "message": (
+                            "This folder has no Nanometa Live run record, so "
+                            "resuming could clobber unrelated data. Choose "
+                            "'Move existing & start fresh' or cancel."
+                        ),
+                        "color": "danger",
+                    },
+                    no_update,
+                    no_update,
+                )
             success, message = backend_manager.start(resume=True)
         else:
             raise PreventUpdate
@@ -1608,150 +1712,97 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         return "preparation-tab"
 
     # ========================================================================
-    # Resume-previous-session banner
+    # Session restore is explicit, not automatic
     # ========================================================================
-    # The previous behaviour silently auto-loaded
-    # ~/.nanometa/configs/last-session.yaml on every restart, which
-    # rehydrated stale paths and confused operators who expected a
-    # fresh process to mean a fresh state. Now nanometa_live.py main()
-    # boots with a default config and stashes the YAML metadata in
-    # the deferred-last-session store; the operator chooses to
-    # Resume or Discard from a banner above the header.
+    # Boot is always fresh: nanometa_live.py main() starts from a default
+    # config and never auto-loads ~/.nanometa/configs/last-session.yaml.
+    # The autosave still happens on Apply Settings, so a prior session can
+    # be restored deliberately from Configuration > Load ("Last Session").
+    # To view a finished run's data, use the "Open Results" control in the
+    # secondary bar (see open_results_* callbacks) -- viewing a results
+    # folder is kept separate from restoring a pipeline configuration.
 
     @app.callback(
-        Output("resume-session-banner-body", "children"),
-        Output("resume-session-banner", "is_open"),
-        Input("deferred-last-session", "data"),
+        Output("folder-browser-modal", "is_open", allow_duplicate=True),
+        Output("browse-target-field", "data", allow_duplicate=True),
+        Output("current-browse-path", "data", allow_duplicate=True),
+        Input("open-results-btn", "n_clicks"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
     )
-    def update_resume_session_banner(deferred):
-        """Render the Resume / Discard banner when a previous session
-        YAML is available; collapse it once the operator acts."""
-        if not deferred or not deferred.get("path"):
-            return no_update, False
-
-        body = html.Div(
-            [
-                html.Div(
-                    [
-                        html.I(className="bi bi-clock-history me-2"),
-                        html.Span("Found a previous session at "),
-                        html.Code(deferred["path"]),
-                        html.Span(
-                            f" (saved {deferred.get('mtime_iso', 'unknown time')}). "
-                            "Resume it or start fresh.",
-                        ),
-                    ],
-                    className="me-3",
-                ),
-                html.Div(
-                    [
-                        dbc.Button(
-                            [html.I(className="bi bi-arrow-counterclockwise me-1"),
-                             "Resume session"],
-                            id="resume-session-load-btn",
-                            color="primary",
-                            size="sm",
-                            className="me-2",
-                            n_clicks=0,
-                        ),
-                        dbc.Button(
-                            [html.I(className="bi bi-trash me-1"), "Discard"],
-                            id="resume-session-discard-btn",
-                            color="outline-secondary",
-                            size="sm",
-                            n_clicks=0,
-                        ),
-                    ],
-                    className="ms-auto",
-                ),
-            ],
-            className="d-flex align-items-center flex-wrap",
-        )
-        return body, True
+    def open_results_picker(n_clicks, config):
+        """Open the shared folder browser targeting the transient
+        'open-results' field. Start navigation at the currently-viewed
+        results folder if one is set, else the home directory."""
+        if not n_clicks:
+            raise PreventUpdate
+        start = resolve_outdir_for_fingerprint(config or {})
+        if not start or not os.path.isdir(start):
+            start = os.path.expanduser("~")
+        return True, "open-results", start
 
     @app.callback(
         Output("app-config", "data", allow_duplicate=True),
-        Output("config-source", "data", allow_duplicate=True),
-        Output("saved-config-snapshot", "data", allow_duplicate=True),
-        Output("config-modified", "data", allow_duplicate=True),
-        Output("deferred-last-session", "data", allow_duplicate=True),
+        Output("folder-browser-modal", "is_open", allow_duplicate=True),
         Output("toast-message", "data", allow_duplicate=True),
-        Input("resume-session-load-btn", "n_clicks"),
-        State("deferred-last-session", "data"),
-        State("app-data-dir", "data"),
+        Output("selected-sample", "data", allow_duplicate=True),
+        Input("confirm-directory-select", "n_clicks"),
+        State("current-browse-path", "data"),
+        State("browse-target-field", "data"),
+        State("app-config", "data"),
         prevent_initial_call=True,
     )
-    def load_deferred_session(n_clicks, deferred, data_dir):
-        """Resume the deferred session: load the YAML through the
-        canonical ConfigLoader (which also runs path normalisation
-        and missing-path warnings, per DB-2), wire it into app-config
-        and the saved-config-snapshot, and clear the deferred store
-        so the banner collapses."""
-        if not n_clicks or not deferred or not deferred.get("path"):
+    def apply_open_results(confirm_clicks, selected_path, target_field, config):
+        """When the folder browser was opened for 'open-results', point the
+        dashboard at the chosen folder. This is a transient view action: it
+        updates the in-memory app-config only (results dir + view-only mode)
+        and never writes last-session.yaml, keeping viewing separate from
+        restoring a configuration. The fingerprint/sample callbacks refresh
+        the dashboard off the app-config change."""
+        if not confirm_clicks or target_field != "open-results":
             raise PreventUpdate
-        path = deferred["path"]
-        try:
-            from nanometa_live.core.config.config_loader import ConfigLoader
-            cfg = ConfigLoader(os.path.join(data_dir, "configs")).load_config(path)
-        except Exception as exc:
+        if not selected_path or not os.path.isdir(selected_path):
             return (
-                no_update, no_update, no_update, no_update, no_update,
+                no_update,
+                False,
                 {
                     "type": "error",
-                    "title": "Could not resume session",
-                    "message": f"Failed to load {path}: {exc}",
+                    "title": "Could not open results",
+                    "message": "The selected folder does not exist.",
                 },
+                no_update,
             )
-        source_info = {
-            "type": "file",
-            "path": path,
-            "name": os.path.basename(path),
-        }
+        new_config = dict(config or {})
+        new_config["results_output_directory"] = selected_path
+        new_config["main_dir"] = selected_path
+        # View past data read-only; the operator must reconfigure inputs to run.
+        new_config["visualization_only"] = True
         return (
-            cfg,
-            source_info,
-            cfg,
+            new_config,
             False,
-            None,
             {
                 "type": "success",
-                "title": "Previous session resumed",
-                "message": f"Loaded configuration from {path}.",
+                "title": "Viewing results",
+                "message": f"Now displaying results from {selected_path}.",
             },
+            "All Samples",
         )
 
     @app.callback(
-        Output("deferred-last-session", "data", allow_duplicate=True),
-        Output("toast-message", "data", allow_duplicate=True),
-        Input("resume-session-discard-btn", "n_clicks"),
-        State("deferred-last-session", "data"),
-        prevent_initial_call=True,
+        Output("current-results-display", "children"),
+        Input("app-config", "data"),
     )
-    def discard_deferred_session(n_clicks, deferred):
-        """Discard the deferred session: remove the YAML from disk so
-        the next process boot is genuinely fresh, then clear the
-        deferred store to collapse the banner."""
-        if not n_clicks or not deferred or not deferred.get("path"):
-            raise PreventUpdate
-        path = deferred["path"]
-        try:
-            os.remove(path)
-        except FileNotFoundError:
-            pass  # Already gone; treat as success.
-        except OSError as exc:
-            return (
-                no_update,
-                {
-                    "type": "error",
-                    "title": "Could not discard previous session",
-                    "message": f"Failed to remove {path}: {exc}",
-                },
-            )
-        return None, {
-            "type": "info",
-            "title": "Previous session discarded",
-            "message": f"Removed {path}.",
-        }
+    def update_current_results_display(config):
+        """Show the results folder currently driving the dashboard, or a
+        clear empty state on a fresh boot."""
+        path = resolve_outdir_for_fingerprint(config or {})
+        if path:
+            return path
+        return html.Span(
+            "(no results loaded) - Open Results... to view a finished run, "
+            "or configure inputs and Start Analysis.",
+            className="fst-italic",
+        )
 
     # ========================================================================
     # Storage Locations panel

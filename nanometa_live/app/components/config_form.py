@@ -272,7 +272,10 @@ def _essential_settings_card():
                         html.I(className="bi bi-arrow-up-circle me-1"),
                         "Destination for Nanometa Live's analysis output (species "
                         "reports, QC, validation). Created if it does not exist.",
-                    ])
+                    ]),
+                    # Advisory warning when the chosen folder already holds
+                    # results (populated by validate_results_directory).
+                    html.Div(id="results-dir-feedback", className="mt-1"),
                 ], md=12)
             ], className="mb-4"),
 
@@ -613,32 +616,13 @@ def _pipeline_source_item():
                 dbc.FormText("Path to local nanometanf directory (must contain main.nf)")
             ], md=4, id="pipeline-local-path-col", style={"display": "none"})
         ]),
-        # Offline mode: disables every outbound network call (GitHub branch
-        # probe, NCBI/GTDB taxonomy + genome lookups) and runs purely from the
-        # local caches and a prepared bundle. Surfaced here because it gates
-        # the remote pipeline source directly above.
-        dbc.Row([
-            dbc.Col([
-                html.Div([
-                    dbc.Switch(
-                        id="offline-mode-input",
-                        label="Offline mode (no network calls)",
-                        value=False,
-                        className="mt-3"
-                    ),
-                    html.I(className="bi bi-info-circle text-muted ms-1", id="offline-mode-info"),
-                ], className="d-flex align-items-center"),
-                dbc.FormText("For air-gapped or field deployment: use only local caches and bundles"),
-                dbc.Tooltip(
-                    "When enabled, Nanometa Live makes no outbound network "
-                    "calls -- it will not probe GitHub for pipeline branches "
-                    "or query NCBI/GTDB for taxonomy and genomes. Use this on "
-                    "air-gapped field machines with a pre-built offline bundle. "
-                    "Requires a local pipeline path and pre-downloaded data.",
-                    target="offline-mode-info"
-                )
-            ], md=12)
-        ], className="mt-2")
+        # Note: offline mode is toggled from the header (live, with immediate
+        # effect and persistence) rather than buried here -- see the
+        # offline-mode-toggle switch and set_offline_mode callback.
+        dbc.FormText(
+            "Tip: toggle Offline mode from the switch in the header bar.",
+            className="mt-2 d-block",
+        ),
     ], title="Pipeline Source")
 
 

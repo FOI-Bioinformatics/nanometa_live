@@ -74,17 +74,19 @@ class TestValidateKrakenDatabase:
 
 
 class TestValidateResultsDirectory:
+    # The callback now returns (status_icon, existing-results-feedback);
+    # assert on the icon element (index 0).
     def test_empty_is_info(self, cfg_app):
         fn = _callback_fn(cfg_app, "results-dir-status.children")
-        assert "text-muted" in _class(fn(""))
+        assert "text-muted" in _class(fn("")[0])
 
     def test_existing_writable_is_success(self, cfg_app, tmp_path):
         fn = _callback_fn(cfg_app, "results-dir-status.children")
-        assert "text-success" in _class(fn(str(tmp_path)))
+        assert "text-success" in _class(fn(str(tmp_path))[0])
 
     def test_nonexistent_with_writable_parent_is_info(self, cfg_app, tmp_path):
         fn = _callback_fn(cfg_app, "results-dir-status.children")
-        icon = fn(str(tmp_path / "to_be_created"))
+        icon = fn(str(tmp_path / "to_be_created"))[0]
         assert "text-info" in _class(icon)
 
 

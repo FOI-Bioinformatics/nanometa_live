@@ -7,7 +7,6 @@ prior configuration or setup. The user can configure the application via the UI
 and start the analysis workflow from there.
 """
 
-import datetime
 import os
 import sys
 import argparse
@@ -149,7 +148,6 @@ def main():
     # Load configuration
     config_loader = ConfigLoader(os.path.join(data_dir, "configs"))
 
-    deferred_session = None
     if args.config:
         try:
             config = config_loader.load_config(args.config)
@@ -158,35 +156,14 @@ def main():
             logging.error(f"Failed to load configuration from {args.config}: {e}")
             config = config_loader.create_default_config()
     else:
-        # Boot with a fresh default config. Visualising already-
-        # processed data should be an explicit choice, not the
-        # default behaviour, so we no longer silently rehydrate
-        # ~/.nanometa/configs/last-session.yaml on every restart.
-        # If the file exists, the GUI surfaces a Resume/Discard
-        # banner via the deferred-last-session store and the
-        # operator chooses whether to load it.
-        last_session = os.path.join(data_dir, "configs", "last-session.yaml")
+        # Boot is always fresh. We never silently rehydrate
+        # ~/.nanometa/configs/last-session.yaml -- a prior configuration
+        # is restored deliberately from Configuration > Load, and a
+        # finished run's data is viewed via the "Open Results" control
+        # in the secondary bar. The autosave on Apply Settings still
+        # populates the "Last Session" entry in the Load modal.
         config = config_loader.create_default_config()
-        if os.path.exists(last_session):
-            try:
-                mtime = os.path.getmtime(last_session)
-                deferred_session = {
-                    "path": last_session,
-                    "mtime": mtime,
-                    "mtime_iso": datetime.datetime.fromtimestamp(mtime).strftime(
-                        "%Y-%m-%d %H:%M:%S"
-                    ),
-                }
-                logging.info(
-                    "Found previous session at %s (saved %s); "
-                    "GUI will offer Resume/Discard.",
-                    last_session,
-                    deferred_session["mtime_iso"],
-                )
-            except OSError as e:
-                logging.warning("Could not stat %s: %s", last_session, e)
-        else:
-            logging.info("No previous session found; starting with default configuration.")
+        logging.info("Starting with default configuration (boot is fresh by design).")
 
     # Sync CLI arguments to config
     # data_dir is now a first-class config key so every subsystem can
@@ -221,7 +198,7 @@ def main():
     backend_manager = BackendManager(data_dir)
 
     # Create and start the Dash application
-    app = create_app(config, data_dir, backend_manager, deferred_session=deferred_session)
+    app = create_app(config, data_dir, backend_manager)
 
     # Dash resets its own logger to INFO during construction, undoing
     # the WARNING level we set in setup_logging. Re-apply here so the

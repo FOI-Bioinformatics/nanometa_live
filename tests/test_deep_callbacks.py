@@ -299,56 +299,6 @@ class TestStepNavigation:
 
 
 # --------------------------------------------------------------------------
-# Resume / load / discard session
-# --------------------------------------------------------------------------
-
-class TestResumeSessionBanner:
-    def test_no_deferred_closed(self, app_backend):
-        fn = _fn(app_backend[0], "resume-session-banner-body.children")
-        body, is_open = fn(None)
-        assert is_open is False
-
-    def test_deferred_opens_banner(self, app_backend):
-        fn = _fn(app_backend[0], "resume-session-banner-body.children")
-        body, is_open = fn({"path": "/cfg/last.yaml", "mtime_iso": "2026-05-30T10:00"})
-        assert is_open is True
-        assert body is not no_update
-
-
-class TestLoadDeferredSession:
-    def test_no_clicks_prevents(self, app_backend):
-        fn = _fn(app_backend[0], "deferred-last-session.data", input_contains="resume-session-load-btn")
-        with pytest.raises(PreventUpdate):
-            fn(0, {"path": "/x"}, "/data")
-
-    def test_no_deferred_prevents(self, app_backend):
-        fn = _fn(app_backend[0], "deferred-last-session.data", input_contains="resume-session-load-btn")
-        with pytest.raises(PreventUpdate):
-            fn(1, None, "/data")
-
-
-class TestDiscardDeferredSession:
-    def test_removes_file_and_clears(self, app_backend, tmp_path):
-        session = tmp_path / "last-session.yaml"
-        session.write_text("x")
-        fn = _fn(app_backend[0], "deferred-last-session.data", input_contains="resume-session-discard-btn")
-        deferred, toast = fn(1, {"path": str(session)})
-        assert deferred is None
-        assert not session.exists()
-        assert toast["title"] == "Previous session discarded"
-
-    def test_missing_file_still_succeeds(self, app_backend, tmp_path):
-        fn = _fn(app_backend[0], "deferred-last-session.data", input_contains="resume-session-discard-btn")
-        deferred, toast = fn(1, {"path": str(tmp_path / "gone.yaml")})
-        assert deferred is None
-
-    def test_no_clicks_prevents(self, app_backend):
-        fn = _fn(app_backend[0], "deferred-last-session.data", input_contains="resume-session-discard-btn")
-        with pytest.raises(PreventUpdate):
-            fn(0, {"path": "/x"})
-
-
-# --------------------------------------------------------------------------
 # Storage locations
 # --------------------------------------------------------------------------
 
@@ -387,3 +337,79 @@ class TestStorageLocations:
         with _ctx({"type": "storage-open-btn", "path": "/some/dir"}):
             with pytest.raises(PreventUpdate):
                 fn([0])
+
+
+# --------------------------------------------------------------------------
+# Open Results (explicit results-folder loading) -- Part 2 of the session
+# handling redesign. Viewing a folder is transient: it writes the in-memory
+# app-config only and never persists a session.
+# --------------------------------------------------------------------------
+
+class TestOpenResults:
+    def test_apply_open_results_sets_view_only(self, app_backend, tmp_path):
+        app, _ = app_backend
+        fn = _fn(app, "app-config.data", input_contains="confirm-directory-select")
+        new_cfg, is_open, toast, sample = fn(1, str(tmp_path), "open-results", {"foo": "bar"})
+        assert new_cfg["results_output_directory"] == str(tmp_path)
+        assert new_cfg["main_dir"] == str(tmp_path)
+        assert new_cfg["visualization_only"] is True
+        assert new_cfg["foo"] == "bar"  # preserves existing config
+        assert is_open is False
+        assert sample == "All Samples"
+        assert toast["type"] == "success"
+
+    def test_apply_open_results_ignores_other_targets(self, app_backend, tmp_path):
+        app, _ = app_backend
+        fn = _fn(app, "app-config.data", input_contains="confirm-directory-select")
+        with pytest.raises(PreventUpdate):
+            fn(1, str(tmp_path), "nanopore-dir-input", {})
+
+    def test_apply_open_results_missing_dir_errors(self, app_backend):
+        app, _ = app_backend
+        fn = _fn(app, "app-config.data", input_contains="confirm-directory-select")
+        new_cfg, is_open, toast, sample = fn(1, "/no/such/dir", "open-results", {})
+        assert new_cfg is no_update
+        assert toast["type"] == "error"
+
+    def test_current_results_display_empty_state(self, app_backend):
+        app, _ = app_backend
+        fn = _fn(app, "current-results-display.children")
+        out = fn({})
+        assert "no results loaded" in str(out)
+
+    def test_current_results_display_shows_path(self, app_backend):
+        app, _ = app_backend
+        fn = _fn(app, "current-results-display.children")
+        assert fn({"results_output_directory": "/data/run12"}) == "/data/run12"
+
+
+# --------------------------------------------------------------------------
+# Collision modal: foreign-data guard -- Part 4. A folder with result-shaped
+# data but no .nanometa.run.json is "foreign" and must not be resumed over.
+# --------------------------------------------------------------------------
+
+class TestCollisionForeignData:
+    def test_foreign_data_shows_red_banner_and_no_resume(self):
+        from nanometa_live.app.components.collision_modal import render_collision_body
+        body = str(render_collision_body("/x", ["kraken2"], input_match=None, has_metadata=False))
+        assert "not created by Nanometa Live" in body
+        assert "Continue (resume)" not in body
+
+    def test_nanometa_mismatch_keeps_resume_bullet(self):
+        from nanometa_live.app.components.collision_modal import render_collision_body
+        body = str(render_collision_body("/x", ["kraken2"], input_match=False, has_metadata=True))
+        assert "Input differs from the previous run" in body
+        assert "Continue (resume)" in body
+
+    def test_matching_run_has_resume_and_no_banner(self):
+        from nanometa_live.app.components.collision_modal import render_collision_body
+        body = str(render_collision_body("/x", ["kraken2"], input_match=True, has_metadata=True))
+        assert "Continue (resume)" in body
+        assert "not created by Nanometa Live" not in body
+        assert "Input differs" not in body
+
+    def test_resume_button_hidden_for_foreign(self, app_backend):
+        app, _ = app_backend
+        fn = _fn(app, "collision-resume-btn.style")
+        assert fn({"has_metadata": False}) == {"display": "none"}
+        assert fn({"has_metadata": True}) == {}
