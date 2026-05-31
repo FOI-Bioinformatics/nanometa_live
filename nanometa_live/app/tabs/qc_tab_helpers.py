@@ -8,7 +8,128 @@ so they are unit-testable in isolation. qc_tab.py re-exports these names.
 """
 
 from dash import html
+import pandas as pd
 import plotly.express as px
+
+
+def build_qc_figures(sample_data: list) -> list:
+    """Build the four QC figures from gathered per-sample data.
+
+    Pure given ``sample_data`` (a list of ``{"Sample", "Time", "Reads", "Bp"}``
+    dicts, Time being a datetime). Returns
+    ``[cumulative_sequences, cumulative_bp, sequences_per_sample, bp_per_sample]``.
+    An empty list yields four annotated empty-state figures.
+    """
+    if not sample_data:
+        message = (
+            "No processed data available.<br>"
+            "Plots will appear once fastp, seqkit, or Kraken2 outputs land in the results directory."
+        )
+        return [
+            px.line(title="Cumulative Sequences").add_annotation(text=message, showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5),
+            px.line(title="Cumulative Base Pairs").add_annotation(text=message, showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5),
+            px.bar(title="Sequences per Sample").add_annotation(text=message, showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5),
+            px.bar(title="Base Pairs per Sample").add_annotation(text=message, showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5),
+        ]
+
+    # Create DataFrame and sort by time
+    qc_df = pd.DataFrame(sample_data)
+    qc_df = qc_df.sort_values("Time")
+
+    # Calculate cumulative values
+    qc_df["Cumulative Reads"] = qc_df["Reads"].cumsum()
+    qc_df["Cumulative Bp"] = qc_df["Bp"].cumsum()
+
+    # Format time for display
+    time_for_display = qc_df["Time"].dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    # Shared Plotly layout for consistent QC chart styling
+    _qc_layout = dict(
+        template="nanometa",
+        height=350,
+        margin=dict(l=50, r=30, t=50, b=60),
+        font=dict(family="Arial, sans-serif", size=12),
+        title_font=dict(size=14, color="#374151"),
+        hovermode="x unified",
+    )
+
+    # Cumulative reads line chart
+    cumul_reads_fig = px.line(
+        qc_df,
+        x=time_for_display,
+        y="Cumulative Reads",
+        title="Cumulative Processed Sequences",
+    )
+    cumul_reads_fig.update_traces(
+        line=dict(color="#0d6efd", width=2.5),
+        fill="tozeroy",
+        fillcolor="rgba(13, 110, 253, 0.08)",
+        hovertemplate="Sequences: %{y:,.0f}<extra></extra>",
+    )
+    cumul_reads_fig.update_layout(
+        **_qc_layout,
+        xaxis_title="Processing Time",
+        yaxis_title="Cumulative Sequences",
+        yaxis_tickformat=",",
+    )
+
+    # Cumulative base pairs line chart
+    cumul_bp_fig = px.line(
+        qc_df,
+        x=time_for_display,
+        y="Cumulative Bp",
+        title="Cumulative Processed Base Pairs",
+    )
+    cumul_bp_fig.update_traces(
+        line=dict(color="#198754", width=2.5),
+        fill="tozeroy",
+        fillcolor="rgba(25, 135, 84, 0.08)",
+        hovertemplate="Bases: %{y:,.0f}<extra></extra>",
+    )
+    cumul_bp_fig.update_layout(
+        **_qc_layout,
+        xaxis_title="Processing Time",
+        yaxis_title="Cumulative Base Pairs",
+        yaxis_tickformat=",",
+    )
+
+    # Reads per sample bar chart
+    reads_fig = px.bar(
+        qc_df, x="Sample", y="Reads", title="Sequences per Sample"
+    )
+    reads_fig.update_traces(
+        marker_color="#0d6efd",
+        marker_line_width=0,
+        hovertemplate="<b>%{x}</b><br>Sequences: %{y:,.0f}<extra></extra>",
+    )
+    reads_fig.update_layout(
+        **_qc_layout,
+        xaxis_title="Sample",
+        yaxis_title="Sequences",
+        yaxis_tickformat=",",
+        xaxis_type="category",
+        bargap=0.3,
+    )
+
+    # Base pairs per sample bar chart
+    bp_fig = px.bar(
+        qc_df, x="Sample", y="Bp", title="Processed Base Pairs per Sample"
+    )
+    bp_fig.update_traces(
+        marker_color="#198754",
+        marker_line_width=0,
+        hovertemplate="<b>%{x}</b><br>Base pairs: %{y:,.0f}<extra></extra>",
+    )
+    bp_fig.update_layout(
+        **_qc_layout,
+        xaxis_title="Sample",
+        yaxis_title="Base Pairs",
+        yaxis_tickformat=",",
+        xaxis_type="category",
+        bargap=0.3,
+    )
+
+    return [cumul_reads_fig, cumul_bp_fig, reads_fig, bp_fig]
 
 
 def _build_stage_strip_slot(heading, count_text, subtitle, count_extra=None, slot_class="stage-strip-slot"):

@@ -48,6 +48,7 @@ from nanometa_live.app.tabs.qc_tab_helpers import (  # noqa: E402
     _build_stage_strip_empty,
     _get_empty_qc_figures,
     compute_qc_stat_lines,
+    build_qc_figures,
 )
 
 
@@ -174,122 +175,8 @@ def register_qc_callbacks(app: Dash):
                         logging.debug(f"Error reading Kraken report {kreport_file}: {e}")
                         continue
 
-            if not sample_data:
-                # Empty-state copy now references all three loader
-                # tiers (fastp, seqkit, kraken2) since the chopper QC
-                # tool path lands seqkit/<sample>.tsv first and the
-                # earlier wording made operators think the tab was
-                # broken when only seqkit data was on disk.
-                message = (
-                    "No processed data available.<br>"
-                    "Plots will appear once fastp, seqkit, or Kraken2 outputs land in the results directory."
-                )
-                empty_figures = [
-                    px.line(title="Cumulative Sequences").add_annotation(text=message, showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5),
-                    px.line(title="Cumulative Base Pairs").add_annotation(text=message, showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5),
-                    px.bar(title="Sequences per Sample").add_annotation(text=message, showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5),
-                    px.bar(title="Base Pairs per Sample").add_annotation(text=message, showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5),
-                ]
-                return empty_figures
-
-            # Create DataFrame and sort by time
-            qc_df = pd.DataFrame(sample_data)
-            qc_df = qc_df.sort_values("Time")
-
-            # Calculate cumulative values
-            qc_df["Cumulative Reads"] = qc_df["Reads"].cumsum()
-            qc_df["Cumulative Bp"] = qc_df["Bp"].cumsum()
-
-            # Format time for display
-            time_for_display = qc_df["Time"].dt.strftime("%Y-%m-%d %H:%M:%S")
-
-            # Shared Plotly layout for consistent QC chart styling
-            _qc_layout = dict(
-                template="nanometa",
-                height=350,
-                margin=dict(l=50, r=30, t=50, b=60),
-                font=dict(family="Arial, sans-serif", size=12),
-                title_font=dict(size=14, color="#374151"),
-                hovermode="x unified",
-            )
-
-            # Cumulative reads line chart
-            cumul_reads_fig = px.line(
-                qc_df,
-                x=time_for_display,
-                y="Cumulative Reads",
-                title="Cumulative Processed Sequences",
-            )
-            cumul_reads_fig.update_traces(
-                line=dict(color="#0d6efd", width=2.5),
-                fill="tozeroy",
-                fillcolor="rgba(13, 110, 253, 0.08)",
-                hovertemplate="Sequences: %{y:,.0f}<extra></extra>",
-            )
-            cumul_reads_fig.update_layout(
-                **_qc_layout,
-                xaxis_title="Processing Time",
-                yaxis_title="Cumulative Sequences",
-                yaxis_tickformat=",",
-            )
-
-            # Cumulative base pairs line chart
-            cumul_bp_fig = px.line(
-                qc_df,
-                x=time_for_display,
-                y="Cumulative Bp",
-                title="Cumulative Processed Base Pairs",
-            )
-            cumul_bp_fig.update_traces(
-                line=dict(color="#198754", width=2.5),
-                fill="tozeroy",
-                fillcolor="rgba(25, 135, 84, 0.08)",
-                hovertemplate="Bases: %{y:,.0f}<extra></extra>",
-            )
-            cumul_bp_fig.update_layout(
-                **_qc_layout,
-                xaxis_title="Processing Time",
-                yaxis_title="Cumulative Base Pairs",
-                yaxis_tickformat=",",
-            )
-
-            # Reads per sample bar chart
-            reads_fig = px.bar(
-                qc_df, x="Sample", y="Reads", title="Sequences per Sample"
-            )
-            reads_fig.update_traces(
-                marker_color="#0d6efd",
-                marker_line_width=0,
-                hovertemplate="<b>%{x}</b><br>Sequences: %{y:,.0f}<extra></extra>",
-            )
-            reads_fig.update_layout(
-                **_qc_layout,
-                xaxis_title="Sample",
-                yaxis_title="Sequences",
-                yaxis_tickformat=",",
-                xaxis_type="category",
-                bargap=0.3,
-            )
-
-            # Base pairs per sample bar chart
-            bp_fig = px.bar(
-                qc_df, x="Sample", y="Bp", title="Processed Base Pairs per Sample"
-            )
-            bp_fig.update_traces(
-                marker_color="#198754",
-                marker_line_width=0,
-                hovertemplate="<b>%{x}</b><br>Base pairs: %{y:,.0f}<extra></extra>",
-            )
-            bp_fig.update_layout(
-                **_qc_layout,
-                xaxis_title="Sample",
-                yaxis_title="Base Pairs",
-                yaxis_tickformat=",",
-                xaxis_type="category",
-                bargap=0.3,
-            )
-
-            return cumul_reads_fig, cumul_bp_fig, reads_fig, bp_fig
+            # Figure construction is a pure function in qc_tab_helpers.
+            return build_qc_figures(sample_data)
 
         except Exception as e:
             logging.error(f"Error updating QC plots: {e}")
