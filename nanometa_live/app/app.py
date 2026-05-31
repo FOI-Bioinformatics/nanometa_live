@@ -377,6 +377,11 @@ def create_app(
         dcc.Store(id='notification-trigger', data={}),
         dcc.Store(id='last-update-time', data=None),
         dcc.Store(id='toast-message', data=None),
+        # Dedicated channel for the background internet-reachability check so
+        # it never shares the initial_duplicate toast-message output (which
+        # crashed the dash-renderer when a background callback wrote it). A
+        # tiny relay callback mirrors this into toast-message.
+        dcc.Store(id='internet-check-toast', data=None),
         dcc.Store(id='theme-preference', data='auto'),  # auto, light, dark
         dcc.Store(id='previous-running-state', data=False),  # For detecting analysis completion
         dcc.Store(id='readiness-state', data={"ready": False, "checks": []}),

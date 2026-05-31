@@ -165,12 +165,24 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         }
 
     @app.callback(
-        Output("toast-message", "data", allow_duplicate=True),
+        Output("internet-check-toast", "data"),
         Input("app-config", "data"),
-        prevent_initial_call="initial_duplicate",
+        background=True,
+        manager=background_callback_manager,
     )
     def check_internet_on_startup(config):
-        """On first load, check internet and suggest offline mode if unreachable."""
+        """On first load, check internet and suggest offline mode if unreachable.
+
+        Runs in a DiskcacheManager worker so the up-to-3-second
+        ``requests.get`` reachability probe never holds a Werkzeug request
+        thread. Writes to the dedicated ``internet-check-toast`` store
+        rather than the shared ``toast-message`` output: a background
+        callback writing the initial_duplicate toast-message output crashed
+        the dash-renderer at load. The relay callback below mirrors the
+        result into toast-message. The module-level guard lives in the
+        worker process, so the probe may run on more than one of the handful
+        of startup app-config writes; that is harmless (advisory toast,
+        suppressed once offline mode is on)."""
         with _internet_check_lock:
             if _internet_checked["done"]:
                 return no_update
@@ -191,6 +203,19 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 "title": "No Internet Detected",
                 "message": "Consider enabling Offline Mode in Settings.",
             }
+
+    @app.callback(
+        Output("toast-message", "data", allow_duplicate=True),
+        Input("internet-check-toast", "data"),
+        prevent_initial_call=True,
+    )
+    def relay_internet_check_toast(toast):
+        """Mirror the background internet-check result into the shared toast
+        channel. Kept separate (and non-background) so the background
+        callback never touches the initial_duplicate toast-message output."""
+        if not toast:
+            raise PreventUpdate
+        return toast
 
     # ========================================================================
     # Taxid Mapping Initialization (for pathogen detection)
