@@ -68,19 +68,21 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     @app.callback(
         Output("available-configs", "children"),
         Input("update-interval", "n_intervals"),
-        State("app-data-dir", "data"),
+        State("app-config", "data"),
     )
-    def update_available_configs(_, data_dir):
+    def update_available_configs(_, config):
         """Update the list of available configurations.
 
         Gated on the configs/ directory mtime so the per-tick os.walk and
         YAML-metadata read only run when the operator actually saved,
-        renamed, or removed a configuration.
+        renamed, or removed a configuration. Resolves the configs dir via
+        NanometaPaths so it follows the project scope (project-local).
         """
-        if not data_dir:
+        if not config:
             return "[]"
 
-        configs_dir = os.path.join(data_dir, "configs")
+        from nanometa_live.core.utils.paths import NanometaPaths
+        configs_dir = str(NanometaPaths.from_config(config).configs)
         try:
             mt = os.stat(configs_dir).st_mtime if os.path.isdir(configs_dir) else 0.0
         except OSError:
@@ -141,10 +143,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         ],
         Input({"type": "load-config-item", "index": dash.ALL}, "n_clicks"),
         State("available-configs", "children"),
-        State("app-data-dir", "data"),
+        State("app-config", "data"),
         prevent_initial_call=True,
     )
-    def load_selected_config(n_clicks, available_configs_json, data_dir):
+    def load_selected_config(n_clicks, available_configs_json, app_config):
         """Load the selected configuration."""
         if not any(n_clicks) or not ctx.triggered_id:
             return no_update, no_update, no_update, no_update
@@ -160,7 +162,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             configs = json.loads(available_configs_json)
             selected_config = configs[trigger_idx]
 
-            config_loader = ConfigLoader(os.path.join(data_dir, "configs"))
+            from nanometa_live.core.utils.paths import NanometaPaths
+            config_loader = ConfigLoader(str(NanometaPaths.from_config(app_config or {}).configs))
             config = config_loader.load_config(selected_config["path"])
 
             return (
@@ -194,10 +197,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         ],
         Input({"type": "delete-config-item", "index": dash.ALL}, "n_clicks"),
         State("available-configs", "children"),
-        State("app-data-dir", "data"),
+        State("app-config", "data"),
         prevent_initial_call=True,
     )
-    def delete_selected_config(n_clicks, available_configs_json, data_dir):
+    def delete_selected_config(n_clicks, available_configs_json, app_config):
         """Delete the selected configuration preset."""
         if not n_clicks or not any(n_clicks) or not ctx.triggered_id:
             return no_update, no_update, no_update
@@ -212,7 +215,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             configs = json.loads(available_configs_json)
             selected_config = configs[trigger_idx]
 
-            config_loader = ConfigLoader(os.path.join(data_dir, "configs"))
+            from nanometa_live.core.utils.paths import NanometaPaths
+            config_loader = ConfigLoader(str(NanometaPaths.from_config(app_config or {}).configs))
             deleted = config_loader.delete_config(selected_config["path"])
 
             if deleted:

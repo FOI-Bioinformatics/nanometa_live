@@ -1941,9 +1941,11 @@ def register_preparation_callbacks(app):
         # download function creates a per-database subdirectory.
         # Falling back to config["kraken_db"] (the existing DB path)
         # would extract on top of an already-installed database, so
-        # we anchor the default at ~/.nanometa/kraken2_databases/
-        # regardless of what kraken_db currently points to.
-        dest_dir = str(Path.home() / ".nanometa" / "kraken2_databases")
+        # we anchor at the GLOBAL <data_dir>/kraken2_databases/ (shared
+        # across analyses, honouring --data-dir) regardless of what
+        # kraken_db currently points to.
+        from nanometa_live.core.utils.paths import NanometaPaths
+        dest_dir = str(NanometaPaths.from_config(config or {}).kraken2_databases)
 
         try:
             from nanometa_live.core.utils.kraken_utils import download_kraken_database as _download

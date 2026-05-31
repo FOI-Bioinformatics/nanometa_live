@@ -36,8 +36,16 @@ def _utcnow():
     """Naive UTC timestamp, replacing the deprecated stdlib utcnow()."""
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
-# Default cache location
-DEFAULT_CACHE_DIR = Path.home() / ".nanometa" / "cache"
+# Default cache location. Resolved from NANOMETA_DATA_DIR (set by the CLI
+# entry point from --data-dir) so the taxonomy cache follows the operator's
+# chosen data directory, matching offline_cache._default_cache_dir(). Falls
+# back to the legacy ~/.nanometa/cache when the env var is unset.
+def _default_taxonomy_cache_dir() -> Path:
+    from nanometa_live.core.utils.paths import get_data_dir_from_env
+    return Path(get_data_dir_from_env()) / "cache"
+
+
+DEFAULT_CACHE_DIR = _default_taxonomy_cache_dir()
 CACHE_FILE = "taxonomy_cache.json"
 CACHE_VERSION = "1.0"
 

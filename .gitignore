@@ -193,3 +193,7 @@ verify_visualizations.py
 # Playwright scratch screenshots from interactive scenario runs
 scenario*.png
 page-*.png
+
+# Project-local Nanometa state (session, watchlist selection, taxid mappings)
+# created when the app is run from a project/working directory.
+.nanometa/

@@ -103,6 +103,13 @@ class ConfigLoader:
             # resolved value back into the config dict so downstream
             # subsystems can read it via NanometaPaths.from_config.
             "data_dir": os.path.join(os.path.expanduser("~"), ".nanometa"),
+            # Project directory anchoring per-analysis state under
+            # <project_dir>/.nanometa/ (session config, watchlist
+            # selection + toggle state, taxid mappings). Empty here so a
+            # bare config keeps the legacy single-root layout; the CLI
+            # entry points set it to the current working directory (or
+            # --project) so each analysis folder owns its own state.
+            "project_dir": "",
             # Genome cache directory for downloaded reference genomes.
             # When unset, NanometaPaths resolves this to <data_dir>.
             "genome_cache_dir": os.path.join(os.path.expanduser("~"), ".nanometa"),

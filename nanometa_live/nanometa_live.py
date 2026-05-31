@@ -21,7 +21,7 @@ from nanometa_live.app.app import create_app
 from nanometa_live.core.config.config_loader import ConfigLoader
 from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.utils.logging_utils import setup_logging
-from nanometa_live.core.utils.paths import set_data_dir_env
+from nanometa_live.core.utils.paths import set_data_dir_env, set_project_dir_env
 
 
 def parse_arguments():
@@ -59,7 +59,16 @@ def parse_arguments():
     )
 
     parser.add_argument(
-        "--data-dir", help="Directory to store application data (default: ~/.nanometa)"
+        "--data-dir",
+        help="Directory for SHARED app data -- taxonomy cache, reference "
+             "genomes, BLAST and Kraken2 databases (default: ~/.nanometa)",
+    )
+
+    parser.add_argument(
+        "--project",
+        help="Project directory for this analysis. Per-analysis state "
+             "(session config, watchlist selection, taxid mappings) is kept "
+             "in <project>/.nanometa/ (default: current working directory)",
     )
 
     parser.add_argument(
@@ -139,6 +148,17 @@ def main():
     # ``NanometaPaths.from_config(config)``.
     set_data_dir_env(data_dir)
 
+    # Project directory anchors per-analysis state (session, watchlist
+    # selection, taxid mappings) under <project_dir>/.nanometa/. Set the env
+    # too so project-scoped singletons (e.g. the taxid mapper, constructed
+    # before a config is loaded) resolve to the same place as config-aware
+    # callers via NanometaPaths.
+    project_dir = (
+        os.path.abspath(os.path.expanduser(args.project))
+        if args.project else os.getcwd()
+    )
+    set_project_dir_env(project_dir)
+
     create_default_dirs(data_dir)
 
     # Setup logging with file output
@@ -170,6 +190,13 @@ def main():
     # read the resolved value via NanometaPaths.from_config(config),
     # rather than each module embedding its own ~/.nanometa fallback.
     config["data_dir"] = data_dir
+    # Project directory anchors per-analysis state under
+    # <project_dir>/.nanometa/ (see NanometaPaths). Defaults to the current
+    # working directory so running the app from an analysis folder keeps that
+    # project's session/watchlist/mappings local to it, while genomes and
+    # caches stay shared under --data-dir. (project_dir + its env var were
+    # resolved above, before singletons could read them.)
+    config["project_dir"] = project_dir
     config["gui_port"] = args.port
     if args.main_dir:
         config["results_output_directory"] = os.path.abspath(args.main_dir)

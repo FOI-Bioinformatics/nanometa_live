@@ -33,41 +33,93 @@ DEFAULT_DATA_DIR = "~/.nanometa"
 
 @dataclass(frozen=True)
 class NanometaPaths:
-    """Resolved per-installation directory layout.
+    """Resolved directory layout, split across two scopes.
 
-    Construct via :meth:`from_config` (preferred) or directly with an
-    already-resolved absolute :class:`pathlib.Path`. The class is frozen
-    so an instance can be threaded through callbacks without worrying
-    about mutation.
+    Two roots, single source of truth:
+
+    * ``data_dir`` -- per-installation GLOBAL state, shared across every
+      analysis: the taxonomy ``cache``, downloaded ``genomes``/``blast``
+      databases, the kraken2 download registry, ``logs``. Defaults to
+      ``~/.nanometa`` and is moved with ``--data-dir``.
+    * ``project_dir`` -- the operator's current analysis directory. PROJECT
+      state lives in ``<project_dir>/.nanometa/`` (the ``project_state``
+      root): the session ``configs`` (incl. ``last-session.yaml``), the
+      ``watchlists`` selection + ``watchlist_toggle_state``, and the taxid
+      ``mappings``. Different projects therefore do not clobber each other.
+
+    Backward compatible: when ``project_dir`` is unset, the project-scoped
+    properties fall back to ``data_dir`` (the pre-split layout), so callers
+    and tests that never set a project keep working.
+
+    Construct via :meth:`from_config` (preferred). The class is frozen so an
+    instance can be threaded through callbacks without worrying about
+    mutation.
     """
 
     data_dir: Path
+    project_dir: Path | None = None
+
+    @staticmethod
+    def _norm(raw: object) -> Path:
+        return Path(os.path.abspath(os.path.expanduser(str(raw))))
 
     @classmethod
     def from_config(cls, config: Mapping[str, object]) -> "NanometaPaths":
         """Build a resolver from the application config dict.
 
-        Reads ``config["data_dir"]`` if set; otherwise falls back to
-        :data:`DEFAULT_DATA_DIR` (``~/.nanometa``). The value is
-        expanduser+abspath-normalised so a stored ``"~/foo"`` works on
-        any process.
+        Reads ``config["data_dir"]`` (global root; falls back to
+        :data:`DEFAULT_DATA_DIR`) and ``config["project_dir"]`` (project
+        root; ``None`` when empty, which collapses the project scope back
+        onto ``data_dir``). Values are expanduser+abspath-normalised.
         """
-        raw = config.get("data_dir") or DEFAULT_DATA_DIR
-        return cls(Path(os.path.abspath(os.path.expanduser(str(raw)))))
+        raw_data = config.get("data_dir") or DEFAULT_DATA_DIR
+        raw_project = config.get("project_dir") or ""
+        project = cls._norm(raw_project) if str(raw_project).strip() else None
+        return cls(cls._norm(raw_data), project)
 
     @classmethod
     def from_data_dir(cls, data_dir: str | os.PathLike[str]) -> "NanometaPaths":
         """Build a resolver from an explicit ``data_dir`` value.
 
         Use when the caller has the path but no full config dict (e.g.
-        the CLI entry point, before the config has been merged).
+        the CLI entry point, before the config has been merged). No project
+        scope -- project-scoped properties fall back to ``data_dir``.
         """
-        return cls(Path(os.path.abspath(os.path.expanduser(str(data_dir)))))
+        return cls(cls._norm(data_dir))
 
+    # ---- project scope root --------------------------------------------
+    @property
+    def project_state(self) -> Path:
+        """Root for project-local state (``<project_dir>/.nanometa``).
+
+        Falls back to ``data_dir`` when no project is configured, so the
+        project-scoped properties behave exactly as before the split."""
+        if self.project_dir is not None:
+            return self.project_dir / ".nanometa"
+        return self.data_dir
+
+    # ---- project-scoped subdirectories ---------------------------------
     @property
     def configs(self) -> Path:
-        return self.data_dir / "configs"
+        return self.project_state / "configs"
 
+    @property
+    def mappings(self) -> Path:
+        return self.project_state / "mappings"
+
+    @property
+    def watchlists(self) -> Path:
+        return self.project_state / "watchlists"
+
+    @property
+    def watchlist_toggle_state(self) -> Path:
+        return self.project_state / "watchlist_toggle_state.yaml"
+
+    @property
+    def last_session_yaml(self) -> Path:
+        return self.configs / "last-session.yaml"
+
+    # ---- global (per-installation) subdirectories ----------------------
     @property
     def cache(self) -> Path:
         return self.data_dir / "cache"
@@ -81,36 +133,33 @@ class NanometaPaths:
         return self.data_dir / "blast"
 
     @property
-    def mappings(self) -> Path:
-        return self.data_dir / "mappings"
-
-    @property
     def logs(self) -> Path:
         return self.data_dir / "logs"
-
-    @property
-    def last_session_yaml(self) -> Path:
-        return self.configs / "last-session.yaml"
 
     @property
     def kraken2_local_registry(self) -> Path:
         return self.data_dir / "kraken2_databases.local.yaml"
 
     @property
-    def watchlist_toggle_state(self) -> Path:
-        return self.data_dir / "watchlist_toggle_state.yaml"
+    def kraken2_databases(self) -> Path:
+        """Where GUI-downloaded Kraken2 databases are stored (global)."""
+        return self.data_dir / "kraken2_databases"
 
     def ensure_dirs(self) -> None:
         """Create the standard subdirectories if they do not exist."""
-        for p in (
+        global_dirs = (
             self.data_dir,
-            self.configs,
             self.cache,
             self.genomes,
             self.blast,
-            self.mappings,
             self.logs,
-        ):
+        )
+        project_dirs = (
+            self.configs,
+            self.mappings,
+            self.watchlists,
+        )
+        for p in (*global_dirs, *project_dirs):
             p.mkdir(parents=True, exist_ok=True)
 
 
@@ -119,6 +168,7 @@ class NanometaPaths:
 # so any import-time consumer reads the right path. Falls back to the
 # legacy default when unset.
 _DATA_DIR_ENV = "NANOMETA_DATA_DIR"
+_PROJECT_DIR_ENV = "NANOMETA_PROJECT_DIR"
 
 
 def get_data_dir_from_env() -> str:
@@ -137,3 +187,33 @@ def set_data_dir_env(data_dir: str | os.PathLike[str]) -> None:
     Called once by the CLI entry point after ``--data-dir`` is parsed.
     """
     os.environ[_DATA_DIR_ENV] = str(data_dir)
+
+
+def get_project_dir_from_env() -> str | None:
+    """Return the project_dir from the environment, or None if unset."""
+    val = os.environ.get(_PROJECT_DIR_ENV)
+    return val or None
+
+
+def set_project_dir_env(project_dir: str | os.PathLike[str]) -> None:
+    """Set ``NANOMETA_PROJECT_DIR`` so project-scoped singletons agree.
+
+    Called once by the CLI entry point alongside :func:`set_data_dir_env`.
+    Lets writer and reader of project-local artifacts (e.g. taxid mappings)
+    meet at the same path even when constructed before a config is loaded.
+    """
+    os.environ[_PROJECT_DIR_ENV] = str(project_dir)
+
+
+def get_mappings_dir_from_env() -> str:
+    """Resolve the taxid-mappings directory from the environment.
+
+    Project-local (``<project_dir>/.nanometa/mappings``) when
+    ``NANOMETA_PROJECT_DIR`` is set, else the legacy global
+    ``<data_dir>/mappings``. Mirrors :pyattr:`NanometaPaths.mappings`."""
+    project = get_project_dir_from_env()
+    if project:
+        return os.path.join(
+            os.path.abspath(os.path.expanduser(project)), ".nanometa", "mappings"
+        )
+    return os.path.join(get_data_dir_from_env(), "mappings")

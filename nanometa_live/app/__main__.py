@@ -56,7 +56,13 @@ def parse_arguments():
     )
 
     parser.add_argument(
-        "--data-dir", help="Directory to store application data (default: ~/.nanometa)"
+        "--data-dir", help="Directory for shared app data: caches, genomes, "
+                           "BLAST/Kraken2 databases (default: ~/.nanometa)"
+    )
+
+    parser.add_argument(
+        "--project", help="Project directory; per-analysis state is kept in "
+                          "<project>/.nanometa/ (default: current directory)"
     )
 
     parser.add_argument(
@@ -112,12 +118,25 @@ def main():
         # Set NANOMETA_DATA_DIR before any singleton (offline cache,
         # background-callback Diskcache) reads the legacy default. The
         # full-mode entry point in nanometa_live.py does the same thing.
-        from nanometa_live.core.utils.paths import set_data_dir_env
+        from nanometa_live.core.utils.paths import (
+            set_data_dir_env, set_project_dir_env,
+        )
         set_data_dir_env(data_dir)
+
+        project_dir = os.path.abspath(
+            os.path.expanduser(args.project)
+            if getattr(args, "project", None)
+            else os.getcwd()
+        )
+        set_project_dir_env(project_dir)
 
         # Create config pointing to the main_dir
         config = {
             "data_dir": data_dir,
+            # Per-analysis state (session, watchlist, mappings) lives under
+            # <project_dir>/.nanometa/; default to the working directory or
+            # --project. See NanometaPaths.
+            "project_dir": project_dir,
             "main_dir": args.main_dir,
             "visualization_only": True,
         }

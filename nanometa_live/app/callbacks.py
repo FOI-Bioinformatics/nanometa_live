@@ -153,12 +153,15 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             log_callback_error("set_offline_mode/_init_offline_mode", e)
 
         # Persist just this flag so it survives a relaunch, without forcing a
-        # full Apply Settings. Merge into the existing last-session.yaml.
+        # full Apply Settings. Merge into the existing last-session.yaml
+        # (project-local via NanometaPaths).
         try:
             from nanometa_live.core.config.config_loader import ConfigLoader
-            loader = ConfigLoader(os.path.join(data_dir, "configs"))
+            from nanometa_live.core.utils.paths import NanometaPaths
+            configs_dir = str(NanometaPaths.from_config(config).configs)
+            loader = ConfigLoader(configs_dir)
             existing = {}
-            session_path = os.path.join(data_dir, "configs", "last-session.yaml")
+            session_path = os.path.join(configs_dir, "last-session.yaml")
             if os.path.exists(session_path):
                 try:
                     existing = loader.load_config(session_path)

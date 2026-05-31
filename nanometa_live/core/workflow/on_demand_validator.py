@@ -114,11 +114,14 @@ class OnDemandValidator:
         self.results_dir = Path(results_dir)
         self.input_dir = Path(input_dir) if input_dir else None
 
-        # Set up cache directory
+        # Set up cache directory. genomes/ and blast/ are GLOBAL (shared
+        # across analyses), so resolve from the data_dir env (set by the CLI
+        # from --data-dir) rather than hardcoding ~/.nanometa.
         if cache_dir:
             self.cache_dir = Path(cache_dir)
         else:
-            self.cache_dir = Path.home() / ".nanometa"
+            from nanometa_live.core.utils.paths import get_data_dir_from_env
+            self.cache_dir = Path(get_data_dir_from_env())
 
         self.genomes_dir = self.cache_dir / "genomes"
         self.blast_dir = self.cache_dir / "blast"

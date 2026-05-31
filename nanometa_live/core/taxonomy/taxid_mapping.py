@@ -634,10 +634,10 @@ def get_mapping_cache_path(database_path: str) -> Path:
     the two paths differed (typical on a server with
     ``/mnt/<vol>/nanometa_data/`` etc.).
     """
-    from nanometa_live.core.utils.paths import get_data_dir_from_env
+    from nanometa_live.core.utils.paths import get_mappings_dir_from_env
 
     db_hash = get_database_hash(database_path)
-    cache_dir = Path(get_data_dir_from_env()) / "mappings"
+    cache_dir = Path(get_mappings_dir_from_env())
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir / f"{db_hash}_mappings.json"
 
@@ -699,8 +699,8 @@ class TaxidMapper:
         if cache_dir:
             self._cache_dir = Path(cache_dir)
         else:
-            from nanometa_live.core.utils.paths import get_data_dir_from_env
-            self._cache_dir = Path(get_data_dir_from_env()) / "mappings"
+            from nanometa_live.core.utils.paths import get_mappings_dir_from_env
+            self._cache_dir = Path(get_mappings_dir_from_env())
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
         self._index: Optional[DatabaseTaxonomyIndex] = None

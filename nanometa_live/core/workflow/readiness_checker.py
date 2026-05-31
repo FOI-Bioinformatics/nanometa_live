@@ -229,8 +229,10 @@ class ReadinessChecker:
                 "DB Taxonomy Index", False, Severity.CRITICAL,
                 "Could not compute database hash"
             )
-        index_file_json = home / "mappings" / f"{db_hash}_index.json"
-        index_file_pkl = home / "mappings" / f"{db_hash}_index.pkl"
+        from nanometa_live.core.utils.paths import get_mappings_dir_from_env
+        mappings_dir = Path(get_mappings_dir_from_env())
+        index_file_json = mappings_dir / f"{db_hash}_index.json"
+        index_file_pkl = mappings_dir / f"{db_hash}_index.pkl"
         if index_file_json.exists() or index_file_pkl.exists():
             return CheckResult(
                 "DB Taxonomy Index", True, Severity.CRITICAL,
@@ -262,7 +264,8 @@ class ReadinessChecker:
                 "Taxid Mappings", False, Severity.CRITICAL,
                 "Could not compute database hash"
             )
-        mapping_file = home / "mappings" / f"{db_hash}_mappings.json"
+        from nanometa_live.core.utils.paths import get_mappings_dir_from_env
+        mapping_file = Path(get_mappings_dir_from_env()) / f"{db_hash}_mappings.json"
         if mapping_file.exists():
             return CheckResult(
                 "Taxid Mappings", True, Severity.CRITICAL,

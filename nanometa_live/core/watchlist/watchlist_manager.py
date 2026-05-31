@@ -360,6 +360,9 @@ class WatchlistManager:
         self._enabled_watchlists: Set[str] = set()  # YAML watchlist IDs
         self._pathogen_db: Optional[PathogenDatabase] = None
         self._project_dir: Optional[Path] = None
+        # data_dir/project_dir captured at load_config time so the toggle
+        # state file resolves to the project-local location via NanometaPaths.
+        self._paths_config: Dict[str, Any] = {}
         self._taxonomy_mode: str = "auto"  # "auto", "ncbi", "gtdb"
         self._loaded = False
 
@@ -387,6 +390,13 @@ class WatchlistManager:
         self._entries = {}
         self._name_index = {}
         self._enabled_watchlists = set()
+
+        # Capture the path-relevant keys so the project-local toggle-state
+        # file resolves via NanometaPaths (project_dir/.nanometa/...).
+        self._paths_config = {
+            "data_dir": config.get("data_dir"),
+            "project_dir": config.get("project_dir"),
+        }
 
         # Set project directory for custom watchlist discovery
         project_dir = config.get("results_output_directory") or config.get("main_dir")
@@ -840,16 +850,21 @@ class WatchlistManager:
         """Get the set of enabled builtin categories."""
         return self._enabled_categories.copy()
 
-    @staticmethod
-    def _toggle_state_path() -> Path:
-        """Path to the toggle state persistence file.
+    def _toggle_state_path(self) -> Path:
+        """Path to the toggle-state persistence file.
 
-        Honors NANOMETA_DATA_DIR (set by the CLI entry point from
-        ``--data-dir``) so the toggle file follows the operator's
-        chosen data directory; falls back to ``~/.nanometa`` for
-        backward compatibility.
+        The toggle state (which entries are enabled/disabled) is the
+        operator's per-analysis *selection*, so it is project-local:
+        ``<project_dir>/.nanometa/watchlist_toggle_state.yaml`` via
+        NanometaPaths. When no project_dir was supplied at load_config
+        time, NanometaPaths falls back to the global data_dir (honouring
+        NANOMETA_DATA_DIR), preserving the pre-split location.
         """
-        from nanometa_live.core.utils.paths import get_data_dir_from_env
+        from nanometa_live.core.utils.paths import (
+            NanometaPaths, get_data_dir_from_env,
+        )
+        if self._paths_config:
+            return NanometaPaths.from_config(self._paths_config).watchlist_toggle_state
         return Path(get_data_dir_from_env()) / "watchlist_toggle_state.yaml"
 
     def _save_toggle_state(self) -> None:
@@ -871,6 +886,7 @@ class WatchlistManager:
                 taxid for taxid, entry in self._entries.items() if not entry.enabled
             )
             state_path = self._toggle_state_path()
+            state_path.parent.mkdir(parents=True, exist_ok=True)
             with file_lock(state_path):
                 atomic_write_text(
                     state_path,
