@@ -136,7 +136,10 @@ def create_preparation_layout():
                 ], className="d-flex align-items-center mb-1"),
                 html.P(
                     "Verify that everything is ready before you start analysis. "
-                    "Run the checklist first, then address any issues it finds.",
+                    "1. Run the readiness checklist. 2. Click Start Preparation "
+                    "for automated setup, or expand Advanced: Individual Stages "
+                    "to run a single step. 3. Use Offline deployment to build a "
+                    "portable bundle for field machines.",
                     className="text-muted mb-0 small"
                 ),
             ]),
@@ -266,7 +269,11 @@ def create_preparation_layout():
                 html.Div(_create_import_genomes_card(), id="import-genomes-card"),
             ], title=html.Span([
                 html.I(className="bi bi-tools me-2"),
-                "Manual stages (advanced)",
+                "Advanced: Individual Stages",
+                html.Small(
+                    "  -  most users should use Run Preparation above",
+                    className="text-muted ms-2",
+                ),
             ])),
         ], start_collapsed=True, className="mb-4"),
 
@@ -664,7 +671,7 @@ def _create_genome_downloads_card() -> dbc.Card:
                     children=[
                         html.P("No missing genomes.", className="text-muted fst-italic")
                     ],
-                    style={"maxHeight": "200px", "overflowY": "auto"},
+                    style={"maxHeight": "420px", "overflowY": "auto"},
                 ),
             ], className="mb-3"),
 
@@ -676,7 +683,7 @@ def _create_genome_downloads_card() -> dbc.Card:
                     children=[
                         html.P("No genomes downloaded yet.", className="text-muted fst-italic")
                     ],
-                    style={"maxHeight": "200px", "overflowY": "auto"},
+                    style={"maxHeight": "420px", "overflowY": "auto"},
                 ),
             ]),
 
