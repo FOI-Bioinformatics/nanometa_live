@@ -155,9 +155,17 @@ class TestDisplayToast:
 
 
 class TestSwitchToResultsTab:
-    def test_analysis_started_navigates(self, app_backend):
+    def test_navigate_to_field_navigates(self, app_backend):
+        # Navigation now keys on the explicit navigate_to field set by the
+        # start callbacks, not the (locale-sensitive) title string.
         fn = _fn(app_backend[0], "tabs.active_tab", input_contains="notification-trigger")
-        assert fn({"title": "Analysis Started", "color": "success"}, "config-tab") == "dashboard-tab"
+        assert fn({"navigate_to": "dashboard-tab"}, "config-tab") == "dashboard-tab"
+
+    def test_title_match_alone_does_not_navigate(self, app_backend):
+        # The old fragile contract: a toast that merely shares the title must
+        # no longer hijack navigation.
+        fn = _fn(app_backend[0], "tabs.active_tab", input_contains="notification-trigger")
+        assert fn({"title": "Analysis Started", "color": "success"}, "config-tab") is no_update
 
     def test_other_notification_noop(self, app_backend):
         fn = _fn(app_backend[0], "tabs.active_tab", input_contains="notification-trigger")

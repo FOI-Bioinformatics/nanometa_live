@@ -635,6 +635,9 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 "title": "Analysis Started" if success else "Error",
                 "message": message,
                 "color": color,
+                # Explicit navigation intent, so switch_to_results_tab does
+                # not have to string-match a (locale-sensitive) title.
+                "navigate_to": "dashboard-tab" if success else None,
             },
             updated_config,
             no_update,
@@ -761,6 +764,8 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 "title": "Analysis Started" if success else "Error",
                 "message": message,
                 "color": color,
+                # Explicit navigation intent (see switch_to_results_tab).
+                "navigate_to": "dashboard-tab" if success else None,
             },
             updated_config,
             optimistic_status,
@@ -804,15 +809,19 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         prevent_initial_call=True,
     )
     def switch_to_results_tab(notification, current_tab):
-        """Switch to the Dashboard tab after starting analysis."""
+        """Switch to the Dashboard tab after starting analysis.
+
+        Keys on the explicit ``navigate_to`` field set by the start
+        callbacks rather than matching the notification title string, which
+        was locale-sensitive and would fire for any unrelated toast that
+        happened to use the same title/color.
+        """
         if not notification or not isinstance(notification, dict):
             return no_update
 
-        if (
-            notification.get("title") == "Analysis Started"
-            and notification.get("color") == "success"
-        ):
-            return "dashboard-tab"
+        target = notification.get("navigate_to")
+        if target:
+            return target
 
         return no_update
 

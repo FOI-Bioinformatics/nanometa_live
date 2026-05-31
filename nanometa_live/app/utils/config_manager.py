@@ -194,8 +194,12 @@ def atomic_config_update(
     if not current_config:
         current_config = {}
 
-    # Create a shallow copy and apply updates
-    new_config = dict(current_config)
+    # Deep-copy so callers that hold the old dict cannot observe mutations
+    # through shared nested values, and so a later mutation of `updates`
+    # cannot alias into the returned config. apply_pending_changes already
+    # deep-copies; this matches it (config values are small, so the cost
+    # is negligible).
+    new_config = copy.deepcopy(current_config)
     new_config.update(updates)
 
     # Update version and timestamp
