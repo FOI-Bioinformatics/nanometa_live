@@ -394,6 +394,22 @@ again. The 2-second `should_skip_update("...")` debouncer or the
 `get_trigger_type(ctx) == "interval"` guard keeps the new Input from
 multiplying work — the backstop fires at most once per tick.
 
+**Verdict-banner decision logic is a pure function.** The safety-critical
+clinical verdict (ACTION REQUIRED / MONITORING / ALL CLEAR / SCREENING /
+STANDBY) is decided by `select_verdict()` in
+`app/tabs/dashboard_helpers.py`, which returns a `VerdictDescriptor` from the
+input booleans and the watchlist hit list — no file I/O, no component build.
+The `update_verdict_banner` callback only gathers inputs (Kraken load,
+`_check_pathogens_with_mapping`), delegates the state choice, runs per-sample
+attribution when `descriptor.needs_attribution` is set (ACTION REQUIRED only),
+and renders via `_make_banner_content` / `_verdict_banner_style`. The precedence
+is fixed: no-config → starting → data-driven → running-no-data → standby; note
+a missing results dir yields STANDBY even while the pipeline runs. Every branch
+is unit-tested in `tests/test_verdict_selector.py`; keep new states in the pure
+function so they stay testable without a running app. This mirrors the broader
+`*_tab.py` → `*_helpers.py` split (pure logic in helpers, thin callback wiring
+in the tab module) used across the dashboard, main, qc, and validation tabs.
+
 ### macOS bind-mount gotcha
 
 macOS writes AppleDouble (`._*`) sidecar files when writing to non-HFS+ filesystems,
@@ -405,12 +421,25 @@ Linux-native path (Docker volume or `/root/.nextflow`); short-term workaround is
 ## Testing
 
 ```bash
-pytest tests/ -v
+pytest                                              # full suite, parallel (pytest-xdist)
+pytest -n 0                                         # serial, for pdb/print debugging
+pytest --cov=nanometa_live --cov-report=term-missing   # with the coverage gate
 ```
 
-864 tests as of 2026-05-08. Synthetic datasets are auto-generated under
-`/tmp/nanometa_test_datasets/` by `conftest.py` via `scripts/generate_test_datasets.py`.
-Mock Kraken2/FASTP generators live in `core/testing/mock_data_generator.py`.
+1874 tests as of 2026-05-31, ~56% line coverage. `pytest.ini` enforces a
+`fail_under = 55` floor on coverage runs only (the default `pytest` dev loop
+does not load coverage), `filterwarnings = error::DeprecationWarning:nanometa_live`
+(our own deprecations fail the build), and the `unit` / `callback` / `integration`
+markers. CI runs the suite and the gate on Python 3.11 and 3.12 for every push
+and PR to `main` / `dev` (`.github/workflows/tests.yml`). Tests marked `slow`
+need Nextflow/conda and are skipped by default.
+
+Synthetic datasets are auto-generated under `/tmp/nanometa_test_datasets/` by
+`conftest.py` via `scripts/generate_test_datasets.py`. Mock Kraken2/FASTP
+generators live in `core/testing/mock_data_generator.py`. Dash callbacks are
+tested by registering on a throwaway `Dash` app, locating the spec in
+`app.callback_map`, and unwrapping `spec["callback"].__wrapped__`; shared
+helpers for this live in `tests/dash_test_utils.py`.
 
 Real test data:
 ```
