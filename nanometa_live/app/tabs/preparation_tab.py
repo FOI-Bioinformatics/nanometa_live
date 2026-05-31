@@ -1785,17 +1785,35 @@ def register_preparation_callbacks(app):
             raise PreventUpdate
         return relayed_state
     # Run All Steps
+    _WIZARD_STEP_NAMES = [
+        "Watchlist check", "Verify Kraken2 DB", "Taxonomy index + mappings",
+        "Download genomes", "Build BLAST DBs", "Cache taxonomy",
+        "Readiness check", "Export bundle",
+    ]
+
     @app.callback(
-        Output("wizard-run-all-result", "children"),
         Output("wizard-step-state", "data", allow_duplicate=True),
-        Output("wizard-run-all-btn", "disabled"),
         Input("wizard-run-all-btn", "n_clicks"),
         State("wizard-step-state", "data"),
         State("app-config", "data"),
+        background=True,
+        manager=background_callback_manager,
+        progress=[Output("wizard-run-all-result", "children")],
+        running=[(Output("wizard-run-all-btn", "disabled"), True, False)],
+        cancel=[Input("wizard-cancel-btn", "n_clicks")],
         prevent_initial_call=True,
     )
-    def run_all_wizard_steps(n_clicks, wizard_state, config):
-        """Run all wizard steps sequentially."""
+    def run_all_wizard_steps(set_progress, n_clicks, wizard_state, config):
+        """Run all 8 offline-prep wizard steps sequentially in a worker.
+
+        Background so the multi-minute steps (genome download, BLAST build,
+        bundle export) do not freeze the UI. The wizard-step-state stepper is
+        updated live via set_progress as each step transitions; the final
+        summary is written to the result area. The Cancel button is wired via
+        cancel=, so the operator can actually stop the run (the previous
+        cancel_wizard callback only re-enabled the button without stopping
+        anything).
+        """
         if not n_clicks:
             raise PreventUpdate
 
@@ -1805,17 +1823,41 @@ def register_preparation_callbacks(app):
             "steps": {str(i): "pending" for i in range(8)},
         }
 
+        # The WatchlistManager singleton is empty in this worker process, and
+        # steps 0/3/4 read it (get_active_entries / _get_watchlist_entries).
+        # Load it once from config so every step sees the operator's watchlist.
+        try:
+            from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
+            wm = get_watchlist_manager()
+            if not wm._loaded:
+                wm.load_config(config)
+        except Exception:
+            logger.debug("Could not preload watchlist manager in wizard worker",
+                         exc_info=True)
+
+        def _running_alert(step_idx: int):
+            name = _WIZARD_STEP_NAMES[step_idx]
+            return dbc.Alert(
+                [dbc.Spinner(size="sm", spinner_class_name="me-2"),
+                 f"Running step {step_idx + 1}/8: {name}…"],
+                color="info", className="mt-2 py-2",
+            )
+
         results = []
         all_ok = True
 
         for step_idx in range(8):
             wizard_state["steps"][str(step_idx)] = "running"
+            # Live stepper + result-area update before the (possibly slow) step.
+            set_progress((_running_alert(step_idx),))
             try:
                 _execute_wizard_step(step_idx, config)
                 wizard_state["steps"][str(step_idx)] = "done"
             except Exception as e:
                 wizard_state["steps"][str(step_idx)] = "failed"
-                results.append(f"Step {step_idx + 1} failed: {e}")
+                results.append(
+                    f"Step {step_idx + 1} ({_WIZARD_STEP_NAMES[step_idx]}) failed: {e}"
+                )
                 all_ok = False
                 # Steps 1-2 are critical, abort on failure
                 if step_idx in (1, 2):
@@ -1835,7 +1877,10 @@ def register_preparation_callbacks(app):
                 html.Ul([html.Li(r) for r in results]),
             ], color="warning")
 
-        return alert, wizard_state, False
+        # Final summary into the result area (progress outputs retain their
+        # last value after the callback completes).
+        set_progress((alert,))
+        return wizard_state
 
     # =========================================================================
     # Kraken2 Database Download button
@@ -1948,24 +1993,10 @@ def register_preparation_callbacks(app):
             logger.error(f"Kraken2 database download failed: {e}", exc_info=True)
             return dbc.Alert(f"Download failed: {e}", color="danger"), no_update
 
-    # =========================================================================
-    # Wizard Cancel button
-    # =========================================================================
-
-    @app.callback(
-        Output("wizard-run-all-btn", "disabled", allow_duplicate=True),
-        Input("wizard-cancel-btn", "n_clicks"),
-        prevent_initial_call=True,
-    )
-    def cancel_wizard(n_clicks):
-        """Re-enable the run-all button when cancel is clicked.
-
-        The wizard-run-all-btn background callback does not expose a cancel
-        input, so this callback simply re-enables the button so the user can
-        restart after clicking Cancel.
-        """
-        if not n_clicks:
-            raise PreventUpdate
-        return False
+    # The wizard Cancel button is now wired directly into run_all_wizard_steps
+    # via cancel=[Input("wizard-cancel-btn", "n_clicks")]: clicking it actually
+    # terminates the background run, and the running= clause re-enables the
+    # Run-All button. The previous standalone cancel_wizard callback (which
+    # only re-enabled the button without stopping the work) has been removed.
 
     logger.info("Preparation tab callbacks registered")
