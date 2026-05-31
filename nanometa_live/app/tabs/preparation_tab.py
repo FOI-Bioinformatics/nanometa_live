@@ -16,7 +16,7 @@ import time
 import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import dash_bootstrap_components as dbc
 from dash import html, Input, Output, State, callback, no_update, ctx, ALL, MATCH, set_props
@@ -330,10 +330,20 @@ def register_preparation_callbacks(app):
         State("bundle-containerization-radio", "value"),
         State("app-config", "data"),
         prevent_initial_call=True,
+        background=True,
+        manager=background_callback_manager,
+        running=[
+            (Output("export-bundle-btn", "disabled"), True, False),
+        ],
     )
     def export_bundle(n_clicks, directory, filename, pre_warm,
                       containerization, config):
-        """Check readiness, then export or show issues."""
+        """Check readiness, then export or show issues.
+
+        Runs in a DiskcacheManager worker because pre-warming conda
+        environments can take tens of minutes; doing it inline would hold a
+        Werkzeug request thread for the whole export. The bundle is written
+        to disk, so no in-process state has to survive the worker."""
         if not n_clicks:
             raise PreventUpdate
 
@@ -459,10 +469,20 @@ def register_preparation_callbacks(app):
         State("bundle-containerization-radio", "value"),
         State("app-config", "data"),
         prevent_initial_call=True,
+        background=True,
+        manager=background_callback_manager,
+        running=[
+            # disabled is also driven by toggle_force_export_btn, so the
+            # running output must be marked as a duplicate.
+            (Output("export-force-btn", "disabled", allow_duplicate=True), True, False),
+        ],
     )
     def force_export_bundle(n_clicks, directory, filename, pre_warm,
                             containerization, config):
-        """Export bundle after user acknowledged warnings."""
+        """Export bundle after user acknowledged warnings.
+
+        Background for the same reason as export_bundle: conda pre-warming
+        can run for tens of minutes."""
         if not n_clicks:
             raise PreventUpdate
         return _run_export(
@@ -1256,17 +1276,32 @@ def register_preparation_callbacks(app):
         Input({"type": "genome-download-single-btn", "index": ALL}, "n_clicks"),
         [
             State({"type": "genome-download-single-btn", "index": ALL}, "id"),
+            State("watchlist-entries-snapshot", "data"),
             State("app-config", "data"),
         ],
         prevent_initial_call=True,
+        background=True,
+        manager=background_callback_manager,
+        # No `running` button-disable here: a pattern-matching (ALL)
+        # running output is not reliably supported and crashes the
+        # dash-renderer. The background conversion alone removes the UI
+        # freeze, which is the point.
     )
     def download_single_genome(
         download_clicks: List[int],
         download_ids: List[Dict],
+        watchlist_entries_snapshot: Optional[List[Dict]],
         config: Dict,
     ) -> Any:
-        """Handle individual genome download from missing list."""
-        from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
+        """Handle individual genome download from missing list.
+
+        Runs in a DiskcacheManager worker so the NCBI Datasets download and
+        makeblastdb build (which can take minutes for large bacterial
+        genomes) do not freeze the UI. The species name is read from the
+        ``watchlist-entries-snapshot`` store hydrated by the main process --
+        the WatchlistManager singleton is empty in this worker. The genome
+        and BLAST DB are written to the on-disk cache, so the main process
+        picks them up via the genome-download-complete refresh."""
 
         if not ctx.triggered_id:
             raise PreventUpdate
@@ -1284,9 +1319,13 @@ def register_preparation_callbacks(app):
         if taxid:
             from nanometa_live.core.utils.genome_manager import get_genome_manager
 
-            manager = get_watchlist_manager()
-            entry = manager.get_entry_by_taxid(taxid)
-            species_name = entry.name if entry else "Unknown"
+            # Resolve the species name from the snapshot rather than the
+            # singleton (empty in this background worker).
+            species_name = "Unknown"
+            for entry in (watchlist_entries_snapshot or []):
+                if str(entry.get("taxid")) == str(taxid):
+                    species_name = entry.get("name", "Unknown")
+                    break
 
             cache_dir = None
             if config:
