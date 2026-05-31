@@ -44,6 +44,18 @@ _readiness_cache_lock = threading.Lock()
 # notifications does not accumulate an unbounded list in the store.
 _MAX_NOTIFICATIONS = 10
 
+# The legacy notification-trigger channel labels severity with a Bootstrap
+# "color"; the toast channel uses "type". This maps the former onto the
+# latter so both feed the single unified toast renderer.
+_COLOR_TO_TOAST_TYPE = {
+    "success": "success",
+    "danger": "danger",
+    "warning": "warning",
+    "info": "info",
+    "primary": "info",
+    "secondary": "info",
+}
+
 
 # Tracks the kraken_db path the taxid mapping callback last initialised
 # from. When the operator points the dashboard at a different Kraken2
@@ -476,55 +488,12 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             return config["analysis_name"]
         return "Nanometa Live Analysis"
 
-    @app.callback(
-        Output("notification-container", "children"),
-        Input("notification-trigger", "data"),
-        State("notification-container", "children"),
-    )
-    def show_notification(notification_data, current_notifications):
-        """Show a notification."""
-        try:
-            if not notification_data:
-                return current_notifications or []
-
-            if current_notifications is None:
-                current_notifications = []
-
-            # Validate notification data structure
-            if not isinstance(notification_data, dict):
-                logging.error(f"Invalid notification data format: {notification_data}")
-                return current_notifications
-
-            # Make sure required fields exist
-            message = notification_data.get("message", "Notification")
-            title = notification_data.get("title", "Notification")
-            color = notification_data.get("color", "primary")
-
-            # Render multi-line messages as separate lines
-            if isinstance(message, str) and "\n" in message:
-                message_content = html.Div([
-                    html.Div(line, className="mb-1") for line in message.split("\n") if line.strip()
-                ])
-            else:
-                message_content = message
-
-            notification = dbc.Toast(
-                message_content,
-                id=f"notification-{int(time.time())}",
-                header=title,
-                is_open=True,
-                dismissable=True,
-                duration=4000,
-                color=color,
-            )
-
-            # Cap the rendered list so a long session (hours of real-time
-            # mode emitting repeated status/error notifications) does not
-            # accumulate an ever-growing DOM round-tripped through the store.
-            return (current_notifications + [notification])[-_MAX_NOTIFICATIONS:]
-        except Exception as e:
-            log_callback_error("show_notification", e)
-            return current_notifications or []
+    # NOTE: the former show_notification callback (which rendered the
+    # notification-trigger channel into a separate header notification-container)
+    # has been folded into the single display_toast renderer below, so there is
+    # one notification UI instead of two. notification-trigger is still written
+    # by ~14 call sites and read for navigation by switch_to_results_tab; only
+    # its rendering moved.
 
     @app.callback(
         [
@@ -1263,32 +1232,42 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
 
     @app.callback(
         Output("toast-container", "children"),
-        Input("toast-message", "data"),
+        [
+            Input("toast-message", "data"),
+            Input("notification-trigger", "data"),
+        ],
         State("toast-container", "children"),
     )
-    def display_toast(toast_data, current_toasts):
+    def display_toast(toast_data, notification_data, current_toasts):
         """
-        Display toast notifications for non-blocking feedback.
+        Unified floating-notification renderer.
 
-        Toast data format:
-        {
-            "type": "success" | "warning" | "danger" | "info",
-            "title": "Toast Title",
-            "message": "Toast message content"
-        }
+        Both notification channels feed this single container so there is one
+        notification UI rather than two:
+          - toast-message:        {"type", "title", "message"}
+          - notification-trigger: {"title", "message", "color"[, "navigate_to"]}
+        The legacy "color" field is normalized to a toast "type". (The
+        navigate_to field on notification-trigger is consumed separately by
+        switch_to_results_tab; it is ignored here.)
         """
         from dash import html
 
-        if not toast_data:
+        # Pick the payload from whichever store actually fired.
+        payload = toast_data if ctx.triggered_id == "toast-message" else notification_data
+
+        if not payload or not isinstance(payload, dict):
             return current_toasts or []
 
         if current_toasts is None:
             current_toasts = []
 
         try:
-            toast_type = toast_data.get("type", "info")
-            title = toast_data.get("title", "Notification")
-            message = toast_data.get("message", "")
+            # toast-message uses "type"; notification-trigger uses "color".
+            toast_type = payload.get("type") or _COLOR_TO_TOAST_TYPE.get(
+                payload.get("color", "info"), "info"
+            )
+            title = payload.get("title", "Notification")
+            message = payload.get("message", "")
 
             # Icon mapping
             icon_map = {

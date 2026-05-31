@@ -144,14 +144,25 @@ class TestTrackLastUpdateTime:
 # --------------------------------------------------------------------------
 
 class TestDisplayToast:
-    def test_appends_toast(self, app_backend):
+    # display_toast now renders both the toast-message and notification-trigger
+    # channels into one container: fn(toast_data, notification_data, current).
+    def test_appends_toast_message(self, app_backend):
         fn = _fn(app_backend[0], "toast-container.children")
-        result = fn({"type": "success", "title": "Done"}, [])
+        with _ctx("toast-message"):
+            result = fn({"type": "success", "title": "Done"}, None, [])
+        assert len(result) == 1
+
+    def test_renders_notification_trigger_channel(self, app_backend):
+        # A notification-trigger payload (color, not type) must also render.
+        fn = _fn(app_backend[0], "toast-container.children")
+        with _ctx("notification-trigger"):
+            result = fn(None, {"title": "Started", "message": "x", "color": "success"}, [])
         assert len(result) == 1
 
     def test_no_data_keeps_current(self, app_backend):
         fn = _fn(app_backend[0], "toast-container.children")
-        assert fn(None, ["existing"]) == ["existing"]
+        with _ctx("toast-message"):
+            assert fn(None, None, ["existing"]) == ["existing"]
 
 
 class TestSwitchToResultsTab:

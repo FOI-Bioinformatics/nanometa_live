@@ -196,17 +196,7 @@ def create_header(title="Nanometa Live"):
             ])
         ], id="stop-confirm-modal", is_open=False, centered=True),
 
-        # Notification area
-        html.Div(
-            id="notification-container",
-            className="position-fixed",
-            role="alert",
-            **{"aria-live": "assertive"},
-            style={
-                "top": "20px",
-                "right": "20px",
-                "maxWidth": "400px",
-                "zIndex": "1000"
-            }
-        )
+        # Notifications are rendered by the unified toast-container in the
+        # main layout (see display_toast); there is no longer a separate
+        # header notification area.
     ], className="header mb-4", role="banner")
