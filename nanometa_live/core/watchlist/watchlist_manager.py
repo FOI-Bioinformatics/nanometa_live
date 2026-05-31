@@ -1378,6 +1378,42 @@ class WatchlistManager:
                    f"{results['failed']} failed out of {total}")
         return results
 
+    def apply_validation_results(self, results: List[Dict[str, Any]]) -> int:
+        """Copy validation outcomes (WatchlistEntry.to_dict() payloads) onto
+        the in-memory entries, matching by taxid.
+
+        Validation runs in a DiskcacheManager background worker so the
+        NCBI/GTDB probes never freeze the UI. The worker mutates its own
+        process-local WatchlistManager, so its results must be applied back
+        onto the main-process singleton that the table reads from. This is
+        that apply step.
+
+        Returns the number of entries updated.
+        """
+        applied = 0
+        for payload in results or []:
+            try:
+                taxid = int(payload.get("taxid"))
+            except (TypeError, ValueError):
+                continue
+            entry = self._entries.get(taxid)
+            if entry is None:
+                continue
+            entry.validated = bool(payload.get("validated", False))
+            entry.validation_date = payload.get("validation_date")
+            entry.ncbi_link = payload.get("ncbi_link")
+            entry.gtdb_link = payload.get("gtdb_link")
+            entry.gtdb_taxonomy = payload.get("gtdb_taxonomy")
+            entry.api_sciname = payload.get("api_sciname")
+            entry.api_commonname = payload.get("api_commonname")
+            entry.api_rank = payload.get("api_rank")
+            if payload.get("lineage") is not None:
+                entry.lineage = payload.get("lineage")
+            applied += 1
+        if applied:
+            logger.info("Applied %d background validation result(s)", applied)
+        return applied
+
     def get_validation_status(self) -> Dict[str, Any]:
         """
         Get summary statistics about validation status.

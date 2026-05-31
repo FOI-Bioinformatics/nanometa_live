@@ -31,6 +31,8 @@ from nanometa_live.app.layouts.watchlist_layout import (
     create_api_details_content,
     create_missing_genome_item,
 )
+from nanometa_live.app.app import background_callback_manager
+
 logger = logging.getLogger(__name__)
 
 
@@ -855,14 +857,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
     # ---------------------------------------------------------------------
 
     @app.callback(
-        [
-            Output("watchlist-tab-state", "data", allow_duplicate=True),
-            Output("watchlist-table-refresh", "data", allow_duplicate=True),
-            Output("watchlist-progress-modal", "is_open"),
-            Output("watchlist-progress-bar", "value"),
-            Output("watchlist-progress-text", "children"),
-            Output("watchlist-progress-detail", "children"),
-        ],
+        Output("watchlist-validation-results", "data"),
         [
             Input("watchlist-validate-all-btn", "n_clicks"),
             Input({"type": "watchlist-row-validate", "index": ALL}, "n_clicks"),
@@ -870,20 +865,41 @@ def register_watchlist_callbacks(app: Dash) -> None:
         [
             State("watchlist-api-options", "value"),
             State({"type": "watchlist-row-validate", "index": ALL}, "id"),
-            State("watchlist-table-refresh", "data"),
             State("app-config", "data"),
+        ],
+        background=True,
+        manager=background_callback_manager,
+        progress=[
+            Output("watchlist-progress-bar", "value"),
+            Output("watchlist-progress-text", "children"),
+            Output("watchlist-progress-detail", "children"),
+        ],
+        running=[
+            (Output("watchlist-progress-modal", "is_open"), True, False),
+            (Output("watchlist-validate-all-btn", "disabled"), True, False),
         ],
         prevent_initial_call=True,
     )
     def validate_entries(
+        set_progress,
         validate_all: int,
         validate_row_clicks: List[int],
         api_options: List[str],
         row_ids: List[Dict],
-        current_refresh: int,
         config: Optional[Dict],
-    ) -> Tuple:
-        """Handle API validation requests."""
+    ):
+        """Validate watchlist entries against NCBI/GTDB in a background worker.
+
+        Runs in a DiskcacheManager worker so the (potentially multi-minute)
+        NCBI/GTDB probes never hold the Werkzeug request thread. The
+        WatchlistManager singleton is empty in this worker, so it is loaded
+        from config here; the per-entry results are returned as
+        WatchlistEntry.to_dict() payloads via the watchlist-validation-results
+        store, and apply_background_validation_results (main process) copies
+        them onto the singleton the table reads. set_progress drives the
+        modal progress bar; the modal open/close and button-disable are
+        handled by the running= clause.
+        """
         if not ctx.triggered_id:
             raise PreventUpdate
 
@@ -892,13 +908,10 @@ def register_watchlist_callbacks(app: Dash) -> None:
         use_gtdb = "gtdb" in (api_options or [])
         offline_mode = bool((config or {}).get("offline_mode", False))
 
-        # Match the validation API set to the configured taxonomy. The
-        # GTDB API is much slower than NCBI and was historically the
-        # source of multi-minute GUI lockups when degraded. If the
-        # operator picked an NCBI-taxonomy database (Standard, MinusB,
-        # Viral, etc.), querying GTDB is wasted work; same the other
-        # direction. The operator can still tick both checkboxes
-        # explicitly when they want the cross-validation.
+        # Match the validation API set to the configured taxonomy. The GTDB
+        # API is much slower than NCBI and was historically the source of
+        # multi-minute lockups when degraded. Operators can still tick both
+        # checkboxes for explicit cross-validation.
         kraken_taxonomy = str((config or {}).get("kraken_taxonomy", "")).lower()
         if kraken_taxonomy == "ncbi":
             use_gtdb = False
@@ -906,70 +919,118 @@ def register_watchlist_callbacks(app: Dash) -> None:
             use_ncbi = False
 
         if not use_ncbi and not use_gtdb:
-            return (
-                no_update,
-                no_update,
-                False,  # Close progress modal
-                0,
-                "No databases selected",
-                "Check NCBI and/or GTDB in the Databases section.",
-            )
+            return {"error": "no_databases"}
 
-        if offline_mode:
-            logger.info(
-                "validate_entries: offline_mode=True; API calls will be skipped; "
-                "only cached data will be used."
-            )
-
+        # The singleton is empty in this worker process; load it from config.
         manager = get_watchlist_manager()
-        taxids_to_validate = []
+        if not manager._loaded:
+            manager.load_config(config or {})
 
         if "validate-all" in trigger:
-            # Validate ALL pathogens (from stats bar button)
             entries = manager.get_entries_with_toggle_state()
             taxids_to_validate = [e.get("taxid") for e in entries]
-        elif isinstance(ctx.triggered_id, dict) and ctx.triggered_id.get("type") == "watchlist-row-validate":
-            # Single row validation
+        elif (
+            isinstance(ctx.triggered_id, dict)
+            and ctx.triggered_id.get("type") == "watchlist-row-validate"
+        ):
             taxid = ctx.triggered_id.get("index")
-            if taxid:
-                taxids_to_validate = [taxid]
+            taxids_to_validate = [taxid] if taxid else []
+        else:
+            taxids_to_validate = []
 
+        taxids_to_validate = [t for t in taxids_to_validate if t is not None]
         if not taxids_to_validate:
-            raise PreventUpdate
+            return {"error": "no_entries"}
 
-        # Perform validation
-        results = manager.bulk_validate_entries(
+        total = len(taxids_to_validate)
+        apis_used = [a for a, on in (("NCBI", use_ncbi), ("GTDB", use_gtdb)) if on]
+        api_label = f"APIs: {', '.join(apis_used)}"
+        set_progress((0, f"Validating 0/{total}", api_label))
+
+        def _progress(current: int, total_: int) -> None:
+            pct = int(current / total_ * 100) if total_ else 100
+            set_progress((pct, f"Validating {current}/{total_}", api_label))
+
+        summary = manager.bulk_validate_entries(
             taxids=taxids_to_validate,
             use_ncbi=use_ncbi,
             use_gtdb=use_gtdb,
+            progress_callback=_progress,
             offline_mode=offline_mode,
         )
 
-        validated = results.get("validated", 0)
-        failed = results.get("failed", 0)
-        total = len(taxids_to_validate)
+        # Serialize the entries we just validated for the main process.
+        payloads = []
+        for taxid in taxids_to_validate:
+            try:
+                entry = manager._entries.get(int(taxid))
+            except (TypeError, ValueError):
+                entry = None
+            if entry is not None:
+                payloads.append(entry.to_dict())
 
-        # Build detail message
-        apis_used = []
-        if use_ncbi:
-            apis_used.append("NCBI")
-        if use_gtdb:
-            apis_used.append("GTDB")
-        detail = f"APIs: {', '.join(apis_used) if apis_used else 'None selected'}"
-        if offline_mode:
-            detail += " | offline mode: only cached data used"
-        elif failed > 0:
+        validated = summary.get("validated", 0)
+        set_progress((100, f"Validated {validated} of {total}", api_label))
+
+        return {
+            "results": payloads,
+            "validated": validated,
+            "failed": summary.get("failed", 0),
+            "total": total,
+            "apis": apis_used,
+            "offline": offline_mode,
+        }
+
+    @app.callback(
+        [
+            Output("watchlist-tab-state", "data", allow_duplicate=True),
+            Output("watchlist-table-refresh", "data", allow_duplicate=True),
+            Output("toast-message", "data", allow_duplicate=True),
+        ],
+        Input("watchlist-validation-results", "data"),
+        [
+            State("watchlist-table-refresh", "data"),
+            State("app-config", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def apply_background_validation_results(payload, current_refresh, config):
+        """Apply background-validation results onto the main-process
+        WatchlistManager singleton and refresh the table."""
+        if not payload:
+            raise PreventUpdate
+
+        if payload.get("error") == "no_databases":
+            return no_update, no_update, {
+                "type": "warning",
+                "title": "No databases selected",
+                "message": "Tick NCBI and/or GTDB in the Databases section before verifying.",
+            }
+        if payload.get("error") == "no_entries":
+            raise PreventUpdate
+
+        manager = get_watchlist_manager()
+        if not manager._loaded:
+            manager.load_config(config or {})
+        applied = manager.apply_validation_results(payload.get("results", []))
+
+        validated = payload.get("validated", 0)
+        total = payload.get("total", 0)
+        failed = payload.get("failed", 0)
+        apis = payload.get("apis", [])
+        detail = f"APIs: {', '.join(apis) if apis else 'none'}"
+        if payload.get("offline"):
+            detail += " | offline mode: cached data only"
+        elif failed:
             detail += f" | {failed} failed"
 
         new_refresh = (current_refresh or 0) + 1
-        return (
-            {"last_update": f"validate-{validated}"},
-            new_refresh,  # Trigger table refresh
-            False,  # Close progress modal
-            100,
-            f"Validated {validated} of {total} entries",
-            detail,
-        )
+        toast = {
+            "type": "success" if validated else "info",
+            "title": "Validation complete",
+            "message": f"Validated {validated} of {total} entries. {detail}",
+        }
+        return {"last_update": f"validate-{validated}-{applied}"}, new_refresh, toast
 
     # ---------------------------------------------------------------------
     # API Details Modal

@@ -382,6 +382,10 @@ def create_app(
         # crashed the dash-renderer when a background callback wrote it). A
         # tiny relay callback mirrors this into toast-message.
         dcc.Store(id='internet-check-toast', data=None),
+        # Carries WatchlistEntry.to_dict() payloads from the background
+        # validation worker back to the main process, which applies them to
+        # the singleton (see apply_validation_results).
+        dcc.Store(id='watchlist-validation-results', data=None),
         dcc.Store(id='theme-preference', data='auto'),  # auto, light, dark
         dcc.Store(id='previous-running-state', data=False),  # For detecting analysis completion
         dcc.Store(id='readiness-state', data={"ready": False, "checks": []}),
