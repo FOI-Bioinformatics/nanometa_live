@@ -7,19 +7,95 @@ deterministic and testable in isolation, independent of the Dash callbacks that
 call them.
 """
 
+import datetime as _dt
+
 import pandas as pd
 import pytest
 
 from nanometa_live.app.tabs.dashboard_helpers import (
+    _calculate_overall_status,
     _count_input_files,
     _estimate_classified_rate,
     _estimate_pass_rate_from_quality,
+    _format_time_elapsed,
+    _generate_status_display,
     _get_alerts_badge_color,
+    _get_error_alerts,
+    _get_idle_alerts,
     _species_df_to_organisms,
     _verdict_banner_style,
 )
 
 pytestmark = pytest.mark.unit
+
+
+class TestGenerateStatusDisplay:
+    @pytest.mark.parametrize(
+        "status,label,css",
+        [
+            ("starting", "ACTIVE", "status-running"),
+            ("success", "ACTIVE", "status-good"),
+            ("viewing", "COMPLETE", "status-good"),
+            ("warning", "ATTENTION", "status-warning"),
+            ("danger", "ERROR", "status-danger"),
+        ],
+    )
+    def test_known_statuses(self, status, label, css):
+        style, icon, text, subtitle, label_text, label_icon, css_class = _generate_status_display(status)
+        assert label_text == label
+        assert css_class == css
+        assert isinstance(style, dict)
+
+    def test_unknown_falls_back_to_success(self):
+        assert _generate_status_display("nonsense") == _generate_status_display("success")
+
+
+class TestFormatTimeElapsed:
+    def test_none(self):
+        assert _format_time_elapsed(None) == "00:00:00"
+
+    def test_garbage(self):
+        assert _format_time_elapsed("not-a-timestamp") == "00:00:00"
+
+    def test_elapsed_hms(self):
+        start = (_dt.datetime.now() - _dt.timedelta(hours=1, minutes=2, seconds=3)).isoformat()
+        assert _format_time_elapsed(start) == "01:02:03"
+
+
+class TestAlertStates:
+    def test_idle_alerts(self):
+        component, count, color = _get_idle_alerts()
+        assert count == "0"
+        assert color == "secondary"
+
+    def test_error_alerts(self):
+        component, count, color = _get_error_alerts("boom")
+        assert count == "1"
+        assert color == "danger"
+
+
+class TestCalculateOverallStatus:
+    def test_visualization_only_is_viewing(self, tmp_path):
+        out = _calculate_overall_status(
+            str(tmp_path), {"visualization_only": True}, ["All Samples"],
+            pipeline_running=False,
+        )
+        assert out["status"] == "viewing"
+
+    def test_running_no_data_is_starting(self, tmp_path):
+        out = _calculate_overall_status(
+            str(tmp_path), {}, [], pipeline_running=True,
+        )
+        assert out["status"] == "starting"
+        assert out["total_reads"] == 0
+
+    def test_idle_empty_dir_is_success(self, tmp_path):
+        out = _calculate_overall_status(
+            str(tmp_path), {}, ["All Samples", "bc01"], pipeline_running=False,
+        )
+        assert out["status"] == "success"
+        assert out["total_samples"] == 1  # "All Samples" pseudo-sample excluded
+        assert set(out) >= {"status", "total_reads", "organisms_detected", "samples_processed"}
 
 
 class TestCountInputFiles:
