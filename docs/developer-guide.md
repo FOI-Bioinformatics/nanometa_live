@@ -267,7 +267,14 @@ python -c "from nanometa_live.app.app import create_app; print('OK')"
 - Follow PEP 8
 - Use type hints
 - Document public functions
-- Keep callbacks focused and small
+- Keep callbacks focused and small. Extract pure decision and formatting logic
+  into a sibling `app/tabs/<name>_helpers.py` module and keep only the thin
+  Dash wiring (Inputs/Outputs, store reads, I/O) in the callback. The helper
+  functions take plain arguments and return plain values, so they can be
+  unit-tested without a running app. Existing splits: `dashboard_helpers.py`
+  (including `select_verdict`, the clinical verdict state machine),
+  `kraken2_helpers.py`, `main_tab_helpers.py`, `qc_tab_helpers.py`,
+  `validation_tab_helpers.py`, and `config_tab_helpers.py`.
 
 ### Formatting
 
