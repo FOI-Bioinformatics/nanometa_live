@@ -76,8 +76,6 @@ def create_watchlist_layout() -> html.Div:
         _create_entry_edit_modal(),
         _create_api_details_modal(),
         _create_validation_progress_modal(),
-        # Taxid mapping modal (for Kraken2 Match badge clicks)
-        _create_taxid_mapping_modal_only(),
 
         # Next step navigation
         html.Div([
@@ -652,17 +650,6 @@ def _create_collapsible_add_species() -> dbc.Accordion:
 
 # NOTE: Genome download section, genome/BLAST modals, and rescan progress modal
 # have been moved to preparation_layout.py as part of the Setup tab reorganization.
-
-
-def _create_taxid_mapping_modal_only() -> dbc.Modal:
-    """
-    Create only the taxid mapping modal (without the full section).
-
-    The modal is opened when clicking Kraken2 Match badges in the Pathogens table.
-    Uses the same component from taxid_mapping_ui but standalone.
-    """
-    from nanometa_live.app.components.taxid_mapping_ui import create_manual_mapping_modal
-    return create_manual_mapping_modal("taxmap")
 
 
 # =============================================================================

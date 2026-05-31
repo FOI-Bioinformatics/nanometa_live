@@ -21,11 +21,6 @@ from nanometa_live.app.components.coverage_plots import (
     create_depth_histogram_figure,
 )
 from nanometa_live.app.components.header import create_header
-from nanometa_live.app.components.taxid_mapping_ui import (
-    create_mapping_controls,
-    create_mapping_status_dashboard,
-    create_mapping_table_section,
-)
 from nanometa_live.app.components.waiting_banner import waiting_for_first_batch_banner
 from nanometa_live.core.parsers.paf_coverage_parser import CoverageData
 
@@ -54,17 +49,6 @@ class TestSimpleBuilders:
     def test_waiting_banner_constructs(self):
         banner = waiting_for_first_batch_banner()
         assert isinstance(banner, Component)
-
-
-class TestTaxidMappingUi:
-    @pytest.mark.parametrize(
-        "builder",
-        [create_mapping_status_dashboard, create_mapping_controls, create_mapping_table_section],
-    )
-    def test_builders_construct_with_unique_ids(self, builder):
-        card = builder()
-        assert isinstance(card, Component)
-        _assert_no_duplicate_ids(card)
 
 
 class TestCoveragePlots:

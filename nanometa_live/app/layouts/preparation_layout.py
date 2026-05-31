@@ -758,25 +758,6 @@ def _create_import_genomes_card() -> dbc.Card:
                     ),
                 ], label="Directory", tab_id="import-dir"),
                 dbc.Tab([
-                    dcc.Upload(
-                        id="genome-import-archive-upload",
-                        children=html.Div([
-                            html.I(className="bi bi-cloud-upload me-2"),
-                            "Drag and drop or ",
-                            html.A("select archive", className="text-primary"),
-                            html.Br(),
-                            html.Small("(.tar.gz or .zip)", className="text-muted"),
-                        ]),
-                        style={
-                            # Hidden: no callback decodes the uploaded archive yet.
-                            # Use the path field below, which is wired to
-                            # import_genomes_from_archive.
-                            "display": "none",
-                        },
-                        className="mt-3 mb-2",
-                        multiple=False,
-                        max_size=500_000_000,  # 500 MB
-                    ),
                     dbc.InputGroup([
                         dbc.InputGroupText("Archive path"),
                         dbc.Input(

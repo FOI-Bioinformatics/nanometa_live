@@ -18,7 +18,6 @@ import dash_ag_grid as dag
 from nanometa_live.app.components.modern_components import (
     LastUpdatedBadge,
 )
-from nanometa_live.app.components.watchlist_modal import create_all_modals
 from nanometa_live.app.components.waiting_banner import (
     waiting_for_first_batch_banner as _lazy_waiting_banner,
 )
@@ -453,9 +452,6 @@ def create_dashboard_layout():
                 ),
             ]),
         ], id="report-export-modal", is_open=False, centered=True),
-
-        # Watchlist modals (retained for pathogen alert card modals)
-        create_all_modals(id_prefix="dashboard-wl"),
     ], className="p-3")
 
 
