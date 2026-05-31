@@ -20,11 +20,49 @@ from nanometa_live.app.tabs.qc_tab_helpers import (
     _build_stage_strip_slot,
     _get_empty_qc_figures,
     _is_amplicon_mode,
+    aggregate_fastp_read_stats,
     build_qc_figures,
     compute_qc_stat_lines,
 )
 
 pytestmark = pytest.mark.unit
+
+
+class TestAggregateFastpReadStats:
+    def _summary(self, reads_before, len_before, reads_after, len_after, gc):
+        return {
+            "before_filtering": {"total_reads": reads_before, "read1_mean_length": len_before},
+            "after_filtering": {"total_reads": reads_after, "read1_mean_length": len_after,
+                                 "gc_content": gc},
+        }
+
+    def test_empty(self):
+        stats = aggregate_fastp_read_stats([])
+        assert stats["mean_length"] == 0.0
+        assert stats["mean_length_before"] is None
+        assert stats["gc_content"] is None
+
+    def test_single_summary(self):
+        stats = aggregate_fastp_read_stats([self._summary(100, 1200, 90, 1000, 0.51)])
+        assert stats["mean_length"] == pytest.approx(1000.0)
+        assert stats["mean_length_before"] == pytest.approx(1200.0)
+        assert stats["gc_content"] == pytest.approx(51.0)  # 0.51 -> 51%
+
+    def test_read_count_weighted_mean(self):
+        # Two files: 100 reads@1000bp and 300 reads@2000bp ->
+        # weighted = (100*1000 + 300*2000) / 400 = 1750.
+        summaries = [
+            self._summary(100, 1000, 100, 1000, 0.4),
+            self._summary(300, 2000, 300, 2000, 0.6),
+        ]
+        stats = aggregate_fastp_read_stats(summaries)
+        assert stats["mean_length"] == pytest.approx(1750.0)
+        # GC is a simple mean of per-file after values: (40 + 60)/2 = 50.
+        assert stats["gc_content"] == pytest.approx(50.0)
+
+    def test_zero_gc_excluded(self):
+        stats = aggregate_fastp_read_stats([self._summary(10, 100, 10, 100, 0)])
+        assert stats["gc_content"] is None
 
 
 class TestBuildQcFigures:

@@ -49,6 +49,7 @@ from nanometa_live.app.tabs.qc_tab_helpers import (  # noqa: E402
     _get_empty_qc_figures,
     compute_qc_stat_lines,
     build_qc_figures,
+    aggregate_fastp_read_stats,
 )
 
 
@@ -681,46 +682,20 @@ def register_qc_callbacks(app: Dash):
                 fastp_files = glob.glob(os.path.join(fastp_dir, "*.fastp.json"))
                 if fastp_files:
                     source = "fastp"
-                    total_reads_after = 0
-                    total_reads_before = 0
-                    total_length_after = 0
-                    total_length_before = 0
-                    gc_values = []
-
+                    summaries = []
                     for fastp_file in fastp_files:
                         try:
                             with open(fastp_file, 'r') as f:
-                                fastp_data = json.load(f)
-                                summary = fastp_data.get("summary", {})
-                                before = summary.get("before_filtering", {})
-                                after = summary.get("after_filtering", {})
-
-                                # Accumulate for weighted average
-                                reads_before = before.get("total_reads", 0)
-                                reads_after = after.get("total_reads", 0)
-                                total_reads_before += reads_before
-                                total_reads_after += reads_after
-
-                                # Mean length calculation (weighted)
-                                len_after = after.get("read1_mean_length", 0)
-                                len_before = before.get("read1_mean_length", 0)
-                                total_length_after += len_after * reads_after
-                                total_length_before += len_before * reads_before
-
-                                # GC content
-                                gc = after.get("gc_content", 0)
-                                if gc > 0:
-                                    gc_values.append(gc * 100)  # Convert to percentage
+                                summaries.append(json.load(f).get("summary", {}))
                         except (json.JSONDecodeError, IOError, KeyError, TypeError) as e:
                             logging.debug(f"Error reading FASTP length data from {fastp_file}: {e}")
                             continue
 
-                    if total_reads_after > 0:
-                        mean_length = total_length_after / total_reads_after
-                    if total_reads_before > 0:
-                        mean_length_before = total_length_before / total_reads_before
-                    if gc_values:
-                        gc_content = sum(gc_values) / len(gc_values)
+                    # Weighted-average aggregation is a pure helper.
+                    _stats = aggregate_fastp_read_stats(summaries)
+                    mean_length = _stats["mean_length"]
+                    mean_length_before = _stats["mean_length_before"]
+                    gc_content = _stats["gc_content"]
 
             # Fallback to seqkit if no FASTP data
             if mean_length == 0:
