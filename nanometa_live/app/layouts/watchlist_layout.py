@@ -366,6 +366,7 @@ def _create_pathogens_table_section() -> dbc.Card:
                     ], size="sm"),
                 ], width=4),
                 dbc.Col([
+                    html.Small("Bulk:", className="text-muted me-2 align-self-center"),
                     dbc.ButtonGroup([
                         dbc.Button(
                             [html.I(className="bi bi-toggle-on me-1"), "Enable All"],
@@ -433,7 +434,7 @@ def _create_pathogens_table_section() -> dbc.Card:
                         ),
                     ], width=2),
                     dbc.Col([
-                        html.Small("Ref.", className="fw-bold"),
+                        html.Small("Genome/BLAST", className="fw-bold"),
                         html.I(className="bi bi-info-circle text-muted ms-1",
                                id="genome-header-info",
                                style={"fontSize": "0.7rem", "cursor": "help"}),
@@ -543,7 +544,7 @@ def _create_collapsible_watchlist_files() -> dbc.Accordion:
                 ], md=6),
             ]),
         ], title="Watchlist Files", item_id="watchlist-files"),
-    ], id="watchlist-files-accordion", start_collapsed=False, className="mb-3")
+    ], id="watchlist-files-accordion", start_collapsed=True, className="mb-3")
 
 
 def _create_collapsible_add_species() -> dbc.Accordion:
@@ -643,7 +644,13 @@ def _create_collapsible_add_species() -> dbc.Accordion:
 
             # Feedback
             html.Div(id="watchlist-add-feedback", className="mt-2 small"),
-        ], title="Add Custom Species", item_id="add-species"),
+        ], title=html.Span([
+            "Add Custom Species",
+            html.Small(
+                "  -  add one organism by name/taxid, or import a YAML list",
+                className="text-muted ms-2",
+            ),
+        ]), item_id="add-species"),
     ], id="add-species-accordion", start_collapsed=True, className="mb-3")
 
 
