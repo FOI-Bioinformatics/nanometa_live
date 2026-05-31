@@ -10,16 +10,57 @@ import plotly.graph_objects as go
 import pytest
 from dash import html
 
+from datetime import datetime
+
+import plotly.graph_objects as go
+
 from nanometa_live.app.tabs.qc_tab_helpers import (
     _build_stage_strip,
     _build_stage_strip_empty,
     _build_stage_strip_slot,
     _get_empty_qc_figures,
     _is_amplicon_mode,
+    build_qc_figures,
     compute_qc_stat_lines,
 )
 
 pytestmark = pytest.mark.unit
+
+
+class TestBuildQcFigures:
+    def test_empty_returns_four_empty_state_figures(self):
+        figs = build_qc_figures([])
+        assert len(figs) == 4
+        assert all(isinstance(f, go.Figure) for f in figs)
+        # Each carries the empty-state annotation.
+        assert all(f.layout.annotations for f in figs)
+
+    def test_builds_four_figures_from_samples(self):
+        sample_data = [
+            {"Sample": "bc01", "Time": datetime(2026, 5, 31, 10, 0, 0),
+             "Reads": 1000, "Bp": 1_500_000},
+            {"Sample": "bc02", "Time": datetime(2026, 5, 31, 10, 5, 0),
+             "Reads": 2000, "Bp": 3_000_000},
+        ]
+        figs = build_qc_figures(sample_data)
+        assert len(figs) == 4
+        cumul_reads, cumul_bp, reads_bar, bp_bar = figs
+        assert all(isinstance(f, go.Figure) for f in figs)
+        # Cumulative reads line ends at the running total (1000 + 2000).
+        assert cumul_reads.data[0].y[-1] == 3000
+        # Per-sample bar carries both samples.
+        assert set(reads_bar.data[0].x) == {"bc01", "bc02"}
+
+    def test_sorted_by_time(self):
+        # Out-of-order input: cumulative should still be monotonic by Time.
+        sample_data = [
+            {"Sample": "late", "Time": datetime(2026, 5, 31, 11, 0, 0), "Reads": 500, "Bp": 1},
+            {"Sample": "early", "Time": datetime(2026, 5, 31, 9, 0, 0), "Reads": 100, "Bp": 1},
+        ]
+        cumul_reads = build_qc_figures(sample_data)[0]
+        # First cumulative point is the earliest sample's reads (100), not 500.
+        assert cumul_reads.data[0].y[0] == 100
+        assert cumul_reads.data[0].y[-1] == 600
 
 
 class TestComputeQcStatLines:
