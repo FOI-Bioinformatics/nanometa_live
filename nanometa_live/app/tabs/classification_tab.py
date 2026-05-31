@@ -1280,12 +1280,30 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, colo
     # Calculate total reads for percentage calculations (use recalculated root value)
     # Find the domain-level totals for proper percentage base
     first_level_df = filtered_df[filtered_df["rank"] == tax_levels[0]]
-    total_reads = sum(
-        recalc_cumul.get(f"{row['rank']}_{row['name'].strip()}", 0)
-        for _, row in first_level_df.iterrows()
-    ) if tax_levels else 1
+    # recalc_cumul column was already filled from the same map, so the
+    # first-level total is just its column sum -- no per-row iterrows needed.
+    total_reads = int(first_level_df["recalc_cumul"].sum()) if tax_levels else 1
     if total_reads == 0:
         total_reads = 1  # Avoid division by zero
+
+    # Authoritative parent lookup, same as the Sankey: walk the taxid
+    # parent chain (robust to aggregation reordering and out-of-order
+    # PlusPFP nodes) rather than parsing leading-whitespace indentation.
+    # Falls back to the indentation walk below when the taxid columns are
+    # absent, so no data layout regresses.
+    use_taxid_parents = (
+        "taxid" in kraken_df.columns and "parent_taxid" in kraken_df.columns
+    )
+    if use_taxid_parents:
+        taxid_to_parent = dict(zip(
+            kraken_df["taxid"].astype(int), kraken_df["parent_taxid"].astype(int)
+        ))
+        taxid_to_key = {
+            int(tid): f"{rank}_{name.strip()}"
+            for tid, rank, name in zip(
+                kraken_df["taxid"], kraken_df["rank"], kraken_df["name"]
+            )
+        }
 
     # Build sunburst data with proper hierarchy
     ids = []
@@ -1339,18 +1357,35 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, colo
         taxon_names_stripped = level_df["name"].str.strip().tolist()
         taxon_reads = level_df["recalc_cumul"].tolist()
         taxon_indices = level_df.index.tolist()
+        taxon_taxids = (
+            level_df["taxid"].tolist() if use_taxid_parents
+            else [None] * len(level_df)
+        )
 
-        for taxon_name_full, taxon, reads, row_idx in zip(
-            taxon_names_full, taxon_names_stripped, taxon_reads, taxon_indices
+        for taxon_name_full, taxon, reads, row_idx, node_taxid in zip(
+            taxon_names_full, taxon_names_stripped, taxon_reads, taxon_indices,
+            taxon_taxids,
         ):
             # Create unique ID to handle duplicate names across levels
             taxon_id = f"{level}_{taxon}"
 
-            # Find parent using indentation-based hierarchy from Kraken format
             parent_id = "root"
 
-            if level_idx > 0:
-                # Get position in original dataframe
+            if level_idx > 0 and use_taxid_parents and node_taxid is not None:
+                # Walk up the taxid parent chain to the nearest ancestor that
+                # is already in the chart. Order-independent; correct even
+                # when the report rows are out of order (PlusPFP).
+                cur = taxid_to_parent.get(int(node_taxid), 0)
+                seen = set()
+                while cur != 0 and cur not in seen:
+                    seen.add(cur)
+                    ancestor_key = taxid_to_key.get(cur)
+                    if ancestor_key is not None and ancestor_key in added_ids:
+                        parent_id = ancestor_key
+                        break
+                    cur = taxid_to_parent.get(cur, 0)
+            elif level_idx > 0:
+                # Fallback: indentation-based hierarchy from Kraken format.
                 row_indent = len(taxon_name_full) - len(taxon_name_full.lstrip())
 
                 # Search backwards for parent

@@ -13,9 +13,12 @@ import numpy as np
 import plotly.graph_objects as go
 from dash import html
 import dash_bootstrap_components as dbc
-from nanometa_live.app.utils.plotly_theme import register_templates
-
-register_templates()
+# Importing plotly_theme registers the "nanometa" Plotly template as an
+# import-time side effect (plotly_theme calls _safe_register_templates() at
+# module load); the figures below reference that template by name. The
+# previous explicit register_templates() call re-registered it on every
+# worker-process import for no benefit.
+import nanometa_live.app.utils.plotly_theme  # noqa: F401
 
 from nanometa_live.core.parsers.paf_coverage_parser import CoverageData
 
@@ -142,9 +145,15 @@ def create_cumulative_coverage_figure(coverage: CoverageData) -> go.Figure:
     max_d = min(int(np.percentile(depth[depth > 0], 99)) if np.any(depth > 0) else 1, 500)
 
     thresholds = np.arange(0, max_d + 1)
-    fractions = np.array([
-        np.sum(depth >= t) / coverage.ref_length * 100 for t in thresholds
-    ])
+    # Vectorized: count(depth >= t) for every threshold at once. Sorting once
+    # then searchsorted is O(N log N + max_d) instead of the previous
+    # O(max_d * N) Python loop (up to ~2.5e9 comparisons on a 5 Mbp genome).
+    # count(depth >= t) == N - (number of elements < t).
+    sorted_depth = np.sort(depth)
+    counts_at_or_above = sorted_depth.size - np.searchsorted(
+        sorted_depth, thresholds, side="left"
+    )
+    fractions = counts_at_or_above / coverage.ref_length * 100
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(

@@ -311,17 +311,29 @@ def recalculate_cumulative_reads(df):
     if df.empty:
         return {}
 
-    result = {}
-    for idx in range(len(df)):
-        row = df.iloc[idx]
-        name = row["name"].strip()
-        rank = row.get("rank", "")
-        composite_key = f"{rank}_{name}"
-        # Use cumul_reads (column 2) - the cumulative/clade reads
-        # NOT reads (column 3) which is only direct assignments
-        result[composite_key] = row.get("cumul_reads", row.get("reads", 0))
+    # Vectorized build of the composite-key -> cumulative-reads map. This
+    # is on the hot Sankey/Sunburst rebuild path; the previous df.iloc[idx]
+    # row loop was quadratic in access cost for large databases.
+    names = df["name"].str.strip()
+    if "rank" in df.columns:
+        ranks = df["rank"].astype(str)
+    else:
+        ranks = pd.Series("", index=df.index)
+    keys = ranks + "_" + names
 
-    return result
+    # Use cumul_reads (cumulative/clade reads) when present, else fall back
+    # to reads (direct assignments), else 0 -- matching the per-row .get
+    # precedence the loop used.
+    if "cumul_reads" in df.columns:
+        vals = df["cumul_reads"]
+    elif "reads" in df.columns:
+        vals = df["reads"]
+    else:
+        vals = pd.Series(0, index=df.index)
+
+    # dict(zip(...)) keeps the last value on duplicate composite keys,
+    # exactly as repeated dict assignment in the loop did.
+    return dict(zip(keys, vals))
 
 
 def build_parent_map(tax_df, domain_df, tax_levels, node_ids, top_filter,
