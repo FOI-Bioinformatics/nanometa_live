@@ -79,8 +79,14 @@ class ConfigLoader:
             # Using strict boolean values
             "kraken_memory_mapping": True,
             # Validation settings
-            "blast_validation": False,  # Disabled by default - requires genomes to be downloaded
-            "validation_method": "blast",  # 'blast', 'minimap2', or 'both'
+            # Enabled by default: confirmation testing is cheap and gives operators
+            # an immediate cross-check on detected species. It silently no-ops when
+            # reference genomes have not been downloaded yet (see can_run_validation).
+            "blast_validation": True,
+            # minimap2 is the default: fast, ONT-optimised, and produces coverage-depth
+            # plots plus mapping confidence. 'blast' is more thorough but 5-10x slower
+            # per pair; 'both' is available for highest confidence at 2x compute.
+            "validation_method": "minimap2",  # 'blast', 'minimap2', or 'both'
             "min_perc_identity": 90,
             "e_val_cutoff": 0.01,
             "validation_hit_rate_threshold": 0.5,

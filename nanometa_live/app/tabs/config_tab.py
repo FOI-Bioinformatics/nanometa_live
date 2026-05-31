@@ -1016,10 +1016,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         clean_temp = bool(clean_temp)
 
         # Pipeline profile
-        pipeline_profile = config.get("pipeline_profile", "docker")
+        pipeline_profile = config.get("pipeline_profile", "conda")
 
         # Parse pipeline_source to extract type, branch, and local path
-        pipeline_source = config.get("pipeline_source", "remote:master")
+        pipeline_source = config.get("pipeline_source", "remote:dev")
         pipeline_source_type = "remote"
         pipeline_branch = "master"
         pipeline_local_path = ""

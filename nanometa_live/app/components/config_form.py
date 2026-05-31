@@ -131,7 +131,7 @@ def create_config_form():
                                     "value": "by_barcode",
                                 },
                             ],
-                            value="single_sample"
+                            value="by_barcode"
                         ),
                         dbc.Tooltip(
                             "single_sample: all FASTQ files in one flat folder are pooled into a single sample "
@@ -334,7 +334,7 @@ def create_config_form():
                                         {"label": "master (Stable)", "value": "master"},
                                         {"label": "dev (Development)", "value": "dev"}
                                     ],
-                                    value="master"
+                                    value="dev"
                                 ),
                                 dbc.FormText("Pipeline version to use"),
                                 dbc.Tooltip(
@@ -975,7 +975,7 @@ def create_config_form():
                                     min=5,
                                     max=300,
                                     step=5,
-                                    value=30
+                                    value=10
                                 ),
                                 dbc.FormText("How often the dashboard refreshes (5-300 seconds)"),
                                 dbc.Tooltip(

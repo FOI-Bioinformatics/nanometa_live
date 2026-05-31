@@ -81,6 +81,7 @@ CHART_CONFIG = {
     "displayModeBar": True,
     "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"],
     "displaylogo": False,
+    "responsive": True,
     "toImageButtonOptions": {"format": "png", "height": 800, "width": 1200, "scale": 2}
 }
 
@@ -94,6 +95,13 @@ def get_nanometa_template() -> Dict[str, Any]:
     """
     return {
         "layout": {
+            # Preserve operator zoom/pan/selection across the periodic figure
+            # rebuilds that drive the live dashboard. A constant value is all
+            # Plotly needs -- it is compared per-graph between successive
+            # figures, so one shared constant keeps each chart's view stable
+            # without coupling unrelated graphs.
+            "uirevision": "nanometa",
+
             # Background colors
             "paper_bgcolor": COLORS["white"],
             "plot_bgcolor": COLORS["white"],
@@ -235,6 +243,8 @@ def get_dark_mode_template() -> Dict[str, Any]:
 
     return {
         "layout": {
+            # See get_nanometa_template: preserve UI state across live rebuilds.
+            "uirevision": "nanometa",
             "paper_bgcolor": dark_colors["bg_primary"],
             "plot_bgcolor": dark_colors["bg_secondary"],
             "font": {

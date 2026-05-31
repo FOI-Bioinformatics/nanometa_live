@@ -1118,6 +1118,9 @@ def _create_nested_pathogen_row(entry: Dict[str, Any], watchlist_id: str) -> htm
                     color="link",
                     className="p-0",
                     title="Edit",
+                    # Hidden: no callback wired yet. Editing nested pathogens is
+                    # done via the main-table edit button (watchlist-row-edit).
+                    style={"display": "none"},
                 ),
             ], width=2, className="text-end"),
         ], align="center", className=row_class),
@@ -1249,6 +1252,8 @@ def create_watchlist_file_item(wl: Dict[str, Any], pathogens: List[Dict[str, Any
                     outline=True,
                     title="View in main table",
                     className="me-1",
+                    # Hidden: no callback wired yet.
+                    style={"display": "none"},
                 ),
                 dbc.Button(
                     html.I(className="bi bi-trash"),

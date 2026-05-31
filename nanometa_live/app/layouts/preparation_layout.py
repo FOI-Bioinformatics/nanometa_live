@@ -431,7 +431,6 @@ def create_preparation_layout():
         # Modals
         _create_genome_download_modal(),
         _create_blast_build_modal(),
-        _create_rescan_progress_modal(),
         _create_remove_all_confirm_modal(),
 
         # Page-bottom Start Analysis CTA. Mirrors the "Next" button
@@ -769,21 +768,17 @@ def _create_import_genomes_card() -> dbc.Card:
                             html.Small("(.tar.gz or .zip)", className="text-muted"),
                         ]),
                         style={
-                            "width": "100%",
-                            "height": "80px",
-                            "lineHeight": "40px",
-                            "borderWidth": "1px",
-                            "borderStyle": "dashed",
-                            "borderRadius": "5px",
-                            "textAlign": "center",
-                            "paddingTop": "10px",
+                            # Hidden: no callback decodes the uploaded archive yet.
+                            # Use the path field below, which is wired to
+                            # import_genomes_from_archive.
+                            "display": "none",
                         },
                         className="mt-3 mb-2",
                         multiple=False,
                         max_size=500_000_000,  # 500 MB
                     ),
                     dbc.InputGroup([
-                        dbc.InputGroupText("Or path"),
+                        dbc.InputGroupText("Archive path"),
                         dbc.Input(
                             id="genome-import-archive-path",
                             placeholder="/path/to/genomes.tar.gz",
@@ -977,39 +972,6 @@ def _create_blast_build_modal() -> dbc.Modal:
     ], id="blast-build-modal", centered=True, backdrop="static", is_open=False, size="lg")
 
 
-def _create_rescan_progress_modal() -> dbc.Modal:
-    """Create the rescan progress modal for taxmap scanning."""
-    return dbc.Modal([
-        dbc.ModalHeader([
-            dbc.ModalTitle([
-                html.I(className="bi bi-arrow-repeat me-2"),
-                "Scanning Database",
-            ]),
-        ]),
-        dbc.ModalBody([
-            html.Div([
-                html.P(
-                    id="taxmap-rescan-progress-text",
-                    children="Initializing...",
-                    className="mb-2",
-                ),
-                dbc.Progress(
-                    id="taxmap-rescan-progress-bar",
-                    value=0,
-                    striped=True,
-                    animated=True,
-                    className="mb-2",
-                    style={"height": "20px"},
-                ),
-                html.Small(
-                    id="taxmap-rescan-progress-detail",
-                    className="text-muted",
-                ),
-            ]),
-        ]),
-    ], id="taxmap-rescan-modal", centered=True, backdrop="static", is_open=False)
-
-
 def _create_remove_all_confirm_modal() -> dbc.Modal:
     """Confirmation dialog for removing all downloaded genomes."""
     return dbc.Modal([
@@ -1139,10 +1101,6 @@ def _wizard_step_item(step):
         title=html.Span([
             html.I(className=f"bi {step['icon']} me-2"),
             f"Step {idx + 1}: {step['title']}",
-            html.Span(
-                id={"type": "wizard-step-badge", "index": idx},
-                className="ms-2",
-            ),
         ]),
         item_id=f"wizard-step-{idx}",
     )
