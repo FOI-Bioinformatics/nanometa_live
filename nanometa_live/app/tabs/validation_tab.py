@@ -12,10 +12,12 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 
 from dash import Dash, Input, Output, State, ctx, no_update, html, ALL
+from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import pandas as pd
 
+from nanometa_live.app.utils.debounce import should_skip_update, get_trigger_type
 from nanometa_live.core.parsers.blast_validation_parser import BlastValidationParser
 from nanometa_live.core.parsers.paf_coverage_parser import parse_paf_coverage, aggregate_contig_coverage, CoverageData
 from nanometa_live.app.layouts.validation_layout import (
@@ -110,6 +112,13 @@ def register_validation_callbacks(app: Dash):
         an empty value) returns the full result set so cross-sample
         aggregates still work.
         """
+        # Interval ticks are a backstop only; debounce them so a quiet
+        # outdir does not re-parse the BLAST validation directory every
+        # tick (matches the pattern on every other results-driven lead
+        # callback).
+        if get_trigger_type(ctx) == "interval":
+            if should_skip_update("load_validation_data", debounce_ms=2000):
+                raise PreventUpdate
 
         try:
             if not config:

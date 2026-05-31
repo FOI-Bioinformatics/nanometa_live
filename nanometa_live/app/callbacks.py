@@ -22,6 +22,7 @@ from nanometa_live.core.utils.sample_detector import get_available_samples, get_
 from nanometa_live.core.utils.loader_utils import check_data_freshness
 from nanometa_live.app.utils.callback_helpers import log_callback_error
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+from nanometa_live.app.utils.debounce import should_skip_update, get_trigger_type
 from nanometa_live.app.app import background_callback_manager
 
 
@@ -36,6 +37,12 @@ from nanometa_live.app.app import background_callback_manager
 _READINESS_TTL = 60.0
 _readiness_cache: Dict[str, Tuple[float, Any]] = {}
 _readiness_cache_lock = threading.Lock()
+
+
+# Maximum number of notification / toast nodes kept in the DOM. Older
+# entries are dropped so a long real-time session that emits repeated
+# notifications does not accumulate an unbounded list in the store.
+_MAX_NOTIFICATIONS = 10
 
 
 # Tracks the kraken_db path the taxid mapping callback last initialised
@@ -486,7 +493,10 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 color=color,
             )
 
-            return current_notifications + [notification]
+            # Cap the rendered list so a long session (hours of real-time
+            # mode emitting repeated status/error notifications) does not
+            # accumulate an ever-growing DOM round-tripped through the store.
+            return (current_notifications + [notification])[-_MAX_NOTIFICATIONS:]
         except Exception as e:
             log_callback_error("show_notification", e)
             return current_notifications or []
@@ -935,25 +945,33 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             Output("available-samples", "data"),
             Output("sample-file-mapping", "data"),
         ],
+        Input("results-fingerprint", "data"),
         Input("update-interval", "n_intervals"),
         State("app-config", "data"),
         State("available-samples", "data"),
         State("sample-file-mapping", "data"),
     )
-    def update_available_samples(n_intervals, config, prev_samples, prev_mapping):
+    def update_available_samples(fingerprint, n_intervals, config, prev_samples, prev_mapping):
         """
         Detect and update available samples from nanometanf output.
 
         Scans the output directory for Kraken2, FASTP, and BLAST files
         to automatically detect all available samples/barcodes.
 
-        Short-circuits with PreventUpdate when the detected sample list
-        and file mapping have not changed since the previous tick. This
-        eliminates the per-tick store-overwrite churn flagged as P1-T03
-        in docs/audit-2026-04-28-throughput-gui.md, which otherwise
-        cascades a re-render of every callback subscribed to either
-        store on every interval tick at 24-barcode scale.
+        Driven primarily by ``results-fingerprint`` so the filesystem scan
+        (70+ scandir calls at 24-barcode scale) only runs when the outdir
+        actually changed. ``update-interval`` is kept as a backstop -- a tab
+        visited on a quiet outdir after the first fingerprint tick still
+        needs one refresh -- but interval ticks are debounced so they are a
+        microsecond short-circuit rather than a full scan.
+
+        Short-circuits with PreventUpdate when the detected sample list and
+        file mapping have not changed since the previous tick, so identical
+        content never re-renders downstream subscribers.
         """
+        if get_trigger_type(ctx) == "interval":
+            if should_skip_update("available_samples", debounce_ms=2000):
+                raise PreventUpdate
 
         if not config:
             new_samples, new_mapping = ["All Samples"], {}
@@ -1270,8 +1288,10 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 id=f"toast-{int(time.time()*1000)}"
             )
 
-            # Auto-remove after 4 seconds (handled by CSS animation)
-            return current_toasts + [new_toast]
+            # Auto-remove after 4 seconds (handled by CSS animation).
+            # Cap the list so repeated toasts over a long session do not
+            # grow the DOM without bound.
+            return (current_toasts + [new_toast])[-_MAX_NOTIFICATIONS:]
 
         except Exception as e:
             log_callback_error("display_toast", e)
@@ -1497,7 +1517,12 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 }
                 return no_update, new_prev_state, toast_msg
 
-        # No navigation needed, just update the previous state tracker
+        # No navigation needed. Only write the tracker store when the
+        # running flag actually changed (e.g. transition into running);
+        # writing an unchanged value on every backend-status poll would
+        # mark the store dirty and re-fire downstream subscribers each tick.
+        if new_prev_state == bool(prev_running):
+            return no_update, no_update, no_update
         return no_update, new_prev_state, no_update
 
     # ========================================================================
