@@ -52,6 +52,7 @@ from nanometa_live.app.tabs.validation_tab_helpers import (  # noqa: E402
     _format_criteria_text,
     _compute_summary,
     _create_empty_identity_plot,
+    _load_real_coverage,
 )
 
 
@@ -714,45 +715,5 @@ def register_validation_callbacks(app: Dash):
             return no_update
 
 
-# =====================================================================
-# Helper functions (module-level)
-# =====================================================================
-
-def _load_real_coverage(
-    selected_key: str, config: Optional[dict], min_mapq: int
-) -> Optional[CoverageData]:
-    """Load coverage from a real PAF file.
-
-    Returns None if no PAF file exists or if the file has no alignments
-    passing the min_mapq filter.
-    """
-    if not config:
-        return None
-
-    results_dir = config.get("results_output_directory") or config.get("main_dir", "")
-    if not results_dir:
-        return None
-
-    # selected_key format: "{sample_id}_{taxid}" where taxid is numeric
-    parts = selected_key.rsplit("_", 1)
-    if len(parts) != 2:
-        return None
-    sample_id, taxid_str = parts
-
-    candidates = [
-        Path(results_dir) / "validation" / "minimap2" / f"{sample_id}_taxid{taxid_str}.paf",
-        Path(results_dir) / "on_demand_validation" / f"{sample_id}_{taxid_str}_ondemand.paf",
-    ]
-
-    for paf_path in candidates:
-        if paf_path.exists():
-            cov_dict = parse_paf_coverage(paf_path, min_mapq=min_mapq)
-            if cov_dict:
-                return aggregate_contig_coverage(cov_dict)
-            logger.info(
-                "PAF file found but has no alignments passing min_mapq=%d: %s",
-                min_mapq, paf_path,
-            )
-            return None
-
-    return None
+# _load_real_coverage was moved to validation_tab_helpers.py and is re-exported
+# in the import block near the top of this module.
