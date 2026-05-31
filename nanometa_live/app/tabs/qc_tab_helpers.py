@@ -12,6 +12,46 @@ import pandas as pd
 import plotly.express as px
 
 
+def aggregate_fastp_read_stats(summaries: list) -> dict:
+    """Weighted-average read statistics over a list of fastp ``summary`` dicts.
+
+    Each summary has ``before_filtering`` / ``after_filtering`` blocks with
+    ``total_reads``, ``read1_mean_length`` and ``gc_content``. Mean lengths are
+    read-count-weighted across files; GC is a simple mean of the per-file
+    after-filtering values (converted to a percentage).
+
+    Returns ``{"mean_length", "mean_length_before", "gc_content"}`` where the
+    "before" and GC values are ``None`` when unavailable.
+    """
+    total_reads_after = 0
+    total_reads_before = 0
+    total_length_after = 0
+    total_length_before = 0
+    gc_values = []
+
+    for summary in summaries:
+        before = summary.get("before_filtering", {})
+        after = summary.get("after_filtering", {})
+
+        reads_before = before.get("total_reads", 0)
+        reads_after = after.get("total_reads", 0)
+        total_reads_before += reads_before
+        total_reads_after += reads_after
+
+        total_length_after += after.get("read1_mean_length", 0) * reads_after
+        total_length_before += before.get("read1_mean_length", 0) * reads_before
+
+        gc = after.get("gc_content", 0)
+        if gc > 0:
+            gc_values.append(gc * 100)  # Convert to percentage
+
+    return {
+        "mean_length": (total_length_after / total_reads_after) if total_reads_after > 0 else 0.0,
+        "mean_length_before": (total_length_before / total_reads_before) if total_reads_before > 0 else None,
+        "gc_content": (sum(gc_values) / len(gc_values)) if gc_values else None,
+    }
+
+
 def build_qc_figures(sample_data: list) -> list:
     """Build the four QC figures from gathered per-sample data.
 
