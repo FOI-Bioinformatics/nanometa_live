@@ -1038,7 +1038,11 @@ def create_config_form():
                                     step=1,
                                     value=8050
                                 ),
-                                dbc.FormText("Network port for this web interface (default: 8050)")
+                                dbc.FormText(
+                                    "Network port for this web interface (default: 8050). "
+                                    "Takes effect on the next application launch -- the "
+                                    "running server keeps the port it started on."
+                                )
                             ], md=4),
                             dbc.Col([
                                 dbc.Switch(

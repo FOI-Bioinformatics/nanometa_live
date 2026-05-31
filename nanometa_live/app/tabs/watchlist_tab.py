@@ -333,13 +333,23 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         manager = get_watchlist_manager()
 
-        for i, (value, id_dict) in enumerate(zip(values, ids)):
-            wl_id = id_dict.get("index")
-            if wl_id:
-                if value:
-                    manager.enable_watchlist(wl_id)
-                else:
-                    manager.disable_watchlist(wl_id)
+        # Apply only the toggle that actually changed (ctx.triggered_id),
+        # not every toggle in the group. The previous loop re-applied all n
+        # enable/disable calls on every single toggle -- correct, but O(n)
+        # wasted work (and any per-call side effects fired n times).
+        if not isinstance(ctx.triggered_id, dict):
+            raise PreventUpdate
+        changed_id = ctx.triggered_id.get("index")
+        changed_value = None
+        for value, id_dict in zip(values, ids):
+            if id_dict.get("index") == changed_id:
+                changed_value = value
+                break
+        if changed_id:
+            if changed_value:
+                manager.enable_watchlist(changed_id)
+            else:
+                manager.disable_watchlist(changed_id)
 
         # Sync watchlist state to app-config and save to disk
         updated_config = dict(current_config) if current_config else {}

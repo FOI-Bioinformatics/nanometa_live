@@ -279,10 +279,14 @@ def register_preparation_callbacks(app):
         initial = current_dir if current_dir and Path(current_dir).exists() else str(Path.home())
         try:
             if platform.system() == "Darwin":
+                # Escape for embedding inside an AppleScript double-quoted
+                # string: a path containing a quote (e.g. /Users/O'Brien is
+                # fine, but a literal ") would otherwise break the string.
+                mac_safe = initial.replace("\\", "\\\\").replace('"', '\\"')
                 script = (
                     f'set theFolder to POSIX path of '
                     f'(choose folder with prompt "Select export directory" '
-                    f'default location POSIX file "{initial}")\n'
+                    f'default location POSIX file "{mac_safe}")\n'
                     f'return theFolder'
                 )
                 result = _sp.run(
@@ -301,11 +305,14 @@ def register_preparation_callbacks(app):
                 if result.returncode == 0 and result.stdout.strip():
                     return result.stdout.strip()
             else:
-                # Windows
+                # Windows. Use a single-quoted PowerShell string (no $
+                # interpolation) and double any embedded single quotes, so a
+                # path with quotes cannot alter the command.
+                ps_safe = initial.replace("'", "''")
                 script = (
                     'Add-Type -AssemblyName System.Windows.Forms; '
                     '$d = New-Object System.Windows.Forms.FolderBrowserDialog; '
-                    f'$d.SelectedPath = "{initial}"; '
+                    f"$d.SelectedPath = '{ps_safe}'; "
                     'if ($d.ShowDialog() -eq "OK") { $d.SelectedPath }'
                 )
                 result = _sp.run(
