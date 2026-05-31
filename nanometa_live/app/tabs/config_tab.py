@@ -650,6 +650,36 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             if gui_port < 1024 or gui_port > 65535:
                 errors.append("GUI Port must be between 1024-65535")
 
+        # Server-side bounds for the remaining numeric inputs. The widgets
+        # carry browser-level min/max, but those are advisory only -- a
+        # programmatic post or devtools edit can submit out-of-range values
+        # that would otherwise be written to last-session.yaml and handed to
+        # Nextflow at launch.
+        if minimap2_min_mapq is not None:
+            if minimap2_min_mapq < 0 or minimap2_min_mapq > 60:
+                errors.append("Alignment Confidence (MAPQ) must be between 0-60")
+
+        if validation_identity is not None:
+            if validation_identity < 0 or validation_identity > 100:
+                errors.append("Validation identity must be between 0-100%")
+
+        if kraken2_confidence is not None:
+            if kraken2_confidence < 0 or kraken2_confidence > 1:
+                errors.append("Kraken2 confidence must be between 0.0-1.0")
+
+        if chopper_minlength is not None and chopper_minlength < 0:
+            errors.append("Chopper minimum length must be 0 or greater")
+
+        if chopper_quality is not None:
+            if chopper_quality < 0 or chopper_quality > 30:
+                errors.append("Chopper quality must be between 0-30")
+
+        if filtlong_minlength is not None and filtlong_minlength < 0:
+            errors.append("Filtlong minimum length must be 0 or greater")
+
+        if danger_threshold is not None and danger_threshold < 1:
+            errors.append("Alert Threshold must be at least 1")
+
         # If there are validation errors, return them
         if errors:
             return no_update, no_update, {
@@ -754,6 +784,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 errors.append(f"Local pipeline path does not exist: {pipeline_local_path}")
             else:
                 config["pipeline_source"] = pipeline_local_path
+        elif pipeline_source_type == "local":
+            # Local selected but no path given: fail loudly instead of
+            # silently leaving the previous pipeline_source in place.
+            errors.append("Local pipeline path is required when 'Local Path' is selected")
 
         # Input mode settings
         if processing_mode is not None:
@@ -1512,13 +1546,12 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 html.Small("Path is not a directory.", className="text-danger")
             )
         else:
-            # Check for required Kraken2 database files
-            required_files = ["hash.k2d", "opts.k2d", "taxo.k2d"]
-            missing_files = []
-            for req_file in required_files:
-                file_path = os.path.join(path, req_file)
-                if not os.path.exists(file_path):
-                    missing_files.append(req_file)
+            # Delegate to the single source of truth so this real-time
+            # feedback never drifts from the launch-time gate
+            # (parameter_mapping.validate_nextflow_params) or the apply
+            # callback, all of which use check_kraken_db.
+            from nanometa_live.core.utils.kraken_utils import check_kraken_db
+            _valid, missing_files = check_kraken_db(path)
 
             if missing_files:
                 return (

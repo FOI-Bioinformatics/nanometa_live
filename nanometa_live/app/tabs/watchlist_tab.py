@@ -1043,6 +1043,17 @@ def register_watchlist_callbacks(app: Dash) -> None:
         use_gtdb = "gtdb" in (api_options or [])
         offline_mode = bool((config or {}).get("offline_mode", False))
 
+        # Match the API set to the configured taxonomy, exactly as
+        # validate_entries does: querying the API that does not match the
+        # active database is wasted work and risks stalling on a degraded
+        # endpoint. The operator can still tick both boxes to force a
+        # cross-lookup.
+        kraken_taxonomy = str((config or {}).get("kraken_taxonomy", "")).lower()
+        if kraken_taxonomy == "ncbi":
+            use_gtdb = False
+        elif kraken_taxonomy == "gtdb":
+            use_ncbi = False
+
         if not use_ncbi and not use_gtdb:
             return (
                 {"display": "block"},

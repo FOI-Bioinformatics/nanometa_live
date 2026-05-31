@@ -1905,6 +1905,23 @@ def register_preparation_callbacks(app):
                 new_config = dict(config or {})
                 new_config["kraken_db"] = extract_path
                 new_config["external_kraken2_db"] = extract_path
+                # Persist to last-session.yaml so the newly downloaded DB
+                # path survives a browser refresh or server restart. Other
+                # config-mutating callbacks do this; this one previously
+                # only updated the in-memory store. Wrapped so a save
+                # failure never masks the successful download.
+                try:
+                    from nanometa_live.core.config.config_loader import ConfigLoader
+                    from nanometa_live.core.utils.paths import NanometaPaths
+                    paths = NanometaPaths.from_config(new_config)
+                    ConfigLoader(str(paths.configs)).save_config(
+                        new_config, "last-session.yaml"
+                    )
+                except Exception:
+                    logger.debug(
+                        "Could not persist kraken_db to last-session.yaml",
+                        exc_info=True,
+                    )
                 return dbc.Alert(
                     [
                         html.I(className="bi bi-check-circle me-2"),
