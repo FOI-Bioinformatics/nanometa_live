@@ -93,6 +93,12 @@ class TestRangeValidation:
     def test_alert_threshold_below_one_rejected(self):
         assert "Alert Threshold" in _message(_invoke(danger_threshold=0))
 
+    def test_max_file_age_negative_rejected(self):
+        assert "file age" in _message(_invoke(max_file_age_minutes=-1)).lower()
+
+    def test_min_reads_for_validation_below_one_rejected(self):
+        assert "validation" in _message(_invoke(min_reads_for_validation=0)).lower()
+
     def test_in_range_values_produce_no_bound_error(self):
         # All within bounds: the only errors should be the required-field
         # ones (nanopore/kraken), never a bound message.

@@ -93,6 +93,10 @@ class ConfigLoader:
             "validation_identity_threshold": 90.0,
             "minimap2_preset": "map-ont",
             "minimap2_min_mapq": 30,
+            # Minimum classified reads before the on-demand Validate action is
+            # offered on the Organisms tab. Consumed in main_tab.py; exposed in
+            # the Configuration tab's Confirmation Testing section.
+            "min_reads_for_validation": 50,
             # Per-installation directory for app state (configs, cache,
             # genomes, blast, mappings, logs). The CLI ``--data-dir``
             # flag overrides this; nanometa_live.py writes the

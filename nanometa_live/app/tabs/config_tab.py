@@ -456,6 +456,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             State("validation-identity-input", "value"),
             State("kraken2-confidence-input", "value"),
             State("kraken2-hitgroups-input", "value"),
+            # Newly exposed settings (2026-05-31): offline mode, realtime
+            # file-age bound, and the on-demand-validation read gate.
+            State("offline-mode-input", "value"),
+            State("max-file-age-input", "value"),
+            State("min-reads-for-validation-input", "value"),
             State("app-config", "data"),
         ],
         prevent_initial_call=True,
@@ -500,6 +505,9 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         validation_identity,
         kraken2_confidence,
         kraken2_hitgroups,
+        offline_mode,
+        max_file_age_minutes,
+        min_reads_for_validation,
         current_config,
     ):
         """Apply configuration changes with validation."""
@@ -680,6 +688,16 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         if danger_threshold is not None and danger_threshold < 1:
             errors.append("Alert Threshold must be at least 1")
 
+        if max_file_age_minutes is not None and max_file_age_minutes != "":
+            try:
+                if int(max_file_age_minutes) < 0:
+                    errors.append("Maximum file age must be 0 or greater")
+            except (TypeError, ValueError):
+                errors.append("Maximum file age must be an integer number of minutes")
+
+        if min_reads_for_validation is not None and min_reads_for_validation < 1:
+            errors.append("Minimum reads to offer validation must be at least 1")
+
         # If there are validation errors, return them
         if errors:
             return no_update, no_update, {
@@ -826,6 +844,14 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             config["kraken2_confidence"] = float(kraken2_confidence)
         if kraken2_hitgroups is not None:
             config["kraken2_minimum_hit_groups"] = int(kraken2_hitgroups)
+
+        # Newly exposed settings (2026-05-31).
+        if offline_mode is not None:
+            config["offline_mode"] = bool(offline_mode)
+        if max_file_age_minutes is not None and max_file_age_minutes != "":
+            config["max_file_age_minutes"] = int(max_file_age_minutes)
+        if min_reads_for_validation is not None:
+            config["min_reads_for_validation"] = int(min_reads_for_validation)
 
         # Note: Species watchlist is now managed via the Watchlist tab
         # and WatchlistManager, not through this config form
@@ -993,6 +1019,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("validation-identity-input", "value"),
             Output("kraken2-confidence-input", "value"),
             Output("kraken2-hitgroups-input", "value"),
+            # Newly exposed settings (2026-05-31)
+            Output("offline-mode-input", "value"),
+            Output("max-file-age-input", "value"),
+            Output("min-reads-for-validation-input", "value"),
             Output("config-form-initialized", "data"),
         ],
         Input("refresh-form-trigger", "data"),
@@ -1001,7 +1031,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     def initialize_form_from_config(refresh_trigger, config):
         """Initialize form fields from the current configuration."""
         if not config:
-            return [no_update] * 40
+            return [no_update] * 43
 
         # Extract values from config
         analysis_name = config.get("analysis_name", "")
@@ -1103,6 +1133,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         kraken2_confidence = config.get("kraken2_confidence", 0.0)
         kraken2_hitgroups = config.get("kraken2_minimum_hit_groups", 0)
 
+        # Newly exposed settings (2026-05-31).
+        offline_mode = bool(config.get("offline_mode", False))
+        max_file_age_minutes = config.get("max_file_age_minutes", 1000000)
+        min_reads_for_validation = config.get("min_reads_for_validation", 50)
+
         return [
             analysis_name,
             nanopore_dir,
@@ -1142,6 +1177,9 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             validation_identity,
             kraken2_confidence,
             kraken2_hitgroups,
+            offline_mode,
+            max_file_age_minutes,
+            min_reads_for_validation,
             True,  # Mark form as initialized (suppresses first "Modified" badge)
         ]
 
