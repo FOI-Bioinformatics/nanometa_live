@@ -59,6 +59,8 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     _count_input_files,
     _make_banner_content,
     _verdict_banner_style,
+    select_verdict,
+    _classify_dangerous,
     _get_idle_alerts,
     _get_error_alerts,
     _calculate_overall_status,
@@ -206,55 +208,29 @@ def register_dashboard_callbacks(app: Dash):
             run_state = "STANDBY"
             run_state_color = "secondary"
 
-        # No config or no data: STANDBY or SCREENING IN PROGRESS
-        if not config:
-            if pipeline_running:
-                return (
-                    _make_banner_content(
-                        "arrow-repeat", "#084298",
-                        "SCREENING IN PROGRESS", "First results pending",
-                        run_state, time_elapsed,
-                        sub_color="#084298",
-                        last_updated_str=last_updated_str,
-                        auto_stop_remaining_s=auto_stop_remaining_s,
-                        icon_extra_class="spin",
-                    ),
-                    _verdict_banner_style("#cfe2ff", "#0d6efd"),
-                    time_elapsed, run_state, run_state_color
-                )
-            return (
-                _make_banner_content(
-                    "pause-circle", "#6c757d",
-                    "STANDBY", "Start an analysis to begin",
-                    run_state, time_elapsed,
-                    sub_color="#6c757d",
-                    last_updated_str=last_updated_str,
-                    auto_stop_remaining_s=auto_stop_remaining_s,
-                ),
-                _verdict_banner_style("#f8f9fa", "#6c757d"),
-                time_elapsed, run_state, run_state_color
-            )
+        # ----------------------------------------------------------------
+        # Gather the decision inputs (file I/O isolated to this block), then
+        # delegate the safety-critical state choice to the pure
+        # select_verdict() helper so the verdict logic stays unit-testable.
+        # ----------------------------------------------------------------
+        has_config = bool(config)
+        overall_status_starting = bool(
+            overall_status and overall_status.get("status") == "starting"
+        )
+        main_dir = (
+            config.get("results_output_directory", "")
+            or config.get("main_dir", "")
+        ) if has_config else ""
+        main_dir_available = bool(main_dir and os.path.isdir(main_dir))
 
-        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
-
-        # Pipeline running but no data yet
-        if overall_status and overall_status.get("status") == "starting":
-            return (
-                _make_banner_content(
-                    "arrow-repeat", "#084298",
-                    "SCREENING IN PROGRESS", "First results pending",
-                    run_state, time_elapsed,
-                    sub_color="#084298",
-                    last_updated_str=last_updated_str,
-                    auto_stop_remaining_s=auto_stop_remaining_s,
-                    icon_extra_class="spin",
-                ),
-                _verdict_banner_style("#cfe2ff", "#0d6efd"),
-                time_elapsed, run_state, run_state_color
-            )
-
-        try:
-            if main_dir and os.path.isdir(main_dir):
+        kraken_has_data = False
+        dangerous: List[Dict[str, Any]] = []
+        n_watched = 0
+        # Only touch disk when there is a configured, ready results directory
+        # and we are not already short-circuiting on "starting" -- mirrors the
+        # original control flow so no Kraken load runs in those states.
+        if has_config and not overall_status_starting and main_dir_available:
+            try:
                 kraken_df = load_kraken_data(main_dir, "All Samples")
                 if not kraken_df.empty:
                     species_df = kraken_df[
@@ -263,139 +239,85 @@ def register_dashboard_callbacks(app: Dash):
                     detected_organisms = _species_df_to_organisms(species_df)
                     watched_species = _get_active_watchlist_entries(config)
                     n_watched = len(watched_species)
-                    dangerous = _check_pathogens_with_mapping(detected_organisms, config)
-
-                    if dangerous:
-                        n_found = len(dangerous)
-                        critical = [d for d in dangerous if d.get("threat_level") == "critical"]
-                        high_risk = [d for d in dangerous
-                                     if d.get("threat_level") in ["high", "high_risk"]]
-                        if critical or high_risk:
-                            # n_found counts only entries above each
-                            # pathogen's alert_threshold. The Organisms
-                            # tab lists every watchlist hit (any reads)
-                            # without that gate, so the two counters
-                            # legitimately differ. The wording below
-                            # makes the threshold gate explicit.
-                            action_sub = (
-                                f"{n_found} of {n_watched} watched pathogens above alert threshold"
-                            )
-                            if not validation_has_results:
-                                action_sub += " — pending confirmatory validation"
-
-                            # Per-sample attribution for the banner subhead
-                            # (closes P0-T02 from
-                            # docs/audit-2026-04-28-throughput-ux.md).
-                            # The per-sample IO is shared via the loader
-                            # cache + per-key parse lock, so this adds
-                            # minimal cost on top of the main aggregation.
-                            triggering_samples: List[str] = []
-                            total_real_samples = 0
-                            try:
-                                resolved_samples = _resolve_samples(
-                                    main_dir, available_samples or []
-                                )
-                                total_real_samples = len(
-                                    [s for s in resolved_samples
-                                     if s != "All Samples"]
-                                )
-                                taxid_to_samples = _load_per_sample_organisms(
-                                    main_dir, resolved_samples
-                                )
-                                # Union the samples that triggered any critical
-                                # or high-risk pathogen, preserving descending-
-                                # by-reads order via a stable accumulator.
-                                seen = set()
-                                for d in critical + high_risk:
-                                    taxid = d.get("taxid") or d.get("kraken_taxid")
-                                    if taxid is None:
-                                        continue
-                                    for entry in taxid_to_samples.get(int(taxid), []):
-                                        name = entry.get("sample")
-                                        if name and name not in seen:
-                                            seen.add(name)
-                                            triggering_samples.append(name)
-                            except Exception as exc:
-                                logger.warning(
-                                    "Verdict-banner attribution unavailable: %s",
-                                    exc,
-                                    exc_info=True,
-                                )
-
-                            return (
-                                _make_banner_content(
-                                    "exclamation-octagon-fill", "#8b0000",
-                                    "ACTION REQUIRED",
-                                    action_sub,
-                                    run_state, time_elapsed,
-                                    sub_color="#721c24",
-                                    show_icon_mobile=True,
-                                    last_updated_str=last_updated_str,
-                                    auto_stop_remaining_s=auto_stop_remaining_s,
-                                    triggering_samples=triggering_samples or None,
-                                    total_sample_count=total_real_samples or None,
-                                ),
-                                _verdict_banner_style("#f8d7da", "#8b0000"),
-                                time_elapsed, run_state, run_state_color
-                            )
-                        return (
-                            _make_banner_content(
-                                "eye-fill", "#fd7e14",
-                                "MONITORING",
-                                "Moderate-risk species found",
-                                run_state, time_elapsed,
-                                sub_color="#664d03",
-                                last_updated_str=last_updated_str,
-                                auto_stop_remaining_s=auto_stop_remaining_s,
-                            ),
-                            _verdict_banner_style("#fff3cd", "#fd7e14"),
-                            time_elapsed, run_state, run_state_color
-                        )
-
-                    # ALL CLEAR
-                    return (
-                        _make_banner_content(
-                            "shield-check", "#28a745",
-                            "ALL CLEAR",
-                            f"0 of {n_watched} watched pathogens above alert threshold",
-                            run_state, time_elapsed,
-                            sub_color="#155724",
-                            last_updated_str=last_updated_str,
-                            auto_stop_remaining_s=auto_stop_remaining_s,
-                        ),
-                        _verdict_banner_style("#d4edda", "#28a745"),
-                        time_elapsed, run_state, run_state_color
+                    dangerous = _check_pathogens_with_mapping(
+                        detected_organisms, config
                     )
+                    kraken_has_data = True
+            except Exception as e:
+                logger.error(f"Error updating verdict banner: {e}", exc_info=True)
+                # A load failure falls back to STANDBY, matching the original.
+                main_dir_available = False
+                kraken_has_data = False
+                dangerous = []
 
-                if pipeline_running:
-                    return (
-                        _make_banner_content(
-                            "arrow-repeat", "#084298",
-                            "SCREENING IN PROGRESS", "First results pending",
-                            run_state, time_elapsed,
-                            sub_color="#084298",
-                            last_updated_str=last_updated_str,
-                            auto_stop_remaining_s=auto_stop_remaining_s,
-                            icon_extra_class="spin",
-                        ),
-                        _verdict_banner_style("#cfe2ff", "#0d6efd"),
-                        time_elapsed, run_state, run_state_color
-                    )
+        descriptor = select_verdict(
+            has_config=has_config,
+            pipeline_running=pipeline_running,
+            overall_status_starting=overall_status_starting,
+            main_dir_available=main_dir_available,
+            kraken_has_data=kraken_has_data,
+            dangerous=dangerous,
+            n_watched=n_watched,
+            validation_has_results=validation_has_results,
+        )
 
-        except Exception as e:
-            logger.error(f"Error updating verdict banner: {e}", exc_info=True)
+        # Per-sample attribution for the ACTION REQUIRED subhead (closes
+        # P0-T02 from docs/audit-2026-04-28-throughput-ux.md). The per-sample
+        # IO is shared via the loader cache + per-key parse lock, so this adds
+        # minimal cost on top of the main aggregation above. Only ACTION
+        # REQUIRED needs it -- the operator must know which barcode is hot.
+        triggering_samples: Optional[List[str]] = None
+        total_real_samples: Optional[int] = None
+        if descriptor.needs_attribution:
+            critical, high_risk = _classify_dangerous(dangerous)
+            collected: List[str] = []
+            total_count = 0
+            try:
+                resolved_samples = _resolve_samples(
+                    main_dir, available_samples or []
+                )
+                total_count = len(
+                    [s for s in resolved_samples if s != "All Samples"]
+                )
+                taxid_to_samples = _load_per_sample_organisms(
+                    main_dir, resolved_samples
+                )
+                # Union the samples that triggered any critical or high-risk
+                # pathogen, preserving descending-by-reads order via a stable
+                # accumulator.
+                seen = set()
+                for d in critical + high_risk:
+                    taxid = d.get("taxid") or d.get("kraken_taxid")
+                    if taxid is None:
+                        continue
+                    for entry in taxid_to_samples.get(int(taxid), []):
+                        name = entry.get("sample")
+                        if name and name not in seen:
+                            seen.add(name)
+                            collected.append(name)
+            except Exception as exc:
+                logger.warning(
+                    "Verdict-banner attribution unavailable: %s",
+                    exc,
+                    exc_info=True,
+                )
+            triggering_samples = collected or None
+            total_real_samples = total_count or None
 
-        # Default: STANDBY
         return (
             _make_banner_content(
-                "pause-circle", "#6c757d",
-                "STANDBY", "Start an analysis to begin",
+                descriptor.icon, descriptor.icon_color,
+                descriptor.title, descriptor.subtitle,
                 run_state, time_elapsed,
-                sub_color="#6c757d",
+                sub_color=descriptor.sub_color,
+                show_icon_mobile=descriptor.show_icon_mobile,
                 last_updated_str=last_updated_str,
                 auto_stop_remaining_s=auto_stop_remaining_s,
+                icon_extra_class=descriptor.icon_extra_class,
+                triggering_samples=triggering_samples,
+                total_sample_count=total_real_samples,
             ),
-            _verdict_banner_style("#f8f9fa", "#6c757d"),
+            _verdict_banner_style(descriptor.bg_color, descriptor.border_color),
             time_elapsed, run_state, run_state_color
         )
 

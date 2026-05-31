@@ -11,6 +11,7 @@ register_dashboard_callbacks() block.
 import os
 import glob
 import pandas as pd
+from dataclasses import dataclass
 from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
 import logging
@@ -236,6 +237,154 @@ def _verdict_banner_style(bg_color: str, border_color: str) -> dict:
         "padding": "24px 32px",
         "minHeight": "120px",
     }
+
+
+# ----------------------------------------------------------------------------
+# Clinical verdict-banner decision logic (Zone 1).
+#
+# The state machine below is the safety-critical core of the dashboard: it
+# decides whether the operator sees ACTION REQUIRED, MONITORING, ALL CLEAR,
+# SCREENING IN PROGRESS, or STANDBY. It is kept as a pure function so the
+# decision can be unit-tested exhaustively in isolation from the Dash callback,
+# the file I/O (Kraken load, per-sample attribution), and the component build.
+# The callback computes the input booleans and the `dangerous` hit list, calls
+# select_verdict(), then renders the returned descriptor.
+# ----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class VerdictDescriptor:
+    """Describes which verdict banner to render, without building components.
+
+    Carries every argument needed by _make_banner_content and
+    _verdict_banner_style. ``needs_attribution`` signals to the callback that
+    the per-sample triggering attribution I/O should run for this state (only
+    ACTION REQUIRED today).
+    """
+    state: str
+    icon: str
+    icon_color: str
+    title: str
+    subtitle: str
+    sub_color: str
+    bg_color: str
+    border_color: str
+    icon_extra_class: str = ""
+    show_icon_mobile: bool = False
+    needs_attribution: bool = False
+
+
+def _screening_descriptor() -> VerdictDescriptor:
+    """SCREENING IN PROGRESS: pipeline running, first results pending."""
+    return VerdictDescriptor(
+        state="SCREENING",
+        icon="arrow-repeat", icon_color="#084298",
+        title="SCREENING IN PROGRESS", subtitle="First results pending",
+        sub_color="#084298", bg_color="#cfe2ff", border_color="#0d6efd",
+        icon_extra_class="spin",
+    )
+
+
+def _standby_descriptor() -> VerdictDescriptor:
+    """STANDBY: no analysis active and no data to summarise."""
+    return VerdictDescriptor(
+        state="STANDBY",
+        icon="pause-circle", icon_color="#6c757d",
+        title="STANDBY", subtitle="Start an analysis to begin",
+        sub_color="#6c757d", bg_color="#f8f9fa", border_color="#6c757d",
+    )
+
+
+def _classify_dangerous(dangerous: List[Dict[str, Any]]) -> Tuple[list, list]:
+    """Split watchlist hits into (critical, high_risk) buckets.
+
+    ``high`` and ``high_risk`` are treated as the same escalation tier; both,
+    along with ``critical``, drive the ACTION REQUIRED verdict.
+    """
+    critical = [d for d in dangerous if d.get("threat_level") == "critical"]
+    high_risk = [d for d in dangerous
+                 if d.get("threat_level") in ("high", "high_risk")]
+    return critical, high_risk
+
+
+def _action_required_subtitle(n_found: int, n_watched: int,
+                              validation_has_results: bool) -> str:
+    """Subtitle for ACTION REQUIRED.
+
+    n_found counts only entries above each pathogen's alert_threshold; the
+    Organisms tab lists every watchlist hit without that gate, so the two
+    counters legitimately differ. The wording makes the threshold gate
+    explicit and flags when confirmatory validation has not yet run.
+    """
+    sub = f"{n_found} of {n_watched} watched pathogens above alert threshold"
+    if not validation_has_results:
+        sub += " — pending confirmatory validation"
+    return sub
+
+
+def select_verdict(
+    *,
+    has_config: bool,
+    pipeline_running: bool,
+    overall_status_starting: bool,
+    main_dir_available: bool,
+    kraken_has_data: bool,
+    dangerous: List[Dict[str, Any]],
+    n_watched: int,
+    validation_has_results: bool,
+) -> VerdictDescriptor:
+    """Pure decision: pick the verdict banner state from the analysis inputs.
+
+    Mirrors the original update_verdict_banner control flow exactly:
+
+    1. No config -> SCREENING when running, otherwise STANDBY.
+    2. overall_status == "starting" -> SCREENING (takes priority over data).
+    3. Results directory present with Kraken data -> classify the watchlist
+       hits: any critical/high-risk hit -> ACTION REQUIRED; other hits ->
+       MONITORING; no hits -> ALL CLEAR.
+    4. Results directory present but no data yet and still running -> SCREENING.
+    5. Everything else (no results dir, idle with no data, load failure) ->
+       STANDBY.
+    """
+    if not has_config:
+        return _screening_descriptor() if pipeline_running else _standby_descriptor()
+
+    if overall_status_starting:
+        return _screening_descriptor()
+
+    if main_dir_available and kraken_has_data:
+        if dangerous:
+            critical, high_risk = _classify_dangerous(dangerous)
+            if critical or high_risk:
+                return VerdictDescriptor(
+                    state="ACTION_REQUIRED",
+                    icon="exclamation-octagon-fill", icon_color="#8b0000",
+                    title="ACTION REQUIRED",
+                    subtitle=_action_required_subtitle(
+                        len(dangerous), n_watched, validation_has_results),
+                    sub_color="#721c24", bg_color="#f8d7da",
+                    border_color="#8b0000",
+                    show_icon_mobile=True, needs_attribution=True,
+                )
+            return VerdictDescriptor(
+                state="MONITORING",
+                icon="eye-fill", icon_color="#fd7e14",
+                title="MONITORING", subtitle="Moderate-risk species found",
+                sub_color="#664d03", bg_color="#fff3cd", border_color="#fd7e14",
+            )
+        return VerdictDescriptor(
+            state="ALL_CLEAR",
+            icon="shield-check", icon_color="#28a745",
+            title="ALL CLEAR",
+            subtitle=f"0 of {n_watched} watched pathogens above alert threshold",
+            sub_color="#155724", bg_color="#d4edda", border_color="#28a745",
+        )
+
+    # Results directory present but no rows yet, pipeline still producing them.
+    if main_dir_available and pipeline_running:
+        return _screening_descriptor()
+
+    return _standby_descriptor()
 
 
 def _get_idle_alerts() -> Tuple:
