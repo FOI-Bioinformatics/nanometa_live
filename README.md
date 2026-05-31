@@ -72,6 +72,22 @@ diskcache>=5.6.0
 For pipeline execution: Nextflow 25.10 or later. Container engines are
 not required; nanometanf runs under the `conda` profile by default.
 
+## Development
+
+The test suite needs the runtime dependencies (Dash, Plotly, pandas), so
+install the package with its dev extras into a virtual environment:
+
+```
+pip install -e ".[dev]"
+pytest               # full suite, parallel (pytest-xdist)
+pytest -n 0          # serial, for pdb/print debugging
+pytest --cov=nanometa_live --cov-report=term-missing   # with coverage gate
+```
+
+Tests marked `slow` need Nextflow/conda and are skipped by default; run them
+with `pytest -m slow`. CI runs the suite and the coverage gate on Python 3.11
+and 3.12 for every push and pull request to `main` and `dev`.
+
 ## Citation
 
 If you use Nanometa Live in research, please cite:
