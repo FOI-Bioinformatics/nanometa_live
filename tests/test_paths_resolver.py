@@ -159,3 +159,27 @@ def test_set_get_project_dir_env_round_trip(monkeypatch, tmp_path):
         assert get_project_dir_from_env() == str(tmp_path / "p")
     finally:
         os.environ.pop("NANOMETA_PROJECT_DIR", None)
+
+
+# --------------------------------------------------------------------------
+# Results container + per-run folders (named runs nested in the project).
+# --------------------------------------------------------------------------
+
+def test_results_under_project_when_set(tmp_path):
+    paths = NanometaPaths.from_config({"project_dir": str(tmp_path / "proj")})
+    assert paths.results == tmp_path / "proj" / "results"
+    assert paths.run_dir("run_alpha") == tmp_path / "proj" / "results" / "run_alpha"
+
+
+def test_results_falls_back_to_home_when_no_project(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    paths = NanometaPaths.from_config({"data_dir": str(tmp_path / "g")})
+    assert paths.results == Path(os.path.expanduser("~/nanometa_results"))
+
+
+def test_ensure_dirs_creates_results_only_for_project(tmp_path):
+    proj = tmp_path / "proj"
+    NanometaPaths.from_config(
+        {"data_dir": str(tmp_path / "g"), "project_dir": str(proj)}
+    ).ensure_dirs()
+    assert (proj / "results").is_dir()

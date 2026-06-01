@@ -722,11 +722,20 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         if kraken_db is not None:
             config["kraken_db"] = kraken_db
 
-        if results_dir is not None:
-            # If empty, use the default
-            if not results_dir.strip():
-                results_dir = os.path.join(os.path.expanduser("~"), "nanometa_results")
-            config["results_output_directory"] = results_dir
+        # Results directory. An explicit value is an operator override; when
+        # the field is left empty we derive a project-local, per-run folder
+        # <project_dir>/results/<run-name slug> from analysis_name. The derived
+        # path is written into the config so every downstream reader sees a
+        # concrete directory.
+        explicit_results = (results_dir or "").strip()
+        if explicit_results:
+            config["results_output_directory"] = explicit_results
+        else:
+            from nanometa_live.app.utils.outdir_resolution import resolve_run_outdir
+            # Clear any stale value so resolve_run_outdir derives rather than
+            # treating a previously-derived path as an override.
+            config["results_output_directory"] = ""
+            config["results_output_directory"] = resolve_run_outdir(config)
 
         if update_interval is not None:
             config["update_interval_seconds"] = update_interval

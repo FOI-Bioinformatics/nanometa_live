@@ -55,13 +55,14 @@ class ConfigLoader:
         Returns:
             A dictionary containing the default configuration
         """
-        # Default results directory: ~/nanometa_results
-        default_results_dir = os.path.join(os.path.expanduser("~"), "nanometa_results")
-
         default_config = {
             "analysis_name": "Nanometa Live Analysis",
             "nanopore_output_directory": "",
-            "results_output_directory": default_results_dir,
+            # Empty by default: the effective output directory is derived as
+            # <project_dir>/results/<run-name slug> at Apply Settings (see
+            # outdir_resolution.resolve_run_outdir). A non-empty value here is
+            # treated as an explicit operator override.
+            "results_output_directory": "",
             "species_of_interest": [],
             "update_interval_seconds": 10,
             "gui_port": 8050,

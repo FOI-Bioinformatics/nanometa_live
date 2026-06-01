@@ -618,6 +618,14 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
             or config.get("main_dir")
             or ""
         )
+        # Safety net: a Start without a prior Apply (empty results dir) still
+        # lands in the project-local run folder <project>/results/<run slug>.
+        if not outdir:
+            from nanometa_live.app.utils.outdir_resolution import resolve_run_outdir
+            outdir = resolve_run_outdir(config)
+            if outdir:
+                config = dict(config)
+                config["results_output_directory"] = outdir
         found = backend_manager.detect_existing_results(outdir)
         if found:
             # Compare current input fingerprint with the prior run's
@@ -1726,23 +1734,136 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
     # folder is kept separate from restoring a pipeline configuration.
 
     @app.callback(
-        Output("folder-browser-modal", "is_open", allow_duplicate=True),
-        Output("browse-target-field", "data", allow_duplicate=True),
-        Output("current-browse-path", "data", allow_duplicate=True),
+        Output("open-results-modal", "is_open", allow_duplicate=True),
+        Output("open-results-list", "children"),
         Input("open-results-btn", "n_clicks"),
         State("app-config", "data"),
         prevent_initial_call=True,
     )
-    def open_results_picker(n_clicks, config):
-        """Open the shared folder browser targeting the transient
-        'open-results' field. Start navigation at the currently-viewed
-        results folder if one is set, else the home directory."""
+    def open_results_modal(n_clicks, config):
+        """Open the run picker and list the run folders under the project's
+        results/ directory. Each run is a clickable item; a folder is treated
+        as a run when it holds nanometanf output (detect_existing_results)."""
+        if not n_clicks:
+            raise PreventUpdate
+
+        from nanometa_live.core.utils.paths import NanometaPaths
+        results_root = NanometaPaths.from_config(config or {}).results
+        items = []
+        try:
+            entries = sorted(
+                (e for e in os.scandir(str(results_root)) if e.is_dir()),
+                key=lambda e: e.name,
+            )
+        except OSError:
+            entries = []
+
+        for entry in entries:
+            found = backend_manager.detect_existing_results(entry.path)
+            if not found:
+                continue  # not a run folder (no nanometanf output)
+            meta = backend_manager.read_run_metadata(entry.path)
+            subtitle = f"{', '.join(found[:4])}{'...' if len(found) > 4 else ''}"
+            when = (meta or {}).get("written_at")
+            detail = f"produced {when}" if when else "no run record"
+            items.append(
+                dbc.ListGroupItem(
+                    [
+                        html.Div([
+                            html.I(className="bi bi-folder-fill text-warning me-2"),
+                            html.Strong(entry.name),
+                            html.Span(f"  -  {detail}", className="text-muted small ms-1"),
+                        ]),
+                        html.Div(subtitle, className="text-muted small"),
+                    ],
+                    id={"type": "open-results-run", "path": entry.path},
+                    action=True,
+                    n_clicks=0,
+                )
+            )
+
+        if items:
+            body = [
+                html.P(
+                    [
+                        "Runs in this project (",
+                        html.Code(str(results_root)),
+                        "):",
+                    ],
+                    className="small text-muted",
+                ),
+                dbc.ListGroup(items),
+            ]
+        else:
+            body = html.Div([
+                html.I(className="bi bi-info-circle me-2"),
+                html.Span(
+                    "No runs found in this project yet. Start an analysis to "
+                    "create one, or use 'Browse another folder' to open results "
+                    "from elsewhere.",
+                    className="text-muted",
+                ),
+            ])
+        return True, body
+
+    @app.callback(
+        Output("open-results-modal", "is_open", allow_duplicate=True),
+        Input("open-results-close-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def close_open_results_modal(n_clicks):
+        """Close the run picker."""
+        if not n_clicks:
+            raise PreventUpdate
+        return False
+
+    @app.callback(
+        Output("app-config", "data", allow_duplicate=True),
+        Output("open-results-modal", "is_open", allow_duplicate=True),
+        Output("toast-message", "data", allow_duplicate=True),
+        Output("selected-sample", "data", allow_duplicate=True),
+        Input({"type": "open-results-run", "path": ALL}, "n_clicks"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
+    )
+    def select_run_to_view(clicks, config):
+        """Point the dashboard at a run picked from the project list. Transient
+        view action: in-memory app-config only (never persisted)."""
+        if not clicks or not any(clicks) or not ctx.triggered_id:
+            raise PreventUpdate
+        path = ctx.triggered_id.get("path") if isinstance(ctx.triggered_id, dict) else None
+        if not path or not os.path.isdir(path):
+            return no_update, False, {
+                "type": "error", "title": "Could not open run",
+                "message": "That run folder no longer exists.",
+            }, no_update
+        new_config = dict(config or {})
+        new_config["results_output_directory"] = path
+        new_config["main_dir"] = path
+        new_config["visualization_only"] = True
+        return new_config, False, {
+            "type": "success", "title": "Viewing run",
+            "message": f"Now displaying results from {path}.",
+        }, "All Samples"
+
+    @app.callback(
+        Output("open-results-modal", "is_open", allow_duplicate=True),
+        Output("folder-browser-modal", "is_open", allow_duplicate=True),
+        Output("browse-target-field", "data", allow_duplicate=True),
+        Output("current-browse-path", "data", allow_duplicate=True),
+        Input("open-results-browse-btn", "n_clicks"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
+    )
+    def open_results_browse_elsewhere(n_clicks, config):
+        """Escape hatch: open the generic folder browser (target 'open-results')
+        for results outside the project. Closes the run picker first."""
         if not n_clicks:
             raise PreventUpdate
         start = resolve_outdir_for_fingerprint(config or {})
         if not start or not os.path.isdir(start):
             start = os.path.expanduser("~")
-        return True, "open-results", start
+        return False, True, "open-results", start
 
     @app.callback(
         Output("app-config", "data", allow_duplicate=True),

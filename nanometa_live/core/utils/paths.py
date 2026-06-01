@@ -119,6 +119,22 @@ class NanometaPaths:
     def last_session_yaml(self) -> Path:
         return self.configs / "last-session.yaml"
 
+    @property
+    def results(self) -> Path:
+        """Container for this project's run folders.
+
+        ``<project_dir>/results`` when a project is set; otherwise the
+        legacy ``~/nanometa_results`` so a project-less invocation keeps
+        the pre-split default. Each run is a named subfolder (see
+        :meth:`run_dir`)."""
+        if self.project_dir is not None:
+            return self.project_dir / "results"
+        return Path(os.path.expanduser("~/nanometa_results"))
+
+    def run_dir(self, run_name: str) -> Path:
+        """Results folder for a single named run (``results/<run_name>``)."""
+        return self.results / run_name
+
     # ---- global (per-installation) subdirectories ----------------------
     @property
     def cache(self) -> Path:
@@ -154,11 +170,15 @@ class NanometaPaths:
             self.blast,
             self.logs,
         )
-        project_dirs = (
+        project_dirs = [
             self.configs,
             self.mappings,
             self.watchlists,
-        )
+        ]
+        # The results container is only auto-created for an explicit project
+        # (avoid materialising ~/nanometa_results on a project-less run).
+        if self.project_dir is not None:
+            project_dirs.append(self.results)
         for p in (*global_dirs, *project_dirs):
             p.mkdir(parents=True, exist_ok=True)
 

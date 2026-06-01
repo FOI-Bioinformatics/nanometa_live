@@ -231,17 +231,45 @@ def _essential_settings_card():
                 ], md=12)
             ], className="mb-4"),
 
-            # Results Output Directory.
-            # Label clarified 2026-05-07 (see input field above): the
-            # field name now starts with "Nanometa Live" so the
-            # ownership is unambiguous, and the *output* badge mirrors
-            # the *input* badge above. Backend key
+            # Run name. Surfaced here (moved out of Advanced) because it now
+            # names this run's results folder: <project>/results/<run name>.
+            # The backend key remains ``analysis_name``.
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label([
+                        "Run name ",
+                        html.I(className="bi bi-info-circle text-muted ms-1", id="analysis-name-info")
+                    ], html_for="analysis-name-input"),
+                    dbc.Input(
+                        id="analysis-name-input",
+                        type="text",
+                        placeholder="e.g. patient_0042_blood",
+                    ),
+                    dbc.FormText([
+                        html.I(className="bi bi-folder me-1"),
+                        "Names this run's results folder under the project's "
+                        "results/ directory. Spaces and symbols are simplified "
+                        "to a safe folder name.",
+                    ]),
+                    dbc.Tooltip(
+                        "A short label for this analysis run. It becomes the "
+                        "results folder (project/results/<run name>) so each "
+                        "run is kept separate. Reusing a name reuses that "
+                        "folder (you will be prompted to archive or resume).",
+                        target="analysis-name-info"
+                    ),
+                ], md=12)
+            ], className="mb-4"),
+
+            # Results folder -- optional override. Empty means the per-run
+            # folder is derived from the Run name above
+            # (<project>/results/<run name>). Backend key
             # ``results_output_directory`` is unchanged.
             dbc.Row([
                 dbc.Col([
                     dbc.Label([
-                        "Nanometa Live Results Folder ",
-                        dbc.Badge("output", color="success", className="me-1",
+                        "Results folder ",
+                        dbc.Badge("advanced override", color="secondary", className="me-1",
                                   style={"fontSize": "0.65rem", "verticalAlign": "middle"}),
                         html.I(className="bi bi-info-circle text-muted ms-1", id="results-dir-info")
                     ], html_for="results-dir-input"),
@@ -249,7 +277,7 @@ def _essential_settings_card():
                         dbc.Input(
                             id="results-dir-input",
                             type="text",
-                            placeholder="Leave empty to use ~/nanometa_results"
+                            placeholder="Leave empty to use <project>/results/<run name>"
                         ),
                         dbc.Button(
                             [html.I(className="bi bi-folder2-open me-1"), "Browse"],
@@ -262,16 +290,16 @@ def _essential_settings_card():
                         )
                     ]),
                     dbc.Tooltip(
-                        "Where the analysis saves its output files (species reports, "
-                        "quality data, and validation results). Defaults to a folder "
-                        "in your home directory if left empty. This is OUTPUT from "
-                        "Nanometa Live, not the sequencer's data folder.",
+                        "Leave empty (recommended) to keep results inside the "
+                        "project at results/<run name>. Set an explicit path "
+                        "only to write somewhere else, e.g. a scratch disk. "
+                        "This is OUTPUT, not the sequencer's data folder.",
                         target="results-dir-info"
                     ),
                     dbc.FormText([
                         html.I(className="bi bi-arrow-up-circle me-1"),
-                        "Destination for Nanometa Live's analysis output (species "
-                        "reports, QC, validation). Created if it does not exist.",
+                        "Leave empty to use the project's results/<run name> "
+                        "folder. Created if it does not exist.",
                     ]),
                     # Advisory warning when the chosen folder already holds
                     # results (populated by validate_results_directory).
@@ -649,23 +677,9 @@ def _database_settings_item():
 def _processing_settings_item():
     """Advanced: run-level processing knobs."""
     return dbc.AccordionItem([
+        # Note: the run name (analysis_name) moved to Essential Settings -- it
+        # now names this run's results folder.
         dbc.Row([
-            dbc.Col([
-                dbc.Label([
-                    "Analysis Name ",
-                    html.I(className="bi bi-info-circle text-muted ms-1", id="analysis-name-info")
-                ], html_for="analysis-name-input"),
-                dbc.Input(
-                    id="analysis-name-input",
-                    type="text",
-                    placeholder="My Nanopore Analysis",
-                ),
-                dbc.FormText("Optional label for this analysis run"),
-                dbc.Tooltip(
-                    "Give your analysis a descriptive name for easy reference",
-                    target="analysis-name-info"
-                )
-            ], md=6),
             dbc.Col([
                 dbc.Label([
                     "Check Interval (seconds) ",

@@ -778,6 +778,36 @@ def create_app(
             data={"outdir": "", "found": []},
         ),
         create_collision_modal(),
+
+        # Open Results: a run picker scoped to the current project. The body
+        # is populated by populate_open_results_list with the run folders
+        # found under <project>/results/. "Browse another folder" falls back
+        # to the generic folder browser for results outside the project.
+        dbc.Modal(
+            [
+                dbc.ModalHeader(dbc.ModalTitle([
+                    html.I(className="bi bi-folder2-open me-2"),
+                    "Open Results",
+                ])),
+                dbc.ModalBody(id="open-results-list"),
+                dbc.ModalFooter([
+                    dbc.Button(
+                        [html.I(className="bi bi-search me-1"), "Browse another folder..."],
+                        id="open-results-browse-btn",
+                        color="secondary",
+                        outline=True,
+                        className="me-2",
+                        n_clicks=0,
+                    ),
+                    dbc.Button("Close", id="open-results-close-btn", color="light", n_clicks=0),
+                ]),
+            ],
+            id="open-results-modal",
+            is_open=False,
+            centered=True,
+            size="lg",
+            scrollable=True,
+        ),
     ])
 
     # Initialize offline mode on all API clients and managers if configured
