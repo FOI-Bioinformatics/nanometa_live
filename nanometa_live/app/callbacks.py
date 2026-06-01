@@ -103,12 +103,31 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         backend_manager: Backend manager instance
     """
 
-    @app.callback(Output("update-interval", "interval"), Input("app-config", "data"))
-    def update_interval(config):
-        """Update the interval based on configuration."""
-        if config and "update_interval_seconds" in config:
-            return config["update_interval_seconds"] * 1000
-        return 30000  # Default 30 seconds
+    @app.callback(
+        Output("update-interval", "interval"),
+        Input("app-config", "data"),
+        Input("backend-status", "data"),
+    )
+    def update_interval(config, status):
+        """Adaptive poll cadence.
+
+        Poll at the configured ``update_interval_seconds`` while a run is
+        active (or just starting), and back off to
+        ``idle_update_interval_seconds`` when nothing is running -- complete,
+        standby, or viewing existing results. Combined with the
+        fingerprint-gated callbacks (idle ticks are no-ops) and the
+        hidden-tab pause, this keeps the server quiet between runs while
+        staying responsive during one. Changing the interval restarts the
+        timer, so a Start (which optimistically flips backend-status to
+        running) speeds polling up almost immediately.
+        """
+        config = config or {}
+        active = bool(status and (status.get("running") or status.get("starting")))
+        base = config.get("update_interval_seconds", 10)
+        if active:
+            return int(base) * 1000
+        idle = config.get("idle_update_interval_seconds") or max(int(base), 60)
+        return int(idle) * 1000
 
     # ========================================================================
     # Offline Mode Badge

@@ -72,6 +72,10 @@ class ConfigLoader:
             "results_dir_override": "",
             "species_of_interest": [],
             "update_interval_seconds": 10,
+            # Slower dashboard poll used when no run is active (complete,
+            # standby, or viewing existing results). The faster
+            # update_interval_seconds applies while a run is running.
+            "idle_update_interval_seconds": 60,
             "gui_port": 8050,
             "danger_lower_limit": 100,
             "taxonomic_hierarchy_letters": ["D", "P", "C", "O", "F", "G", "S"],
