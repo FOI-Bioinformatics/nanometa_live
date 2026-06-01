@@ -33,7 +33,10 @@ from nanometa_live.app.utils.callback_helpers import (
     validate_config_and_get_main_dir,
     log_callback_error,
 )
-from nanometa_live.app.utils.debounce import should_skip_update, get_trigger_type
+from nanometa_live.app.utils.debounce import (
+    should_skip_update, get_trigger_type,
+    interval_render_is_redundant, mark_rendered,
+)
 from nanometa_live.app.utils.throughput import (
     BUFFER_LIMIT,
     append_tick,
@@ -128,8 +131,9 @@ def register_dashboard_callbacks(app: Dash):
     )
     def compute_overall_status_cache(_fingerprint, _n_intervals, config, status, available_samples):
         """Compute overall status once per interval and cache for other callbacks."""
-        if should_skip_update("dashboard_overall_status", debounce_ms=2000):
+        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("dashboard_overall_status", _fingerprint):
             raise PreventUpdate
+        mark_rendered("dashboard_overall_status", _fingerprint)
 
         should_load, main_dir = _should_load_data(config, status, available_samples)
         if not should_load:
@@ -177,9 +181,9 @@ def register_dashboard_callbacks(app: Dash):
                               config, status, overall_status, validation_data,
                               available_samples):
         """Update the clinical verdict banner based on analysis status and pathogen screening."""
-        if get_trigger_type(ctx) == "interval":
-            if should_skip_update("dashboard_verdict_banner", debounce_ms=2000):
+        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("dashboard_verdict_banner", _fingerprint):
                 raise PreventUpdate
+        mark_rendered("dashboard_verdict_banner", _fingerprint)
 
         pipeline_running = status.get("running", False) if status else False
         pipeline_completed = status.get("completed", False) if status else False

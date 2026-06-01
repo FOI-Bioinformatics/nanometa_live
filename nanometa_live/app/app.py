@@ -422,6 +422,10 @@ def create_app(
             disabled=False
         ),
 
+        # Init sink for the tab-visibility watcher (see the clientside callback
+        # in register_callbacks): pauses update-interval while the tab is hidden.
+        dcc.Store(id='visibility-watch-init'),
+
         # Header with title, controls, and status
         create_header(config.get('analysis_name', 'Nanometa Live Analysis')),
 
@@ -940,4 +944,28 @@ def register_callbacks(app: Dash, backend_manager: BackendManager):
         """,
         Output("countdown-tick", "disabled"),
         Input("backend-status", "data"),
+    )
+
+    # Pause the data-refresh interval while the browser tab is hidden, so a
+    # backgrounded dashboard does no polling, fingerprint scans, or re-renders.
+    # Event-driven (visibilitychange), not polled: the listener is bound once
+    # on load and flips update-interval.disabled via set_props; the interval
+    # resumes the moment the tab is shown again.
+    app.clientside_callback(
+        """
+        function(_) {
+            if (!window.__nmVisibilityBound) {
+                window.__nmVisibilityBound = true;
+                var apply = function() {
+                    window.dash_clientside.set_props(
+                        'update-interval', {disabled: document.hidden === true});
+                };
+                document.addEventListener('visibilitychange', apply);
+                apply();  // apply current state on load
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("visibility-watch-init", "data"),
+        Input("app-config", "data"),
     )

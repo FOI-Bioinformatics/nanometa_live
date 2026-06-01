@@ -36,7 +36,10 @@ from nanometa_live.app.utils.callback_helpers import (
     log_callback_error,
     get_classification_stats,
 )
-from nanometa_live.app.utils.debounce import should_skip_update, get_trigger_type
+from nanometa_live.app.utils.debounce import (
+    should_skip_update, get_trigger_type,
+    interval_render_is_redundant, mark_rendered,
+)
 
 
 # Stage-strip + amplicon-mode pure helpers extracted to qc_tab_helpers.py;
@@ -89,9 +92,9 @@ def register_qc_callbacks(app: Dash):
         Shows actual reads and base pairs that passed through the pipeline,
         ordered by file modification time to show processing progress.
         """
-        if get_trigger_type(ctx) == "interval":
-            if should_skip_update("qc_plots", debounce_ms=2000):
-                raise PreventUpdate
+        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("qc_plots", _fingerprint):
+            raise PreventUpdate
+        mark_rendered("qc_plots", _fingerprint)
 
         # Check if we have valid config and main_dir
         main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
@@ -222,9 +225,9 @@ def register_qc_callbacks(app: Dash):
     )
     def update_qc_stats(_fingerprint, selected_sample, _n_intervals, config, status):
         """Update the QC statistics based on the latest data."""
-        if get_trigger_type(ctx) == "interval":
-            if should_skip_update("qc_stats", debounce_ms=2000):
-                raise PreventUpdate
+        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("qc_stats", _fingerprint):
+            raise PreventUpdate
+        mark_rendered("qc_stats", _fingerprint)
 
         # Default values for when no data is available
         default_values = [
@@ -500,9 +503,9 @@ def register_qc_callbacks(app: Dash):
 
         This table shows individual stats for each detected sample/barcode.
         """
-        if get_trigger_type(ctx) == "interval":
-            if should_skip_update("qc_per_sample_table", debounce_ms=2000):
-                raise PreventUpdate
+        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("qc_per_sample_table", _fingerprint):
+            raise PreventUpdate
+        mark_rendered("qc_per_sample_table", _fingerprint)
 
         # Check if we have valid config and main_dir
         main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
@@ -544,9 +547,9 @@ def register_qc_callbacks(app: Dash):
         - FASTP: q20_bases, q30_bases, total_bases, quality_curves
         - Seqkit (Chopper): Q20(%), Q30(%), sum_len
         """
-        if get_trigger_type(ctx) == "interval":
-            if should_skip_update("qc_base_quality", debounce_ms=2000):
-                raise PreventUpdate
+        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("qc_base_quality", _fingerprint):
+            raise PreventUpdate
+        mark_rendered("qc_base_quality", _fingerprint)
 
         # Default empty state
         empty_state = EmptyStateMessage(
@@ -655,9 +658,9 @@ def register_qc_callbacks(app: Dash):
         - FASTP: read1_mean_length (before/after), gc_content
         - Seqkit (Chopper): avg_len, N50, GC(%)
         """
-        if get_trigger_type(ctx) == "interval":
-            if should_skip_update("qc_read_stats", debounce_ms=2000):
-                raise PreventUpdate
+        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("qc_read_stats", _fingerprint):
+            raise PreventUpdate
+        mark_rendered("qc_read_stats", _fingerprint)
 
         # Default empty state
         empty_state = EmptyStateMessage(
@@ -756,9 +759,9 @@ def register_qc_callbacks(app: Dash):
           since chopper feeds Kraken2 in the pipeline order)
         - Classified: Kraken2 cumulative root.cumul_reads (classified reads)
         """
-        if get_trigger_type(ctx) == "interval":
-            if should_skip_update("qc_stage_strip", debounce_ms=2000):
-                raise PreventUpdate
+        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("qc_stage_strip", _fingerprint):
+            raise PreventUpdate
+        mark_rendered("qc_stage_strip", _fingerprint)
 
         main_dir = (
             config.get("results_output_directory", "") or config.get("main_dir", "")
@@ -922,9 +925,9 @@ def register_qc_callbacks(app: Dash):
         Translates raw metrics into plain-language recommendations for
         operators who may not have bioinformatics expertise.
         """
-        if get_trigger_type(ctx) == "interval":
-            if should_skip_update("qc_action_guidance", debounce_ms=2000):
-                raise PreventUpdate
+        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("qc_action_guidance", _fingerprint):
+            raise PreventUpdate
+        mark_rendered("qc_action_guidance", _fingerprint)
 
         main_dir = (
             config.get("results_output_directory", "")

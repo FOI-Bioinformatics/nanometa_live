@@ -92,3 +92,39 @@ class TestDebounceLruBound:
         assert key in dbm._debounce_timestamps, (
             "Skipped consults must extend LRU lifetime"
         )
+
+
+class TestFingerprintRenderGate:
+    """interval_render_is_redundant / mark_rendered: an interval-driven
+    backstop must re-render only when the results fingerprint advances or the
+    callback has not yet rendered the current fingerprint."""
+
+    def setup_method(self):
+        dbm._render_fp.clear()
+
+    def test_unseen_fingerprint_is_not_redundant(self):
+        # Never rendered -> not redundant (fresh tab view must render once).
+        assert dbm.interval_render_is_redundant("cb", {"fp": "A"}) is False
+
+    def test_same_fingerprint_after_mark_is_redundant(self):
+        dbm.mark_rendered("cb", {"fp": "A"})
+        assert dbm.interval_render_is_redundant("cb", {"fp": "A"}) is True
+
+    def test_advanced_fingerprint_is_not_redundant(self):
+        dbm.mark_rendered("cb", {"fp": "A"})
+        assert dbm.interval_render_is_redundant("cb", {"fp": "B"}) is False
+
+    def test_accepts_raw_fp_string_or_dict(self):
+        dbm.mark_rendered("cb", "Z")
+        assert dbm.interval_render_is_redundant("cb", {"fp": "Z"}) is True
+        assert dbm.interval_render_is_redundant("cb", "Z") is True
+
+    def test_per_callback_isolation(self):
+        dbm.mark_rendered("cbA", {"fp": "A"})
+        # A different callback has not seen fp "A".
+        assert dbm.interval_render_is_redundant("cbB", {"fp": "A"}) is False
+
+    def test_render_fp_memo_is_bounded(self):
+        for i in range(dbm._DEBOUNCE_MAX_KEYS + 50):
+            dbm.mark_rendered(f"cb-{i}", {"fp": str(i)})
+        assert len(dbm._render_fp) <= dbm._DEBOUNCE_MAX_KEYS

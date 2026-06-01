@@ -23,7 +23,10 @@ from nanometa_live.app.utils.callback_helpers import (
 )
 from nanometa_live.app.components.modern_components import EmptyStateMessage
 from nanometa_live.app.utils.plotly_theme import apply_theme_to_figure
-from nanometa_live.app.utils.debounce import should_skip_update, get_trigger_type
+from nanometa_live.app.utils.debounce import (
+    should_skip_update, get_trigger_type,
+    interval_render_is_redundant, mark_rendered,
+)
 from nanometa_live.app.tabs.kraken2_helpers import (
     RANK_NAMES,
     RANK_NORMALIZATION,
@@ -171,9 +174,9 @@ def register_classification_callbacks(app: Dash):
         """
 
         # Debounce interval-triggered refreshes
-        if get_trigger_type(ctx) == "interval":
-            if should_skip_update("classification_plot", debounce_ms=2000):
-                raise PreventUpdate
+        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("classification_plot", _fingerprint):
+            raise PreventUpdate
+        mark_rendered("classification_plot", _fingerprint)
 
         # Style constants for showing/hiding the graph
         graph_visible = {"width": "100%"}

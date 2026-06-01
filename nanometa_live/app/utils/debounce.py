@@ -84,6 +84,50 @@ def should_skip_update(
         return False
 
 
+# Per-callback memo of the results-fingerprint last rendered, so an
+# interval-driven "backstop" refresh can be skipped when it would only
+# re-render data that is already on screen. Bounded like the debounce dict.
+_render_fp: "OrderedDict[str, object]" = OrderedDict()
+_render_fp_lock = threading.Lock()
+
+
+def _fp_value(fingerprint) -> object:
+    """Extract the content hash from a results-fingerprint store value."""
+    if isinstance(fingerprint, dict):
+        return fingerprint.get("fp")
+    return fingerprint
+
+
+def interval_render_is_redundant(callback_id: str, fingerprint) -> bool:
+    """Return True when an interval tick would re-render unchanged data.
+
+    The results-fingerprint advances only when the output directory actually
+    changes. On an interval ("backstop") trigger the callback receives the
+    *current* fingerprint; if it equals the one this callback last rendered,
+    the refresh is redundant and should be skipped -- this is what stops the
+    dashboard from rebuilding every poll when no new data has arrived.
+
+    Always pair a non-redundant proceed with :func:`mark_rendered` so the memo
+    tracks what is actually on screen. ``fingerprint`` may be the whole store
+    dict or its ``fp`` string.
+    """
+    fp = _fp_value(fingerprint)
+    with _render_fp_lock:
+        return _render_fp.get(callback_id) == fp
+
+
+def mark_rendered(callback_id: str, fingerprint) -> None:
+    """Record the fingerprint a callback just rendered (see
+    :func:`interval_render_is_redundant`). Call on every render path, not only
+    interval ticks, so the interval gate reflects the latest displayed state."""
+    fp = _fp_value(fingerprint)
+    with _render_fp_lock:
+        _render_fp[callback_id] = fp
+        _render_fp.move_to_end(callback_id)
+        if len(_render_fp) > _DEBOUNCE_MAX_KEYS:
+            _render_fp.popitem(last=False)
+
+
 def get_last_update_time(callback_id: str) -> Optional[float]:
     """
     Get the timestamp of the last execution for a callback.

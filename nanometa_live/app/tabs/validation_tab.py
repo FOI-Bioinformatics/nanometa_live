@@ -17,7 +17,10 @@ import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import pandas as pd
 
-from nanometa_live.app.utils.debounce import should_skip_update, get_trigger_type
+from nanometa_live.app.utils.debounce import (
+    should_skip_update, get_trigger_type,
+    interval_render_is_redundant, mark_rendered,
+)
 from nanometa_live.core.parsers.blast_validation_parser import BlastValidationParser
 from nanometa_live.core.parsers.paf_coverage_parser import parse_paf_coverage, aggregate_contig_coverage, CoverageData
 from nanometa_live.app.layouts.validation_layout import (
@@ -116,9 +119,9 @@ def register_validation_callbacks(app: Dash):
         # outdir does not re-parse the BLAST validation directory every
         # tick (matches the pattern on every other results-driven lead
         # callback).
-        if get_trigger_type(ctx) == "interval":
-            if should_skip_update("load_validation_data", debounce_ms=2000):
-                raise PreventUpdate
+        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("load_validation_data", _fingerprint):
+            raise PreventUpdate
+        mark_rendered("load_validation_data", _fingerprint)
 
         try:
             if not config:

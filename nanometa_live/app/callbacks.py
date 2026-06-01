@@ -22,7 +22,10 @@ from nanometa_live.core.utils.sample_detector import get_available_samples, get_
 from nanometa_live.core.utils.loader_utils import check_data_freshness
 from nanometa_live.app.utils.callback_helpers import log_callback_error
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
-from nanometa_live.app.utils.debounce import should_skip_update, get_trigger_type
+from nanometa_live.app.utils.debounce import (
+    should_skip_update, get_trigger_type,
+    interval_render_is_redundant, mark_rendered,
+)
 from nanometa_live.app.app import background_callback_manager
 
 
@@ -1087,9 +1090,9 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
         file mapping have not changed since the previous tick, so identical
         content never re-renders downstream subscribers.
         """
-        if get_trigger_type(ctx) == "interval":
-            if should_skip_update("available_samples", debounce_ms=2000):
-                raise PreventUpdate
+        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("available_samples", fingerprint):
+            raise PreventUpdate
+        mark_rendered("available_samples", fingerprint)
 
         if not config:
             new_samples, new_mapping = ["All Samples"], {}
