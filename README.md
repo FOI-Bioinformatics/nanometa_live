@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="nanometa_live/app/assets/logo.png" alt="Nanometa Live" width="420">
+</p>
+
 # Nanometa Live
 
 Real-time visualisation dashboard for Oxford Nanopore metagenomic sequencing
