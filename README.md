@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="nanometa_live/app/assets/logo.png" alt="Nanometa Live" width="420">
-</p>
+<img src="nanometa_live/app/assets/logo.png" alt="Nanometa Live" width="420">
 
 # Nanometa Live
 
