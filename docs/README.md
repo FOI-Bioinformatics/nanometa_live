@@ -9,6 +9,7 @@ for a hands-on end-to-end demo, or with the
 | Document                                                    | Description |
 |-------------------------------------------------------------|-------------|
 | [Quick start with nanorunner](quickstart-with-nanorunner.md)| End-to-end demo using simulated input |
+| [Local / server test guide](local-server-testing.md)       | Pre-release validation: batch + real-time via nanorunner |
 | [User guide](user-guide.md)                                 | End-to-end usage instructions |
 | [Operator guide](OPERATOR_GUIDE.md)                         | Field-deployment reference and decision trees |
 

@@ -39,6 +39,8 @@ nanometanf.
 
 - [Quick start with nanorunner](docs/quickstart-with-nanorunner.md) --
   end-to-end demo using simulated input.
+- [Local / server test guide](docs/local-server-testing.md) -- pre-release
+  validation of batch and real-time modes with nanorunner.
 - [User guide](docs/user-guide.md) -- full reference, including
   installation, configuration, and tab-by-tab walkthrough.
 - [Operator guide](docs/OPERATOR_GUIDE.md) -- field-deployment reference
