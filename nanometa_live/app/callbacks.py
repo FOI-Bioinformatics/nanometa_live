@@ -610,22 +610,22 @@ def register_core_callbacks(app: Dash, backend_manager: BackendManager):
                 no_update,
             )
 
-        # Determine the results directory the run will write to. The
-        # GUI accepts either explicit `results_output_directory` or
-        # falls back to `main_dir`; mirror parameter_mapping's choice.
-        outdir = (
+        # Determine the results directory this run will write to. Always
+        # (re)derive from the current Run name + override so that stopping a
+        # run, changing the Run name, and restarting writes to a NEW folder
+        # rather than reusing the previous run's directory. resolve_run_outdir
+        # honours an explicit results_dir_override and otherwise derives
+        # <project>/results/<run slug>; it falls back to an existing
+        # results_output_directory/main_dir only for a project-less config.
+        from nanometa_live.app.utils.outdir_resolution import resolve_run_outdir
+        outdir = resolve_run_outdir(config) or (
             config.get("results_output_directory")
             or config.get("main_dir")
             or ""
         )
-        # Safety net: a Start without a prior Apply (empty results dir) still
-        # lands in the project-local run folder <project>/results/<run slug>.
-        if not outdir:
-            from nanometa_live.app.utils.outdir_resolution import resolve_run_outdir
-            outdir = resolve_run_outdir(config)
-            if outdir:
-                config = dict(config)
-                config["results_output_directory"] = outdir
+        if outdir:
+            config = dict(config)
+            config["results_output_directory"] = outdir
         found = backend_manager.detect_existing_results(outdir)
         if found:
             # Compare current input fingerprint with the prior run's

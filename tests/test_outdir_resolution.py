@@ -82,20 +82,40 @@ class TestSlugifyRunName:
 
 class TestResolveRunOutdir:
     def test_derives_project_results_run(self):
-        cfg = {"project_dir": "/proj", "analysis_name": "Patient 0042 blood",
-               "results_output_directory": ""}
+        cfg = {"project_dir": "/proj", "analysis_name": "Patient 0042 blood"}
         assert resolve_run_outdir(cfg) == "/proj/results/Patient_0042_blood"
 
     def test_explicit_override_returned_verbatim(self):
         cfg = {"project_dir": "/proj", "analysis_name": "x",
-               "results_output_directory": "/scratch/out"}
+               "results_dir_override": "/scratch/out"}
         assert resolve_run_outdir(cfg) == "/scratch/out"
 
     def test_no_project_falls_back_to_home(self):
-        cfg = {"analysis_name": "run1", "results_output_directory": ""}
+        cfg = {"analysis_name": "run1"}
         assert resolve_run_outdir(cfg) == os.path.join(
             os.path.expanduser("~/nanometa_results"), "run1"
         )
 
     def test_none_config_empty(self):
         assert resolve_run_outdir(None) == ""
+
+    def test_derived_path_is_not_a_sticky_override(self):
+        # The stickiness regression: a previously-computed
+        # results_output_directory must NOT lock the folder. With no override,
+        # changing the Run name re-derives a new folder.
+        cfg = {
+            "project_dir": "/proj",
+            "analysis_name": "run_two",
+            # left over from a prior run -- must be ignored:
+            "results_output_directory": "/proj/results/run_one",
+        }
+        assert resolve_run_outdir(cfg) == "/proj/results/run_two"
+
+    def test_override_still_wins_over_stale_computed(self):
+        cfg = {
+            "project_dir": "/proj",
+            "analysis_name": "run_two",
+            "results_dir_override": "/scratch/out",
+            "results_output_directory": "/proj/results/run_one",
+        }
+        assert resolve_run_outdir(cfg) == "/scratch/out"

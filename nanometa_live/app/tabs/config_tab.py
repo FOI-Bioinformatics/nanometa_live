@@ -722,20 +722,15 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         if kraken_db is not None:
             config["kraken_db"] = kraken_db
 
-        # Results directory. An explicit value is an operator override; when
-        # the field is left empty we derive a project-local, per-run folder
-        # <project_dir>/results/<run-name slug> from analysis_name. The derived
-        # path is written into the config so every downstream reader sees a
-        # concrete directory.
-        explicit_results = (results_dir or "").strip()
-        if explicit_results:
-            config["results_output_directory"] = explicit_results
-        else:
-            from nanometa_live.app.utils.outdir_resolution import resolve_run_outdir
-            # Clear any stale value so resolve_run_outdir derives rather than
-            # treating a previously-derived path as an override.
-            config["results_output_directory"] = ""
-            config["results_output_directory"] = resolve_run_outdir(config)
+        # Results directory. The form field is the operator OVERRIDE: empty =
+        # derive <project>/results/<run-name slug> from analysis_name; a path =
+        # use verbatim. We store it in results_dir_override and (re)compute the
+        # concrete results_output_directory from it. Because the override is
+        # kept separate, changing the Run name and re-applying always moves the
+        # run folder -- the previously-derived path never sticks.
+        from nanometa_live.app.utils.outdir_resolution import resolve_run_outdir
+        config["results_dir_override"] = (results_dir or "").strip()
+        config["results_output_directory"] = resolve_run_outdir(config)
 
         if update_interval is not None:
             config["update_interval_seconds"] = update_interval
@@ -1046,7 +1041,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         analysis_name = config.get("analysis_name", "")
         nanopore_dir = config.get("nanopore_output_directory", "")
         kraken_db = config.get("kraken_db", "")
-        results_dir = config.get("results_output_directory", "")
+        # The results field shows the operator OVERRIDE, not the computed run
+        # dir -- so after a run it is empty (derived) rather than the concrete
+        # folder, and a changed Run name re-derives on the next Apply.
+        results_dir = config.get("results_dir_override", "")
         update_interval = config.get("update_interval_seconds", 10)
         danger_threshold = config.get("danger_lower_limit", 100)
         taxonomy = config.get("kraken_taxonomy", "gtdb")

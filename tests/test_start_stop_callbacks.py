@@ -51,7 +51,7 @@ class TestStartOrPromptStop:
         fn, backend = start_stop
         backend.detect_existing_results.return_value = []
         backend.start.return_value = (True, "Pipeline started")
-        result = fn(1, {"results_output_directory": "/out"}, {"running": False})
+        result = fn(1, {"results_dir_override": "/out"}, {"running": False})
         backend.start.assert_called_once()
         assert result[NOTIF]["title"] == "Analysis Started"
         # Optimistic backend-status flips running True on success.
@@ -62,7 +62,7 @@ class TestStartOrPromptStop:
         fn, backend = start_stop
         backend.detect_existing_results.return_value = []
         backend.start.return_value = (False, "conda env broken")
-        result = fn(1, {"results_output_directory": "/out"}, {"running": False})
+        result = fn(1, {"results_dir_override": "/out"}, {"running": False})
         assert result[NOTIF]["title"] == "Error"
         assert result[NOTIF]["color"] == "danger"
         assert result[STATUS] is no_update
@@ -71,7 +71,7 @@ class TestStartOrPromptStop:
         fn, backend = start_stop
         backend.detect_existing_results.return_value = ["kraken2", "fastp"]
         backend.fingerprint_matches.return_value = True
-        result = fn(1, {"results_output_directory": "/out"}, {"running": False})
+        result = fn(1, {"results_dir_override": "/out"}, {"running": False})
         assert result[COLLISION_MODAL] is True
         assert result[PENDING]["outdir"] == "/out"
         assert result[PENDING]["found"] == ["kraken2", "fastp"]

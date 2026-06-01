@@ -58,11 +58,18 @@ class ConfigLoader:
         default_config = {
             "analysis_name": "Nanometa Live Analysis",
             "nanopore_output_directory": "",
-            # Empty by default: the effective output directory is derived as
-            # <project_dir>/results/<run-name slug> at Apply Settings (see
-            # outdir_resolution.resolve_run_outdir). A non-empty value here is
-            # treated as an explicit operator override.
+            # The *computed* output directory for the active run. Derived as
+            # <project_dir>/results/<run-name slug> at Apply/Start (see
+            # outdir_resolution.resolve_run_outdir) and read by the pipeline +
+            # dashboard. Not edited directly by the operator -- it is recomputed
+            # each Apply/Start so changing the Run name (then restarting) moves
+            # the folder.
             "results_output_directory": "",
+            # The operator's explicit results-folder OVERRIDE (the editable
+            # field). Empty = derive from the Run name; a path here is used
+            # verbatim. Kept separate from results_output_directory so the
+            # derived run folder is never mistaken for an operator override.
+            "results_dir_override": "",
             "species_of_interest": [],
             "update_interval_seconds": 10,
             "gui_port": 8050,
