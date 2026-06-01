@@ -146,6 +146,10 @@ def register_preparation_callbacks(app):
         Input("start-prep-btn", "n_clicks"),
         State("app-config", "data"),
         State("prep-options", "value"),
+        # Watchlist entries hydrated by the main process; the worker's
+        # WatchlistManager singleton is empty, so taxid mapping + genome
+        # download must read the snapshot (same bridge as run_rescan).
+        State("watchlist-entries-snapshot", "data"),
         prevent_initial_call=True,
         background=True,
         manager=background_callback_manager,
@@ -167,7 +171,7 @@ def register_preparation_callbacks(app):
             Output("prep-progress-area", "children"),
         ],
     )
-    def run_preparation(set_progress, n_clicks, config, options):
+    def run_preparation(set_progress, n_clicks, config, options, watchlist_snapshot):
         if not n_clicks:
             raise PreventUpdate
 
@@ -204,6 +208,7 @@ def register_preparation_callbacks(app):
             preparer = MobileLabPreparer(
                 config=config,
                 progress_callback=progress_callback,
+                watchlist_entries=watchlist_snapshot,
             )
             result = preparer.prepare(skip_existing=skip_existing)
 

@@ -30,6 +30,36 @@ def make_preparer(tmp_path, config=None, cb=None):
     )
 
 
+class TestInjectedWatchlistEntries:
+    """In a background worker the WatchlistManager singleton is empty, so the
+    preparer must accept entries injected from the main process (the
+    watchlist-entries-snapshot store). Regression for the E2E finding where
+    Start Preparation generated no taxid mappings ("No watchlist entries
+    found for mapping")."""
+
+    def test_injected_entries_used_over_empty_singleton(self, tmp_path):
+        snapshot = [
+            {"name": "Staphylococcus aureus", "taxid": 1280, "names_alt": []},
+            {"name": "Escherichia coli", "taxid": 562, "names_alt": ["E. coli"]},
+        ]
+        prep = MobileLabPreparer(
+            {"kraken_db": "/db"},
+            nanometa_home=str(tmp_path),
+            watchlist_entries=snapshot,
+        )
+        entries = prep._get_watchlist_entries()
+        taxids = sorted(e["taxid"] for e in entries)
+        assert taxids == [562, 1280]
+        # kraken_taxid falls back to the watchlist taxid when no mapping exists
+        assert all(e["kraken_taxid"] == e["taxid"] for e in entries)
+
+    def test_no_injection_falls_back_to_singleton(self, tmp_path):
+        # No injected entries -> reads the (empty in tests) singleton; must not
+        # raise and returns a list.
+        prep = MobileLabPreparer({"kraken_db": "/db"}, nanometa_home=str(tmp_path))
+        assert isinstance(prep._get_watchlist_entries(), list)
+
+
 class TestDataclasses:
     def test_prep_progress_to_dict(self):
         p = PrepProgress(

@@ -103,6 +103,7 @@ class MobileLabPreparer:
         config: Dict[str, Any],
         nanometa_home: Optional[str] = None,
         progress_callback: Optional[ProgressCallback] = None,
+        watchlist_entries: Optional[List[Dict[str, Any]]] = None,
     ):
         if nanometa_home is None:
             # Honor config["data_dir"] (seeded by the CLI entry
@@ -115,6 +116,11 @@ class MobileLabPreparer:
         self.home.mkdir(parents=True, exist_ok=True)
         self._progress_cb = progress_callback or (lambda p: None)
         self._cancelled = False
+        # Watchlist entries injected from the main process via the
+        # ``watchlist-entries-snapshot`` store. Required when prepare() runs
+        # in a DiskcacheManager background worker, where the WatchlistManager
+        # singleton is empty. Each entry: {name, taxid, names_alt, ...}.
+        self._injected_entries = watchlist_entries
 
     def cancel(self):
         """Signal cancellation."""
@@ -344,16 +350,38 @@ class MobileLabPreparer:
                 result.warnings.append(f"Readiness: {fail.name} - {fail.message}")
 
     def _get_watchlist_entries(self) -> List[Dict[str, Any]]:
-        """Load watchlist entries from config or watchlist files."""
+        """Return watchlist entries for mapping / genome download.
+
+        Prefers entries injected from the main process (the
+        ``watchlist-entries-snapshot`` store) so this works inside a
+        background worker where the WatchlistManager singleton is empty;
+        falls back to the singleton for in-process callers.
+        """
         try:
+            from nanometa_live.core.taxonomy.taxid_mapping import get_mapping_collection
+            mc = get_mapping_collection()
+
+            if self._injected_entries:
+                # Snapshot shape: {name, taxid, rank, names_alt}.
+                result = []
+                for e in self._injected_entries:
+                    taxid = e.get("taxid")
+                    if not taxid:
+                        continue
+                    kraken_taxid = mc.get_db_taxid(taxid) if mc else None
+                    result.append({
+                        "taxid": taxid,
+                        "name": e.get("name", ""),
+                        "kraken_taxid": kraken_taxid or taxid,
+                        "names_alt": e.get("names_alt", []),
+                    })
+                return result
+
             from nanometa_live.core.watchlist.watchlist_manager import (
                 get_watchlist_manager,
             )
-            from nanometa_live.core.taxonomy.taxid_mapping import get_mapping_collection
-
             wm = get_watchlist_manager()
             entries = wm.get_all_entries()
-            mc = get_mapping_collection()
 
             result = []
             for e in entries:
