@@ -47,13 +47,16 @@ def get_callback_fn(app, output_id, *, input_contains=None):
 def ctx_with(triggered_id):
     """Patch the dash callback context's triggered_id for the duration.
 
-    Patches ``nanometa_live.app.callbacks.ctx`` (imported lazily so this module
-    can be imported in environments where callbacks have not been touched yet).
+    Patches ``dash.ctx`` directly. Callbacks reference the context as
+    ``dash.ctx`` (resolved as an attribute of the ``dash`` module at call
+    time) rather than binding a module-local ``ctx`` name, so a single
+    patch on ``dash.ctx`` reaches callbacks regardless of which
+    ``callbacks/`` submodule they are defined in.
     """
     from unittest.mock import patch
-    import nanometa_live.app.callbacks as cb
+    import dash
 
-    with patch.object(cb, "ctx", MagicMock(triggered_id=triggered_id)):
+    with patch.object(dash, "ctx", MagicMock(triggered_id=triggered_id)):
         yield
 
 
