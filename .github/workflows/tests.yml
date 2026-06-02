@@ -56,3 +56,20 @@ jobs:
           name: coverage-${{ matrix.python-version }}
           path: coverage.xml
           if-no-files-found: ignore
+
+  code-size:
+    # Ratchet against new god-files: fails only when a file >800 LOC or a
+    # function >80 LOC appears that is not already in
+    # scripts/code_size_baseline.json. Pure stdlib (ast), so no install step.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Check code size (no new oversized files/functions)
+        run: python scripts/check_code_size.py
