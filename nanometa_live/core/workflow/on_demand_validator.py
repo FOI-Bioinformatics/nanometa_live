@@ -29,6 +29,46 @@ from nanometa_live.core.utils.read_extractor import ReadExtractor
 
 logger = logging.getLogger(__name__)
 
+# Default on-demand validation timeout (minutes) when config does not set one.
+_DEFAULT_VALIDATION_TIMEOUT_MINUTES = 30
+
+
+def _is_int_str(value: Any) -> bool:
+    """True if ``value`` is a string (or value) that parses as an int."""
+    try:
+        int(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _genome_file_looks_valid(path: Path) -> bool:
+    """Cheap sanity check that ``path`` is a non-empty FASTA file.
+
+    has_genome() only tests existence; a zero-byte or truncated download
+    passes it but fails opaquely once Nextflow tries to align against it.
+    """
+    try:
+        if not path.is_file() or path.stat().st_size == 0:
+            return False
+        with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+            first = fh.readline().lstrip()
+        return first.startswith(">")
+    except OSError:
+        return False
+
+
+def _validation_timeout_seconds(config: Optional[Dict[str, Any]]) -> int:
+    """Resolve the subprocess timeout (seconds) from config, floored at 60s."""
+    minutes = (config or {}).get(
+        "validation_timeout_minutes", _DEFAULT_VALIDATION_TIMEOUT_MINUTES
+    )
+    try:
+        minutes = float(minutes)
+    except (TypeError, ValueError):
+        minutes = _DEFAULT_VALIDATION_TIMEOUT_MINUTES
+    return max(60, int(minutes * 60))
+
 
 class ValidationStatus(Enum):
     """Status of an on-demand validation job."""
@@ -374,11 +414,25 @@ class OnDemandValidator:
             if not genome_path:
                 return None
 
+        # Integrity gate: a zero-byte or non-FASTA genome passes has_genome()
+        # (it only tests existence) but makes the Nextflow validation fail
+        # opaquely downstream. Reject it here with a clear log instead.
+        genome_fasta = self.genomes_dir / f"{taxid}.fasta"
+        if not _genome_file_looks_valid(genome_fasta):
+            logger.error(
+                "Genome file for taxid %s is missing, empty, or not FASTA: %s",
+                taxid, genome_fasta,
+            )
+            return None
+
         # Append the new taxid to the cumulative pathogen_genomes mapping.
         # Preserves prior taxids so Nextflow's resume cache reuses their
         # work; only the new (sample, taxid) pair runs end-to-end.
-        genome_fasta = self.genomes_dir / f"{taxid}.fasta"
         mapping = self._load_pathogen_genomes()
+        # Drop any non-numeric keys a corrupted prior file may carry so the
+        # sorted(key=int) below and Nextflow's taxid filter never choke; this
+        # also heals the on-disk file when it is re-saved.
+        mapping = {k: v for k, v in mapping.items() if _is_int_str(k)}
         mapping[str(taxid)] = str(genome_fasta)
         try:
             genomes_json_path = self._save_pathogen_genomes(mapping)
@@ -413,13 +467,17 @@ class OnDemandValidator:
             "-profile", pipeline_profile,
         ]
 
+        # Timeout is operator-configurable: large reference genomes or slow
+        # I/O can need more than the historical hardcoded 30 minutes.
+        timeout_seconds = _validation_timeout_seconds(config)
+
         try:
             logger.info(f"Running nanometanf validation: {' '.join(cmd)}")
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=1800,  # 30 minute timeout
+                timeout=timeout_seconds,
             )
 
             if result.returncode != 0:
@@ -454,7 +512,11 @@ class OnDemandValidator:
             return None
 
         except subprocess.TimeoutExpired:
-            logger.error("nanometanf validation timed out")
+            logger.error(
+                "nanometanf validation timed out after %d minute(s); raise "
+                "'validation_timeout_minutes' in config for large genomes",
+                timeout_seconds // 60,
+            )
             return None
         except FileNotFoundError:
             logger.warning("nextflow not found in PATH")

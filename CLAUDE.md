@@ -285,6 +285,17 @@ Two validation sub-tabs:
 - **BLAST** — read-centric: identity scores, distribution plot, stats table
 - **Minimap2/Coverage** — genome-centric: depth chart, cumulative curve, histogram, mapq filter
 
+**Result-loading priority** (`ValidationParser.get_validation_results`): the
+aggregate `validation/validation_results.json` wins when present. Without it,
+the parser falls back to individual per-(sample, taxid) files — `blast/*.blast.tsv`
+*and* `minimap2/*.minimap2_stats.json`. The minimap2 individual-file path
+(`core/parsers/minimap2_stats.py`) is what keeps the Coverage sub-tab populated
+during a realtime run, where the aggregate JSON is not written until late; BLAST
+and minimap2 are distinct methods for the same pair, so minimap2 stats supplement
+the blast.tsv results rather than dedup against them. Added in the 2026-06-02
+validation audit after a live run showed the Coverage tab blank mid-run despite
+high-quality `.minimap2_stats.json` already on disk.
+
 ### On-demand validation
 
 `OnDemandValidator.validate_organism()` invokes `nextflow run -resume --validation_only`

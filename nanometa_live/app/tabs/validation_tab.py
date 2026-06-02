@@ -450,20 +450,30 @@ def register_validation_callbacks(app: Dash):
 
     @app.callback(
         Output("download-blast-report", "data"),
+        Output("notification-trigger", "data", allow_duplicate=True),
         Input("export-blast-button", "n_clicks"),
         State("validation-data-store", "data"),
         State("app-config", "data"),
         prevent_initial_call=True,
     )
     def export_blast_report(n_clicks, data, config):
-        """Export BLAST validation results to CSV."""
+        """Export BLAST validation results to CSV.
+
+        Returns ``(download, toast)``. A failed or empty export emits a toast
+        on the ``notification-trigger`` channel so the operator gets explicit
+        feedback instead of a button click that silently does nothing.
+        """
         if not n_clicks or not data or not data.get("results"):
-            return no_update
+            return no_update, no_update
 
         try:
             blast_results = _filter_by_method(data["results"], "blast")
             if not blast_results:
-                return no_update
+                return no_update, {
+                    "title": "Nothing to Export",
+                    "message": "No BLAST validation results are available to export.",
+                    "color": "warning",
+                }
 
             df = pd.DataFrame(blast_results)
             if "coverage_breadth" in df.columns:
@@ -472,11 +482,15 @@ def register_validation_callbacks(app: Dash):
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"blast_validation_{analysis_name}_{timestamp}.csv"
 
-            return dict(content=df.to_csv(index=False), filename=filename, type="text/csv")
+            return dict(content=df.to_csv(index=False), filename=filename, type="text/csv"), no_update
 
         except Exception as e:
             log_callback_error("export_blast_report", e)
-            return no_update
+            return no_update, {
+                "title": "Export Failed",
+                "message": f"Could not export the BLAST report: {e}",
+                "color": "danger",
+            }
 
     # =================================================================
     # Coverage (minimap2) sub-tab callbacks
@@ -700,31 +714,44 @@ def register_validation_callbacks(app: Dash):
 
     @app.callback(
         Output("download-coverage-report", "data"),
+        Output("notification-trigger", "data", allow_duplicate=True),
         Input("export-coverage-button", "n_clicks"),
         State("validation-data-store", "data"),
         State("app-config", "data"),
         prevent_initial_call=True,
     )
     def export_coverage_report(n_clicks, data, config):
-        """Export minimap2 coverage results to CSV."""
+        """Export minimap2 coverage results to CSV.
+
+        Returns ``(download, toast)``; see ``export_blast_report`` -- a failed
+        or empty export emits a toast rather than failing silently.
+        """
         if not n_clicks or not data or not data.get("results"):
-            return no_update
+            return no_update, no_update
 
         try:
             cov_results = _filter_by_method(data["results"], "minimap2")
             if not cov_results:
-                return no_update
+                return no_update, {
+                    "title": "Nothing to Export",
+                    "message": "No minimap2 coverage results are available to export.",
+                    "color": "warning",
+                }
 
             df = pd.DataFrame(cov_results)
             analysis_name = config.get("analysis_name", "analysis") if config else "analysis"
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"coverage_validation_{analysis_name}_{timestamp}.csv"
 
-            return dict(content=df.to_csv(index=False), filename=filename, type="text/csv")
+            return dict(content=df.to_csv(index=False), filename=filename, type="text/csv"), no_update
 
         except Exception as e:
             log_callback_error("export_coverage_report", e)
-            return no_update
+            return no_update, {
+                "title": "Export Failed",
+                "message": f"Could not export the coverage report: {e}",
+                "color": "danger",
+            }
 
 
 # _load_real_coverage was moved to validation_tab_helpers.py and is re-exported

@@ -192,7 +192,10 @@ def _create_blast_tab() -> dbc.Tab:
                     html.Hr(),
 
                     # Results cards container
-                    html.Div(id="blast-results-container", className="mb-4"),
+                    dcc.Loading(
+                        type="circle",
+                        children=[html.Div(id="blast-results-container", className="mb-4")],
+                    ),
 
                     # Identity distribution plot (collapsible)
                     dbc.Accordion([
@@ -359,6 +362,8 @@ def _create_coverage_tab() -> dbc.Tab:
                                 step=1,
                                 className="form-control",
                                 style={"maxWidth": "120px"},
+                                persistence=True,
+                                persistence_type="session",
                             ),
                         ], md=2),
                         dbc.Col([
@@ -390,6 +395,8 @@ def _create_coverage_tab() -> dbc.Tab:
                                 step=1,
                                 className="form-control",
                                 style={"maxWidth": "120px"},
+                                persistence=True,
+                                persistence_type="session",
                             ),
                         ], md=3),
                         dbc.Col([
@@ -458,7 +465,10 @@ def _create_coverage_tab() -> dbc.Tab:
             html.Hr(),
 
             # Results cards container (minimap2 cards)
-            html.Div(id="coverage-results-container", className="mb-4"),
+            dcc.Loading(
+                type="circle",
+                children=[html.Div(id="coverage-results-container", className="mb-4")],
+            ),
 
             # Download component
             dcc.Download(id="download-coverage-report"),

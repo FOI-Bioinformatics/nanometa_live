@@ -148,19 +148,11 @@ class ValidationParser:
     """
     Parser for BLAST and minimap2 validation results from nanometanf pipeline.
 
-    Supports the current nanometanf output formats:
-    1. nanometanf aggregate JSON (validation_results.json, preferred)
-    2. Per-(sample, taxid) JSON summaries (*_validation.json)
-    3. Per-(sample, taxid) BLAST tabular output (*.blast.tsv, outfmt 6)
-
-    Directory structure expected:
-        results/
-        ├── validation/
-        │   ├── validation_results.json          # nanometanf aggregate output
-        │   └── blast/
-        │       ├── barcode01_562_validation.json    # JSON summary
-        │       └── barcode01_taxid562.blast.tsv     # Raw BLAST output (outfmt 6)
-        └── ...
+    Supports the current nanometanf output formats (under results/validation/):
+    1. Aggregate JSON (validation_results.json, preferred when present)
+    2. Per-(sample, taxid) JSON summaries (blast/*_validation.json)
+    3. Per-(sample, taxid) BLAST tabular output (blast/*.blast.tsv, outfmt 6)
+    4. Per-(sample, taxid) minimap2 stats (minimap2/*.minimap2_stats.json)
     """
 
     # Validation thresholds
@@ -597,6 +589,13 @@ class ValidationParser:
                     blast_file, file_sample, file_taxid
                 )
                 results.append(result)
+
+        # Surface per-(sample, taxid) minimap2 coverage from individual stats
+        # files so the Coverage sub-tab is not empty before the aggregate JSON
+        # is written in a realtime run (see core/parsers/minimap2_stats.py).
+        from nanometa_live.core.parsers.minimap2_stats import collect_minimap2_results
+        results.extend(collect_minimap2_results(
+            self.results_dir, self.validation_dir, sample, taxid, results))
 
         # Also check the on_demand_validation/ directory for results produced by
         # OnDemandValidator.  These supplement (never replace) pipeline results.
