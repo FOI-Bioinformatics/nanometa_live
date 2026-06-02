@@ -424,6 +424,37 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
         )
 
 
+def _accumulate_kraken_df(
+    df: pd.DataFrame,
+    agg: Dict[int, List],
+    ordered_taxids: List[int],
+    seen_taxids: set,
+) -> None:
+    """Accumulate one parsed kraken report into the aggregation state.
+
+    Reads and cumulative reads are summed per taxid; the remaining
+    columns (rank, name, parent_taxid) are taken from the first
+    occurrence. New taxids are appended to ``ordered_taxids`` in
+    first-seen order. Vectorized extraction avoids per-row overhead.
+    """
+    taxids = df['taxid'].astype(int).values
+    reads_arr = df['reads'].values
+    cumul_arr = df['cumul_reads'].values
+    ranks = df['rank'].values
+    names = df['name'].values
+    parent_taxids_arr = df['parent_taxid'].values if 'parent_taxid' in df.columns else [0] * len(df)
+    for i in range(len(df)):
+        taxid = int(taxids[i])
+        if taxid in agg:
+            agg[taxid][0] += reads_arr[i]
+            agg[taxid][1] += cumul_arr[i]
+        else:
+            agg[taxid] = [reads_arr[i], cumul_arr[i], ranks[i], names[i], parent_taxids_arr[i]]
+            if taxid not in seen_taxids:
+                ordered_taxids.append(taxid)
+                seen_taxids.add(taxid)
+
+
 def _parse_kraken_data_uncached(
     main_dir: str,
     sample: Optional[str],
@@ -624,23 +655,7 @@ def _parse_kraken_data_uncached(
             if df is None or df.empty:
                 continue
             has_data = True
-            # Vectorized extraction avoids per-row Python overhead
-            taxids = df['taxid'].astype(int).values
-            reads_arr = df['reads'].values
-            cumul_arr = df['cumul_reads'].values
-            ranks = df['rank'].values
-            names = df['name'].values
-            parent_taxids_arr = df['parent_taxid'].values if 'parent_taxid' in df.columns else [0] * len(df)
-            for i in range(len(df)):
-                taxid = int(taxids[i])
-                if taxid in agg:
-                    agg[taxid][0] += reads_arr[i]
-                    agg[taxid][1] += cumul_arr[i]
-                else:
-                    agg[taxid] = [reads_arr[i], cumul_arr[i], ranks[i], names[i], parent_taxids_arr[i]]
-                    if taxid not in seen_taxids:
-                        ordered_taxids.append(taxid)
-                        seen_taxids.add(taxid)
+            _accumulate_kraken_df(df, agg, ordered_taxids, seen_taxids)
 
         if not has_data:
             return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
@@ -789,23 +804,7 @@ def _parse_kraken_data_uncached(
             file_count += 1
             if file_count == 1:
                 first_df = df
-            # Vectorized extraction avoids per-row Python overhead
-            taxids = df['taxid'].astype(int).values
-            reads_arr = df['reads'].values
-            cumul_arr = df['cumul_reads'].values
-            ranks = df['rank'].values
-            names = df['name'].values
-            parent_taxids_arr = df['parent_taxid'].values if 'parent_taxid' in df.columns else [0] * len(df)
-            for i in range(len(df)):
-                taxid = int(taxids[i])
-                if taxid in agg:
-                    agg[taxid][0] += reads_arr[i]
-                    agg[taxid][1] += cumul_arr[i]
-                else:
-                    agg[taxid] = [reads_arr[i], cumul_arr[i], ranks[i], names[i], parent_taxids_arr[i]]
-                    if taxid not in seen_taxids:
-                        ordered_taxids.append(taxid)
-                        seen_taxids.add(taxid)
+            _accumulate_kraken_df(df, agg, ordered_taxids, seen_taxids)
 
         if file_count == 0:
             return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)

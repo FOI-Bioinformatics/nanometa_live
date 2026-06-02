@@ -23,6 +23,32 @@ from nanometa_live.app.components.waiting_banner import (
 )
 
 
+def _metric_card(value_id: str, icon_class: str, icon_color: str, label: str, value: str):
+    """Build one Zone 3 supporting-data metric card.
+
+    Renders an icon, a live value (``html.H3`` carrying ``value_id`` for
+    callbacks to target) and a static label inside the shared
+    ``dashboard-metric-card`` shell.
+    """
+    return dbc.Col([
+        dbc.Card([
+            dbc.CardBody([
+                html.Div([
+                    html.I(className=icon_class,
+                           style={"fontSize": "28px", "color": icon_color}),
+                ], className="mb-1"),
+                html.H3(
+                    id=value_id,
+                    children=value,
+                    className="dashboard-metric-value mb-0"
+                ),
+                html.P(label,
+                       className="dashboard-metric-label text-muted mb-0")
+            ], className="text-center py-2")
+        ], className="h-100 dashboard-metric-card")
+    ], md=3, xs=6, className="mb-3")
+
+
 def create_dashboard_layout():
     """
     Create the overview dashboard layout for clinical operators.
@@ -145,23 +171,13 @@ def create_dashboard_layout():
         ], className="text-end mb-1"),
         dbc.Row([
             # Card A: Sequences Analyzed
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.Div([
-                            html.I(className="bi bi-bar-chart-fill",
-                                   style={"fontSize": "28px", "color": "#0d6efd"}),
-                        ], className="mb-1"),
-                        html.H3(
-                            id="dashboard-sequences-count",
-                            children="0",
-                            className="dashboard-metric-value mb-0"
-                        ),
-                        html.P("Sequences Analyzed",
-                               className="dashboard-metric-label text-muted mb-0")
-                    ], className="text-center py-2")
-                ], className="h-100 dashboard-metric-card")
-            ], md=3, xs=6, className="mb-3"),
+            _metric_card(
+                value_id="dashboard-sequences-count",
+                icon_class="bi bi-bar-chart-fill",
+                icon_color="#0d6efd",
+                label="Sequences Analyzed",
+                value="0",
+            ),
 
             # Card B: Sample Quality
             dbc.Col([
@@ -183,23 +199,13 @@ def create_dashboard_layout():
             ], md=3, xs=6, className="mb-3"),
 
             # Card C: Species Detected
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.Div([
-                            html.I(className="bi bi-bug-fill",
-                                   style={"fontSize": "28px", "color": "#6f42c1"}),
-                        ], className="mb-1"),
-                        html.H3(
-                            id="dashboard-organisms-count",
-                            children="0",
-                            className="dashboard-metric-value mb-0"
-                        ),
-                        html.P("Species Detected",
-                               className="dashboard-metric-label text-muted mb-0")
-                    ], className="text-center py-2")
-                ], className="h-100 dashboard-metric-card")
-            ], md=3, xs=6, className="mb-3"),
+            _metric_card(
+                value_id="dashboard-organisms-count",
+                icon_class="bi bi-bug-fill",
+                icon_color="#6f42c1",
+                label="Species Detected",
+                value="0",
+            ),
 
             # Card D: Run Time
             dbc.Col([

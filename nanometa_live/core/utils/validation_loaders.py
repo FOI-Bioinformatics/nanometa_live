@@ -14,6 +14,23 @@ from typing import Any, Dict, List, Optional
 from nanometa_live.core.utils.canonical_loaders import load_canonical_validation
 from nanometa_live.core.utils.sample_detector import resolve_analysis_directory
 
+# Upstream validation status -> dashboard status vocabulary.
+_VALIDATION_STATUS_MAP = {"confirmed": "validated", "uncertain": "partial", "rejected": "failed"}
+
+
+def _validation_rate(hit_rate: float) -> float:
+    """Normalise a hit rate to a 0-100 percentage, rounded to one decimal.
+
+    Values <= 1.0 are treated as fractions and scaled by 100; values
+    already expressed as a percentage are passed through unchanged.
+    """
+    return round(hit_rate * 100 if hit_rate <= 1.0 else hit_rate, 1)
+
+
+def _map_validation_status(status: str) -> str:
+    """Map an upstream validation status onto the dashboard vocabulary."""
+    return _VALIDATION_STATUS_MAP.get(status, status)
+
 
 def load_validation_data(
     main_dir: str,
@@ -109,15 +126,10 @@ def load_blast_validation_data(
                     "name": watchlist_match.get("name", f"Species {tid}"),
                     "total_reads": entry.get("kraken_reads", 0),
                     "validated_reads": entry.get("blast_hits", entry.get("mapped_reads", 0)),
-                    "validation_rate": round(
-                        hit_rate * 100 if hit_rate <= 1.0 else hit_rate, 1
-                    ),
-                    "status": entry.get("status", "no_data"),
+                    "validation_rate": _validation_rate(hit_rate),
+                    "status": _map_validation_status(entry.get("status", "no_data")),
                     "avg_identity": entry.get("avg_identity", 0.0),
                 }
-                # Map status values
-                status_map = {"confirmed": "validated", "uncertain": "partial", "rejected": "failed"}
-                result_entry["status"] = status_map.get(result_entry["status"], result_entry["status"])
 
                 results[tid] = result_entry
 
@@ -162,26 +174,16 @@ def load_blast_validation_data(
                         'name': watchlist_match.get('name', f'Species {tid}'),
                         'total_reads': kraken_reads,
                         'validated_reads': blast_hits,
-                        'validation_rate': round(hit_rate * 100 if hit_rate <= 1.0 else hit_rate, 1),
-                        'status': entry.get('validation_status', 'no_data'),
+                        'validation_rate': _validation_rate(hit_rate),
+                        'status': _map_validation_status(entry.get('validation_status', 'no_data')),
                         'avg_identity': entry.get('avg_identity', 0.0),
                     }
-
-                    # Map status values
-                    if result_entry['status'] == 'confirmed':
-                        result_entry['status'] = 'validated'
-                    elif result_entry['status'] == 'uncertain':
-                        result_entry['status'] = 'partial'
-                    elif result_entry['status'] == 'rejected':
-                        result_entry['status'] = 'failed'
 
                     # Add minimap2 fields if present
                     if entry.get('minimap2_mapped') is not None:
                         result_entry['minimap2_validated_reads'] = int(entry.get('minimap2_mapped', 0))
                         mm2_rate = entry.get('minimap2_hit_rate', 0.0)
-                        result_entry['minimap2_validation_rate'] = round(
-                            mm2_rate * 100 if mm2_rate <= 1.0 else mm2_rate, 1
-                        )
+                        result_entry['minimap2_validation_rate'] = _validation_rate(mm2_rate)
                         result_entry['minimap2_identity'] = float(entry.get('minimap2_identity', 0.0))
                         result_entry['minimap2_avg_mapq'] = float(entry.get('avg_mapq', 0.0))
                         result_entry['minimap2_status'] = entry.get('minimap2_status', 'no_data')

@@ -9,12 +9,15 @@ Provides a dedicated tab for managing species watchlists with:
 - Add custom species with API lookup
 """
 
+import logging
 from typing import Any, Dict, List, Optional
 
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 
 from nanometa_live.app.components.modern_components import WorkflowStepper
+
+logger = logging.getLogger(__name__)
 
 
 def create_watchlist_layout() -> html.Div:
@@ -1439,7 +1442,7 @@ def create_genome_item(genome_meta: Dict[str, Any]) -> html.Div:
             if entry and entry.name:
                 species = entry.name
         except Exception:
-            pass
+            logger.debug("Watchlist name fallback failed for taxid %s", taxid, exc_info=True)
     accession = genome_meta.get("accession", "")
     source = genome_meta.get("source", "ncbi")
     kingdom = genome_meta.get("kingdom", "Unknown")
@@ -1450,7 +1453,7 @@ def create_genome_item(genome_meta: Dict[str, Any]) -> html.Div:
             from nanometa_live.core.utils.genome_manager import get_genome_manager
             has_blast = get_genome_manager().has_blast_db(taxid)
         except Exception:
-            pass
+            logger.debug("BLAST DB filesystem check failed for taxid %s", taxid, exc_info=True)
     file_size = genome_meta.get("file_size", 0)
     size_mb = round(file_size / (1024 * 1024), 2) if file_size else 0
 
