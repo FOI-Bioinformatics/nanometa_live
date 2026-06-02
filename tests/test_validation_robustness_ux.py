@@ -303,3 +303,74 @@ def test_on_demand_does_not_clobber_other_method(tmp_path):
     methods = {r.validation_method for r in results
                if r.sample_id == "barcode14" and r.taxid == 263}
     assert "minimap2" in methods and "blast" in methods
+
+
+# ---------------------------------------------------------------------------
+# Cumulative / per-batch realtime drill-down
+# ---------------------------------------------------------------------------
+
+from nanometa_live.app.tabs.validation_tab_helpers import (
+    _enumerate_batch_ids, _load_real_coverage)
+
+_PAF_LINE = "r1\t100\t0\t100\t+\tref1\t1000\t0\t100\t100\t100\t60\n"
+
+
+def _write_batch_minimap2(results_dir, sample, taxid, batch_id, **fields):
+    d = results_dir / "validation" / "minimap2" / "batch"
+    d.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "sample_id": sample, "taxid": taxid, "validation_method": "minimap2",
+        "total_reads": 0, "mapped_reads": 0, "hit_rate": 0.0, "avg_mapq": 0.0,
+        "avg_identity": 0.0, "avg_coverage": 0.0, "validation_status": "rejected",
+        "ref_name": "unknown", "ref_length": 0,
+    }
+    payload.update(fields)
+    (d / f"{sample}_taxid{taxid}_{batch_id}.minimap2_stats.json").write_text(json.dumps(payload))
+    (d / f"{sample}_taxid{taxid}_{batch_id}.paf").write_text(_PAF_LINE)
+
+
+def _write_batch_blast(results_dir, sample, taxid, batch_id):
+    d = results_dir / "validation" / "blast" / "batch"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{sample}_taxid{taxid}_{batch_id}.blast.tsv").write_text(
+        "read1\tACC\t98.0\t500\t0\t0\t1\t500\t1\t500\t1e-50\t900\n"
+    )
+
+
+def test_enumerate_batch_ids_empty_without_batch_dir(tmp_path):
+    assert _enumerate_batch_ids({"results_output_directory": str(tmp_path)}) == []
+
+
+def test_enumerate_batch_ids_most_recent_first(tmp_path):
+    _write_batch_minimap2(tmp_path, "barcode14", 263, "batch_1000")
+    _write_batch_minimap2(tmp_path, "barcode14", 263, "batch_2000")
+    _write_batch_blast(tmp_path, "barcode14", 263, "batch_3000")
+    assert _enumerate_batch_ids({"results_output_directory": str(tmp_path)}) == [
+        "batch_3000", "batch_2000", "batch_1000",
+    ]
+
+
+def test_get_validation_results_batch_id_reads_batch_dir(tmp_path):
+    """batch_id pulls from validation/{tool}/batch, not the cumulative flat files."""
+    # cumulative flat file (should be ignored when batch_id is given)
+    _write_minimap2_stats(tmp_path, "barcode14", 263, mapped_reads=99,
+                          total_reads=99, hit_rate=1.0, validation_status="confirmed")
+    # a single batch
+    _write_batch_minimap2(tmp_path, "barcode14", 263, "batch_2000",
+                          total_reads=10, mapped_reads=10, hit_rate=1.0,
+                          avg_identity=99.0, avg_coverage=0.5, validation_status="confirmed")
+    _write_batch_blast(tmp_path, "barcode14", 263, "batch_2000")
+    res = ValidationParser(str(tmp_path)).get_validation_results(batch_id="batch_2000")
+    mm2 = [r for r in res if r.validation_method == "minimap2"]
+    blast = [r for r in res if r.validation_method == "blast"]
+    assert len(mm2) == 1 and mm2[0].validated_reads == 10   # batch value, not the 99 cumulative
+    assert len(blast) == 1 and blast[0].sample_id == "barcode14" and blast[0].taxid == 263
+
+
+def test_load_real_coverage_batch_path(tmp_path):
+    _write_batch_minimap2(tmp_path, "barcode14", 263, "batch_2000")
+    cfg = {"results_output_directory": str(tmp_path)}
+    cov = _load_real_coverage("barcode14_263", cfg, 0, batch_id="batch_2000")
+    assert cov is not None
+    assert cov.ref_name == "ref1"
+    assert round(cov.breadth, 3) == 0.1   # 100 of 1000 bp covered in this batch

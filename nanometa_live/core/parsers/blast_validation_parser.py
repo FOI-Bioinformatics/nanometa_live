@@ -470,7 +470,8 @@ class ValidationParser:
     def get_validation_results(
         self,
         sample: Optional[str] = None,
-        taxid: Optional[int] = None
+        taxid: Optional[int] = None,
+        batch_id: Optional[str] = None,
     ) -> List[ValidationResult]:
         """
         Get all validation results, optionally filtered by sample or taxid.
@@ -478,10 +479,16 @@ class ValidationParser:
         Args:
             sample: Filter by sample name (optional)
             taxid: Filter by taxonomy ID (optional)
+            batch_id: when set, read a single realtime batch from
+                ``validation/{tool}/batch/`` instead of the cumulative files.
 
         Returns:
             List of ValidationResult objects
         """
+        if batch_id:
+            from nanometa_live.core.parsers.validation_batch import collect_batch_results
+            return collect_batch_results(self.results_dir, batch_id, sample, taxid, self.parse_blast_tabular)
+
         # Cache fast-path: if the validation directory has not changed
         # since the last full parse, reuse the cached unfiltered list
         # and apply the (sample, taxid) filter in-memory.
@@ -591,17 +598,14 @@ class ValidationParser:
                 results.append(result)
 
         # Surface per-(sample, taxid) minimap2 coverage from individual stats
-        # files so the Coverage sub-tab is not empty before the aggregate JSON
-        # is written in a realtime run (see core/parsers/minimap2_stats.py).
+        # files (core/parsers/minimap2_stats.py): keeps the Coverage tab live
+        # before the aggregate JSON exists in a realtime run.
         from nanometa_live.core.parsers.minimap2_stats import collect_minimap2_results
         results.extend(collect_minimap2_results(
             self.results_dir, self.validation_dir, sample, taxid, results))
 
-        # Also check the on_demand_validation/ directory for results produced by
-        # OnDemandValidator. An on-demand run is an explicit operator re-check,
-        # so for a given (sample, taxid, method) it SUPERSEDES the pipeline
-        # result (in place, preserving order) rather than being dropped as a
-        # duplicate; a method the on-demand run did not cover is left untouched.
+        # On-demand results supersede the pipeline result for the same
+        # (sample, taxid, method) in place (see CLAUDE.md); other methods kept.
         on_demand_dir = self.results_dir / "on_demand_validation"
         if on_demand_dir.is_dir():
             def _supersede(od_r):

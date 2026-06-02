@@ -58,6 +58,8 @@ from nanometa_live.app.tabs.validation_tab_helpers import (  # noqa: E402
     _compute_summary,
     _create_empty_identity_plot,
     _load_real_coverage,
+    _enumerate_batch_ids,
+    _batch_selector_state,
 )
 
 
@@ -101,11 +103,14 @@ def register_validation_callbacks(app: Dash):
             Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
             Input("update-interval", "n_intervals"),
+            Input("validation-view-mode", "value"),
+            Input("validation-batch-selector", "value"),
         ],
         State("app-config", "data"),
         prevent_initial_call=True,
     )
-    def load_validation_data(_fingerprint, selected_sample, _n_intervals, config):
+    def load_validation_data(_fingerprint, selected_sample, _n_intervals,
+                             view_mode, batch_value, config):
         """Load validation data filtered by the selected sample.
 
         The Validation tab honours the same sample selector as the
@@ -114,7 +119,10 @@ def register_validation_callbacks(app: Dash):
         and stats table all narrow to that sample. ``All Samples`` (or
         an empty value) returns the full result set so cross-sample
         aggregates still work.
+
+        ``view_mode``/``batch_value`` select cumulative vs a single batch.
         """
+        batch_id = batch_value if view_mode == "batch" and batch_value else None
         # Interval ticks are a backstop only; debounce them so a quiet
         # outdir does not re-parse the BLAST validation directory every
         # tick (matches the pattern on every other results-driven lead
@@ -150,8 +158,10 @@ def register_validation_callbacks(app: Dash):
                     "selected_sample": selected_sample,
                 }
 
-            results = parser.get_validation_results()
-            summary = parser.get_validation_summary()
+            results = parser.get_validation_results(batch_id=batch_id)
+            # The cumulative summary is run-wide; in single-batch view the
+            # per-method summary cards recompute from results, so skip it.
+            summary = {} if batch_id else parser.get_validation_summary()
 
             # Apply sample filter via the pure helper. ``All Samples`` and
             # empty sentinel values mean "no filter" -- matches the
@@ -178,6 +188,28 @@ def register_validation_callbacks(app: Dash):
             log_callback_error("load_validation_data", e)
             return {"results": [], "summary": {}, "message": f"Error loading data: {e}",
                     "selected_sample": selected_sample}
+
+    @app.callback(
+        [
+            Output("validation-view-controls", "style"),
+            Output("validation-batch-selector-col", "style"),
+            Output("validation-batch-selector", "options"),
+            Output("validation-batch-selector", "value"),
+        ],
+        [
+            Input("results-fingerprint", "data"),
+            Input("validation-view-mode", "value"),
+        ],
+        [
+            State("app-config", "data"),
+            State("validation-batch-selector", "value"),
+        ],
+    )
+    def populate_validation_batch_selector(_fingerprint, view_mode, config, current_value):
+        """Show the cumulative/single-batch control only when per-batch outputs
+        exist, and populate the batch dropdown. Pure logic in
+        ``_batch_selector_state`` (validation_tab_helpers)."""
+        return _batch_selector_state(config, view_mode, current_value)
 
     # =================================================================
     # BLAST sub-tab callbacks
@@ -667,11 +699,18 @@ def register_validation_callbacks(app: Dash):
             Input("coverage-species-selector", "value"),
             Input("coverage-mapq-filter", "value"),
             Input("coverage-depth-threshold", "value"),
+            Input("validation-view-mode", "value"),
+            Input("validation-batch-selector", "value"),
         ],
         State("app-config", "data"),
     )
-    def update_coverage_plots(selected_key, min_mapq, depth_threshold, config):
-        """Load PAF data and render coverage plots."""
+    def update_coverage_plots(selected_key, min_mapq, depth_threshold,
+                              view_mode, batch_value, config):
+        """Load PAF data and render coverage plots.
+
+        Reads the cumulative PAF by default; in single-batch view it reads the
+        preserved per-batch PAF for the chosen batch.
+        """
         empty = create_empty_coverage_figure
         hidden = {"display": "none"}
         visible = {"display": "block"}
@@ -691,7 +730,8 @@ def register_validation_callbacks(app: Dash):
         except (ValueError, TypeError):
             threshold = 10
 
-        coverage = _load_real_coverage(selected_key, config, min_mapq)
+        batch_id = batch_value if view_mode == "batch" and batch_value else None
+        coverage = _load_real_coverage(selected_key, config, min_mapq, batch_id=batch_id)
 
         if coverage is None:
             no_paf_msg = "No PAF file found for this species/sample. Ensure minimap2 validation ran and results are in validation/minimap2/."

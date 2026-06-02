@@ -9,6 +9,7 @@ validation_tab.py re-exports these names.
 """
 
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -265,9 +266,20 @@ def _compute_summary(results):
 
 
 def _load_real_coverage(
-    selected_key: str, config: Optional[dict], min_mapq: int
+    selected_key: str,
+    config: Optional[dict],
+    min_mapq: int,
+    batch_id: Optional[str] = None,
 ) -> Optional[CoverageData]:
     """Load coverage from a real PAF file.
+
+    ``batch_id`` selects which PAF to read:
+
+    - ``None`` (default, "cumulative" view) -> the canonical flat PAF
+      ``validation/minimap2/<sample>_taxid<tid>.paf``, which the realtime
+      cumulative aggregator keeps current (falling back to the on-demand PAF).
+    - a batch id -> the preserved per-batch PAF
+      ``validation/minimap2/batch/<sample>_taxid<tid>_<batch_id>.paf``.
 
     Returns None if no PAF file exists or if the file has no alignments
     passing the min_mapq filter.
@@ -285,10 +297,14 @@ def _load_real_coverage(
         return None
     sample_id, taxid_str = parts
 
-    candidates = [
-        Path(results_dir) / "validation" / "minimap2" / f"{sample_id}_taxid{taxid_str}.paf",
-        Path(results_dir) / "on_demand_validation" / f"{sample_id}_{taxid_str}_ondemand.paf",
-    ]
+    mm2 = Path(results_dir) / "validation" / "minimap2"
+    if batch_id:
+        candidates = [mm2 / "batch" / f"{sample_id}_taxid{taxid_str}_{batch_id}.paf"]
+    else:
+        candidates = [
+            mm2 / f"{sample_id}_taxid{taxid_str}.paf",
+            Path(results_dir) / "on_demand_validation" / f"{sample_id}_{taxid_str}_ondemand.paf",
+        ]
 
     for paf_path in candidates:
         if paf_path.exists():
@@ -302,6 +318,57 @@ def _load_real_coverage(
             return None
 
     return None
+
+
+def _batch_selector_state(config: Optional[dict], view_mode: Optional[str],
+                          current_value: Optional[str]):
+    """Compute the view-controls visibility, batch-dropdown column visibility,
+    options, and value from the available per-batch outputs.
+
+    Returns ``(controls_style, col_style, options, value)``. The whole control
+    row is hidden when no per-batch data exists (batch-mode run / pre-realtime),
+    so default behaviour is unchanged; the batch dropdown shows only in
+    single-batch view.
+    """
+    hidden = {"display": "none"}
+    batch_ids = _enumerate_batch_ids(config)
+    if not batch_ids:
+        return hidden, hidden, [], None
+    options = [{"label": b, "value": b} for b in batch_ids]
+    value = current_value if current_value in batch_ids else batch_ids[0]
+    col_style = {} if view_mode == "batch" else hidden
+    return {}, col_style, options, value
+
+
+def _enumerate_batch_ids(config: Optional[dict]) -> List[str]:
+    """List batch ids that have preserved per-batch validation outputs.
+
+    Scans ``validation/minimap2/batch`` and ``validation/blast/batch`` for the
+    realtime per-batch files named ``<sample>_taxid<tid>_<batch_id>.<ext>`` and
+    returns the distinct ``<batch_id>`` values, most recent first. Empty when no
+    per-batch data exists (e.g. a batch-mode run), so the UI can hide the
+    per-batch option.
+    """
+    if not config:
+        return []
+    results_dir = config.get("results_output_directory") or config.get("main_dir", "")
+    if not results_dir:
+        return []
+
+    # <sample>_taxid<digits>_<batch_id>.<ext>  -> capture <batch_id>
+    pattern = re.compile(r"_taxid\d+_(?P<batch>.+?)\.(?:paf|blast\.tsv|minimap2_stats\.json|blast_stats\.json)$")
+    batch_ids: set = set()
+    for tool in ("minimap2", "blast"):
+        batch_dir = Path(results_dir) / "validation" / tool / "batch"
+        if not batch_dir.is_dir():
+            continue
+        for f in batch_dir.iterdir():
+            m = pattern.search(f.name)
+            if m:
+                batch_ids.add(m.group("batch"))
+    # batch ids carry a trailing timestamp (e.g. "batch_1733142000123"); a plain
+    # reverse-sort puts the most recent first.
+    return sorted(batch_ids, reverse=True)
 
 
 def _create_empty_identity_plot() -> go.Figure:
