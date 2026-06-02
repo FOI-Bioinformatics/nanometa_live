@@ -222,102 +222,44 @@ def _calculate_hierarchical_y_positions(nodes, node_ids, tax_levels, nodes_per_l
     return node_y
 
 
-def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_level, chart_height="auto", color_palette=None):
-    """
-    Create Sankey plot data from Kraken report.
+# Shared layout for informational empty-state Sankey figures.
+_SANKEY_INFO_LAYOUT = dict(
+    height=400,
+    paper_bgcolor="white",
+    plot_bgcolor="white",
+    margin=dict(l=50, r=50, t=50, b=50),
+    font=dict(family="Arial, sans-serif"),
+)
 
-    Args:
-        kraken_df: DataFrame containing Kraken report
-        domains: List of domains to include
-        tax_levels: List of taxonomy levels to include
-        min_reads: Minimum number of reads for filtering
-        max_taxa_per_level: Maximum number of taxa to show at each level
-        chart_height: Chart height - "auto" for adaptive, or pixel value as string
-        color_palette: Dictionary mapping taxonomy ranks to colors (optional)
 
-    Returns:
-        A Go.Figure object with the Sankey plot
-    """
-    # Use provided color palette or default
-    colors = color_palette or TAXONOMY_COLORS
-    # Shared layout for informational empty-state figures
-    _info_layout = dict(
-        height=400,
-        paper_bgcolor="white",
-        plot_bgcolor="white",
-        margin=dict(l=50, r=50, t=50, b=50),
-        font=dict(family="Arial, sans-serif"),
+def _sankey_info_figure(text):
+    """Build a centred empty-/info-state Sankey placeholder figure."""
+    fig = go.Figure()
+    fig.add_annotation(
+        text=text,
+        xref="paper", yref="paper",
+        x=0.5, y=0.5, showarrow=False,
+        font=dict(size=14, color="#6B7280"),
     )
+    fig.update_layout(**_SANKEY_INFO_LAYOUT)
+    return fig
 
-    # Ensure clean integer index to prevent duplicate-index issues with .loc[]
-    kraken_df = kraken_df.reset_index(drop=True)
 
-    # Handle empty dataframe
-    if kraken_df.empty:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No organism classification data available for this sample.",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5, showarrow=False,
-            font=dict(size=14, color="#6B7280"),
-        )
-        fig.update_layout(**_info_layout)
-        return fig
+def _build_sankey_frames(kraken_df, domains, tax_levels):
+    """Filter the kraken frame to the requested domains and tax levels.
 
-    # Filter to standard taxonomy ranks only — sub-ranks (S1, S2, F3, etc.)
-    # are excluded because their cumulative reads are already counted in the
-    # parent rank's cumulative total, and including them would double-count.
-    available_ranks = kraken_df["rank"].unique().tolist()
-    tax_levels = [level for level in tax_levels if level in available_ranks]
-
-    logging.debug(f"Sankey: Available ranks in data: {available_ranks}")
-    logging.debug(f"Sankey: Using tax_levels: {tax_levels}")
-
-    # If no valid tax levels after filtering, return informative message
-    if not tax_levels:
-        logging.debug("Sankey: No matching tax levels found in data")
-        fig = go.Figure()
-        fig.add_annotation(
-            text=f"No matching classification levels in data.<br>Try adjusting filter settings or selecting a different preset view.",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5, showarrow=False,
-            font=dict(size=14, color="#6B7280"),
-        )
-        fig.update_layout(**_info_layout)
-        return fig
-
-    # Sankey requires at least 2 levels to show parent-child relationships
-    if len(tax_levels) < 2:
-        logging.debug(f"Sankey: Need at least 2 taxonomy levels, only have {len(tax_levels)}: {tax_levels}")
-        rank_names_local = {"D": "Domain", "K": "Kingdom", "P": "Phylum", "C": "Class", "O": "Order", "F": "Family", "G": "Genus", "S": "Species"}
-        available_names = [rank_names_local.get(r, r) for r in available_ranks]
-        fig = go.Figure()
-        fig.add_annotation(
-            text=f"The flow diagram needs at least 2 classification levels to show relationships.<br>Currently available: {', '.join(available_names)}<br>Try the Ring View (Sunburst) or select more levels in Advanced Settings.",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5, showarrow=False,
-            font=dict(size=14, color="#6B7280"),
-        )
-        fig.update_layout(**_info_layout)
-        return fig
-
-    # Build cumulative reads lookup (composite key -> reads)
+    Returns ``(tax_df, domain_df, total_reads, taxid_to_parent, taxid_to_key)``
+    or ``None`` when no rows fall under the requested domains. ``domain_df``
+    gains ``recalc_cumul`` (cumulative reads) and ``recalc_pct`` columns.
+    """
     recalc_cumul = recalculate_cumulative_reads(kraken_df)
+    total_reads = sum(recalc_cumul.values()) or 1
 
-    # Calculate total reads for percentage calculation
-    total_reads = sum(recalc_cumul.values())
-    if total_reads == 0:
-        total_reads = 1
-
-    # Build taxid-based parent lookup from the parent_taxid column.
-    # parent_taxid is computed during Kraken2 report parsing from indentation,
-    # making it robust to aggregation reordering.
+    # taxid-based parent lookup. parent_taxid is derived from indentation
+    # during Kraken2 parsing, so it survives aggregation reordering.
     taxid_to_parent = dict(zip(
         kraken_df["taxid"].astype(int), kraken_df["parent_taxid"].astype(int)
     ))
-
-    # Build composite-key lookup: taxid -> f"{rank}_{name}"
-    # Used for parent-finding via taxid_to_parent (order-independent).
     taxid_to_key = {
         int(tid): f"{rank}_{name.strip()}"
         for tid, rank, name in zip(
@@ -325,13 +267,10 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
         )
     }
 
-    # Filter by domains using taxid subtree membership (order-independent).
-    # Build a children map then do BFS/DFS from each domain taxid downward.
+    # Filter by domain via taxid subtree membership (order-independent).
     children_map: dict = {}
     for taxid, parent_taxid in taxid_to_parent.items():
-        if parent_taxid not in children_map:
-            children_map[parent_taxid] = []
-        children_map[parent_taxid].append(taxid)
+        children_map.setdefault(parent_taxid, []).append(taxid)
 
     def _collect_subtree(root_taxid):
         """Return the set of all taxids at or below root_taxid."""
@@ -352,80 +291,71 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
         domain_taxids_set.update(_collect_subtree(domain_taxid))
 
     domain_df = kraken_df[kraken_df["taxid"].isin(domain_taxids_set)].copy()
-
     if domain_df.empty:
         return None
 
-    # Add cumulative reads to domain_df for sorting and link values
     domain_df["recalc_cumul"] = (
         domain_df["rank"] + "_" + domain_df["name"].str.strip()
     ).map(recalc_cumul).fillna(0).astype(int)
-
-    # Add percentage for hover display
     domain_df["recalc_pct"] = domain_df["recalc_cumul"] / total_reads * 100
 
-    # Filter by taxonomy levels
     tax_df = domain_df[domain_df["rank"].isin(tax_levels)].copy()
+    return tax_df, domain_df, total_reads, taxid_to_parent, taxid_to_key
 
-    # Generate node IDs
+
+def _build_sankey_nodes(tax_df, tax_levels, max_taxa_per_level):
+    """Create node bookkeeping for the top taxa at each level.
+
+    Levels are processed in order so nodes form clean per-rank groups. Returns
+    ``(nodes, node_ids, node_values, node_pcts, node_ranks)``.
+    """
     node_id = 0
     node_ids = {}
     nodes = []
-    node_values = {}  # Store recalculated cumulative reads for each node
-    node_pcts = {}  # Store percentage for each node
-    node_ranks = {}  # Store rank for each node
-
-    # Process levels in the order specified (original dev2 algorithm)
-    # This creates clean node groups: all Family nodes, then all Genus nodes, then all Species nodes
-    # With "fixed" arrangement, explicit x/y positions control layout precisely
-    # Sort by recalculated cumulative reads for proper hierarchy representation
+    node_values = {}
+    node_pcts = {}
+    node_ranks = {}
     for level in tax_levels:
-        level_df = tax_df[tax_df["rank"] == level].sort_values("recalc_cumul", ascending=False)
-
-        # Take top N at this level
-        level_df = level_df.head(max_taxa_per_level)
-
-        # Vectorized node creation - extract columns as lists
+        level_df = (
+            tax_df[tax_df["rank"] == level]
+            .sort_values("recalc_cumul", ascending=False)
+            .head(max_taxa_per_level)
+        )
         level_names = level_df["name"].str.strip().tolist()
         level_cumuls = level_df["recalc_cumul"].tolist()
         level_pcts = level_df["recalc_pct"].tolist()
-
         for name, cumul_val, pct_val in zip(level_names, level_cumuls, level_pcts):
             node_key = f"{level}_{name}"
             node_ids[node_key] = node_id
             nodes.append(node_key)
-            # Store recalculated cumulative value and percentage for this node
             node_values[node_key] = cumul_val
             node_pcts[node_key] = pct_val
             node_ranks[node_key] = level
             node_id += 1
+    return nodes, node_ids, node_values, node_pcts, node_ranks
 
-    logging.debug(f"Sankey: Created {len(nodes)} nodes across {len(tax_levels)} levels")
-    logging.debug(f"Sankey: Nodes: {nodes[:5]}...")  # Log first 5 nodes
 
-    # Create links
+def _build_sankey_links(tax_df, tax_levels, max_taxa_per_level, node_ids,
+                        node_values, taxid_to_parent, taxid_to_key):
+    """Link each level's nodes to the nearest visible ancestor one level up.
+
+    Walks the taxid parent chain (order-independent) and never falls back to an
+    unrelated parent, which would create misleading taxonomic links. Returns
+    ``(links, values, parent_outgoing_sum, parent_link_indices)``.
+    """
     links = []
     values = []
+    parent_outgoing_sum = {}   # parent_key -> sum of outgoing link values
+    parent_link_indices = {}   # parent_key -> link indices (for scaling)
 
-    # Track parent outgoing totals for scaling and sink node creation
-    # This ensures parents have correct visual height
-    parent_outgoing_sum = {}  # parent_name -> sum of outgoing link values
-    parent_link_indices = {}  # parent_name -> list of link indices (for scaling)
-
-    # For each level (except the highest), create links to parent level
     for i in range(len(tax_levels) - 1, 0, -1):
         current_level = tax_levels[i]
         parent_level = tax_levels[i - 1]
-
-        # Get nodes at this level that made it to the visualization
-        # Sort by recalculated cumulative reads for consistency
         level_df = (
             tax_df[tax_df["rank"] == current_level]
             .sort_values("recalc_cumul", ascending=False)
             .head(max_taxa_per_level)
         )
-
-        # Pre-extract data for faster iteration (avoid iterrows overhead)
         child_names_stripped = level_df["name"].str.strip().tolist()
         child_taxids = level_df["taxid"].tolist()
         child_cumuls = level_df["recalc_cumul"].tolist()
@@ -436,13 +366,8 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
             child_key = f"{current_level}_{child_name_stripped}"
             if child_key not in node_ids:
                 continue
-
-            # Get child's cumulative value
             child_value = node_values.get(child_key, child_cumul)
 
-            # Walk up the taxid parent chain to find the nearest ancestor
-            # at the expected parent_level that is in the visualization.
-            # This is order-independent and works correctly after aggregation.
             parent_found = False
             current_taxid = taxid_to_parent.get(int(child_taxid), 0)
             while current_taxid != 0:
@@ -450,140 +375,98 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
                 if ancestor_key is not None:
                     ancestor_rank = ancestor_key.split("_", 1)[0]
                     if ancestor_rank == parent_level:
-                        # Found the right rank - only link if it's in the visualization
+                        # Found the right rank - only link if it is visible.
                         if ancestor_key in node_ids:
-                            parent_key = ancestor_key
                             link_idx = len(links)
-                            links.append((node_ids[parent_key], node_ids[child_key]))
+                            links.append((node_ids[ancestor_key], node_ids[child_key]))
                             values.append(child_value)
-                            parent_outgoing_sum[parent_key] = parent_outgoing_sum.get(parent_key, 0) + child_value
-                            if parent_key not in parent_link_indices:
-                                parent_link_indices[parent_key] = []
-                            parent_link_indices[parent_key].append(link_idx)
+                            parent_outgoing_sum[ancestor_key] = parent_outgoing_sum.get(ancestor_key, 0) + child_value
+                            parent_link_indices.setdefault(ancestor_key, []).append(link_idx)
                             parent_found = True
-                        break  # Stop regardless - found the rank, whether visible or not
+                        break  # Stop regardless - found the rank, visible or not.
                     elif ancestor_rank in tax_levels and tax_levels.index(ancestor_rank) < tax_levels.index(parent_level):
-                        # Reached a displayed rank above parent_level without finding parent
+                        # Passed a displayed rank above parent_level without a hit.
                         break
                 current_taxid = taxid_to_parent.get(current_taxid, 0)
 
-            # If no parent found, skip this child - do NOT fallback to an
-            # unrelated parent, as that creates misleading taxonomic links
-            # (e.g. linking Bacillus subtilis to Staphylococcus genus)
             if not parent_found:
                 logging.debug(
                     f"Sankey: No parent at {parent_level} found for "
                     f"{child_name_stripped} ({current_level}) - skipping link"
                 )
 
-    # SCALING FIX: When children's cumul_reads sum exceeds parent's cumul_reads,
-    # scale down the outgoing links proportionally to prevent parent appearing too large.
-    # This happens because Plotly Sankey sizes nodes by sum of link values.
-    scaled_parents = 0
+    return links, values, parent_outgoing_sum, parent_link_indices
+
+
+def _scale_oversized_parent_links(values, node_values, parent_outgoing_sum, parent_link_indices):
+    """Scale down outgoing links where children's reads exceed the parent's.
+
+    Plotly sizes Sankey nodes by the sum of their link values, so unscaled
+    children would inflate the parent's visual height. Mutates ``values`` in
+    place and updates ``parent_outgoing_sum``.
+    """
     for parent_name, outgoing_sum in list(parent_outgoing_sum.items()):
         parent_value = node_values.get(parent_name, 0)
         if outgoing_sum > parent_value > 0:
-            # Children sum exceeds parent - scale down proportionally
             scale_factor = parent_value / outgoing_sum
-            link_indices = parent_link_indices.get(parent_name, [])
-            for link_idx in link_indices:
+            for link_idx in parent_link_indices.get(parent_name, []):
                 values[link_idx] = values[link_idx] * scale_factor
-            # Update the outgoing sum after scaling
             parent_outgoing_sum[parent_name] = parent_value
-            scaled_parents += 1
             logging.debug(f"Sankey: Scaled {parent_name} links by {scale_factor:.3f} "
-                         f"(children sum {outgoing_sum} > parent value {parent_value})")
+                          f"(children sum {outgoing_sum} > parent value {parent_value})")
 
-    if scaled_parents > 0:
-        logging.debug(f"Sankey: Scaled down links for {scaled_parents} parents to prevent inflation")
 
-    # Note: Sink nodes removed for fixed arrangement - they caused visual artifacts
-    # when Plotly cannot auto-adjust positions. Parent node heights may not perfectly
-    # match cumulative reads, but the layout is cleaner and more predictable.
+def _prune_orphan_sankey_nodes(nodes, node_ids, links, node_values, node_pcts, node_ranks):
+    """Drop nodes with no incident links and remap link/node indices.
 
-    # Remove orphan nodes (no incoming or outgoing links) to avoid
-    # disconnected floating nodes in the Sankey diagram
+    Returns the possibly-shrunk ``(nodes, node_ids, links, node_values,
+    node_pcts, node_ranks)``; the inputs are returned unchanged when nothing
+    is orphaned.
+    """
     connected_indices = set()
     for src, tgt in links:
         connected_indices.add(src)
         connected_indices.add(tgt)
+    if not connected_indices:
+        return nodes, node_ids, links, node_values, node_pcts, node_ranks
 
-    if connected_indices:
-        # Build mapping from old index to new index
-        old_to_new = {}
-        new_nodes = []
-        new_node_values = {}
-        new_node_pcts = {}
-        new_node_ranks = {}
-        for old_idx, node_key in enumerate(nodes):
-            if old_idx in connected_indices:
-                new_idx = len(new_nodes)
-                old_to_new[old_idx] = new_idx
-                new_nodes.append(node_key)
-                new_node_values[node_key] = node_values.get(node_key, 0)
-                new_node_pcts[node_key] = node_pcts.get(node_key, 0)
-                new_node_ranks[node_key] = node_ranks.get(node_key, "")
+    old_to_new = {}
+    new_nodes = []
+    new_node_values = {}
+    new_node_pcts = {}
+    new_node_ranks = {}
+    for old_idx, node_key in enumerate(nodes):
+        if old_idx in connected_indices:
+            old_to_new[old_idx] = len(new_nodes)
+            new_nodes.append(node_key)
+            new_node_values[node_key] = node_values.get(node_key, 0)
+            new_node_pcts[node_key] = node_pcts.get(node_key, 0)
+            new_node_ranks[node_key] = node_ranks.get(node_key, "")
 
-        removed = len(nodes) - len(new_nodes)
-        if removed > 0:
-            logging.debug(f"Sankey: Removed {removed} orphan nodes without links")
-            # Remap link indices
-            links = [(old_to_new[s], old_to_new[t]) for s, t in links]
-            # Update node_ids for downstream Y-position calculation
-            node_ids = {key: old_to_new[old_idx] for key, old_idx in node_ids.items()
-                        if old_idx in old_to_new}
-            nodes = new_nodes
-            node_values = new_node_values
-            node_pcts = new_node_pcts
-            node_ranks = new_node_ranks
+    if len(new_nodes) == len(nodes):
+        return nodes, node_ids, links, node_values, node_pcts, node_ranks
 
-    # Create figure
-    logging.debug(f"Sankey: Created {len(links)} links with values sum={sum(values) if values else 0}")
+    logging.debug(f"Sankey: Removed {len(nodes) - len(new_nodes)} orphan nodes without links")
+    links = [(old_to_new[s], old_to_new[t]) for s, t in links]
+    node_ids = {key: old_to_new[old_idx] for key, old_idx in node_ids.items()
+                if old_idx in old_to_new}
+    return new_nodes, node_ids, links, new_node_values, new_node_pcts, new_node_ranks
 
-    if not links:
-        logging.debug("Sankey: No links created, returning None")
-        return None
 
-    # Create node colors based on taxonomy level
-    # Track which level each node belongs to
-    node_colors = []
-    nodes_per_level = {}
+def _build_sankey_node_colors(nodes, node_ranks, colors):
+    """Colour each node by its taxonomy rank."""
+    return [colors.get(node_ranks.get(name, ""), "#3B82F6") for name in nodes]
 
-    # Count nodes per level from actual nodes list
-    for level in tax_levels:
-        nodes_per_level[level] = sum(1 for name in nodes if node_ranks.get(name) == level)
 
-    # Assign colors to each node based on their rank
-    for name in nodes:
-        level = node_ranks.get(name, "")
-        base_color = colors.get(level, "#3B82F6")
-        node_colors.append(base_color)
-
-    logging.debug(f"Sankey: Created {len(node_colors)} node colors for {len(nodes)} nodes")
-    logging.debug(f"Sankey: First 3 node colors: {node_colors[:3]}")
-
-    # Debug: Log actual link details
-    source_indices = [link[0] for link in links]
-    target_indices = [link[1] for link in links]
-    logging.debug(f"Sankey: Source indices (first 5): {source_indices[:5]}")
-    logging.debug(f"Sankey: Target indices (first 5): {target_indices[:5]}")
-    logging.debug(f"Sankey: Values (first 5): {values[:5]}")
-    logging.debug(f"Sankey: Max source idx: {max(source_indices)}, Max target idx: {max(target_indices)}, Num nodes: {len(nodes)}")
-
-    # Create link colors with transparency scaled by read proportion
-    # Color links based on TARGET node's color for visual flow continuity
+def _build_sankey_link_colors(links, values, node_colors):
+    """Colour links by their target node with opacity scaled to read share."""
     total_value = sum(values) if values else 1
     link_colors = []
-    for i, link in enumerate(links):
-        source_idx = link[0]
-        target_idx = link[1]
-
-        # Use target node color for visual continuity into the next level
+    for i, (source_idx, target_idx) in enumerate(links):
+        # Use target node colour for visual continuity into the next level.
         color_idx = target_idx if target_idx < len(node_colors) else source_idx
         base_color = node_colors[color_idx] if color_idx < len(node_colors) else "#3B82F6"
 
-        # Scale opacity by proportion of total reads:
-        # Major links (>5%) get higher opacity, minor links fade out
         link_pct = (values[i] / total_value * 100) if total_value > 0 else 0
         if link_pct > 5:
             opacity = 0.55
@@ -600,13 +483,13 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
             link_colors.append(f"rgba({r},{g},{b},{opacity})")
         else:
             link_colors.append(f"rgba(150,150,150,{opacity})")
+    return link_colors
 
-    # Create explicit X positions for nodes based on taxonomy level
-    # Dynamically distribute levels across the available width so that
-    # any subset of levels (e.g. P-C-O-F-G-S) uses the full chart width,
-    # not just the canonical positions designed for all 8 levels.
+
+def _build_sankey_node_x(nodes, node_ranks, tax_levels):
+    """Distribute nodes horizontally so any subset of levels spans the width."""
     x_min = 0.001
-    x_max = 0.85  # Leave 150px right margin for rightmost labels
+    x_max = 0.85  # Leave 150px right margin for rightmost labels.
     n_levels = len(tax_levels)
     level_to_x = {}
     if n_levels == 1:
@@ -614,60 +497,165 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
     else:
         for i, level in enumerate(tax_levels):
             level_to_x[level] = x_min + (x_max - x_min) * i / (n_levels - 1)
+    return [level_to_x.get(node_ranks.get(name, ""), 0.5) for name in nodes]
 
-    node_x = []
-    for name in nodes:
-        level = node_ranks.get(name, "")
-        x_pos = level_to_x.get(level, 0.5)
-        node_x.append(x_pos)
 
-    # Build parent map for hierarchical Y positioning
-    parent_map = build_parent_map(tax_df, domain_df, tax_levels, node_ids, max_taxa_per_level,
-                                   taxid_to_parent=taxid_to_parent, taxid_to_key=taxid_to_key)
-    logging.debug(f"Sankey: Built parent map with {len(parent_map)} entries")
+def _build_sankey_customdata(nodes, node_values, node_pcts, node_ranks):
+    """Build node display labels and hover customdata.
 
-    # Calculate hierarchical Y positions with proportional spacing based on read counts
-    node_y = _calculate_hierarchical_y_positions(
-        nodes, node_ids, tax_levels, nodes_per_level, parent_map, node_values, node_ranks
-    )
-
-    logging.debug(f"Sankey: Node X positions (first 5): {node_x[:5]}")
-    logging.debug(f"Sankey: Node Y positions (first 5): {node_y[:5]}")
-    logging.debug(f"Sankey: Total X positions: {len(node_x)}, Total Y positions: {len(node_y)}")
-
-    # DIAGNOSTIC: Log all link data
-    all_sources = [link[0] for link in links]
-    all_targets = [link[1] for link in links]
-    logging.debug(f"Sankey: ALL sources: {all_sources}")
-    logging.debug(f"Sankey: ALL targets: {all_targets}")
-    logging.debug(f"Sankey: ALL values: {values}")
-
-    # Build custom data for hover: [reads, percentage, rank_name, full_name]
-    # Scale padding nodes get empty labels and are hidden from hover
-    rank_names = {"D": "Domain", "K": "Kingdom", "P": "Phylum", "C": "Class",
-                  "O": "Order", "F": "Family", "G": "Genus", "S": "Species"}
+    Returns ``(node_labels, node_customdata)`` where each customdata row is
+    ``[reads, percentage, rank_name, full_name]``. Long labels are truncated;
+    the full name stays in the hover tooltip.
+    """
+    MAX_LABEL_LEN = 30
+    node_labels = []
     node_customdata = []
-    node_labels = []  # Display labels (empty for scale nodes)
-
-    MAX_LABEL_LEN = 30  # Truncate long names to reduce label overlap
     for node_key in nodes:
-        # Extract plain display name from composite key (e.g., "P_Pseudomonadota" -> "Pseudomonadota")
         display_name = node_key.split("_", 1)[1] if "_" in node_key else node_key
-        # Truncate long labels; full name is in hover tooltip via customdata[3]
         if len(display_name) > MAX_LABEL_LEN:
             node_labels.append(display_name[:MAX_LABEL_LEN - 1] + "...")
         else:
             node_labels.append(display_name)
-        reads = node_values.get(node_key, 0)
-        pct = node_pcts.get(node_key, 0)
         rank = node_ranks.get(node_key, "")
-        rank_name = rank_names.get(rank, rank)
-        node_customdata.append([reads, pct, rank_name, display_name])
+        node_customdata.append([
+            node_values.get(node_key, 0),
+            node_pcts.get(node_key, 0),
+            RANK_NAMES.get(rank, rank),
+            display_name,
+        ])
+    return node_labels, node_customdata
 
-    # Enforce minimum node visibility: nodes with < 0.5% of reads can be
-    # nearly invisible, so set a floor on link values used for rendering
+
+def _resolve_sankey_height(chart_height, nodes_per_level):
+    """Pick the figure height: explicit pixels, else adaptive to node density."""
+    max_nodes_at_level = max(nodes_per_level.values()) if nodes_per_level else 5
+    MIN_HEIGHT = 600
+    MAX_HEIGHT = 2500
+    PIXELS_PER_NODE = 60  # Generous spacing per node.
+    adaptive_height = max(MIN_HEIGHT, min(MAX_HEIGHT, max_nodes_at_level * PIXELS_PER_NODE + 100))
+    if chart_height == "auto" or chart_height is None:
+        logging.debug(f"Sankey: Using adaptive height={adaptive_height}px (max_nodes_at_level={max_nodes_at_level})")
+        return adaptive_height
+    try:
+        return int(chart_height)
+    except (ValueError, TypeError):
+        logging.debug(f"Sankey: Invalid height '{chart_height}', falling back to adaptive={adaptive_height}px")
+        return adaptive_height
+
+
+def _build_sankey_legend(tax_levels, colors):
+    """Build the rank colour legend shown beneath the Sankey."""
+    items = []
+    for level in tax_levels:
+        color = colors.get(level, "#94A3B8")
+        name = RANK_NAMES.get(level, level)
+        items.append(f"<span style='color:{color}'>&#9632;</span> {name}")
+    return " (broad) " + "  ".join(items) + " (specific)"
+
+
+def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_level, chart_height="auto", color_palette=None):
+    """
+    Create Sankey plot data from Kraken report.
+
+    Args:
+        kraken_df: DataFrame containing Kraken report
+        domains: List of domains to include
+        tax_levels: List of taxonomy levels to include
+        min_reads: Minimum number of reads for filtering
+        max_taxa_per_level: Maximum number of taxa to show at each level
+        chart_height: Chart height - "auto" for adaptive, or pixel value as string
+        color_palette: Dictionary mapping taxonomy ranks to colors (optional)
+
+    Returns:
+        A Go.Figure object with the Sankey plot
+    """
+    colors = color_palette or TAXONOMY_COLORS
+
+    # Ensure clean integer index to prevent duplicate-index issues with .loc[]
+    kraken_df = kraken_df.reset_index(drop=True)
+
+    if kraken_df.empty:
+        return _sankey_info_figure(
+            "No organism classification data available for this sample."
+        )
+
+    # Filter to standard taxonomy ranks present in the data. Sub-ranks (S1, S2,
+    # F3, ...) are excluded because their cumulative reads are already counted
+    # in the parent rank's total, and including them would double-count.
+    available_ranks = kraken_df["rank"].unique().tolist()
+    tax_levels = [level for level in tax_levels if level in available_ranks]
+    logging.debug(f"Sankey: Available ranks in data: {available_ranks}")
+    logging.debug(f"Sankey: Using tax_levels: {tax_levels}")
+
+    if not tax_levels:
+        logging.debug("Sankey: No matching tax levels found in data")
+        return _sankey_info_figure(
+            "No matching classification levels in data.<br>"
+            "Try adjusting filter settings or selecting a different preset view."
+        )
+
+    # Sankey requires at least 2 levels to show parent-child relationships.
+    if len(tax_levels) < 2:
+        logging.debug(f"Sankey: Need at least 2 taxonomy levels, only have {len(tax_levels)}: {tax_levels}")
+        available_names = [RANK_NAMES.get(r, r) for r in available_ranks]
+        return _sankey_info_figure(
+            "The flow diagram needs at least 2 classification levels to show relationships.<br>"
+            f"Currently available: {', '.join(available_names)}<br>"
+            "Try the Ring View (Sunburst) or select more levels in Advanced Settings."
+        )
+
+    frames = _build_sankey_frames(kraken_df, domains, tax_levels)
+    if frames is None:
+        return None
+    tax_df, domain_df, total_reads, taxid_to_parent, taxid_to_key = frames
+
+    nodes, node_ids, node_values, node_pcts, node_ranks = _build_sankey_nodes(
+        tax_df, tax_levels, max_taxa_per_level
+    )
+    logging.debug(f"Sankey: Created {len(nodes)} nodes across {len(tax_levels)} levels")
+
+    links, values, parent_outgoing_sum, parent_link_indices = _build_sankey_links(
+        tax_df, tax_levels, max_taxa_per_level, node_ids, node_values,
+        taxid_to_parent, taxid_to_key
+    )
+    _scale_oversized_parent_links(values, node_values, parent_outgoing_sum, parent_link_indices)
+
+    # Drop orphan nodes (no incident links) so they do not float disconnected.
+    nodes, node_ids, links, node_values, node_pcts, node_ranks = _prune_orphan_sankey_nodes(
+        nodes, node_ids, links, node_values, node_pcts, node_ranks
+    )
+
+    logging.debug(f"Sankey: Created {len(links)} links with values sum={sum(values) if values else 0}")
+    if not links:
+        logging.debug("Sankey: No links created, returning None")
+        return None
+
+    # Count nodes per level - drives adaptive height and Y positioning.
+    nodes_per_level = {
+        level: sum(1 for name in nodes if node_ranks.get(name) == level)
+        for level in tax_levels
+    }
+    node_colors = _build_sankey_node_colors(nodes, node_ranks, colors)
+    link_colors = _build_sankey_link_colors(links, values, node_colors)
+
+    source_indices = [link[0] for link in links]
+    target_indices = [link[1] for link in links]
+
+    node_x = _build_sankey_node_x(nodes, node_ranks, tax_levels)
+    parent_map = build_parent_map(tax_df, domain_df, tax_levels, node_ids, max_taxa_per_level,
+                                   taxid_to_parent=taxid_to_parent, taxid_to_key=taxid_to_key)
+    node_y = _calculate_hierarchical_y_positions(
+        nodes, node_ids, tax_levels, nodes_per_level, parent_map, node_values, node_ranks
+    )
+
+    node_labels, node_customdata = _build_sankey_customdata(
+        nodes, node_values, node_pcts, node_ranks
+    )
+
+    # Floor link render values so sub-0.5% nodes stay visible (Plotly would
+    # otherwise render them nearly invisibly thin).
     max_value = max(values) if values else 1
-    min_visible = max_value * 0.005  # 0.5% of largest link
+    min_visible = max_value * 0.005
     display_values = [max(v, min_visible) if v > 0 else v for v in values]
 
     # Create the Sankey figure with enhanced hover information
@@ -697,8 +685,8 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
                 ),
             ),
             link=dict(
-                source=all_sources,
-                target=all_targets,
+                source=source_indices,
+                target=target_indices,
                 value=display_values,
                 color=link_colors,
                 hovertemplate=(
@@ -712,42 +700,8 @@ def create_sankey_data(kraken_df, domains, tax_levels, min_reads, max_taxa_per_l
         )
     )
 
-    logging.debug(f"Sankey: Figure created successfully")
-
-    # Calculate adaptive height based on number of nodes
-    # Find the maximum number of nodes at any single level
-    max_nodes_at_level = max(nodes_per_level.values()) if nodes_per_level else 5
-    total_nodes = len(nodes)
-
-    # Adaptive height calculation:
-    # - Minimum 50px per node at the most crowded level
-    # - Plus padding for title and margins
-    # - Constrained between 600 and 2500 pixels
-    MIN_HEIGHT = 600
-    MAX_HEIGHT = 2500
-    PIXELS_PER_NODE = 60  # Generous spacing per node
-
-    adaptive_height = max(MIN_HEIGHT, min(MAX_HEIGHT, max_nodes_at_level * PIXELS_PER_NODE + 100))
-
-    # Determine final height
-    if chart_height == "auto" or chart_height is None:
-        final_height = adaptive_height
-        logging.debug(f"Sankey: Using adaptive height={final_height}px (max_nodes_at_level={max_nodes_at_level})")
-    else:
-        try:
-            final_height = int(chart_height)
-            logging.debug(f"Sankey: Using user-specified height={final_height}px")
-        except (ValueError, TypeError):
-            final_height = adaptive_height
-            logging.debug(f"Sankey: Invalid height '{chart_height}', falling back to adaptive={final_height}px")
-
-    # Build level legend for Sankey subtitle
-    sankey_legend_items = []
-    for level in tax_levels:
-        color = colors.get(level, "#94A3B8")
-        name = rank_names.get(level, level)
-        sankey_legend_items.append(f"<span style='color:{color}'>&#9632;</span> {name}")
-    sankey_legend_text = " (broad) " + "  ".join(sankey_legend_items) + " (specific)"
+    final_height = _resolve_sankey_height(chart_height, nodes_per_level)
+    sankey_legend_text = _build_sankey_legend(tax_levels, colors)
 
     # Layout with dynamic height and balanced margins for labels
     figure.update_layout(
@@ -823,6 +777,118 @@ def create_empty_sunburst(message="Waiting for data"):
     return fig
 
 
+def _resolve_sunburst_parent(node_taxid, taxon_name_full, row_idx, level_idx,
+                             tax_levels, added_ids, filtered_df,
+                             use_taxid_parents, taxid_to_parent, taxid_to_key):
+    """Find the nearest already-added ancestor id for a sunburst node.
+
+    Prefers the taxid parent chain (order-independent, robust to out-of-order
+    PlusPFP rows); falls back to Kraken indentation when taxid columns are
+    absent. Returns ``"root"`` when no in-chart ancestor is found.
+    """
+    if level_idx == 0:
+        return "root"
+
+    if use_taxid_parents and node_taxid is not None:
+        cur = taxid_to_parent.get(int(node_taxid), 0)
+        seen = set()
+        while cur != 0 and cur not in seen:
+            seen.add(cur)
+            ancestor_key = taxid_to_key.get(cur)
+            if ancestor_key is not None and ancestor_key in added_ids:
+                return ancestor_key
+            cur = taxid_to_parent.get(cur, 0)
+        return "root"
+
+    # Fallback: indentation-based hierarchy from the Kraken report format.
+    row_indent = len(taxon_name_full) - len(taxon_name_full.lstrip())
+    for check_idx in range(row_idx - 1, -1, -1):
+        if check_idx not in filtered_df.index:
+            continue
+        check_row = filtered_df.loc[check_idx]
+        check_indent = len(check_row["name"]) - len(check_row["name"].lstrip())
+        check_rank = check_row["rank"]
+        # First less-indented row in an ancestor rank decides the parent.
+        if check_indent < row_indent and check_rank in tax_levels[:level_idx]:
+            candidate_parent_id = f"{check_rank}_{check_row['name'].strip()}"
+            if candidate_parent_id in added_ids:
+                return candidate_parent_id
+            break
+    return "root"
+
+
+def _build_sunburst_nodes(filtered_df, tax_levels, total_reads, palette,
+                          use_taxid_parents, taxid_to_parent, taxid_to_key):
+    """Build the sunburst node arrays under a synthetic ``root``.
+
+    Returns ``(ids, labels, parents, values, colors, custom_data)``. Each
+    node's parent is the nearest ancestor already added, keeping the hierarchy
+    connected; colour varies by within-level position.
+    """
+    ids, labels, parents, values, colors, custom_data = [], [], [], [], [], []
+
+    # First pass: count items per level (for colour variation).
+    level_counts = {}
+    level_positions = {}
+    for level in tax_levels:
+        level_counts[level] = len(filtered_df[filtered_df["rank"] == level])
+        level_positions[level] = 0
+
+    first_level = tax_levels[0] if tax_levels else "D"
+    first_level_reads = filtered_df[filtered_df["rank"] == first_level]["recalc_cumul"].sum()
+    logging.debug(f"Sunburst: First level '{first_level}' has {level_counts.get(first_level, 0)} items with total reads {first_level_reads}")
+
+    # Root carries no value: branchvalues="remainder" avoids the
+    # parent >= sum(children) constraint.
+    ids.append("root")
+    labels.append("All Taxa")
+    parents.append("")
+    values.append(0)
+    colors.append("#E5E7EB")
+    custom_data.append(["Root", first_level_reads, 100.0])
+
+    added_ids = {"root"}
+    for level_idx, level in enumerate(tax_levels):
+        level_df = filtered_df[filtered_df["rank"] == level].sort_values(
+            "recalc_cumul", ascending=False
+        )
+        logging.debug(f"Sunburst: Processing level {level} with {len(level_df)} items")
+
+        # Pre-extract columns to avoid iterrows overhead.
+        taxon_names_full = level_df["name"].tolist()
+        taxon_names_stripped = level_df["name"].str.strip().tolist()
+        taxon_reads = level_df["recalc_cumul"].tolist()
+        taxon_indices = level_df.index.tolist()
+        taxon_taxids = (
+            level_df["taxid"].tolist() if use_taxid_parents
+            else [None] * len(level_df)
+        )
+
+        for taxon_name_full, taxon, reads, row_idx, node_taxid in zip(
+            taxon_names_full, taxon_names_stripped, taxon_reads, taxon_indices,
+            taxon_taxids,
+        ):
+            taxon_id = f"{level}_{taxon}"  # Unique across levels.
+            parent_id = _resolve_sunburst_parent(
+                node_taxid, taxon_name_full, row_idx, level_idx, tax_levels,
+                added_ids, filtered_df, use_taxid_parents, taxid_to_parent,
+                taxid_to_key,
+            )
+            pct_of_total = (reads / total_reads * 100) if total_reads > 0 else 0
+            color = get_level_color(level, level_positions[level], level_counts[level], palette)
+            level_positions[level] += 1
+
+            ids.append(taxon_id)
+            added_ids.add(taxon_id)
+            labels.append(taxon)
+            parents.append(parent_id)
+            values.append(reads)
+            colors.append(color)
+            custom_data.append([RANK_NAMES.get(level, level), reads, pct_of_total])
+
+    return ids, labels, parents, values, colors, custom_data
+
+
 def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, color_palette=None):
     """
     Create a modern, well-styled Sunburst chart from Kraken report.
@@ -852,9 +918,7 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, colo
     # No rank normalization needed — their cumulative reads are already counted
     # in the parent rank, so normalizing would double-count.
 
-    # Use provided color palette or default
     palette = color_palette or TAXONOMY_COLORS
-    # Use provided tax_levels or fallback to config
     if not tax_levels:
         tax_levels = config.get(
             "taxonomic_hierarchy_letters", ["D", "K", "P", "C", "O", "F", "G", "S"]
@@ -863,16 +927,14 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, colo
     else:
         logging.debug(f"Sunburst: Using provided tax_levels: {tax_levels}")
 
-    # Check available ranks BEFORE min_reads filtering
+    # Check available ranks BEFORE min_reads filtering.
     available_ranks = kraken_df["rank"].unique().tolist()
     tax_levels = [level for level in tax_levels if level in available_ranks]
-
     logging.debug(f"Sunburst: Available ranks: {available_ranks}")
     logging.debug(f"Sunburst: Selected levels: {tax_levels}")
 
-    # Filter by tax_levels, apply min_reads only to Species
+    # Filter by tax_levels; apply min_reads only to Species.
     level_filtered_df = kraken_df[kraken_df["rank"].isin(tax_levels)].copy()
-
     if "S" in tax_levels:
         filtered_df = level_filtered_df[
             (level_filtered_df["rank"] != "S") |
@@ -880,40 +942,33 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, colo
         ].copy()
     else:
         filtered_df = level_filtered_df.copy()
-
     logging.debug(f"Sunburst: {len(filtered_df)} rows after filtering")
 
     if filtered_df.empty or not tax_levels:
         logging.debug("Sunburst: No data after filtering")
         return create_empty_sunburst("No data matches the selected filters")
 
-    # CRITICAL FIX: Recalculate cumulative reads bottom-up to ensure parent >= children
-    # This fixes issues when aggregating across multiple samples
+    # Recalculate cumulative reads bottom-up so parent >= children even when
+    # aggregating across multiple samples. Composite key f"{rank}_{name}"
+    # matches recalculate_cumulative_reads' output.
     recalc_cumul = recalculate_cumulative_reads(kraken_df)
-
-    # Add recalculated cumulative reads to filtered_df
-    # Uses composite key f"{rank}_{name}" to match recalculate_cumulative_reads output
     filtered_df["recalc_cumul"] = (
         filtered_df["rank"] + "_" + filtered_df["name"].str.strip()
     ).map(recalc_cumul).fillna(0).astype(int)
 
-    # Calculate total reads for percentage calculations (use recalculated root value)
-    # Find the domain-level totals for proper percentage base
+    # Percentage base: the first level's recalculated total (column sum).
     first_level_df = filtered_df[filtered_df["rank"] == tax_levels[0]]
-    # recalc_cumul column was already filled from the same map, so the
-    # first-level total is just its column sum -- no per-row iterrows needed.
     total_reads = int(first_level_df["recalc_cumul"].sum()) if tax_levels else 1
     if total_reads == 0:
-        total_reads = 1  # Avoid division by zero
+        total_reads = 1  # Avoid division by zero.
 
-    # Authoritative parent lookup, same as the Sankey: walk the taxid
-    # parent chain (robust to aggregation reordering and out-of-order
-    # PlusPFP nodes) rather than parsing leading-whitespace indentation.
-    # Falls back to the indentation walk below when the taxid columns are
-    # absent, so no data layout regresses.
+    # Authoritative parent lookup, same as the Sankey: walk the taxid parent
+    # chain when those columns exist, else fall back to indentation.
     use_taxid_parents = (
         "taxid" in kraken_df.columns and "parent_taxid" in kraken_df.columns
     )
+    taxid_to_parent = {}
+    taxid_to_key = {}
     if use_taxid_parents:
         taxid_to_parent = dict(zip(
             kraken_df["taxid"].astype(int), kraken_df["parent_taxid"].astype(int)
@@ -925,131 +980,15 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, colo
             )
         }
 
-    # Build sunburst data with proper hierarchy
-    ids = []
-    labels = []
-    parents = []
-    values = []
-    colors = []
-    ranks = []
-    custom_data = []  # For enhanced hover
+    ids, labels, parents, values, colors, custom_data = _build_sunburst_nodes(
+        filtered_df, tax_levels, total_reads, palette,
+        use_taxid_parents, taxid_to_parent, taxid_to_key,
+    )
 
-    # Track counts per level for color variation
-    level_counts = {}
-    level_positions = {}
-
-    # First pass: count items per level
-    for level in tax_levels:
-        count = len(filtered_df[filtered_df["rank"] == level])
-        level_counts[level] = count
-        level_positions[level] = 0
-
-    # Calculate sum of first-level reads for root value (use recalculated values)
-    first_level = tax_levels[0] if tax_levels else "D"
-    first_level_reads = filtered_df[filtered_df["rank"] == first_level]["recalc_cumul"].sum()
-
-    logging.debug(f"Sunburst: First level '{first_level}' has {level_counts.get(first_level, 0)} items with total reads {first_level_reads}")
-
-    # Add root node - don't add a value since we'll use branchvalues="remainder"
-    # This avoids the parent >= sum(children) constraint issues
-    ids.append("root")
-    labels.append("All Taxa")
-    parents.append("")
-    values.append(0)  # With remainder mode, root doesn't need a value
-    colors.append("#E5E7EB")  # Light gray for root
-    ranks.append("Root")
-    custom_data.append(["Root", first_level_reads, 100.0])
-
-    # Track which IDs we've added to detect orphan parents
-    added_ids = set(["root"])
-
-    # Process each taxonomy level
-    for level_idx, level in enumerate(tax_levels):
-        # Sort by recalculated cumulative reads for proper hierarchy representation
-        level_df = filtered_df[filtered_df["rank"] == level].sort_values(
-            "recalc_cumul", ascending=False
-        )
-
-        logging.debug(f"Sunburst: Processing level {level} with {len(level_df)} items")
-
-        # Pre-extract data for faster iteration (avoid iterrows overhead)
-        taxon_names_full = level_df["name"].tolist()
-        taxon_names_stripped = level_df["name"].str.strip().tolist()
-        taxon_reads = level_df["recalc_cumul"].tolist()
-        taxon_indices = level_df.index.tolist()
-        taxon_taxids = (
-            level_df["taxid"].tolist() if use_taxid_parents
-            else [None] * len(level_df)
-        )
-
-        for taxon_name_full, taxon, reads, row_idx, node_taxid in zip(
-            taxon_names_full, taxon_names_stripped, taxon_reads, taxon_indices,
-            taxon_taxids,
-        ):
-            # Create unique ID to handle duplicate names across levels
-            taxon_id = f"{level}_{taxon}"
-
-            parent_id = "root"
-
-            if level_idx > 0 and use_taxid_parents and node_taxid is not None:
-                # Walk up the taxid parent chain to the nearest ancestor that
-                # is already in the chart. Order-independent; correct even
-                # when the report rows are out of order (PlusPFP).
-                cur = taxid_to_parent.get(int(node_taxid), 0)
-                seen = set()
-                while cur != 0 and cur not in seen:
-                    seen.add(cur)
-                    ancestor_key = taxid_to_key.get(cur)
-                    if ancestor_key is not None and ancestor_key in added_ids:
-                        parent_id = ancestor_key
-                        break
-                    cur = taxid_to_parent.get(cur, 0)
-            elif level_idx > 0:
-                # Fallback: indentation-based hierarchy from Kraken format.
-                row_indent = len(taxon_name_full) - len(taxon_name_full.lstrip())
-
-                # Search backwards for parent
-                for check_idx in range(row_idx - 1, -1, -1):
-                    if check_idx not in filtered_df.index:
-                        continue
-
-                    check_row = filtered_df.loc[check_idx]
-                    check_indent = len(check_row["name"]) - len(check_row["name"].lstrip())
-                    check_rank = check_row["rank"]
-
-                    # Parent has less indentation and is in our level list
-                    if check_indent < row_indent and check_rank in tax_levels[:level_idx]:
-                        check_name = check_row["name"].strip()
-                        candidate_parent_id = f"{check_rank}_{check_name}"
-                        # CRITICAL: Only use this parent if it's in our added_ids
-                        if candidate_parent_id in added_ids:
-                            parent_id = candidate_parent_id
-                        break
-
-            # Calculate percentage
-            pct_of_total = (reads / total_reads * 100) if total_reads > 0 else 0
-
-            # Get color with variation
-            position = level_positions[level]
-            color = get_level_color(level, position, level_counts[level], palette)
-            level_positions[level] += 1
-
-            # Add to lists
-            ids.append(taxon_id)
-            added_ids.add(taxon_id)
-            labels.append(taxon)
-            parents.append(parent_id)
-            values.append(reads)
-            colors.append(color)
-            ranks.append(level)
-            custom_data.append([RANK_NAMES.get(level, level), reads, pct_of_total])
-
-    # Debug: Check for orphan parents (parents that don't exist in ids)
-    all_parents = set(parents) - {""}  # Exclude root's empty parent
-    orphan_parents = all_parents - added_ids
+    # Detect orphan parents (referenced but never added).
+    orphan_parents = (set(parents) - {""}) - set(ids)
     if orphan_parents:
         logging.warning(f"Sunburst: Found {len(orphan_parents)} orphan parents: {list(orphan_parents)[:5]}...")
-
     logging.debug(f"Sunburst: Built {len(ids)} nodes, {len(set(parents))} unique parents")
 
     # Create the sunburst figure using go.Sunburst for full control

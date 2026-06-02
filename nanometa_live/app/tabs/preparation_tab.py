@@ -789,7 +789,6 @@ def register_preparation_callbacks(app):
         """
         logger.info(f"[RESCAN] run_rescan called: n_clicks={n_clicks}")
         hide_progress = {"display": "none"}
-        show_progress = {"display": "block"}
 
         if not n_clicks:
             raise PreventUpdate

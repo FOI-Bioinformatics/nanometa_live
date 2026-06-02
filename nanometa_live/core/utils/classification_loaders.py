@@ -470,6 +470,222 @@ def _accumulate_kraken_df(
                 seen_taxids.add(taxid)
 
 
+def _select_legacy_batch_per_sample(candidate_batches: List[str]) -> List[str]:
+    """Keep the highest-numbered batch per sample for legacy snapshot layouts.
+
+    Legacy ``{sample}_batch{N}`` reports are cumulative snapshots, so only the
+    latest matters. (Incremental deltas are handled by the caller, which keeps
+    every batch for per-taxid summing.)
+    """
+    batch_num_re = re.compile(r'batch[_\-]?(\d+)', re.IGNORECASE)
+    batch_suffix_re = re.compile(r'[._]batch[_\-]?\d+$', re.IGNORECASE)
+
+    def _batch_sample(fp: str) -> str:
+        basename = os.path.basename(fp)
+        stem = re.sub(
+            r'\.(cumulative\.kraken2\.report|kraken2\.report)\.txt$', '', basename,
+        )
+        # Strip batch_N suffix if embedded in the filename.
+        stripped = batch_suffix_re.sub('', stem)
+        if stripped and stripped != stem:
+            return stripped
+        # Fall back to the containing per-sample directory (v1.5 nested layout
+        # publishes batch_N.kraken2.report.txt under <sample>/batch_reports/).
+        parts = fp.replace('\\', '/').split('/')
+        for i, part in enumerate(parts):
+            if part in ('batch_reports', 'reports', 'batches') and i > 0:
+                return parts[i - 1]
+        return stem
+
+    def _batch_num(fp: str) -> int:
+        m = batch_num_re.search(os.path.basename(fp))
+        return int(m.group(1)) if m else -1
+
+    by_sample: Dict[str, str] = {}
+    for fp in candidate_batches:
+        sample_key = _batch_sample(fp)
+        current = by_sample.get(sample_key)
+        if current is None or _batch_num(fp) > _batch_num(current):
+            by_sample[sample_key] = fp
+    return list(by_sample.values())
+
+
+def _discover_all_sample_reports(kraken_dir: str) -> List[str]:
+    """Find Kraken2 reports to aggregate across all samples.
+
+    Priority: cumulative reports, then standard reports, then batch files
+    (incremental deltas kept whole; legacy snapshots reduced to the latest per
+    sample). Top-level globs first, v1.5 nested subdirs as a fallback. Returns
+    a realpath-deduplicated list (possibly empty).
+    """
+    # 1. Cumulative reports (preferred for realtime), top-level then nested.
+    kreport_files = glob.glob(os.path.join(kraken_dir, "*.cumulative.kraken2.report.txt"))
+    if not kreport_files:
+        kreport_files = _scan_subdirs_for_pattern(kraken_dir, "*.cumulative.kraken2.report.txt")
+    if kreport_files:
+        kreport_files = list(dict.fromkeys(os.path.realpath(f) for f in kreport_files))
+        logging.debug(f"Found {len(kreport_files)} cumulative Kraken2 reports")
+        return kreport_files
+
+    # 2. Standard (non-batch, non-cumulative) reports: top-level, then nested,
+    # then a defensive flat-root re-scan for per_file/single_sample layouts.
+    standard: List[str] = []
+    for f in glob.glob(os.path.join(kraken_dir, "*.kraken2.report.txt")):
+        if _is_standard_report(os.path.basename(f)):
+            standard.append(f)
+    if not standard:
+        for f in _scan_subdirs_for_pattern(kraken_dir, "*.kraken2.report.txt"):
+            if _is_standard_report(os.path.basename(f)):
+                standard.append(f)
+    if not standard:
+        for f in glob.glob(os.path.join(kraken_dir, "*.kraken2.report.txt")):
+            if _is_standard_report(os.path.basename(f)):
+                standard.append(f)
+    standard = list(dict.fromkeys(os.path.realpath(f) for f in standard))
+    if standard:
+        return standard
+
+    # 3. Batch files as last resort, dispatching on the upstream layout.
+    logging.debug("No standard reports found, looking for batch files")
+    candidate_batches = glob.glob(os.path.join(kraken_dir, "*_batch*.kraken2.report.txt"))
+    candidate_batches.extend(
+        _scan_subdirs_for_pattern(kraken_dir, "*.kraken2.report.txt", subdir="batch_reports")
+    )
+    candidate_batches = _deduplicate_batch_files(candidate_batches)
+    if not candidate_batches:
+        return []
+    if _is_incremental_layout(kraken_dir):
+        logging.debug(
+            "Incremental Kraken2 layout detected: summing %d batch reports "
+            "across all samples", len(candidate_batches),
+        )
+        return candidate_batches
+    kreport_files = _select_legacy_batch_per_sample(candidate_batches)
+    logging.debug(
+        f"Selected {len(kreport_files)} latest-per-sample batch Kraken2 "
+        f"reports from {len(candidate_batches)} candidates"
+    )
+    return kreport_files
+
+
+def _dedup_reports_by_sample_batch(kreport_files: List[str]) -> List[str]:
+    """Drop reports naming the same (sample, batch) under different directories.
+
+    Copies in e.g. top-level + subdir or ``reports/`` + ``batch_reports/`` would
+    otherwise multi-count reads. Files from per-sample subdirectories carry
+    their containing folder in the key so identical basenames across samples
+    stay distinct.
+    """
+    seen_keys: set = set()
+    deduplicated_files = []
+    for kreport_file in kreport_files:
+        basename = os.path.basename(kreport_file)
+        stem = re.sub(
+            r'\.(cumulative\.kraken2\.report|kraken2\.report)\.txt$', '', basename
+        )
+        parent_dir = os.path.basename(os.path.dirname(kreport_file))
+        grandparent = os.path.basename(os.path.dirname(os.path.dirname(kreport_file)))
+        if parent_dir in ("batch_reports", "reports", "batches"):
+            dedup_key = (grandparent, stem)
+        else:
+            dedup_key = (parent_dir, stem)
+        if dedup_key in seen_keys:
+            logging.debug(f"Skipping duplicate report for {dedup_key}: {kreport_file}")
+            continue
+        seen_keys.add(dedup_key)
+        deduplicated_files.append(kreport_file)
+    return deduplicated_files
+
+
+def _discover_sample_reports(kraken_dir: str, sample: str) -> List[str]:
+    """Find Kraken2 report files for a single sample.
+
+    Priority: cumulative, standard, then batch files (incremental deltas kept
+    whole; legacy snapshots reduced to the highest-numbered batch). Direct-path
+    stat first, v1.5 nested subdir as a fallback. Returns a list (possibly
+    empty).
+    """
+    # 1. Cumulative report (preferred - already aggregated).
+    cumul_path = os.path.join(kraken_dir, f"{sample}.cumulative.kraken2.report.txt")
+    if os.path.exists(cumul_path):
+        logging.debug(f"Found cumulative Kraken2 report for {sample}")
+        return [cumul_path]
+    nested_cumul = os.path.join(kraken_dir, sample, f"{sample}.cumulative.kraken2.report.txt")
+    if os.path.exists(nested_cumul):
+        logging.debug(f"Found cumulative Kraken2 report for {sample}")
+        return [nested_cumul]
+
+    # 2. Standard (non-batch) reports: direct path, nested, then flat re-check.
+    sample_files: List[str] = []
+    p = os.path.join(kraken_dir, f"{sample}.kraken2.report.txt")
+    if os.path.exists(p):
+        sample_files.append(p)
+    if not sample_files:
+        p = os.path.join(kraken_dir, sample, f"{sample}.kraken2.report.txt")
+        if os.path.exists(p):
+            sample_files.append(p)
+    if not sample_files:
+        p = os.path.join(kraken_dir, f"{sample}.kraken2.report.txt")
+        if os.path.exists(p):
+            sample_files.append(p)
+    sample_files = list(dict.fromkeys(os.path.realpath(f) for f in sample_files))
+    if sample_files:
+        return sample_files
+
+    # 3. Batch files, dispatching on the upstream layout.
+    candidate_batches = glob.glob(os.path.join(kraken_dir, f"{sample}_batch*.kraken2.report.txt"))
+    batch_dir = os.path.join(kraken_dir, sample, "batch_reports")
+    if os.path.isdir(batch_dir):
+        candidate_batches.extend(glob.glob(os.path.join(batch_dir, "*.kraken2.report.txt")))
+    candidate_batches = _deduplicate_batch_files(candidate_batches)
+    if not candidate_batches:
+        return []
+    if _is_incremental_layout(kraken_dir, sample):
+        logging.debug(
+            "Incremental Kraken2 layout detected for %s: summing %d batch reports",
+            sample, len(candidate_batches),
+        )
+        return candidate_batches
+    batch_num_re = re.compile(r'batch[_\-]?(\d+)', re.IGNORECASE)
+
+    def _extract_batch_num(fp: str) -> int:
+        m = batch_num_re.search(os.path.basename(fp))
+        return int(m.group(1)) if m else -1
+
+    return [max(candidate_batches, key=_extract_batch_num)]
+
+
+def _aggregate_to_result_df(agg: Dict[int, List], ordered_taxids: List[int]) -> pd.DataFrame:
+    """Build the result DataFrame from the per-taxid accumulation dict.
+
+    Each row's percentage is computed from the summed read total across taxids.
+    """
+    total_reads = sum(v[0] for v in agg.values())
+    result_rows = []
+    for taxid in ordered_taxids:
+        reads, cumul, rank, name, parent_taxid = agg[taxid]
+        pct = round((reads / total_reads) * 100, 2) if total_reads > 0 else 0.0
+        result_rows.append({
+            '%': pct,
+            'cumul_reads': cumul,
+            'reads': reads,
+            'rank': rank,
+            'taxid': taxid,
+            'name': name,
+            'parent_taxid': parent_taxid,
+        })
+    return pd.DataFrame(result_rows)
+
+
+def _cache_and_return(result_df: pd.DataFrame, cache_key: str, mtime_key: str,
+                      kraken_dir: str) -> pd.DataFrame:
+    """Store result_df in the TTL and mtime caches under the lock, then return it."""
+    with _cache_lock:
+        _kraken_cache[cache_key] = (time.time(), result_df.copy())
+    _store_mtime_cache(mtime_key, [kraken_dir], result_df.copy())
+    return result_df
+
+
 def _parse_kraken_data_uncached(
     main_dir: str,
     sample: Optional[str],
@@ -484,187 +700,27 @@ def _parse_kraken_data_uncached(
     callers should use ``load_kraken_data``.
     """
     if not os.path.exists(kraken_dir):
-        # DEBUG, not WARNING: a missing kraken2/ subdir is the normal
-        # state for a freshly-configured results folder before the
-        # pipeline has run. Logging it at WARNING produced terminal
-        # noise on every callback that touched the loader during
-        # Configuration-tab interactions on a fresh outdir. The
-        # equivalent miss in sample_detector already logs at DEBUG.
+        # DEBUG, not WARNING: a missing kraken2/ subdir is the normal state for
+        # a freshly-configured results folder before the pipeline has run.
+        # WARNING here produced terminal noise on every Configuration-tab
+        # callback that touched the loader on a fresh outdir.
         logging.debug(f"Kraken2 directory not found: {kraken_dir}")
         return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
 
     if sample is None or sample == "All Samples":
-        # Load and aggregate all samples.
-        # Strategy: use targeted non-recursive globs at the top-level first
-        # (the common case), falling back to recursive scans only when the
-        # v1.5 nested directory layout is in use.
-        kreport_files: List[str] = []
-
-        # 1. Cumulative reports (preferred for realtime mode) -- top-level only
-        kreport_files = glob.glob(
-            os.path.join(kraken_dir, "*.cumulative.kraken2.report.txt")
-        )
-
-        # 1b. Fallback: check v1.5 nested subdirs for cumulative reports
-        if not kreport_files:
-            kreport_files = _scan_subdirs_for_pattern(
-                kraken_dir, "*.cumulative.kraken2.report.txt"
-            )
-
-        if kreport_files:
-            kreport_files = list(dict.fromkeys(os.path.realpath(f) for f in kreport_files))
-            logging.debug(f"Found {len(kreport_files)} cumulative Kraken2 reports")
-        else:
-            # 2. Standard (non-batch, non-cumulative) reports -- top-level
-            for ext_pattern in ("*.kraken2.report.txt",):
-                for f in glob.glob(os.path.join(kraken_dir, ext_pattern)):
-                    basename = os.path.basename(f)
-                    if _is_standard_report(basename):
-                        kreport_files.append(f)
-
-            # 2b. Fallback: v1.5 nested subdirs
-            if not kreport_files:
-                for ext_pattern in ("*.kraken2.report.txt",):
-                    for f in _scan_subdirs_for_pattern(kraken_dir, ext_pattern):
-                        basename = os.path.basename(f)
-                        if _is_standard_report(basename):
-                            kreport_files.append(f)
-
-            # 2c. Final flat-root re-scan as a defensive fallback for
-            # ``per_file`` and ``single_sample`` layouts emitted by
-            # nanometanf, where reports sit directly under ``kraken2/``
-            # without a per-sample subdirectory. Step 2a already covers
-            # this case in normal operation; the duplicate scan guards
-            # against future filter changes that might drop reports out
-            # of 2a while no nested layout is present.
-            if not kreport_files:
-                for ext_pattern in ("*.kraken2.report.txt",):
-                    for f in glob.glob(os.path.join(kraken_dir, ext_pattern)):
-                        basename = os.path.basename(f)
-                        if _is_standard_report(basename):
-                            kreport_files.append(f)
-
-            kreport_files = list(dict.fromkeys(os.path.realpath(f) for f in kreport_files))
-
-            # 3. Batch files as last resort. The semantics depend on the
-            # upstream layout, so we dispatch via ``_is_incremental_layout``:
-            #
-            #   * Legacy (non-incremental): flat ``{sample}_batch{N}`` files
-            #     are CUMULATIVE snapshots. We keep only the highest-numbered
-            #     batch per sample (matches the 2026-04-15 audit fix).
-            #   * v1.5 incremental: ``<sample>/batch_reports/batch_N`` files
-            #     are DELTAS. All batches are kept; the per-taxid aggregation
-            #     below sums them. The all-samples aggregation happens to
-            #     work for both modes because it accumulates by taxid across
-            #     every retained file.
-            if not kreport_files:
-                logging.debug("No standard reports found, looking for batch files")
-                candidate_batches: List[str] = []
-                # Top-level batch files
-                for ext_pattern in ("*_batch*.kraken2.report.txt",):
-                    candidate_batches.extend(glob.glob(os.path.join(kraken_dir, ext_pattern)))
-                # v1.5: batch_reports/ inside per-sample subdirs
-                candidate_batches.extend(
-                    _scan_subdirs_for_pattern(kraken_dir, "*.kraken2.report.txt", subdir="batch_reports")
-                )
-                # Deduplicate: same batch may appear in reports/ and batch_reports/
-                candidate_batches = _deduplicate_batch_files(candidate_batches)
-
-                if candidate_batches:
-                    if _is_incremental_layout(kraken_dir):
-                        # Incremental deltas - keep every batch so the
-                        # aggregation loop sums per taxid across batches.
-                        kreport_files = candidate_batches
-                        logging.debug(
-                            "Incremental Kraken2 layout detected: summing "
-                            "%d batch reports across all samples",
-                            len(candidate_batches),
-                        )
-                    else:
-                        # Legacy snapshots: keep one (highest-numbered) per sample.
-                        _batch_num_re = re.compile(r'batch[_\-]?(\d+)', re.IGNORECASE)
-                        _batch_suffix_re = re.compile(r'[._]batch[_\-]?\d+$', re.IGNORECASE)
-
-                        def _batch_sample(fp: str) -> str:
-                            basename = os.path.basename(fp)
-                            stem = re.sub(
-                                r'\.(cumulative\.kraken2\.report|kraken2\.report)\.txt$',
-                                '', basename,
-                            )
-                            # Strip batch_N suffix if it is embedded in the filename.
-                            stripped = _batch_suffix_re.sub('', stem)
-                            if stripped and stripped != stem:
-                                return stripped
-                            # Fall back to the containing directory (v1.5 nested
-                            # layout publishes batch_N.kraken2.report.txt inside
-                            # the per-sample batch_reports/ folder).
-                            parts = fp.replace('\\', '/').split('/')
-                            for i, part in enumerate(parts):
-                                if part in ('batch_reports', 'reports', 'batches') and i > 0:
-                                    return parts[i - 1]
-                            return stem
-
-                        def _batch_num(fp: str) -> int:
-                            m = _batch_num_re.search(os.path.basename(fp))
-                            return int(m.group(1)) if m else -1
-
-                        by_sample: Dict[str, str] = {}
-                        for fp in candidate_batches:
-                            sample_key = _batch_sample(fp)
-                            current = by_sample.get(sample_key)
-                            if current is None or _batch_num(fp) > _batch_num(current):
-                                by_sample[sample_key] = fp
-                        kreport_files = list(by_sample.values())
-                        logging.debug(
-                            f"Selected {len(kreport_files)} latest-per-sample batch "
-                            f"Kraken2 reports from {len(candidate_batches)} candidates"
-                        )
-
+        kreport_files = _discover_all_sample_reports(kraken_dir)
         if not kreport_files:
             logging.warning(_diagnose_empty_kraken_dir(kraken_dir))
             return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
+        kreport_files = _dedup_reports_by_sample_batch(kreport_files)
 
-        # Deduplicate by (sample, batch) so that copies of the same report
-        # in different directories (e.g. top-level + subdir, or
-        # ``reports/`` + ``batch_reports/``) do not multi-count reads.
-        # Files from per-sample subdirectories carry their containing folder
-        # in the key so that files with identical basenames but different
-        # samples (e.g. ``barcode01/batch_reports/batch_0`` and
-        # ``barcode02/batch_reports/batch_0``) are kept distinct.
-        seen_keys: set = set()
-        deduplicated_files = []
-        for kreport_file in kreport_files:
-            basename = os.path.basename(kreport_file)
-            stem = re.sub(
-                r'\.(cumulative\.kraken2\.report|kraken2\.report)\.txt$',
-                '', basename
-            )
-            parent_dir = os.path.basename(os.path.dirname(kreport_file))
-            grandparent = os.path.basename(os.path.dirname(os.path.dirname(kreport_file)))
-            # Use the per-sample directory as namespace when present so that
-            # incremental batches under ``<sample>/batch_reports/`` are
-            # disambiguated by sample.
-            if parent_dir in ("batch_reports", "reports", "batches"):
-                dedup_key = (grandparent, stem)
-            else:
-                dedup_key = (parent_dir, stem)
-            if dedup_key in seen_keys:
-                logging.debug(
-                    f"Skipping duplicate report for {dedup_key}: {kreport_file}"
-                )
-                continue
-            seen_keys.add(dedup_key)
-            deduplicated_files.append(kreport_file)
-        kreport_files = deduplicated_files
-
-        # Incremental aggregation: accumulate reads/cumul_reads per taxid in
-        # a running dict, avoiding pd.concat of all raw reports (O(unique_taxa)
-        # memory instead of O(all_rows_across_files)).
-        agg: Dict[int, List] = {}  # taxid -> [reads, cumul_reads, rank, name, parent_taxid]
-        ordered_taxids: List[int] = []  # insertion-order for hierarchy
+        # Accumulate reads/cumul_reads per taxid in a running dict, avoiding
+        # pd.concat of all raw reports (O(unique_taxa) memory instead of
+        # O(all_rows_across_files)).
+        agg: Dict[int, List] = {}
+        ordered_taxids: List[int] = []
         seen_taxids: set = set()
         has_data = False
-
         for kreport_file in kreport_files:
             df = _parse_kraken2_report(kreport_file)
             if df is None or df.empty:
@@ -674,186 +730,47 @@ def _parse_kraken_data_uncached(
 
         if not has_data:
             return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
+        result_df = _aggregate_to_result_df(agg, ordered_taxids)
+        return _cache_and_return(result_df, cache_key, mtime_key, kraken_dir)
 
-        # Compute percentages from total reads
-        total_reads = sum(v[0] for v in agg.values())
+    # Specific sample - may have multiple batch files to combine.
+    sample_files = _discover_sample_reports(kraken_dir, sample)
+    if not sample_files:
+        # Per-sample miss is DEBUG when the directory already holds reports for
+        # *other* samples (the requested one simply has not landed yet during a
+        # live run); WARNING when the directory is genuinely empty/unreadable.
+        try:
+            has_any_kreports = any(
+                f.endswith(".kraken2.report.txt") for f in os.listdir(kraken_dir)
+            )
+        except OSError:
+            has_any_kreports = False
+        level = logging.DEBUG if has_any_kreports else logging.WARNING
+        logging.log(level, _diagnose_empty_kraken_dir(kraken_dir, sample=sample))
+        return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
 
-        result_rows = []
-        for taxid in ordered_taxids:
-            reads, cumul, rank, name, parent_taxid = agg[taxid]
-            pct = round((reads / total_reads) * 100, 2) if total_reads > 0 else 0.0
-            result_rows.append({
-                '%': pct,
-                'cumul_reads': cumul,
-                'reads': reads,
-                'rank': rank,
-                'taxid': taxid,
-                'name': name,
-                'parent_taxid': parent_taxid,
-            })
-
-        result_df = pd.DataFrame(result_rows)
-        # Cache the aggregated all-samples result
-        with _cache_lock:
-            _kraken_cache[cache_key] = (time.time(), result_df.copy())
-        _store_mtime_cache(mtime_key, [kraken_dir], result_df.copy())
-        return result_df
-
-    else:
-        # Load specific sample - may have multiple batch files to combine.
-        # Use direct path construction + os.path.exists() first (O(1) stat),
-        # falling back to glob only for v1.5 nested layouts.
-        sample_files: List[str] = []
-
-        # 1. Cumulative report (preferred - already aggregated)
-        cumul_path = os.path.join(kraken_dir, f"{sample}.cumulative.kraken2.report.txt")
-        if os.path.exists(cumul_path):
-            sample_files = [cumul_path]
-        else:
-            # v1.5 fallback: check sample subdir
-            nested_cumul = os.path.join(kraken_dir, sample, f"{sample}.cumulative.kraken2.report.txt")
-            if os.path.exists(nested_cumul):
-                sample_files = [nested_cumul]
-
-        if sample_files:
-            logging.debug(f"Found cumulative Kraken2 report for {sample}")
-        else:
-            # 2. Standard (non-batch) reports via direct path
-            for ext in (f"{sample}.kraken2.report.txt",):
-                p = os.path.join(kraken_dir, ext)
-                if os.path.exists(p):
-                    sample_files.append(p)
-            # v1.5 nested fallback
-            if not sample_files:
-                for ext in (f"{sample}.kraken2.report.txt",):
-                    p = os.path.join(kraken_dir, sample, ext)
-                    if os.path.exists(p):
-                        sample_files.append(p)
-            # Final flat-root re-check. Mirrors the all-samples branch
-            # above; defensive against the nested fallback claiming a
-            # path that disappeared between checks, and makes the flat
-            # ``per_file``/``single_sample`` layout explicit at the
-            # per-sample call site.
-            if not sample_files:
-                for ext in (f"{sample}.kraken2.report.txt",):
-                    p = os.path.join(kraken_dir, ext)
-                    if os.path.exists(p):
-                        sample_files.append(p)
-            sample_files = list(dict.fromkeys(os.path.realpath(f) for f in sample_files))
-
-            # 3. Batch files. The semantics depend on the upstream layout:
-            #
-            #   * Legacy (non-incremental) flow publishes flat
-            #     ``{sample}_batch{N}.kraken2.report.txt`` files where each
-            #     report is a CUMULATIVE snapshot containing all reads since
-            #     run start. The correct choice is the highest-numbered batch.
-            #   * v1.5+ incremental flow (``kraken2_enable_incremental: true``)
-            #     publishes ``<sample>/batch_reports/batch_N.kraken2.report.txt``
-            #     where each report is a DELTA covering only that batch. The
-            #     correct choice is the sum of all batches.
-            #
-            # We dispatch on the layout via ``_is_incremental_layout`` (which
-            # checks for the ``<sample>/stats/batch_N_report_stats.json``
-            # files emitted only by the incremental writer).
-            if not sample_files:
-                candidate_batches: List[str] = []
-                for ext_pattern in (f"{sample}_batch*.kraken2.report.txt",):
-                    candidate_batches.extend(glob.glob(os.path.join(kraken_dir, ext_pattern)))
-                # v1.5: batch_reports/ subdirectory inside per-sample folder
-                batch_dir = os.path.join(kraken_dir, sample, "batch_reports")
-                if os.path.isdir(batch_dir):
-                    candidate_batches.extend(
-                        glob.glob(os.path.join(batch_dir, "*.kraken2.report.txt"))
-                    )
-                # Deduplicate: same batch may appear in reports/ and batch_reports/
-                candidate_batches = _deduplicate_batch_files(candidate_batches)
-                if candidate_batches:
-                    if _is_incremental_layout(kraken_dir, sample):
-                        # Incremental deltas - use every batch and let the
-                        # aggregation logic below sum them per taxid.
-                        sample_files = candidate_batches
-                        logging.debug(
-                            "Incremental Kraken2 layout detected for %s: "
-                            "summing %d batch reports",
-                            sample, len(candidate_batches),
-                        )
-                    else:
-                        _batch_num_re = re.compile(r'batch[_\-]?(\d+)', re.IGNORECASE)
-                        def _extract_batch_num(fp: str) -> int:
-                            m = _batch_num_re.search(os.path.basename(fp))
-                            return int(m.group(1)) if m else -1
-                        sample_files = [max(candidate_batches, key=_extract_batch_num)]
-
-        if not sample_files:
-            # Per-sample miss is DEBUG when the directory already
-            # contains kraken reports for *other* samples (the
-            # requested sample's file simply has not landed yet during
-            # a live run). The full diagnostic stays WARNING when the
-            # directory is genuinely empty / unreadable, since that is
-            # the operator-facing failure mode the helper was added
-            # for. The whole-dir scan path below keeps WARNING
-            # unconditionally.
-            try:
-                has_any_kreports = any(
-                    f.endswith(".kraken2.report.txt")
-                    for f in os.listdir(kraken_dir)
-                )
-            except OSError:
-                has_any_kreports = False
-            level = logging.DEBUG if has_any_kreports else logging.WARNING
-            logging.log(level, _diagnose_empty_kraken_dir(kraken_dir, sample=sample))
-            return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
-
-        # Parse files, using single-file fast path when possible
-        first_df = None
-        file_count = 0
-        # Incremental aggregation dict for multi-batch case
-        agg: Dict[int, List] = {}
-        ordered_taxids: List[int] = []
-        seen_taxids: set = set()
-
-        for sample_file in sample_files:
-            df = _parse_kraken2_report(sample_file)
-            if df is None or df.empty:
-                continue
-            file_count += 1
-            if file_count == 1:
-                first_df = df
-            _accumulate_kraken_df(df, agg, ordered_taxids, seen_taxids)
-
-        if file_count == 0:
-            return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
-
-        # If only one file, return its DataFrame directly (no aggregation needed)
+    # Parse files, using a single-file fast path when possible.
+    first_df = None
+    file_count = 0
+    agg = {}
+    ordered_taxids = []
+    seen_taxids = set()
+    for sample_file in sample_files:
+        df = _parse_kraken2_report(sample_file)
+        if df is None or df.empty:
+            continue
+        file_count += 1
         if file_count == 1:
-            result_df = first_df
-            _kraken_cache[cache_key] = (time.time(), result_df.copy())
-            _store_mtime_cache(mtime_key, [kraken_dir], result_df.copy())
-            return result_df
+            first_df = df
+        _accumulate_kraken_df(df, agg, ordered_taxids, seen_taxids)
 
-        # Build aggregated result from running dict
-        total_reads = sum(v[0] for v in agg.values())
-
-        result_rows = []
-        for taxid in ordered_taxids:
-            reads, cumul, rank, name, parent_taxid = agg[taxid]
-            pct = round((reads / total_reads) * 100, 2) if total_reads > 0 else 0.0
-            result_rows.append({
-                '%': pct,
-                'cumul_reads': cumul,
-                'reads': reads,
-                'rank': rank,
-                'taxid': taxid,
-                'name': name,
-                'parent_taxid': parent_taxid,
-            })
-
-        result_df = pd.DataFrame(result_rows)
-        # Cache the per-sample result
-        with _cache_lock:
-            _kraken_cache[cache_key] = (time.time(), result_df.copy())
-        _store_mtime_cache(mtime_key, [kraken_dir], result_df.copy())
-        return result_df
+    if file_count == 0:
+        return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
+    if file_count == 1:
+        # Single file: return its DataFrame directly (no aggregation needed).
+        return _cache_and_return(first_df, cache_key, mtime_key, kraken_dir)
+    result_df = _aggregate_to_result_df(agg, ordered_taxids)
+    return _cache_and_return(result_df, cache_key, mtime_key, kraken_dir)
 
 
 def load_kraken_latest_batch(main_dir: str, sample_name: str) -> pd.DataFrame:

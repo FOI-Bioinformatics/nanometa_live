@@ -283,9 +283,6 @@ def create_app(
             with open(logo_file, 'wb') as f:
                 f.write(base64.b64decode(empty_pixel))
 
-    # Determine if running in debug mode (show errors during development)
-    debug_mode = os.environ.get('DASH_DEBUG', '').lower() in ('1', 'true', 'yes')
-
     # Initialize the Dash app with background callback support
     # Note: suppress_callback_exceptions=True is always enabled because:
     # 1. Dynamic layouts may reference components that don't exist yet

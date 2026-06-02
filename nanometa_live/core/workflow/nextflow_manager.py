@@ -960,7 +960,7 @@ class NextflowManager:
             self._last_trace_status = result
             return result
 
-        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, ValueError, IndexError) as e:
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, ValueError, IndexError):
             logging.exception("Error parsing trace file")
             return self._last_trace_status or {}
 
@@ -1022,7 +1022,7 @@ class NextflowManager:
 
                     total_files += file_count
 
-                except (json.JSONDecodeError, FileNotFoundError, PermissionError, OSError, UnicodeDecodeError) as e:
+                except (json.JSONDecodeError, FileNotFoundError, PermissionError, OSError, UnicodeDecodeError):
                     logging.exception(f"Error parsing batch file {batch_file}")
                     continue
 
@@ -1031,7 +1031,7 @@ class NextflowManager:
                 "current_batch": batch_count
             }
 
-        except (json.JSONDecodeError, FileNotFoundError, PermissionError, OSError, UnicodeDecodeError) as e:
+        except (json.JSONDecodeError, FileNotFoundError, PermissionError, OSError, UnicodeDecodeError):
             logging.exception("Error parsing realtime stats")
             return {}
 
@@ -1138,7 +1138,7 @@ class NextflowManager:
 
             return ""
 
-        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError) as e:
+        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError):
             logging.exception("Error extracting error from log")
             return ""
 

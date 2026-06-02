@@ -375,6 +375,276 @@ def _validate_single_input_source(params: Dict[str, Any]) -> None:
         )
 
 
+def _generate_pathogen_genomes_json(config: Dict[str, Any], main_dir: str):
+    """Generate ``validation/pathogen_genomes.json`` from downloaded genomes.
+
+    Returns the JSON path, or ``None`` when no genomes are available. The
+    caller gates on ``blast_validation`` and ``has_species`` before calling.
+    Uses NCBI taxids for genome-file lookup and Kraken taxids as JSON keys so
+    GTDB databases stay compatible.
+    """
+    from nanometa_live.core.utils.paths import NanometaPaths
+    genome_cache_dir = config.get("genome_cache_dir") or str(
+        NanometaPaths.from_config(config).data_dir
+    )
+    logging.debug(f"Using genome cache directory for validation: {genome_cache_dir}")
+    genome_manager = get_genome_manager(cache_dir=genome_cache_dir)
+
+    try:
+        stats = genome_manager.get_statistics()
+        logging.debug(f"Genome manager stats: {stats}")
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        logging.debug(f"Could not read genome cache: {e}")
+    except AttributeError as e:
+        logging.debug(f"Genome manager missing get_statistics: {e}")
+
+    # Build NCBI taxid -> Kraken taxid mapping (for GTDB database compatibility).
+    species_list_full, _ = get_validation_species_from_watchlist(config)
+    ncbi_to_kraken_mapping = {}
+    ncbi_taxids = []
+    for species in species_list_full:
+        ncbi_taxid = species.get('taxid', 0)
+        kraken_taxid = species.get('kraken_taxid', ncbi_taxid)
+        if ncbi_taxid:
+            ncbi_taxids.append(ncbi_taxid)
+            if kraken_taxid and kraken_taxid != ncbi_taxid:
+                ncbi_to_kraken_mapping[ncbi_taxid] = kraken_taxid
+                logging.debug(
+                    f"Taxid mapping: NCBI {ncbi_taxid} -> Kraken2 db {kraken_taxid}"
+                )
+
+    for taxid in ncbi_taxids:
+        logging.debug(f"Taxid {taxid} has_genome={genome_manager.has_genome(taxid)}")
+
+    json_output_path = os.path.join(main_dir, "validation", "pathogen_genomes.json")
+    os.makedirs(os.path.dirname(json_output_path), exist_ok=True)
+    logging.debug(f"Generating pathogen_genomes.json at {json_output_path}")
+    if ncbi_to_kraken_mapping:
+        logging.debug(f"Applying taxid mapping for {len(ncbi_to_kraken_mapping)} species")
+
+    pathogen_genomes_path = genome_manager.generate_pathogen_genomes_json(
+        ncbi_taxids,
+        output_path=json_output_path,
+        taxid_mapping=ncbi_to_kraken_mapping if ncbi_to_kraken_mapping else None,
+    )
+
+    if pathogen_genomes_path is not None:
+        logging.info(f"Generated pathogen_genomes.json at {pathogen_genomes_path}")
+        try:
+            import json
+            with open(pathogen_genomes_path, 'r') as f:
+                content = json.load(f)
+            logging.debug(f"pathogen_genomes.json contains {len(content)} entries")
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            logging.debug(f"Could not read pathogen_genomes.json: {e}")
+        except json.JSONDecodeError as e:
+            logging.debug(f"Malformed pathogen_genomes.json: {e}")
+    else:
+        logging.warning(
+            "No downloaded genomes found for enabled watchlist species. "
+            "Download genomes using the Watchlist tab to enable validation."
+        )
+    return pathogen_genomes_path
+
+
+def _resolve_kraken2_memory_mapping(config: Dict[str, Any]) -> bool:
+    """Pick kraken2_memory_mapping: explicit override wins, else False on ARM.
+
+    nanometanf's KRAKEN2 module falls back to a non-mmap load on ARM anyway;
+    emitting an explicit False silences the per-run WARN.
+    """
+    if "kraken_memory_mapping" in config:
+        return bool(config["kraken_memory_mapping"])
+    if platform.machine().lower() in {"arm64", "aarch64"}:
+        logging.info(
+            "ARM host detected (%s); defaulting kraken2_memory_mapping=False",
+            platform.machine(),
+        )
+        return False
+    return True
+
+
+def _build_base_params(config: Dict[str, Any], main_dir: str, kraken_db: str,
+                       analysis_name: str, run_validation_enabled: bool,
+                       blast_validation_enabled: bool,
+                       kraken2_memory_mapping: bool) -> Dict[str, Any]:
+    """Assemble the mode-independent nanometanf parameter dictionary."""
+    return {
+        "outdir": main_dir,
+
+        # Kraken2 classification
+        "kraken2_db": kraken_db,
+        "kraken2_memory_mapping": kraken2_memory_mapping,
+
+        # Save reads assignment and classified FASTQs (required for validation):
+        # save_reads_assignment gives per-read Kraken2 output (which reads map to
+        # which taxid); save_output_fastqs gives the classified reads to BLAST.
+        "save_reads_assignment": run_validation_enabled,
+        "save_output_fastqs": run_validation_enabled,
+
+        # Validation parameters - nanometanf VALIDATION subworkflow
+        "run_validation": run_validation_enabled,
+        "validation_method": config.get("validation_method", "blast"),
+        "blast_evalue": config.get("e_val_cutoff", 1e-10),
+        # The legacy ``min_perc_identity`` config key was collapsed into
+        # ``validation_identity_threshold`` (2026-04-30). For backwards
+        # compatibility we read ``min_perc_identity`` first if set, then fall
+        # through. New configs only carry the latter.
+        "blast_perc_identity": config.get(
+            "min_perc_identity",
+            config.get("validation_identity_threshold", 90),
+        ),
+        "validation_hit_rate_threshold": config.get("validation_hit_rate_threshold", 0.5),
+        "validation_identity_threshold": config.get("validation_identity_threshold", 90.0),
+        "minimap2_preset": config.get("minimap2_preset", "map-ont"),
+        "minimap2_min_mapq": config.get("minimap2_min_mapq", 10),
+
+        # Legacy parameter (deprecated, nanometanf maps to run_validation internally)
+        "blast_validation": blast_validation_enabled,
+
+        # QC settings
+        "qc_tool": config.get("qc_tool", "chopper"),
+        "skip_fastp": False,
+        "skip_nanoplot": config.get("skip_nanoplot", False),
+
+        # Read-filter overrides surfaced by the Configuration tab's Advanced
+        # Settings -> Read Filtering and Validation card. Defaults match
+        # nanometanf's pipeline-side defaults. See
+        # docs/audit-2026-04-29-short-amplicons.md for rationale.
+        "chopper_minlength": config.get("chopper_minlength", 1000),
+        "chopper_quality": config.get("chopper_quality", 10),
+        "filtlong_min_length": config.get("filtlong_min_length", 1000),
+        "kraken2_confidence": config.get("kraken2_confidence", 0.0),
+        "kraken2_minimum_hit_groups": config.get(
+            "kraken2_minimum_hit_groups", 0
+        ),
+
+        # Visualization. Krona plots disabled by default - container has
+        # permission issues with taxonomy update.
+        "enable_krona_plots": config.get("enable_krona_plots", False),
+
+        # nanopore stats for MultiQC disabled - container missing PyYAML.
+        "enable_nanopore_stats_mqc": config.get("enable_nanopore_stats_mqc", False),
+
+        # Reporting
+        "multiqc_title": analysis_name,
+    }
+
+
+def _apply_batch_input_params(params: Dict[str, Any], config: Dict[str, Any],
+                              main_dir: str, nanopore_dir: str,
+                              sample_handling: str, sample_name: str) -> None:
+    """Set batch-mode input params on ``params`` in place.
+
+    Four input paths in priority order: a pre-supplied samplesheet
+    (config["input"] is an existing file), explicit --input_dir
+    (use_input_dir_mode), Scenario E auto --input_dir for batch+by_barcode with
+    no samplesheet, else auto-generate a samplesheet from nanopore_dir.
+    """
+    user_input = config.get("input")
+    use_input_dir = bool(config.get("use_input_dir_mode", False))
+
+    # Scenario E auto-trigger: batch + by_barcode + no samplesheet. Scoped to
+    # by_barcode so single_sample and per_file still generate samplesheets.
+    samplesheet_provided = bool(user_input) and os.path.isfile(user_input)
+    if (
+        not use_input_dir
+        and not samplesheet_provided
+        and sample_handling == "by_barcode"
+    ):
+        use_input_dir = True
+        logging.info(
+            "Batch mode + by_barcode with no samplesheet supplied: "
+            "auto-enabling --input_dir so nanometanf INPUT_SCANNER "
+            "can discover the barcode layout."
+        )
+
+    if samplesheet_provided:
+        params["input"] = str(user_input)
+        logging.info(f"Batch mode: using pre-supplied samplesheet at {user_input}")
+    elif use_input_dir:
+        params["input_dir"] = nanopore_dir
+        logging.info(
+            f"Batch mode (input_dir): nanometanf INPUT_SCANNER will "
+            f"auto-discover layout under {nanopore_dir}"
+        )
+    else:
+        if user_input:
+            logging.warning(
+                f"config['input']={user_input!r} does not point at an "
+                f"existing file; falling back to samplesheet generation"
+            )
+        # Validate the declared sample_handling matches the directory shape
+        # before committing to samplesheet generation.
+        validate_sample_handling_layout(sample_handling, nanopore_dir)
+
+        samplesheet_dir = os.path.join(main_dir, "samplesheets")
+        os.makedirs(samplesheet_dir, exist_ok=True)
+        samplesheet_path = os.path.join(samplesheet_dir, "input_samplesheet.csv")
+
+        # Let ValueError propagate. Silently flipping to realtime mode on
+        # samplesheet failure masked configuration mistakes (wrong
+        # sample_handling, missing FASTQs, mismatched barcode subdirs).
+        # NextflowManager.setup catches this and surfaces it to the GUI.
+        generate_samplesheet(
+            nanopore_dir,
+            samplesheet_path,
+            sample_handling=sample_handling,
+            sample_name=sample_name,
+        )
+        params["input"] = samplesheet_path
+        logging.info(
+            f"Batch mode ({sample_handling}): Generated samplesheet at {samplesheet_path}"
+        )
+
+
+def _apply_realtime_input_params(params: Dict[str, Any], config: Dict[str, Any],
+                                 nanopore_dir: str, sample_handling: str,
+                                 sample_name: str, check_interval) -> None:
+    """Set realtime-mode input params (watchPath, batching, timeouts) in place."""
+    params["realtime_mode"] = True
+    params["nanopore_output_dir"] = nanopore_dir
+    # nanopore_output_dir alone drives realtime FASTQ monitoring. Do NOT also
+    # set input_dir -- the pipeline treats them as mutually exclusive input
+    # modes and raises "Multiple input modes detected" if both are non-null.
+
+    if sample_handling == "single_sample":
+        params["sample_name"] = sample_name
+        logging.info(f"Single-sample mode: Using sample name '{sample_name}'")
+
+    # Default batch_size=1 so existing files process immediately rather than
+    # waiting for files to accumulate.
+    params["batch_size"] = config.get("batch_size", 1)
+    params["min_batch_size"] = config.get("min_batch_size", 1)
+    params["batch_interval"] = format_duration(check_interval)
+
+    # File-age filtering: the pipeline requires a minimum of 0.1, so use a very
+    # high value (~1.9 years) to effectively process old demo/archived data.
+    params["max_avg_file_age_minutes"] = config.get("max_file_age_minutes", 1000000)
+
+    # Incremental Kraken2 for realtime: each batch classified independently
+    # (avoids O(n^2) reprocessing), merged via KRAKEN2_OUTPUT_MERGER, cumulative
+    # reports via KRAKEN2_REPORT_GENERATOR.
+    params["kraken2_enable_incremental"] = config.get("kraken2_enable_incremental", True)
+
+    # Timeout to prevent indefinite running. Default None (indefinite) for true
+    # realtime monitoring; settable via config for testing/demo.
+    realtime_timeout = config.get("realtime_timeout_minutes")
+    if realtime_timeout:
+        params["realtime_timeout_minutes"] = int(realtime_timeout)
+        logging.info(f"Realtime timeout set to {realtime_timeout} minutes")
+
+    max_files = config.get("max_files")
+    if max_files:
+        params["max_files"] = int(max_files)
+        logging.info(f"Max files limit set to {max_files}")
+
+    barcode_mode = "with barcode directories" if sample_handling == "by_barcode" else "single sample"
+    logging.info(f"Realtime mode ({barcode_mode}): Monitoring {nanopore_dir}")
+    if params["kraken2_enable_incremental"]:
+        logging.info("Incremental Kraken2 classification enabled for cumulative reporting")
+
+
 def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     """
     Create nanometanf parameter dictionary from Nanometa Live configuration.
@@ -474,86 +744,9 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     # 3. taxids_to_validate = 'auto' or comma-separated list
     pathogen_genomes_path = None
     has_genomes = False
-
     if config.get("blast_validation", False) and has_species:
-        # Generate pathogen_genomes.json from downloaded genomes
-        # Use configurable genome cache directory from config
-        from nanometa_live.core.utils.paths import NanometaPaths
-        genome_cache_dir = config.get("genome_cache_dir") or str(
-            NanometaPaths.from_config(config).data_dir
-        )
-        logging.debug(f"Using genome cache directory for validation: {genome_cache_dir}")
-
-        genome_manager = get_genome_manager(cache_dir=genome_cache_dir)
-
-        # Log genome manager stats
-        try:
-            stats = genome_manager.get_statistics()
-            logging.debug(f"Genome manager stats: {stats}")
-        except (FileNotFoundError, PermissionError, OSError) as e:
-            logging.debug(f"Could not read genome cache: {e}")
-        except AttributeError as e:
-            logging.debug(f"Genome manager missing get_statistics: {e}")
-
-        # Get the full species list with both NCBI and Kraken taxids
-        # We need NCBI taxids for genome file lookup, and Kraken taxids for pipeline filtering
-        species_list_full, _ = get_validation_species_from_watchlist(config)
-
-        # Build mapping: NCBI taxid -> Kraken taxid (for GTDB database compatibility)
-        ncbi_to_kraken_mapping = {}
-        ncbi_taxids = []
-        for species in species_list_full:
-            ncbi_taxid = species.get('taxid', 0)
-            kraken_taxid = species.get('kraken_taxid', ncbi_taxid)
-            if ncbi_taxid:
-                ncbi_taxids.append(ncbi_taxid)
-                if kraken_taxid and kraken_taxid != ncbi_taxid:
-                    ncbi_to_kraken_mapping[ncbi_taxid] = kraken_taxid
-                    logging.debug(
-                        f"Taxid mapping: NCBI {ncbi_taxid} -> Kraken2 db {kraken_taxid}"
-                    )
-
-        # Check which taxids have genomes (by NCBI taxid)
-        for taxid in ncbi_taxids:
-            has_genome = genome_manager.has_genome(taxid)
-            logging.debug(f"Taxid {taxid} has_genome={has_genome}")
-
-        # Generate JSON file in the results directory
-        # Uses NCBI taxids for file lookup, Kraken taxids as JSON keys
-        json_output_path = os.path.join(main_dir, "validation", "pathogen_genomes.json")
-        os.makedirs(os.path.dirname(json_output_path), exist_ok=True)
-
-        logging.debug(f"Generating pathogen_genomes.json at {json_output_path}")
-        if ncbi_to_kraken_mapping:
-            logging.debug(
-                f"Applying taxid mapping for {len(ncbi_to_kraken_mapping)} species"
-            )
-
-        pathogen_genomes_path = genome_manager.generate_pathogen_genomes_json(
-            ncbi_taxids,
-            output_path=json_output_path,
-            taxid_mapping=ncbi_to_kraken_mapping if ncbi_to_kraken_mapping else None
-        )
-
+        pathogen_genomes_path = _generate_pathogen_genomes_json(config, main_dir)
         has_genomes = pathogen_genomes_path is not None
-
-        if has_genomes:
-            logging.info(f"Generated pathogen_genomes.json at {pathogen_genomes_path}")
-            # Log the contents for debugging
-            try:
-                import json
-                with open(pathogen_genomes_path, 'r') as f:
-                    content = json.load(f)
-                logging.debug(f"pathogen_genomes.json contains {len(content)} entries")
-            except (FileNotFoundError, PermissionError, OSError) as e:
-                logging.debug(f"Could not read pathogen_genomes.json: {e}")
-            except json.JSONDecodeError as e:
-                logging.debug(f"Malformed pathogen_genomes.json: {e}")
-        else:
-            logging.warning(
-                "No downloaded genomes found for enabled watchlist species. "
-                "Download genomes using the Watchlist tab to enable validation."
-            )
 
     # blast_validation and run_validation must both be false if we can't actually run validation
     can_run_validation = has_species and has_genomes
@@ -574,89 +767,12 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
                 "Download pathogen genomes in the Watchlist tab first."
             )
 
-    # Kraken2 memory mapping: auto-disable on ARM unless the user set an
-    # explicit override. nanometanf's KRAKEN2 module falls back to a plain
-    # (non-mmap) load on ARM regardless, but emitting the explicit False
-    # here silences the per-run WARN and matches the behaviour operators see.
-    if "kraken_memory_mapping" in config:
-        kraken2_memory_mapping = bool(config["kraken_memory_mapping"])
-    elif platform.machine().lower() in {"arm64", "aarch64"}:
-        logging.info(
-            "ARM host detected (%s); defaulting kraken2_memory_mapping=False",
-            platform.machine(),
-        )
-        kraken2_memory_mapping = False
-    else:
-        kraken2_memory_mapping = True
+    kraken2_memory_mapping = _resolve_kraken2_memory_mapping(config)
 
-    # Create base nanometanf parameters
-    params = {
-        "outdir": main_dir,
-
-        # Kraken2 classification
-        "kraken2_db": kraken_db,
-        "kraken2_memory_mapping": kraken2_memory_mapping,
-
-        # Save reads assignment and classified FASTQs (required for validation to work)
-        # The VALIDATION workflow needs:
-        # 1. save_reads_assignment - per-read Kraken2 output to know which reads belong to which taxid
-        # 2. save_output_fastqs - the classified reads to extract and BLAST against reference genomes
-        "save_reads_assignment": run_validation_enabled,
-        "save_output_fastqs": run_validation_enabled,
-
-        # Validation parameters - nanometanf VALIDATION subworkflow
-        "run_validation": run_validation_enabled,
-        "validation_method": config.get("validation_method", "blast"),
-        "blast_evalue": config.get("e_val_cutoff", 1e-10),
-        # The legacy ``min_perc_identity`` config key was removed when the
-        # operator-facing duplicate input was collapsed into the canonical
-        # ``validation_identity_threshold`` (2026-04-30). For backwards
-        # compatibility with existing config.yaml files we still read
-        # ``min_perc_identity`` first if set, then fall through to
-        # ``validation_identity_threshold``. New configs only carry the
-        # latter.
-        "blast_perc_identity": config.get(
-            "min_perc_identity",
-            config.get("validation_identity_threshold", 90),
-        ),
-        "validation_hit_rate_threshold": config.get("validation_hit_rate_threshold", 0.5),
-        "validation_identity_threshold": config.get("validation_identity_threshold", 90.0),
-        "minimap2_preset": config.get("minimap2_preset", "map-ont"),
-        "minimap2_min_mapq": config.get("minimap2_min_mapq", 10),
-
-        # Legacy parameter (deprecated, nanometanf maps to run_validation internally)
-        "blast_validation": blast_validation_enabled,
-
-        # QC settings
-        "qc_tool": config.get("qc_tool", "chopper"),
-        "skip_fastp": False,
-        "skip_nanoplot": config.get("skip_nanoplot", False),
-
-        # Read-filter overrides surfaced by the Configuration tab's
-        # Advanced Settings -> Read Filtering and Validation card.
-        # Defaults match nanometanf's pipeline-side defaults so an
-        # operator who has not touched the new GUI fields keeps the
-        # current long-read behaviour. See
-        # docs/audit-2026-04-29-short-amplicons.md for rationale on
-        # why each is operator-tunable.
-        "chopper_minlength": config.get("chopper_minlength", 1000),
-        "chopper_quality": config.get("chopper_quality", 10),
-        "filtlong_min_length": config.get("filtlong_min_length", 1000),
-        "kraken2_confidence": config.get("kraken2_confidence", 0.0),
-        "kraken2_minimum_hit_groups": config.get(
-            "kraken2_minimum_hit_groups", 0
-        ),
-
-        # Visualization
-        # Disable Krona plots by default - container has permissions issues with taxonomy update
-        "enable_krona_plots": config.get("enable_krona_plots", False),
-
-        # Disable nanopore stats for MultiQC - container missing PyYAML dependency
-        "enable_nanopore_stats_mqc": config.get("enable_nanopore_stats_mqc", False),
-
-        # Reporting
-        "multiqc_title": analysis_name,
-    }
+    params = _build_base_params(
+        config, main_dir, kraken_db, analysis_name,
+        run_validation_enabled, blast_validation_enabled, kraken2_memory_mapping,
+    )
 
     # Add validation species if configured (from Watchlist or legacy config)
     if has_species and validation_taxids:
@@ -691,125 +807,13 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     #      to realtime mode without any user-visible warning.
     #   4. Otherwise -> auto-generate a samplesheet from nanopore_dir.
     if processing_mode == "batch":
-        user_input = config.get("input")
-        use_input_dir = bool(config.get("use_input_dir_mode", False))
-
-        # Scenario E auto-trigger: batch + by_barcode + no samplesheet.
-        # Scoped narrowly to by_barcode so single_sample and per_file
-        # continue to generate their samplesheets as before.
-        samplesheet_provided = bool(user_input) and os.path.isfile(user_input)
-        if (
-            not use_input_dir
-            and not samplesheet_provided
-            and sample_handling == "by_barcode"
-        ):
-            use_input_dir = True
-            logging.info(
-                "Batch mode + by_barcode with no samplesheet supplied: "
-                "auto-enabling --input_dir so nanometanf INPUT_SCANNER "
-                "can discover the barcode layout."
-            )
-
-        if samplesheet_provided:
-            params["input"] = str(user_input)
-            logging.info(
-                f"Batch mode: using pre-supplied samplesheet at {user_input}"
-            )
-        elif use_input_dir:
-            params["input_dir"] = nanopore_dir
-            logging.info(
-                f"Batch mode (input_dir): nanometanf INPUT_SCANNER will "
-                f"auto-discover layout under {nanopore_dir}"
-            )
-        else:
-            if user_input:
-                logging.warning(
-                    f"config['input']={user_input!r} does not point at an "
-                    f"existing file; falling back to samplesheet generation"
-                )
-            # Validate the declared sample_handling matches the directory
-            # shape before we commit to samplesheet generation.
-            validate_sample_handling_layout(sample_handling, nanopore_dir)
-
-            samplesheet_dir = os.path.join(main_dir, "samplesheets")
-            os.makedirs(samplesheet_dir, exist_ok=True)
-            samplesheet_path = os.path.join(samplesheet_dir, "input_samplesheet.csv")
-
-            # Let ValueError propagate. The previous behaviour silently
-            # flipped the run into realtime mode on samplesheet failure,
-            # which masked configuration mistakes (wrong sample_handling
-            # for the actual directory layout, missing FASTQ files,
-            # mismatched barcode subdirs) and produced a different
-            # pipeline mode than the operator chose. NextflowManager.setup
-            # catches this and surfaces the message to the GUI.
-            generate_samplesheet(
-                nanopore_dir,
-                samplesheet_path,
-                sample_handling=sample_handling,
-                sample_name=sample_name,
-            )
-            params["input"] = samplesheet_path
-            logging.info(
-                f"Batch mode ({sample_handling}): "
-                f"Generated samplesheet at {samplesheet_path}"
-            )
-
+        _apply_batch_input_params(
+            params, config, main_dir, nanopore_dir, sample_handling, sample_name
+        )
     else:
-        # Realtime mode: Use watchPath for new files
-        params["realtime_mode"] = True
-        params["nanopore_output_dir"] = nanopore_dir
-        # nanopore_output_dir is sufficient for realtime FASTQ monitoring.
-        # Do NOT also set input_dir — the pipeline treats input_dir and
-        # nanopore_output_dir as mutually exclusive input modes and will
-        # raise "Multiple input modes detected" if both are non-null.
-
-        # Pass sample_name for single-sample mode
-        # The pipeline will use this instead of deriving sample ID from filenames
-        if sample_handling == "single_sample":
-            params["sample_name"] = sample_name
-            logging.info(f"Single-sample mode: Using sample name '{sample_name}'")
-
-        # For realtime mode, default to batch_size=1 to process files immediately
-        # This ensures existing files in the folder are processed right away
-        # without waiting for 10 files to accumulate
-        params["batch_size"] = config.get("batch_size", 1)
-        params["min_batch_size"] = config.get("min_batch_size", 1)
-        params["batch_interval"] = format_duration(check_interval)
-
-        # Set file age filtering to allow processing of demo/archived data
-        # The pipeline requires minimum 0.1, so use a very high value to effectively disable
-        # Using 1000000 minutes (~1.9 years) to allow processing of old demo data
-        params["max_avg_file_age_minutes"] = config.get("max_file_age_minutes", 1000000)
-
-        # Enable incremental Kraken2 classification for realtime mode
-        # This enables batch-by-batch processing with cumulative report generation:
-        # - Each batch is classified independently (avoiding O(n^2) reprocessing)
-        # - Batch outputs are merged via KRAKEN2_OUTPUT_MERGER
-        # - Cumulative reports generated via KRAKEN2_REPORT_GENERATOR using combine_kreports.py
-        params["kraken2_enable_incremental"] = config.get("kraken2_enable_incremental", True)
-
-        # Set a timeout for realtime mode to prevent indefinite running
-        # Default to None (indefinite) for true realtime monitoring
-        # Can be set via config to limit runtime for testing/demo
-        realtime_timeout = config.get("realtime_timeout_minutes")
-        if realtime_timeout:
-            params["realtime_timeout_minutes"] = int(realtime_timeout)
-            logging.info(f"Realtime timeout set to {realtime_timeout} minutes")
-
-        # Set max_files if specified (useful for testing with limited data)
-        max_files = config.get("max_files")
-        if max_files:
-            params["max_files"] = int(max_files)
-            logging.info(f"Max files limit set to {max_files}")
-
-        # Note: The nanometanf pipeline's REALTIME_MONITORING subworkflow now handles
-        # both existing and new files by combining Channel.fromPath() with Channel.watchPath()
-        # No samplesheet generation needed here - existing files will be detected automatically
-
-        barcode_mode = "with barcode directories" if sample_handling == "by_barcode" else "single sample"
-        logging.info(f"Realtime mode ({barcode_mode}): Monitoring {nanopore_dir}")
-        if params["kraken2_enable_incremental"]:
-            logging.info("Incremental Kraken2 classification enabled for cumulative reporting")
+        _apply_realtime_input_params(
+            params, config, nanopore_dir, sample_handling, sample_name, check_interval
+        )
 
     # Add email if provided
     if "email" in config and config["email"]:

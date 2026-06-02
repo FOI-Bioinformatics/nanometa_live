@@ -57,7 +57,6 @@ def _deploy(args):
 
     def progress_callback(progress):
         stage_bar = _progress_bar(progress.stage_progress, 20)
-        overall_bar = _progress_bar(progress.overall_progress)
         detail = progress.stage_detail or ""
         # Clear line and print in-place
         sys.stdout.write(

@@ -124,7 +124,6 @@ def _execute_wizard_step(step_idx, config):
     # Step 2: Build taxonomy index + mappings
     if step_idx == 2:
         preparer = MobileLabPreparer(config=config)
-        result = preparer.prepare.__wrapped__ if hasattr(preparer.prepare, '__wrapped__') else None
         # Run the two stages directly
         from nanometa_live.core.workflow.mobile_lab_preparer import PreparationResult
         pr = PreparationResult(success=True)

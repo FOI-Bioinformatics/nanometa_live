@@ -14,6 +14,165 @@ from dash import html
 import dash_bootstrap_components as dbc
 
 
+def _validate_nanopore_dir(nanopore_dir, sample_handling, processing_mode):
+    """Existence and sample-handling-layout checks for the input directory.
+
+    Returns a list of error strings (empty when valid or unset). "by_barcode"
+    means subdirectory-per-sample (conventional barcode<NN> plus custom-named
+    subdirs); the canonical detector in core.utils.auto_detect is delegated to
+    so the rules cannot drift.
+    """
+    errors = []
+    if not (nanopore_dir and nanopore_dir.strip()):
+        return errors
+    if not os.path.exists(nanopore_dir):
+        errors.append(f"Nanopore directory does not exist: {nanopore_dir}")
+        return errors
+    if not os.path.isdir(nanopore_dir):
+        errors.append(f"Nanopore path is not a directory: {nanopore_dir}")
+        return errors
+
+    from nanometa_live.core.utils.auto_detect import (
+        detect_sample_handling,
+        find_sample_subdirs,
+    )
+    detected_mode, detected_reason = detect_sample_handling(nanopore_dir)
+    if sample_handling == "by_barcode":
+        sample_dirs = find_sample_subdirs(nanopore_dir)
+        if not sample_dirs:
+            suggestion = ""
+            if detected_mode and detected_mode != "by_barcode":
+                suggestion = (
+                    f" Auto-detection suggests '{detected_mode}' "
+                    f"for this directory ({detected_reason})."
+                )
+            errors.append(
+                "By-barcode mode selected but no per-sample "
+                f"subdirectories with FASTQ files found in "
+                f"{nanopore_dir}. by_barcode accepts "
+                "conventional 'barcode01', 'barcode02', ... "
+                "and any custom-named folder containing "
+                "FASTQ files (e.g. 'Turex/', 'Zymo/'). For "
+                "flat file directories, switch to 'Single "
+                "sample' or 'Per file' mode."
+                + suggestion
+            )
+    elif sample_handling in ["single_sample", "per_file"] and processing_mode == "batch":
+        # Check for FASTQ files directly in directory.
+        fastq_files = glob.glob(os.path.join(nanopore_dir, "*.fastq*"))
+        sample_dirs = find_sample_subdirs(nanopore_dir)
+        if not fastq_files and sample_dirs:
+            suggestion = ""
+            if detected_mode == "by_barcode":
+                suggestion = (
+                    f" Auto-detection confirms 'by_barcode' "
+                    f"({detected_reason})."
+                )
+            errors.append(
+                f"No FASTQ files found directly in {nanopore_dir}, "
+                "but per-sample subdirectories exist "
+                f"({', '.join(d.name for d in sample_dirs[:3])}"
+                + (", ..." if len(sample_dirs) > 3 else "")
+                + "). For per-sample directories, use "
+                "'By barcode' handling mode."
+                + suggestion
+            )
+    return errors
+
+
+def _validate_kraken_db_path(kraken_db):
+    """Existence and Kraken2-format checks for the database directory.
+
+    Delegates format validation to core.utils.kraken_utils.check_kraken_db,
+    the single source of truth shared with the launch-time gate.
+    """
+    errors = []
+    if not (kraken_db and kraken_db.strip()):
+        return errors
+    if not os.path.exists(kraken_db):
+        errors.append(f"Kraken2 database does not exist: {kraken_db}")
+    elif not os.path.isdir(kraken_db):
+        errors.append(f"Kraken2 database path is not a directory: {kraken_db}")
+    else:
+        from nanometa_live.core.utils.kraken_utils import check_kraken_db
+        valid, missing_files = check_kraken_db(kraken_db)
+        if not valid:
+            errors.append(
+                f"Invalid Kraken2 database format. "
+                f"Missing required files: {', '.join(missing_files)}"
+            )
+    return errors
+
+
+def _validate_numeric_ranges(
+    *,
+    update_interval,
+    check_interval,
+    realtime_timeout_minutes,
+    min_reads_per_level,
+    e_value_cutoff,
+    cores,
+    gui_port,
+    minimap2_min_mapq,
+    validation_identity,
+    kraken2_confidence,
+    chopper_minlength,
+    chopper_quality,
+    filtlong_minlength,
+    danger_threshold,
+    max_file_age_minutes,
+    min_reads_for_validation,
+):
+    """Server-side bounds checks for every numeric form input.
+
+    The widgets carry browser-level min/max, but those are advisory only -- a
+    programmatic post or devtools edit can submit out-of-range values that
+    would otherwise reach last-session.yaml and Nextflow. Returns error strings.
+    """
+    errors = []
+    if update_interval is not None and not (1 <= update_interval <= 300):
+        errors.append("Update Interval must be between 1-300 seconds")
+    if check_interval is not None and not (1 <= check_interval <= 300):
+        errors.append("Check Interval must be between 1-300 seconds")
+    if realtime_timeout_minutes is not None and realtime_timeout_minutes != "":
+        try:
+            if not (1 <= int(realtime_timeout_minutes) <= 10080):
+                errors.append("Realtime Timeout must be between 1-10080 minutes (or empty for no timeout)")
+        except (TypeError, ValueError):
+            errors.append("Realtime Timeout must be an integer number of minutes")
+    if min_reads_per_level is not None and min_reads_per_level < 1:
+        errors.append("Minimum Reads per Level must be at least 1")
+    if e_value_cutoff is not None and not (0 <= e_value_cutoff <= 1):
+        errors.append("E-value Cutoff must be between 0-1")
+    if cores is not None and cores < 1:
+        errors.append("CPU Cores must be at least 1")
+    if gui_port is not None and not (1024 <= int(gui_port) <= 65535):
+        errors.append("GUI Port must be between 1024-65535")
+    if minimap2_min_mapq is not None and not (0 <= minimap2_min_mapq <= 60):
+        errors.append("Alignment Confidence (MAPQ) must be between 0-60")
+    if validation_identity is not None and not (0 <= validation_identity <= 100):
+        errors.append("Validation identity must be between 0-100%")
+    if kraken2_confidence is not None and not (0 <= kraken2_confidence <= 1):
+        errors.append("Kraken2 confidence must be between 0.0-1.0")
+    if chopper_minlength is not None and chopper_minlength < 0:
+        errors.append("Chopper minimum length must be 0 or greater")
+    if chopper_quality is not None and not (0 <= chopper_quality <= 30):
+        errors.append("Chopper quality must be between 0-30")
+    if filtlong_minlength is not None and filtlong_minlength < 0:
+        errors.append("Filtlong minimum length must be 0 or greater")
+    if danger_threshold is not None and danger_threshold < 1:
+        errors.append("Alert Threshold must be at least 1")
+    if max_file_age_minutes is not None and max_file_age_minutes != "":
+        try:
+            if int(max_file_age_minutes) < 0:
+                errors.append("Maximum file age must be 0 or greater")
+        except (TypeError, ValueError):
+            errors.append("Maximum file age must be an integer number of minutes")
+    if min_reads_for_validation is not None and min_reads_for_validation < 1:
+        errors.append("Minimum reads to offer validation must be at least 1")
+    return errors
+
+
 def build_config_from_form(
     current_config,
     *,
@@ -79,167 +238,35 @@ def build_config_from_form(
     if results_dir:
         results_dir = normalise_path(results_dir)
 
-    # Validate required fields
+    # Validate required fields.
     if not nanopore_dir or not nanopore_dir.strip():
         errors.append("Nanopore Sequence Data Folder (input) is required")
-
     if not kraken_db or not kraken_db.strip():
         errors.append("Kraken2 Database is required")
 
-    # Validate directories exist (if provided)
-    if nanopore_dir and nanopore_dir.strip():
-        if not os.path.exists(nanopore_dir):
-            errors.append(f"Nanopore directory does not exist: {nanopore_dir}")
-        elif not os.path.isdir(nanopore_dir):
-            errors.append(f"Nanopore path is not a directory: {nanopore_dir}")
-        else:
-            # Validate directory structure matches sample handling
-            # mode. "by_barcode" really means subdirectory-per-sample
-            # (conventional barcode<NN> AND custom-named subdirs like
-            # Turex/, Zymo/, ...). The canonical detector lives in
-            # core.utils.auto_detect; both barcode-related branches
-            # below delegate so the rules cannot drift.
-            from nanometa_live.core.utils.auto_detect import (
-                detect_sample_handling,
-                find_sample_subdirs,
-            )
-            detected_mode, detected_reason = detect_sample_handling(nanopore_dir)
-            if sample_handling == "by_barcode":
-                sample_dirs = find_sample_subdirs(nanopore_dir)
-                if not sample_dirs:
-                    suggestion = ""
-                    if detected_mode and detected_mode != "by_barcode":
-                        suggestion = (
-                            f" Auto-detection suggests '{detected_mode}' "
-                            f"for this directory ({detected_reason})."
-                        )
-                    errors.append(
-                        "By-barcode mode selected but no per-sample "
-                        f"subdirectories with FASTQ files found in "
-                        f"{nanopore_dir}. by_barcode accepts "
-                        "conventional 'barcode01', 'barcode02', ... "
-                        "and any custom-named folder containing "
-                        "FASTQ files (e.g. 'Turex/', 'Zymo/'). For "
-                        "flat file directories, switch to 'Single "
-                        "sample' or 'Per file' mode."
-                        + suggestion
-                    )
-            elif sample_handling in ["single_sample", "per_file"] and processing_mode == "batch":
-                # Check for FASTQ files directly in directory
-                fastq_files = glob.glob(os.path.join(nanopore_dir, "*.fastq*"))
-                sample_dirs = find_sample_subdirs(nanopore_dir)
-                if not fastq_files and sample_dirs:
-                    suggestion = ""
-                    if detected_mode == "by_barcode":
-                        suggestion = (
-                            f" Auto-detection confirms 'by_barcode' "
-                            f"({detected_reason})."
-                        )
-                    errors.append(
-                        f"No FASTQ files found directly in {nanopore_dir}, "
-                        "but per-sample subdirectories exist "
-                        f"({', '.join(d.name for d in sample_dirs[:3])}"
-                        + (", ..." if len(sample_dirs) > 3 else "")
-                        + "). For per-sample directories, use "
-                        "'By barcode' handling mode."
-                        + suggestion
-                    )
-
-    if kraken_db and kraken_db.strip():
-        if not os.path.exists(kraken_db):
-            errors.append(f"Kraken2 database does not exist: {kraken_db}")
-        elif not os.path.isdir(kraken_db):
-            errors.append(f"Kraken2 database path is not a directory: {kraken_db}")
-        else:
-            # Validate Kraken2 database format. Single source of truth
-            # is core.utils.kraken_utils.check_kraken_db so the rule
-            # cannot drift from the launch-time check in
-            # parameter_mapping.validate_nextflow_params.
-            from nanometa_live.core.utils.kraken_utils import check_kraken_db
-            valid, missing_files = check_kraken_db(kraken_db)
-            if not valid:
-                errors.append(
-                    f"Invalid Kraken2 database format. "
-                    f"Missing required files: {', '.join(missing_files)}"
-                )
-
-    # Validate numeric ranges
-    if update_interval is not None:
-        if update_interval < 1 or update_interval > 300:
-            errors.append("Update Interval must be between 1-300 seconds")
-
-    if check_interval is not None:
-        if check_interval < 1 or check_interval > 300:
-            errors.append("Check Interval must be between 1-300 seconds")
-
-    if realtime_timeout_minutes is not None and realtime_timeout_minutes != "":
-        try:
-            rtm = int(realtime_timeout_minutes)
-            if rtm < 1 or rtm > 10080:
-                errors.append("Realtime Timeout must be between 1-10080 minutes (or empty for no timeout)")
-        except (TypeError, ValueError):
-            errors.append("Realtime Timeout must be an integer number of minutes")
-
-    if min_reads_per_level is not None:
-        if min_reads_per_level < 1:
-            errors.append("Minimum Reads per Level must be at least 1")
-
-    # The legacy min_identity input was collapsed into
-    # validation_identity_threshold on 2026-04-30; no separate
-    # validation here.
-
-    if e_value_cutoff is not None:
-        if e_value_cutoff < 0 or e_value_cutoff > 1:
-            errors.append("E-value Cutoff must be between 0-1")
-
-    if cores is not None:
-        if cores < 1:
-            errors.append("CPU Cores must be at least 1")
-
-    if gui_port is not None:
-        gui_port = int(gui_port)
-        if gui_port < 1024 or gui_port > 65535:
-            errors.append("GUI Port must be between 1024-65535")
-
-    # Server-side bounds for the remaining numeric inputs. The widgets
-    # carry browser-level min/max, but those are advisory only -- a
-    # programmatic post or devtools edit can submit out-of-range values
-    # that would otherwise be written to last-session.yaml and handed to
-    # Nextflow at launch.
-    if minimap2_min_mapq is not None:
-        if minimap2_min_mapq < 0 or minimap2_min_mapq > 60:
-            errors.append("Alignment Confidence (MAPQ) must be between 0-60")
-
-    if validation_identity is not None:
-        if validation_identity < 0 or validation_identity > 100:
-            errors.append("Validation identity must be between 0-100%")
-
-    if kraken2_confidence is not None:
-        if kraken2_confidence < 0 or kraken2_confidence > 1:
-            errors.append("Kraken2 confidence must be between 0.0-1.0")
-
-    if chopper_minlength is not None and chopper_minlength < 0:
-        errors.append("Chopper minimum length must be 0 or greater")
-
-    if chopper_quality is not None:
-        if chopper_quality < 0 or chopper_quality > 30:
-            errors.append("Chopper quality must be between 0-30")
-
-    if filtlong_minlength is not None and filtlong_minlength < 0:
-        errors.append("Filtlong minimum length must be 0 or greater")
-
-    if danger_threshold is not None and danger_threshold < 1:
-        errors.append("Alert Threshold must be at least 1")
-
-    if max_file_age_minutes is not None and max_file_age_minutes != "":
-        try:
-            if int(max_file_age_minutes) < 0:
-                errors.append("Maximum file age must be 0 or greater")
-        except (TypeError, ValueError):
-            errors.append("Maximum file age must be an integer number of minutes")
-
-    if min_reads_for_validation is not None and min_reads_for_validation < 1:
-        errors.append("Minimum reads to offer validation must be at least 1")
+    # Path/layout, database-format, and numeric-range checks. The legacy
+    # min_identity input was collapsed into validation_identity_threshold on
+    # 2026-04-30, so it has no separate validation here.
+    errors += _validate_nanopore_dir(nanopore_dir, sample_handling, processing_mode)
+    errors += _validate_kraken_db_path(kraken_db)
+    errors += _validate_numeric_ranges(
+        update_interval=update_interval,
+        check_interval=check_interval,
+        realtime_timeout_minutes=realtime_timeout_minutes,
+        min_reads_per_level=min_reads_per_level,
+        e_value_cutoff=e_value_cutoff,
+        cores=cores,
+        gui_port=gui_port,
+        minimap2_min_mapq=minimap2_min_mapq,
+        validation_identity=validation_identity,
+        kraken2_confidence=kraken2_confidence,
+        chopper_minlength=chopper_minlength,
+        chopper_quality=chopper_quality,
+        filtlong_minlength=filtlong_minlength,
+        danger_threshold=danger_threshold,
+        max_file_age_minutes=max_file_age_minutes,
+        min_reads_for_validation=min_reads_for_validation,
+    )
 
     # If there are validation errors, return them
     if errors:
@@ -326,7 +353,7 @@ def build_config_from_form(
         config["blast_cores"] = cores
 
     if gui_port is not None:
-        config["gui_port"] = gui_port
+        config["gui_port"] = int(gui_port)
 
     if clean_temp is not None:
         config["remove_temp_files"] = bool(clean_temp)
