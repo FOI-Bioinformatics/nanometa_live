@@ -16,7 +16,12 @@ import re
 from pathlib import Path
 
 
-CALLBACKS_SRC = Path("nanometa_live/app/callbacks.py").read_text()
+# Callbacks were split from a single module into a callbacks/ package; read
+# every submodule so these static assertions are agnostic to which submodule
+# a given callback now lives in.
+CALLBACKS_SRC = "\n".join(
+    p.read_text() for p in sorted(Path("nanometa_live/app/callbacks").glob("*.py"))
+)
 
 
 def test_import_present():

@@ -294,7 +294,7 @@ def register_validation_callbacks(app: Dash):
                 reverse=reverse,
             )
         except Exception:
-            pass
+            logger.debug("Failed to sort validation results by %s; leaving unsorted", sort_key, exc_info=True)
 
         cards = []
         for result in results:

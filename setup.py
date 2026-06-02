@@ -62,14 +62,14 @@ setup(
             'filelock>=3.10.0',
         ],
     },
-    python_requires='>=3.9',
+    # CI exercises 3.11 and 3.12 only, and numpy 2.x no longer supports 3.9/3.10,
+    # so the previous >=3.9 claim was untested and unsatisfiable in practice.
+    python_requires='>=3.11',
     classifiers=[
         'Development Status :: 4 - Beta',
         'Intended Audience :: Science/Research',
         'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.9',
-        'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',
         'Topic :: Scientific/Engineering :: Bio-Informatics',

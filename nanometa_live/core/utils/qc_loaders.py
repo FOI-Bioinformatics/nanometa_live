@@ -60,6 +60,70 @@ def _empty_fastp_stats() -> Dict[str, int]:
     }
 
 
+def _find_sample_files(directory: str, sample: str, extensions: List[str]) -> List[str]:
+    """Glob a sample's flat and batch-suffixed files for each extension.
+
+    For each extension, matches ``<sample>.<ext>`` followed by
+    ``<sample>_*.<ext>`` (the batch-numbered companions written in
+    real-time mode), preserving that order.
+    """
+    files: List[str] = []
+    for ext in extensions:
+        files.extend(glob.glob(os.path.join(directory, f"{sample}.{ext}")))
+        files.extend(glob.glob(os.path.join(directory, f"{sample}_*.{ext}")))
+    return files
+
+
+def _aggregate_fastp_files(fastp_files: List[str]) -> Dict[str, Any]:
+    """Aggregate FASTP statistics across one or more fastp.json files.
+
+    Stable files are parsed and validated; unstable, malformed, or
+    unreadable files are skipped. The q30 rate is recomputed from the
+    accumulated post-filtering q30 and total bases.
+    """
+    aggregated_stats = _empty_fastp_stats()
+    acc_q30_bases = 0
+
+    for fastp_file in fastp_files:
+        try:
+            if not _is_file_stable(fastp_file):
+                logging.debug(f"Skipping unstable file: {fastp_file}")
+                continue
+
+            with open(fastp_file, 'r') as f:
+                fastp_data = json.load(f)
+
+            if not _validate_fastp_json(fastp_data, fastp_file):
+                continue
+
+            summary = fastp_data.get("summary", {})
+            before = summary.get("before_filtering", {})
+            after = summary.get("after_filtering", {})
+            filtering = fastp_data.get("filtering_result", {})
+
+            aggregated_stats['total_reads_before'] += before.get("total_reads", 0)
+            aggregated_stats['total_reads_after'] += after.get("total_reads", 0)
+            aggregated_stats['total_bases_before'] += before.get("total_bases", 0)
+            aggregated_stats['total_bases_after'] += after.get("total_bases", 0)
+            aggregated_stats['passed_filter'] += filtering.get("passed_filter_reads", 0)
+            aggregated_stats['low_quality'] += filtering.get("low_quality_reads", 0)
+            aggregated_stats['too_short'] += filtering.get("too_short_reads", 0)
+            aggregated_stats['too_many_N'] += filtering.get("too_many_N_reads", 0)
+            acc_q30_bases += after.get("q30_bases", 0)
+
+        except json.JSONDecodeError as e:
+            logging.warning(f"Malformed JSON in {fastp_file}: {e}")
+            continue
+        except OSError as e:
+            logging.error(f"Error reading {fastp_file}: {e}")
+            continue
+
+    total_bases_after = aggregated_stats['total_bases_after']
+    if total_bases_after > 0:
+        aggregated_stats['q30_rate_after'] = acc_q30_bases / total_bases_after
+    return aggregated_stats
+
+
 def _empty_nanoplot_stats() -> Dict[str, Any]:
     """Return empty NanoPlot statistics dictionary."""
     return {
@@ -178,108 +242,17 @@ def load_fastp_data(main_dir: str, sample: Optional[str] = None) -> Dict[str, An
         if not fastp_files:
             logging.warning("No FASTP files found")
             return _empty_fastp_stats()
-
-        aggregated_stats = _empty_fastp_stats()
-        _acc_q30_bases = 0
-
-        for fastp_file in fastp_files:
-            try:
-                if not _is_file_stable(fastp_file):
-                    logging.debug(f"Skipping unstable file: {fastp_file}")
-                    continue
-
-                with open(fastp_file, 'r') as f:
-                    fastp_data = json.load(f)
-
-                if not _validate_fastp_json(fastp_data, fastp_file):
-                    continue
-
-                summary = fastp_data.get("summary", {})
-                before = summary.get("before_filtering", {})
-                after = summary.get("after_filtering", {})
-                filtering = fastp_data.get("filtering_result", {})
-
-                aggregated_stats['total_reads_before'] += before.get("total_reads", 0)
-                aggregated_stats['total_reads_after'] += after.get("total_reads", 0)
-                aggregated_stats['total_bases_before'] += before.get("total_bases", 0)
-                aggregated_stats['total_bases_after'] += after.get("total_bases", 0)
-                aggregated_stats['passed_filter'] += filtering.get("passed_filter_reads", 0)
-                aggregated_stats['low_quality'] += filtering.get("low_quality_reads", 0)
-                aggregated_stats['too_short'] += filtering.get("too_short_reads", 0)
-                aggregated_stats['too_many_N'] += filtering.get("too_many_N_reads", 0)
-                _acc_q30_bases += after.get("q30_bases", 0)
-
-            except json.JSONDecodeError as e:
-                logging.warning(f"Malformed JSON in {fastp_file}: {e}")
-                continue
-            except OSError as e:
-                logging.error(f"Error reading {fastp_file}: {e}")
-                continue
-
-        total_bases_after = aggregated_stats['total_bases_after']
-        if total_bases_after > 0:
-            aggregated_stats['q30_rate_after'] = _acc_q30_bases / total_bases_after
-        _store_mtime_cache(mtime_key, [fastp_dir], aggregated_stats.copy())
-        return aggregated_stats
-
     else:
         # Load specific sample - may have multiple batch files to combine
-        sample_patterns = [
-            os.path.join(fastp_dir, f"{sample}.fastp.json"),
-            os.path.join(fastp_dir, f"{sample}_*.fastp.json")
-        ]
+        fastp_files = _find_sample_files(fastp_dir, sample, ["fastp.json"])
 
-        sample_files = []
-        for pattern in sample_patterns:
-            sample_files.extend(glob.glob(pattern))
-
-        if not sample_files:
+        if not fastp_files:
             logging.warning(f"No FASTP files found for sample {sample}")
             return _empty_fastp_stats()
 
-        # Aggregate stats from all batch files
-        aggregated_stats = _empty_fastp_stats()
-        _acc_q30_bases = 0
-
-        for sample_file in sample_files:
-            try:
-                if not _is_file_stable(sample_file):
-                    logging.debug(f"Skipping unstable file: {sample_file}")
-                    continue
-
-                with open(sample_file, 'r') as f:
-                    fastp_data = json.load(f)
-
-                if not _validate_fastp_json(fastp_data, sample_file):
-                    continue
-
-                summary = fastp_data.get("summary", {})
-                before = summary.get("before_filtering", {})
-                after = summary.get("after_filtering", {})
-                filtering = fastp_data.get("filtering_result", {})
-
-                aggregated_stats['total_reads_before'] += before.get("total_reads", 0)
-                aggregated_stats['total_reads_after'] += after.get("total_reads", 0)
-                aggregated_stats['total_bases_before'] += before.get("total_bases", 0)
-                aggregated_stats['total_bases_after'] += after.get("total_bases", 0)
-                aggregated_stats['passed_filter'] += filtering.get("passed_filter_reads", 0)
-                aggregated_stats['low_quality'] += filtering.get("low_quality_reads", 0)
-                aggregated_stats['too_short'] += filtering.get("too_short_reads", 0)
-                aggregated_stats['too_many_N'] += filtering.get("too_many_N_reads", 0)
-                _acc_q30_bases += after.get("q30_bases", 0)
-
-            except json.JSONDecodeError as e:
-                logging.warning(f"Malformed JSON in {sample_file}: {e}")
-                continue
-            except OSError as e:
-                logging.error(f"Error reading {sample_file}: {e}")
-                continue
-
-        total_bases_after = aggregated_stats['total_bases_after']
-        if total_bases_after > 0:
-            aggregated_stats['q30_rate_after'] = _acc_q30_bases / total_bases_after
-        _store_mtime_cache(mtime_key, [fastp_dir], aggregated_stats.copy())
-        return aggregated_stats
+    aggregated_stats = _aggregate_fastp_files(fastp_files)
+    _store_mtime_cache(mtime_key, [fastp_dir], aggregated_stats.copy())
+    return aggregated_stats
 
 
 def load_batch_stats(main_dir: str, sample: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -615,14 +588,8 @@ def load_seqkit_stats(main_dir: str, sample: Optional[str] = None) -> pd.DataFra
         tsv_files.extend(glob.glob(os.path.join(seqkit_dir, "*/stats/*.tsv")))
     else:
         # Load specific sample (flat and nested layouts)
-        sample_patterns = [
-            os.path.join(seqkit_dir, f"{sample}.tsv"),
-            os.path.join(seqkit_dir, f"{sample}_*.tsv"),
-            os.path.join(seqkit_dir, f"{sample}/stats/*.tsv"),
-        ]
-        tsv_files = []
-        for pattern in sample_patterns:
-            tsv_files.extend(glob.glob(pattern))
+        tsv_files = _find_sample_files(seqkit_dir, sample, ["tsv"])
+        tsv_files.extend(glob.glob(os.path.join(seqkit_dir, f"{sample}/stats/*.tsv")))
 
     if incremental:
         incremental_df = _load_seqkit_incremental(seqkit_dir, sample)
