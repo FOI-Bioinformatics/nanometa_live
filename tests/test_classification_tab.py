@@ -23,6 +23,8 @@ import dash_bootstrap_components as dbc
 
 from nanometa_live.app.tabs.classification_tab import (
     register_classification_callbacks,
+)
+from nanometa_live.app.tabs.classification_helpers import (
     create_sankey_data,
     create_sunburst_data,
     create_placeholder_sankey,

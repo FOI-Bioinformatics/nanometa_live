@@ -174,7 +174,10 @@ def register_qc_callbacks(app: Dash):
                                 "Bp": total_reads * 1500  # Estimate bp
                             })
                     except Exception as e:
-                        logging.debug(f"Error reading Kraken report {kreport_file}: {e}")
+                        # Promote to warning: a skipped report leaves the QC
+                        # table incomplete, which the operator should see
+                        # rather than silently missing a sample's row.
+                        logging.warning(f"Error reading Kraken report {kreport_file}: {e}")
                         continue
 
             # Figure construction is a pure function in qc_tab_helpers.

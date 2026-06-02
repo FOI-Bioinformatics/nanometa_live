@@ -271,10 +271,12 @@ python -c "from nanometa_live.app.app import create_app; print('OK')"
   into a sibling `app/tabs/<name>_helpers.py` module and keep only the thin
   Dash wiring (Inputs/Outputs, store reads, I/O) in the callback. The helper
   functions take plain arguments and return plain values, so they can be
-  unit-tested without a running app. Existing splits: `dashboard_helpers.py`
-  (including `select_verdict`, the clinical verdict state machine),
-  `kraken2_helpers.py`, `main_tab_helpers.py`, `qc_tab_helpers.py`,
-  `validation_tab_helpers.py`, and `config_tab_helpers.py`.
+  unit-tested without a running app. Every tab now follows this split; the
+  helper modules are `dashboard_helpers.py` (including `select_verdict`, the
+  clinical verdict state machine), `kraken2_helpers.py`, `main_tab_helpers.py`,
+  `qc_tab_helpers.py`, `validation_tab_helpers.py`, `config_tab_helpers.py`,
+  `preparation_helpers.py`, and `classification_helpers.py` (the Sankey and
+  Sunburst figure builders).
 
 ### Formatting
 

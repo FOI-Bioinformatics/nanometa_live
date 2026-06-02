@@ -10,7 +10,7 @@ import pandas as pd
 from pathlib import Path
 
 # Import visualization functions
-from nanometa_live.app.tabs.classification_tab import create_sunburst_data
+from nanometa_live.app.tabs.classification_helpers import create_sunburst_data
 
 
 class TestSunburstTaxonomyLevels:
@@ -158,7 +158,7 @@ class TestSunburstVsSankeyParity:
 
     def test_same_parameters_signature(self, kraken_data_medium, sample_config):
         """Test that both functions accept same core parameters."""
-        from nanometa_live.app.tabs.classification_tab import create_sankey_data
+        from nanometa_live.app.tabs.classification_helpers import create_sankey_data
 
         domains = ["Bacteria"]
         tax_levels = ["D", "P", "F", "S"]
@@ -179,7 +179,7 @@ class TestSunburstVsSankeyParity:
 
     def test_both_respect_tax_levels(self, kraken_data_medium, sample_config):
         """Test that both visualizations respect tax_levels parameter."""
-        from nanometa_live.app.tabs.classification_tab import create_sankey_data
+        from nanometa_live.app.tabs.classification_helpers import create_sankey_data
 
         # Select only 3 levels
         tax_levels = ["P", "F", "S"]

@@ -590,6 +590,11 @@ def register_watchlist_callbacks(app: Dash) -> None:
             from nanometa_live.core.utils.genome_manager import get_genome_manager
             genome_mgr = get_genome_manager()
         except Exception:
+            # Degrade to no genome status rather than failing the whole table,
+            # but log it: a broken genome manager silently drops every entry's
+            # download/BLAST annotation, which looks identical to "no genomes".
+            logger.warning("Could not load genome manager for watchlist status; "
+                           "genome annotations will be omitted", exc_info=True)
             genome_mgr = None
 
         # Create rows with mapping info and genome status

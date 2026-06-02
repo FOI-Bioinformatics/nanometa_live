@@ -46,6 +46,16 @@ class TestCircuitBreaker:
     def test_host_extraction(self):
         assert TaxonomyAPIClient._circuit_host(URL) == HOST
 
+    def test_host_extraction_falls_back_and_logs_on_parse_failure(self, caplog):
+        # A URL that cannot be parsed must not be swallowed silently: the
+        # raw URL is used as the breaker key and the failure is logged so a
+        # malformed endpoint is diagnosable rather than retried in silence.
+        with patch("urllib.parse.urlparse", side_effect=ValueError("bad url")):
+            with caplog.at_level("WARNING"):
+                result = TaxonomyAPIClient._circuit_host(URL)
+        assert result == URL
+        assert any("circuit-breaker host" in rec.message for rec in caplog.records)
+
     def test_opens_after_threshold_failures(self):
         for _ in range(TaxonomyAPIClient._CIRCUIT_FAILURE_THRESHOLD):
             TaxonomyAPIClient._circuit_record_failure(URL)

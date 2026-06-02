@@ -270,6 +270,11 @@ class TaxonomyAPIClient(ABC):
             from urllib.parse import urlparse
             return urlparse(url).netloc or url
         except Exception:
+            # Fall back to the raw URL as the breaker key, but log it: a URL
+            # that cannot be parsed points at a malformed endpoint that
+            # warrants triage rather than silent per-call retries.
+            logger.warning("Could not parse circuit-breaker host from URL %r; "
+                           "using raw URL as key", url, exc_info=True)
             return url
 
     @classmethod

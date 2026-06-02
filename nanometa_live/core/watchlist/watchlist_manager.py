@@ -71,6 +71,26 @@ def _get_watchlist_loader():
         return _watchlist_loader
 
 
+# Severity ordering for threat levels. ThreatLevel.value is a STRING
+# ("critical", "high", ...), so comparing .value directly is a lexicographic
+# compare ("critical" < "high" < "low" < "moderate"), which is NOT severity
+# order. Merging entries by that comparison silently under-escalates a
+# CRITICAL organism onto a LOW one (and downgrades CRITICAL when a HIGH entry
+# merges in). Rank explicitly so "more severe wins" actually holds.
+_THREAT_SEVERITY = {
+    ThreatLevel.CRITICAL: 4,
+    ThreatLevel.HIGH: 3,
+    ThreatLevel.MODERATE: 2,
+    ThreatLevel.LOW: 1,
+    ThreatLevel.UNKNOWN: 0,
+}
+
+
+def _threat_severity(level: ThreatLevel) -> int:
+    """Return the severity rank of a threat level (higher == more severe)."""
+    return _THREAT_SEVERITY.get(level, 0)
+
+
 class WatchlistSource(Enum):
     """Source of a watchlist entry."""
     BUILTIN = "builtin"      # From pathogens.yaml
@@ -580,12 +600,17 @@ class WatchlistManager:
                 # MERGE: Entry already exists from another watchlist
                 existing = self._entries[entry.taxid]
 
+                # Snapshot the pre-merge state so a later user-override can
+                # record the TRUE originals, not the already-merged values.
+                pre_merge_threshold = existing.alert_threshold
+                pre_merge_threat_level = existing.threat_level
+
                 # Add new watchlist_id to the set
                 if watchlist_id:
                     existing.watchlist_ids.add(watchlist_id)
 
-                # Keep higher threat level (more severe)
-                if entry.threat_level.value > existing.threat_level.value:
+                # Keep higher threat level (more severe), ranked by severity.
+                if _threat_severity(entry.threat_level) > _threat_severity(existing.threat_level):
                     existing.threat_level = entry.threat_level
 
                 # Keep lower threshold (more sensitive alerting)
@@ -606,9 +631,9 @@ class WatchlistManager:
                 if existing.source == WatchlistSource.BUILTIN and source != WatchlistSource.BUILTIN:
                     existing.user_override = True
                     if existing.original_threshold is None:
-                        existing.original_threshold = existing.alert_threshold
+                        existing.original_threshold = pre_merge_threshold
                     if existing.original_threat_level is None:
-                        existing.original_threat_level = existing.threat_level
+                        existing.original_threat_level = pre_merge_threat_level
 
                 # Don't overwrite - we merged into existing
                 return
@@ -629,7 +654,7 @@ class WatchlistManager:
                 existing = self._entries[pseudo_taxid]
                 if watchlist_id:
                     existing.watchlist_ids.add(watchlist_id)
-                if entry.threat_level.value > existing.threat_level.value:
+                if _threat_severity(entry.threat_level) > _threat_severity(existing.threat_level):
                     existing.threat_level = entry.threat_level
                 existing.alert_threshold = min(existing.alert_threshold, entry.alert_threshold)
                 # Preserve existing enabled state (don't force enable on merge)

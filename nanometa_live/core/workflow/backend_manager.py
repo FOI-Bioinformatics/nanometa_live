@@ -507,8 +507,11 @@ class BackendManager:
         }
         path = os.path.join(outdir, BackendManager.RUN_METADATA_FILENAME)
         try:
-            with open(path, "w", encoding="utf-8") as fh:
-                json.dump(payload, fh, indent=2, sort_keys=True)
+            # Atomic temp+replace so a crash mid-write can never leave a
+            # truncated metadata file that the next launch would have to
+            # treat as a corrupt fingerprint.
+            from nanometa_live.core.utils.atomic_write import atomic_write_json
+            atomic_write_json(path, payload)
         except OSError as e:
             logging.warning(f"Could not write run metadata to {path}: {e}")
 
