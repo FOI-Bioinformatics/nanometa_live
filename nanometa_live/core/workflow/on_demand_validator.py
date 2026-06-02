@@ -630,17 +630,18 @@ class OnDemandValidator:
         # Compute percent_validated as a percentage (0-100)
         percent_validated = job.validation_rate  # already stored as percentage
 
-        # Determine validation_status using the same thresholds as the parser
-        if job.validated_reads == 0 and job.total_reads == 0:
-            validation_status = "no_data"
-        elif percent_validated >= 80 and job.avg_identity >= 90:
-            validation_status = "confirmed"
-        elif percent_validated >= 50:
-            validation_status = "partial"
-        elif percent_validated > 0:
-            validation_status = "low"
-        else:
-            validation_status = "no_data"
+        # Determine validation_status via the parser's single source of truth
+        # (ValidationResult.determine_status) so the on-demand and pipeline
+        # paths can never drift apart on the threshold logic.
+        from nanometa_live.core.parsers.blast_validation_parser import ValidationResult
+        validation_status = ValidationResult(
+            sample_id=job.sample,
+            taxid=job.taxid,
+            total_reads=job.total_reads,
+            validated_reads=job.validated_reads,
+            percent_validated=percent_validated,
+            percent_identity_mean=job.avg_identity,
+        ).determine_status().value
 
         results = {
             # Fields expected by BlastValidationParser.parse_validation_json()

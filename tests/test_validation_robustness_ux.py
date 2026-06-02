@@ -212,3 +212,94 @@ def test_minimap2_and_blast_coexist_for_same_taxid(tmp_path):
     pair = [r for r in results if r.sample_id == "barcode14" and r.taxid == 263]
     methods = {r.validation_method for r in pair}
     assert "minimap2" in methods and "blast" in methods
+
+
+# ---------------------------------------------------------------------------
+# R1: on-demand status determination delegates to the parser (no drift)
+# ---------------------------------------------------------------------------
+
+from nanometa_live.core.workflow.on_demand_validator import (
+    OnDemandValidator, ValidationJob, ValidationStatus as ODStatus)
+from nanometa_live.core.parsers.blast_validation_parser import (
+    ValidationResult, ValidationStatus)
+
+
+@pytest.mark.parametrize("pct,identity,total,validated,expected", [
+    (100.0, 99.0, 24, 24, "confirmed"),
+    (60.0, 95.0, 20, 12, "partial"),
+    (10.0, 80.0, 20, 2, "low"),
+    (0.0, 0.0, 0, 0, "no_data"),
+])
+def test_on_demand_status_matches_parser(tmp_path, pct, identity, total, validated, expected):
+    """_save_results must label status identically to the parser's
+    ValidationResult.determine_status for the same metrics (R1: no drift)."""
+    v = OnDemandValidator(str(tmp_path))
+    job = ValidationJob(taxid=263, name="Francisella tularensis", sample="barcode14")
+    job.total_reads = total
+    job.validated_reads = validated
+    job.validation_rate = pct
+    job.avg_identity = identity
+    v._save_results(job)
+
+    written = json.loads(
+        (tmp_path / "on_demand_validation" / "barcode14_263_validation.json").read_text()
+    )
+    parser_status = ValidationResult(
+        sample_id="barcode14", taxid=263, total_reads=total, validated_reads=validated,
+        percent_validated=pct, percent_identity_mean=identity,
+    ).determine_status().value
+    assert written["validation_status"] == expected
+    assert written["validation_status"] == parser_status
+
+
+# ---------------------------------------------------------------------------
+# R3: an on-demand result supersedes the pipeline result for the same
+# (sample, taxid, method); other methods are untouched.
+# ---------------------------------------------------------------------------
+
+def _write_pipeline_blast(results_dir, sample, taxid, pident):
+    blast = results_dir / "validation" / "blast"
+    blast.mkdir(parents=True, exist_ok=True)
+    (blast / f"{sample}_taxid{taxid}.blast.tsv").write_text(
+        f"read1\tACC\t{pident}\t500\t0\t0\t1\t500\t1\t500\t1e-50\t900\n"
+    )
+
+
+def _write_on_demand_validation_json(results_dir, sample, taxid, **fields):
+    od = results_dir / "on_demand_validation"
+    od.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "sample_id": sample, "taxid": taxid, "species": "X",
+        "total_reads": 100, "validated_reads": 95, "percent_validated": 95.0,
+        "percent_identity_mean": 99.0, "validation_method": "blast",
+        "validation_status": "confirmed",
+    }
+    payload.update(fields)
+    (od / f"{sample}_{taxid}_validation.json").write_text(json.dumps(payload))
+
+
+def test_on_demand_supersedes_pipeline_blast(tmp_path):
+    """An on-demand blast result replaces the pipeline blast row for the same
+    (sample, taxid) rather than being dropped as a duplicate (R3)."""
+    _write_pipeline_blast(tmp_path, "barcode14", 263, pident=91.0)
+    _write_on_demand_validation_json(
+        tmp_path, "barcode14", 263, percent_identity_mean=99.5, validated_reads=95)
+    results = ValidationParser(str(tmp_path)).get_validation_results()
+    blast = [r for r in results
+             if r.sample_id == "barcode14" and r.taxid == 263
+             and r.validation_method == "blast"]
+    assert len(blast) == 1                       # not duplicated
+    assert blast[0].percent_identity_mean == 99.5  # on-demand value won
+
+
+def test_on_demand_does_not_clobber_other_method(tmp_path):
+    """On-demand blast must not remove a pipeline minimap2 result for the
+    same (sample, taxid) -- different method (R3)."""
+    _write_minimap2_stats(
+        tmp_path, "barcode14", 263, total_reads=24, mapped_reads=24,
+        hit_rate=1.0, avg_identity=99.0, avg_coverage=0.9, validation_status="confirmed")
+    _write_on_demand_validation_json(tmp_path, "barcode14", 263)
+    results = ValidationParser(str(tmp_path)).get_validation_results()
+    methods = {r.validation_method for r in results
+               if r.sample_id == "barcode14" and r.taxid == 263}
+    assert "minimap2" in methods and "blast" in methods

@@ -306,6 +306,14 @@ Genome list `<outdir>/validation/pathogen_genomes.json` is cumulative across cal
 (atomic `.replace()`). Aggregator re-runs each invocation to rebuild
 `validation_results.json` over the union.
 
+On load, an on-demand result *supersedes* the pipeline result for the same
+`(sample, taxid, method)` in `ValidationParser.get_validation_results` (it is an
+explicit operator re-check, so it wins in place); a method the on-demand run did
+not cover is left untouched. `OnDemandValidator._save_results` derives its
+`validation_status` from `ValidationResult.determine_status` rather than a private
+threshold copy, so the two paths cannot drift. Both changed in the 2026-06-02
+validation audit.
+
 Requirements: `pipeline_source` configured, `save_reads_assignment: true`,
 original FASTQ accessible. `pipeline_source` is now mandatory: missing config
 or a `None` return from `validate_via_nanometanf` produces a failed

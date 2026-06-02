@@ -598,24 +598,29 @@ class ValidationParser:
             self.results_dir, self.validation_dir, sample, taxid, results))
 
         # Also check the on_demand_validation/ directory for results produced by
-        # OnDemandValidator.  These supplement (never replace) pipeline results.
+        # OnDemandValidator. An on-demand run is an explicit operator re-check,
+        # so for a given (sample, taxid, method) it SUPERSEDES the pipeline
+        # result (in place, preserving order) rather than being dropped as a
+        # duplicate; a method the on-demand run did not cover is left untouched.
         on_demand_dir = self.results_dir / "on_demand_validation"
         if on_demand_dir.is_dir():
-            # Check for an aggregate JSON produced by on-demand runs
+            def _supersede(od_r):
+                key = (od_r.sample_id, od_r.taxid, od_r.validation_method)
+                for i, r in enumerate(results):
+                    if (r.sample_id, r.taxid, r.validation_method) == key:
+                        results[i] = od_r
+                        return
+                results.append(od_r)
+
+            # Aggregate JSON produced by on-demand runs
             od_aggregate = on_demand_dir / "validation_results.json"
             if od_aggregate.exists():
-                od_results = self.parse_nanometanf_aggregate_json(
+                for od_r in self.parse_nanometanf_aggregate_json(
                     od_aggregate, sample=sample, taxid=taxid
-                )
-                for od_r in od_results:
-                    already_present = any(
-                        r.sample_id == od_r.sample_id and r.taxid == od_r.taxid
-                        for r in results
-                    )
-                    if not already_present:
-                        results.append(od_r)
+                ):
+                    _supersede(od_r)
 
-            # Also scan individual JSON files in on_demand_validation/
+            # Individual JSON files in on_demand_validation/
             for json_file in on_demand_dir.glob("*_validation.json"):
                 od_r = self.parse_validation_json(json_file)
                 if od_r is None:
@@ -624,12 +629,7 @@ class ValidationParser:
                     continue
                 if taxid and od_r.taxid != taxid:
                     continue
-                already_present = any(
-                    r.sample_id == od_r.sample_id and r.taxid == od_r.taxid
-                    for r in results
-                )
-                if not already_present:
-                    results.append(od_r)
+                _supersede(od_r)
 
         logger.info(f"Retrieved {len(results)} validation results")
         if cache_this_call:
