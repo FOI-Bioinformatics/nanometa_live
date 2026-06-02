@@ -3,7 +3,7 @@ dash-ag-grid>=31.0.0
 dash-bootstrap-components>=1.7.1
 dash-daq>=0.6.0
 pandas>=2.2.3
-numpy>=1.22.0  # CVE-2021-34141 fix requires >=1.22.0
+numpy>=2.0.0  # 1.x is EOL (1.26 ended Sep 2025); suite is tested on numpy 2.x
 plotly>=6.0.0
 ruamel.yaml>=0.18.10
 PyYAML>=6.0.1  # Used by watchlist_loader, pathogen_loader, and other modules
@@ -22,4 +22,5 @@ openpyxl>=3.1.0  # Required for XLSX export
 # Or via conda: conda install -c bioconda nextflow
 
 # Security note: Reviewed 2024-12. No critical CVEs in current versions.
-# numpy 1.26.x EOL September 2025 - consider upgrading to 2.x
+# numpy floored at 2.x: the 1.x series is end-of-life (1.26 ended Sep 2025)
+# and the test suite runs against numpy 2.x (verified 2026-06 on 2.4.4).
