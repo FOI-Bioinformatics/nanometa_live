@@ -148,19 +148,18 @@ class ValidationParser:
     """
     Parser for BLAST and minimap2 validation results from nanometanf pipeline.
 
-    Supports multiple output formats:
+    Supports the current nanometanf output formats:
     1. nanometanf aggregate JSON (validation_results.json, preferred)
-    2. JSON validation summary (validation_summary.json, legacy)
-    3. Legacy BLAST tabular output (outfmt 6)
+    2. Per-(sample, taxid) JSON summaries (*_validation.json)
+    3. Per-(sample, taxid) BLAST tabular output (*.blast.tsv, outfmt 6)
 
     Directory structure expected:
         results/
         ├── validation/
-        │   └── validation_results.json          # nanometanf aggregate output
-        ├── blast_validation/
-        │   ├── barcode01_562_validation.json    # JSON summary
-        │   ├── barcode01_562.blast.txt          # Raw BLAST output
-        │   └── validation_summary.json          # Combined summary
+        │   ├── validation_results.json          # nanometanf aggregate output
+        │   └── blast/
+        │       ├── barcode01_562_validation.json    # JSON summary
+        │       └── barcode01_taxid562.blast.tsv     # Raw BLAST output (outfmt 6)
         └── ...
     """
 
@@ -227,7 +226,7 @@ class ValidationParser:
         """Check if any validation data exists."""
         if self.validation_dir and self.validation_dir.exists():
             # Check for any validation files
-            patterns = ['*.json', '*.blast.tsv', '*.blast.txt', '*_blast.txt']
+            patterns = ['*.json', '*.blast.tsv']
             for pattern in patterns:
                 if list(self.validation_dir.glob(pattern)):
                     return True
@@ -296,7 +295,7 @@ class ValidationParser:
         total_reads: int = 0
     ) -> ValidationResult:
         """
-        Parse legacy BLAST tabular output (outfmt 6).
+        Parse BLAST tabular output (outfmt 6).
 
         BLAST outfmt 6 columns:
         qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore
@@ -550,35 +549,7 @@ class ValidationParser:
                     self._results_cache_mtime = fingerprint
                 return aggregate_results
 
-        # Next, check for combined summary JSON
-        summary_path = self.validation_dir / 'validation_summary.json'
-        if summary_path.exists():
-            try:
-                with open(summary_path, 'r') as f:
-                    summary_data = json.load(f)
-
-                for entry in summary_data.get('validations', []):
-                    result = ValidationResult.from_dict(entry)
-
-                    # Apply filters
-                    if sample and result.sample_id != sample:
-                        continue
-                    if taxid and result.taxid != taxid:
-                        continue
-
-                    results.append(result)
-
-                if results:
-                    logger.info(f"Loaded {len(results)} results from summary JSON")
-                    if cache_this_call:
-                        self._results_cache = list(results)
-                        self._results_cache_mtime = fingerprint
-                    return results
-
-            except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
-                logger.exception(f"Error reading validation summary: {e}")
-
-        # Fall back to individual files
+        # Per-(sample, taxid) individual JSON summaries
         json_files = list(self.validation_dir.glob('*_validation.json'))
         for json_file in json_files:
             result = self.parse_validation_json(json_file)
@@ -590,45 +561,42 @@ class ValidationParser:
                     continue
                 results.append(result)
 
-        # Also check for legacy BLAST tabular files.
-        # nanometanf v1.1+ produces *.blast.tsv; legacy formats used *.blast.txt.
-        blast_patterns = ['*.blast.tsv', '*.blast.txt', '*_blast.txt']
-        for pattern in blast_patterns:
-            for blast_file in self.validation_dir.glob(pattern):
-                # Try to extract sample and taxid from filename
-                # Expected formats: sample_taxid.blast.txt or sample_taxid_blast.txt
-                stem = blast_file.stem.replace('_blast', '').replace('.blast', '')
-                parts = stem.rsplit('_', 1)
+        # Per-(sample, taxid) BLAST tabular files (nanometanf *.blast.tsv).
+        for blast_file in self.validation_dir.glob('*.blast.tsv'):
+            # Try to extract sample and taxid from filename
+            # Expected format: sample_taxid.blast.tsv
+            stem = blast_file.stem.replace('_blast', '').replace('.blast', '')
+            parts = stem.rsplit('_', 1)
 
-                if len(parts) >= 2:
-                    file_sample = parts[0]
-                    taxid_part = parts[1]
-                    # nanometanf names files with a 'taxid' prefix, e.g.
-                    # barcode01_taxid562.blast.tsv -> taxid_part = "taxid562"
-                    if taxid_part.startswith('taxid'):
-                        taxid_part = taxid_part[5:]
-                    try:
-                        file_taxid = int(taxid_part)
-                    except ValueError:
-                        continue
+            if len(parts) >= 2:
+                file_sample = parts[0]
+                taxid_part = parts[1]
+                # nanometanf names files with a 'taxid' prefix, e.g.
+                # barcode01_taxid562.blast.tsv -> taxid_part = "taxid562"
+                if taxid_part.startswith('taxid'):
+                    taxid_part = taxid_part[5:]
+                try:
+                    file_taxid = int(taxid_part)
+                except ValueError:
+                    continue
 
-                    # Apply filters
-                    if sample and file_sample != sample:
-                        continue
-                    if taxid and file_taxid != taxid:
-                        continue
+                # Apply filters
+                if sample and file_sample != sample:
+                    continue
+                if taxid and file_taxid != taxid:
+                    continue
 
-                    # Check if we already have JSON result for this
-                    existing = [r for r in results
-                                if r.sample_id == file_sample and r.taxid == file_taxid]
-                    if existing:
-                        continue
+                # Check if we already have JSON result for this
+                existing = [r for r in results
+                            if r.sample_id == file_sample and r.taxid == file_taxid]
+                if existing:
+                    continue
 
-                    # Parse tabular file
-                    result = self.parse_blast_tabular(
-                        blast_file, file_sample, file_taxid
-                    )
-                    results.append(result)
+                # Parse tabular file
+                result = self.parse_blast_tabular(
+                    blast_file, file_sample, file_taxid
+                )
+                results.append(result)
 
         # Also check the on_demand_validation/ directory for results produced by
         # OnDemandValidator.  These supplement (never replace) pipeline results.
@@ -781,8 +749,6 @@ def generate_mock_validation_data(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    all_validations = []
-
     for sample in samples:
         for pathogen in pathogens:
             taxid = pathogen.get('taxid', 0)
@@ -822,19 +788,6 @@ def generate_mock_validation_data(
             filename = f"{sample}_{taxid}_validation.json"
             with open(output_path / filename, 'w') as f:
                 json.dump(result.to_dict(), f, indent=2)
-
-            all_validations.append(result.to_dict())
-
-    # Write summary file
-    summary = {
-        'generated_at': datetime.now().isoformat(),
-        'samples': samples,
-        'pathogens': len(pathogens),
-        'validations': all_validations
-    }
-
-    with open(output_path / 'validation_summary.json', 'w') as f:
-        json.dump(summary, f, indent=2)
 
     logger.info(f"Generated mock validation data for {len(samples)} samples, {len(pathogens)} pathogens")
 

@@ -85,14 +85,14 @@ class TestLoadBlastValidationData:
         assert load_blast_validation_data(str(tmp_path), WATCHLIST) == {}
 
 
-class TestLegacyBlastTabularFallback:
-    """No aggregate/canonical JSON present -> scan validation/blast/<taxid>.txt."""
+class TestBlastTabularFallback:
+    """No aggregate/canonical JSON present -> scan validation/blast/*_<taxid>.blast.tsv."""
 
     def test_counts_unique_reads_from_tabular_files(self, tmp_path):
         blast = tmp_path / "validation" / "blast"
         blast.mkdir(parents=True)
         # Two HSPs for read1, one for read2 -> 2 unique validated reads.
-        (blast / "562.txt").write_text(
+        (blast / "barcode01_562.blast.tsv").write_text(
             "read1\tref\t98.0\nread1\tref\t95.0\nread2\tref\t92.0\n"
         )
         out = load_blast_validation_data(str(tmp_path), WATCHLIST)
@@ -106,7 +106,7 @@ class TestLegacyBlastTabularFallback:
     def test_no_blast_files_for_taxid_reports_no_data(self, tmp_path):
         blast = tmp_path / "validation" / "blast"
         blast.mkdir(parents=True)
-        (blast / "999.txt").write_text("readX\tref\t98.0\n")  # different taxid
+        (blast / "barcode01_999.blast.tsv").write_text("readX\tref\t98.0\n")  # different taxid
         out = load_blast_validation_data(str(tmp_path), WATCHLIST)
         assert out[562]["status"] == "no_data"
         assert out[562]["validated_reads"] == 0

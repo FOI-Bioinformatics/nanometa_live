@@ -41,8 +41,7 @@ def load_validation_data(
 
     Checks for results in priority order:
     1. validation/validation_results.json (nanometanf aggregate output)
-    2. blast_validation/validation_summary.json (legacy format)
-    3. Legacy BLAST tabular files (fallback)
+    2. Per-(sample, taxid) *.blast.tsv tabular files (fallback)
 
     Args:
         main_dir: Main nanometanf output directory
@@ -236,26 +235,15 @@ def load_blast_validation_data(
         blast_files = []
 
         if sample is None or sample == "All Samples":
-            # Look for all files matching this taxid
-            # Supports both legacy .txt and nanometanf .blast.tsv extensions
-            patterns = [
-                os.path.join(blast_dir, f"*_{taxid}.txt"),
-                os.path.join(blast_dir, f"{taxid}.txt"),
-                os.path.join(blast_dir, f"*_{taxid}_blast.txt"),
-                os.path.join(blast_dir, f"*_{taxid}.blast.tsv"),
-            ]
-            for pattern in patterns:
-                blast_files.extend(glob.glob(pattern))
+            # Look for all files matching this taxid (nanometanf *.blast.tsv)
+            blast_files.extend(
+                glob.glob(os.path.join(blast_dir, f"*_{taxid}.blast.tsv"))
+            )
         else:
-            # Look for sample-specific file
-            # Supports both legacy .txt and nanometanf .blast.tsv extensions
-            patterns = [
-                os.path.join(blast_dir, f"{sample}_{taxid}.txt"),
-                os.path.join(blast_dir, f"{sample}_{taxid}_blast.txt"),
-                os.path.join(blast_dir, f"{sample}_{taxid}.blast.tsv"),
-            ]
-            for pattern in patterns:
-                blast_files.append(pattern)
+            # Look for the sample-specific file (nanometanf *.blast.tsv)
+            blast_files.append(
+                os.path.join(blast_dir, f"{sample}_{taxid}.blast.tsv")
+            )
 
         # Count validated reads from all matching files
         unique_reads = set()
