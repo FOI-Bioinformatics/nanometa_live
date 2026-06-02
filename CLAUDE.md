@@ -296,6 +296,27 @@ the blast.tsv results rather than dedup against them. Added in the 2026-06-02
 validation audit after a live run showed the Coverage tab blank mid-run despite
 high-quality `.minimap2_stats.json` already on disk.
 
+### Realtime cumulative validation + per-batch drill-down
+
+In realtime mode the pipeline keeps a run-so-far cumulative view per
+`(sample, taxid)` instead of overwriting each batch (the prior behaviour, where a
+later empty batch reset a confirmed organism to 0). Layout:
+
+- **Cumulative (canonical flat):** `validation/{minimap2,blast}/<sample>_taxid<tid>.{paf,blast.tsv,*_stats.json}`
+  — kept current each batch by nanometanf's `validation_cumulative_aggregator`
+  module (merges the prior cumulative + the new batch, recomputes stats; coverage
+  breadth is recomputed since it is not additive, `total_reads` is accumulated
+  since it is not in the alignment files). The GUI reads these by default.
+- **Per-batch (preserved):** `validation/{minimap2,blast}/batch/<sample>_taxid<tid>_<batch_id>.*`
+  — every batch retained for drill-down. `batch_id` is the realtime batch index.
+
+GUI side: a "View: Cumulative / Single batch" toggle (hidden unless a `batch/`
+dir exists) drives `get_validation_results(batch_id=…)` and
+`_load_real_coverage(batch_id=…)`; batch results come from
+`core/parsers/validation_batch.py`. In batch processing mode (no `meta.batch_id`)
+nothing changes — the flat file is the result and the aggregator is skipped.
+Added 2026-06-02 (nanometanf + nanometa_live `validation-cumulative-realtime`).
+
 ### On-demand validation
 
 `OnDemandValidator.validate_organism()` invokes `nextflow run -resume --validation_only`
