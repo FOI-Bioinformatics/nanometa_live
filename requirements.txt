@@ -21,6 +21,11 @@ openpyxl>=3.1.0  # Required for XLSX export
 # Installation: curl -s https://get.nextflow.io | bash
 # Or via conda: conda install -c bioconda nextflow
 
-# Security note: Reviewed 2024-12. No critical CVEs in current versions.
+# Security note: Reviewed 2026-06. One known CVE: diskcache 5.6.3
+# (CVE-2025-69872, pickle deserialization -> code execution). Low exposure
+# here: the DiskcacheManager cache is per-process under user-owned
+# ~/.nanometa (app.py:_ensure_background_callback_manager) and requires
+# local write access to exploit. No patched release exists; 5.6.3 is the
+# latest. Re-evaluate if Dash gains a non-pickle background-callback backend.
 # numpy floored at 2.x: the 1.x series is end-of-life (1.26 ended Sep 2025)
 # and the test suite runs against numpy 2.x (verified 2026-06 on 2.4.4).

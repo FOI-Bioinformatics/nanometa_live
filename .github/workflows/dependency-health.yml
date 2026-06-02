@@ -41,8 +41,15 @@ jobs:
         if: always()
         run: pip list --outdated || true
 
-      - name: Security audit (informational)
+      - name: Security audit (fails on new vulnerabilities)
         if: always()
         run: |
           pip install pip-audit
-          pip-audit || true
+          # Accept the one known, unfixable finding so the gate still
+          # catches NEW CVEs instead of being a no-op:
+          #   CVE-2025-69872 - diskcache 5.6.3 pickle deserialization.
+          # Low exposure: the cache is per-process under user-owned
+          # ~/.nanometa and needs local write access to exploit; no patched
+          # release exists. Drop this ignore if a fix ships or Dash gains a
+          # non-pickle background-callback backend.
+          pip-audit --ignore-vuln CVE-2025-69872

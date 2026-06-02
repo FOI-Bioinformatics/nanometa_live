@@ -8,11 +8,11 @@ channels:
 channel_priority: strict
 dependencies:
   - python >=3.11.0
-  - dash >=3.0.0
+  - dash >=4.0.0
   - dash-daq >=0.6.0
   - dash-bootstrap-components >=1.7.1
   - plotly >=6.0.0
-  - numpy >=1.24.1
+  - numpy >=2.0.0
   - pandas >=2.2.3
   - pyyaml >=6.0
   - pytest >=7.2.1
