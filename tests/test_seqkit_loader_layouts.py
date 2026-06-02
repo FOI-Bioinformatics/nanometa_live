@@ -2,9 +2,9 @@
 Tests for seqkit output layout discovery.
 
 Regression coverage for F9 / P2-4: the nanometanf pipeline emits seqkit stats
-as a flat ``seqkit/<sample>.tsv`` layout; an older CLAUDE.md description and a
-pre-v1.5 loader expected ``seqkit/<sample>/stats/*.tsv``. These tests pin
-both layouts so neither regresses.
+as a flat ``seqkit/<sample>.tsv`` layout. The older nested
+``seqkit/<sample>/stats/*.tsv`` layout was retired (only current-pipeline
+output is supported); a test pins that nested files are now ignored.
 """
 
 import pandas as pd
@@ -51,20 +51,21 @@ class TestSeqkitFlatLayout:
         assert set(df["sample"]) == {"barcode01", "barcode02"}
 
 
-class TestSeqkitNestedLayout:
-    def test_nested_single_sample(self, tmp_path):
+class TestSeqkitNestedLayoutRetired:
+    """The pre-current nested ``stats/`` layout is no longer read."""
+
+    def test_nested_single_sample_ignored(self, tmp_path):
         _write_seqkit_tsv(tmp_path / "seqkit" / "barcode01" / "stats" / "stats.tsv")
 
         df = load_seqkit_stats(str(tmp_path), sample="barcode01")
-        assert not df.empty
-        assert df.iloc[0]["num_seqs"] == 100
+        assert df.empty
 
-    def test_nested_all_samples(self, tmp_path):
+    def test_nested_all_samples_ignored(self, tmp_path):
         _write_seqkit_tsv(tmp_path / "seqkit" / "barcode01" / "stats" / "a.tsv")
         _write_seqkit_tsv(tmp_path / "seqkit" / "barcode02" / "stats" / "b.tsv")
 
         df = load_seqkit_stats(str(tmp_path), sample=None)
-        assert len(df) == 2
+        assert df.empty
 
 
 class TestSeqkitMissing:

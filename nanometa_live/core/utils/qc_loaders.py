@@ -548,22 +548,20 @@ def load_seqkit_stats(main_dir: str, sample: Optional[str] = None) -> pd.DataFra
     """
     Load seqkit sequence statistics (used when QC tool is chopper).
 
-    The loader supports three upstream layouts:
+    The loader supports two upstream layouts:
 
-    1. Flat ``seqkit/<sample>.tsv`` (nanometanf v1.4 and earlier; also the
-       end-of-stream output of ``SEQKIT_MERGE_STATS`` in v1.5).
-    2. Nested ``seqkit/<sample>/stats/*.tsv`` (older nanometanf nested
-       layout, retained for backwards compatibility).
-    3. Incremental ``seqkit/<sample>/batch_stats/*.tsv`` (nanometanf v1.5
-       streaming mode). Each TSV is a single-batch snapshot; the merged
-       cumulative file is only published at end-of-stream, so a realtime
-       run that hits the configured timeout exposes only the per-batch
-       files. In that state the loader sums ``num_seqs`` and ``sum_len``
-       across batches and recomputes the quality metrics as a per-base
-       weighted average, mirroring the SEQKIT_MERGE_STATS Python script
-       in the nanometanf pipeline.
+    1. Flat ``seqkit/<sample>.tsv`` (the end-of-stream output of
+       ``SEQKIT_MERGE_STATS``).
+    2. Incremental ``seqkit/<sample>/batch_stats/*.tsv`` (streaming mode).
+       Each TSV is a single-batch snapshot; the merged cumulative file is
+       only published at end-of-stream, so a realtime run that hits the
+       configured timeout exposes only the per-batch files. In that state
+       the loader sums ``num_seqs`` and ``sum_len`` across batches and
+       recomputes the quality metrics as a per-base weighted average,
+       mirroring the SEQKIT_MERGE_STATS Python script in the nanometanf
+       pipeline.
 
-    Layouts (1) and (2) are read directly. Layout (3) is detected via
+    Layout (1) is read directly. Layout (2) is detected via
     ``_is_incremental_seqkit_layout`` and aggregated per sample.
 
     Args:
@@ -583,25 +581,23 @@ def load_seqkit_stats(main_dir: str, sample: Optional[str] = None) -> pd.DataFra
     incremental = _is_incremental_seqkit_layout(seqkit_dir, sample)
 
     if sample is None or sample == "All Samples":
-        # Load all TSV files (flat and nanometanf v1.5 nested layout)
+        # Load all flat TSV files
         tsv_files = glob.glob(os.path.join(seqkit_dir, "*.tsv"))
-        tsv_files.extend(glob.glob(os.path.join(seqkit_dir, "*/stats/*.tsv")))
     else:
-        # Load specific sample (flat and nested layouts)
+        # Load the specific sample's flat TSV(s)
         tsv_files = _find_sample_files(seqkit_dir, sample, ["tsv"])
-        tsv_files.extend(glob.glob(os.path.join(seqkit_dir, f"{sample}/stats/*.tsv")))
 
     if incremental:
         incremental_df = _load_seqkit_incremental(seqkit_dir, sample)
         if not incremental_df.empty:
             if tsv_files:
-                # A flat or nested TSV exists for some samples but not the
-                # incremental one; combine the legacy rows with the
-                # aggregated row(s) so all samples are represented.
-                legacy_df = _read_seqkit_tsvs(tsv_files)
-                if not legacy_df.empty:
+                # A flat TSV exists for some samples but not the incremental
+                # one; combine those rows with the aggregated row(s) so all
+                # samples are represented.
+                flat_df = _read_seqkit_tsvs(tsv_files)
+                if not flat_df.empty:
                     return pd.concat(
-                        [legacy_df, incremental_df], ignore_index=True
+                        [flat_df, incremental_df], ignore_index=True
                     )
             return incremental_df
 
