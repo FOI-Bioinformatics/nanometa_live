@@ -26,8 +26,8 @@ def clear_cache():
 
 
 class TestExtractSampleName:
-    def test_kreport2_txt(self):
-        assert extract_sample_name("barcode01.kreport2.txt") == "barcode01"
+    def test_kraken2_report_txt(self):
+        assert extract_sample_name("barcode01.kraken2.report.txt") == "barcode01"
 
     def test_kraken2_report_txt(self):
         assert extract_sample_name("barcode01.kraken2.report.txt") == "barcode01"
@@ -39,13 +39,13 @@ class TestExtractSampleName:
         assert extract_sample_name("sample_A.fastp.json") == "sample_A"
 
     def test_batch_suffix_stripped(self):
-        assert extract_sample_name("barcode01_batch0.kreport2.txt") == "barcode01"
+        assert extract_sample_name("barcode01_batch0.kraken2.report.txt") == "barcode01"
 
     def test_batch_suffix_with_dot(self):
         assert extract_sample_name("barcode01.batch2.kraken2.report.txt") == "barcode01"
 
     def test_full_path(self):
-        assert extract_sample_name("/some/path/barcode02.kreport2.txt") == "barcode02"
+        assert extract_sample_name("/some/path/barcode02.kraken2.report.txt") == "barcode02"
 
     def test_no_extension(self):
         # Falls through without matching any extension
@@ -76,7 +76,7 @@ class TestDetectSamplesFromKraken:
     def test_detects_legacy_format(self, tmp_path):
         kraken_dir = tmp_path / "kraken2"
         kraken_dir.mkdir()
-        (kraken_dir / "sample1.kreport2.txt").write_text("data")
+        (kraken_dir / "sample1.kraken2.report.txt").write_text("data")
 
         samples = detect_samples_from_kraken(str(kraken_dir))
         assert "sample1" in samples

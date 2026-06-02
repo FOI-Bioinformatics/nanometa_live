@@ -27,7 +27,7 @@ class TestIsStandardReport:
 
     def test_plain_report_accepted(self):
         assert _is_standard_report("barcode01.kraken2.report.txt")
-        assert _is_standard_report("sample.kreport2.txt")
+        assert _is_standard_report("sample.kraken2.report.txt")
 
     def test_cumulative_excluded(self):
         assert not _is_standard_report("sample.cumulative.kraken2.report.txt")
@@ -526,9 +526,9 @@ class TestLoadKrakenDataFlatLayout:
         assert df_one is not None and not df_one.empty
         assert int(df_one.iloc[0]["reads"]) == 10
 
-    def test_flat_layout_kreport2_extension(self, tmp_path):
-        """The flat fallback must also accept the legacy ``.kreport2.txt``
-        suffix emitted by older nanometanf versions."""
+    def test_legacy_kreport2_extension_ignored(self, tmp_path):
+        """The retired ``.kreport2.txt`` suffix from older nanometanf versions
+        is no longer read; only ``.kraken2.report.txt`` is recognised."""
         self._clear_caches()
         kraken_dir = tmp_path / "kraken2"
         kraken_dir.mkdir()
@@ -538,8 +538,7 @@ class TestLoadKrakenDataFlatLayout:
         _backdate_mtime(report)
 
         df = load_kraken_data(str(tmp_path), sample="legacy_sample")
-        assert df is not None and not df.empty
-        assert int(df.iloc[0]["reads"]) == 7
+        assert df is None or df.empty
 class TestEmptyKrakenDirDiagnostics:
     """When the loader returns empty, the warning must list directory state."""
 

@@ -172,7 +172,7 @@ class TestQCStatistics:
             ["25.00", "2500", "2500", "D", "2157", "Archaea"],
         ]
 
-        kreport_file = kraken_dir / "sample1.kreport2.txt"
+        kreport_file = kraken_dir / "sample1.kraken2.report.txt"
         with open(kreport_file, 'w') as f:
             for row in kraken_data:
                 f.write("\t".join(row) + "\n")
@@ -202,7 +202,7 @@ class TestQCStatistics:
     def test_kraken_classification_statistics(self, mock_kraken_data):
         """Test calculation of Kraken classification statistics."""
         kraken_dir = mock_kraken_data / "kraken2"
-        kreport_file = list(kraken_dir.glob("*.kreport2.txt"))[0]
+        kreport_file = list(kraken_dir.glob("*.kraken2.report.txt"))[0]
 
         kraken_df = pd.read_csv(
             kreport_file,

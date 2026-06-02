@@ -88,7 +88,6 @@ def resolve_analysis_directory(main_dir: str) -> str:
                 # Verify there are actual report files, not just an empty directory
                 report_patterns = [
                     os.path.join(kraken_check, "*.kraken2.report.txt"),
-                    os.path.join(kraken_check, "*.kreport2.txt")
                 ]
                 has_reports = any(
                     glob.glob(pattern) for pattern in report_patterns
@@ -117,15 +116,15 @@ def extract_sample_name(filename: str) -> str:
     of the same sample together for visualization.
 
     Args:
-        filename: Name of the file (e.g., "barcode01_batch0.kreport2.txt")
+        filename: Name of the file (e.g., "barcode01_batch0.kraken2.report.txt")
 
     Returns:
         Sample name without extensions and batch suffix (e.g., "barcode01")
 
     Examples:
-        >>> extract_sample_name("barcode01.kreport2.txt")
+        >>> extract_sample_name("barcode01.kraken2.report.txt")
         'barcode01'
-        >>> extract_sample_name("barcode01_batch0.kreport2.txt")
+        >>> extract_sample_name("barcode01_batch0.kraken2.report.txt")
         'barcode01'
         >>> extract_sample_name("sample_A.fastp.json")
         'sample_A'
@@ -142,7 +141,6 @@ def extract_sample_name(filename: str) -> str:
     extensions_to_remove = [
         '.cumulative.kraken2.report.txt',  # Incremental mode cumulative reports (must be first)
         '.kraken2.report.txt',  # nanometanf v1.2+
-        '.kreport2.txt',         # Legacy
         '.kraken2.txt',
         '.fastp.json',
         '.txt',
@@ -189,7 +187,6 @@ def detect_samples_from_kraken(kraken_dir: str) -> Set[str]:
     kreport_patterns = [
         os.path.join(kraken_dir, "*.cumulative.kraken2.report.txt"),  # Incremental mode cumulative
         os.path.join(kraken_dir, "*.kraken2.report.txt"),  # nanometanf v1.2+
-        os.path.join(kraken_dir, "*.kreport2.txt"),         # Legacy
     ]
     kreport_files = []
     for pattern in kreport_patterns:
@@ -451,11 +448,11 @@ def get_sample_file_mapping(main_dir: str) -> Dict[str, Dict[str, List[str]]]:
         Dictionary mapping sample names to lists of file paths:
         {
             'barcode01': {
-                'kraken2': ['/path/kraken2/barcode01_batch0.kreport2.txt',
-                           '/path/kraken2/barcode01_batch1.kreport2.txt'],
+                'kraken2': ['/path/kraken2/barcode01_batch0.kraken2.report.txt',
+                           '/path/kraken2/barcode01_batch1.kraken2.report.txt'],
                 'fastp': ['/path/fastp/barcode01_batch0.fastp.json',
                          '/path/fastp/barcode01_batch1.fastp.json'],
-                'blast': ['/path/blast/barcode01_*.txt']
+                'blast': ['/path/blast/barcode01_*.blast.tsv']
             },
             ...
         }
@@ -474,12 +471,10 @@ def get_sample_file_mapping(main_dir: str) -> Dict[str, Dict[str, List[str]]]:
 
         # Kraken2 files (may be multiple batches)
         kraken_dir = os.path.join(main_dir, "kraken2")
-        # Match both nanometanf v1.2+ and legacy formats, with and without batch suffix
+        # Match nanometanf report naming, with and without batch suffix
         kraken_patterns = [
             os.path.join(kraken_dir, f"{sample}.kraken2.report.txt"),    # nanometanf v1.2+
             os.path.join(kraken_dir, f"{sample}_*.kraken2.report.txt"),  # nanometanf batches
-            os.path.join(kraken_dir, f"{sample}.kreport2.txt"),          # Legacy
-            os.path.join(kraken_dir, f"{sample}_*.kreport2.txt")         # Legacy batches
         ]
         kraken_files = []
         for pattern in kraken_patterns:

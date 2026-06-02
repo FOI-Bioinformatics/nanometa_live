@@ -67,7 +67,7 @@ monitor.start_monitoring(interval=10)
 **Multiple File Format Support:**
 - TSV parsing for MultiQC data
 - JSON parsing for FASTP and batch statistics
-- Kraken2 kreport2 format
+- Kraken2 report format (`.kraken2.report.txt`)
 - BLAST outfmt 6 (tabular)
 
 **Flexible File Discovery:**
@@ -143,9 +143,8 @@ results/
 ### Supported File Patterns
 
 **Kraken2:**
-- `{sample}.kreport2`
 - `{sample}.kraken2.report.txt`
-- `{sample}_kraken2.report`
+- `{sample}.cumulative.kraken2.report.txt`
 
 **FASTP:**
 - `{sample}.fastp.json`

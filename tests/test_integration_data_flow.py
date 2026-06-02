@@ -119,7 +119,7 @@ class TestSampleDetection:
         from nanometa_live.core.utils.loader_utils import clear_data_cache
 
         clear_data_cache()
-        assert extract_sample_name("barcode01_batch0.kreport2.txt") == "barcode01"
+        assert extract_sample_name("barcode01_batch0.kraken2.report.txt") == "barcode01"
 
     def test_strip_cumulative_suffix(self) -> None:
         """Cumulative report suffixes should be removed from sample names."""

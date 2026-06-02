@@ -194,7 +194,7 @@ def main():
         lines = generate_kraken_report(selected_species, total_reads, unclassified_pct)
 
         # Write to file
-        output_file = kraken_dir / f"{barcode_name}.kreport2.txt"
+        output_file = kraken_dir / f"{barcode_name}.kraken2.report.txt"
         with open(output_file, 'w') as f:
             f.write('\n'.join(lines))
 

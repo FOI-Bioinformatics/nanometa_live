@@ -58,7 +58,7 @@ class TestSeqkitInFreshnessScan:
     def test_no_change_keeps_fingerprint_stable(self, tmp_path):
         for sub in ("kraken2", "fastp", "validation", "seqkit"):
             (tmp_path / sub).mkdir()
-        _touch(tmp_path / "kraken2" / "sample.kreport2.txt", mtime=1_700_000_000)
+        _touch(tmp_path / "kraken2" / "sample.kraken2.report.txt", mtime=1_700_000_000)
         _touch(tmp_path / "seqkit" / "sample.tsv", mtime=1_700_000_000)
 
         fp1 = check_data_freshness(str(tmp_path))
@@ -70,7 +70,7 @@ class TestKraken2InFreshnessScan:
     def test_kraken2_change_advances_fingerprint(self, tmp_path):
         for sub in ("kraken2", "fastp", "validation", "seqkit"):
             (tmp_path / sub).mkdir()
-        kr_file = tmp_path / "kraken2" / "barcode01.kreport2.txt"
+        kr_file = tmp_path / "kraken2" / "barcode01.kraken2.report.txt"
         _touch(kr_file, mtime=1_700_000_000)
 
         fp1 = check_data_freshness(str(tmp_path))

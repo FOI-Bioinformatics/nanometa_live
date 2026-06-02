@@ -148,8 +148,6 @@ def register_qc_callbacks(app: Dash):
                 kreport_files = glob.glob(os.path.join(kraken_dir, "*.cumulative.kraken2.report.txt"))
                 if not kreport_files:
                     kreport_files = glob.glob(os.path.join(kraken_dir, "*.kraken2.report.txt"))
-                if not kreport_files:
-                    kreport_files = glob.glob(os.path.join(kraken_dir, "*.kreport2.txt"))
 
                 for kreport_file in kreport_files:
                     try:
@@ -167,7 +165,7 @@ def register_qc_callbacks(app: Dash):
 
                         if total_reads > 0:
                             mtime = os.path.getmtime(kreport_file)
-                            sample_name = os.path.basename(kreport_file).replace(".cumulative.kraken2.report.txt", "").replace(".kraken2.report.txt", "").replace(".kreport2.txt", "")
+                            sample_name = os.path.basename(kreport_file).replace(".cumulative.kraken2.report.txt", "").replace(".kraken2.report.txt", "")
 
                             sample_data.append({
                                 "Sample": sample_name,

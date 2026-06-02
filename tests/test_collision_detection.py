@@ -58,7 +58,7 @@ class TestDetectExistingResults:
         assert BackendManager.detect_existing_results(str(tmp_path)) == []
 
     def test_kraken2_with_file_is_detected(self, tmp_path):
-        _touch(tmp_path / "kraken2" / "sample.kreport2.txt")
+        _touch(tmp_path / "kraken2" / "sample.kraken2.report.txt")
         assert BackendManager.detect_existing_results(str(tmp_path)) == [
             "kraken2"
         ]
@@ -71,7 +71,7 @@ class TestDetectExistingResults:
         ]
 
     def test_multiple_subdirs_all_returned(self, tmp_path):
-        _touch(tmp_path / "kraken2" / "sample.kreport2.txt")
+        _touch(tmp_path / "kraken2" / "sample.kraken2.report.txt")
         _touch(tmp_path / "fastp" / "sample.fastp.json")
         _touch(tmp_path / "seqkit" / "sample.tsv")
         result = BackendManager.detect_existing_results(str(tmp_path))
@@ -79,13 +79,13 @@ class TestDetectExistingResults:
 
     def test_unknown_subdir_ignored(self, tmp_path):
         # Subdirs that aren't in the known list are not flagged.
-        _touch(tmp_path / "kraken2" / "sample.kreport2.txt")
+        _touch(tmp_path / "kraken2" / "sample.kraken2.report.txt")
         _touch(tmp_path / "my_random_stuff" / "anything.txt")
         result = BackendManager.detect_existing_results(str(tmp_path))
         assert result == ["kraken2"]
 
     def test_idempotent_when_unchanged(self, tmp_path):
-        _touch(tmp_path / "kraken2" / "sample.kreport2.txt")
+        _touch(tmp_path / "kraken2" / "sample.kraken2.report.txt")
         first = BackendManager.detect_existing_results(str(tmp_path))
         second = BackendManager.detect_existing_results(str(tmp_path))
         assert first == second
@@ -109,7 +109,7 @@ class TestArchiveExistingResults:
         )
 
     def test_archives_kraken2_dir(self, tmp_path):
-        _touch(tmp_path / "kraken2" / "sample.kreport2.txt", "k2")
+        _touch(tmp_path / "kraken2" / "sample.kraken2.report.txt", "k2")
 
         archive = BackendManager.archive_existing_results(str(tmp_path))
 
@@ -120,9 +120,9 @@ class TestArchiveExistingResults:
         assert archive_path.name.startswith("_archive_")
         # Original kraken2 dir is gone, content preserved under archive
         assert not (tmp_path / "kraken2").exists()
-        assert (archive_path / "kraken2" / "sample.kreport2.txt").exists()
+        assert (archive_path / "kraken2" / "sample.kraken2.report.txt").exists()
         assert (
-            archive_path / "kraken2" / "sample.kreport2.txt"
+            archive_path / "kraken2" / "sample.kraken2.report.txt"
         ).read_text() == "k2"
 
     def test_archives_multiple_subdirs(self, tmp_path):

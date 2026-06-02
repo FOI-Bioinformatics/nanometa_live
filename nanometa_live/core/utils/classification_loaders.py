@@ -52,7 +52,6 @@ def _diagnose_empty_kraken_dir(kraken_dir: str, sample: Optional[str] = None) ->
     patterns = [
         "*.cumulative.kraken2.report.txt",
         "*.kraken2.report.txt",
-        "*.kreport2.txt",
         "*_batch*.kraken2.report.txt",
     ]
     return (
@@ -517,7 +516,7 @@ def _parse_kraken_data_uncached(
             logging.debug(f"Found {len(kreport_files)} cumulative Kraken2 reports")
         else:
             # 2. Standard (non-batch, non-cumulative) reports -- top-level
-            for ext_pattern in ("*.kraken2.report.txt", "*.kreport2.txt"):
+            for ext_pattern in ("*.kraken2.report.txt",):
                 for f in glob.glob(os.path.join(kraken_dir, ext_pattern)):
                     basename = os.path.basename(f)
                     if _is_standard_report(basename):
@@ -525,7 +524,7 @@ def _parse_kraken_data_uncached(
 
             # 2b. Fallback: v1.5 nested subdirs
             if not kreport_files:
-                for ext_pattern in ("*.kraken2.report.txt", "*.kreport2.txt"):
+                for ext_pattern in ("*.kraken2.report.txt",):
                     for f in _scan_subdirs_for_pattern(kraken_dir, ext_pattern):
                         basename = os.path.basename(f)
                         if _is_standard_report(basename):
@@ -539,7 +538,7 @@ def _parse_kraken_data_uncached(
             # against future filter changes that might drop reports out
             # of 2a while no nested layout is present.
             if not kreport_files:
-                for ext_pattern in ("*.kraken2.report.txt", "*.kreport2.txt"):
+                for ext_pattern in ("*.kraken2.report.txt",):
                     for f in glob.glob(os.path.join(kraken_dir, ext_pattern)):
                         basename = os.path.basename(f)
                         if _is_standard_report(basename):
@@ -562,7 +561,7 @@ def _parse_kraken_data_uncached(
                 logging.debug("No standard reports found, looking for batch files")
                 candidate_batches: List[str] = []
                 # Top-level batch files
-                for ext_pattern in ("*_batch*.kraken2.report.txt", "*_batch*.kreport2.txt"):
+                for ext_pattern in ("*_batch*.kraken2.report.txt",):
                     candidate_batches.extend(glob.glob(os.path.join(kraken_dir, ext_pattern)))
                 # v1.5: batch_reports/ inside per-sample subdirs
                 candidate_batches.extend(
@@ -589,7 +588,7 @@ def _parse_kraken_data_uncached(
                         def _batch_sample(fp: str) -> str:
                             basename = os.path.basename(fp)
                             stem = re.sub(
-                                r'\.(cumulative\.kraken2\.report|kraken2\.report|kreport2)\.txt$',
+                                r'\.(cumulative\.kraken2\.report|kraken2\.report)\.txt$',
                                 '', basename,
                             )
                             # Strip batch_N suffix if it is embedded in the filename.
@@ -637,7 +636,7 @@ def _parse_kraken_data_uncached(
         for kreport_file in kreport_files:
             basename = os.path.basename(kreport_file)
             stem = re.sub(
-                r'\.(cumulative\.kraken2\.report|kraken2\.report|kreport2)\.txt$',
+                r'\.(cumulative\.kraken2\.report|kraken2\.report)\.txt$',
                 '', basename
             )
             parent_dir = os.path.basename(os.path.dirname(kreport_file))
@@ -720,13 +719,13 @@ def _parse_kraken_data_uncached(
             logging.debug(f"Found cumulative Kraken2 report for {sample}")
         else:
             # 2. Standard (non-batch) reports via direct path
-            for ext in (f"{sample}.kraken2.report.txt", f"{sample}.kreport2.txt"):
+            for ext in (f"{sample}.kraken2.report.txt",):
                 p = os.path.join(kraken_dir, ext)
                 if os.path.exists(p):
                     sample_files.append(p)
             # v1.5 nested fallback
             if not sample_files:
-                for ext in (f"{sample}.kraken2.report.txt", f"{sample}.kreport2.txt"):
+                for ext in (f"{sample}.kraken2.report.txt",):
                     p = os.path.join(kraken_dir, sample, ext)
                     if os.path.exists(p):
                         sample_files.append(p)
@@ -736,7 +735,7 @@ def _parse_kraken_data_uncached(
             # ``per_file``/``single_sample`` layout explicit at the
             # per-sample call site.
             if not sample_files:
-                for ext in (f"{sample}.kraken2.report.txt", f"{sample}.kreport2.txt"):
+                for ext in (f"{sample}.kraken2.report.txt",):
                     p = os.path.join(kraken_dir, ext)
                     if os.path.exists(p):
                         sample_files.append(p)
@@ -758,7 +757,7 @@ def _parse_kraken_data_uncached(
             # files emitted only by the incremental writer).
             if not sample_files:
                 candidate_batches: List[str] = []
-                for ext_pattern in (f"{sample}_batch*.kraken2.report.txt", f"{sample}_batch*.kreport2.txt"):
+                for ext_pattern in (f"{sample}_batch*.kraken2.report.txt",):
                     candidate_batches.extend(glob.glob(os.path.join(kraken_dir, ext_pattern)))
                 # v1.5: batch_reports/ subdirectory inside per-sample folder
                 batch_dir = os.path.join(kraken_dir, sample, "batch_reports")
@@ -796,7 +795,7 @@ def _parse_kraken_data_uncached(
             # unconditionally.
             try:
                 has_any_kreports = any(
-                    f.endswith(".kraken2.report.txt") or f.endswith(".kreport2.txt")
+                    f.endswith(".kraken2.report.txt")
                     for f in os.listdir(kraken_dir)
                 )
             except OSError:
@@ -892,7 +891,6 @@ def load_kraken_latest_batch(main_dir: str, sample_name: str) -> pd.DataFrame:
     candidate_batches: List[str] = []
     for ext_pattern in (
         f"{sample_name}_batch*.kraken2.report.txt",
-        f"{sample_name}_batch*.kreport2.txt",
     ):
         candidate_batches.extend(glob.glob(os.path.join(kraken_dir, ext_pattern)))
 
@@ -920,7 +918,6 @@ def load_kraken_latest_batch(main_dir: str, sample_name: str) -> pd.DataFrame:
     # 2. Fall back to standard (non-cumulative) report when no batch files exist.
     for ext in (
         f"{sample_name}.kraken2.report.txt",
-        f"{sample_name}.kreport2.txt",
     ):
         for candidate in (
             os.path.join(kraken_dir, ext),
@@ -966,7 +963,5 @@ def describe_kraken_scan_locations(main_dir: str) -> Dict[str, object]:
         "patterns": [
             "*.cumulative.kraken2.report.txt",
             "*.kraken2.report.txt",
-            "*.kreport2.txt",
-            "*.kreport2",
         ],
     }

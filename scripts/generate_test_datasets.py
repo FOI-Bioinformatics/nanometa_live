@@ -165,7 +165,7 @@ def create_dataset(output_dir: str, name: str, species_count: int, total_reads: 
     lines = generate_kraken_report(selected_species, total_reads, unclassified_pct)
 
     # Write to file
-    output_file = kraken_dir / "barcode01.kreport2.txt"
+    output_file = kraken_dir / "barcode01.kraken2.report.txt"
     with open(output_file, 'w') as f:
         f.write('\n'.join(lines))
 

@@ -119,8 +119,10 @@ Loader priority order (cumulative beats per-batch):
 
 1. `*.cumulative.kraken2.report.txt` (real-time cumulative)
 2. `*.kraken2.report.txt`
-3. `*.kreport2.txt` (nanometanf output)
-4. `*.kreport2` (legacy)
+
+The pre-current `*.kreport2.txt` / `*.kreport2` naming was retired in the
+2026-06-02 sunset pass; only the current nanometanf `*.kraken2.report.txt`
+naming is recognised.
 
 Per-batch reports `*_batch*.kraken2.report.txt` are excluded — `load_kraken_latest_batch()`
 selects the highest-numbered batch and never sums across them.
@@ -160,7 +162,7 @@ results/
 
 Notes:
 - `fastp/` and `seqkit/` are mutually exclusive; QC loaders try fastp first, fall back to seqkit.
-- `seqkit/<sample>.tsv` is the current flat layout. The older nested `seqkit/<sample>/stats/*.tsv` is still supported.
+- `seqkit/<sample>.tsv` is the current flat layout (plus the incremental `seqkit/<sample>/batch_stats/*.tsv`). The older nested `seqkit/<sample>/stats/*.tsv` layout was retired in the 2026-06-02 sunset pass.
 - Nextflow trace lives at `pipeline_info/execution_trace_*.txt` (per `nextflow.config:407` in nanometanf). The GUI's NextflowManager redirects its own copy to `~/.nanometa/logs/trace.txt` for status polling, but the canonical pipeline emit is under `pipeline_info/`.
 
 ## Configuration

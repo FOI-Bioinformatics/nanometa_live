@@ -191,10 +191,10 @@ class MockDataGenerator:
         """
         Generate a Kraken2-style taxonomic report.
 
-        Format matches actual Kraken2 kreport2 output.
+        Format matches actual Kraken2 report output (nanometanf naming).
         """
         kraken_dir = os.path.join(self.base_dir, "kraken2")
-        output_file = os.path.join(kraken_dir, f"{sample_name}.kreport2.txt")
+        output_file = os.path.join(kraken_dir, f"{sample_name}.kraken2.report.txt")
 
         # Calculate classified vs unclassified based on scenario
         if self.scenario == MockDataScenario.QUALITY_ISSUES:

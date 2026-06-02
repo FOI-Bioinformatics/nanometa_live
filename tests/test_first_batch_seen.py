@@ -23,7 +23,7 @@ def test_first_batch_seen_only_empty_files(tmp_path):
     # Empty placeholder files do not count as a real first batch.
     krk = tmp_path / "kraken2"
     krk.mkdir()
-    (krk / "barcode01.kreport2.txt").write_text("")
+    (krk / "barcode01.kraken2.report.txt").write_text("")
     assert first_batch_seen(str(tmp_path)) is False
 
 
@@ -32,7 +32,7 @@ def test_first_batch_seen_flips_true_on_nonempty_file(tmp_path):
     krk.mkdir()
     # Pre-condition: still empty.
     assert first_batch_seen(str(tmp_path)) is False
-    (krk / "barcode01.kreport2.txt").write_text("data")
+    (krk / "barcode01.kraken2.report.txt").write_text("data")
     # Post-condition: a non-empty file flips the flag.
     assert first_batch_seen(str(tmp_path)) is True
 
