@@ -148,19 +148,11 @@ class ValidationParser:
     """
     Parser for BLAST and minimap2 validation results from nanometanf pipeline.
 
-    Supports the current nanometanf output formats:
-    1. nanometanf aggregate JSON (validation_results.json, preferred)
-    2. Per-(sample, taxid) JSON summaries (*_validation.json)
-    3. Per-(sample, taxid) BLAST tabular output (*.blast.tsv, outfmt 6)
-
-    Directory structure expected:
-        results/
-        ├── validation/
-        │   ├── validation_results.json          # nanometanf aggregate output
-        │   └── blast/
-        │       ├── barcode01_562_validation.json    # JSON summary
-        │       └── barcode01_taxid562.blast.tsv     # Raw BLAST output (outfmt 6)
-        └── ...
+    Supports the current nanometanf output formats (under results/validation/):
+    1. Aggregate JSON (validation_results.json, preferred when present)
+    2. Per-(sample, taxid) JSON summaries (blast/*_validation.json)
+    3. Per-(sample, taxid) BLAST tabular output (blast/*.blast.tsv, outfmt 6)
+    4. Per-(sample, taxid) minimap2 stats (minimap2/*.minimap2_stats.json)
     """
 
     # Validation thresholds
@@ -478,7 +470,8 @@ class ValidationParser:
     def get_validation_results(
         self,
         sample: Optional[str] = None,
-        taxid: Optional[int] = None
+        taxid: Optional[int] = None,
+        batch_id: Optional[str] = None,
     ) -> List[ValidationResult]:
         """
         Get all validation results, optionally filtered by sample or taxid.
@@ -486,10 +479,16 @@ class ValidationParser:
         Args:
             sample: Filter by sample name (optional)
             taxid: Filter by taxonomy ID (optional)
+            batch_id: when set, read a single realtime batch from
+                ``validation/{tool}/batch/`` instead of the cumulative files.
 
         Returns:
             List of ValidationResult objects
         """
+        if batch_id:
+            from nanometa_live.core.parsers.validation_batch import collect_batch_results
+            return collect_batch_results(self.results_dir, batch_id, sample, taxid, self.parse_blast_tabular)
+
         # Cache fast-path: if the validation directory has not changed
         # since the last full parse, reuse the cached unfiltered list
         # and apply the (sample, taxid) filter in-memory.
@@ -598,25 +597,34 @@ class ValidationParser:
                 )
                 results.append(result)
 
-        # Also check the on_demand_validation/ directory for results produced by
-        # OnDemandValidator.  These supplement (never replace) pipeline results.
+        # Surface per-(sample, taxid) minimap2 coverage from individual stats
+        # files (core/parsers/minimap2_stats.py): keeps the Coverage tab live
+        # before the aggregate JSON exists in a realtime run.
+        from nanometa_live.core.parsers.minimap2_stats import collect_minimap2_results
+        results.extend(collect_minimap2_results(
+            self.results_dir, self.validation_dir, sample, taxid, results))
+
+        # On-demand results supersede the pipeline result for the same
+        # (sample, taxid, method) in place (see CLAUDE.md); other methods kept.
         on_demand_dir = self.results_dir / "on_demand_validation"
         if on_demand_dir.is_dir():
-            # Check for an aggregate JSON produced by on-demand runs
+            def _supersede(od_r):
+                key = (od_r.sample_id, od_r.taxid, od_r.validation_method)
+                for i, r in enumerate(results):
+                    if (r.sample_id, r.taxid, r.validation_method) == key:
+                        results[i] = od_r
+                        return
+                results.append(od_r)
+
+            # Aggregate JSON produced by on-demand runs
             od_aggregate = on_demand_dir / "validation_results.json"
             if od_aggregate.exists():
-                od_results = self.parse_nanometanf_aggregate_json(
+                for od_r in self.parse_nanometanf_aggregate_json(
                     od_aggregate, sample=sample, taxid=taxid
-                )
-                for od_r in od_results:
-                    already_present = any(
-                        r.sample_id == od_r.sample_id and r.taxid == od_r.taxid
-                        for r in results
-                    )
-                    if not already_present:
-                        results.append(od_r)
+                ):
+                    _supersede(od_r)
 
-            # Also scan individual JSON files in on_demand_validation/
+            # Individual JSON files in on_demand_validation/
             for json_file in on_demand_dir.glob("*_validation.json"):
                 od_r = self.parse_validation_json(json_file)
                 if od_r is None:
@@ -625,12 +633,7 @@ class ValidationParser:
                     continue
                 if taxid and od_r.taxid != taxid:
                     continue
-                already_present = any(
-                    r.sample_id == od_r.sample_id and r.taxid == od_r.taxid
-                    for r in results
-                )
-                if not already_present:
-                    results.append(od_r)
+                _supersede(od_r)
 
         logger.info(f"Retrieved {len(results)} validation results")
         if cache_this_call:

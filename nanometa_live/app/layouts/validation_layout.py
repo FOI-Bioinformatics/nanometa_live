@@ -192,7 +192,10 @@ def _create_blast_tab() -> dbc.Tab:
                     html.Hr(),
 
                     # Results cards container
-                    html.Div(id="blast-results-container", className="mb-4"),
+                    dcc.Loading(
+                        type="circle",
+                        children=[html.Div(id="blast-results-container", className="mb-4")],
+                    ),
 
                     # Identity distribution plot (collapsible)
                     dbc.Accordion([
@@ -359,6 +362,8 @@ def _create_coverage_tab() -> dbc.Tab:
                                 step=1,
                                 className="form-control",
                                 style={"maxWidth": "120px"},
+                                persistence=True,
+                                persistence_type="session",
                             ),
                         ], md=2),
                         dbc.Col([
@@ -390,6 +395,8 @@ def _create_coverage_tab() -> dbc.Tab:
                                 step=1,
                                 className="form-control",
                                 style={"maxWidth": "120px"},
+                                persistence=True,
+                                persistence_type="session",
                             ),
                         ], md=3),
                         dbc.Col([
@@ -458,7 +465,10 @@ def _create_coverage_tab() -> dbc.Tab:
             html.Hr(),
 
             # Results cards container (minimap2 cards)
-            html.Div(id="coverage-results-container", className="mb-4"),
+            dcc.Loading(
+                type="circle",
+                children=[html.Div(id="coverage-results-container", className="mb-4")],
+            ),
 
             # Download component
             dcc.Download(id="download-coverage-report"),
@@ -522,6 +532,47 @@ def create_validation_layout() -> html.Div:
             ],
             color="light",
             className="border mb-4",
+        ),
+
+        # View-mode control (shared by both sub-tabs). Cumulative is the
+        # run-so-far picture (default); Single batch drills into one realtime
+        # batch. The whole row stays hidden unless per-batch outputs exist on
+        # disk (i.e. a realtime run), so a batch-mode run is unaffected.
+        dbc.Row(
+            [
+                dbc.Col(
+                    [
+                        dbc.Label("View:", className="fw-bold me-2 mb-0"),
+                        dbc.RadioItems(
+                            id="validation-view-mode",
+                            options=[
+                                {"label": "Cumulative (run so far)", "value": "cumulative"},
+                                {"label": "Single batch", "value": "batch"},
+                            ],
+                            value="cumulative",
+                            inline=True,
+                            persistence=True,
+                            persistence_type="session",
+                        ),
+                    ],
+                    md="auto",
+                    className="d-flex align-items-center",
+                ),
+                dbc.Col(
+                    dcc.Dropdown(
+                        id="validation-batch-selector",
+                        placeholder="Select a batch...",
+                        clearable=False,
+                        style={"minWidth": "280px"},
+                    ),
+                    md="auto",
+                    id="validation-batch-selector-col",
+                    style={"display": "none"},
+                ),
+            ],
+            id="validation-view-controls",
+            className="mb-3 g-2 align-items-center",
+            style={"display": "none"},
         ),
 
         # Shared data store
