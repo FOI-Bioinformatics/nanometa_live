@@ -65,6 +65,22 @@ def _diagnose_empty_kraken_dir(kraken_dir: str, sample: Optional[str] = None) ->
     )
 
 
+def _is_standard_report(basename: str) -> bool:
+    """True for a plain (non-cumulative, non-batch) Kraken2 report filename.
+
+    Standard reports are the per-sample end-of-run reports; cumulative
+    snapshots and per-batch deltas are selected by dedicated code paths and
+    must be excluded here. Centralised so the four-clause exclusion rule
+    cannot drift between the call sites that filter glob results.
+    """
+    return (
+        '.cumulative.' not in basename
+        and '_batch' not in basename
+        and '.batch_' not in basename
+        and not basename.startswith('batch_')
+    )
+
+
 def _scan_subdirs_for_pattern(
     parent_dir: str,
     file_pattern: str,
@@ -504,7 +520,7 @@ def _parse_kraken_data_uncached(
             for ext_pattern in ("*.kraken2.report.txt", "*.kreport2.txt"):
                 for f in glob.glob(os.path.join(kraken_dir, ext_pattern)):
                     basename = os.path.basename(f)
-                    if '.cumulative.' not in basename and '_batch' not in basename and '.batch_' not in basename and not basename.startswith('batch_'):
+                    if _is_standard_report(basename):
                         kreport_files.append(f)
 
             # 2b. Fallback: v1.5 nested subdirs
@@ -512,7 +528,7 @@ def _parse_kraken_data_uncached(
                 for ext_pattern in ("*.kraken2.report.txt", "*.kreport2.txt"):
                     for f in _scan_subdirs_for_pattern(kraken_dir, ext_pattern):
                         basename = os.path.basename(f)
-                        if '.cumulative.' not in basename and '_batch' not in basename and '.batch_' not in basename and not basename.startswith('batch_'):
+                        if _is_standard_report(basename):
                             kreport_files.append(f)
 
             # 2c. Final flat-root re-scan as a defensive fallback for
@@ -526,7 +542,7 @@ def _parse_kraken_data_uncached(
                 for ext_pattern in ("*.kraken2.report.txt", "*.kreport2.txt"):
                     for f in glob.glob(os.path.join(kraken_dir, ext_pattern)):
                         basename = os.path.basename(f)
-                        if '.cumulative.' not in basename and '_batch' not in basename and '.batch_' not in basename and not basename.startswith('batch_'):
+                        if _is_standard_report(basename):
                             kreport_files.append(f)
 
             kreport_files = list(dict.fromkeys(os.path.realpath(f) for f in kreport_files))

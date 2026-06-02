@@ -14,11 +14,28 @@ import pytest
 from nanometa_live.core.utils.classification_loaders import (
     KRAKEN2_EXPECTED_COLUMNS,
     _is_incremental_layout,
+    _is_standard_report,
     _parse_kraken2_report,
     _deduplicate_batch_files,
     load_kraken_data,
     load_kraken_latest_batch,
 )
+
+
+class TestIsStandardReport:
+    """The shared cumulative/batch exclusion predicate used to select plain reports."""
+
+    def test_plain_report_accepted(self):
+        assert _is_standard_report("barcode01.kraken2.report.txt")
+        assert _is_standard_report("sample.kreport2.txt")
+
+    def test_cumulative_excluded(self):
+        assert not _is_standard_report("sample.cumulative.kraken2.report.txt")
+
+    def test_batch_variants_excluded(self):
+        assert not _is_standard_report("sample_batch3.kraken2.report.txt")
+        assert not _is_standard_report("sample.batch_3.kraken2.report.txt")
+        assert not _is_standard_report("batch_3.kraken2.report.txt")
 
 
 def _backdate_mtime(path, seconds=5):
