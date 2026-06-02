@@ -334,7 +334,11 @@ def _batch_selector_state(config: Optional[dict], view_mode: Optional[str],
     batch_ids = _enumerate_batch_ids(config)
     if not batch_ids:
         return hidden, hidden, [], None
-    options = [{"label": b, "value": b} for b in batch_ids]
+    # Label numeric batch ids as "Batch N" for clarity; keep raw label otherwise.
+    options = [
+        {"label": (f"Batch {b}" if b.isdigit() else b), "value": b}
+        for b in batch_ids
+    ]
     value = current_value if current_value in batch_ids else batch_ids[0]
     col_style = {} if view_mode == "batch" else hidden
     return {}, col_style, options, value
@@ -366,8 +370,13 @@ def _enumerate_batch_ids(config: Optional[dict]) -> List[str]:
             m = pattern.search(f.name)
             if m:
                 batch_ids.add(m.group("batch"))
-    # batch ids carry a trailing timestamp (e.g. "batch_1733142000123"); a plain
-    # reverse-sort puts the most recent first.
+    # batch_id is the per-sample batch sequence number assigned by nanometanf's
+    # taxonomic_classification (an integer counter, 0,1,2,... incremented as each
+    # batch arrives; a given organism appears only in the batches its reads
+    # landed in, so the set is sparse). Sort numerically so the most recent batch
+    # is first; fall back to lexical for any non-numeric id scheme.
+    if batch_ids and all(b.isdigit() for b in batch_ids):
+        return sorted(batch_ids, key=int, reverse=True)
     return sorted(batch_ids, reverse=True)
 
 

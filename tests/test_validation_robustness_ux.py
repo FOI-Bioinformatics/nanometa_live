@@ -374,3 +374,27 @@ def test_load_real_coverage_batch_path(tmp_path):
     assert cov is not None
     assert cov.ref_name == "ref1"
     assert round(cov.breadth, 3) == 0.1   # 100 of 1000 bp covered in this batch
+
+
+def test_enumerate_batch_ids_numeric_sort(tmp_path):
+    """Real batch_ids are per-sample integer counters; sort numerically (most
+    recent first), not lexically (which would put '9' before '58')."""
+    for b in ["3", "9", "30", "58"]:
+        _write_batch_minimap2(tmp_path, "barcode14", 263, b)
+    assert _enumerate_batch_ids({"results_output_directory": str(tmp_path)}) == [
+        "58", "30", "9", "3",
+    ]
+
+
+def test_batch_selector_numeric_labels_and_default(tmp_path):
+    """Numeric batch ids are labelled 'Batch N' and the most recent is the
+    default selection."""
+    from nanometa_live.app.tabs.validation_tab_helpers import _batch_selector_state
+    for b in ["3", "9"]:
+        _write_batch_minimap2(tmp_path, "barcode14", 263, b)
+    _, col_style, options, value = _batch_selector_state(
+        {"results_output_directory": str(tmp_path)}, "batch", None)
+    labels = {o["value"]: o["label"] for o in options}
+    assert labels["9"] == "Batch 9"
+    assert value == "9"          # numeric most-recent, not lexical
+    assert col_style == {}        # batch dropdown visible in batch view
