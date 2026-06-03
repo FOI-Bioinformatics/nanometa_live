@@ -201,6 +201,11 @@ def build_run_preparation_card():
                 "search indexes.",
                 className="text-muted"
             ),
+            # Prerequisite hint, shown only when the species database is not yet
+            # present. Run Preparation's first stage (verify DB) is critical and
+            # aborts the whole run without it, so surface the one prerequisite on
+            # the primary path instead of leaving it buried in Advanced stages.
+            html.Div(id="prep-db-prerequisite"),
             dbc.Checklist(
                 id="prep-options",
                 options=[
@@ -233,7 +238,11 @@ def build_run_preparation_card():
 
 
 def build_advanced_stages_accordion():
-    """Collapsed 'Advanced: Individual Stages' accordion (manual re-runs)."""
+    """Collapsed 'Advanced: Individual Stages' accordion (manual re-runs).
+
+    Has a stable id + item_id so the Run Preparation prerequisite hint can open
+    it and scroll to the database-download card.
+    """
     return dbc.Accordion([
         dbc.AccordionItem([
             html.P(
@@ -250,7 +259,7 @@ def build_advanced_stages_accordion():
             html.Div(_create_genome_downloads_card(), id="genome-downloads-card"),
             # Import Genomes
             html.Div(_create_import_genomes_card(), id="import-genomes-card"),
-        ], title=html.Span([
+        ], item_id="advanced-stages", title=html.Span([
             html.I(className="bi bi-tools me-2"),
             "Advanced: Individual Stages",
             html.Small(
@@ -258,7 +267,7 @@ def build_advanced_stages_accordion():
                 className="text-muted ms-2",
             ),
         ])),
-    ], start_collapsed=True, className="mb-4")
+    ], id="advanced-stages-accordion", start_collapsed=True, className="mb-4")
 
 
 def build_prep_modals():

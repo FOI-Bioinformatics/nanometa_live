@@ -30,6 +30,63 @@ from nanometa_live.app.tabs.preparation_helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _build_prep_result(result):
+    """Render the Run Preparation outcome banner.
+
+    Three states: failed (a critical stage aborted), completed-with-warnings
+    (a non-critical stage recorded a warning or did not finish), and clean
+    success. Distinguishing the middle state stops a green "complete" banner
+    from masking missing genomes / BLAST DBs (only verify-db and build-index
+    are critical; every later stage continues on failure with a warning).
+    """
+    from nanometa_live.core.workflow.mobile_lab_preparer import STAGE_LABELS, PrepStage
+    label_by_value = {s.value: STAGE_LABELS[s] for s in PrepStage}
+
+    retry_btn = dbc.Button(
+        [html.I(className="bi bi-arrow-clockwise me-2"), "Retry Preparation"],
+        id="retry-preparation-btn", color="warning", size="sm",
+    )
+    counts = (f"{result.genomes_downloaded} genomes downloaded, "
+              f"{result.blast_dbs_built} BLAST DBs built.")
+
+    if not result.success:
+        body = [
+            html.I(className="bi bi-x-circle me-2"),
+            html.Strong("Preparation failed. "),
+            html.Ul([html.Li(e) for e in result.errors]),
+        ]
+        if result.warnings:
+            body += [html.Strong("Warnings:"),
+                     html.Ul([html.Li(w) for w in result.warnings])]
+        body += [html.Hr(), retry_btn]
+        return dbc.Alert(body, color="danger")
+
+    if not (result.warnings or result.stages_failed):
+        return dbc.Alert([
+            html.I(className="bi bi-check-circle me-2"),
+            html.Strong("Preparation complete. "),
+            f"{len(result.stages_completed)} stages completed. {counts}",
+        ], color="success")
+
+    # Succeeded overall, but a non-critical stage warned or did not finish.
+    items = [
+        html.Li([html.Strong("Did not finish: "), label_by_value.get(sv, sv)])
+        for sv in result.stages_failed
+    ]
+    items += [html.Li(w) for w in result.warnings]
+    return dbc.Alert([
+        html.I(className="bi bi-exclamation-triangle me-2"),
+        html.Strong("Preparation completed with warnings. "),
+        f"{len(result.stages_completed)} stages completed; {counts} ",
+        "Some confirmation data may be incomplete -- review the items below "
+        "and re-run the relevant Advanced stage if needed.",
+        html.Ul(items, className="mb-2 mt-2"),
+        retry_btn,
+    ], color="warning")
+
+
 def register_preparation_callbacks(app):
     """Register all preparation tab callbacks."""
 
@@ -129,6 +186,62 @@ def register_preparation_callbacks(app):
         prevent_initial_call=True,
     )
 
+    # --- Database prerequisite hint on the Run Preparation card ---
+    # The first prepare() stage (verify DB) is critical and aborts the whole
+    # run if the species database is missing. Surface that one prerequisite on
+    # the primary path -- driven by the same readiness-state Store as the
+    # checklist -- so a first-time operator does not click Start Preparation
+    # only to have it fail at stage 1 with the DB download buried in Advanced.
+    @app.callback(
+        Output("prep-db-prerequisite", "children"),
+        Input("readiness-state", "data"),
+        prevent_initial_call=False,
+    )
+    def render_db_prerequisite(state):
+        checks = (state or {}).get("checks") or []
+        db_ok = next(
+            (c.get("passed") for c in checks if c.get("name") == "Kraken2 Database"),
+            None,
+        )
+        # Only nag when the DB check has actually run and failed. None (no
+        # config / pre-first-check) shows nothing to avoid a false alarm.
+        if db_ok is not False:
+            return None
+        return dbc.Alert([
+            html.I(className="bi bi-exclamation-triangle-fill me-2"),
+            html.Strong("Species database required first. "),
+            "Run Preparation verifies the Kraken2 database as its first step and "
+            "stops if it is missing. Download it before starting.",
+            html.Div(
+                dbc.Button(
+                    [html.I(className="bi bi-download me-2"),
+                     "Open database download"],
+                    id="prep-open-db-download-btn",
+                    color="warning",
+                    size="sm",
+                    n_clicks=0,
+                ),
+                className="mt-2",
+            ),
+        ], color="warning", className="mt-2 mb-3")
+
+    # Open the Advanced accordion and scroll to the DB card from the hint.
+    app.clientside_callback(
+        """
+        function(n_clicks) {
+            if (!n_clicks) return window.dash_clientside.no_update;
+            setTimeout(function() {
+                var el = document.getElementById("kraken2-db-card");
+                if (el) { el.scrollIntoView({behavior: "smooth", block: "center"}); }
+            }, 300);
+            return "advanced-stages";
+        }
+        """,
+        Output("advanced-stages-accordion", "active_item"),
+        Input("prep-open-db-download-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+
     # --- Start Preparation ---
     @app.callback(
         Output("prep-progress-area", "children"),
@@ -202,40 +315,9 @@ def register_preparation_callbacks(app):
                 watchlist_entries=watchlist_snapshot,
             )
             result = preparer.prepare(skip_existing=skip_existing)
-
-            if result.success:
-                alert = dbc.Alert([
-                    html.I(className="bi bi-check-circle me-2"),
-                    html.Strong("Preparation complete. "),
-                    f"{len(result.stages_completed)} stages completed. ",
-                    f"{result.genomes_downloaded} genomes downloaded, "
-                    f"{result.blast_dbs_built} BLAST DBs built.",
-                ], color="success")
-            else:
-                alert = dbc.Alert([
-                    html.I(className="bi bi-x-circle me-2"),
-                    html.Strong("Preparation failed. "),
-                    html.Br(),
-                    html.Ul([html.Li(e) for e in result.errors]),
-                    html.Hr(),
-                    dbc.Button(
-                        [html.I(className="bi bi-arrow-clockwise me-2"), "Retry Preparation"],
-                        id="retry-preparation-btn",
-                        color="warning",
-                        size="sm"
-                    )
-                ], color="danger")
-
-            warnings_div = html.Div()
-            if result.warnings:
-                warnings_div = dbc.Alert([
-                    html.Strong("Warnings:"),
-                    html.Ul([html.Li(w) for w in result.warnings]),
-                ], color="warning", className="mt-2")
-
             return (
                 html.Div(),
-                html.Div([alert, warnings_div]),
+                _build_prep_result(result),
                 False,
             )
 

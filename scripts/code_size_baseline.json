@@ -102,7 +102,6 @@
     "nanometa_live/app/tabs/preparation_tab.py::register_preparation_callbacks",
     "nanometa_live/app/tabs/preparation_tab.py::register_preparation_callbacks.build_missing_blast_dbs",
     "nanometa_live/app/tabs/preparation_tab.py::register_preparation_callbacks.download_missing_genomes",
-    "nanometa_live/app/tabs/preparation_tab.py::register_preparation_callbacks.run_preparation",
     "nanometa_live/app/tabs/preparation_tab.py::register_preparation_callbacks.run_rescan",
     "nanometa_live/app/tabs/preparation_tab.py::register_preparation_callbacks.update_genome_stats",
     "nanometa_live/app/tabs/qc_tab.py",
