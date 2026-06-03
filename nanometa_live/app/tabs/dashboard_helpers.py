@@ -94,6 +94,7 @@ def _make_banner_content(
     triggering_samples: Optional[List[str]] = None,
     total_sample_count: Optional[int] = None,
     auto_stop_remaining_s: Optional[int] = None,
+    triggering_pathogens: Optional[List[str]] = None,
 ) -> dbc.Row:
     """
     Build the inner content for the Zone 1 clinical verdict banner.
@@ -166,6 +167,22 @@ def _make_banner_content(
         html.P(sub, className="dashboard-verdict-sub mb-0",
                style={"color": sub_color}),
     ]
+    # Name the pathogens that crossed their alert threshold -- the operator's
+    # first question on ACTION REQUIRED is "which ones?". Up to 5 inline, the
+    # rest summarized; the full list is on the Organisms tab.
+    if triggering_pathogens:
+        shown_p = triggering_pathogens[:5]
+        overflow_p = max(0, len(triggering_pathogens) - len(shown_p))
+        listed = ", ".join(shown_p)
+        if overflow_p > 0:
+            listed += f" (+{overflow_p} more)"
+        verdict_text_children.append(
+            html.P(
+                [html.Strong("Above threshold: "), listed],
+                className="dashboard-verdict-pathogens mb-0 mt-1",
+                style={"color": sub_color, "fontSize": "14px", "fontWeight": "600"},
+            )
+        )
     if triggering_samples:
         # Top 3 named inline; tail summarized as "(+N more)"
         shown = triggering_samples[:3]

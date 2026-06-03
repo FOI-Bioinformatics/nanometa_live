@@ -169,3 +169,42 @@ class TestVerdictBannerAttributionRuns:
         # and "Triggered by" never made it into the banner.
         assert "Triggered by" in rendered
         assert "barcode01" in rendered
+        # The banner must also NAME the triggering pathogen(s) -- the count
+        # alone ("N of M above threshold") left the operator asking "which?".
+        assert "Above threshold" in rendered
+        assert "Bacillus anthracis" in rendered
+
+
+class TestPathogenNaming:
+    """`_make_banner_content` names the pathogens above threshold so the
+    operator does not have to leave the dashboard to learn which organisms
+    triggered ACTION REQUIRED."""
+
+    def _render(self, triggering_pathogens):
+        from nanometa_live.app.tabs.dashboard_helpers import _make_banner_content
+        content = _make_banner_content(
+            "exclamation-octagon-fill", "#dc3545",
+            "ACTION REQUIRED", "3 of 35 watched pathogens above alert threshold",
+            "ACTIVE", "00:05:00",
+            triggering_pathogens=triggering_pathogens,
+        )
+        return json.dumps(content, default=str)
+
+    def test_names_each_pathogen(self):
+        rendered = self._render(["Bacillus anthracis", "Yersinia pestis"])
+        assert "Above threshold" in rendered
+        assert "Bacillus anthracis" in rendered
+        assert "Yersinia pestis" in rendered
+
+    def test_overflow_beyond_five_summarized(self):
+        names = [f"Pathogen {i}" for i in range(8)]
+        rendered = self._render(names)
+        # First five named inline, the remaining three summarized.
+        assert "Pathogen 0" in rendered
+        assert "Pathogen 4" in rendered
+        assert "(+3 more)" in rendered
+        assert "Pathogen 7" not in rendered
+
+    def test_no_block_when_empty(self):
+        assert "Above threshold" not in self._render(None)
+        assert "Above threshold" not in self._render([])

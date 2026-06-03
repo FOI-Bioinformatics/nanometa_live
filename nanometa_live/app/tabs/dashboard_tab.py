@@ -272,8 +272,20 @@ def register_dashboard_callbacks(app: Dash):
         # REQUIRED needs it -- the operator must know which barcode is hot.
         triggering_samples: Optional[List[str]] = None
         total_real_samples: Optional[int] = None
+        triggering_pathogens: Optional[List[str]] = None
         if descriptor.needs_attribution:
             critical, high_risk = _classify_dangerous(dangerous)
+            # Name the pathogens above threshold (critical first), deduped.
+            # In-memory only -- independent of the per-sample disk I/O below,
+            # so the names render even if that attribution fails.
+            seen_names: set = set()
+            pathogen_names: List[str] = []
+            for d in critical + high_risk:
+                nm = d.get("name") or d.get("common_name")
+                if nm and nm not in seen_names:
+                    seen_names.add(nm)
+                    pathogen_names.append(nm)
+            triggering_pathogens = pathogen_names or None
             collected: List[str] = []
             total_count = 0
             try:
@@ -320,6 +332,7 @@ def register_dashboard_callbacks(app: Dash):
                 icon_extra_class=descriptor.icon_extra_class,
                 triggering_samples=triggering_samples,
                 total_sample_count=total_real_samples,
+                triggering_pathogens=triggering_pathogens,
             ),
             _verdict_banner_style(descriptor.bg_color, descriptor.border_color),
             time_elapsed, run_state, run_state_color
