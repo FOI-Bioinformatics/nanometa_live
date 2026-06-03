@@ -34,17 +34,17 @@ def ActionRow(buttons, align: str = "end", gap: int = 2, className: str = "") ->
 
 def WorkflowStepper(active_step: int = 1) -> html.Div:
     """
-    Reusable workflow step indicator for the setup sequence.
+    Reusable workflow step indicator for the analysis chain.
 
-    Shows a 4-step horizontal stepper: Configure -> Prepare -> Deploy -> Analyze.
-    "Prepare" is the merged Watchlist & Preparation tab; "Deploy" is the offline
-    deployment tab. Completed steps are green, the active step is blue, and
-    future steps are grey.
+    Shows the 3-step chain: Configure -> Prepare -> Analyse. "Prepare" is the
+    merged Watchlist & Preparation tab. The Deployment tab is deliberately NOT a
+    step here -- it is an independent tool for moving/cloning a prepared system
+    between computers, not part of the setup-to-run sequence. Completed steps are
+    green, the active step is blue, and future steps are grey.
 
     Args:
-        active_step: Which step is currently active (1-4).
-            1 = Configuration, 2 = Watchlist & Preparation, 3 = Deployment,
-            4 = Analyze
+        active_step: Which step is currently active (1-3).
+            1 = Configuration, 2 = Watchlist & Preparation, 3 = Analyse
 
     Returns:
         html.Div containing the step indicator row
@@ -52,8 +52,7 @@ def WorkflowStepper(active_step: int = 1) -> html.Div:
     steps = [
         {"num": "1", "label": "Configure"},
         {"num": "2", "label": "Prepare"},
-        {"num": "3", "label": "Deploy"},
-        {"num": "4", "label": "Analyze", "icon": "bi-play-fill"},
+        {"num": "3", "label": "Analyse", "icon": "bi-play-fill"},
     ]
 
     children = []

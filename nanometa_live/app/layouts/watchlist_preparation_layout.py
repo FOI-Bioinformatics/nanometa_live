@@ -75,17 +75,14 @@ def _preparation_block():
 
 
 def _bottom_ctas():
-    """Bottom action row: optional Deployment branch + primary Start Analysis."""
+    """Bottom action row: Start Analysis is the chain's next step (sole primary).
+
+    Deployment is independent of the Configure -> Prepare -> Analyse chain, so it
+    is a quiet link here rather than a peer next-step button.
+    """
     return html.Div([
         html.Hr(className="my-4"),
         ActionRow([
-            dbc.Button(
-                ["Offline deployment ", html.I(className="bi bi-arrow-right ms-1")],
-                id="merged-next-deployment-btn",
-                color="secondary",
-                outline=True,
-                size="lg",
-            ),
             dbc.Button(
                 [html.I(className="bi bi-play-fill me-2"), "Start Analysis"],
                 id="preparation-start-analysis-btn",
@@ -94,6 +91,20 @@ def _bottom_ctas():
                 n_clicks=0,
             ),
         ]),
+        html.Div(
+            dbc.Button(
+                [
+                    "Moving to another computer or cloning this setup? "
+                    "Open Deployment ",
+                    html.I(className="bi bi-arrow-right ms-1"),
+                ],
+                id="merged-next-deployment-btn",
+                color="link",
+                size="sm",
+                className="text-muted p-0",
+            ),
+            className="d-flex justify-content-end mt-2",
+        ),
     ], className="mt-3 mb-4")
 
 
