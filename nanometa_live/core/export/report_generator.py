@@ -33,6 +33,30 @@ logger = logging.getLogger(__name__)
 # Plotly CDN version to embed (minified JS is fetched at build time or bundled)
 _PLOTLY_CDN_URL = "https://cdn.plot.ly/plotly-2.35.2.min.js"
 
+# Result subdirectories copied into the export's raw/ folder. Covers both QC
+# tools (fastp / seqkit are mutually exclusive), both validation paths, the
+# taxpasta aggregates, and the Nextflow provenance under pipeline_info.
+_RAW_SUBDIRS = (
+    "kraken2",
+    "fastp",
+    "seqkit",
+    "taxpasta",
+    "validation",
+    "on_demand_validation",
+    "pipeline_info",
+)
+
+# Default ceiling on the raw payload. macOS bind-mounts and full result trees
+# can be large; rather than silently copy gigabytes inside a blocking callback,
+# the copy is skipped above this size with a clear log line. Override via the
+# config key ``export_max_raw_bytes`` (0 disables the cap).
+_DEFAULT_MAX_RAW_BYTES = 5 * 1024 ** 3  # 5 GiB
+
+# macOS AppleDouble sidecars (and .DS_Store) written onto non-HFS+ volumes;
+# excluded from the copy so they do not pollute the export or trip Nextflow if
+# the raw tree is ever re-used. See the macOS bind-mount note in CLAUDE.md.
+_IGNORE_SIDECARS = shutil.ignore_patterns("._*", ".DS_Store")
+
 
 class ReportGenerator:
     """Generate self-contained HTML reports from nanometanf results."""
@@ -80,8 +104,9 @@ class ReportGenerator:
         logger.info("Report written to %s", report_file)
 
         # Copy raw files
-        if include_raw:
-            self._copy_raw_files(str(output_path))
+        report_data["raw_files_included"] = (
+            self._copy_raw_files(str(output_path)) if include_raw else []
+        )
 
         # Write metadata
         self._write_metadata(str(output_path), report_data)
@@ -452,20 +477,57 @@ class ReportGenerator:
         """Serialize a Plotly figure to JSON for template embedding."""
         return pio.to_json(fig, validate=False)
 
-    def _copy_raw_files(self, output_dir: str):
-        """Copy raw result files to output_dir/raw/."""
-        raw_dir = os.path.join(output_dir, "raw")
-        subdirs = ["kraken2", "fastp", "validation"]
+    @staticmethod
+    def _dir_size(path: str) -> int:
+        """Total size in bytes of files under ``path`` (sidecars excluded)."""
+        total = 0
+        for root, _dirs, files in os.walk(path):
+            for f in files:
+                if f.startswith("._") or f == ".DS_Store":
+                    continue
+                try:
+                    total += os.path.getsize(os.path.join(root, f))
+                except OSError:
+                    pass
+        return total
 
-        for subdir in subdirs:
+    def _copy_raw_files(self, output_dir: str) -> List[str]:
+        """Copy raw result subdirs into ``output_dir/raw/``.
+
+        Returns the list of subdirs actually copied. AppleDouble/.DS_Store
+        sidecars are excluded, and the copy is skipped (with a clear log line)
+        when the total payload exceeds the configured ceiling -- this runs in a
+        blocking callback, so silently copying gigabytes would freeze the UI.
+        """
+        raw_dir = os.path.join(output_dir, "raw")
+        present = [
+            s for s in _RAW_SUBDIRS
+            if os.path.isdir(os.path.join(self.results_dir, s))
+        ]
+
+        cap = self.config.get("export_max_raw_bytes", _DEFAULT_MAX_RAW_BYTES)
+        if cap:
+            total = sum(self._dir_size(os.path.join(self.results_dir, s)) for s in present)
+            if total > cap:
+                logger.warning(
+                    "Raw export skipped: payload %.1f GiB exceeds the %.1f GiB "
+                    "cap (set export_max_raw_bytes to override). The HTML report "
+                    "and metadata are still written.",
+                    total / 1024 ** 3, cap / 1024 ** 3,
+                )
+                return []
+
+        copied: List[str] = []
+        for subdir in present:
             src = os.path.join(self.results_dir, subdir)
             dst = os.path.join(raw_dir, subdir)
-            if os.path.isdir(src):
-                try:
-                    shutil.copytree(src, dst, dirs_exist_ok=True)
-                    logger.info("Copied %s to %s", src, dst)
-                except (FileNotFoundError, PermissionError, OSError, shutil.Error) as e:
-                    logger.exception("Could not copy %s: %s", src, e)
+            try:
+                shutil.copytree(src, dst, dirs_exist_ok=True, ignore=_IGNORE_SIDECARS)
+                copied.append(subdir)
+                logger.info("Copied %s to %s", src, dst)
+            except (FileNotFoundError, PermissionError, OSError, shutil.Error) as e:
+                logger.exception("Could not copy %s: %s", src, e)
+        return copied
 
     def _write_metadata(self, output_dir: str, data: Dict[str, Any]):
         """Write summary.json and metadata.json."""
@@ -507,6 +569,7 @@ class ReportGenerator:
             },
             "watchlist_entries": len(data.get("watched_results", [])),
             "alerts": data.get("alerts", []),
+            "raw_files_included": data.get("raw_files_included", []),
         }
 
         metadata_path = os.path.join(output_dir, "metadata.json")

@@ -167,3 +167,53 @@ class TestReportSurfacesThreat:
         summary = json.loads((out / "summary.json").read_text())
         detected = summary["watched_species_detected"]
         assert detected and detected[0]["name"] == "Bacillus anthracis"
+
+
+class TestRawCopy:
+    """Cover the expanded raw-dir set, AppleDouble exclusion, and size cap."""
+
+    def _gen(self, results_dir, config=None):
+        g = ReportGenerator(str(results_dir), config or {})
+        # Pin results_dir to the controlled tree (bypass auto-resolution).
+        g.results_dir = str(results_dir)
+        return g
+
+    def test_copies_seqkit_and_excludes_sidecars(self, tmp_path):
+        res = tmp_path / "res"
+        (res / "seqkit").mkdir(parents=True)
+        (res / "seqkit" / "sampleA.tsv").write_text("data")
+        (res / "seqkit" / "._sampleA.tsv").write_text("apple-double junk")
+        (res / "kraken2").mkdir()
+        (res / "kraken2" / "a.kraken2.report.txt").write_text("data")
+        out = tmp_path / "export"
+        out.mkdir()
+
+        copied = self._gen(res)._copy_raw_files(str(out))
+
+        assert "seqkit" in copied and "kraken2" in copied
+        assert (out / "raw" / "seqkit" / "sampleA.tsv").exists()
+        assert not (out / "raw" / "seqkit" / "._sampleA.tsv").exists()
+
+    def test_size_cap_skips_copy(self, tmp_path):
+        res = tmp_path / "res"
+        (res / "kraken2").mkdir(parents=True)
+        (res / "kraken2" / "big.txt").write_text("x" * 4096)
+        out = tmp_path / "export"
+        out.mkdir()
+
+        g = self._gen(res, {"export_max_raw_bytes": 100})  # 100-byte ceiling
+        copied = g._copy_raw_files(str(out))
+
+        assert copied == []
+        assert not (out / "raw").exists()
+
+    def test_metadata_records_raw_included(self, tmp_path):
+        res = tmp_path / "res"
+        (res / "kraken2").mkdir(parents=True)
+        (res / "kraken2" / "a.kraken2.report.txt").write_text("data")
+        out = tmp_path / "export"
+
+        self._gen(res).generate(str(out), include_raw=True)
+
+        meta = json.loads((out / "metadata.json").read_text())
+        assert "kraken2" in meta["raw_files_included"]
