@@ -41,6 +41,34 @@ from nanometa_live.core.taxonomy.taxonomy_api import get_ncbi_client
 logger = logging.getLogger(__name__)
 
 
+# Name-only / custom watchlist entries get a synthetic taxid in a high band
+# (watchlist_manager._PSEUDO_TAXID_BASE = 2e9). Those are NOT real NCBI taxids,
+# so NCBI-by-taxid lookups (kingdom, accession, datasets-by-taxid) must be
+# skipped for them -- they only resolve via the species-name (GTDB) path.
+_PSEUDO_TAXID_MIN = 2_000_000_000
+
+
+def _is_real_ncbi_taxid(taxid) -> bool:
+    """True for a plausible real NCBI taxid (positive, below the pseudo band)."""
+    try:
+        t = int(taxid)
+    except (TypeError, ValueError):
+        return False
+    return 0 < t < _PSEUDO_TAXID_MIN
+
+
+def _kingdom_from_gtdb_taxonomy(gtdb_taxonomy) -> Optional[str]:
+    """Derive Bacteria/Archaea from a GTDB taxonomy string (d__Bacteria/...)."""
+    if not gtdb_taxonomy:
+        return None
+    low = str(gtdb_taxonomy).lower()
+    if "d__archaea" in low:
+        return "Archaea"
+    if "d__bacteria" in low:
+        return "Bacteria"
+    return None
+
+
 def _default_download_workers() -> int:
     """Default ThreadPoolExecutor size for genome HTTPS downloads.
 
@@ -754,7 +782,9 @@ class GenomeDownloadManager:
         self,
         taxid: int,
         species_name: str,
-        force: bool = False
+        force: bool = False,
+        kingdom: Optional[str] = None,
+        gtdb_taxonomy: Optional[str] = None,
     ) -> Optional[Path]:
         """
         Download reference genome for a species.
@@ -762,9 +792,15 @@ class GenomeDownloadManager:
         Routes to GTDB for bacteria/archaea, NCBI for other kingdoms.
 
         Args:
-            taxid: NCBI taxonomy ID
-            species_name: Species name
-            force: Force re-download even if exists
+            taxid: NCBI taxonomy ID (or a synthetic pseudo-taxid for a
+                name-only / GTDB-custom entry -- see _is_real_ncbi_taxid).
+            species_name: Species name (the GTDB representative-genome lookup
+                key; required for entries without a real NCBI taxid).
+            force: Force re-download even if exists.
+            kingdom: Optional kingdom hint (e.g. "Bacteria" for a GTDB database)
+                so the kingdom does not have to be fetched from the NCBI API.
+            gtdb_taxonomy: Optional GTDB taxonomy string; its domain is used as
+                a kingdom hint when ``kingdom`` is not given.
 
         Returns:
             Path to downloaded FASTA file, or None on failure
@@ -786,8 +822,18 @@ class GenomeDownloadManager:
         # Clear previous error for this taxid
         self._last_errors.pop(taxid, None)
 
-        # Determine kingdom to route to correct source
-        kingdom = self.get_kingdom(taxid)
+        real_ncbi = _is_real_ncbi_taxid(taxid)
+
+        # Determine kingdom to route to the correct source, preferring caller
+        # hints so a live NCBI lookup is avoided when possible (offline / GTDB).
+        kingdom = kingdom or _kingdom_from_gtdb_taxonomy(gtdb_taxonomy)
+        if not kingdom and real_ncbi:
+            kingdom = self.get_kingdom(taxid)
+        if not kingdom and not real_ncbi:
+            # Name-only / GTDB-custom entry (no real NCBI taxid): it is a
+            # bacterium/archaeon by construction, so route to the name-based
+            # GTDB representative-genome lookup rather than failing.
+            kingdom = "Bacteria"
         if not kingdom:
             msg = f"Could not determine kingdom for taxid {taxid} (NCBI API may be unreachable)"
             logger.error(msg)
@@ -832,8 +878,8 @@ class GenomeDownloadManager:
             else:
                 logger.info(f"No GTDB match found for {species_name}, trying NCBI...")
 
-        if not accession:
-            # Fall back to NCBI
+        if not accession and real_ncbi:
+            # Fall back to NCBI (only meaningful with a real NCBI taxid)
             logger.info(f"Querying NCBI for taxid {taxid}...")
             result = self.fetch_ncbi_accession(taxid)
             if result:
@@ -841,7 +887,7 @@ class GenomeDownloadManager:
                 source = "ncbi"
                 logger.info(f"Found NCBI RefSeq genome: {accession}")
 
-        if not accession:
+        if not accession and real_ncbi:
             # REST API failed — try direct download by taxid via datasets CLI
             # (the CLI supports more taxa than the REST API, especially fungi)
             logger.info(f"No accession found via API, trying direct taxid download for {species_name}...")
@@ -1549,6 +1595,7 @@ class GenomeDownloadManager:
         entries: List[Dict[str, Any]],
         max_workers: Optional[int] = None,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        kingdom_hint: Optional[str] = None,
     ) -> Dict[int, Optional[Path]]:
         """
         Download genomes for multiple watchlist entries concurrently.
@@ -1620,7 +1667,16 @@ class GenomeDownloadManager:
 
         for entry in to_download:
             taxid = entry["taxid"]
-            kingdom = kingdoms.get(taxid)
+            # Resolve kingdom without requiring a live NCBI lookup: the batch
+            # probe, then the entry's own GTDB taxonomy, then a caller hint,
+            # then default a name-only/pseudo-taxid entry to Bacteria so it
+            # takes the GTDB-by-name path instead of failing.
+            kingdom = (
+                kingdoms.get(taxid)
+                or _kingdom_from_gtdb_taxonomy(entry.get("gtdb_taxonomy"))
+                or kingdom_hint
+                or (None if _is_real_ncbi_taxid(taxid) else "Bacteria")
+            )
             entry["_kingdom"] = kingdom  # stash for worker
             if kingdom == "Viruses":
                 virus_entries.append(entry)
@@ -1629,11 +1685,13 @@ class GenomeDownloadManager:
             else:
                 other_entries.append(entry)
 
-        # Step 3: Batch NCBI accession lookup for non-virus entries
+        # Step 3: Batch NCBI accession lookup for non-virus entries. Only real
+        # NCBI taxids can be looked up by taxid; pseudo-taxids resolve by name.
         ncbi_lookup_taxids = [
             e["taxid"]
             for e in other_entries
-            if kingdoms.get(e["taxid"]) not in ("Bacteria", "Archaea")
+            if e.get("_kingdom") not in ("Bacteria", "Archaea")
+            and _is_real_ncbi_taxid(e["taxid"])
         ]
         ncbi_accessions: Dict[int, Tuple[str, Dict[str, Any]]] = {}
         if ncbi_lookup_taxids:
@@ -1679,8 +1737,8 @@ class GenomeDownloadManager:
                             accession, meta_dict = gtdb_result
                             source = "gtdb"
 
-                    # Fallback to NCBI
-                    if not accession:
+                    # Fallback to NCBI (only with a real NCBI taxid)
+                    if not accession and _is_real_ncbi_taxid(taxid):
                         if taxid in ncbi_accessions:
                             accession, meta_dict = ncbi_accessions[taxid]
                         else:
@@ -1706,8 +1764,9 @@ class GenomeDownloadManager:
                                 ),
                             )
 
-                    # Fallback: download directly by taxid via CLI
-                    if not path:
+                    # Fallback: download directly by taxid via CLI (real NCBI
+                    # taxids only; a pseudo-taxid would query NCBI with garbage).
+                    if not path and _is_real_ncbi_taxid(taxid):
                         logger.info(f"Trying direct taxid download for {name}...")
                         cli_path, cli_accession = self._download_ncbi_genome_by_taxid(taxid, name)
                         if cli_path:

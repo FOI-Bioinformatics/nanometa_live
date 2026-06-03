@@ -343,7 +343,7 @@ class TestDownloadAndBlastStages:
         class _Manager:
             def has_genome(self, taxid):
                 return taxid == 999  # one already present
-            def download_genome(self, taxid, name):
+            def download_genome(self, taxid, name, **kwargs):
                 return f"/genomes/{taxid}.fasta"
         monkeypatch.setattr(
             "nanometa_live.core.utils.genome_manager.get_genome_manager",
@@ -363,7 +363,7 @@ class TestDownloadAndBlastStages:
         class _Manager:
             def has_genome(self, taxid):
                 return False
-            def download_genome(self, taxid, name):
+            def download_genome(self, taxid, name, **kwargs):
                 raise AssertionError("should not download after cancel")
         monkeypatch.setattr(
             "nanometa_live.core.utils.genome_manager.get_genome_manager",

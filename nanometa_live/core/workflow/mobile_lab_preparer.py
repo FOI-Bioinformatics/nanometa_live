@@ -289,6 +289,12 @@ class MobileLabPreparer:
                 )
             return
 
+        # On a GTDB database every organism is bacteria/archaea, so hint the
+        # kingdom and skip the per-taxid NCBI lookup entirely.
+        kingdom_hint = ("Bacteria"
+                        if str(self.config.get("kraken_taxonomy", "")).lower() == "gtdb"
+                        else None)
+
         total = len(entries)
         downloaded = 0
         for i, entry in enumerate(entries):
@@ -303,7 +309,10 @@ class MobileLabPreparer:
             if skip_existing and manager.has_genome(taxid):
                 continue
             if taxid:
-                path = manager.download_genome(taxid, name)
+                path = manager.download_genome(
+                    taxid, name, kingdom=kingdom_hint,
+                    gtdb_taxonomy=entry.get("gtdb_taxonomy"),
+                )
                 if path:
                     downloaded += 1
 

@@ -1378,9 +1378,16 @@ def register_preparation_callbacks(app):
                 dbc.Badge(f"{completed}/{total_count}", color="primary", className="me-2"),
             ))
 
+        # On a GTDB database every organism is bacteria/archaea: hint the
+        # kingdom so the batch skips per-taxid NCBI lookups and uses the
+        # name-based GTDB path (also the only path for name-only entries).
+        kingdom_hint = ("Bacteria"
+                        if str((config or {}).get("kraken_taxonomy", "")).lower() == "gtdb"
+                        else None)
         try:
             results = genome_mgr.download_genomes_batch(
-                missing, max_workers=3, progress_callback=progress_cb
+                missing, max_workers=3, progress_callback=progress_cb,
+                kingdom_hint=kingdom_hint,
             )
 
             # Log results and count successes/failures
