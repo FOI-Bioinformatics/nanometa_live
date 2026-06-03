@@ -13,9 +13,84 @@ import dash_bootstrap_components as dbc
 from nanometa_live.app.tabs.config_tab_helpers import (
     _build_config_list_items,
     build_config_from_form,
+    config_form_dirty,
+    _pipeline_source_from_form,
 )
 
 pytestmark = pytest.mark.unit
+
+
+class TestConfigFormDirty:
+    """The Modified-badge detector must flag every operator-editable field,
+    including the ones the prior inline detector silently ignored."""
+
+    def _form(self, **overrides):
+        base = {
+            "analysis_name": "Run",
+            "nanopore_output_directory": "/data/in",
+            "kraken_db": "/db",
+            "results_dir_override": "",
+            "update_interval_seconds": 10,
+            "processing_mode": "batch",
+            "sample_handling": "by_barcode",
+            "qc_tool": "chopper",
+            "skip_nanoplot": False,
+            "pipeline_profile": "conda",
+            "pipeline_source": "remote:dev",
+            "max_file_age_minutes": 1000,
+            "min_reads_for_validation": 50,
+        }
+        base.update(overrides)
+        return base
+
+    def test_unchanged_is_not_dirty(self):
+        form = self._form()
+        snapshot = dict(form)
+        assert config_form_dirty(snapshot, form=form) is False
+
+    def test_no_snapshot_is_not_dirty(self):
+        assert config_form_dirty(None, form=self._form()) is False
+
+    @pytest.mark.parametrize("field,new_value", [
+        ("processing_mode", "realtime"),       # was never watched
+        ("sample_handling", "single_sample"),  # was never watched
+        ("pipeline_profile", "docker"),        # was never watched
+        ("max_file_age_minutes", 5),           # was never watched
+        ("min_reads_for_validation", 99),      # was never watched
+        ("qc_tool", "fastp"),                  # watched but never compared
+        ("skip_nanoplot", True),               # watched but never compared
+    ])
+    def test_previously_missed_fields_now_flag_dirty(self, field, new_value):
+        snapshot = self._form()
+        form = self._form(**{field: new_value})
+        assert config_form_dirty(snapshot, form=form) is True
+
+    def test_pipeline_source_change_flags_dirty(self):
+        snapshot = self._form(pipeline_source="remote:dev")
+        form = self._form(pipeline_source="remote:master")
+        assert config_form_dirty(snapshot, form=form) is True
+
+    def test_bool_string_in_snapshot_normalized(self):
+        # A legacy snapshot storing "yes"/"true" must compare equal to the
+        # boolean the form now carries -- no spurious dirty flag.
+        snapshot = self._form(skip_nanoplot="true")
+        form = self._form(skip_nanoplot=True)
+        assert config_form_dirty(snapshot, form=form) is False
+
+
+class TestPipelineSourceFromForm:
+    def test_remote_branch(self):
+        assert _pipeline_source_from_form("remote", "dev", "") == "remote:dev"
+
+    def test_remote_default_branch(self):
+        assert _pipeline_source_from_form("remote", "", "") == "remote:master"
+
+    def test_local_path_normalised(self):
+        out = _pipeline_source_from_form("local", "", "/tmp/pipe")
+        assert out == "/tmp/pipe"
+
+    def test_local_without_path_empty(self):
+        assert _pipeline_source_from_form("local", "", "") == ""
 
 
 def _build(**overrides):

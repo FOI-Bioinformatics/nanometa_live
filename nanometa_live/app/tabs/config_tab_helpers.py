@@ -455,6 +455,52 @@ def build_config_from_form(
     return config, []
 
 
+def _pipeline_source_from_form(source_type, branch, local_path):
+    """Reconstruct the stored ``pipeline_source`` string from the three form
+    fields, mirroring build_config_from_form (remote:<branch> or a normalised
+    local path)."""
+    if source_type == "remote":
+        return f"remote:{branch or 'master'}"
+    if source_type == "local" and local_path:
+        from nanometa_live.core.utils.path_utils import normalise_path
+        return normalise_path(local_path)
+    return ""
+
+
+def config_form_dirty(snapshot, *, form):
+    """Return True when the form state differs from the saved snapshot.
+
+    ``form`` is the dict of current widget values keyed by config name. This
+    mirrors what build_config_from_form would write, so the "Modified" badge
+    reflects every operator-editable field -- the prior inline detector watched
+    only a subset, leaving ~14 fields (processing mode, sample handling,
+    pipeline source, the QC/feature toggles, ...) able to change silently.
+    """
+    if not snapshot:
+        return False
+
+    bool_keys = {
+        "kraken_memory_mapping", "blast_validation", "remove_temp_files",
+        "skip_nanoplot", "kraken2_enable_incremental", "enable_krona_plots",
+        "enable_nanopore_stats_mqc",
+    }
+    for key, current_val in form.items():
+        snapshot_val = snapshot.get(key)
+        if key in bool_keys:
+            current_val = bool(current_val)
+            if isinstance(snapshot_val, str):
+                snapshot_val = snapshot_val.lower() in (
+                    "true", "yes", "y", "1", "--memory-mapping"
+                )
+            else:
+                snapshot_val = bool(snapshot_val)
+        if current_val is None and snapshot_val is None:
+            continue
+        if current_val != snapshot_val:
+            return True
+    return False
+
+
 def autosave_session_config(config):
     """Persist the applied config (plus current watchlist) to last-session.yaml.
 

@@ -37,6 +37,8 @@ from nanometa_live.app.tabs.config_tab_helpers import (  # noqa: E402
     _build_config_list_items,
     autosave_session_config,
     build_config_from_form,
+    config_form_dirty,
+    _pipeline_source_from_form,
 )
 
 
@@ -745,7 +747,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             blast_validation = blast_validation.lower() in ["true", "yes", "y", "1"]
         blast_validation = bool(blast_validation)
 
-        validation_method = config.get("validation_method", "blast")
+        validation_method = config.get("validation_method", "minimap2")
         minimap2_preset = config.get("minimap2_preset", "map-ont")
         minimap2_min_mapq = config.get("minimap2_min_mapq", 30)
 
@@ -794,7 +796,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
         # Input mode settings
         processing_mode = config.get("processing_mode", "batch")
-        sample_handling = config.get("sample_handling", "single_sample")
+        sample_handling = config.get("sample_handling", "by_barcode")
         sample_name = config.get("sample_name", "sample")
 
         # Pipeline options
@@ -1581,6 +1583,17 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("validation-identity-input", "value"),
             Input("kraken2-confidence-input", "value"),
             Input("kraken2-hitgroups-input", "value"),
+            # Fields previously missing from the dirty check -- editing any of
+            # these used to leave the form showing "Saved".
+            Input("pipeline-profile-input", "value"),
+            Input("pipeline-source-type-input", "value"),
+            Input("pipeline-branch-input", "value"),
+            Input("pipeline-local-path-input", "value"),
+            Input("processing-mode-input", "value"),
+            Input("sample-handling-input", "value"),
+            Input("sample-name-input", "value"),
+            Input("max-file-age-input", "value"),
+            Input("min-reads-for-validation-input", "value"),
         ],
         [
             State("saved-config-snapshot", "data"),
@@ -1598,75 +1611,70 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         qc_tool, skip_nanoplot, kraken2_incremental, enable_krona, enable_nanopore_stats,
         chopper_minlength, chopper_quality, filtlong_minlength,
         validation_identity, kraken2_confidence, kraken2_hitgroups,
+        pipeline_profile, pipeline_source_type, pipeline_branch, pipeline_local_path,
+        processing_mode, sample_handling, sample_name,
+        max_file_age_minutes, min_reads_for_validation,
         saved_snapshot, currently_modified, form_initialized
     ):
-        """Detect when form values differ from saved snapshot."""
-        # After form initialization, the cascading value changes trigger this
-        # callback. Consume the initialized flag and skip the modification check.
+        """Flag the form as modified when any saved field differs from the
+        snapshot. Comparison mirrors build_config_from_form via the
+        config_form_dirty helper, so all operator-editable fields are covered."""
+        # Form (re)initialization cascades value changes into this callback;
+        # consume the initialized flag and skip the check.
         if form_initialized:
             return no_update, False
-
         if not saved_snapshot:
             return no_update, no_update
 
-        # Build current form state for comparison
-        current_values = {
+        form = {
             "analysis_name": analysis_name or "",
             "nanopore_output_directory": nanopore_dir or "",
             "kraken_db": kraken_db or "",
-            "results_output_directory": results_dir or "",
+            "results_dir_override": (results_dir or "").strip(),
             "update_interval_seconds": update_interval,
             "danger_lower_limit": danger_threshold,
             "kraken_taxonomy": taxonomy or "",
             "check_intervals_seconds": check_interval,
             "realtime_timeout_minutes": (
                 int(realtime_timeout_minutes)
-                if realtime_timeout_minutes not in (None, "")
-                else None
+                if realtime_timeout_minutes not in (None, "") else None
             ),
             "default_reads_per_level": min_reads_per_level,
-            "kraken_memory_mapping": bool(memory_mapping),
-            "blast_validation": bool(blast_validation),
-            "validation_method": validation_method or "blast",
+            "kraken_memory_mapping": memory_mapping,
+            "blast_validation": blast_validation,
+            "validation_method": validation_method or "minimap2",
             "minimap2_preset": minimap2_preset or "map-ont",
             "minimap2_min_mapq": minimap2_min_mapq,
             "e_val_cutoff": e_value_cutoff,
             "genome_cache_dir": genome_cache_dir,
             "pipeline_cores": cores,
             "gui_port": gui_port,
-            "remove_temp_files": bool(clean_temp),
-            # Read filtering / validation overrides
+            "remove_temp_files": clean_temp,
+            "pipeline_profile": pipeline_profile,
+            "pipeline_source": _pipeline_source_from_form(
+                pipeline_source_type, pipeline_branch, pipeline_local_path
+            ),
+            "processing_mode": processing_mode,
+            "sample_handling": sample_handling,
+            "sample_name": sample_name if (sample_name or "").strip() else "sample",
+            "qc_tool": qc_tool,
+            "skip_nanoplot": skip_nanoplot,
+            "kraken2_enable_incremental": kraken2_incremental,
+            "enable_krona_plots": enable_krona,
+            "enable_nanopore_stats_mqc": enable_nanopore_stats,
             "chopper_minlength": chopper_minlength,
             "chopper_quality": chopper_quality,
             "filtlong_min_length": filtlong_minlength,
             "validation_identity_threshold": validation_identity,
             "kraken2_confidence": kraken2_confidence,
             "kraken2_minimum_hit_groups": kraken2_hitgroups,
+            "max_file_age_minutes": (
+                int(max_file_age_minutes)
+                if max_file_age_minutes not in (None, "") else max_file_age_minutes
+            ),
+            "min_reads_for_validation": min_reads_for_validation,
         }
-
-        # Compare key fields with snapshot
-        is_modified = False
-        for key, current_val in current_values.items():
-            snapshot_val = saved_snapshot.get(key)
-
-            # Handle None values
-            if current_val is None and snapshot_val is None:
-                continue
-
-            # Normalize values for comparison
-            if isinstance(current_val, bool):
-                # Convert snapshot value to bool for comparison
-                if isinstance(snapshot_val, str):
-                    snapshot_val = snapshot_val.lower() in ["true", "yes", "y", "1", "--memory-mapping"]
-                else:
-                    snapshot_val = bool(snapshot_val) if snapshot_val is not None else False
-
-            # Compare normalized values
-            if current_val != snapshot_val:
-                is_modified = True
-                break
-
-        return is_modified, no_update
+        return config_form_dirty(saved_snapshot, form=form), no_update
 
     # Callback: Mark as not modified after Apply (config matches current form)
     @app.callback(
