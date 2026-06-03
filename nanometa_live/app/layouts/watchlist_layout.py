@@ -520,6 +520,28 @@ def _create_collapsible_add_species() -> dbc.Accordion:
                     ),
                 ], md=2),
                 dbc.Col([
+                    dbc.Label([
+                        "DB taxid ",
+                        html.I(className="bi bi-info-circle text-muted",
+                               id="add-dbtaxid-info",
+                               style={"fontSize": "0.7rem", "cursor": "help"}),
+                        dbc.Tooltip(
+                            "Optional. The organism's taxid in your Kraken2 database. "
+                            "GTDB / custom databases assign their own integers, "
+                            "unrelated to NCBI. Set this when the database taxid "
+                            "differs from the NCBI taxid so detection and validation "
+                            "filter correctly without running Scan Database.",
+                            target="add-dbtaxid-info",
+                        ),
+                    ], className="small"),
+                    dbc.Input(
+                        id="watchlist-add-db-taxid",
+                        type="number",
+                        placeholder="optional",
+                        size="sm",
+                    ),
+                ], md=2),
+                dbc.Col([
                     dbc.Label("Threat Level", className="small"),
                     dbc.Select(
                         id="watchlist-add-threat",

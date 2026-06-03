@@ -153,9 +153,19 @@ def get_validation_species_from_watchlist(
             if not ncbi_taxid:
                 continue
 
-            # Try to get mapped Kraken2 taxid from mapping collection
+            # Resolve the Kraken2 database taxid. An explicit per-entry
+            # db_taxid (operator-set, e.g. for a GTDB/custom DB) wins outright,
+            # so the operator does not have to run "Scan Database"; otherwise
+            # fall back to the auto-mapping collection, then to the NCBI taxid.
             kraken_taxid = ncbi_taxid  # Default to NCBI taxid
-            if mapping_collection:
+            explicit_db_taxid = getattr(entry, 'db_taxid', None)
+            if explicit_db_taxid:
+                kraken_taxid = explicit_db_taxid
+                logging.debug(
+                    f"Using explicit db_taxid {explicit_db_taxid} for "
+                    f"{getattr(entry, 'name', '')}"
+                )
+            elif mapping_collection:
                 db_taxid = mapping_collection.get_db_taxid(ncbi_taxid)
                 if db_taxid:
                     kraken_taxid = db_taxid

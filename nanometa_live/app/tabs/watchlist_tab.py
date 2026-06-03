@@ -1231,6 +1231,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
         [
             State("watchlist-add-name", "value"),
             State("watchlist-add-taxid", "value"),
+            State("watchlist-add-db-taxid", "value"),
             State("watchlist-add-threat", "value"),
             State("watchlist-add-threshold", "value"),
             State("api-lookup-result", "data"),
@@ -1241,6 +1242,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
         n_clicks: int,
         name: str,
         taxid: Optional[int],
+        db_taxid: Optional[int],
         threat: str,
         threshold: int,
         lookup_result: Dict,
@@ -1254,6 +1256,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
         entry_data = {
             "name": name.strip(),
             "taxid": int(taxid) if taxid else 0,
+            "db_taxid": int(db_taxid) if db_taxid else None,  # GTDB/custom DB taxid
             "threat_level": threat or "moderate",
             "alert_threshold": int(threshold) if threshold else 10,
         }

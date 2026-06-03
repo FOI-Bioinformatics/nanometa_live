@@ -1255,6 +1255,9 @@ def _get_active_watchlist_entries(config: Dict[str, Any]) -> List[Dict[str, Any]
                 active_entries.append({
                     "name": entry.name,
                     "taxid": entry.taxid,  # WatchlistEntry uses 'taxid', not 'taxid_ncbi'
+                    # Explicit GTDB/custom DB taxid (when set) so detection can
+                    # match the report's DB taxid exactly.
+                    "db_taxid": entry.db_taxid,
                     "common_name": entry.common_name,
                     "threat_level": entry.threat_level.value if entry.threat_level else "moderate",
                     "alert_threshold": entry.alert_threshold,

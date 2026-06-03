@@ -223,7 +223,8 @@ class TaxonomyMatcher:
         detected: Dict[str, Any],
         entry_name: str,
         entry_alt_names: Optional[List[str]] = None,
-        entry_taxid: Optional[int] = None
+        entry_taxid: Optional[int] = None,
+        entry_db_taxid: Optional[int] = None,
     ) -> float:
         """
         Calculate match score between detected organism and watchlist entry.
@@ -240,7 +241,13 @@ class TaxonomyMatcher:
         detected_name = detected.get("name", "")
         detected_taxid = detected.get("taxid")
 
-        # Exact taxid match (only for NCBI)
+        # Explicit database taxid match -- works for ANY database type, because
+        # the detected taxid is the report's own DB taxid. Lets a GTDB/custom
+        # entry match exactly without relying on name normalization.
+        if entry_db_taxid and detected_taxid and int(entry_db_taxid) == int(detected_taxid):
+            return 1.0
+
+        # Exact taxid match (only for NCBI, where entry NCBI taxid == DB taxid)
         if (self._taxonomy_type == TaxonomyType.NCBI and
             entry_taxid and detected_taxid and
             int(entry_taxid) == int(detected_taxid)):
@@ -314,7 +321,9 @@ class TaxonomyMatcher:
                 detected=detected,
                 entry_name=entry.get("name", ""),
                 entry_alt_names=entry.get("names_alt", []),
-                entry_taxid=entry.get("taxid") or entry.get("taxid_ncbi")
+                entry_taxid=entry.get("taxid") or entry.get("taxid_ncbi"),
+                # Explicit GTDB/custom DB taxid -> exact match for any DB type.
+                entry_db_taxid=entry.get("db_taxid"),
             )
 
             if score > best_score:

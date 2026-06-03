@@ -20,6 +20,7 @@ with a single, unified approach.
 import logging
 import os
 import threading
+import zlib
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -39,6 +40,23 @@ from nanometa_live.core.config.pathogen_loader import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Pseudo-taxids for name-only / custom watchlist entries (those with no NCBI
+# taxid -- typically GTDB-only organisms) must be DETERMINISTIC across process
+# restarts: they key the in-memory entry dict, the downloaded genome filename
+# (``{taxid}.fasta``) and the taxid-mapping cache. Python's builtin ``hash()``
+# randomises str hashing per process (PYTHONHASHSEED), so it produced a
+# different id every launch -- orphaning genomes and mappings on restart. crc32
+# is stable. The high base keeps pseudo-taxids clear of real NCBI taxids
+# (currently < ~10M) so the two namespaces never collide.
+_PSEUDO_TAXID_BASE = 2_000_000_000
+
+
+def _stable_pseudo_taxid(name: str) -> int:
+    """Deterministic synthetic taxid for a name-only / custom entry."""
+    digest = zlib.crc32((name or "").strip().lower().encode("utf-8"))
+    return _PSEUDO_TAXID_BASE + (digest % 1_000_000_000)
+
 
 # Import taxonomy and loader (with lazy initialization to avoid circular imports)
 # Protected by lock for thread-safe lazy initialization.
@@ -121,6 +139,12 @@ class WatchlistEntry:
     enabled: bool = False
     # Multi-taxonomy support
     names_alt: List[str] = field(default_factory=list)  # Alternative names for matching
+    # The organism's taxid in the Kraken2 *database* (GTDB / custom DBs assign
+    # their own integers, unrelated to NCBI). When set, it is used directly for
+    # detection matching and pipeline filtering, so the operator does not have
+    # to rely on "Scan Database" auto-mapping. ``taxid`` above stays the NCBI
+    # taxid (used for reference-genome download).
+    db_taxid: Optional[int] = None
     watchlist_id: Optional[str] = None  # Which watchlist file this came from (legacy, use watchlist_ids)
     watchlist_ids: Set[str] = field(default_factory=set)  # All contributing watchlists (for multi-source tracking)
     # User overrides (if entry is from builtin but user modified it)
@@ -207,6 +231,15 @@ class WatchlistEntry:
         except (ValueError, TypeError):
             taxid = 0
 
+        # Custom/GTDB database taxid (accept several aliases). Distinct from the
+        # NCBI taxid above; used for matching + pipeline filtering when set.
+        db_taxid_raw = (data.get("db_taxid") or data.get("kraken_taxid")
+                        or data.get("taxid_custom") or data.get("taxid_gtdb"))
+        try:
+            db_taxid = int(db_taxid_raw) if db_taxid_raw else None
+        except (ValueError, TypeError):
+            db_taxid = None
+
         # Handle alternative names for multi-taxonomy support
         names_alt = data.get("names_alt", [])
         if isinstance(names_alt, str):
@@ -230,6 +263,7 @@ class WatchlistEntry:
             source=source,
             enabled=data.get("enabled", False),
             names_alt=names_alt,
+            db_taxid=db_taxid,
             watchlist_id=watchlist_id,
             watchlist_ids=set(data.get("watchlist_ids", [])) if data.get("watchlist_ids") else set(),
             # Validation fields
@@ -266,6 +300,9 @@ class WatchlistEntry:
         # Include alt names if present
         if self.names_alt:
             result["names_alt"] = self.names_alt
+        # Custom/GTDB database taxid (round-trips to the UI store + workers).
+        if self.db_taxid:
+            result["db_taxid"] = self.db_taxid
         if self.watchlist_id:
             result["watchlist_id"] = self.watchlist_id
         if self.watchlist_ids:
@@ -494,6 +531,7 @@ class WatchlistManager:
                         "name": p.name,
                         "names_alt": p.names_alt,
                         "taxid_ncbi": p.taxid_ncbi,
+                        "db_taxid": getattr(p, "db_taxid", None),
                         "common_name": p.common_name,
                         "threat_level": p.threat_level,
                         "bsl_level": p.bsl_level,
@@ -647,7 +685,7 @@ class WatchlistManager:
                     self._name_index[alt_name.lower()] = entry.taxid
         elif entry.name:
             # Name-only entry (no taxid) - use hash of name as pseudo-taxid
-            pseudo_taxid = hash(entry.name.lower()) % (10**9)
+            pseudo_taxid = _stable_pseudo_taxid(entry.name)
 
             if pseudo_taxid in self._entries:
                 # MERGE: Entry already exists
@@ -816,7 +854,7 @@ class WatchlistManager:
         """Add a custom entry to the watchlist."""
         with self._lock:
             self._add_entry_from_dict(entry_data, WatchlistSource.USER)
-            taxid = entry_data.get("taxid") or hash(entry_data.get("name", "").lower()) % (10**9)
+            taxid = entry_data.get("taxid") or _stable_pseudo_taxid(entry_data.get("name", ""))
             return self._entries.get(taxid)
 
     def remove_entry(self, taxid: int) -> bool:
@@ -1163,7 +1201,7 @@ class WatchlistManager:
                 existing = self._entries.get(p.taxid_ncbi)
             if not existing:
                 # Try by name hash for name-only entries
-                pseudo_taxid = hash(p.name.lower()) % (10**9)
+                pseudo_taxid = _stable_pseudo_taxid(p.name)
                 existing = self._entries.get(pseudo_taxid)
 
             result.append({

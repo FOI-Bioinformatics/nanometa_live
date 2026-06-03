@@ -41,6 +41,10 @@ class WatchlistPathogenEntry:
     name: str
     names_alt: List[str] = field(default_factory=list)
     taxid_ncbi: Optional[int] = None
+    # Optional taxid in the Kraken2 *database* (GTDB/custom DBs assign their own
+    # integers). Carried through to WatchlistEntry.db_taxid for matching +
+    # pipeline filtering. NCBI watchlists leave it unset.
+    db_taxid: Optional[int] = None
     common_name: Optional[str] = None
     threat_level: str = "moderate"
     bsl_level: Optional[int] = None
@@ -251,6 +255,8 @@ class WatchlistLoader:
                         name=p_data.get("name", "Unknown"),
                         names_alt=p_data.get("names_alt", []),
                         taxid_ncbi=p_data.get("taxid_ncbi") or p_data.get("taxid"),
+                        db_taxid=(p_data.get("db_taxid") or p_data.get("kraken_taxid")
+                                  or p_data.get("taxid_custom") or p_data.get("taxid_gtdb")),
                         common_name=p_data.get("common_name"),
                         threat_level=p_data.get("threat_level", "moderate"),
                         bsl_level=p_data.get("bsl_level"),
