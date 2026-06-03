@@ -12,6 +12,7 @@ Handles:
 """
 
 import logging
+import os
 import time
 import traceback
 from datetime import datetime
@@ -85,6 +86,101 @@ def _build_prep_result(result):
         html.Ul(items, className="mb-2 mt-2"),
         retry_btn,
     ], color="warning")
+
+
+def _native_path_picker(initial, prompt, *, pick_file=False):
+    """Open a native OS file/folder picker; return the chosen path or None.
+
+    ``pick_file=True`` selects a file, otherwise a directory. Best-effort: any
+    failure (no picker installed, user cancels) returns None and the caller
+    raises PreventUpdate, leaving the text input editable by hand.
+    """
+    import platform
+    import subprocess as _sp
+
+    initial = initial if initial and Path(initial).exists() else str(Path.home())
+    try:
+        system = platform.system()
+        if system == "Darwin":
+            safe = initial.replace("\\", "\\\\").replace('"', '\\"')
+            chooser = "choose file" if pick_file else "choose folder"
+            script = (
+                f'set theItem to POSIX path of ({chooser} with prompt "{prompt}" '
+                f'default location POSIX file "{safe}")\nreturn theItem'
+            )
+            res = _sp.run(["osascript", "-e", script],
+                          capture_output=True, text=True, timeout=120)
+            if res.returncode == 0 and res.stdout.strip():
+                out = res.stdout.strip()
+                return out if pick_file else out.rstrip("/")
+        elif system == "Linux":
+            args = ["zenity", "--file-selection", f"--title={prompt}"]
+            if not pick_file:
+                args.append("--directory")
+            args.append(f"--filename={initial}/")
+            res = _sp.run(args, capture_output=True, text=True, timeout=120)
+            if res.returncode == 0 and res.stdout.strip():
+                return res.stdout.strip()
+        else:
+            ps_safe = initial.replace("'", "''")
+            if pick_file:
+                script = (
+                    'Add-Type -AssemblyName System.Windows.Forms; '
+                    '$d = New-Object System.Windows.Forms.OpenFileDialog; '
+                    f"$d.InitialDirectory = '{ps_safe}'; "
+                    'if ($d.ShowDialog() -eq "OK") { $d.FileName }'
+                )
+            else:
+                script = (
+                    'Add-Type -AssemblyName System.Windows.Forms; '
+                    '$d = New-Object System.Windows.Forms.FolderBrowserDialog; '
+                    f"$d.SelectedPath = '{ps_safe}'; "
+                    'if ($d.ShowDialog() -eq "OK") { $d.SelectedPath }'
+                )
+            res = _sp.run(["powershell", "-Command", script],
+                          capture_output=True, text=True, timeout=120)
+            if res.returncode == 0 and res.stdout.strip():
+                return res.stdout.strip()
+    except Exception as e:
+        logger.warning(f"Native picker unavailable: {e}")
+    return None
+
+
+def _export_preflight(directory, config, pre_warm):
+    """Validate the export directory and check free space before a long export.
+
+    Returns an Alert to display (and abort) on failure, or None when it is safe
+    to proceed. Catches the "wrong/full directory" case immediately instead of
+    after a multi-minute export.
+    """
+    directory = (directory or "").strip()
+    if not directory:
+        return dbc.Alert("Choose an export directory first.", color="warning")
+    if not Path(directory).is_dir():
+        return dbc.Alert(f"Export directory does not exist: {directory}",
+                         color="danger")
+    if not os.access(directory, os.W_OK):
+        return dbc.Alert(f"Export directory is not writable: {directory}",
+                         color="danger")
+    try:
+        import shutil as _sh
+        from nanometa_live.core.utils.paths import NanometaPaths
+        from nanometa_live.core.workflow.bundle_manager import (
+            estimate_bundle_size, human_size,
+        )
+        home = str(NanometaPaths.from_config(config or {}).data_dir)
+        est = estimate_bundle_size(home, pre_warm=bool(pre_warm))
+        free = _sh.disk_usage(directory).free
+        if est and free < est:
+            return dbc.Alert(
+                f"Not enough free space: the bundle needs about {human_size(est)} "
+                f"but only {human_size(free)} is free at {directory}. Free up "
+                "space or choose another directory.",
+                color="danger",
+            )
+    except Exception as e:  # preflight is advisory -- never block on its own bug
+        logger.debug(f"Export size preflight skipped: {e}")
+    return None
 
 
 def register_preparation_callbacks(app):
@@ -377,59 +473,44 @@ def register_preparation_callbacks(app):
         prevent_initial_call=True,
     )
     def browse_export_directory(n_clicks, current_dir):
-        """Open a native folder picker dialog."""
+        """Open a native folder picker for the export directory."""
         if not n_clicks:
             raise PreventUpdate
-        import platform
-        import subprocess as _sp
-        initial = current_dir if current_dir and Path(current_dir).exists() else str(Path.home())
-        try:
-            if platform.system() == "Darwin":
-                # Escape for embedding inside an AppleScript double-quoted
-                # string: a path containing a quote (e.g. /Users/O'Brien is
-                # fine, but a literal ") would otherwise break the string.
-                mac_safe = initial.replace("\\", "\\\\").replace('"', '\\"')
-                script = (
-                    f'set theFolder to POSIX path of '
-                    f'(choose folder with prompt "Select export directory" '
-                    f'default location POSIX file "{mac_safe}")\n'
-                    f'return theFolder'
-                )
-                result = _sp.run(
-                    ["osascript", "-e", script],
-                    capture_output=True, text=True, timeout=120,
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    return result.stdout.strip().rstrip("/")
-            elif platform.system() == "Linux":
-                result = _sp.run(
-                    ["zenity", "--file-selection", "--directory",
-                     "--title=Select export directory",
-                     f"--filename={initial}/"],
-                    capture_output=True, text=True, timeout=120,
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    return result.stdout.strip()
-            else:
-                # Windows. Use a single-quoted PowerShell string (no $
-                # interpolation) and double any embedded single quotes, so a
-                # path with quotes cannot alter the command.
-                ps_safe = initial.replace("'", "''")
-                script = (
-                    'Add-Type -AssemblyName System.Windows.Forms; '
-                    '$d = New-Object System.Windows.Forms.FolderBrowserDialog; '
-                    f"$d.SelectedPath = '{ps_safe}'; "
-                    'if ($d.ShowDialog() -eq "OK") { $d.SelectedPath }'
-                )
-                result = _sp.run(
-                    ["powershell", "-Command", script],
-                    capture_output=True, text=True, timeout=120,
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    return result.stdout.strip()
-        except Exception as e:
-            logger.warning(f"Folder picker unavailable: {e}")
-        raise PreventUpdate
+        path = _native_path_picker(current_dir, "Select export directory")
+        if path is None:
+            raise PreventUpdate
+        return path
+
+    @app.callback(
+        Output("import-bundle-path", "value"),
+        Input("import-bundle-browse-btn", "n_clicks"),
+        State("import-bundle-path", "value"),
+        prevent_initial_call=True,
+    )
+    def browse_import_bundle(n_clicks, current):
+        """Open a native file picker for the bundle .tar.gz."""
+        if not n_clicks:
+            raise PreventUpdate
+        path = _native_path_picker(current, "Select the bundle .tar.gz",
+                                   pick_file=True)
+        if path is None:
+            raise PreventUpdate
+        return path
+
+    @app.callback(
+        Output("import-kraken-db-path", "value"),
+        Input("import-kraken-db-browse-btn", "n_clicks"),
+        State("import-kraken-db-path", "value"),
+        prevent_initial_call=True,
+    )
+    def browse_import_kraken_db(n_clicks, current):
+        """Open a native folder picker for the Kraken2 database directory."""
+        if not n_clicks:
+            raise PreventUpdate
+        path = _native_path_picker(current, "Select the Kraken2 database folder")
+        if path is None:
+            raise PreventUpdate
+        return path
 
     @app.callback(
         Output("export-readiness-issues", "children"),
@@ -459,6 +540,12 @@ def register_preparation_callbacks(app):
         to disk, so no in-process state has to survive the worker."""
         if not n_clicks:
             raise PreventUpdate
+
+        # Validate the destination and free space up front so a wrong/full
+        # directory fails immediately, not after a multi-minute export.
+        pre_err = _export_preflight(directory, config, pre_warm)
+        if pre_err is not None:
+            return pre_err, {"display": "none"}, html.Div(), False
 
         # Run readiness check
         try:
@@ -598,6 +685,9 @@ def register_preparation_callbacks(app):
         can run for tens of minutes."""
         if not n_clicks:
             raise PreventUpdate
+        pre_err = _export_preflight(directory, config, pre_warm)
+        if pre_err is not None:
+            return pre_err
         return _run_export(
             config, filename, directory,
             pre_warm=pre_warm,
@@ -623,6 +713,26 @@ def register_preparation_callbacks(app):
         if not Path(bundle_path).exists():
             return dbc.Alert(f"Bundle not found: {bundle_path}", color="danger")
 
+        # Free-space preflight: a gzip bundle expands well beyond its file size
+        # once extracted and copied. Stop early rather than fail mid-extract.
+        try:
+            import shutil as _sh
+            from nanometa_live.core.utils.paths import get_data_dir_from_env
+            from nanometa_live.core.workflow.bundle_manager import human_size
+            home = get_data_dir_from_env()
+            bundle_size = Path(bundle_path).stat().st_size
+            free = _sh.disk_usage(home).free
+            if free < bundle_size * 3:
+                return dbc.Alert(
+                    f"Not enough free space to import: the bundle is "
+                    f"{human_size(bundle_size)} and unpacking needs roughly "
+                    f"{human_size(bundle_size * 3)}, but only {human_size(free)} "
+                    f"is free at {home}. Free up space and try again.",
+                    color="danger",
+                )
+        except Exception as e:
+            logger.debug(f"Import space preflight skipped: {e}")
+
         try:
             from nanometa_live.core.workflow.bundle_manager import BundleManager
             manager = BundleManager()
@@ -635,7 +745,7 @@ def register_preparation_callbacks(app):
 
                 children = [
                     html.I(className="bi bi-check-circle me-2"),
-                    "Bundle imported. Offline mode activated.",
+                    html.Strong("Bundle imported. Offline mode activated."),
                 ]
                 if result["warnings"]:
                     children.append(html.Br())
@@ -643,9 +753,20 @@ def register_preparation_callbacks(app):
                     children.extend([
                         html.Span(w + "; ") for w in result["warnings"]
                     ])
+                # Tell the operator where to go next.
+                children.append(html.Hr(className="my-2"))
+                children.append(html.Div([
+                    html.Strong("Next steps: "),
+                    "open the Watchlist & Preparation tab, run the Readiness "
+                    "checklist to confirm everything is green, then click "
+                    "Start Analysis.",
+                ], className="small"))
                 return dbc.Alert(children, color="success")
             else:
-                return dbc.Alert("Import failed.", color="danger")
+                # Surface the manager's own diagnostics (platform mismatch,
+                # checksum failure, unsupported version, ...).
+                detail = "; ".join(result.get("warnings", [])) or "see logs"
+                return dbc.Alert(f"Import failed: {detail}", color="danger")
 
         except Exception as e:
             logger.error(f"Import failed: {e}", exc_info=True)

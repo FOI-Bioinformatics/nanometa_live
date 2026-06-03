@@ -101,6 +101,56 @@ _BUNDLED_PIPELINE_DIRNAME = "pipeline_source"
 # Subdirectory name inside the bundle for the bundled Nextflow plugin cache.
 _BUNDLED_NXF_PLUGINS_DIRNAME = "nextflow_plugins"
 
+# Manifest formats this build can import. Bump when the bundle layout changes;
+# import_bundle refuses unknown versions (unless forced) so a newer bundle does
+# not import "successfully" while silently dropping required data.
+_SUPPORTED_MANIFEST_VERSIONS = {"1.0", "1.1"}
+
+# Home subdirectories copied into a bundle, used by estimate_bundle_size for the
+# pre-export disk-space preflight. The big ones are genomes and blast.
+_BUNDLE_SOURCE_DIRS = ("genomes", "blast", "mappings", "cache",
+                       "watchlists", "containers")
+
+
+def human_size(num_bytes: int) -> str:
+    """Format a byte count as a short human string (e.g. '4.2 GB')."""
+    size = float(max(num_bytes, 0))
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
+def _dir_size(path: Path) -> int:
+    """Total size of regular files under *path* (symlinks not followed)."""
+    total = 0
+    try:
+        for p in path.rglob("*"):
+            try:
+                if p.is_file() and not p.is_symlink():
+                    total += p.stat().st_size
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return total
+
+
+def estimate_bundle_size(nanometa_home: str, *, pre_warm: bool = False) -> int:
+    """Rough pre-gzip size estimate (bytes) of the data a bundle would stage.
+
+    Sums the home subdirectories that export copies; includes the pre-warmed
+    conda cache only when *pre_warm* is set. Intended for a disk-space preflight,
+    not exact accounting -- gzip shrinks the final tar, but staging needs the
+    raw size, so this is a conservative bound.
+    """
+    home = Path(nanometa_home)
+    total = sum(_dir_size(home / d) for d in _BUNDLE_SOURCE_DIRS)
+    if pre_warm:
+        total += _dir_size(home / _BUNDLED_CONDA_CACHE_DIRNAME)
+    return total
+
 # Patterns of files and directories to skip when copying the pipeline source
 # to keep bundle size manageable.
 _PIPELINE_IGNORE_PATTERNS = (
@@ -673,10 +723,18 @@ class BundleManager:
             if scratch.exists():
                 shutil.rmtree(scratch, ignore_errors=True)
 
-            # Create tar.gz
+            # Create tar.gz. Exclude macOS AppleDouble sidecars (._*) and
+            # .DS_Store -- they ride along when a bundle is built on macOS onto
+            # a non-HFS+ volume and confuse Nextflow / extraction on the target.
+            def _tar_filter(tarinfo):
+                base = Path(tarinfo.name).name
+                if base.startswith("._") or base == ".DS_Store":
+                    return None
+                return tarinfo
+
             with tarfile.open(str(output), "w:gz") as tar:
                 for item in staging.iterdir():
-                    tar.add(str(item), arcname=item.name)
+                    tar.add(str(item), arcname=item.name, filter=_tar_filter)
 
         logger.info(f"Bundle exported to {output}")
         return output
@@ -753,6 +811,25 @@ class BundleManager:
                 result["warnings"].append(f"Corrupted manifest.json: {e}")
                 return result
 
+            # Refuse bundles written by an incompatible (newer) format so
+            # missing required fields surface here, not as a cryptic runtime
+            # error after a "successful" import.
+            manifest_version = str(manifest.get("version", ""))
+            if manifest_version and manifest_version not in _SUPPORTED_MANIFEST_VERSIONS:
+                if not force:
+                    result["success"] = False
+                    result["warnings"].append(
+                        f"Unsupported bundle format (manifest version "
+                        f"{manifest_version!r}; this build understands "
+                        f"{sorted(_SUPPORTED_MANIFEST_VERSIONS)}). Update Nanometa "
+                        "Live on this machine, or force the import."
+                    )
+                    return result
+                result["warnings"].append(
+                    f"Unsupported manifest version {manifest_version!r}; "
+                    "continuing anyway (force=True)."
+                )
+
             # Validate checksums before extracting to home
             checksums = manifest.get("checksums", {})
             mismatches = []
@@ -824,6 +901,21 @@ class BundleManager:
                     )
                     logger.warning(msg)
                     result["warnings"].append(msg)
+
+                    # Pre-warmed conda envs embed absolute build-host paths and
+                    # per-arch binaries; on a platform mismatch they cannot run
+                    # at all. Refuse the import (unless forced) so the operator
+                    # learns now instead of at the first pipeline process.
+                    prewarm = manifest.get("pre_warm_conda_envs", {})
+                    if prewarm.get("success") and not force:
+                        result["success"] = False
+                        result["warnings"].append(
+                            "Import aborted: the bundle ships pre-warmed conda "
+                            "environments that cannot run on this OS/architecture. "
+                            "Rebuild the bundle on a matching machine, use Docker "
+                            "mode, or force the import and rebuild conda envs here."
+                        )
+                        return result
 
             # Copy directories to home (handle partial imports gracefully)
             for dirname in [
@@ -952,6 +1044,15 @@ class BundleManager:
                             logger.info(
                                 f"Rebased pipeline_source to {abs_pipeline}"
                             )
+                            # Guard against a truncated transfer: the directory
+                            # can exist yet be missing main.nf, which only
+                            # surfaces as a cryptic error at launch.
+                            if not (abs_pipeline / "main.nf").exists():
+                                result["warnings"].append(
+                                    "Bundled pipeline source is missing main.nf "
+                                    f"at {abs_pipeline}; the bundle may be "
+                                    "incomplete or was truncated in transfer."
+                                )
                     # Rebase nxf_plugins_dir similarly.
                     npd = cfg.get("nxf_plugins_dir", "")
                     if isinstance(npd, str) and npd == f"./{_BUNDLED_NXF_PLUGINS_DIRNAME}":

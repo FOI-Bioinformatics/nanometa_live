@@ -341,10 +341,16 @@ def build_export_bundle_card():
                     color="success",
                 ),
             ]),
+            html.Div(
+                "Large exports take several minutes; conda pre-warm adds ~30 min. "
+                "The button stays disabled and a spinner shows while it runs.",
+                className="text-muted small mt-1",
+            ),
             # Readiness issues area (populated by callback)
             html.Div(id="export-readiness-issues", className="mt-3"),
             _build_export_force_area(),
-            html.Div(id="export-result", className="mt-2"),
+            dcc.Loading(html.Div(id="export-result", className="mt-2"),
+                        type="default"),
         ]),
     ])
 
@@ -390,7 +396,7 @@ def _build_export_force_area():
                     [html.I(className="bi bi-exclamation-triangle me-2"),
                      "Export Incomplete Bundle"],
                     id="export-force-btn",
-                    color="warning",
+                    color="danger",
                     disabled=True,
                 ),
             ]),
@@ -409,9 +415,7 @@ def build_import_bundle_card():
         ]),
         dbc.CardBody([
             html.P(
-                "Import a bundle from another machine. "
-                "You must also provide the path to the species database "
-                "on this computer.",
+                "Import a bundle built on another machine onto this one.",
                 className="text-muted small"
             ),
             dbc.InputGroup([
@@ -421,15 +425,39 @@ def build_import_bundle_card():
                     placeholder="/path/to/bundle.tar.gz",
                     type="text",
                 ),
+                dbc.Button(
+                    html.I(className="bi bi-folder2-open"),
+                    id="import-bundle-browse-btn",
+                    color="secondary",
+                    outline=True,
+                    n_clicks=0,
+                    title="Browse for the bundle .tar.gz file",
+                ),
             ], className="mb-2"),
             dbc.InputGroup([
                 dbc.InputGroupText("Species DB"),
                 dbc.Input(
                     id="import-kraken-db-path",
-                    placeholder="/path/to/species/database",
+                    placeholder="/path/to/kraken2/database",
                     type="text",
                 ),
-            ], className="mb-3"),
+                dbc.Button(
+                    html.I(className="bi bi-folder2-open"),
+                    id="import-kraken-db-browse-btn",
+                    color="secondary",
+                    outline=True,
+                    n_clicks=0,
+                    title="Browse for the Kraken2 database folder",
+                ),
+            ], className="mb-1"),
+            # The Kraken2 DB is excluded from the bundle (too large), so spell
+            # out how to provide it on the target machine.
+            html.Div([
+                html.I(className="bi bi-info-circle me-1"),
+                "The species (Kraken2) database is not included in the bundle. "
+                "Copy it across from the source machine -- e.g. on the same USB "
+                "drive -- and point here at the folder where you placed it.",
+            ], className="text-muted small mb-3"),
             ActionRow([
                 dbc.Button(
                     [html.I(className="bi bi-upload me-2"), "Import Bundle"],
@@ -437,7 +465,8 @@ def build_import_bundle_card():
                     color="info",
                 ),
             ]),
-            html.Div(id="import-result", className="mt-2"),
+            dcc.Loading(html.Div(id="import-result", className="mt-2"),
+                        type="default"),
         ]),
     ])
 
