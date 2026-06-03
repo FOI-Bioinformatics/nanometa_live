@@ -257,6 +257,132 @@ def _verdict_banner_style(bg_color: str, border_color: str) -> dict:
 
 
 # ----------------------------------------------------------------------------
+# Pathogen Report modal: reference links, confidence, and detection metadata.
+#
+# Kept as pure builders so the report's external links and derived fields can
+# be unit-tested without a running app. The guiding rule is honesty: never
+# render a link that resolves to a wrong or nonexistent record, and never imply
+# a confidence the read support does not back.
+# ----------------------------------------------------------------------------
+
+# Federal Select Agent Program list -- the authoritative, maintained successor
+# to CDC's retired bioterrorism A/B/C category page. The old CDC NIOSH
+# chemical-agent URL was both dead (404) and topically wrong for a microbial
+# tool.
+SELECT_AGENTS_URL = "https://www.selectagents.gov/sat/list.htm"
+_NCBI_TAX_URL = "https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id={taxid}"
+
+
+def _ref_button(label: str, href: str) -> html.A:
+    return html.A(
+        [html.I(className="bi bi-box-arrow-up-right me-1"), label],
+        href=href,
+        target="_blank",
+        rel="noopener noreferrer",
+        className="btn btn-outline-secondary btn-sm me-2 mb-1",
+    )
+
+
+def build_reference_links(
+    ncbi_taxid: Optional[int] = None,
+    ncbi_link: Optional[str] = None,
+    gtdb_link: Optional[str] = None,
+) -> List[Any]:
+    """Build the report's external-reference buttons, omitting any link that
+    would send the operator to a wrong or nonexistent record.
+
+    - NCBI Taxonomy: shown only when a resolved NCBI link is known, or the
+      taxid is a real NCBI taxid (not a GTDB/custom pseudo-taxid). A link to
+      the wrong taxon is worse than no link.
+    - GTDB: shown only when a resolved GTDB link exists (from taxonomy-ID
+      validation); never reconstructed from a name, to avoid inventing a dead
+      link.
+    - Select Agents (FSAP): always shown -- a live, authoritative reference.
+    """
+    from nanometa_live.core.utils.genome_manager import _is_real_ncbi_taxid
+
+    buttons: List[Any] = []
+    ncbi_href = ncbi_link or (
+        _NCBI_TAX_URL.format(taxid=int(ncbi_taxid))
+        if _is_real_ncbi_taxid(ncbi_taxid) else None
+    )
+    if ncbi_href:
+        buttons.append(_ref_button("NCBI Taxonomy", ncbi_href))
+    if gtdb_link:
+        buttons.append(_ref_button("GTDB", gtdb_link))
+    buttons.append(_ref_button("Select Agents (FSAP)", SELECT_AGENTS_URL))
+    return [
+        html.Label("References", className="text-muted small d-block mb-2"),
+        html.Div(buttons),
+    ]
+
+
+def compute_detection_confidence(reads, abundance_pct=None) -> str:
+    """Detection confidence derived from read support -- NOT a statistical
+    confidence interval. More reads backing a classification means a more
+    trustworthy call. Returns 'N/A' when no read count is available so the
+    report never implies confidence it cannot support.
+    """
+    try:
+        r = int(reads)
+    except (TypeError, ValueError):
+        return "N/A"
+    if r >= 100:
+        return "High"
+    if r >= 20:
+        return "Moderate"
+    if r >= 1:
+        return "Low"
+    return "N/A"
+
+
+def _meta_row(label: str, value: Any, badge: Optional[str] = None) -> html.Div:
+    val = (
+        dbc.Badge(value, color=badge, className="ms-1")
+        if badge else html.Span(value)
+    )
+    return html.Div(
+        [html.Span(f"{label}: ", className="text-muted"), val],
+        className="mb-1",
+    )
+
+
+def build_detection_meta(
+    detected_at: Optional[str] = None,
+    taxonomy_validated: bool = False,
+    validation_date: Optional[str] = None,
+    lineage: Optional[List[str]] = None,
+    gtdb_taxonomy: Optional[str] = None,
+    on_watchlist: bool = True,
+) -> Any:
+    """Compact detection-metadata block for the report modal.
+
+    Covers the report's information gaps: a reported-at timestamp, the
+    taxonomy-ID validation status (deliberately labelled "Taxonomy ID" so it
+    is not confused with the confirmatory BLAST/minimap2 results on the
+    Validation tab), and the organism lineage when known. Returns "" when
+    there is nothing to show.
+    """
+    items: List[Any] = []
+    if detected_at:
+        items.append(_meta_row("Reported", detected_at))
+    if taxonomy_validated:
+        txt = "Validated"
+        if validation_date:
+            txt += f" ({str(validation_date)[:10]})"
+        items.append(_meta_row("Taxonomy ID", txt, badge="success"))
+    elif on_watchlist:
+        items.append(_meta_row("Taxonomy ID", "Not yet validated", badge="secondary"))
+    if lineage:
+        items.append(_meta_row("Lineage", " > ".join(lineage)))
+    elif gtdb_taxonomy:
+        items.append(_meta_row("GTDB lineage", gtdb_taxonomy))
+    if not items:
+        return ""
+    return html.Div(items, className="small")
+
+
+# ----------------------------------------------------------------------------
 # Clinical verdict-banner decision logic (Zone 1).
 #
 # The state machine below is the safety-critical core of the dashboard: it

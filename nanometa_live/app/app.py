@@ -647,29 +647,26 @@ def create_app(
                         html.Strong("Additional Information")
                     ]),
                     dbc.CardBody([
-                        html.P(id="pathogen-modal-notes", className="mb-0")
+                        html.P(id="pathogen-modal-notes", className="mb-2"),
+                        # Detection metadata: reported-at, taxonomy-ID
+                        # validation status, lineage. Populated dynamically.
+                        html.Div(id="pathogen-modal-detection-meta"),
                     ])
                 ], className="mb-3"),
 
-                # Reference links
-                html.Div([
-                    html.Label("References", className="text-muted small d-block mb-2"),
-                    html.A(
-                        [html.I(className="bi bi-box-arrow-up-right me-1"), "NCBI Taxonomy"],
-                        id="pathogen-modal-ncbi-link",
-                        href="#",
-                        target="_blank",
-                        className="btn btn-outline-secondary btn-sm me-2"
-                    ),
-                    html.A(
-                        [html.I(className="bi bi-box-arrow-up-right me-1"), "CDC Information"],
-                        href="https://www.cdc.gov/niosh/topics/emres/chemagent.html",
-                        target="_blank",
-                        className="btn btn-outline-secondary btn-sm"
-                    )
-                ])
+                # Reference links -- built dynamically so the link set matches
+                # the organism's taxonomy database (NCBI / GTDB) and never
+                # points at a wrong or dead record.
+                html.Div(id="pathogen-modal-references")
             ]),
             dbc.ModalFooter([
+                dbc.Button(
+                    [html.I(className="bi bi-shield-check me-2"), "View in Validation"],
+                    id="pathogen-modal-goto-validation",
+                    color="primary",
+                    outline=True,
+                    className="me-2"
+                ),
                 dbc.Button(
                     [html.I(className="bi bi-check-lg me-2"), "Acknowledge Alert"],
                     id="pathogen-modal-acknowledge",

@@ -77,6 +77,9 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     _estimate_classified_rate,
     _get_alerts_badge_color,
     _create_pathogen_alert_panel,
+    build_reference_links,
+    compute_detection_confidence,
+    build_detection_meta,
 )
 
 logger = logging.getLogger(__name__)
@@ -668,8 +671,9 @@ def register_dashboard_callbacks(app: Dash):
             Output("pathogen-modal-action", "children"),
             Output("pathogen-modal-action-alert", "color"),
             Output("pathogen-modal-notes", "children"),
-            Output("pathogen-modal-ncbi-link", "href"),
+            Output("pathogen-modal-references", "children"),
             Output("pathogen-modal-threat-banner", "children"),
+            Output("pathogen-modal-detection-meta", "children"),
             Output("pathogen-report-data", "data")
         ],
         [
@@ -704,7 +708,7 @@ def register_dashboard_callbacks(app: Dash):
 
         # Handle close button
         if triggered == "pathogen-modal-close":
-            return [False] + [no_update] * 14
+            return [False] + [no_update] * 15
 
         # Handle acknowledge button - close modal and log acknowledgment
         if triggered == "pathogen-modal-acknowledge":
@@ -714,20 +718,21 @@ def register_dashboard_callbacks(app: Dash):
                 f"PATHOGEN ALERT ACKNOWLEDGED (modal): {name} (TaxID {taxid}) "
                 f"at {datetime.now().isoformat()}"
             )
-            return [False] + [no_update] * 14
+            return [False] + [no_update] * 15
 
         # Handle view report buttons
         if not view_clicks or not any(view_clicks):
-            return [no_update] * 15
+            return [no_update] * 16
 
         if not isinstance(triggered, dict):
-            return [no_update] * 15
+            return [no_update] * 16
 
         taxid = triggered.get("taxid", 0)
 
         # Look up actual read count and abundance from Kraken2 data
         from nanometa_live.core.utils.classification_loaders import load_kraken_data
         organism_reads = "N/A"
+        organism_reads_int = None
         organism_abundance = "N/A"
         organism_name = None
         organism_rank = None
@@ -739,7 +744,8 @@ def register_dashboard_callbacks(app: Dash):
                     match = kraken_df[kraken_df["taxid"] == int(taxid)]
                     if not match.empty:
                         row = match.iloc[0]
-                        organism_reads = f"{int(row.get('reads', 0)):,}"
+                        organism_reads_int = int(row.get('reads', 0))
+                        organism_reads = f"{organism_reads_int:,}"
                         pct = row.get("%", 0)
                         organism_abundance = f"{pct:.1f}%"
                         organism_name = str(row.get("name", "")).strip()
@@ -772,29 +778,38 @@ def register_dashboard_callbacks(app: Dash):
                             logger.debug(f"Found pathogen via taxid mapping: Kraken2 {taxid} -> NCBI {ncbi_taxid}")
                             break
 
-        # Strategy 3: Try WatchlistManager for custom entries
-        if not pathogen and taxid:
-            try:
-                manager = get_watchlist_manager()
-                # Check if it's in the active watchlist entries
-                active_entries = manager.get_active_entries()
-                # Try by NCBI taxid first
-                if ncbi_taxid in active_entries:
-                    entry = active_entries[ncbi_taxid]
-                    # Create a pseudo-pathogen object from watchlist entry
-                    from types import SimpleNamespace
-                    pathogen = SimpleNamespace(
-                        name=entry.name,
-                        common_name=entry.common_name or "",
-                        threat_level=entry.threat_level,
-                        bsl=entry.bsl_level,
-                        category=entry.category or "Watchlist",
-                        notes=entry.notes or "",
-                        action_required=entry.action_required or "Follow laboratory protocols"
-                    )
-                    logger.debug(f"Found organism in watchlist: {entry.name}")
-            except Exception as e:
-                logger.debug(f"Watchlist lookup failed: {e}")
+        # Shared watchlist-entry lookup: carries the resolved reference links
+        # (ncbi_link / gtdb_link), lineage, and taxonomy-ID validation status
+        # used to enrich the report regardless of which pathogen source above
+        # matched. Matched by NCBI taxid, the raw (db) taxid, or db_taxid.
+        wl_entry = None
+        try:
+            active_entries = get_watchlist_manager().get_active_entries()
+            wl_entry = active_entries.get(ncbi_taxid) or active_entries.get(taxid)
+            if wl_entry is None and isinstance(taxid, int):
+                for e in active_entries.values():
+                    if getattr(e, "db_taxid", None) == taxid:
+                        wl_entry = e
+                        break
+        except Exception as e:
+            logger.debug(f"Watchlist enrichment lookup failed: {e}")
+
+        # Strategy 3: build a pseudo-pathogen from the watchlist entry when the
+        # built-in database had no hit.
+        if not pathogen and wl_entry is not None:
+            from types import SimpleNamespace
+            pathogen = SimpleNamespace(
+                name=wl_entry.name,
+                common_name=wl_entry.common_name or "",
+                threat_level=wl_entry.threat_level,
+                bsl=wl_entry.bsl_level,
+                category=wl_entry.category or "Watchlist",
+                notes=wl_entry.notes or "",
+                action_required=wl_entry.action_required or "Follow laboratory protocols"
+            )
+            logger.debug(f"Found organism in watchlist: {wl_entry.name}")
+
+        detected_at = datetime.now().strftime("%Y-%m-%d %H:%M")
 
         if not pathogen:
             # Show modal with actual Kraken2 data when available
@@ -807,16 +822,17 @@ def register_dashboard_callbacks(app: Dash):
                 "Unknown",  # bsl
                 organism_reads,  # reads
                 organism_abundance,  # abundance
-                "HIGH" if organism_reads != "N/A" else "N/A",  # confidence
+                compute_detection_confidence(organism_reads_int),  # confidence
                 str(taxid),  # taxid
                 "Follow standard laboratory biosafety protocols",  # action
                 "secondary",  # alert color
                 "This organism is not in any active watchlist. Review classification results for context.",  # notes
-                f"https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id={ncbi_taxid}",  # ncbi link
+                build_reference_links(ncbi_taxid=ncbi_taxid),  # references
                 html.Div([
                     html.I(className="bi bi-info-circle me-2"),
                     "Not on watchlist"
                 ], className="alert alert-secondary text-center py-2"),  # threat banner
+                build_detection_meta(detected_at=detected_at, on_watchlist=False),  # meta
                 {"taxid": taxid, "ncbi_taxid": ncbi_taxid}  # store data
             ]
 
@@ -853,8 +869,25 @@ def register_dashboard_callbacks(app: Dash):
             bsl_val = bsl_val.value
         bsl_text = f"BSL-{bsl_val}" if bsl_val else "BSL Unknown"
 
-        # Confidence based on typical detection (placeholder - would be populated from actual data)
-        confidence = "HIGH" if taxid else "UNKNOWN"
+        # Confidence reflects read support for the call (see helper docstring).
+        confidence = compute_detection_confidence(organism_reads_int)
+
+        # References + lineage drawn from the resolved watchlist entry when
+        # present, so a GTDB run gets a working GTDB link instead of a
+        # possibly-wrong NCBI one.
+        references = build_reference_links(
+            ncbi_taxid=ncbi_taxid,
+            ncbi_link=getattr(wl_entry, "ncbi_link", None),
+            gtdb_link=getattr(wl_entry, "gtdb_link", None),
+        )
+        detection_meta = build_detection_meta(
+            detected_at=detected_at,
+            taxonomy_validated=bool(getattr(wl_entry, "validated", False)),
+            validation_date=getattr(wl_entry, "validation_date", None),
+            lineage=getattr(wl_entry, "lineage", None),
+            gtdb_taxonomy=getattr(wl_entry, "gtdb_taxonomy", None),
+            on_watchlist=wl_entry is not None,
+        )
 
         return [
             True,  # is_open
@@ -869,8 +902,9 @@ def register_dashboard_callbacks(app: Dash):
             pathogen.action_required,  # action
             alert_color,  # alert color
             pathogen.notes or "No additional notes available.",  # notes
-            f"https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id={ncbi_taxid}",  # ncbi link
+            references,  # references
             threat_banner,  # threat banner
+            detection_meta,  # meta
             {"taxid": taxid, "name": pathogen.name, "threat_level": threat_level}  # store data
         ]
 
@@ -1062,6 +1096,23 @@ def register_dashboard_callbacks(app: Dash):
         Input("pathogen-modal-print", "n_clicks"),
         prevent_initial_call=True
     )
+
+    # ========================================================================
+    # Pathogen Modal -> Validation tab jump
+    # ========================================================================
+
+    @app.callback(
+        Output("tabs", "active_tab", allow_duplicate=True),
+        Output("pathogen-report-modal", "is_open", allow_duplicate=True),
+        Input("pathogen-modal-goto-validation", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def goto_validation_from_report(n_clicks):
+        """Close the report and switch to the Validation tab for the
+        confirmatory BLAST/minimap2 results on the detected organism."""
+        if not n_clicks:
+            return no_update, no_update
+        return "validation-tab", False
 
     # ========================================================================
     # Dashboard Refresh Button

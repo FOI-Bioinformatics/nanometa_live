@@ -14,7 +14,7 @@ Users can override or extend the built-in database by:
 2. Adding entries to species_of_interest in their analysis config
 
 References:
-- CDC Bioterrorism Agents/Diseases: https://www.cdc.gov/niosh/topics/emres/chemagent.html
+- Federal Select Agent Program (select agents and toxins): https://www.selectagents.gov/sat/list.htm
 - WHO Priority Pathogens: https://www.who.int/publications/i/item/9789240093461
 """
 
