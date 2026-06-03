@@ -228,6 +228,23 @@ tab save validation, `parameter_mapping.validate_nextflow_params`
 delegate. Adding a new required file (e.g. `accmap.k2d`) is a
 single-edit change.
 
+### Config form: save / load / dirty-state symmetry
+
+The Configuration tab has three field lists that must stay in lock-step,
+or the form silently mis-reports: `apply_config_changes` (States that build
+the saved config), `initialize_form_from_config` (Outputs that repopulate the
+form), and `detect_form_changes` (Inputs that drive the "Modified" badge).
+When you add a form field, wire it into all three. The dirty check delegates
+to the pure `config_form_dirty(snapshot, form=...)` helper in
+`config_tab_helpers.py`, fed the full saved field set keyed exactly as
+`build_config_from_form` writes it (with `pipeline_source` reconstructed from
+the three source widgets via `_pipeline_source_from_form`); a field missing
+there means edits to it never flag the form modified, so the operator can
+forget to Apply and launch with stale config. Form-loader `.get(key, default)`
+fallbacks must match `create_default_config` — a divergent default (e.g.
+`validation_method`, `sample_handling`) only surfaces when a key is absent, a
+latent trap since `load_config` merges defaults on read.
+
 ## Watchlist System
 
 Sources searched in priority order:
@@ -452,6 +469,37 @@ function so they stay testable without a running app. This mirrors the broader
 `*_tab.py` → `*_helpers.py` split (pure logic in helpers, thin callback wiring
 in the tab module) used across the dashboard, main, qc, and validation tabs.
 
+**Pathogen Report modal references are built dynamically.** The report's
+external links come from `build_reference_links()` in `dashboard_helpers.py`,
+which never emits a link to a wrong or nonexistent record: NCBI Taxonomy only
+for a real NCBI taxid (`_is_real_ncbi_taxid`) or a resolved `ncbi_link`; GTDB
+only when a resolved `gtdb_link` exists (never reconstructed from a name);
+Federal Select Agent Program (`SELECT_AGENTS_URL`,
+`https://www.selectagents.gov/sat/list.htm`) always. The old CDC
+`niosh/topics/emres/chemagent.html` link was dead (404) and topically wrong
+(chemical agents) — do not reintroduce a CDC bioterrorism-category URL; CDC
+retired that tree in 2024. Confidence in the report is `compute_detection_confidence`
+(read-support bands, not a statistical CI), and `build_detection_meta` labels
+the watchlist `validated` flag as "Taxonomy ID" validation so it is not
+confused with the confirmatory BLAST/minimap2 results on the Validation tab.
+
+**Export Results report generator** (`core/export/report_generator.py`). The
+report's decision banner and Watched Organisms table are driven entirely by
+`watched_results`, so `_screen_watchlist` must iterate
+`get_active_entries()` — a `Dict[int, WatchlistEntry]`, NOT a list of dicts —
+via `.values()` with attribute access, matching by `db_taxid` → NCBI `taxid` →
+name. Iterating it wrong silently empties the threat screen (a false negative
+in the archived artifact); regression-covered in `tests/test_report_generator.py`.
+Classification counts delegate to `get_classification_stats`; organism abundance
+uses species (`S`) rank only with Kraken2's `%` column (never `reads.sum()` —
+double-counts genus and over-states). Raw files copied are `_RAW_SUBDIRS`
+(kraken2/fastp/seqkit/taxpasta/validation/on_demand_validation/pipeline_info),
+AppleDouble-filtered, skipped above `export_max_raw_bytes` (default 5 GiB).
+Plotly is inlined for offline self-containment; `offline_mode` suppresses the
+CDN fallback so an offline report never emits a dead `<script src>`. The export
+runs synchronously in the callback ON PURPOSE — a background callback would
+empty the `WatchlistManager` singleton and re-break the screen.
+
 ### macOS bind-mount gotcha
 
 macOS writes AppleDouble (`._*`) sidecar files when writing to non-HFS+ filesystems,
@@ -468,7 +516,7 @@ pytest -n 0                                         # serial, for pdb/print debu
 pytest --cov=nanometa_live --cov-report=term-missing   # with the coverage gate
 ```
 
-1874 tests as of 2026-05-31, ~56% line coverage. `pytest.ini` enforces a
+2159 tests as of 2026-06-03, ~56% line coverage. `pytest.ini` enforces a
 `fail_under = 55` floor on coverage runs only (the default `pytest` dev loop
 does not load coverage), `filterwarnings = error::DeprecationWarning:nanometa_live`
 (our own deprecations fail the build), and the `unit` / `callback` / `integration`
