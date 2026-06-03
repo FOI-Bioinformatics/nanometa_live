@@ -62,6 +62,23 @@ class TestGenerate:
         data = json.loads(metadata_files[0].read_text())
         assert isinstance(data, dict)
 
+    def test_metadata_drops_redundant_fastp_summary(self, generator, tmp_path):
+        out = tmp_path / "export"
+        generator.generate(str(out), include_raw=False)
+        metadata = json.loads((out / "metadata.json").read_text())
+        # qc_summary covers both fastp and seqkit; the fastp-only block is gone.
+        assert "fastp_summary" not in metadata
+        assert "qc_summary" in metadata
+
+    def test_generated_at_is_timezone_aware(self, generator, tmp_path):
+        from datetime import datetime
+
+        out = tmp_path / "export"
+        generator.generate(str(out), include_raw=False)
+        summary = json.loads((out / "summary.json").read_text())
+        ts = datetime.fromisoformat(summary["generated_at"])
+        assert ts.tzinfo is not None  # carries a UTC offset, not naive
+
     def test_include_raw_copies_kraken2(self, generator, tmp_path):
         out = tmp_path / "export"
         generator.generate(str(out), include_raw=True)

@@ -18,10 +18,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 
 from nanometa_live.core.utils.classification_loaders import load_kraken_data
-from nanometa_live.core.utils.qc_loaders import (
-    get_qc_stats,
-    load_fastp_data,
-)
+from nanometa_live.core.utils.qc_loaders import get_qc_stats
 from nanometa_live.core.utils.sample_detector import (
     get_available_samples,
     resolve_analysis_directory,
@@ -115,10 +112,10 @@ class ReportGenerator:
 
     def _collect_data(self, samples: List[Optional[str]]) -> Dict[str, Any]:
         """Collect all data needed for the report."""
-        # Aggregated data
+        # Aggregated data. get_qc_stats already abstracts fastp/seqkit (the two
+        # are mutually exclusive), so a separate fastp-only summary is dropped.
         kraken_all = load_kraken_data(self.results_dir, None)
         qc_all = get_qc_stats(self.results_dir, None)
-        fastp_all = load_fastp_data(self.results_dir, None)
 
         # Classification summary from aggregated kraken
         classified, unclassified = self._get_classification_counts(kraken_all)
@@ -149,7 +146,9 @@ class ReportGenerator:
             }
 
         return {
-            "generated_at": datetime.now().isoformat(),
+            # Timezone-aware local timestamp (carries the UTC offset) so an
+            # archived report is unambiguous about when it was generated.
+            "generated_at": datetime.now().astimezone().isoformat(),
             "results_dir": self.results_dir,
             "config": {
                 k: v for k, v in self.config.items()
@@ -160,7 +159,6 @@ class ReportGenerator:
             "classified_total": classified,
             "unclassified_total": unclassified,
             "qc_summary": qc_all,
-            "fastp_summary": fastp_all,
             "watched_results": watched_results,
             "alerts": alerts,
             "per_sample": per_sample,
@@ -578,10 +576,6 @@ class ReportGenerator:
             "config": data.get("config", {}),
             "qc_summary": {
                 k: v for k, v in data.get("qc_summary", {}).items()
-                if isinstance(v, (str, int, float, bool, type(None)))
-            },
-            "fastp_summary": {
-                k: v for k, v in data.get("fastp_summary", {}).items()
                 if isinstance(v, (str, int, float, bool, type(None)))
             },
             "watchlist_entries": len(data.get("watched_results", [])),
