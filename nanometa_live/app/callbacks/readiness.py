@@ -18,10 +18,6 @@ from nanometa_live.core.utils.sample_detector import get_available_samples, get_
 from nanometa_live.core.utils.loader_utils import check_data_freshness
 from nanometa_live.app.utils.callback_helpers import log_callback_error
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
-from nanometa_live.app.utils.debounce import (
-    should_skip_update, get_trigger_type,
-    interval_render_is_redundant, mark_rendered,
-)
 from nanometa_live.app.app import background_callback_manager
 
 # Readiness single source of truth. ONE callback runs ReadinessChecker and
@@ -75,6 +71,49 @@ def _empty_readiness_state(message: str) -> Dict[str, Any]:
     }
 
 
+# Best-effort per-process skip so an idle update-interval tick does not re-run
+# ReadinessChecker's subprocess probes (docker info, nextflow -version) when the
+# readiness-relevant config is unchanged. Belt-and-braces with the prev-state
+# equality compare below, which robustly suppresses Store rewrites even across
+# DiskcacheManager worker processes (it reads the published Store as State).
+_READINESS_TTL = 60.0
+_readiness_lock = threading.Lock()
+_readiness_last: Dict[str, Any] = {"fingerprint": None, "ts": 0.0}
+
+
+def _readiness_fingerprint(config: Optional[Dict[str, Any]]) -> str:
+    """Hash only the config fields the readiness checks actually read."""
+    if not config:
+        return "no-config"
+    relevant = {
+        k: config.get(k) for k in (
+            "kraken_db", "main_dir", "results_output_directory",
+            "nanopore_output_directory", "pipeline_source", "pipeline_profile",
+            "pipeline_cache_dir", "blast_validation", "network_check_enabled",
+            "offline_mode",
+        )
+    }
+    return hashlib.md5(json.dumps(relevant, sort_keys=True).encode()).hexdigest()
+
+
+def _readiness_unchanged(prev: Optional[Dict[str, Any]],
+                         new: Dict[str, Any]) -> bool:
+    """True when two readiness states are equivalent ignoring ``computed_at``.
+
+    Used to skip rewriting the Store (and thus re-firing the renderers, which
+    would re-open the checklist every interval tick) when nothing meaningful
+    changed.
+    """
+    if not prev:
+        return False
+    return (
+        prev.get("ready") == new.get("ready")
+        and prev.get("error") == new.get("error")
+        and prev.get("summary") == new.get("summary")
+        and prev.get("checks") == new.get("checks")
+    )
+
+
 def register_readiness(app, backend_manager):
     # Recompute callback: the ONLY place that runs ReadinessChecker. It writes
     # the shared readiness-state Store; both the header pill (below) and the
@@ -90,21 +129,55 @@ def register_readiness(app, backend_manager):
         Input("update-interval", "n_intervals"),
         Input("app-config", "data"),
         Input("check-readiness-btn", "n_clicks"),
+        State("readiness-state", "data"),
         background=True,
         manager=background_callback_manager,
     )
-    def update_readiness_state(n_intervals, config, n_clicks):
-        """Compute readiness once and publish it to the shared Store."""
+    def update_readiness_state(n_intervals, config, n_clicks, prev_state):
+        """Compute readiness and publish it to the shared Store, deduplicated.
+
+        Idle update-interval ticks must not re-run the checker's subprocess
+        probes or rewrite the Store -- a Store rewrite re-fires the renderers and
+        would re-open the checklist every 30 s, fighting the operator's manual
+        collapse. So: a manual "Check Everything" click always recomputes; an
+        unchanged config within the TTL skips the recompute entirely; and even
+        when we do recompute, an unchanged result returns no_update so the Store
+        (and the renderers) stay put.
+        """
         from nanometa_live.core.workflow.readiness_checker import ReadinessChecker
 
+        try:
+            forced = (dash.ctx.triggered_id == "check-readiness-btn")
+        except Exception:
+            forced = False
+
         if not config:
-            return _empty_readiness_state("No configuration loaded")
+            new = _empty_readiness_state("No configuration loaded")
+            return no_update if _readiness_unchanged(prev_state, new) else new
+
+        fingerprint = _readiness_fingerprint(config)
+        now = time.time()
+        if not forced:
+            with _readiness_lock:
+                fresh = (_readiness_last["fingerprint"] == fingerprint
+                         and (now - _readiness_last["ts"]) < _READINESS_TTL)
+            if fresh:
+                return no_update
+
         try:
             report = ReadinessChecker().check_readiness(config)
-            return _serialize_report(report)
+            new = _serialize_report(report)
         except Exception as e:
             logging.error(f"Readiness check failed: {e}")
-            return _empty_readiness_state(str(e))
+            new = _empty_readiness_state(str(e))
+
+        with _readiness_lock:
+            _readiness_last["fingerprint"] = fingerprint
+            _readiness_last["ts"] = now
+
+        if forced:
+            return new
+        return no_update if _readiness_unchanged(prev_state, new) else new
 
     @app.callback(
         Output("readiness-badge", "children"),

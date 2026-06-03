@@ -484,29 +484,6 @@ def build_offline_deployment_content():
     ])
 
 
-def build_start_analysis_cta():
-    """Page-bottom Start Analysis CTA.
-
-    Mirrors the "Next" button placement on the Configuration tab so the
-    operator's left-to-right step flow ends with a Start Analysis button in the
-    expected position. Proxies to the header start-stop-button (callback in
-    callbacks/navigation.py) so the existing start_or_prompt_stop logic
-    (collision modal, readiness gate, backend launch) runs unchanged.
-    """
-    return html.Div([
-        html.Hr(className="my-4"),
-        ActionRow([
-            dbc.Button(
-                [html.I(className="bi bi-play-fill me-2"), "Start Analysis"],
-                id="preparation-start-analysis-btn",
-                color="primary",
-                size="lg",
-                n_clicks=0,
-            ),
-        ]),
-    ], className="mt-3 mb-4")
-
-
 # =============================================================================
 # SECTION CARDS
 # =============================================================================
