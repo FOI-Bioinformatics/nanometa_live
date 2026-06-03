@@ -26,6 +26,7 @@ from nanometa_live.core.utils.sample_detector import (
     get_available_samples,
     resolve_analysis_directory,
 )
+from nanometa_live.app.utils.callback_helpers import get_classification_stats
 
 logger = logging.getLogger(__name__)
 
@@ -141,16 +142,15 @@ class ReportGenerator:
         }
 
     def _get_classification_counts(self, df: pd.DataFrame):
-        """Extract classified/unclassified read counts from kraken dataframe."""
-        if df.empty:
-            return 0, 0
-        unclassified_row = df[df["taxid"] == 0]
-        root_row = df[df["taxid"] == 1]
-        unclassified = int(unclassified_row["reads"].sum()) if not unclassified_row.empty else 0
-        classified = int(root_row["cumul_reads"].sum()) if not root_row.empty else 0
-        if classified == 0:
-            # Fallback: sum all non-unclassified reads
-            classified = int(df[df["taxid"] != 0]["reads"].sum())
+        """Classified/unclassified read counts via the canonical helper.
+
+        Delegates to ``get_classification_stats`` (root.cumul_reads +
+        unclassified.cumul_reads) rather than re-deriving the counts. The old
+        local fallback summed the per-rank ``reads`` column, which collapses to
+        zero in the degenerate single-read case where every read is parked at
+        root -- the exact pattern CLAUDE.md warns against.
+        """
+        classified, unclassified, _rate = get_classification_stats(df)
         return classified, unclassified
 
     def _extract_organisms(self, df: pd.DataFrame, max_n: int = 20) -> List[Dict[str, Any]]:
@@ -176,42 +176,63 @@ class ReportGenerator:
         return results
 
     def _screen_watchlist(self, kraken_df: pd.DataFrame) -> List[Dict[str, Any]]:
-        """Screen kraken results against configured watchlist."""
-        results = []
+        """Screen kraken results against the active watchlist.
+
+        Emits one row per active entry (detected and not) so the report's
+        Watched Organisms table and decision banner reflect the full screen.
+
+        ``get_active_entries()`` returns ``Dict[int, WatchlistEntry]`` -- the
+        prior code iterated it as a list of dicts (``entry.get(...)``), which
+        raised ``AttributeError`` on the first entry, was swallowed by the
+        broad except, and left every exported report showing an empty,
+        all-clear screen even when watchlist pathogens were present.
+        """
+        results: List[Dict[str, Any]] = []
         try:
             from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
             wm = get_watchlist_manager()
+            if not wm._loaded:
+                wm.load_config(self.config)
             active_entries = wm.get_active_entries()
 
             if kraken_df.empty or not active_entries:
                 return results
 
-            for entry in active_entries:
-                taxid = entry.get("taxid")
-                name = entry.get("name", "Unknown")
-                threat_level = entry.get("threat_level", "unknown")
+            # Denominator is total reads (classified + unclassified), matching
+            # the dashboard tiles -- not the per-rank reads column.
+            classified, unclassified, _rate = get_classification_stats(kraken_df)
+            total = classified + unclassified
+            read_col = "cumul_reads" if "cumul_reads" in kraken_df.columns else "reads"
+            names_lower = kraken_df["name"].astype(str).str.strip().str.lower()
 
-                matched_rows = kraken_df[kraken_df["taxid"] == taxid] if taxid else pd.DataFrame()
-                if matched_rows.empty and name:
-                    # Try name match
-                    matched_rows = kraken_df[
-                        kraken_df["name"].str.strip().str.lower() == name.lower().strip()
-                    ]
+            for entry in active_entries.values():
+                threat = entry.threat_level
+                threat_level = threat.value if hasattr(threat, "value") else str(threat)
 
-                reads = int(matched_rows["reads"].sum()) if not matched_rows.empty else 0
-                total = int(kraken_df["reads"].sum()) if not kraken_df.empty else 0
+                # Match by the Kraken2 database taxid (db_taxid for GTDB/custom
+                # DBs, else the NCBI taxid), then fall back to an exact name
+                # match -- the same precedence the dashboard uses.
+                match_id = getattr(entry, "db_taxid", None) or entry.taxid
+                matched = (
+                    kraken_df[kraken_df["taxid"] == match_id]
+                    if match_id else kraken_df.iloc[0:0]
+                )
+                if matched.empty and entry.name:
+                    matched = kraken_df[names_lower == entry.name.strip().lower()]
+
+                reads = int(matched[read_col].sum()) if not matched.empty else 0
                 abundance = (reads / total * 100) if total > 0 else 0
 
                 results.append({
-                    "name": name,
-                    "taxid": taxid,
+                    "name": entry.name,
+                    "taxid": entry.taxid,
                     "threat_level": threat_level,
                     "reads": reads,
                     "abundance": round(abundance, 3),
                     "detected": reads > 0,
                 })
 
-        except (ImportError, AttributeError, KeyError, ValueError, TypeError) as e:
+        except Exception as e:
             logger.exception("Could not screen watchlist: %s", e)
 
         return results
@@ -253,11 +274,22 @@ class ReportGenerator:
         except (ImportError, AttributeError, FileNotFoundError, PermissionError, OSError, UnicodeDecodeError):
             pass
 
-        # Fallback: use CDN reference (not fully self-contained but functional)
-        logger.warning(
-            "Could not find local plotly.js bundle. "
-            "Report will reference CDN: %s", _PLOTLY_CDN_URL
-        )
+        # No local bundle. In offline mode a CDN reference is useless (and a
+        # dangling external request when the report is opened), so the caller
+        # must not emit one -- see _build_html_report. Surface the degradation
+        # clearly rather than silently shipping a chart-less "self-contained"
+        # report.
+        if self.config.get("offline_mode"):
+            logger.error(
+                "No local plotly.js bundle found and offline_mode is set: "
+                "the exported report's charts will not render. Install plotly "
+                "with its bundled package_data, or export with network access."
+            )
+        else:
+            logger.warning(
+                "Could not find local plotly.js bundle. "
+                "Report will reference CDN: %s", _PLOTLY_CDN_URL
+            )
         self._plotly_js = ""
         return self._plotly_js
 
@@ -278,9 +310,11 @@ class ReportGenerator:
         # Build Plotly figures as JSON
         charts = self._build_charts(data)
 
-        # Get plotly.js for embedding
+        # Get plotly.js for embedding. Only reference the CDN when a local
+        # bundle is unavailable AND we are not offline -- an offline report
+        # that points at a CDN just fails to load with a dangling request.
         plotly_js = self._get_plotly_js()
-        use_cdn = not plotly_js
+        use_cdn = (not plotly_js) and not self.config.get("offline_mode")
 
         # Serialize charts dict to JSON for embedding in template script
         charts_json = json.dumps(charts)
