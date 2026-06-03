@@ -217,3 +217,40 @@ class TestRawCopy:
 
         meta = json.loads((out / "metadata.json").read_text())
         assert "kraken2" in meta["raw_files_included"]
+
+
+class TestExtractOrganisms:
+    """Top-organisms extraction: species-only, kraken %-column abundance."""
+
+    def _df(self):
+        # A genus row whose reads include its species (clade semantics) plus a
+        # standalone species. The genus must NOT appear in the output.
+        return pd.DataFrame([
+            {"taxid": 1386, "name": "Bacillus", "rank": "G", "reads": 800, "%": 80.0},
+            {"taxid": 1392, "name": "Bacillus anthracis", "rank": "S", "reads": 500, "%": 50.0},
+            {"taxid": 1423, "name": "Bacillus subtilis", "rank": "S", "reads": 300, "%": 30.0},
+        ])
+
+    def test_species_only_no_genus_double_count(self, generator):
+        orgs = generator._extract_organisms(self._df())
+        names = [o["name"] for o in orgs]
+        assert "Bacillus" not in names  # genus excluded
+        assert names == ["Bacillus anthracis", "Bacillus subtilis"]  # reads desc
+
+    def test_abundance_from_percent_column(self, generator):
+        orgs = generator._extract_organisms(self._df())
+        anthracis = next(o for o in orgs if o["name"] == "Bacillus anthracis")
+        assert anthracis["abundance"] == 50.0  # kraken % column, not reads/sum
+        assert all(o["abundance"] <= 100 for o in orgs)
+
+    def test_fallback_uses_total_reads_denominator(self, generator):
+        # No %/fraction columns -> fall back to fraction of total (classified +
+        # unclassified) reads, not the per-rank reads sum.
+        df = pd.DataFrame([
+            {"taxid": 0, "name": "unclassified", "rank": "U", "reads": 100, "cumul_reads": 100},
+            {"taxid": 1, "name": "root", "rank": "R", "reads": 0, "cumul_reads": 900},
+            {"taxid": 1392, "name": "Bacillus anthracis", "rank": "S", "reads": 500, "cumul_reads": 500},
+        ])
+        orgs = generator._extract_organisms(df)
+        # 500 / (900 + 100) total reads = 50%
+        assert orgs[0]["abundance"] == 50.0

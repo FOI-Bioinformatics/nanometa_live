@@ -179,24 +179,41 @@ class ReportGenerator:
         return classified, unclassified
 
     def _extract_organisms(self, df: pd.DataFrame, max_n: int = 20) -> List[Dict[str, Any]]:
-        """Extract top organisms at species/genus level."""
-        if df.empty:
+        """Extract the top species-level organisms.
+
+        Species rank (``S``) only: the previous S+G filter double-counted,
+        since a genus row's reads already include its species' reads. Abundance
+        is read from Kraken2's own ``%`` column (the authoritative per-clade
+        fraction of total reads) -- the prior reads/sum(reads) used the per-rank
+        ``reads`` column as denominator, which over-states abundance and can
+        push the listed values past 100%.
+        """
+        if df.empty or "rank" not in df.columns:
             return []
-        species = df[df["rank"].isin(["S", "G"])].copy()
+        species = df[df["rank"].astype(str).str.strip() == "S"].copy()
         if species.empty:
             return []
         species = species.sort_values("reads", ascending=False).head(max_n)
 
-        total_reads = df["reads"].sum()
+        if "%" in species.columns:
+            abundance = species["%"].fillna(0).astype(float)
+        elif "fraction_total_reads" in species.columns:
+            abundance = species["fraction_total_reads"].fillna(0).astype(float) * 100
+        else:
+            # Last resort: fraction of total (classified + unclassified) reads.
+            classified, unclassified, _rate = get_classification_stats(df)
+            total = classified + unclassified
+            abundance = (species["reads"].astype(float) / total * 100) if total > 0 else 0.0
+        species["_abundance"] = abundance
+
         results = []
         for _, row in species.iterrows():
-            abundance = (row["reads"] / total_reads * 100) if total_reads > 0 else 0
             results.append({
                 "name": str(row["name"]).strip(),
                 "taxid": int(row["taxid"]),
                 "reads": int(row["reads"]),
                 "rank": str(row["rank"]).strip(),
-                "abundance": round(abundance, 2),
+                "abundance": round(float(row["_abundance"]), 2),
             })
         return results
 
