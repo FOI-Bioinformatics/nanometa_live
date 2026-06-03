@@ -242,6 +242,34 @@ def register_preparation_callbacks(app):
         prevent_initial_call=True,
     )
 
+    # --- Pre-warm checkbox only applies to the conda engine ---
+    @app.callback(
+        Output("prewarm-wrapper", "style"),
+        Input("bundle-containerization-radio", "value"),
+        prevent_initial_call=False,
+    )
+    def toggle_prewarm_visibility(engine):
+        # Pre-warming bakes conda environments into the bundle; it is
+        # meaningless for docker/singularity, so hide it there.
+        return {} if (engine or "conda") == "conda" else {"display": "none"}
+
+    # --- Offline notice on the Run Preparation card ---
+    @app.callback(
+        Output("prep-offline-notice", "children"),
+        Input("app-config", "data"),
+        prevent_initial_call=False,
+    )
+    def render_offline_notice(config):
+        if not (config or {}).get("offline_mode"):
+            return None
+        return dbc.Alert([
+            html.I(className="bi bi-wifi-off me-2"),
+            html.Strong("Offline mode is on. "),
+            "Run Preparation will use the genomes bundled with this system and "
+            "will not download anything from NCBI. Any watchlist organism whose "
+            "genome was not included in the bundle is reported as a warning.",
+        ], color="info", className="mt-2 mb-3 py-2")
+
     # --- Start Preparation ---
     @app.callback(
         Output("prep-progress-area", "children"),
@@ -1156,6 +1184,20 @@ def register_preparation_callbacks(app):
             raise PreventUpdate
 
         from nanometa_live.core.utils.genome_manager import get_genome_manager
+
+        # Offline / imported system: never reach out to NCBI. The bundled
+        # genomes are the source of truth here.
+        if (config or {}).get("offline_mode"):
+            set_progress((
+                100,
+                "Offline mode -- genome download disabled",
+                "Using genomes bundled with this system",
+                [html.Div("Offline mode is on; skipping NCBI download. "
+                          "Missing genomes must be added to the bundle on the "
+                          "source machine.", className="text-warning")],
+                dbc.Badge("Offline", color="secondary", className="me-2"),
+            ))
+            return [datetime.now().isoformat()]
 
         log_entries = []
 

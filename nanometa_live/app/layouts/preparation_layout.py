@@ -206,6 +206,9 @@ def build_run_preparation_card():
             # aborts the whole run without it, so surface the one prerequisite on
             # the primary path instead of leaving it buried in Advanced stages.
             html.Div(id="prep-db-prerequisite"),
+            # Offline-mode notice: on an imported/offline system, preparation
+            # uses bundled genomes and never reaches out to NCBI.
+            html.Div(id="prep-offline-notice"),
             dbc.Checklist(
                 id="prep-options",
                 options=[
@@ -329,18 +332,7 @@ def build_export_bundle_card():
                 htmlFor="bundle-containerization-radio",
             ),
             _build_containerization_radio(),
-            # Conda-mode-only sub-control: pre-warm toggle. The export callback
-            # ignores this flag when docker / singularity is selected.
-            dbc.Checkbox(
-                id="bundle-export-prewarm",
-                label=(
-                    "Pre-warm conda environments "
-                    "(adds roughly 30 min and ~5 GB; "
-                    "applies only to Conda mode)"
-                ),
-                value=True,
-                className="mb-2 ms-3",
-            ),
+            _build_prewarm_toggle(),
             _build_platform_banner(),
             ActionRow([
                 dbc.Button(
@@ -355,6 +347,30 @@ def build_export_bundle_card():
             html.Div(id="export-result", className="mt-2"),
         ]),
     ])
+
+
+def _build_prewarm_toggle():
+    """Conda-mode pre-warm checkbox, off by default and conda-only.
+
+    Off by default because pre-warming downloads ~5 GB -- a footgun on
+    restricted internet. The toggle_prewarm_visibility callback hides this
+    wrapper unless the conda engine is selected (the export ignores the flag
+    for docker/singularity anyway).
+    """
+    return html.Div(
+        dbc.Checkbox(
+            id="bundle-export-prewarm",
+            label=(
+                "Pre-warm conda environments before export "
+                "(downloads ~5 GB and adds ~30 min) -- leave off on "
+                "restricted internet; the field machine can build the "
+                "environments itself on first run"
+            ),
+            value=False,
+            className="mb-2 ms-3",
+        ),
+        id="prewarm-wrapper",
+    )
 
 
 def _build_export_force_area():

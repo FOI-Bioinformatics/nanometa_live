@@ -347,7 +347,7 @@ class TestDownloadAndBlastStages:
                 return f"/genomes/{taxid}.fasta"
         monkeypatch.setattr(
             "nanometa_live.core.utils.genome_manager.get_genome_manager",
-            lambda d: _Manager(),
+            lambda d, offline_mode=False: _Manager(),
         )
         prep = make_preparer(tmp_path)
         monkeypatch.setattr(prep, "_get_watchlist_entries", lambda: [
@@ -367,7 +367,7 @@ class TestDownloadAndBlastStages:
                 raise AssertionError("should not download after cancel")
         monkeypatch.setattr(
             "nanometa_live.core.utils.genome_manager.get_genome_manager",
-            lambda d: _Manager(),
+            lambda d, offline_mode=False: _Manager(),
         )
         prep = make_preparer(tmp_path)
         prep.cancel()
@@ -384,7 +384,7 @@ class TestDownloadAndBlastStages:
                 return 4
         monkeypatch.setattr(
             "nanometa_live.core.utils.genome_manager.get_genome_manager",
-            lambda d: _Manager(),
+            lambda d, offline_mode=False: _Manager(),
         )
         prep = make_preparer(tmp_path)
         result = PreparationResult(success=True)

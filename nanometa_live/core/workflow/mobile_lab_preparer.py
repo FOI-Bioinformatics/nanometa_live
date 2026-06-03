@@ -256,9 +256,37 @@ class MobileLabPreparer:
 
     def _run_download_genomes(self, idx: int, result: PreparationResult, skip_existing: bool):
         from nanometa_live.core.utils.genome_manager import get_genome_manager
-        manager = get_genome_manager(self.config.get("genome_cache_dir") or str(self.home))
+        offline = bool(self.config.get("offline_mode", False))
+        # Pass offline_mode explicitly: prepare() runs in a DiskcacheManager
+        # worker where the genome-manager singleton starts fresh (offline_mode
+        # defaults False), so without this an imported/offline system would
+        # still reach out to NCBI.
+        manager = get_genome_manager(
+            self.config.get("genome_cache_dir") or str(self.home),
+            offline_mode=offline,
+        )
         entries = self._get_watchlist_entries()
         if not entries:
+            return
+
+        if offline:
+            # Imported/offline system: rely on the genomes shipped in the
+            # bundle; never download. Report any watchlist organism whose
+            # genome was not included so the operator knows confirmation
+            # testing will be incomplete for it.
+            missing = [
+                e.get("name", f"taxid {e.get('taxid')}")
+                for e in entries
+                if not manager.has_genome(e.get("taxid", 0))
+            ]
+            self._report(PrepStage.DOWNLOAD_GENOMES, idx,
+                         "Offline mode: using bundled genomes", 100.0)
+            if missing:
+                shown = ", ".join(missing[:5]) + ("..." if len(missing) > 5 else "")
+                result.warnings.append(
+                    f"Offline mode: skipped genome download; {len(missing)} "
+                    f"watchlist genome(s) not present in the bundle: {shown}"
+                )
             return
 
         total = len(entries)
@@ -283,7 +311,12 @@ class MobileLabPreparer:
 
     def _run_build_blast_dbs(self, idx: int, result: PreparationResult, skip_existing: bool):
         from nanometa_live.core.utils.genome_manager import get_genome_manager
-        manager = get_genome_manager(self.config.get("genome_cache_dir") or str(self.home))
+        # makeblastdb is local, but keep the manager offline-consistent so it
+        # never lazily fetches anything on an imported/offline system.
+        manager = get_genome_manager(
+            self.config.get("genome_cache_dir") or str(self.home),
+            offline_mode=bool(self.config.get("offline_mode", False)),
+        )
         self._report(PrepStage.BUILD_BLAST_DBS, idx,
                      "Building missing BLAST databases", 30.0)
         built = manager.build_missing_blast_dbs()

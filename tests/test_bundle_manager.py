@@ -1534,8 +1534,12 @@ class TestBuildPlatformCheck:
 class TestPreparationTabPreWarmCheckbox:
     """The Preparation tab must surface the pre-warm toggle and platform banner."""
 
-    def test_layout_includes_prewarm_checkbox_default_on(self):
-        """bundle-export-prewarm checkbox is in the layout, defaults to True."""
+    def test_layout_includes_prewarm_checkbox_default_off(self):
+        """bundle-export-prewarm checkbox is in the layout, defaults to False.
+
+        Off by default so the default export never attempts a ~5 GB conda
+        pre-warm download -- a footgun on restricted internet.
+        """
         from nanometa_live.app.layouts.deployment_layout import (
             create_deployment_layout,
         )
@@ -1559,7 +1563,7 @@ class TestPreparationTabPreWarmCheckbox:
         layout = create_deployment_layout()
         cb = find_checkbox(layout, "bundle-export-prewarm")
         assert cb is not None, "bundle-export-prewarm checkbox missing"
-        assert cb.value is True, "pre-warm checkbox must default to ON"
+        assert cb.value is False, "pre-warm checkbox must default to OFF"
 
     def test_platform_banner_renders(self):
         """_build_platform_banner returns an Alert with current OS+arch."""

@@ -107,3 +107,73 @@ class TestDbPrerequisiteHint:
         # No config / pre-first-check: empty Store must not raise a false alarm.
         assert render_fn({"checks": []}) is None
         assert render_fn(None) is None
+
+
+class TestRestrictedInternetGuards:
+    """#1 pre-warm default/visibility and #2 offline genome-download guards."""
+
+    @pytest.fixture
+    def app(self):
+        app = Dash(__name__, suppress_callback_exceptions=True)
+        register_preparation_callbacks(app)
+        return app
+
+    def test_prewarm_defaults_off(self):
+        # The checkbox must default unchecked so the default export does not
+        # attempt a ~5 GB download on restricted internet.
+        from nanometa_live.app.layouts.preparation_layout import build_export_bundle_card
+
+        def find(node, target_id):
+            if getattr(node, "id", None) == target_id:
+                return node
+            ch = getattr(node, "children", None)
+            if ch is None:
+                return None
+            for c in (ch if isinstance(ch, (list, tuple)) else [ch]):
+                found = find(c, target_id)
+                if found is not None:
+                    return found
+            return None
+
+        cb = find(build_export_bundle_card(), "bundle-export-prewarm")
+        assert cb is not None and cb.value is False
+
+    def test_prewarm_hidden_for_non_conda(self, app):
+        fn = get_callback_fn(app, "prewarm-wrapper.style")
+        assert fn("conda") == {}
+        assert fn("docker") == {"display": "none"}
+        assert fn("singularity") == {"display": "none"}
+
+    def test_offline_notice_only_when_offline(self, app):
+        fn = get_callback_fn(app, "prep-offline-notice.children")
+        assert fn({"offline_mode": True}) is not None
+        assert fn({"offline_mode": False}) is None
+        assert fn({}) is None
+
+    def test_download_stage_offline_skips_ncbi(self, tmp_path):
+        from unittest.mock import MagicMock, patch
+        from nanometa_live.core.workflow.mobile_lab_preparer import (
+            MobileLabPreparer, PreparationResult,
+        )
+
+        preparer = MobileLabPreparer(
+            config={"offline_mode": True}, nanometa_home=str(tmp_path),
+        )
+        preparer._get_watchlist_entries = lambda: [
+            {"taxid": 1, "name": "Present sp."},
+            {"taxid": 2, "name": "Missing sp."},
+        ]
+        mgr = MagicMock()
+        mgr.has_genome.side_effect = lambda t: t == 1
+        result = PreparationResult(success=True)
+        with patch(
+            "nanometa_live.core.utils.genome_manager.get_genome_manager",
+            return_value=mgr,
+        ) as gm:
+            preparer._run_download_genomes(3, result, skip_existing=True)
+
+        # Constructed offline, and no network download attempted.
+        assert gm.call_args.kwargs.get("offline_mode") is True
+        mgr.download_genome.assert_not_called()
+        # The missing bundled genome is reported as a warning.
+        assert any("Missing sp." in w for w in result.warnings)
