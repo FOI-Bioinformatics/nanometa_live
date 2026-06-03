@@ -18,7 +18,7 @@ from typing import Tuple
 import dash_bootstrap_components as dbc
 from dash import html, dcc
 
-from nanometa_live.app.components.modern_components import WorkflowStepper
+from nanometa_live.app.components.modern_components import WorkflowStepper, ActionRow
 
 
 def _detect_engine_availability() -> Tuple[bool, bool, bool]:
@@ -106,10 +106,19 @@ def _build_containerization_radio() -> dbc.RadioItems:
     )
 
 
-def create_preparation_layout():
-    """Create the Preparation tab layout."""
-    return dbc.Container([
-        # Preparation-local stores
+# ---------------------------------------------------------------------------
+# Composable section builders.
+#
+# The Preparation tab was merged into the Watchlist & Preparation tab and the
+# offline-deployment section was split into its own Deployment tab. To keep the
+# component IDs and callback wiring identical, these builders return the same
+# blocks that the old single-page layout used; the two new layout modules
+# (watchlist_preparation_layout.py, deployment_layout.py) compose them.
+# ---------------------------------------------------------------------------
+
+def build_wizard_stores():
+    """Wizard-step stores driving the offline-deployment wizard (Deployment tab)."""
+    return [
         dcc.Store(id="wizard-step-state", data={
             "current_step": 0,
             "steps": {
@@ -117,353 +126,331 @@ def create_preparation_layout():
                 "4": "pending", "5": "pending", "6": "pending", "7": "pending",
             },
         }),
-        # Intermediate store: relays wizard-step-state updates from MATCH callbacks
-        # to the plain wizard-step-state store (MATCH and plain IDs cannot be mixed
-        # in a single callback's outputs).
+        # Relays wizard-step-state updates from MATCH callbacks to the plain
+        # wizard-step-state store (MATCH and plain IDs cannot be mixed in a
+        # single callback's outputs).
         dcc.Store(id="wizard-step-state-relay", data=None),
-        dcc.Store(id="genome-import-unrecognized", data=[]),
+    ]
 
-        # Workflow step indicator
-        WorkflowStepper(active_step=3),
 
-        # Header
-        dbc.Row([
-            dbc.Col([
-                html.Div([
-                    html.I(className="bi bi-box-seam me-2",
-                           style={"fontSize": "1.3rem"}),
-                    html.H4("Preparation", className="mb-0 d-inline"),
-                ], className="d-flex align-items-center mb-1"),
-                html.P(
-                    "Verify that everything is ready before you start analysis. "
-                    "1. Run the readiness checklist. 2. Click Start Preparation "
-                    "for automated setup, or expand Advanced: Individual Stages "
-                    "to run a single step. 3. Use Offline deployment to build a "
-                    "portable bundle for field machines.",
-                    className="text-muted mb-0 small"
+def build_genome_import_store():
+    """Store holding genome-import filenames not recognised by the mapper."""
+    return dcc.Store(id="genome-import-unrecognized", data=[])
+
+
+def build_readiness_checklist_card():
+    """Readiness checklist card -- a pure renderer fed by the readiness-state Store."""
+    return dbc.Card([
+        dbc.CardHeader([
+            html.Div([
+                html.I(className="bi bi-clipboard-check me-2",
+                       style={"fontSize": "1.1rem"}),
+                html.H5("Readiness Checklist", className="mb-0 d-inline"),
+                html.I(
+                    id="readiness-collapse-icon",
+                    className="bi bi-chevron-down ms-2",
+                    style={"fontSize": "0.9rem", "cursor": "pointer"},
                 ),
-            ]),
-        ], className="mb-3"),
-
-        # Readiness checklist
-        dbc.Card([
-            dbc.CardHeader([
-                html.Div([
-                    html.I(className="bi bi-clipboard-check me-2",
-                           style={"fontSize": "1.1rem"}),
-                    html.H5("Readiness Checklist", className="mb-0 d-inline"),
-                    html.I(
-                        id="readiness-collapse-icon",
-                        className="bi bi-chevron-down ms-2",
-                        style={"fontSize": "0.9rem", "cursor": "pointer"},
-                    ),
-                ], className="d-inline-flex align-items-center",
-                   id="readiness-header-toggle",
-                   role="button",
-                   style={"cursor": "pointer"}),
-                dbc.Button(
-                    [html.I(className="bi bi-arrow-clockwise me-1"), "Check Everything"],
-                    id="check-readiness-btn",
-                    color="primary",
-                    size="sm",
-                    className="float-end",
-                ),
-            ]),
-            dbc.Collapse(
-                dbc.CardBody([
-                    dbc.Spinner(
-                        html.Div(id="readiness-results",
-                                 children=html.Div([
-                                     html.I(className="bi bi-info-circle text-muted me-2"),
-                                     html.Span(
-                                         "Click 'Check Everything' above to verify your setup. "
-                                         "This will check directories, databases, and required software.",
-                                         className="text-muted",
-                                     ),
-                                 ], className="d-flex align-items-center")),
-                        size="sm",
-                        type="border",
-                    ),
-                ]),
-                id="readiness-collapse",
-                is_open=True,
+            ], className="d-inline-flex align-items-center",
+               id="readiness-header-toggle",
+               role="button",
+               style={"cursor": "pointer"}),
+            dbc.Button(
+                [html.I(className="bi bi-arrow-clockwise me-1"), "Check Everything"],
+                id="check-readiness-btn",
+                color="primary",
+                size="sm",
+                className="float-end",
             ),
-        ], className="mb-4"),
-
-        # Recommended order guidance (rewritten to describe primary vs manual split)
-        dbc.Alert([
-            html.I(className="bi bi-signpost-2 me-2"),
-            html.Strong("Recommended order: "),
-            html.Span(
-                "Run the readiness checklist, then click Start Preparation for "
-                "one-shot setup. The Manual stages and Offline deployment "
-                "sections below are collapsed by default; expand them only "
-                "to inspect or re-run individual stages."
-            ),
-        ], color="light", className="small py-2 mb-3 border"),
-
-        # PRIMARY PATH: Run Preparation (full width)
-        dbc.Card([
-            dbc.CardHeader([
-                html.H5([
-                    html.I(className="bi bi-gear-wide-connected me-2"),
-                    "Run Preparation"
-                ], className="mb-0"),
-            ]),
+        ]),
+        dbc.Collapse(
             dbc.CardBody([
-                html.P(
-                    "Run all preparation steps automatically: verify the database, "
-                    "check organism mappings, download reference genomes, and build "
-                    "search indexes.",
-                    className="text-muted"
+                dbc.Spinner(
+                    html.Div(id="readiness-results",
+                             children=html.Div([
+                                 html.I(className="bi bi-info-circle text-muted me-2"),
+                                 html.Span(
+                                     "Click 'Check Everything' above to verify your setup. "
+                                     "This will check directories, databases, and required software.",
+                                     className="text-muted",
+                                 ),
+                             ], className="d-flex align-items-center")),
+                    size="sm",
+                    type="border",
                 ),
-                dbc.Checklist(
-                    id="prep-options",
-                    options=[
-                        {"label": " Skip already-completed steps", "value": "skip_existing"},
-                    ],
-                    value=["skip_existing"],
-                    className="mb-3",
-                ),
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Button(
-                            [html.I(className="bi bi-play-circle me-2"), "Start Preparation"],
-                            id="start-prep-btn",
-                            color="primary",
-                            size="lg",
-                            className="me-2",
-                        ),
-                        dbc.Button(
-                            [html.I(className="bi bi-x-circle me-2"), "Cancel"],
-                            id="cancel-prep-btn",
-                            color="outline-danger",
-                            size="lg",
-                            style={"display": "none"},
-                        ),
-                    ]),
-                ]),
-                # Progress area
-                html.Div(id="prep-progress-area", children=[], className="mt-3"),
-                # Result area
-                html.Div(id="prep-result-area", children=[], className="mt-3"),
             ]),
-        ], className="mb-4 border-primary shadow-sm"),
+            id="readiness-collapse",
+            is_open=True,
+        ),
+    ], className="mb-4")
 
-        # SECONDARY: Manual stages (collapsed accordion)
-        dbc.Accordion([
-            dbc.AccordionItem([
-                html.P(
-                    "Run individual preparation stages. Use these only to "
-                    "inspect, debug, or re-run a single step; the primary "
-                    "Run Preparation flow above covers all of them.",
-                    className="text-muted small mb-3",
-                ),
-                # Kraken2 Database Download
-                html.Div(_create_kraken_db_download_card(), id="kraken2-db-card"),
-                # Taxid Mapping / Rescan DB
-                html.Div(_create_rescan_db_card(), id="taxid-mapping-card"),
-                # Genome Downloads
-                html.Div(_create_genome_downloads_card(), id="genome-downloads-card"),
-                # Import Genomes
-                html.Div(_create_import_genomes_card(), id="import-genomes-card"),
-            ], title=html.Span([
-                html.I(className="bi bi-tools me-2"),
-                "Advanced: Individual Stages",
-                html.Small(
-                    "  -  most users should use Run Preparation above",
-                    className="text-muted ms-2",
-                ),
-            ])),
-        ], start_collapsed=True, className="mb-4"),
 
-        # OFFLINE DEPLOYMENT: wizard + export + import (collapsed accordion)
-        dbc.Accordion([
-            dbc.AccordionItem([
-                html.P(
-                    "Tools for preparing a portable bundle for field "
-                    "deployment. Use the wizard to step through each "
-                    "stage, or the Export / Import controls if you "
-                    "already have a prepared bundle.",
-                    className="text-muted small mb-3",
+def build_run_preparation_card():
+    """Primary one-shot 'Run Preparation' card (runs all prepare() stages)."""
+    return dbc.Card([
+        dbc.CardHeader([
+            html.H5([
+                html.I(className="bi bi-gear-wide-connected me-2"),
+                "Run Preparation"
+            ], className="mb-0"),
+        ]),
+        dbc.CardBody([
+            html.P(
+                "Run all preparation steps automatically: verify the database, "
+                "check organism mappings, download reference genomes, and build "
+                "search indexes.",
+                className="text-muted"
+            ),
+            dbc.Checklist(
+                id="prep-options",
+                options=[
+                    {"label": " Skip already-completed steps", "value": "skip_existing"},
+                ],
+                value=["skip_existing"],
+                className="mb-3",
+            ),
+            ActionRow([
+                dbc.Button(
+                    [html.I(className="bi bi-x-circle me-2"), "Cancel"],
+                    id="cancel-prep-btn",
+                    color="outline-danger",
+                    size="lg",
+                    style={"display": "none"},
                 ),
-                # Deploy Offline Wizard
-                _create_deploy_wizard_card(),
-                # Export / Import side by side
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Card([
-                            dbc.CardHeader([
-                                html.H5([
-                                    html.I(className="bi bi-box-arrow-up me-2"),
-                                    "Export Bundle"
-                                ], className="mb-0"),
-                            ]),
-                            dbc.CardBody([
-                                html.P(
-                                    "Package all prepared data into a portable archive for "
-                                    "transfer to a field computer. The species database is not "
-                                    "included due to size -- transfer it separately.",
-                                    className="text-muted small"
-                                ),
-                                dbc.InputGroup([
-                                    dbc.InputGroupText("Save to"),
-                                    dbc.Input(
-                                        id="bundle-export-directory",
-                                        value=str(Path.home() / "Downloads"),
-                                        type="text",
-                                        placeholder="/path/to/save/directory",
-                                    ),
-                                    dbc.Button(
-                                        html.I(className="bi bi-folder2-open"),
-                                        id="bundle-export-browse-btn",
-                                        color="secondary",
-                                        outline=True,
-                                        n_clicks=0,
-                                        title="Browse for directory",
-                                    ),
-                                ], className="mb-2"),
-                                dbc.InputGroup([
-                                    dbc.InputGroupText("Filename"),
-                                    dbc.Input(
-                                        id="bundle-export-filename",
-                                        value="mobile_lab_bundle.tar.gz",
-                                        type="text",
-                                    ),
-                                ], className="mb-3"),
-                                # Containerization engine + adaptive
-                                # platform banner. Conda mode keeps the
-                                # legacy pre-warm checkbox visible so
-                                # operators can opt out for very large
-                                # bundles or cross-platform builds.
-                                html.Label(
-                                    "Containerization:",
-                                    className="fw-bold mb-1",
-                                    htmlFor="bundle-containerization-radio",
-                                ),
-                                _build_containerization_radio(),
-                                # Conda-mode-only sub-control: pre-warm
-                                # toggle. The export callback ignores
-                                # this flag when docker / singularity
-                                # is selected.
-                                dbc.Checkbox(
-                                    id="bundle-export-prewarm",
-                                    label=(
-                                        "Pre-warm conda environments "
-                                        "(adds roughly 30 min and ~5 GB; "
-                                        "applies only to Conda mode)"
-                                    ),
-                                    value=True,
-                                    className="mb-2 ms-3",
-                                ),
-                                _build_platform_banner(),
-                                dbc.Button(
-                                    [html.I(className="bi bi-download me-2"), "Export Bundle"],
-                                    id="export-bundle-btn",
-                                    color="success",
-                                ),
-                                # Readiness issues area (populated by callback)
-                                html.Div(id="export-readiness-issues", className="mt-3"),
-                                # Force-export controls (hidden by default)
-                                html.Div(
-                                    id="export-force-area",
-                                    style={"display": "none"},
-                                    children=[
-                                        dbc.Checkbox(
-                                            id="export-force-check",
-                                            label="I understand the bundle is incomplete",
-                                            value=False,
-                                            className="mb-2",
-                                        ),
-                                        dbc.Button(
-                                            [html.I(className="bi bi-exclamation-triangle me-2"),
-                                             "Export Incomplete Bundle"],
-                                            id="export-force-btn",
-                                            color="warning",
-                                            disabled=True,
-                                        ),
-                                    ],
-                                ),
-                                html.Div(id="export-result", className="mt-2"),
-                            ]),
-                        ]),
-                    ], md=6),
-                    dbc.Col([
-                        dbc.Card([
-                            dbc.CardHeader([
-                                html.H5([
-                                    html.I(className="bi bi-box-arrow-in-down me-2"),
-                                    "Import Bundle"
-                                ], className="mb-0"),
-                            ]),
-                            dbc.CardBody([
-                                html.P(
-                                    "Import a bundle from another machine. "
-                                    "You must also provide the path to the species database "
-                                    "on this computer.",
-                                    className="text-muted small"
-                                ),
-                                dbc.InputGroup([
-                                    dbc.InputGroupText("Bundle Path"),
-                                    dbc.Input(
-                                        id="import-bundle-path",
-                                        placeholder="/path/to/bundle.tar.gz",
-                                        type="text",
-                                    ),
-                                ], className="mb-2"),
-                                dbc.InputGroup([
-                                    dbc.InputGroupText("Species DB"),
-                                    dbc.Input(
-                                        id="import-kraken-db-path",
-                                        placeholder="/path/to/species/database",
-                                        type="text",
-                                    ),
-                                ], className="mb-3"),
-                                dbc.Button(
-                                    [html.I(className="bi bi-upload me-2"), "Import Bundle"],
-                                    id="import-bundle-btn",
-                                    color="info",
-                                ),
-                                html.Div(id="import-result", className="mt-2"),
-                            ]),
-                        ]),
-                    ], md=6),
-                ]),
-            ], title=html.Span([
-                html.I(className="bi bi-rocket-takeoff me-2"),
-                "Offline deployment (wizard, export, import)",
-            ])),
-        ], start_collapsed=True, className="mb-4"),
+                dbc.Button(
+                    [html.I(className="bi bi-play-circle me-2"), "Start Preparation"],
+                    id="start-prep-btn",
+                    color="primary",
+                    size="lg",
+                ),
+            ]),
+            # Progress area
+            html.Div(id="prep-progress-area", children=[], className="mt-3"),
+            # Result area
+            html.Div(id="prep-result-area", children=[], className="mt-3"),
+        ]),
+    ], className="mb-4 border-primary shadow-sm")
 
-        # Modals
+
+def build_advanced_stages_accordion():
+    """Collapsed 'Advanced: Individual Stages' accordion (manual re-runs)."""
+    return dbc.Accordion([
+        dbc.AccordionItem([
+            html.P(
+                "Run individual preparation stages. Use these only to "
+                "inspect, debug, or re-run a single step; the primary "
+                "Run Preparation flow above covers all of them.",
+                className="text-muted small mb-3",
+            ),
+            # Kraken2 Database Download
+            html.Div(_create_kraken_db_download_card(), id="kraken2-db-card"),
+            # Taxid Mapping / Rescan DB
+            html.Div(_create_rescan_db_card(), id="taxid-mapping-card"),
+            # Genome Downloads
+            html.Div(_create_genome_downloads_card(), id="genome-downloads-card"),
+            # Import Genomes
+            html.Div(_create_import_genomes_card(), id="import-genomes-card"),
+        ], title=html.Span([
+            html.I(className="bi bi-tools me-2"),
+            "Advanced: Individual Stages",
+            html.Small(
+                "  -  most users should use Run Preparation above",
+                className="text-muted ms-2",
+            ),
+        ])),
+    ], start_collapsed=True, className="mb-4")
+
+
+def build_prep_modals():
+    """Modals used by the preparation cards (genome download, BLAST, remove-all)."""
+    return [
         _create_genome_download_modal(),
         _create_blast_build_modal(),
         _create_remove_all_confirm_modal(),
+    ]
 
-        # Page-bottom Start Analysis CTA. Mirrors the "Next" button
-        # placement on the Configuration and Watchlist tabs so the
-        # operator's left-to-right step flow ends with a Start
-        # Analysis button in the same screen position they expect a
-        # Next button. Proxies to the header start-stop-button via
-        # the callback in callbacks.py so the existing
-        # start_or_prompt_stop logic (collision modal, readiness
-        # gate, backend launch) runs unchanged.
-        html.Div([
-            html.Hr(className="my-4"),
-            html.Div([
-                dbc.Button(
-                    [
-                        html.I(className="bi bi-play-fill me-2"),
-                        "Start Analysis",
-                    ],
-                    id="preparation-start-analysis-btn",
-                    color="primary",
-                    size="lg",
-                    n_clicks=0,
+
+def build_export_bundle_card():
+    """Export-bundle card (Deployment tab)."""
+    return dbc.Card([
+        dbc.CardHeader([
+            html.H5([
+                html.I(className="bi bi-box-arrow-up me-2"),
+                "Export Bundle"
+            ], className="mb-0"),
+        ]),
+        dbc.CardBody([
+            html.P(
+                "Package all prepared data into a portable archive for "
+                "transfer to a field computer. The species database is not "
+                "included due to size -- transfer it separately.",
+                className="text-muted small"
+            ),
+            dbc.InputGroup([
+                dbc.InputGroupText("Save to"),
+                dbc.Input(
+                    id="bundle-export-directory",
+                    value=str(Path.home() / "Downloads"),
+                    type="text",
+                    placeholder="/path/to/save/directory",
                 ),
-            ], className="text-end"),
-        ], className="mt-3 mb-4"),
-    ], fluid=True, className="py-3")
+                dbc.Button(
+                    html.I(className="bi bi-folder2-open"),
+                    id="bundle-export-browse-btn",
+                    color="secondary",
+                    outline=True,
+                    n_clicks=0,
+                    title="Browse for directory",
+                ),
+            ], className="mb-2"),
+            dbc.InputGroup([
+                dbc.InputGroupText("Filename"),
+                dbc.Input(
+                    id="bundle-export-filename",
+                    value="mobile_lab_bundle.tar.gz",
+                    type="text",
+                ),
+            ], className="mb-3"),
+            # Containerization engine + adaptive platform banner. Conda mode
+            # keeps the legacy pre-warm checkbox visible so operators can opt
+            # out for very large bundles or cross-platform builds.
+            html.Label(
+                "Containerization:",
+                className="fw-bold mb-1",
+                htmlFor="bundle-containerization-radio",
+            ),
+            _build_containerization_radio(),
+            # Conda-mode-only sub-control: pre-warm toggle. The export callback
+            # ignores this flag when docker / singularity is selected.
+            dbc.Checkbox(
+                id="bundle-export-prewarm",
+                label=(
+                    "Pre-warm conda environments "
+                    "(adds roughly 30 min and ~5 GB; "
+                    "applies only to Conda mode)"
+                ),
+                value=True,
+                className="mb-2 ms-3",
+            ),
+            _build_platform_banner(),
+            ActionRow([
+                dbc.Button(
+                    [html.I(className="bi bi-download me-2"), "Export Bundle"],
+                    id="export-bundle-btn",
+                    color="success",
+                ),
+            ]),
+            # Readiness issues area (populated by callback)
+            html.Div(id="export-readiness-issues", className="mt-3"),
+            _build_export_force_area(),
+            html.Div(id="export-result", className="mt-2"),
+        ]),
+    ])
+
+
+def _build_export_force_area():
+    """Hidden 'export incomplete bundle' controls, revealed when checks fail."""
+    return html.Div(
+        id="export-force-area",
+        style={"display": "none"},
+        children=[
+            dbc.Checkbox(
+                id="export-force-check",
+                label="I understand the bundle is incomplete",
+                value=False,
+                className="mb-2",
+            ),
+            ActionRow([
+                dbc.Button(
+                    [html.I(className="bi bi-exclamation-triangle me-2"),
+                     "Export Incomplete Bundle"],
+                    id="export-force-btn",
+                    color="warning",
+                    disabled=True,
+                ),
+            ]),
+        ],
+    )
+
+
+def build_import_bundle_card():
+    """Import-bundle card (Deployment tab)."""
+    return dbc.Card([
+        dbc.CardHeader([
+            html.H5([
+                html.I(className="bi bi-box-arrow-in-down me-2"),
+                "Import Bundle"
+            ], className="mb-0"),
+        ]),
+        dbc.CardBody([
+            html.P(
+                "Import a bundle from another machine. "
+                "You must also provide the path to the species database "
+                "on this computer.",
+                className="text-muted small"
+            ),
+            dbc.InputGroup([
+                dbc.InputGroupText("Bundle Path"),
+                dbc.Input(
+                    id="import-bundle-path",
+                    placeholder="/path/to/bundle.tar.gz",
+                    type="text",
+                ),
+            ], className="mb-2"),
+            dbc.InputGroup([
+                dbc.InputGroupText("Species DB"),
+                dbc.Input(
+                    id="import-kraken-db-path",
+                    placeholder="/path/to/species/database",
+                    type="text",
+                ),
+            ], className="mb-3"),
+            ActionRow([
+                dbc.Button(
+                    [html.I(className="bi bi-upload me-2"), "Import Bundle"],
+                    id="import-bundle-btn",
+                    color="info",
+                ),
+            ]),
+            html.Div(id="import-result", className="mt-2"),
+        ]),
+    ])
+
+
+def build_offline_deployment_content():
+    """Offline-deployment content (wizard + export/import), surfaced directly."""
+    return html.Div([
+        # Deploy Offline Wizard
+        _create_deploy_wizard_card(),
+        # Export / Import side by side
+        dbc.Row([
+            dbc.Col(build_export_bundle_card(), md=6),
+            dbc.Col(build_import_bundle_card(), md=6),
+        ]),
+    ])
+
+
+def build_start_analysis_cta():
+    """Page-bottom Start Analysis CTA.
+
+    Mirrors the "Next" button placement on the Configuration tab so the
+    operator's left-to-right step flow ends with a Start Analysis button in the
+    expected position. Proxies to the header start-stop-button (callback in
+    callbacks/navigation.py) so the existing start_or_prompt_stop logic
+    (collision modal, readiness gate, backend launch) runs unchanged.
+    """
+    return html.Div([
+        html.Hr(className="my-4"),
+        ActionRow([
+            dbc.Button(
+                [html.I(className="bi bi-play-fill me-2"), "Start Analysis"],
+                id="preparation-start-analysis-btn",
+                color="primary",
+                size="lg",
+                n_clicks=0,
+            ),
+        ]),
+    ], className="mt-3 mb-4")
 
 
 # =============================================================================

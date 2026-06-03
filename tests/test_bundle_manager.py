@@ -1536,8 +1536,8 @@ class TestPreparationTabPreWarmCheckbox:
 
     def test_layout_includes_prewarm_checkbox_default_on(self):
         """bundle-export-prewarm checkbox is in the layout, defaults to True."""
-        from nanometa_live.app.layouts.preparation_layout import (
-            create_preparation_layout,
+        from nanometa_live.app.layouts.deployment_layout import (
+            create_deployment_layout,
         )
         import dash_bootstrap_components as dbc
 
@@ -1556,7 +1556,7 @@ class TestPreparationTabPreWarmCheckbox:
                         return found
             return None
 
-        layout = create_preparation_layout()
+        layout = create_deployment_layout()
         cb = find_checkbox(layout, "bundle-export-prewarm")
         assert cb is not None, "bundle-export-prewarm checkbox missing"
         assert cb.value is True, "pre-warm checkbox must default to ON"
@@ -1802,8 +1802,8 @@ class TestPreparationTabContainerizationRadio:
     flows through the export callback to BundleManager."""
 
     def test_layout_includes_containerization_radio_default_conda(self):
-        from nanometa_live.app.layouts.preparation_layout import (
-            create_preparation_layout,
+        from nanometa_live.app.layouts.deployment_layout import (
+            create_deployment_layout,
         )
         import dash_bootstrap_components as dbc
 
@@ -1822,7 +1822,7 @@ class TestPreparationTabContainerizationRadio:
                         return found
             return None
 
-        layout = create_preparation_layout()
+        layout = create_deployment_layout()
         radio = find_radio(layout, "bundle-containerization-radio")
         assert radio is not None, "bundle-containerization-radio missing"
         assert radio.value == "conda", "default selection must be conda"

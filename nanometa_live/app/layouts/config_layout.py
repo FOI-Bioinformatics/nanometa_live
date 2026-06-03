@@ -377,7 +377,7 @@ def create_config_layout():
             html.Hr(className="my-4"),
             html.Div([
                 dbc.Button([
-                    "Next: Set up Watchlist ",
+                    "Next: Watchlist & Preparation ",
                     html.I(className="bi bi-arrow-right ms-1"),
                 ],
                     id="config-next-watchlist-btn",

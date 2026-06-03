@@ -47,7 +47,6 @@
     "nanometa_live/app/layouts/preparation_layout.py",
     "nanometa_live/app/layouts/preparation_layout.py::_create_genome_downloads_card",
     "nanometa_live/app/layouts/preparation_layout.py::_create_import_genomes_card",
-    "nanometa_live/app/layouts/preparation_layout.py::create_preparation_layout",
     "nanometa_live/app/layouts/qc_layout.py::_qc_detailed_plots_accordion",
     "nanometa_live/app/layouts/qc_layout.py::_qc_per_sample_table",
     "nanometa_live/app/layouts/validation_layout.py",

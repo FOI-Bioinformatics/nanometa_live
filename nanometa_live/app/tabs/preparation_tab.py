@@ -33,93 +33,84 @@ logger = logging.getLogger(__name__)
 def register_preparation_callbacks(app):
     """Register all preparation tab callbacks."""
 
-    # --- Readiness check ---
+    # --- Readiness checklist (pure renderer of the shared readiness-state Store) ---
+    # The check itself runs in callbacks/readiness.py:update_readiness_state, which
+    # also feeds the header pill. Rendering both from the same Store is what keeps
+    # the checklist and the header indicator in sync. Clicking "Check Everything"
+    # (check-readiness-btn) triggers that recompute; this callback re-renders when
+    # the Store updates.
+    _SECTION_LINKS = {
+        "Kraken2 Database": "kraken2-db-card",
+        "DB Taxonomy Index": "taxid-mapping-card",
+        "Taxid Mappings": "taxid-mapping-card",
+        "Watchlist Genomes": "genome-downloads-card",
+        "BLAST Databases": "genome-downloads-card",
+    }
+    _SEVERITY_ICON = {
+        "critical": "bi bi-x-circle-fill text-danger me-2",
+        "warning": "bi bi-exclamation-triangle-fill text-warning me-2",
+        "info": "bi bi-info-circle-fill text-info me-2",
+    }
+    _SEVERITY_BADGE = {"critical": "danger", "warning": "warning", "info": "info"}
+
     @app.callback(
         Output("readiness-results", "children"),
         Output("readiness-collapse", "is_open"),
-        Input("check-readiness-btn", "n_clicks"),
-        State("app-config", "data"),
-        prevent_initial_call=True,
+        Input("readiness-state", "data"),
+        prevent_initial_call=False,
     )
-    def check_readiness(n_clicks, config):
-        if not n_clicks:
-            raise PreventUpdate
+    def render_readiness_checklist(state):
+        state = state or {}
+        checks = state.get("checks") or []
+        if not checks:
+            msg = state.get("error") or "Run a readiness check to see results."
+            return dbc.Alert(msg, color="secondary", className="mb-0"), False
 
-        try:
-            from nanometa_live.core.workflow.readiness_checker import (
-                ReadinessChecker, Severity,
-            )
-            checker = ReadinessChecker()
-            report = checker.check_readiness(config)
+        rows = []
+        for check in checks:
+            passed = check.get("passed")
+            severity = check.get("severity")
+            name = check.get("name", "")
+            if passed:
+                icon = html.I(className="bi bi-check-circle-fill text-success me-2")
+            else:
+                icon = html.I(className=_SEVERITY_ICON.get(severity, "bi bi-dash-circle text-muted me-2"))
 
-            # Map check names to section IDs for scroll links
-            _section_links = {
-                "Kraken2 Database": "kraken2-db-card",
-                "DB Taxonomy Index": "taxid-mapping-card",
-                "Taxid Mappings": "taxid-mapping-card",
-                "Watchlist Genomes": "genome-downloads-card",
-                "BLAST Databases": "genome-downloads-card",
-            }
+            row_children = [
+                icon,
+                dbc.Badge((severity or "").upper(),
+                          color=_SEVERITY_BADGE.get(severity, "secondary"),
+                          className="me-2", style={"width": "70px"}),
+                html.Span(name, className="fw-semibold me-2"),
+                html.Span(check.get("message", ""), className="text-muted"),
+            ]
 
-            rows = []
-            for check in report.checks:
-                if check.passed:
-                    icon = html.I(className="bi bi-check-circle-fill text-success me-2")
-                elif check.severity == Severity.CRITICAL:
-                    icon = html.I(className="bi bi-x-circle-fill text-danger me-2")
-                elif check.severity == Severity.WARNING:
-                    icon = html.I(className="bi bi-exclamation-triangle-fill text-warning me-2")
-                else:
-                    icon = html.I(className="bi bi-info-circle-fill text-info me-2")
-
-                badge_color = {
-                    Severity.CRITICAL: "danger",
-                    Severity.WARNING: "warning",
-                    Severity.INFO: "info",
-                }.get(check.severity, "secondary")
-
-                row_children = [
-                    icon,
-                    dbc.Badge(check.severity.value.upper(), color=badge_color,
-                              className="me-2", style={"width": "70px"}),
-                    html.Span(check.name, className="fw-semibold me-2"),
-                    html.Span(check.message, className="text-muted"),
-                ]
-
-                # Add "Fix" link for failed checks that map to a section
-                section_id = _section_links.get(check.name)
-                if not check.passed and section_id:
-                    row_children.append(
-                        html.A(
-                            html.Small("Fix"),
-                            href=f"#{section_id}",
-                            className="ms-2 text-decoration-none",
-                            title=f"Scroll to {check.name} section",
-                        )
+            # "Fix" scroll-link for failed checks that map to a section card.
+            section_id = _SECTION_LINKS.get(name)
+            if not passed and section_id:
+                row_children.append(
+                    html.A(
+                        html.Small("Fix"),
+                        href=f"#{section_id}",
+                        className="ms-2 text-decoration-none",
+                        title=f"Scroll to {name} section",
                     )
-
-                rows.append(
-                    html.Div(row_children, className="mb-2 d-flex align-items-center")
                 )
 
-            summary = report.summary()
-            status_color = "success" if report.ready else "danger"
-            header = dbc.Alert(
-                [
-                    html.Strong("Ready" if report.ready else "Not Ready"),
-                    f" - {summary['passed']}/{summary['total']} checks passed",
-                ],
-                color=status_color,
-                className="mb-3",
-            )
+            rows.append(html.Div(row_children, className="mb-2 d-flex align-items-center"))
 
-            # Collapse the checklist if all checks pass (no issues to review)
-            has_issues = not report.ready
-            return html.Div([header] + rows), has_issues
-
-        except Exception as e:
-            logger.error(f"Readiness check failed: {e}", exc_info=True)
-            return dbc.Alert(f"Error: {e}", color="danger"), True
+        summary = state.get("summary", {})
+        ready = state.get("ready", False)
+        header = dbc.Alert(
+            [
+                html.Strong("Ready" if ready else "Not Ready"),
+                f" - {summary.get('passed', 0)}/{summary.get('total', 0)} checks passed",
+            ],
+            color="success" if ready else "danger",
+            className="mb-3",
+        )
+        # Expand when there are issues to review; collapse once everything passes.
+        return html.Div([header] + rows), (not ready)
 
     # --- Toggle readiness checklist collapse ---
     app.clientside_callback(

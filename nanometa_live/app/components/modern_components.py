@@ -13,24 +13,46 @@ from dash import html
 import dash_bootstrap_components as dbc
 
 
+def ActionRow(buttons, align: str = "end", gap: int = 2, className: str = "") -> html.Div:
+    """A horizontal row of action buttons with consistent alignment and spacing.
+
+    Standardizes button grouping across the setup tabs so primary/utility
+    actions line up the same way everywhere.
+
+    Args:
+        buttons: list of dbc.Button (or any components) to lay out.
+        align: flex justification -- "end" (right, default), "start" (left),
+            "center", or "between".
+        gap: Bootstrap gap utility size (0-5) between buttons.
+        className: extra CSS classes appended to the wrapper.
+    """
+    return html.Div(
+        buttons,
+        className=f"d-flex justify-content-{align} gap-{gap} flex-wrap {className}".strip(),
+    )
+
+
 def WorkflowStepper(active_step: int = 1) -> html.Div:
     """
     Reusable workflow step indicator for the setup sequence.
 
-    Shows a 4-step horizontal stepper: Configure -> Watchlist -> Prepare -> Analyze.
-    Completed steps are green, the active step is blue, and future steps are grey.
+    Shows a 4-step horizontal stepper: Configure -> Prepare -> Deploy -> Analyze.
+    "Prepare" is the merged Watchlist & Preparation tab; "Deploy" is the offline
+    deployment tab. Completed steps are green, the active step is blue, and
+    future steps are grey.
 
     Args:
         active_step: Which step is currently active (1-4).
-            1 = Configuration, 2 = Watchlist, 3 = Preparation, 4 = Analyze
+            1 = Configuration, 2 = Watchlist & Preparation, 3 = Deployment,
+            4 = Analyze
 
     Returns:
         html.Div containing the step indicator row
     """
     steps = [
         {"num": "1", "label": "Configure"},
-        {"num": "2", "label": "Watchlist"},
-        {"num": "3", "label": "Prepare"},
+        {"num": "2", "label": "Prepare"},
+        {"num": "3", "label": "Deploy"},
         {"num": "4", "label": "Analyze", "icon": "bi-play-fill"},
     ]
 

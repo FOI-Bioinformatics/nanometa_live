@@ -15,88 +15,12 @@ from typing import Any, Dict, List, Optional
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 
-from nanometa_live.app.components.modern_components import WorkflowStepper
-
 logger = logging.getLogger(__name__)
 
-
-def create_watchlist_layout() -> html.Div:
-    """
-    Create the Watchlist tab layout.
-
-    Simplified 4-section layout:
-    1. Stats bar - Quick overview of watchlist status
-    2. Pathogens table - Main interaction area with Kraken2 Match status
-    3. Watchlist files (collapsible) - Enable/disable watchlist files
-    4. Add species (collapsible) - Add custom species with API lookup
-
-    Returns:
-        html.Div containing the complete Watchlist management interface
-    """
-    return html.Div([
-        # Workflow step indicator
-        WorkflowStepper(active_step=2),
-
-        # Stores for state management
-        dcc.Store(id="watchlist-tab-state", data={}),
-        dcc.Store(id="watchlist-table-refresh", data=0),  # Counter to force table refresh
-        dcc.Store(id="api-lookup-result", data=None),
-        # Watchlist-local stores
-        # Note: taxmap-collection, taxmap-database-info, taxmap-rescan-complete,
-        # genome-status-data, genome-download-complete,
-        # blast-build-complete are shared stores defined in app.py
-
-        # Main content - Simplified layout with prominent quick-start
-        dbc.Container([
-            # Section 1: Stats Bar (compact overview)
-            _create_stats_bar(),
-
-            # Brief intro text
-            html.Div([
-                html.P([
-                    html.I(className="bi bi-lightbulb me-2 text-info"),
-                    "Choose which organisms to watch for. Select a pre-built list below, "
-                    "or add individual species. Enabled organisms will trigger alerts "
-                    "when detected during analysis.",
-                ], className="text-muted small mb-1"),
-            ], className="mb-2"),
-
-            # Section 2: Quick-Start (promoted from collapsed section)
-            _create_quick_start_section(),
-
-            # Section 3: Pathogens Table (main focus area)
-            _create_pathogens_table_section(),
-
-            # Section 4: Watchlist Files (collapsible)
-            _create_collapsible_watchlist_files(),
-
-            # Section 5: Add Custom Species (collapsible)
-            _create_collapsible_add_species(),
-
-        ], fluid=True, className="p-3"),
-
-        # Modals
-        _create_entry_edit_modal(),
-        _create_api_details_modal(),
-        _create_validation_progress_modal(),
-
-        # Next step navigation
-        html.Div([
-            html.Hr(className="my-4"),
-            html.Div([
-                dbc.Button([
-                    "Next: Prepare Databases ",
-                    html.I(className="bi bi-arrow-right ms-1"),
-                ],
-                    id="watchlist-next-preparation-btn",
-                    color="primary",
-                    outline=True,
-                    size="lg",
-                ),
-            ], className="text-end"),
-        ]),
-
-    ], id="watchlist-tab-content", className="watchlist-tab p-4")
+# NOTE: the old top-level ``create_watchlist_layout()`` was retired when the
+# Watchlist and Preparation tabs were merged. The section builders below
+# (``_create_stats_bar`` etc.) are now composed by
+# ``watchlist_preparation_layout.create_watchlist_preparation_layout()``.
 
 
 # =============================================================================

@@ -134,9 +134,9 @@ from nanometa_live.app.layouts.qc_layout import create_qc_layout
 from nanometa_live.app.layouts.classification_layout import create_classification_layout
 from nanometa_live.app.layouts.config_layout import create_config_layout
 from nanometa_live.app.layouts.dashboard_layout import create_dashboard_layout
-from nanometa_live.app.layouts.watchlist_layout import create_watchlist_layout
 from nanometa_live.app.layouts.validation_layout import create_validation_layout
-from nanometa_live.app.layouts.preparation_layout import create_preparation_layout
+from nanometa_live.app.layouts.watchlist_preparation_layout import create_watchlist_preparation_layout
+from nanometa_live.app.layouts.deployment_layout import create_deployment_layout
 from nanometa_live.app.components.header import create_header
 from nanometa_live.app.components.collision_modal import create_collision_modal
 from nanometa_live.core.workflow.backend_manager import BackendManager
@@ -551,24 +551,27 @@ def create_app(
                     children=create_validation_layout(),
                     tabClassName="tab-validation"
                 ),
-                # Setup group (ordered by workflow: configure -> watchlist -> prepare)
+                # Setup group (ordered by workflow: configure -> prepare -> deploy)
                 dbc.Tab(
                     label=_tab_label("bi-gear", "Configuration"),
                     tab_id="config-tab",
                     children=create_config_layout(),
                     tabClassName="tab-config tab-group-start"
                 ),
+                # Watchlist + Preparation merged into one tab (reuses the
+                # watchlist-tab id so session-persisted active_tab and the
+                # config "Next" navigation keep resolving).
                 dbc.Tab(
-                    label=_tab_label("bi-star", "Watchlist"),
+                    label=_tab_label("bi-clipboard2-check", "Watchlist & Preparation"),
                     tab_id="watchlist-tab",
-                    children=create_watchlist_layout(),
+                    children=create_watchlist_preparation_layout(),
                     tabClassName="tab-watchlist"
                 ),
                 dbc.Tab(
-                    label=_tab_label("bi-box-seam", "Preparation"),
-                    tab_id="preparation-tab",
-                    children=create_preparation_layout(),
-                    tabClassName="tab-preparation"
+                    label=_tab_label("bi-rocket-takeoff", "Deployment"),
+                    tab_id="deployment-tab",
+                    children=create_deployment_layout(),
+                    tabClassName="tab-deployment"
                 )
             ], id="tabs", active_tab="dashboard-tab",
                persistence=True, persistence_type="session"),

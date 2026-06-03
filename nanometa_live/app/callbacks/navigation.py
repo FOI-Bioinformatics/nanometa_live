@@ -68,7 +68,7 @@ def register_navigation(app, backend_manager):
         prevent_initial_call=True,
     )
     def navigate_config_to_watchlist(_n_next, n_apply):
-        """Advance the wizard from Configuration to Watchlist.
+        """Advance the wizard from Configuration to Watchlist & Preparation.
 
         Also auto-fires Apply Settings so any unsaved edits in the
         Configuration form are persisted before navigation. The
@@ -84,12 +84,12 @@ def register_navigation(app, backend_manager):
 
     @app.callback(
         Output("tabs", "active_tab", allow_duplicate=True),
-        Input("watchlist-next-preparation-btn", "n_clicks"),
+        Input("merged-next-deployment-btn", "n_clicks"),
         prevent_initial_call=True,
     )
-    def navigate_watchlist_to_preparation(_):
-        """Navigate from Watchlist to Preparation tab."""
-        return "preparation-tab"
+    def navigate_preparation_to_deployment(_):
+        """Navigate from the merged Watchlist & Preparation tab to Deployment."""
+        return "deployment-tab"
 
     # ========================================================================
     # Session restore is explicit, not automatic

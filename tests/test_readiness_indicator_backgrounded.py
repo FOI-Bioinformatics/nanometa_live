@@ -1,13 +1,15 @@
 """Regression test for audit item #6 (docs/audit/threading-2026-05-10.md):
-``update_readiness_indicator`` must run in a DiskcacheManager worker.
+``update_readiness_state`` must run in a DiskcacheManager worker.
 
 The readiness check shells out to ``docker info`` and ``nextflow -version``
 (15-20 s total on a cold path) and was holding the Werkzeug request thread
 for that entire duration on the first poll after every app-config change.
 Backgrounding the callback isolates the subprocess wait from the main
-process. The 60 s in-memory TTL cache no longer crosses the worker
-boundary, but the request thread stays responsive -- which is what the
-audit asked for.
+process. The request thread stays responsive -- which is what the audit
+asked for. (Renamed from ``update_readiness_indicator`` to
+``update_readiness_state`` when it became the single writer of the shared
+readiness-state Store; the header pill and Preparation checklist are now pure
+renderers of that Store.)
 """
 
 from __future__ import annotations
@@ -31,16 +33,16 @@ def test_import_present():
     )
 
 
-def test_update_readiness_indicator_is_background():
+def test_update_readiness_state_is_background():
     decorator_pattern = re.compile(
-        r"@app\.callback\((?P<dec>.*?)\)\s*\n\s*def update_readiness_indicator\(",
+        r"@app\.callback\((?P<dec>.*?)\)\s*\n\s*def update_readiness_state\(",
         re.DOTALL,
     )
     match = decorator_pattern.search(CALLBACKS_SRC)
-    assert match, "update_readiness_indicator decorator not found"
+    assert match, "update_readiness_state decorator not found"
     dec = match.group("dec")
     assert "background=True" in dec, (
-        "update_readiness_indicator must be decorated background=True "
+        "update_readiness_state must be decorated background=True "
         "(audit item #6); the subprocess probes (docker info, nextflow "
         "-version) hold the Werkzeug request thread for up to ~15 s "
         "without it."

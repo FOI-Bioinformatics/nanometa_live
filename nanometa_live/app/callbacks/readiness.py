@@ -24,157 +24,161 @@ from nanometa_live.app.utils.debounce import (
 )
 from nanometa_live.app.app import background_callback_manager
 
-# update_readiness_indicator runs the full ReadinessChecker every
-# update-interval tick. Each invocation does ~7 shutil.which calls plus
-# os.stat / glob over the configured Kraken2 DB and BLAST DB directories,
-# i.e. 10+ syscalls every 30 s for a state that almost never changes.
-# This module-level cache reuses a recent ReadinessReport when the
-# relevant config has not changed AND less than _READINESS_TTL seconds
-# have elapsed. The TTL guarantees that "operator just installed
-# bowtie / dropped a Kraken2 DB into place" surfaces within 60 s.
-_READINESS_TTL = 60.0
-_readiness_cache: Dict[str, Tuple[float, Any]] = {}
-_readiness_cache_lock = threading.Lock()
+# Readiness single source of truth. ONE callback runs ReadinessChecker and
+# writes the ``readiness-state`` Store; the header pill and the
+# Preparation-tab checklist are both pure renderers of that Store, so they
+# cannot drift out of sync. (The previous header-only TTL cache keyed on a
+# partial config fingerprint was the cause of the reported mismatch.)
+
+# Severity-string -> icon class for the header popover/pill (the Store carries
+# severity as the enum's string value, not the enum object).
+_SEVERITY_ICON = {
+    "critical": "bi bi-x-circle-fill text-danger",
+    "warning": "bi bi-exclamation-triangle-fill text-warning",
+    "info": "bi bi-info-circle-fill text-info",
+}
 
 
-def _readiness_cache_key(config: Optional[Dict[str, Any]]) -> str:
-    """Build a stable cache key from the config fields that affect readiness.
+def _serialize_report(report) -> Dict[str, Any]:
+    """Serialize a ReadinessReport into the readiness-state Store schema.
 
-    The full config dict is not used because the dashboard mutates
-    unrelated keys (UI flags, last-selected sample) on every save, which
-    would invalidate the cache for no reason. Only the fields the
-    readiness checks actually read are included.
+    The schema is a superset of the legacy ``{ready, checks}`` shape so
+    existing consumers (e.g. the Start button gate in status.py) keep working
+    while the renderers gain ``summary`` and per-check ``severity``/``message``.
     """
-    if not config:
-        return "no-config"
-    relevant = {
-        k: config.get(k) for k in (
-            "kraken_db",
-            "main_dir",
-            "results_output_directory",
-            "nanopore_output_directory",
-            "pipeline_source",
-            "pipeline_profile",
-            "pipeline_cache_dir",
-            "blast_validation",
-            "network_check_enabled",
-            "offline_mode",
-        )
+    return {
+        "ready": report.ready,
+        "summary": report.summary(),
+        "checks": [
+            {
+                "name": c.name,
+                "passed": c.passed,
+                "severity": c.severity.value,
+                "message": c.message,
+            }
+            for c in report.checks
+        ],
+        "computed_at": time.time(),
+        "error": None,
     }
-    return hashlib.md5(json.dumps(relevant, sort_keys=True).encode()).hexdigest()
+
+
+def _empty_readiness_state(message: str) -> Dict[str, Any]:
+    """Readiness-state value when there is no config or the check errored."""
+    return {
+        "ready": False,
+        "summary": {"total": 0, "passed": 0, "failed": 0,
+                    "critical_failures": 0, "warnings": 0},
+        "checks": [],
+        "computed_at": time.time(),
+        "error": message,
+    }
 
 
 def register_readiness(app, backend_manager):
+    # Recompute callback: the ONLY place that runs ReadinessChecker. It writes
+    # the shared readiness-state Store; both the header pill (below) and the
+    # Preparation-tab checklist render from that Store, so they stay in sync.
+    #
+    # Backgrounded because the cold path shells out to ``docker info`` (5 s) and
+    # ``nextflow -version`` (10 s) plus other probes -- up to ~15-20 s on the
+    # first run after a config change. A DiskcacheManager worker keeps the
+    # Werkzeug request thread responsive. ``check-readiness-btn`` is a direct
+    # Input so the operator's "Check Everything" forces an immediate recompute.
     @app.callback(
-        [
-            Output("readiness-badge", "children"),
-            Output("readiness-badge", "color"),
-            Output("readiness-state", "data"),
-            Output("readiness-popover-body", "children"),
-        ],
+        Output("readiness-state", "data"),
         Input("update-interval", "n_intervals"),
         Input("app-config", "data"),
-        # Audit item #6 (docs/audit/threading-2026-05-10.md): the cold path
-        # of this callback shells out to ``docker info`` (5 s timeout) and
-        # ``nextflow -version`` (10 s timeout) plus a couple of other
-        # readiness probes, blocking the Werkzeug request thread for up to
-        # ~15-20 s on first run after a configuration change. The 60 s
-        # process-local TTL cache covers the warm path, but cold runs hung
-        # every other Dash callback in flight. Running in a DiskcacheManager
-        # worker isolates the subprocess wait from the main process.
-        # Cache state does not cross the worker boundary, so the worst-case
-        # latency is ~15 s of *worker* time per cold tick; the request
-        # thread stays responsive.
+        Input("check-readiness-btn", "n_clicks"),
         background=True,
         manager=background_callback_manager,
     )
-    def update_readiness_indicator(n_intervals, config):
-        """Update the readiness badge, popover details, and cached readiness state."""
+    def update_readiness_state(n_intervals, config, n_clicks):
+        """Compute readiness once and publish it to the shared Store."""
         from nanometa_live.core.workflow.readiness_checker import ReadinessChecker
 
         if not config:
-            return (
-                [html.I(className="bi bi-dash-circle me-1"), "Not configured"],
-                "secondary",
-                {"ready": False, "checks": [], "message": "No configuration loaded"},
-                html.Div("Load a configuration to see readiness checks.", className="text-muted small"),
-            )
-
+            return _empty_readiness_state("No configuration loaded")
         try:
-            cache_key = _readiness_cache_key(config)
-            now = time.time()
-            with _readiness_cache_lock:
-                cached = _readiness_cache.get(cache_key)
-            if cached is not None and (now - cached[0]) < _READINESS_TTL:
-                report = cached[1]
-            else:
-                checker = ReadinessChecker()
-                report = checker.check_readiness(config)
-                with _readiness_cache_lock:
-                    _readiness_cache[cache_key] = (now, report)
-            summary = report.summary()
-
-            if report.ready:
-                badge_children = [html.I(className="bi bi-check-circle-fill me-1"), "Ready"]
-                badge_color = "success"
-            else:
-                badge_children = [
-                    html.I(className="bi bi-exclamation-triangle-fill me-1"),
-                    f"{summary['passed']}/{summary['total']} checks",
-                ]
-                badge_color = "danger" if summary["critical_failures"] > 0 else "warning"
-
-            checks_data = []
-            popover_items = []
-            for c in report.checks:
-                checks_data.append({
-                    "name": c.name,
-                    "passed": c.passed,
-                    "severity": c.severity.value,
-                    "message": c.message,
-                })
-                if c.passed:
-                    icon_cls = "bi bi-check-circle-fill text-success"
-                elif c.severity.value == "critical":
-                    icon_cls = "bi bi-x-circle-fill text-danger"
-                else:
-                    icon_cls = "bi bi-exclamation-triangle-fill text-warning"
-                popover_items.append(
-                    html.Div([
-                        html.I(className=f"{icon_cls} me-2"),
-                        html.Span(c.name, className="small"),
-                    ], className="mb-1", title=c.message)
-                )
-
-            popover_content = html.Div(popover_items, style={"maxHeight": "300px", "overflowY": "auto"})
-            if not report.ready:
-                popover_content = html.Div([
-                    popover_content,
-                    html.Hr(className="my-2"),
-                    html.Div("Click badge to go to Preparation tab", className="text-muted small fst-italic"),
-                ])
-
-            return (
-                badge_children,
-                badge_color,
-                {"ready": report.ready, "checks": checks_data, "message": ""},
-                popover_content,
-            )
+            report = ReadinessChecker().check_readiness(config)
+            return _serialize_report(report)
         except Exception as e:
             logging.error(f"Readiness check failed: {e}")
+            return _empty_readiness_state(str(e))
+
+    @app.callback(
+        Output("readiness-badge", "children"),
+        Output("readiness-badge", "color"),
+        Output("readiness-popover-body", "children"),
+        Input("readiness-state", "data"),
+    )
+    def render_readiness_badge(state):
+        """Render the header readiness pill from the shared Store (no I/O)."""
+        state = state or {}
+        checks = state.get("checks") or []
+        error = state.get("error")
+
+        if not checks:
+            if error and error != "No configuration loaded":
+                return (
+                    [html.I(className="bi bi-dash-circle me-1"), "Unknown"],
+                    "secondary",
+                    html.Div(f"Error: {error}", className="text-danger small"),
+                )
+            if error == "No configuration loaded":
+                return (
+                    [html.I(className="bi bi-dash-circle me-1"), "Not configured"],
+                    "secondary",
+                    html.Div("Load a configuration to see readiness checks.",
+                             className="text-muted small"),
+                )
+            # Initial Store value, before the first recompute lands.
             return (
-                [html.I(className="bi bi-dash-circle me-1"), "Unknown"],
+                [html.I(className="bi bi-hourglass-split me-1"), "Checking..."],
                 "secondary",
-                {"ready": False, "checks": [], "message": str(e)},
-                html.Div(f"Error: {str(e)}", className="text-danger small"),
+                html.Div("Running readiness checks...", className="text-muted small"),
             )
+
+        summary = state.get("summary", {})
+        ready = state.get("ready", False)
+        if ready:
+            badge_children = [html.I(className="bi bi-check-circle-fill me-1"), "Ready"]
+            badge_color = "success"
+        else:
+            badge_children = [
+                html.I(className="bi bi-exclamation-triangle-fill me-1"),
+                f"{summary.get('passed', 0)}/{summary.get('total', 0)} checks",
+            ]
+            badge_color = "danger" if summary.get("critical_failures", 0) > 0 else "warning"
+
+        popover_items = []
+        for c in checks:
+            if c.get("passed"):
+                icon_cls = "bi bi-check-circle-fill text-success"
+            else:
+                icon_cls = _SEVERITY_ICON.get(c.get("severity"), "bi bi-dash-circle text-muted")
+            popover_items.append(
+                html.Div([
+                    html.I(className=f"{icon_cls} me-2"),
+                    html.Span(c.get("name", ""), className="small"),
+                ], className="mb-1", title=c.get("message", ""))
+            )
+        popover_content = html.Div(popover_items, style={"maxHeight": "300px", "overflowY": "auto"})
+        if not ready:
+            popover_content = html.Div([
+                popover_content,
+                html.Hr(className="my-2"),
+                html.Div("Click badge to go to Watchlist & Preparation",
+                         className="text-muted small fst-italic"),
+            ])
+        return badge_children, badge_color, popover_content
 
     app.clientside_callback(
         """
         function(n_clicks, readiness) {
             if (!n_clicks || !readiness) return dash_clientside.no_update;
             if (readiness.ready) return dash_clientside.no_update;
-            return "preparation-tab";
+            return "watchlist-tab";
         }
         """,
         Output("tabs", "active_tab", allow_duplicate=True),

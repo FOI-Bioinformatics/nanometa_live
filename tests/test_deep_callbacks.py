@@ -284,9 +284,9 @@ class TestStepNavigation:
         assert tab == "watchlist-tab"
         assert n_apply == 4
 
-    def test_watchlist_to_preparation(self, app_backend):
-        fn = _fn(app_backend[0], "tabs.active_tab", input_contains="watchlist-next-preparation")
-        assert fn(1) == "preparation-tab"
+    def test_preparation_to_deployment(self, app_backend):
+        fn = _fn(app_backend[0], "tabs.active_tab", input_contains="merged-next-deployment")
+        assert fn(1) == "deployment-tab"
 
     def test_proxy_prep_start_bumps_header(self, app_backend):
         fn = _fn(app_backend[0], "start-stop-button.n_clicks", input_contains="preparation-start-analysis-btn")

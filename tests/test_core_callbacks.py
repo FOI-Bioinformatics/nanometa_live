@@ -18,7 +18,7 @@ from dash import Dash
 from dash.exceptions import PreventUpdate
 
 from dash_test_utils import get_callback_fn as _callback_fn
-from nanometa_live.app.callbacks import _readiness_cache_key, register_core_callbacks
+from nanometa_live.app.callbacks import register_core_callbacks
 
 
 @pytest.fixture
@@ -28,19 +28,10 @@ def core_app():
     return app
 
 
-class TestReadinessCacheKey:
-    def test_none_config_sentinel(self):
-        assert _readiness_cache_key(None) == "no-config"
-
-    def test_irrelevant_field_does_not_change_key(self):
-        base = {"kraken_db": "/db", "main_dir": "/m"}
-        with_extra = {**base, "last_selected_sample": "barcode09", "ui_theme": "dark"}
-        assert _readiness_cache_key(base) == _readiness_cache_key(with_extra)
-
-    def test_relevant_field_changes_key(self):
-        a = {"kraken_db": "/db/a"}
-        b = {"kraken_db": "/db/b"}
-        assert _readiness_cache_key(a) != _readiness_cache_key(b)
+# The header readiness TTL cache (_readiness_cache_key) was removed when the
+# header pill and Preparation checklist were unified onto the readiness-state
+# Store; its dedicated tests went with it (the staleness it papered over was
+# the reported "indicators out of sync" bug).
 
 
 class TestUpdateInterval:
