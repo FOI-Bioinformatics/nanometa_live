@@ -82,6 +82,14 @@ Full walkthrough: [`docs/developer-guide.md`](docs/developer-guide.md).
 **Background callback isolation:** Dash `DiskcacheManager` runs background callbacks
 in a separate OS process, so Python singletons (e.g. `WatchlistManager`) are empty there.
 Share state via a `dcc.Store` populated in a main-process callback and read via `State`.
+Concretely: any background callback that needs the watchlist MUST take
+`State("watchlist-entries-snapshot", "data")` and use it instead of
+`get_watchlist_manager()`. The readiness checker is one such case —
+`update_readiness_state` (`app/callbacks/readiness.py`) passes the snapshot into
+`ReadinessChecker.check_readiness(..., watchlist_entries=...)`; without it the
+worker's empty singleton makes every watchlist check report "not enabled". The
+snapshot carries `enabled` per entry (set in `hydrate_watchlist_entries_snapshot`)
+so the checks can filter to the active set.
 
 **Update cadence and session writes.** A single global
 `dcc.Interval(id='update-interval')` drives all polling, default 30 s
@@ -290,6 +298,20 @@ forget to Apply and launch with stale config. Form-loader `.get(key, default)`
 fallbacks must match `create_default_config` — a divergent default (e.g.
 `validation_method`, `sample_handling`) only surfaces when a key is absent, a
 latent trap since `load_config` merges defaults on read.
+
+**Form-draft autosave.** Switching tabs re-fires `refresh-form-trigger`
+(`trigger_initial_form_load` on `tabs.active_tab` change), so
+`initialize_form_from_config` re-runs and would discard unsaved edits. To keep
+edits across a tab switch, `detect_form_changes` also writes the in-progress
+`form` dict to the session Store `config-form-draft` (the dict it already
+builds for the dirty check — same `build_config_from_form` keys), and
+`initialize_form_from_config` overlays that draft on top of the saved config
+(`config = {**config, **draft}`). The draft is the *fourth* writer of the form
+state and must stay key-compatible with the other three lists above. It is
+cleared (`None`) on Load and Reset so those authoritative actions win; Apply
+needs no clear because the draft already equals the applied config. Edits are
+still only persisted to `last-session.yaml` on Apply — the draft is a
+session-scoped convenience, not a saved config.
 
 ## Watchlist System
 

@@ -354,8 +354,9 @@ def _create_pathogens_table_section() -> dbc.Card:
                                style={"fontSize": "0.7rem", "cursor": "help"}),
                         dbc.Tooltip(
                             "Whether this organism was found in the species "
-                            "identification database. If 'Not Scanned', run "
-                            "'Rescan DB' in the Preparation tab.",
+                            "identification database. If 'Not Scanned', click "
+                            "'Scan Database' in the 'Verify Watchlist Against "
+                            "Database' card on this tab.",
                             target="dbmatch-header-info",
                             placement="top",
                         ),
@@ -367,7 +368,8 @@ def _create_pathogens_table_section() -> dbc.Card:
                                style={"fontSize": "0.7rem", "cursor": "help"}),
                         dbc.Tooltip(
                             "Reference genome status. Genomes are used for "
-                            "confirmation testing. Download them in the Preparation tab.",
+                            "confirmation testing. Download them in the 'Prepare "
+                            "for Analysis' section on this tab.",
                             target="genome-header-info",
                             placement="top",
                         ),

@@ -218,6 +218,38 @@ class TaxonomyCache:
         }
 
 
+def _classify_request_error(exc: Exception) -> str:
+    """Map a requests exception to a short, operator-facing reason code."""
+    if isinstance(exc, requests.exceptions.SSLError):
+        return "ssl_error"
+    if isinstance(exc, requests.exceptions.Timeout):
+        return "timeout"
+    if isinstance(exc, requests.exceptions.HTTPError):
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        return f"http_{status}" if status else "http_error"
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        return "connection_error"
+    return "network_error"
+
+
+# Human-readable phrasing for the reason codes above, for UI toasts.
+_REASON_LABELS = {
+    "ssl_error": "SSL certificate verification failed",
+    "timeout": "request timed out",
+    "connection_error": "could not connect",
+    "bad_response": "unexpected response",
+    "http_400": "rejected the request (HTTP 400)",
+    "http_error": "returned an HTTP error",
+    "network_error": "network error",
+    "circuit_open": "skipped after repeated failures",
+}
+
+
+def describe_failure_reason(reason: str) -> str:
+    """Return a human phrase for a circuit-breaker reason code."""
+    return _REASON_LABELS.get(reason, reason.replace("_", " "))
+
+
 class TaxonomyAPIClient(ABC):
     """Base class for taxonomy API clients."""
 
@@ -233,6 +265,34 @@ class TaxonomyAPIClient(ABC):
     _CIRCUIT_FAILURE_THRESHOLD: int = 3
     _circuit_failures: Dict[str, int] = {}
     _circuit_open: Dict[str, bool] = {}
+    # Last failure reason per host (ssl_error / http_4xx / timeout /
+    # connection_error / network_error), so callers can tell the operator
+    # WHY a host failed rather than reporting a silent partial count.
+    _circuit_last_reason: Dict[str, str] = {}
+
+    # NCBI taxids at/above this synthetic band are pseudo-taxids minted by
+    # the watchlist for name-only/custom entries (see watchlist_manager
+    # _PSEUDO_TAXID_BASE). They are NOT real NCBI ids; sending one to NCBI
+    # esummary returns HTTP 400, so by-taxid lookups must skip them.
+    _PSEUDO_TAXID_MIN: int = 2_000_000_000
+
+    @classmethod
+    def reset_circuit_breaker(cls) -> None:
+        """Clear all circuit-breaker state for this process.
+
+        Called at the start of a bulk validation run so a transient host
+        failure from an earlier run cannot silently short-circuit the whole
+        new run. The in-run breaker still trips after the threshold, so a
+        genuinely-down host does not stall the rest of the batch.
+        """
+        cls._circuit_failures.clear()
+        cls._circuit_open.clear()
+        cls._circuit_last_reason.clear()
+
+    @classmethod
+    def circuit_failure_summary(cls) -> Dict[str, str]:
+        """Return {host: last_failure_reason} for hosts that have failed."""
+        return dict(cls._circuit_last_reason)
 
     def __init__(
         self,
@@ -278,8 +338,9 @@ class TaxonomyAPIClient(ABC):
             return url
 
     @classmethod
-    def _circuit_record_failure(cls, url: str) -> None:
+    def _circuit_record_failure(cls, url: str, reason: str = "network_error") -> None:
         host = cls._circuit_host(url)
+        cls._circuit_last_reason[host] = reason
         cls._circuit_failures[host] = cls._circuit_failures.get(host, 0) + 1
         if cls._circuit_failures[host] >= cls._CIRCUIT_FAILURE_THRESHOLD:
             if not cls._circuit_open.get(host):
@@ -368,16 +429,18 @@ class TaxonomyAPIClient(ABC):
                 # surfaces the user-visible WARNING once the threshold
                 # is crossed, so individual failures stay at DEBUG.
                 logger.debug("API request failed (SSL fallback): %s - %s", url, e)
-                self._circuit_record_failure(url)
+                # The host's TLS could not be verified even with the fallback;
+                # report it as an SSL error so the operator can fix trust.
+                self._circuit_record_failure(url, "ssl_error")
                 return None
 
         except requests.exceptions.RequestException as e:
             logger.debug(f"API request failed: {url} - {e}")
-            self._circuit_record_failure(url)
+            self._circuit_record_failure(url, _classify_request_error(e))
             return None
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse API response: {e}")
-            self._circuit_record_failure(url)
+            self._circuit_record_failure(url, "bad_response")
             return None
 
     @abstractmethod
@@ -509,6 +572,14 @@ class NCBIClient(TaxonomyAPIClient):
                 logger.debug(f"Offline cache hit for taxid: {taxid}")
                 return NCBIResult.from_dict(offline_data) if isinstance(offline_data, dict) else None
             logger.debug(f"Offline mode: no cached data for taxid {taxid}")
+            return None
+
+        # Pseudo-taxids (name-only / custom watchlist entries) are not real
+        # NCBI ids -- esummary returns HTTP 400 for them, which would trip the
+        # circuit breaker and silently fail the rest of a bulk run. Skip the
+        # request; the caller falls back to search_by_name.
+        if taxid <= 0 or taxid >= self._PSEUDO_TAXID_MIN:
+            logger.debug("Skipping NCBI by-taxid for non-real taxid %s", taxid)
             return None
 
         # Get summary

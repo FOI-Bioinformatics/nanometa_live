@@ -513,9 +513,9 @@ def create_validation_layout() -> html.Div:
                     html.Li([
                         html.Strong("Scope: "),
                         "validation runs only for species you have enabled in the ",
-                        html.Em("Watchlist"),
+                        html.Em("Watchlist & Preparation"),
                         " tab and for which a reference genome has been downloaded ",
-                        "(Preparation tab). A Kraken2 hit on the Organism tab will not ",
+                        "(same tab). A Kraken2 hit on the Organisms tab will not ",
                         "appear here unless those two preconditions are met.",
                     ]),
                     html.Li([

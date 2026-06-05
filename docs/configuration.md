@@ -202,7 +202,7 @@ pathogens:
 
 ### Creating Custom Watchlists
 
-Save a YAML file following the v2.0 format and import it through the Watchlist tab in the GUI. Example files are provided in `nanometa_live/core/config/data/watchlists/examples/`:
+Save a YAML file following the v2.0 format and import it through the Watchlist & Preparation tab in the GUI. Example files are provided in `nanometa_live/core/config/data/watchlists/examples/`:
 
 - `sti_pathogens.yaml` - Sexually transmitted infection organisms
 - `neglected_tropical_diseases.yaml` - NTD surveillance targets
@@ -210,7 +210,7 @@ Save a YAML file following the v2.0 format and import it through the Watchlist t
 
 ### Taxid Mapping
 
-When a watchlist is loaded, Nanometa Live maps each `taxid_ncbi` to the active Kraken2 database. Organisms not present in the database (e.g., eukaryotic parasites in a bacteria-only database) are reported as unmapped in the Preparation tab. Use a PlusPF or PlusPFP Kraken2 database for broader organism coverage.
+When a watchlist is loaded, Nanometa Live maps each `taxid_ncbi` to the active Kraken2 database. Organisms not present in the database (e.g., eukaryotic parasites in a bacteria-only database) are reported as unmapped in the Watchlist & Preparation tab. Use a PlusPF or PlusPFP Kraken2 database for broader organism coverage.
 
 ## Pipeline Source Options
 

@@ -224,7 +224,7 @@ def _essential_settings_card():
                     ]),
                     dbc.Tooltip(
                         "Folder containing the Kraken2 reference database used to identify organisms. "
-                        "If you do not have one, download it from the Preparation tab.",
+                        "If you do not have one, download it from the Watchlist & Preparation tab.",
                         target="kraken-db-info"
                     ),
                     html.Div(id="kraken-db-feedback", className="mt-1")
@@ -570,8 +570,8 @@ def _confirmation_testing_card():
             html.Div([
                 html.I(className="bi bi-info-circle me-2"),
                 html.Span(
-                    "Reference genomes are downloaded in the Preparation tab. "
-                    "Enable the organisms you want to monitor in the Watchlist tab first.",
+                    "Reference genomes are downloaded in the Watchlist & Preparation tab, "
+                    "where you also enable the organisms you want to monitor.",
                     className="text-muted small"
                 )
             ], className="mt-2")
@@ -663,7 +663,7 @@ def _database_settings_item():
                     html.I(className="bi bi-info-circle text-info me-2"),
                     html.Span(
                         "Taxonomy mapping is handled automatically. "
-                        "Database downloads are available in the Preparation tab.",
+                        "Database downloads are available in the Watchlist & Preparation tab.",
                         className="text-muted small"
                     )
                 ], className="mt-2"),

@@ -244,7 +244,7 @@ python -m nanometa_live.app \
 Open `http://localhost:8050/` and:
 
 1. **Configuration tab**: verify the loaded config matches `scenario_A.yaml`. The readiness badge should turn green within a few seconds (it now runs in the background, so it does not block the page).
-2. **Preparation tab**: click *Run Preparation*. Watch the genome-download and BLAST-build progress; both finish in a minute or two for a small watchlist. This step is required for validation but optional for the headline real-time path.
+2. **Watchlist & Preparation tab**: click *Run Preparation*. Watch the genome-download and BLAST-build progress; both finish in a minute or two for a small watchlist. This step is required for validation but optional for the headline real-time path.
 3. **Dashboard tab**: click *Start Pipeline*. The verdict banner flips immediately to "starting", then settles to "running" once the first Nextflow process spawns. Conda envs build on the first run (~10-30 min cold); subsequent runs reuse the cache.
 4. Once Kraken2 produces its first cumulative report (~60-120 s after the first FASTQ batch lands), the dashboard tile starts ticking, organisms appear in the Organisms tab, and the QC plots populate.
 
