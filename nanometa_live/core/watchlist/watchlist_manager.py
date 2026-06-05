@@ -1425,6 +1425,16 @@ class WatchlistManager:
                 if not entry.validated
             ]
 
+        # Reset the per-host circuit breaker so a transient host failure from
+        # an earlier run cannot silently short-circuit this whole run. The
+        # in-run breaker still trips after the threshold for a genuinely-down
+        # host, so the batch never stalls.
+        try:
+            from nanometa_live.core.taxonomy.taxonomy_api import TaxonomyAPIClient
+            TaxonomyAPIClient.reset_circuit_breaker()
+        except ImportError:
+            pass
+
         results = {
             "validated": 0,
             "failed": 0,
@@ -1452,6 +1462,21 @@ class WatchlistManager:
                 results["validated"] += 1
             else:
                 results["failed"] += 1
+
+        # Surface which API host(s) failed and why, so the UI can report a
+        # cause instead of a silent partial count.
+        try:
+            from nanometa_live.core.taxonomy.taxonomy_api import (
+                TaxonomyAPIClient, describe_failure_reason,
+            )
+            summary = TaxonomyAPIClient.circuit_failure_summary()
+            if summary:
+                results["api_failures"] = {
+                    host: describe_failure_reason(reason)
+                    for host, reason in summary.items()
+                }
+        except ImportError:
+            pass
 
         logger.info(f"Bulk validation: {results['validated']} validated, "
                    f"{results['failed']} failed out of {total}")

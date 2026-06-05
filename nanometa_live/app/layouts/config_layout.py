@@ -26,6 +26,17 @@ def create_config_layout():
         dcc.Store(id="refresh-form-trigger", data=False),
         # Track whether form has been initialized (to suppress initial "Modified" badge)
         dcc.Store(id="config-form-initialized", data=False),
+        # Session-scoped draft of unsaved form edits. Switching to another tab
+        # re-runs initialize_form_from_config (via refresh-form-trigger on
+        # active_tab change), which would otherwise repopulate from the saved
+        # config and discard in-progress edits. The draft is overlaid on load so
+        # edits survive a tab switch; it is cleared on Load/Reset.
+        dcc.Store(id="config-form-draft", storage_type="session"),
+        # Sink for the clientside tab-change tooltip-dismiss callback. dbc
+        # tooltips/popovers render into a portal and can linger visible after
+        # the operator switches tabs (the hover/focus target is hidden, not
+        # left). The callback removes any stray portal nodes on tab change.
+        dcc.Store(id="tooltip-dismiss-trigger"),
 
         # Workflow step indicator
         WorkflowStepper(active_step=1),
@@ -333,8 +344,10 @@ def create_config_layout():
                 html.Small([
                     html.I(className="bi bi-info-circle me-1 text-muted"),
                     html.Span(
-                        "Click 'Apply Settings' to use these parameters. "
-                        "Settings are saved automatically and restored on next launch. "
+                        "Click 'Apply Settings' to save and use these parameters; "
+                        "the applied configuration is restored on next launch. "
+                        "Unsaved edits are kept while you switch tabs but are only "
+                        "persisted when you click 'Apply Settings'. "
                         "Use 'Save for Later' to store named presets.",
                         className="text-muted",
                     )

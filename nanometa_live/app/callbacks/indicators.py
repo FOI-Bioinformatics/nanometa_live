@@ -29,6 +29,14 @@ from nanometa_live.app.app import background_callback_manager
 # notifications does not accumulate an unbounded list in the store.
 _MAX_NOTIFICATIONS = 10
 
+# Coalesce identical toasts fired in quick succession into one. A per-entry
+# loop (e.g. genome/taxid preparation iterating watchlist entries) can write
+# the same "Validated x/x" message to the store many times in a burst; without
+# this the operator gets a wall of duplicate pop-ups. Distinct messages are
+# unaffected. Process-local; the GUI runs the toast renderer in the main process.
+_TOAST_DEDUP_WINDOW_S = 5.0
+_toast_dedup: Dict[str, Any] = {"sig": None, "ts": 0.0}
+
 # The legacy notification-trigger channel labels severity with a Bootstrap
 # "color"; the toast channel uses "type". This maps the former onto the
 # latter so both feed the single unified toast renderer.
@@ -217,6 +225,17 @@ def register_indicators(app, backend_manager):
             )
             title = payload.get("title", "Notification")
             message = payload.get("message", "")
+
+            # Coalesce a burst of identical toasts (e.g. a per-entry prep loop
+            # writing the same "Validated x/x" message repeatedly) into one.
+            sig = (toast_type, title, message)
+            now = time.time()
+            if (sig == _toast_dedup["sig"]
+                    and (now - _toast_dedup["ts"]) < _TOAST_DEDUP_WINDOW_S):
+                _toast_dedup["ts"] = now
+                return current_toasts or []
+            _toast_dedup["sig"] = sig
+            _toast_dedup["ts"] = now
 
             # Icon mapping
             icon_map = {

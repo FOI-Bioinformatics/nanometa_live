@@ -36,7 +36,7 @@
 | 10 | Alert banner - barcode04 | No alert banners | [ ] | |
 | 11 | Classification tab | Taxonomy breakdown visible, taxa match scenario | [ ] | |
 | 12 | QC tab | FASTP metrics per barcode: reads, quality, length | [ ] | |
-| 13 | Watchlist tab | Built-in watchlists load, toggle entries on/off | [ ] | |
+| 13 | Watchlist & Preparation tab | Built-in watchlists load, toggle entries on/off | [ ] | |
 | 14 | Validation tab | Results section renders | [ ] | |
 | 15 | View Coverage - barcode01 | 3 plots render (depth, cumulative, histogram) | [ ] | |
 | 16 | Config tab | Current config displays correctly | [ ] | |

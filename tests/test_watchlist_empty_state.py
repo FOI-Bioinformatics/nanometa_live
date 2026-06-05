@@ -74,11 +74,14 @@ def test_empty_taxmap_collection_renders_empty_state_not_not_found():
     # ...but a single empty-state card stands in for the rows.
     assert len(rows) == 1, "exactly one empty-state node, not N 'Not Found' rows"
 
-    # The empty-state copy should name the Preparation tab and the Scan
-    # Database control so the operator knows where to act.
+    # The empty-state copy should name the Scan Database control on THIS tab
+    # (Watchlist & Preparation is one merged tab), not tell the operator to
+    # open a now-nonexistent separate Preparation tab.
     rendered = str(rows[0])
     assert "Taxonomy index" in rendered
-    assert "Preparation" in rendered
     assert "Scan Database" in rendered
+    assert "this tab" in rendered
+    # The stale cross-tab instruction must be gone.
+    assert "Preparation tab" not in rendered
     # And must not render the legacy "Not Found" text per row.
     assert "Not Found" not in rendered

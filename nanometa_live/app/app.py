@@ -729,7 +729,7 @@ def create_app(
                                              "display": "inline-flex", "alignItems": "center", "justifyContent": "center"}),
                             html.Strong("Set up Watchlist"),
                         ], className="d-flex align-items-center mb-1"),
-                        html.P("Go to the Watchlist tab to select which organisms to monitor for alerts.",
+                        html.P("Go to the Watchlist & Preparation tab to select which organisms to monitor for alerts.",
                                className="text-muted small ms-4 mb-3"),
                     ]),
                     html.Div([
@@ -739,7 +739,7 @@ def create_app(
                                              "display": "inline-flex", "alignItems": "center", "justifyContent": "center"}),
                             html.Strong("Prepare Databases"),
                         ], className="d-flex align-items-center mb-1"),
-                        html.P("Go to the Preparation tab to download reference genomes and build validation databases.",
+                        html.P("Go to the Watchlist & Preparation tab to download reference genomes and build validation databases.",
                                className="text-muted small ms-4 mb-3"),
                     ]),
                     html.Div([

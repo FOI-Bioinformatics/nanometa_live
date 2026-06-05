@@ -51,6 +51,26 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         backend_manager: Backend manager instance
     """
 
+    # Dismiss any lingering dbc tooltip/popover portals when the operator
+    # switches tabs. dbc renders these into a detached portal node; when the
+    # hover/focus target is hidden by a tab change the node can stay visible.
+    # Removing the stray nodes is safe -- dbc re-creates them on the next hover.
+    app.clientside_callback(
+        """
+        function(active_tab) {
+            try {
+                document.querySelectorAll('.tooltip, .popover').forEach(function(el) {
+                    if (el && el.parentNode) { el.parentNode.removeChild(el); }
+                });
+            } catch (e) {}
+            return active_tab;
+        }
+        """,
+        Output("tooltip-dismiss-trigger", "data"),
+        Input("tabs", "active_tab"),
+        prevent_initial_call=True,
+    )
+
     # Trigger form initialization on app startup
     # This fires once when the config-tab first renders
     @app.callback(
@@ -144,6 +164,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("load-config-modal", "is_open", allow_duplicate=True),
             Output("notification-trigger", "data", allow_duplicate=True),
             Output("refresh-form-trigger", "data", allow_duplicate=True),
+            Output("config-form-draft", "data", allow_duplicate=True),
         ],
         Input({"type": "load-config-item", "index": dash.ALL}, "n_clicks"),
         State("available-configs", "children"),
@@ -153,12 +174,12 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     def load_selected_config(n_clicks, available_configs_json, app_config):
         """Load the selected configuration."""
         if not any(n_clicks) or not ctx.triggered_id:
-            return no_update, no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update, no_update
 
         # Find which button was clicked (pattern-matching ID returns a dict)
         triggered_id = ctx.triggered_id
         if not isinstance(triggered_id, dict) or "index" not in triggered_id:
-            return no_update, no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update, no_update
 
         trigger_idx = triggered_id["index"]
 
@@ -179,6 +200,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                     "color": "success",
                 },
                 True,  # Trigger form refresh
+                None,  # Clear any unsaved draft so the loaded config wins
             )
 
         except Exception as e:
@@ -190,6 +212,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                     "message": f"Failed to load configuration: {str(e)}",
                     "color": "danger",
                 },
+                no_update,
                 no_update,
             )
 
@@ -388,6 +411,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("app-config", "data", allow_duplicate=True),
             Output("notification-trigger", "data", allow_duplicate=True),
             Output("refresh-form-trigger", "data", allow_duplicate=True),
+            Output("config-form-draft", "data", allow_duplicate=True),
         ],
         Input("reset-config-confirm", "n_clicks"),
         State("app-data-dir", "data"),
@@ -396,7 +420,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     def reset_config(n_clicks, data_dir):
         """Reset the configuration to defaults after user confirms."""
         if not n_clicks:
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
 
         try:
             config_loader = ConfigLoader(os.path.join(data_dir, "configs"))
@@ -406,13 +430,13 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 "title": "Configuration Reset",
                 "message": "All settings have been restored to defaults",
                 "color": "info",
-            }, True  # Trigger form refresh
+            }, True, None  # Trigger form refresh; clear unsaved draft
         except Exception as e:
             return no_update, {
                 "title": "Error",
                 "message": f"Failed to reset configuration: {str(e)}",
                 "color": "danger",
-            }, no_update
+            }, no_update, no_update
 
     # Apply Config Changes Callback - THE SINGLE POINT OF CONFIG UPDATE
     # All form values (including species) are read here and committed to app-config
@@ -710,9 +734,19 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         ],
         Input("refresh-form-trigger", "data"),
         State("app-config", "data"),
+        State("config-form-draft", "data"),
     )
-    def initialize_form_from_config(refresh_trigger, config):
-        """Initialize form fields from the current configuration."""
+    def initialize_form_from_config(refresh_trigger, config, draft):
+        """Initialize form fields from the current configuration.
+
+        Unsaved edits are restored from ``config-form-draft`` (a session Store
+        written by detect_form_changes) so switching tabs and returning does not
+        discard in-progress edits. The draft is overlaid on top of the saved
+        config; it is cleared on Load/Reset so those authoritative actions win.
+        """
+        # Overlay any unsaved draft edits on top of the saved config so the
+        # operator's in-progress changes survive a tab switch.
+        config = {**(config or {}), **(draft or {})}
         if not config:
             return [no_update] * 42
 
@@ -1549,6 +1583,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         [
             Output("config-modified", "data", allow_duplicate=True),
             Output("config-form-initialized", "data", allow_duplicate=True),
+            Output("config-form-draft", "data", allow_duplicate=True),
         ],
         [
             Input("analysis-name-input", "value"),
@@ -1620,11 +1655,12 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         snapshot. Comparison mirrors build_config_from_form via the
         config_form_dirty helper, so all operator-editable fields are covered."""
         # Form (re)initialization cascades value changes into this callback;
-        # consume the initialized flag and skip the check.
+        # consume the initialized flag and skip the check. Leave the draft
+        # untouched (no_update) so a tab-switch re-init does not wipe it.
         if form_initialized:
-            return no_update, False
+            return no_update, False, no_update
         if not saved_snapshot:
-            return no_update, no_update
+            return no_update, no_update, no_update
 
         form = {
             "analysis_name": analysis_name or "",
@@ -1674,7 +1710,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             ),
             "min_reads_for_validation": min_reads_for_validation,
         }
-        return config_form_dirty(saved_snapshot, form=form), no_update
+        dirty = config_form_dirty(saved_snapshot, form=form)
+        # Persist the in-progress edits as a session draft when the form differs
+        # from the saved snapshot; clear it once the form matches saved again so
+        # a stale draft cannot resurrect discarded edits on the next tab visit.
+        return dirty, no_update, (form if dirty else None)
 
     # Callback: Mark as not modified after Apply (config matches current form)
     @app.callback(

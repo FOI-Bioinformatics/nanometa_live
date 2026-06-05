@@ -126,10 +126,10 @@ minimal config is shown in [Appendix A](#appendix-a-minimal-configyaml).
    - Leave "Results folder" empty so it derives `results/<run name>`.
    - Click **Apply Settings**. Expect a "Viewing: .../results/batch_run" line.
 
-2. **Watchlist tab** -- click a built-in list that covers the mock species
-   (e.g. **Clinical Pathogens**). Confirm the active count is non-zero.
+2. **Watchlist & Preparation tab** -- click a built-in list that covers the mock
+   species (e.g. **Clinical Pathogens**). Confirm the active count is non-zero.
 
-3. **Preparation tab** -- click **Start Preparation**. This builds the DB
+3. **Same tab (Prepare for Analysis section)** -- click **Start Preparation**. This builds the DB
    taxonomy index + taxid mappings, downloads the watched species' reference
    genomes, and builds validation indexes. Wait for "Preparation complete";
    the readiness badge should turn **Ready** and Start should enable.

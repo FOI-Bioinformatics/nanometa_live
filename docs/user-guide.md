@@ -136,9 +136,10 @@ Organism identity verification:
 - **Coverage Sub-tab**: Genome-centric minimap2 coverage plots (depth, cumulative, histogram)
 - Species selector and mapping quality filters
 
-### Watchlist tab
+### Watchlist & Preparation tab
 
-Pathogen monitoring management:
+Pathogen monitoring management (watchlist selection and pre-run preparation are
+combined in this single tab):
 - Browse and activate the 9 built-in watchlists (clinical_pathogens, cdc_bioterrorism, who_priority, foodborne, respiratory, who_drinking_water, nosocomial_eskape, wastewater_surveillance, zoonotic_one_health)
 - Upload custom watchlist YAML files
 - Toggle individual pathogen entries on/off
@@ -152,9 +153,9 @@ Analysis settings:
 - Processing mode (batch/real-time)
 - Start/stop analysis controls
 
-### Preparation tab
+### Preparation (part of the Watchlist & Preparation tab)
 
-Pre-run setup:
+Pre-run setup, in the lower section of the Watchlist & Preparation tab:
 - Reference genome downloads for watchlist pathogens
 - BLAST database preparation
 - Genome management status

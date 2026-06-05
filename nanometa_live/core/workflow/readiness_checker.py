@@ -89,6 +89,7 @@ class ReadinessChecker:
         self,
         config: Dict[str, Any],
         nanometa_home: Optional[str] = None,
+        watchlist_entries: Optional[List[Dict[str, Any]]] = None,
     ) -> ReadinessReport:
         """
         Run all readiness checks.
@@ -96,10 +97,19 @@ class ReadinessChecker:
         Args:
             config: Application configuration dict.
             nanometa_home: Path to ~/.nanometa (or equivalent).
+            watchlist_entries: Optional snapshot of watchlist entries (dicts with
+                ``taxid``/``name``/``enabled``). REQUIRED when this runs in a
+                DiskcacheManager background worker, where the WatchlistManager
+                singleton is empty: without it the watchlist checks would always
+                report "not enabled" even when the operator has enabled entries
+                in the main process. When omitted, the singleton is consulted
+                (correct for in-process callers).
 
         Returns:
             ReadinessReport with all check results.
         """
+        active_watchlist = self._resolve_active_watchlist(watchlist_entries)
+
         if nanometa_home is None:
             # Prefer the operator-configured data_dir; the legacy
             # ``~/.nanometa`` fallback only fires when no config has
@@ -166,9 +176,9 @@ class ReadinessChecker:
         report.checks.append(self._check_disk_space(config))
 
         # === Data completeness (warning) ===
-        report.checks.append(self._check_watchlist_active(config))
-        report.checks.append(self._check_watchlist_genomes(config, home))
-        report.checks.append(self._check_blast_dbs(config, home))
+        report.checks.append(self._check_watchlist_active(config, active_watchlist))
+        report.checks.append(self._check_watchlist_genomes(config, home, active_watchlist))
+        report.checks.append(self._check_blast_dbs(config, home, active_watchlist))
 
         # === Informational ===
         report.checks.append(self._check_nextflow_version())
@@ -472,50 +482,83 @@ class ReadinessChecker:
 
     # -- Data completeness checks --
 
-    def _check_watchlist_active(self, config: Dict[str, Any]) -> CheckResult:
-        """Check whether at least one watchlist is enabled for pathogen screening."""
-        try:
-            from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
-            wm = get_watchlist_manager()
-            active = wm.get_active_entries()
-            if active:
-                count = len(active)
-                return CheckResult(
-                    "Watchlist Active", True, Severity.WARNING,
-                    f"{count} pathogen(s) enabled for screening"
-                )
-            return CheckResult(
-                "Watchlist Active", False, Severity.WARNING,
-                "No watchlist enabled - enable pathogens in the Watchlist tab"
-            )
-        except (ImportError, AttributeError, OSError):
-            # Check config for watchlist section as fallback
-            wl = config.get("watchlist", {})
-            if isinstance(wl, dict) and wl.get("enabled_watchlists"):
-                return CheckResult(
-                    "Watchlist Active", True, Severity.WARNING,
-                    "Watchlist configured (not yet loaded)"
-                )
-            return CheckResult(
-                "Watchlist Active", False, Severity.WARNING,
-                "No watchlist enabled - enable pathogens in the Watchlist tab"
-            )
+    def _resolve_active_watchlist(
+        self, watchlist_entries: Optional[List[Dict[str, Any]]]
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Return enabled watchlist entries as ``[{name, taxid}]`` dicts.
 
-    def _check_watchlist_genomes(self, config: Dict[str, Any], home: Path) -> CheckResult:
+        Prefers the injected snapshot (so the watchlist checks work in a
+        DiskcacheManager background worker, where the WatchlistManager singleton
+        is empty); falls back to the singleton for in-process callers. Returns
+        ``None`` only when neither source is available -- the checks treat that
+        as "could not determine" and use their directory/config fallback, which
+        is distinct from an empty list ("watchlist loaded but nothing enabled").
+        """
+        if watchlist_entries is not None:
+            resolved: List[Dict[str, Any]] = []
+            for e in watchlist_entries:
+                if not e.get("enabled", True):
+                    continue
+                taxid = e.get("taxid")
+                if not taxid:
+                    continue
+                resolved.append({"name": e.get("name", f"taxid {taxid}"), "taxid": taxid})
+            return resolved
         try:
             from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
-            from nanometa_live.core.utils.genome_manager import get_genome_manager
             wm = get_watchlist_manager()
-            gm = get_genome_manager(config.get("genome_cache_dir") or str(home))
             active = wm.get_active_entries()
-            if not active:
+            return [
+                {"name": v.name, "taxid": v.taxid}
+                for v in active.values() if v.taxid
+            ]
+        except (ImportError, AttributeError, OSError):
+            return None
+
+    def _check_watchlist_active(
+        self, config: Dict[str, Any],
+        active_entries: Optional[List[Dict[str, Any]]],
+    ) -> CheckResult:
+        """Check whether at least one watchlist entry is enabled for screening."""
+        if active_entries is not None:
+            if active_entries:
+                return CheckResult(
+                    "Watchlist Active", True, Severity.WARNING,
+                    f"{len(active_entries)} pathogen(s) enabled for screening"
+                )
+            return CheckResult(
+                "Watchlist Active", False, Severity.WARNING,
+                "No watchlist enabled - enable pathogens in the Watchlist & Preparation tab"
+            )
+        # Could not determine from snapshot/singleton -- fall back to config.
+        wl = config.get("watchlist", {})
+        if isinstance(wl, dict) and wl.get("enabled_watchlists"):
+            return CheckResult(
+                "Watchlist Active", True, Severity.WARNING,
+                "Watchlist configured (not yet loaded)"
+            )
+        return CheckResult(
+            "Watchlist Active", False, Severity.WARNING,
+            "No watchlist enabled - enable pathogens in the Watchlist & Preparation tab"
+        )
+
+    def _check_watchlist_genomes(
+        self, config: Dict[str, Any], home: Path,
+        active_entries: Optional[List[Dict[str, Any]]],
+    ) -> CheckResult:
+        try:
+            from nanometa_live.core.utils.genome_manager import get_genome_manager
+            gm = get_genome_manager(config.get("genome_cache_dir") or str(home))
+            if active_entries is None:
+                raise AttributeError("watchlist unavailable")
+            if not active_entries:
                 return CheckResult(
                     "Watchlist Genomes", False, Severity.WARNING,
-                    "No enabled watchlist entries — enable pathogens in the Watchlist tab"
+                    "No enabled watchlist entries — enable pathogens in the Watchlist & Preparation tab"
                 )
-            missing = [e.name for e in active.values()
-                       if e.taxid and not gm.has_genome(e.taxid)]
-            total = sum(1 for e in active.values() if e.taxid)
+            missing = [e["name"] for e in active_entries
+                       if e["taxid"] and not gm.has_genome(e["taxid"])]
+            total = sum(1 for e in active_entries if e["taxid"])
             have = total - len(missing)
             if not missing:
                 return CheckResult(
@@ -544,7 +587,10 @@ class ReadinessChecker:
                 "No reference genomes downloaded"
             )
 
-    def _check_blast_dbs(self, config: Dict[str, Any], home: Path) -> CheckResult:
+    def _check_blast_dbs(
+        self, config: Dict[str, Any], home: Path,
+        active_entries: Optional[List[Dict[str, Any]]],
+    ) -> CheckResult:
         blast_enabled = config.get("blast_validation", False)
         if isinstance(blast_enabled, str):
             blast_enabled = blast_enabled.lower() in ("true", "yes", "1")
@@ -554,19 +600,18 @@ class ReadinessChecker:
                 "BLAST validation not enabled"
             )
         try:
-            from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
             from nanometa_live.core.utils.genome_manager import get_genome_manager
-            wm = get_watchlist_manager()
             gm = get_genome_manager(config.get("genome_cache_dir") or str(home))
-            active = wm.get_active_entries()
-            if not active:
+            if active_entries is None:
+                raise AttributeError("watchlist unavailable")
+            if not active_entries:
                 return CheckResult(
                     "BLAST Databases", False, Severity.WARNING,
-                    "No enabled watchlist entries — enable pathogens in the Watchlist tab"
+                    "No enabled watchlist entries — enable pathogens in the Watchlist & Preparation tab"
                 )
-            missing = [e.name for e in active.values()
-                       if e.taxid and not gm.has_blast_db(e.taxid)]
-            total = sum(1 for e in active.values() if e.taxid)
+            missing = [e["name"] for e in active_entries
+                       if e["taxid"] and not gm.has_blast_db(e["taxid"])]
+            total = sum(1 for e in active_entries if e["taxid"])
             have = total - len(missing)
             if not missing:
                 return CheckResult(

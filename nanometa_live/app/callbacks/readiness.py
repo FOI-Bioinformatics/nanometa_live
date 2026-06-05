@@ -81,8 +81,16 @@ _readiness_lock = threading.Lock()
 _readiness_last: Dict[str, Any] = {"fingerprint": None, "ts": 0.0}
 
 
-def _readiness_fingerprint(config: Optional[Dict[str, Any]]) -> str:
-    """Hash only the config fields the readiness checks actually read."""
+def _readiness_fingerprint(
+    config: Optional[Dict[str, Any]],
+    watchlist_entries: Optional[list] = None,
+) -> str:
+    """Hash only the inputs the readiness checks actually read.
+
+    Includes the enabled-watchlist signature so toggling pathogens in the
+    Watchlist & Preparation tab recomputes the watchlist checks instead of
+    being skipped by the TTL/dedup short-circuit.
+    """
     if not config:
         return "no-config"
     relevant = {
@@ -93,6 +101,10 @@ def _readiness_fingerprint(config: Optional[Dict[str, Any]]) -> str:
             "offline_mode",
         )
     }
+    relevant["_watchlist"] = sorted(
+        e.get("taxid") for e in (watchlist_entries or [])
+        if e.get("enabled", True) and e.get("taxid")
+    )
     return hashlib.md5(json.dumps(relevant, sort_keys=True).encode()).hexdigest()
 
 
@@ -130,10 +142,12 @@ def register_readiness(app, backend_manager):
         Input("app-config", "data"),
         Input("check-readiness-btn", "n_clicks"),
         State("readiness-state", "data"),
+        State("watchlist-entries-snapshot", "data"),
         background=True,
         manager=background_callback_manager,
     )
-    def update_readiness_state(n_intervals, config, n_clicks, prev_state):
+    def update_readiness_state(n_intervals, config, n_clicks, prev_state,
+                               watchlist_entries):
         """Compute readiness and publish it to the shared Store, deduplicated.
 
         Idle update-interval ticks must not re-run the checker's subprocess
@@ -155,7 +169,7 @@ def register_readiness(app, backend_manager):
             new = _empty_readiness_state("No configuration loaded")
             return no_update if _readiness_unchanged(prev_state, new) else new
 
-        fingerprint = _readiness_fingerprint(config)
+        fingerprint = _readiness_fingerprint(config, watchlist_entries)
         now = time.time()
         if not forced:
             with _readiness_lock:
@@ -165,7 +179,12 @@ def register_readiness(app, backend_manager):
                 return no_update
 
         try:
-            report = ReadinessChecker().check_readiness(config)
+            # Pass the watchlist snapshot: this callback runs in a background
+            # worker where the WatchlistManager singleton is empty, so the
+            # watchlist checks would otherwise always report "not enabled".
+            report = ReadinessChecker().check_readiness(
+                config, watchlist_entries=watchlist_entries
+            )
             new = _serialize_report(report)
         except Exception as e:
             logging.error(f"Readiness check failed: {e}")

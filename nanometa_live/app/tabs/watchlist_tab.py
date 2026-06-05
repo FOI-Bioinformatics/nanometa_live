@@ -564,12 +564,10 @@ def register_watchlist_callbacks(app: Dash) -> None:
                             [
                                 "The watchlist cannot be checked against the "
                                 "Kraken2 database until the taxonomy index "
-                                "has been built. Open the ",
-                                html.Strong("Preparation"),
-                                " tab and click ",
+                                "has been built. Click ",
                                 html.Strong("Scan Database"),
                                 " in the 'Verify Watchlist Against Database' "
-                                "card to (re)build the index.",
+                                "card on this tab to (re)build the index.",
                             ],
                             className="mb-0 text-muted small",
                         ),
@@ -975,7 +973,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
                 payloads.append(entry.to_dict())
 
         validated = summary.get("validated", 0)
-        set_progress((100, f"Validated {validated} of {total}", api_label))
+        set_progress((100, f"Validated {validated} of {total} entries", api_label))
 
         return {
             "results": payloads,
@@ -984,6 +982,9 @@ def register_watchlist_callbacks(app: Dash) -> None:
             "total": total,
             "apis": apis_used,
             "offline": offline_mode,
+            # {host: human reason} when an API host failed -- lets the toast
+            # explain a partial result instead of a silent count.
+            "api_failures": summary.get("api_failures") or {},
         }
 
     @app.callback(
@@ -1023,15 +1024,22 @@ def register_watchlist_callbacks(app: Dash) -> None:
         total = payload.get("total", 0)
         failed = payload.get("failed", 0)
         apis = payload.get("apis", [])
+        api_failures = payload.get("api_failures") or {}
         detail = f"APIs: {', '.join(apis) if apis else 'none'}"
         if payload.get("offline"):
             detail += " | offline mode: cached data only"
         elif failed:
             detail += f" | {failed} failed"
+        # Name the failing host(s) and cause so a partial result is explained
+        # (e.g. "GTDB: SSL certificate verification failed") rather than a
+        # silent low count from a tripped circuit breaker.
+        if api_failures:
+            reasons = "; ".join(f"{host} {reason}" for host, reason in api_failures.items())
+            detail += f" | {reasons}"
 
         new_refresh = (current_refresh or 0) + 1
         toast = {
-            "type": "success" if validated else "info",
+            "type": "success" if validated and not failed else "warning" if failed else "info",
             "title": "Validation complete",
             "message": f"Validated {validated} of {total} entries. {detail}",
         }

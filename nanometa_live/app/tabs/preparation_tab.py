@@ -975,6 +975,10 @@ def register_preparation_callbacks(app):
                 "taxid": e.get("taxid", 0),
                 "rank": e.get("api_rank", "species"),
                 "names_alt": e.get("names_alt", []),
+                # Carry the enabled flag so background-worker consumers (e.g.
+                # the readiness checker) can filter to the active set without
+                # the empty WatchlistManager singleton.
+                "enabled": e.get("enabled", True),
             }
             for e in entries
         ]
