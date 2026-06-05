@@ -460,16 +460,26 @@ def _accumulate_kraken_df(
     Reads and cumulative reads are summed per taxid; the remaining
     columns (rank, name, parent_taxid) are taken from the first
     occurrence. New taxids are appended to ``ordered_taxids`` in
-    first-seen order. Vectorized extraction avoids per-row overhead.
+    first-seen order.
+
+    Columns are extracted to plain Python lists via ``.tolist()`` rather
+    than ``.values``: under pandas 3.0 ``.values`` on the arrow-backed
+    string columns (``rank``, ``name``) returns an ExtensionArray whose
+    per-element ``[i]`` access goes through arrow ``__getitem__`` and
+    dominated this loop (cProfile, 2026-06-05). ``.tolist()`` materialises
+    native Python scalars once so the loop body is plain list indexing.
     """
-    taxids = df['taxid'].astype(int).values
-    reads_arr = df['reads'].values
-    cumul_arr = df['cumul_reads'].values
-    ranks = df['rank'].values
-    names = df['name'].values
-    parent_taxids_arr = df['parent_taxid'].values if 'parent_taxid' in df.columns else [0] * len(df)
-    for i in range(len(df)):
-        taxid = int(taxids[i])
+    n = len(df)
+    taxids = df['taxid'].astype(int).tolist()
+    reads_arr = df['reads'].tolist()
+    cumul_arr = df['cumul_reads'].tolist()
+    ranks = df['rank'].tolist()
+    names = df['name'].tolist()
+    parent_taxids_arr = (
+        df['parent_taxid'].tolist() if 'parent_taxid' in df.columns else [0] * n
+    )
+    for i in range(n):
+        taxid = taxids[i]
         if taxid in agg:
             agg[taxid][0] += reads_arr[i]
             agg[taxid][1] += cumul_arr[i]
@@ -759,26 +769,31 @@ def _parse_kraken_data_uncached(
         logging.log(level, _diagnose_empty_kraken_dir(kraken_dir, sample=sample))
         return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
 
-    # Parse files, using a single-file fast path when possible.
-    first_df = None
-    file_count = 0
-    agg = {}
-    ordered_taxids = []
-    seen_taxids = set()
+    # Parse files first; defer the per-taxid accumulation until we know more
+    # than one report actually contributed. The single-report case -- the
+    # common one for a per-sample cumulative report -- returns the parsed
+    # frame directly and skips the accumulation pass entirely. The previous
+    # code accumulated the first frame unconditionally and then discarded the
+    # result when file_count == 1, an O(rows) pass wasted on every single-file
+    # load (cProfile, 2026-06-05).
+    parsed_frames: List[pd.DataFrame] = []
     for sample_file in sample_files:
         df = _parse_kraken2_report(sample_file)
         if df is None or df.empty:
             continue
-        file_count += 1
-        if file_count == 1:
-            first_df = df
-        _accumulate_kraken_df(df, agg, ordered_taxids, seen_taxids)
+        parsed_frames.append(df)
 
-    if file_count == 0:
+    if not parsed_frames:
         return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
-    if file_count == 1:
+    if len(parsed_frames) == 1:
         # Single file: return its DataFrame directly (no aggregation needed).
-        return _cache_and_return(first_df, cache_key, mtime_key, kraken_dir)
+        return _cache_and_return(parsed_frames[0], cache_key, mtime_key, kraken_dir)
+
+    agg: Dict[int, List] = {}
+    ordered_taxids: List[int] = []
+    seen_taxids: set = set()
+    for df in parsed_frames:
+        _accumulate_kraken_df(df, agg, ordered_taxids, seen_taxids)
     result_df = _aggregate_to_result_df(agg, ordered_taxids)
     return _cache_and_return(result_df, cache_key, mtime_key, kraken_dir)
 
