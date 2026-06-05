@@ -248,7 +248,7 @@ def register_classification_callbacks(app: Dash):
 
             # Generate visualization based on type
             if view_type == "sunburst":
-                figure = create_sunburst_data(kraken_df, domains, tax_levels, filter_value, config, color_palette)
+                figure = create_sunburst_data(kraken_df, domains, tax_levels, filter_value, config, color_palette, max_taxa_per_level=max_taxa)
                 if figure is None:
                     return create_empty_sunburst("No data matches the selected filters"), None, graph_visible
                 return figure, None, graph_visible
