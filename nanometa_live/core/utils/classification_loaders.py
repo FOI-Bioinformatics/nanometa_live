@@ -186,14 +186,24 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
         # but preserve leading spaces for hierarchy visualization
         df["name"] = df["name"].fillna("unknown")
 
-        # Build parent_taxid from indentation-based hierarchy
-        # Uses a stack to track the parent at each indentation depth
+        # Build parent_taxid from indentation-based hierarchy.
+        # Uses a stack to track the parent at each indentation depth.
+        #
+        # The two columns are extracted to plain Python lists ONCE before the
+        # loop. The previous per-row ``df.iloc[idx][col]`` access dominated the
+        # entire loader: each call materialises a cross-section Series (pandas
+        # fast_xs), so a 3000-row report cost ~110 ms and an all-samples load
+        # ~660 ms, essentially all of it here (cProfile, 2026-06-05). Iterating
+        # over pre-extracted lists leaves the indent-stack algorithm identical
+        # while removing the cross-section overhead.
+        names = df["name"].tolist()
+        taxid_values = df["taxid"].tolist()
         parent_taxids = []
         indent_stack = []  # list of (indent_level, taxid) tuples
-        for idx in range(len(df)):
-            name_val = df.iloc[idx]["name"]
-            indent = len(name_val) - len(str(name_val).lstrip())
-            taxid = int(df.iloc[idx]["taxid"])
+        for name_val, taxid_val in zip(names, taxid_values):
+            name_str = str(name_val)
+            indent = len(name_str) - len(name_str.lstrip())
+            taxid = int(taxid_val)
 
             # Pop stack entries with indent >= current (siblings or deeper)
             while indent_stack and indent_stack[-1][0] >= indent:
