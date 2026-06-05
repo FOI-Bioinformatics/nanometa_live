@@ -881,6 +881,46 @@ def load_kraken_latest_batch(main_dir: str, sample_name: str) -> pd.DataFrame:
     return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
 
 
+def latest_batch_equals_cumulative(main_dir: str, sample_name: str) -> bool:
+    """True when a sample's latest-batch horizon is identical to its cumulative.
+
+    This holds only when the sample has **neither** per-batch reports **nor** a
+    cumulative report: in that case both ``load_kraken_data`` (step 2 of
+    ``_discover_sample_reports``) and ``load_kraken_latest_batch`` (its standard
+    fallback) resolve to the very same ``<sample>.kraken2.report.txt``, so they
+    return identical data. A caller that needs both horizons can then reuse the
+    cumulative frame instead of parsing the same file twice -- the common
+    batch-mode case in ``get_sample_statistics_summary``.
+
+    Returns ``False`` whenever a cumulative report or any batch report exists,
+    because then the two horizons can legitimately differ and must be loaded
+    independently. The check is glob/stat-only (no parsing), so it is far
+    cheaper than the redundant parse it guards.
+    """
+    main_dir = resolve_analysis_directory(main_dir)
+    kraken_dir = os.path.join(main_dir, "kraken2")
+
+    # A cumulative report means load_kraken_data used it (not the standard
+    # report), so the latest-batch fallback is not guaranteed to match.
+    for cumul in (
+        os.path.join(kraken_dir, f"{sample_name}.cumulative.kraken2.report.txt"),
+        os.path.join(kraken_dir, sample_name, f"{sample_name}.cumulative.kraken2.report.txt"),
+    ):
+        if os.path.exists(cumul):
+            return False
+
+    # Any per-batch report means a distinct latest-batch horizon exists.
+    if glob.glob(os.path.join(kraken_dir, f"{sample_name}_batch*.kraken2.report.txt")):
+        return False
+    batch_dir = os.path.join(kraken_dir, sample_name, "batch_reports")
+    if os.path.isdir(batch_dir) and glob.glob(
+        os.path.join(batch_dir, "*.kraken2.report.txt")
+    ):
+        return False
+
+    return True
+
+
 def describe_kraken_scan_locations(main_dir: str) -> Dict[str, object]:
     """Return a structured description of where the Kraken2 loader looks.
 

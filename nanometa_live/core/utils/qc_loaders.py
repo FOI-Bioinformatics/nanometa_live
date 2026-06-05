@@ -879,6 +879,7 @@ def get_sample_statistics_summary(main_dir: str) -> pd.DataFrame:
     from nanometa_live.core.utils.classification_loaders import (
         load_kraken_data,
         load_kraken_latest_batch,
+        latest_batch_equals_cumulative,
     )
 
     # Auto-resolve to analysis directory if needed
@@ -947,7 +948,14 @@ def get_sample_statistics_summary(main_dir: str) -> pd.DataFrame:
             total_reads = kraken_total_cumul
 
         # --- Latest-batch horizon ---
-        latest_df = load_kraken_latest_batch(main_dir, sample)
+        # When the sample has no batch reports and no cumulative report, the
+        # latest-batch horizon is byte-identical to the cumulative one (both
+        # resolve to the same standard <sample>.kraken2.report.txt). Reuse the
+        # already-parsed cumul_df instead of parsing the same file again.
+        if latest_batch_equals_cumulative(main_dir, sample):
+            latest_df = cumul_df
+        else:
+            latest_df = load_kraken_latest_batch(main_dir, sample)
         classified_latest, unclassified_latest, kraken_total_latest = (
             _kraken_classification_counts(latest_df)
         )
