@@ -150,3 +150,63 @@ class TestSampleSummaryHorizons:
         assert row["classified_rate_cumul_num"] == 90.0
         assert row["classified_rate_latest_num"] == 20.0
         assert "Complete" in row["status"]
+
+
+class TestLatestBatchEqualsCumulative:
+    """The dedup guard that lets the summary skip a redundant parse."""
+
+    def test_true_for_standard_report_only(self, tmp_path):
+        """A lone standard report (no cumulative, no batch) -> horizons equal."""
+        from nanometa_live.core.utils.classification_loaders import (
+            latest_batch_equals_cumulative,
+        )
+        kraken_dir = tmp_path / "kraken2"
+        _write_kraken_report(
+            kraken_dir / "barcode01.kraken2.report.txt",
+            classified=150, unclassified=50,
+        )
+        assert latest_batch_equals_cumulative(str(tmp_path), "barcode01") is True
+
+    def test_false_when_cumulative_present(self, tmp_path):
+        from nanometa_live.core.utils.classification_loaders import (
+            latest_batch_equals_cumulative,
+        )
+        kraken_dir = tmp_path / "kraken2"
+        _write_kraken_report(
+            kraken_dir / "barcode01.kraken2.report.txt", classified=150, unclassified=50,
+        )
+        _write_kraken_report(
+            kraken_dir / "barcode01.cumulative.kraken2.report.txt",
+            classified=150, unclassified=50,
+        )
+        assert latest_batch_equals_cumulative(str(tmp_path), "barcode01") is False
+
+    def test_false_when_batch_present(self, tmp_path):
+        from nanometa_live.core.utils.classification_loaders import (
+            latest_batch_equals_cumulative,
+        )
+        kraken_dir = tmp_path / "kraken2"
+        _write_kraken_report(
+            kraken_dir / "barcode01.kraken2.report.txt", classified=150, unclassified=50,
+        )
+        _write_kraken_report(
+            kraken_dir / "barcode01_batch0.kraken2.report.txt",
+            classified=150, unclassified=50,
+        )
+        assert latest_batch_equals_cumulative(str(tmp_path), "barcode01") is False
+
+    def test_summary_dedup_path_matches_horizons(self, tmp_path):
+        """With only a standard report, the dedup reuses cumul_df and the
+        latest horizon equals the cumulative one (no separate parse)."""
+        kraken_dir = tmp_path / "kraken2"
+        _write_empty_fastp(tmp_path / "fastp", "barcode01")
+        _write_kraken_report(
+            kraken_dir / "barcode01.kraken2.report.txt",
+            classified=300, unclassified=100,
+        )
+        df = get_sample_statistics_summary(str(tmp_path))
+        row = df.iloc[0]
+        assert row["reads_cumul"] == 400
+        assert row["reads_latest"] == 400
+        assert row["classified_cumul"] == row["classified_latest"] == 300
+        assert row["classified_rate_latest_num"] == row["classified_rate_cumul_num"]

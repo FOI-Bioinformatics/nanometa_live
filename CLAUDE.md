@@ -137,6 +137,52 @@ which returns `(classified_reads, unclassified_reads, rate)` from
 the per-rank assignment column collapses to 0 when every read is parked at
 root level (the degenerate single-read input case caught by the audit).
 
+**Loader hot-path invariants (do not regress).** The Kraken2 loaders run on
+every poll, so per-element pandas access is the dominant cost on a large
+report. The 2026-06-05 perf pass (cProfile, 6 samples × ~3100 taxa) took the
+per-poll loader work from ~2 s to <0.1 s; keep these contracts:
+
+- **No per-row `df.iloc[idx][col]` in a parse loop.** `_parse_kraken2_report`
+  builds `parent_taxid` by iterating `df["name"].tolist()` / `df["taxid"].tolist()`,
+  not `df.iloc`. Each `df.iloc[idx]` materialises a cross-section Series
+  (`fast_xs`); on 3000 rows that alone was ~98% of loader time.
+- **Use `.tolist()`, not `.values`, for string columns in row loops.** Under
+  pandas 3.0 `.values` on the arrow-backed `name`/`rank` columns returns an
+  ExtensionArray whose per-element `[i]` goes through arrow `__getitem__`.
+  `_accumulate_kraken_df` extracts every column with `.tolist()` for this
+  reason. Numeric columns are unaffected but use `.tolist()` there too for
+  consistency.
+- **Single-report path skips accumulation.** `_parse_kraken_data_uncached`
+  (per-sample branch) parses into `parsed_frames` and returns the lone frame
+  directly when only one report contributes; `_accumulate_kraken_df` /
+  `_aggregate_to_result_df` run only for genuine multi-file aggregation.
+- **`get_sample_statistics_summary` parses each sample once when it safely can.**
+  `latest_batch_equals_cumulative(main_dir, sample)` (glob/stat only, no parse)
+  returns True only when the sample has neither a cumulative report nor any
+  per-batch report — the case where `load_kraken_data` and
+  `load_kraken_latest_batch` resolve to the same standard
+  `<sample>.kraken2.report.txt`. The summary reuses `cumul_df` then; otherwise
+  it loads the latest-batch horizon independently (the horizons legitimately
+  differ once a cumulative or batch report exists). Regression-covered in
+  `tests/test_qc_loaders_horizon.py`.
+
+All four were behaviour-preserving (loader output is byte-identical, verified
+by sha256 over the full frame incl. `parent_taxid`).
+
+**Sunburst node cap (visualization invariant).** `create_sunburst_data`
+(`app/tabs/classification_helpers.py`) takes `max_taxa_per_level` and keeps the
+top-N taxa by recalculated cumulative reads at each rank, mirroring
+`create_sankey_data`. The classification callback passes the same `max_taxa`
+value to both views, so they stay consistent. The default is `0` (= no cap) so
+existing callers and tests are unchanged; the callback's own default is the
+shared `max_taxa` (10, with 0 mapped to "no limit"). The cap is not only a
+readability control: ~60% of an uncapped sunburst build is plotly's
+per-element trace validation, which scales with node count (~3100 species nodes
+on a GTDB run took ~57 ms; capped ~15 ms). A node whose direct parent is capped
+out reparents to its nearest still-present ancestor (or `root`) via
+`_resolve_sunburst_parent`, so capping never orphans a node. Regression-covered
+in `tests/test_sunburst_tax_levels.py`.
+
 ### PAF Files (minimap2 validation)
 
 ```

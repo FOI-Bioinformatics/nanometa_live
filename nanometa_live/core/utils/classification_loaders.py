@@ -186,14 +186,24 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
         # but preserve leading spaces for hierarchy visualization
         df["name"] = df["name"].fillna("unknown")
 
-        # Build parent_taxid from indentation-based hierarchy
-        # Uses a stack to track the parent at each indentation depth
+        # Build parent_taxid from indentation-based hierarchy.
+        # Uses a stack to track the parent at each indentation depth.
+        #
+        # The two columns are extracted to plain Python lists ONCE before the
+        # loop. The previous per-row ``df.iloc[idx][col]`` access dominated the
+        # entire loader: each call materialises a cross-section Series (pandas
+        # fast_xs), so a 3000-row report cost ~110 ms and an all-samples load
+        # ~660 ms, essentially all of it here (cProfile, 2026-06-05). Iterating
+        # over pre-extracted lists leaves the indent-stack algorithm identical
+        # while removing the cross-section overhead.
+        names = df["name"].tolist()
+        taxid_values = df["taxid"].tolist()
         parent_taxids = []
         indent_stack = []  # list of (indent_level, taxid) tuples
-        for idx in range(len(df)):
-            name_val = df.iloc[idx]["name"]
-            indent = len(name_val) - len(str(name_val).lstrip())
-            taxid = int(df.iloc[idx]["taxid"])
+        for name_val, taxid_val in zip(names, taxid_values):
+            name_str = str(name_val)
+            indent = len(name_str) - len(name_str.lstrip())
+            taxid = int(taxid_val)
 
             # Pop stack entries with indent >= current (siblings or deeper)
             while indent_stack and indent_stack[-1][0] >= indent:
@@ -450,16 +460,26 @@ def _accumulate_kraken_df(
     Reads and cumulative reads are summed per taxid; the remaining
     columns (rank, name, parent_taxid) are taken from the first
     occurrence. New taxids are appended to ``ordered_taxids`` in
-    first-seen order. Vectorized extraction avoids per-row overhead.
+    first-seen order.
+
+    Columns are extracted to plain Python lists via ``.tolist()`` rather
+    than ``.values``: under pandas 3.0 ``.values`` on the arrow-backed
+    string columns (``rank``, ``name``) returns an ExtensionArray whose
+    per-element ``[i]`` access goes through arrow ``__getitem__`` and
+    dominated this loop (cProfile, 2026-06-05). ``.tolist()`` materialises
+    native Python scalars once so the loop body is plain list indexing.
     """
-    taxids = df['taxid'].astype(int).values
-    reads_arr = df['reads'].values
-    cumul_arr = df['cumul_reads'].values
-    ranks = df['rank'].values
-    names = df['name'].values
-    parent_taxids_arr = df['parent_taxid'].values if 'parent_taxid' in df.columns else [0] * len(df)
-    for i in range(len(df)):
-        taxid = int(taxids[i])
+    n = len(df)
+    taxids = df['taxid'].astype(int).tolist()
+    reads_arr = df['reads'].tolist()
+    cumul_arr = df['cumul_reads'].tolist()
+    ranks = df['rank'].tolist()
+    names = df['name'].tolist()
+    parent_taxids_arr = (
+        df['parent_taxid'].tolist() if 'parent_taxid' in df.columns else [0] * n
+    )
+    for i in range(n):
+        taxid = taxids[i]
         if taxid in agg:
             agg[taxid][0] += reads_arr[i]
             agg[taxid][1] += cumul_arr[i]
@@ -749,26 +769,31 @@ def _parse_kraken_data_uncached(
         logging.log(level, _diagnose_empty_kraken_dir(kraken_dir, sample=sample))
         return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
 
-    # Parse files, using a single-file fast path when possible.
-    first_df = None
-    file_count = 0
-    agg = {}
-    ordered_taxids = []
-    seen_taxids = set()
+    # Parse files first; defer the per-taxid accumulation until we know more
+    # than one report actually contributed. The single-report case -- the
+    # common one for a per-sample cumulative report -- returns the parsed
+    # frame directly and skips the accumulation pass entirely. The previous
+    # code accumulated the first frame unconditionally and then discarded the
+    # result when file_count == 1, an O(rows) pass wasted on every single-file
+    # load (cProfile, 2026-06-05).
+    parsed_frames: List[pd.DataFrame] = []
     for sample_file in sample_files:
         df = _parse_kraken2_report(sample_file)
         if df is None or df.empty:
             continue
-        file_count += 1
-        if file_count == 1:
-            first_df = df
-        _accumulate_kraken_df(df, agg, ordered_taxids, seen_taxids)
+        parsed_frames.append(df)
 
-    if file_count == 0:
+    if not parsed_frames:
         return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
-    if file_count == 1:
+    if len(parsed_frames) == 1:
         # Single file: return its DataFrame directly (no aggregation needed).
-        return _cache_and_return(first_df, cache_key, mtime_key, kraken_dir)
+        return _cache_and_return(parsed_frames[0], cache_key, mtime_key, kraken_dir)
+
+    agg: Dict[int, List] = {}
+    ordered_taxids: List[int] = []
+    seen_taxids: set = set()
+    for df in parsed_frames:
+        _accumulate_kraken_df(df, agg, ordered_taxids, seen_taxids)
     result_df = _aggregate_to_result_df(agg, ordered_taxids)
     return _cache_and_return(result_df, cache_key, mtime_key, kraken_dir)
 
@@ -854,6 +879,46 @@ def load_kraken_latest_batch(main_dir: str, sample_name: str) -> pd.DataFrame:
         "No latest-batch report found for sample %s in %s", sample_name, kraken_dir
     )
     return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
+
+
+def latest_batch_equals_cumulative(main_dir: str, sample_name: str) -> bool:
+    """True when a sample's latest-batch horizon is identical to its cumulative.
+
+    This holds only when the sample has **neither** per-batch reports **nor** a
+    cumulative report: in that case both ``load_kraken_data`` (step 2 of
+    ``_discover_sample_reports``) and ``load_kraken_latest_batch`` (its standard
+    fallback) resolve to the very same ``<sample>.kraken2.report.txt``, so they
+    return identical data. A caller that needs both horizons can then reuse the
+    cumulative frame instead of parsing the same file twice -- the common
+    batch-mode case in ``get_sample_statistics_summary``.
+
+    Returns ``False`` whenever a cumulative report or any batch report exists,
+    because then the two horizons can legitimately differ and must be loaded
+    independently. The check is glob/stat-only (no parsing), so it is far
+    cheaper than the redundant parse it guards.
+    """
+    main_dir = resolve_analysis_directory(main_dir)
+    kraken_dir = os.path.join(main_dir, "kraken2")
+
+    # A cumulative report means load_kraken_data used it (not the standard
+    # report), so the latest-batch fallback is not guaranteed to match.
+    for cumul in (
+        os.path.join(kraken_dir, f"{sample_name}.cumulative.kraken2.report.txt"),
+        os.path.join(kraken_dir, sample_name, f"{sample_name}.cumulative.kraken2.report.txt"),
+    ):
+        if os.path.exists(cumul):
+            return False
+
+    # Any per-batch report means a distinct latest-batch horizon exists.
+    if glob.glob(os.path.join(kraken_dir, f"{sample_name}_batch*.kraken2.report.txt")):
+        return False
+    batch_dir = os.path.join(kraken_dir, sample_name, "batch_reports")
+    if os.path.isdir(batch_dir) and glob.glob(
+        os.path.join(batch_dir, "*.kraken2.report.txt")
+    ):
+        return False
+
+    return True
 
 
 def describe_kraken_scan_locations(main_dir: str) -> Dict[str, object]:

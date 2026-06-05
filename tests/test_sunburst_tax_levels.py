@@ -247,5 +247,65 @@ class TestSunburstEdgeCases:
         assert elapsed < 3.0, f"Should complete within 3s, took {elapsed:.2f}s"
 
 
+class TestSunburstMaxTaxaPerLevel:
+    """Test the max_taxa_per_level cap on Sunburst node count."""
+
+    @staticmethod
+    def _nodes(fig):
+        tr = fig.data[0]
+        return list(tr.ids), list(tr.parents), list(tr.labels)
+
+    def test_cap_bounds_nodes_per_level(self, kraken_data_medium, sample_config):
+        """A cap keeps at most N taxa per rank and never orphans a node."""
+        levels = ["D", "P", "C", "O", "F", "G", "S"]
+        cap = 2
+        fig = create_sunburst_data(
+            kraken_data_medium, domains=["Bacteria"], tax_levels=levels,
+            min_reads=1, config=sample_config, max_taxa_per_level=cap,
+        )
+        ids, parents, _ = self._nodes(fig)
+
+        # No orphan parents: every referenced parent is a real node (or root "").
+        orphans = (set(parents) - {""}) - set(ids)
+        assert not orphans, f"capping orphaned parents: {orphans}"
+
+        # Per-rank node count is bounded by the cap. Node ids are "<rank>_<name>"
+        # (plus the synthetic "root").
+        per_rank = {}
+        for nid in ids:
+            if nid == "root":
+                continue
+            rank = nid.split("_", 1)[0]
+            per_rank[rank] = per_rank.get(rank, 0) + 1
+        for rank, count in per_rank.items():
+            assert count <= cap, f"rank {rank} has {count} nodes, cap was {cap}"
+
+    def test_cap_reduces_node_count(self, kraken_data_medium, sample_config):
+        """Capping yields strictly fewer nodes than the uncapped default."""
+        levels = ["D", "P", "C", "O", "F", "G", "S"]
+        uncapped = create_sunburst_data(
+            kraken_data_medium, domains=["Bacteria"], tax_levels=levels,
+            min_reads=1, config=sample_config,
+        )
+        capped = create_sunburst_data(
+            kraken_data_medium, domains=["Bacteria"], tax_levels=levels,
+            min_reads=1, config=sample_config, max_taxa_per_level=2,
+        )
+        assert len(self._nodes(capped)[0]) < len(self._nodes(uncapped)[0])
+
+    def test_default_is_uncapped(self, kraken_data_medium, sample_config):
+        """Omitting max_taxa_per_level preserves the pre-cap behavior (no cap)."""
+        levels = ["D", "P", "C", "O", "F", "G", "S"]
+        default = create_sunburst_data(
+            kraken_data_medium, domains=["Bacteria"], tax_levels=levels,
+            min_reads=1, config=sample_config,
+        )
+        explicit_zero = create_sunburst_data(
+            kraken_data_medium, domains=["Bacteria"], tax_levels=levels,
+            min_reads=1, config=sample_config, max_taxa_per_level=0,
+        )
+        assert len(self._nodes(default)[0]) == len(self._nodes(explicit_zero)[0])
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

@@ -818,20 +818,32 @@ def _resolve_sunburst_parent(node_taxid, taxon_name_full, row_idx, level_idx,
 
 
 def _build_sunburst_nodes(filtered_df, tax_levels, total_reads, palette,
-                          use_taxid_parents, taxid_to_parent, taxid_to_key):
+                          use_taxid_parents, taxid_to_parent, taxid_to_key,
+                          max_taxa_per_level=0):
     """Build the sunburst node arrays under a synthetic ``root``.
 
     Returns ``(ids, labels, parents, values, colors, custom_data)``. Each
     node's parent is the nearest ancestor already added, keeping the hierarchy
     connected; colour varies by within-level position.
+
+    ``max_taxa_per_level`` (when > 0) keeps only the top-N taxa by recalculated
+    cumulative reads at each rank, mirroring the Sankey builder. This bounds the
+    node count handed to plotly -- whose per-element trace validation dominates
+    sunburst build time -- and keeps a dense chart readable. A node whose direct
+    parent was capped out reparents to its nearest still-present ancestor (or
+    root) via ``_resolve_sunburst_parent``, so capping never orphans a node.
     """
     ids, labels, parents, values, colors, custom_data = [], [], [], [], [], []
+    cap = max_taxa_per_level if max_taxa_per_level and max_taxa_per_level > 0 else None
 
-    # First pass: count items per level (for colour variation).
+    # First pass: count items per level (for colour variation). The count is
+    # bounded by the cap so the within-level brightness spread matches the
+    # number of nodes actually rendered.
     level_counts = {}
     level_positions = {}
     for level in tax_levels:
-        level_counts[level] = len(filtered_df[filtered_df["rank"] == level])
+        n_level = len(filtered_df[filtered_df["rank"] == level])
+        level_counts[level] = min(n_level, cap) if cap else n_level
         level_positions[level] = 0
 
     first_level = tax_levels[0] if tax_levels else "D"
@@ -852,6 +864,8 @@ def _build_sunburst_nodes(filtered_df, tax_levels, total_reads, palette,
         level_df = filtered_df[filtered_df["rank"] == level].sort_values(
             "recalc_cumul", ascending=False
         )
+        if cap:
+            level_df = level_df.head(cap)
         logging.debug(f"Sunburst: Processing level {level} with {len(level_df)} items")
 
         # Pre-extract columns to avoid iterrows overhead.
@@ -889,7 +903,8 @@ def _build_sunburst_nodes(filtered_df, tax_levels, total_reads, palette,
     return ids, labels, parents, values, colors, custom_data
 
 
-def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, color_palette=None):
+def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config,
+                         color_palette=None, max_taxa_per_level=0):
     """
     Create a modern, well-styled Sunburst chart from Kraken report.
 
@@ -907,6 +922,9 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, colo
         min_reads: Minimum reads for inclusion
         config: Application configuration
         color_palette: Dictionary mapping taxonomy ranks to colors (optional)
+        max_taxa_per_level: Keep only the top-N taxa by reads at each rank
+            (0 = no cap). Mirrors create_sankey_data; bounds the plotly node
+            count so a dense report stays both fast to render and readable.
 
     Returns:
         A go.Figure with the styled Sunburst chart
@@ -983,6 +1001,7 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config, colo
     ids, labels, parents, values, colors, custom_data = _build_sunburst_nodes(
         filtered_df, tax_levels, total_reads, palette,
         use_taxid_parents, taxid_to_parent, taxid_to_key,
+        max_taxa_per_level=max_taxa_per_level,
     )
 
     # Detect orphan parents (referenced but never added).
