@@ -5,6 +5,8 @@ registered @app.callback bodies (extracted via dash_test_utils) so the callback
 orchestration itself is covered, not just the pure helpers it delegates to.
 """
 
+import os
+import time
 from contextlib import contextmanager
 from unittest.mock import patch, MagicMock
 
@@ -14,7 +16,30 @@ import dash_bootstrap_components as dbc
 
 from nanometa_live.app.tabs import main_tab as main_tab_mod
 from nanometa_live.app.tabs.main_tab import register_main_callbacks
+from nanometa_live.core.testing.mock_data_generator import (
+    generate_test_dataset,
+    MockDataScenario,
+)
 from dash_test_utils import get_callback_fn
+
+
+def _backdate(root, seconds=30):
+    """Age every file so the loaders' file-stability checks pass."""
+    old = time.time() - seconds
+    for dirpath, _dirs, files in os.walk(root):
+        for f in files:
+            try:
+                os.utime(os.path.join(dirpath, f), (old, old))
+            except OSError:
+                pass
+
+
+@pytest.fixture(scope="module")
+def populated_config(tmp_path_factory):
+    d = tmp_path_factory.mktemp("main_tab_populated")
+    generate_test_dataset(str(d), scenario=MockDataScenario.PATHOGEN_DETECTED, num_samples=3)
+    _backdate(str(d))
+    return {"results_output_directory": str(d), "main_dir": str(d)}
 
 
 @contextmanager
@@ -144,3 +169,22 @@ def test_update_main_results_empty_returns_nine_outputs(main_app):
     assert len(result) == 9
     # empty data -> zero organism count
     assert result[3] == "0"
+
+
+def test_update_main_results_populated_builds_organisms(main_app, populated_config):
+    """The populated branch (organism cards/table/counts) is the bulk of the
+    callback -- drive it with a real PATHOGEN_DETECTED dataset."""
+    fn = get_callback_fn(main_app, "organism-cards-container")
+    with ctx_with("apply-organism-filters"):
+        result = fn(
+            "fp1", 1, None, [], 0,
+            50, 0, ["S"],
+            populated_config, {"running": True}, {},
+        )
+    assert len(result) == 9
+    # total-organisms-count (index 3) must reflect detected species
+    total = result[3]
+    # badge text is a count string; non-zero for a populated dataset
+    assert str(total) not in ("0", "", None)
+    # the detailed-organism-table rowData (index 2) is a non-empty list
+    assert isinstance(result[2], list) and len(result[2]) > 0
