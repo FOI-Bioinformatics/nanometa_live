@@ -9,6 +9,7 @@ correctly enumerate modules + their tri-source artefacts.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -192,15 +193,20 @@ class TestUniqueContainerRefs:
 # -- Smoke test against the live nanometanf checkout (skipped if absent) ---
 
 
+_NANOMETANF_PATH = Path(
+    os.environ.get("NANOMETANF_PATH", str(Path.home() / "Code" / "nanometanf"))
+)
+
+
 @pytest.mark.skipif(
-    not Path("/Users/andreassjodin/Code/nanometanf/modules").is_dir(),
-    reason="nanometanf checkout not present at expected path",
+    not (_NANOMETANF_PATH / "modules").is_dir(),
+    reason="nanometanf checkout not present (set NANOMETANF_PATH to override)",
 )
 def test_inventory_against_real_pipeline():
     """Sanity-check the parser on the real nanometanf checkout. The
     audit (W6-A) reported 40 modules with 26 unique Docker refs and
     13 unique Singularity URLs; this acts as a regression sentinel."""
-    entries = inventory_pipeline(Path("/Users/andreassjodin/Code/nanometanf"))
+    entries = inventory_pipeline(_NANOMETANF_PATH)
     assert len(entries) >= 30, (
         f"expected at least 30 modules in the live checkout, got {len(entries)}"
     )
