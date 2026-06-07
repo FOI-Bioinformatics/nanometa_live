@@ -1,11 +1,12 @@
 """
 Generate synthetic Nanometa Live test data for end-to-end validation.
 
-Creates 4 barcodes with known organisms from built-in watchlists:
+Creates 5 barcodes with known organisms from built-in watchlists:
 - barcode01: Clinical (M. tuberculosis, S. aureus + background)
 - barcode02: Foodborne (L. monocytogenes, S. enterica + background)
 - barcode03: Environmental/water (L. pneumophila, low E. coli + diverse background)
 - barcode04: Negative control (background flora only)
+- barcode05: F. tularensis TUL4 amplicon (single-copy gene target)
 """
 import json
 import os
@@ -193,6 +194,18 @@ BARCODE03_WATER = [
 
 BARCODE04_NEGATIVE = []
 
+BARCODE05_AMPLICON = [
+    {
+        "phylum": "Pseudomonadota", "phylum_taxid": 1224,
+        "phylum_class": "Gammaproteobacteria", "class_taxid": 1236,
+        "order": "Thiomacrales", "order_taxid": 335192,
+        "family": "Coxiellaceae", "family_taxid": 802,
+        "genus": "Francisella", "genus_taxid": 258,
+        "species": "Francisella tularensis", "taxid": 263,
+        "reads": 3800,
+    },
+]
+
 
 def _generate_fastp_json(total_reads):
     """Generate a realistic FASTP JSON for the given total reads."""
@@ -336,8 +349,8 @@ def _minimap2_stats_dict(sample, taxid, species, total_reads, mapped_reads,
 
 
 # Aggregate validation design: one blast-only, one minimap2-only, one "both",
-# one no-data, spanning two samples. The expansion of the "both" entry into a
-# separate minimap2 ValidationResult is intentional (see
+# one no-data, plus one single-copy amplicon (TUL4). The expansion of the "both"
+# entry into a separate minimap2 ValidationResult is intentional (see
 # parse_nanometanf_aggregate_json). EXPECTED_AGGREGATE_RESULTS lists the
 # (sample_id, taxid, validation_method, status) tuples a parse must yield so the
 # generator and its test stay in lock-step.
@@ -347,6 +360,7 @@ EXPECTED_AGGREGATE_RESULTS = [
     ("barcode01", 1280, "blast", "partial"),        # S. aureus
     ("barcode02", 1639, "minimap2", "confirmed"),   # L. monocytogenes
     ("barcode03", 562, "blast", "no_data"),         # E. coli (low, no hits)
+    ("barcode05", 263, "minimap2", "confirmed"),    # F. tularensis TUL4 amplicon
 ]
 
 
@@ -408,6 +422,19 @@ def _build_aggregate_results():
                     "avg_coverage": 0.0,
                 },
             },
+            "barcode05": {
+                "263": {
+                    "taxid": 263,
+                    "species": "Francisella tularensis",
+                    "validation_method": "minimap2",
+                    "kraken_reads": 3800,
+                    "mapped_reads": 3650,
+                    "hit_rate": 0.961,
+                    "avg_identity": 97.8,
+                    "avg_coverage": 0.94,
+                    "avg_mapq": 56.0,
+                },
+            },
         },
     }
 
@@ -443,12 +470,16 @@ def _generate_validation_tree(output_dir):
     (mm2_dir / "barcode02_taxid1639.minimap2_stats.json").write_text(json.dumps(
         _minimap2_stats_dict("barcode02", 1639, "Listeria monocytogenes",
                              4200, 4000, 96.0, 0.88, 58.0)))
+    (mm2_dir / "barcode05_taxid263.minimap2_stats.json").write_text(json.dumps(
+        _minimap2_stats_dict("barcode05", 263, "Francisella tularensis",
+                             3800, 3650, 97.8, 0.94, 56.0)))
     # matching minimap2 PAF for the Coverage depth plot (taxid 1773)
     (mm2_dir / "barcode01_taxid1773.paf").write_text(
         "\n".join(_generate_paf_lines("ref_contig", 4411532, 500, seed=1773)) + "\n"
     )
 
     # Per-batch drill-down for barcode01 / taxid 1773 (batch ids "1" and "2")
+    # barcode05 (TUL4 amplicon) uses cumulative results only
     for batch_id, n_reads in (("1", 1200), ("2", 3300)):
         (blast_batch / f"barcode01_taxid1773_{batch_id}.blast.tsv").write_text(
             "\n".join(_blast_tsv_lines(n_reads, 97.5, seed=1773 + int(batch_id))) + "\n"
@@ -465,7 +496,14 @@ def _generate_validation_tree(output_dir):
 
 
 def generate_all_synthetic_data(output_dir):
-    """Generate the complete 4-barcode synthetic dataset.
+    """Generate the complete 5-barcode synthetic dataset.
+
+    Includes:
+    - barcode01: Clinical (M. tuberculosis, S. aureus)
+    - barcode02: Foodborne (L. monocytogenes, S. enterica)
+    - barcode03: Water (L. pneumophila, E. coli)
+    - barcode04: Negative control
+    - barcode05: F. tularensis TUL4 amplicon (single-copy gene)
 
     Args:
         output_dir: Path or str to the output directory.
@@ -484,6 +522,7 @@ def generate_all_synthetic_data(output_dir):
         "barcode02": (BARCODE02_FOODBORNE, 12000),
         "barcode03": (BARCODE03_WATER, 8000),
         "barcode04": (BARCODE04_NEGATIVE, 5000),
+        "barcode05": (BARCODE05_AMPLICON, 7000),
     }
 
     for name, (organisms, total_reads) in barcodes.items():
@@ -521,6 +560,20 @@ def generate_all_synthetic_data(output_dir):
     )
     paf_path = validation_dir / "barcode01_taxid1773.paf"
     paf_path.write_text("\n".join(paf_lines) + "\n")
+
+    # PAF file for barcode05 F. tularensis TUL4 amplicon (single-copy gene)
+    # TUL4 primer pair: Forward (TUL4-435, 28bp) and Reverse (TUL4-863, 24bp)
+    # Amplicon spans ~435-863 bp on the reference (~428 bp)
+    amplicon_paf_lines = _generate_amplicon_paf_lines(
+        ref_name="Francisella_tularensis_chr",
+        ref_length=1892775,  # F. tularensis genome size
+        window_start=435,
+        window_len=428,  # TUL4 amplicon region
+        num_reads=400,
+        seed=263,
+    )
+    amplicon_paf_path = validation_dir / "barcode05_taxid263.paf"
+    amplicon_paf_path.write_text("\n".join(amplicon_paf_lines) + "\n")
 
     # Full validation tree: blast.tsv + minimap2_stats.json + aggregate JSON +
     # per-batch drill-down, covering blast / minimap2 / both methods.

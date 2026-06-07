@@ -167,5 +167,71 @@ def test_batch_drilldown_isolates_single_batch(tmp_path):
     keys = {(r.sample_id, r.taxid, r.validation_method) for r in batch1}
     assert ("barcode01", 1773, "blast") in keys
     assert ("barcode01", 1773, "minimap2") in keys
-    # taxid 1280 / 562 are only in the cumulative aggregate, never per-batch
+    # taxid 1280 / 562 / 263 are only in the cumulative aggregate, never per-batch
     assert all(r.taxid == 1773 for r in batch1)
+
+
+def test_barcode05_tul4_amplicon_generated(tmp_path):
+    """barcode05 (TUL4 amplicon) should contain F. tularensis with single-copy gene coverage."""
+    from tests.validation.generate_synthetic_data import generate_all_synthetic_data
+
+    generate_all_synthetic_data(tmp_path)
+
+    # Check Kraken2 report
+    report_path = tmp_path / "kraken2" / "barcode05.kraken2.report.txt"
+    assert report_path.exists(), "barcode05 kraken report missing"
+
+    df = pd.read_csv(report_path, sep="\t", header=None,
+                     names=["%", "cumul_reads", "reads", "rank", "taxid", "name"])
+    species = df[df["rank"] == "S"]
+    taxids = set(species["taxid"].astype(int))
+    assert 263 in taxids, "F. tularensis (taxid 263) missing from barcode05"
+    assert species["reads"].sum() > 0, "No species-level reads in barcode05"
+
+
+def test_barcode05_tul4_amplicon_validation_files(tmp_path):
+    """barcode05 validation files should include PAF and minimap2 stats for TUL4 amplicon."""
+    from tests.validation.generate_synthetic_data import generate_all_synthetic_data
+
+    generate_all_synthetic_data(tmp_path)
+    v = tmp_path / "validation"
+
+    # Check minimap2 files (TUL4 is a single-copy gene, uses minimap2 only)
+    assert (v / "minimap2" / "barcode05_taxid263.minimap2_stats.json").exists(), \
+        "barcode05 minimap2_stats.json missing"
+    assert (v / "minimap2" / "barcode05_taxid263.paf").exists(), \
+        "barcode05 PAF missing"
+
+    # Verify PAF contains amplicon-region reads (positions 435-863)
+    paf_path = v / "minimap2" / "barcode05_taxid263.paf"
+    paf_lines = [ln for ln in paf_path.read_text().splitlines() if ln.strip()]
+    assert len(paf_lines) > 0, "barcode05 PAF should have alignment lines"
+
+    # Check that reads map to the TUL4 amplicon window (chr coords ~435-863)
+    for line in paf_lines[:5]:  # Sample first 5 lines
+        cols = line.split("\t")
+        ref_start, ref_end = int(cols[7]), int(cols[8])
+        # Reads should be within or near the TUL4 window (435-863)
+        assert ref_start >= 400 and ref_end <= 900, \
+            f"Amplicon read maps outside TUL4 window: {ref_start}-{ref_end}"
+
+
+def test_barcode05_tul4_in_aggregate_results(tmp_path):
+    """barcode05 F. tularensis should appear in aggregate validation results."""
+    from tests.validation.generate_synthetic_data import generate_all_synthetic_data
+    from nanometa_live.core.parsers.blast_validation_parser import ValidationParser
+
+    generate_all_synthetic_data(tmp_path)
+    parser = ValidationParser(str(tmp_path))
+    results = parser.get_validation_results()
+
+    # Find barcode05 / 263 result
+    barcode05_results = [r for r in results if r.sample_id == "barcode05" and r.taxid == 263]
+    assert len(barcode05_results) == 1, \
+        f"Expected 1 barcode05/263 result, got {len(barcode05_results)}"
+
+    result = barcode05_results[0]
+    assert result.species == "Francisella tularensis"
+    assert result.validation_method == "minimap2"
+    assert result.status.value == "confirmed"  # High hit rate (96.1%)
+    assert result.validated_reads == 3650  # minimap2 mapped reads
