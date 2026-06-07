@@ -97,3 +97,75 @@ def test_cumulative_time_points(tmp_path):
         totals.append(total)
 
     assert totals[0] < totals[1] < totals[2], f"Reads should increase: {totals}"
+
+
+# ---------------------------------------------------------------------------
+# Validation tree (blast / minimap2 / both) -- parses back through ValidationParser
+# ---------------------------------------------------------------------------
+
+def test_validation_tree_files_written(tmp_path):
+    """The generator emits blast.tsv, minimap2_stats.json, aggregate JSON, and
+    a per-batch drill-down tree."""
+    from tests.validation.generate_synthetic_data import generate_all_synthetic_data
+
+    generate_all_synthetic_data(tmp_path)
+    v = tmp_path / "validation"
+    assert (v / "validation_results.json").exists()
+    assert (v / "blast" / "barcode01_taxid1773.blast.tsv").exists()
+    assert (v / "minimap2" / "barcode01_taxid1773.minimap2_stats.json").exists()
+    assert (v / "minimap2" / "barcode01_taxid1773.paf").exists()
+    assert (v / "blast" / "batch" / "barcode01_taxid1773_1.blast.tsv").exists()
+    assert (v / "minimap2" / "batch" / "barcode01_taxid1773_2.minimap2_stats.json").exists()
+
+
+def test_aggregate_parses_with_expected_statuses(tmp_path):
+    """The aggregate validation_results.json parses through ValidationParser and
+    yields exactly the designed (sample, taxid, method, status) tuples, including
+    the 'both' -> two-results expansion."""
+    from tests.validation.generate_synthetic_data import (
+        generate_all_synthetic_data, EXPECTED_AGGREGATE_RESULTS,
+    )
+    from nanometa_live.core.parsers.blast_validation_parser import ValidationParser
+
+    generate_all_synthetic_data(tmp_path)
+
+    parser = ValidationParser(str(tmp_path))
+    results = parser.get_validation_results()
+    got = {
+        (r.sample_id, r.taxid, r.validation_method, r.status.value)
+        for r in results
+    }
+    for expected in EXPECTED_AGGREGATE_RESULTS:
+        assert expected in got, f"missing {expected}; got {sorted(got)}"
+
+
+def test_blast_tabular_dedup_matches_unique_reads(tmp_path):
+    """The generated blast.tsv has multi-HSP rows; parsing must dedup by qseqid
+    so validated_reads equals the unique-read count, not the line count."""
+    from tests.validation.generate_synthetic_data import generate_all_synthetic_data
+    from nanometa_live.core.parsers.blast_validation_parser import ValidationParser
+
+    generate_all_synthetic_data(tmp_path)
+    tsv = tmp_path / "validation" / "blast" / "barcode01_taxid1773.blast.tsv"
+    raw_lines = [ln for ln in tsv.read_text().splitlines() if ln.strip()]
+    unique_qseqids = len({ln.split("\t")[0] for ln in raw_lines})
+    assert unique_qseqids < len(raw_lines), "fixture should contain duplicate HSPs"
+
+    parser = ValidationParser(str(tmp_path))
+    result = parser.parse_blast_tabular(tsv, "barcode01", 1773, total_reads=3500)
+    assert result.validated_reads == unique_qseqids == 3200
+
+
+def test_batch_drilldown_isolates_single_batch(tmp_path):
+    """get_validation_results(batch_id=...) returns only that batch's results."""
+    from tests.validation.generate_synthetic_data import generate_all_synthetic_data
+    from nanometa_live.core.parsers.blast_validation_parser import ValidationParser
+
+    generate_all_synthetic_data(tmp_path)
+    parser = ValidationParser(str(tmp_path))
+    batch1 = parser.get_validation_results(batch_id="1")
+    keys = {(r.sample_id, r.taxid, r.validation_method) for r in batch1}
+    assert ("barcode01", 1773, "blast") in keys
+    assert ("barcode01", 1773, "minimap2") in keys
+    # taxid 1280 / 562 are only in the cumulative aggregate, never per-batch
+    assert all(r.taxid == 1773 for r in batch1)

@@ -22,6 +22,7 @@ import pytest
 
 from nanometa_live.core.parsers.blast_validation_parser import (
     ValidationParser,
+    ValidationResult,
     ValidationStatus,
 )
 
@@ -101,6 +102,50 @@ class TestParseBlastTabular:
             tmp_path / "does_not_exist.txt", "barcode01", 562
         )
         assert result.status == ValidationStatus.NO_DATA
+
+
+class TestDetermineStatusBoundaries:
+    """Exact-threshold behaviour of ValidationResult.determine_status().
+
+    Authoritative rule (blast_validation_parser.py): CONFIRMED iff
+    percent_validated >= 80 AND percent_identity_mean >= 90; PARTIAL iff
+    percent_validated >= 50; LOW_CONFIDENCE iff > 0; else NO_DATA; FAILED on
+    errors. The boundaries are inclusive on the >= side.
+    """
+
+    @pytest.mark.parametrize("pv,ident,expected", [
+        (80.0, 90.0, ValidationStatus.CONFIRMED),     # both exactly on boundary
+        (100.0, 90.0, ValidationStatus.CONFIRMED),
+        (80.0, 89.9, ValidationStatus.PARTIAL),       # identity just below floor
+        (79.9, 99.0, ValidationStatus.PARTIAL),       # validated just below 80
+        (50.0, 99.0, ValidationStatus.PARTIAL),       # 50 boundary inclusive
+        (49.9, 99.0, ValidationStatus.LOW_CONFIDENCE),
+        (0.0, 99.0, ValidationStatus.NO_DATA),        # no reads validated
+    ])
+    def test_threshold_boundaries(self, pv, ident, expected):
+        # validated/total kept > 0 so the (0,0) early NO_DATA branch is not hit
+        # for the non-zero cases; for the pv==0 case validated_reads stays 0.
+        validated = 0 if pv == 0.0 else 10
+        r = ValidationResult(
+            sample_id="s", taxid=1, total_reads=100,
+            validated_reads=validated, percent_validated=pv,
+            percent_identity_mean=ident, validation_method="blast",
+        )
+        assert r.determine_status() == expected
+
+    def test_errors_force_failed_even_with_high_metrics(self):
+        r = ValidationResult(
+            sample_id="s", taxid=1, total_reads=100, validated_reads=100,
+            percent_validated=100.0, percent_identity_mean=99.0,
+            validation_method="blast",
+        )
+        r.errors.append("boom")
+        assert r.determine_status() == ValidationStatus.FAILED
+
+    def test_zero_reads_and_zero_total_is_no_data(self):
+        r = ValidationResult(sample_id="s", taxid=1, total_reads=0,
+                             validated_reads=0, validation_method="blast")
+        assert r.determine_status() == ValidationStatus.NO_DATA
 
 
 def _aggregate(results, timestamp="2026-05-30T00:00:00", method="blast"):
@@ -191,3 +236,84 @@ class TestParseNanometanfAggregateJson:
         f = tmp_path / "bad.json"
         f.write_text("{not valid json")
         assert parser.parse_nanometanf_aggregate_json(f) == []
+
+    def test_both_method_without_minimap2_fields_does_not_expand(self, parser, tmp_path):
+        # A "both"-declared run can have an entry where minimap2 produced nothing
+        # for this taxid (no ``minimap2_mapped`` key). The parser must NOT
+        # synthesise a phantom minimap2 result from absent fields.
+        f = tmp_path / "validation_results.json"
+        f.write_text(json.dumps(_aggregate({
+            "barcode01": {
+                "562": {
+                    "species": "Escherichia coli",
+                    "kraken_reads": 100,
+                    "blast_hits": 90,
+                    "hit_rate": 0.9,
+                    "avg_identity": 97.0,
+                }
+            }
+        }, method="both")))
+        results = parser.parse_nanometanf_aggregate_json(f)
+        assert len(results) == 1
+        assert results[0].validation_method == "both"
+
+    def test_minimap2_mapped_zero_still_expands(self, parser, tmp_path):
+        # ``minimap2_mapped: 0`` is a real (mapped-nothing) outcome, distinct from
+        # an absent key — it must expand to a NO_DATA minimap2 result, not be
+        # silently dropped.
+        f = tmp_path / "validation_results.json"
+        f.write_text(json.dumps(_aggregate({
+            "barcode01": {
+                "562": {
+                    "kraken_reads": 100, "blast_hits": 90, "hit_rate": 0.9,
+                    "avg_identity": 97.0, "minimap2_mapped": 0,
+                    "minimap2_hit_rate": 0.0, "minimap2_identity": 0.0,
+                }
+            }
+        }, method="both")))
+        results = parser.parse_nanometanf_aggregate_json(f)
+        assert len(results) == 2
+        mm2 = next(r for r in results if r.validation_method == "minimap2")
+        assert mm2.validated_reads == 0
+        assert mm2.status == ValidationStatus.NO_DATA
+
+    def test_mixed_methods_across_taxids_split_correctly(self, parser, tmp_path):
+        # One taxid is "both" (-> 2 results), another is blast-only (-> 1). Total 3.
+        f = tmp_path / "validation_results.json"
+        f.write_text(json.dumps(_aggregate({
+            "barcode01": {
+                "562": {
+                    "kraken_reads": 100, "blast_hits": 90, "hit_rate": 0.9,
+                    "avg_identity": 97.0, "minimap2_mapped": 88,
+                    "minimap2_hit_rate": 0.88, "minimap2_identity": 98.0,
+                },
+                "1280": {
+                    "kraken_reads": 100, "blast_hits": 70, "hit_rate": 0.7,
+                    "avg_identity": 95.0,
+                },
+            }
+        }, method="both")))
+        results = parser.parse_nanometanf_aggregate_json(f)
+        assert len(results) == 3
+        by_taxid = {}
+        for r in results:
+            by_taxid.setdefault(r.taxid, []).append(r.validation_method)
+        assert sorted(by_taxid[562]) == ["both", "minimap2"]
+        assert by_taxid[1280] == ["both"]   # blast-only entry, method defaults to run method
+
+    def test_taxid_filter_keeps_both_expansion(self, parser, tmp_path):
+        # Filtering to the "both" taxid must still yield both expanded results.
+        f = tmp_path / "validation_results.json"
+        f.write_text(json.dumps(_aggregate({
+            "barcode01": {
+                "562": {
+                    "kraken_reads": 100, "blast_hits": 90, "hit_rate": 0.9,
+                    "avg_identity": 97.0, "minimap2_mapped": 88,
+                    "minimap2_hit_rate": 0.88, "minimap2_identity": 98.0,
+                },
+                "1280": {"kraken_reads": 100, "blast_hits": 70, "hit_rate": 0.7},
+            }
+        }, method="both")))
+        results = parser.parse_nanometanf_aggregate_json(f, taxid=562)
+        assert len(results) == 2
+        assert {r.taxid for r in results} == {562}

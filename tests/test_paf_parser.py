@@ -43,6 +43,19 @@ class TestPAFParser:
         assert depth[200] == 1
         assert depth[0] == 0
 
+    def test_minus_strand_contributes_depth(self, tmp_path: Path) -> None:
+        """Reverse-strand alignments (strand '-') use the same target start/end
+        coordinates and must accrue depth identically to forward-strand ones.
+        The parser reads target coords (cols 8/9), not strand (col 5)."""
+        paf = tmp_path / "minus.paf"
+        paf.write_text(
+            "read1\t1000\t0\t1000\t-\tref1\t5000\t100\t600\t500\t500\t60\n"
+        )
+        result = parse_paf_coverage(paf)
+        cov = result["ref1"]
+        assert np.all(cov.depth_array[100:600] == 1)
+        assert cov.breadth == 500 / 5000
+
     def test_mapq_filter(self, tmp_path: Path) -> None:
         """Alignments below min_mapq should be excluded."""
         paf = tmp_path / "mapq.paf"

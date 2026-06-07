@@ -305,6 +305,35 @@ def test_on_demand_does_not_clobber_other_method(tmp_path):
     assert "minimap2" in methods and "blast" in methods
 
 
+def test_on_demand_aggregate_supersedes_pipeline_blast(tmp_path):
+    """An on-demand run can also write an aggregate validation_results.json (the
+    AGGREGATE_VALIDATION_RESULTS path). That aggregate must supersede the pipeline
+    blast row in place, exercising the _supersede() aggregate branch that the
+    individual-file tests above do not reach."""
+    _write_pipeline_blast(tmp_path, "barcode14", 263, pident=91.0)
+    od = tmp_path / "on_demand_validation"
+    od.mkdir(parents=True, exist_ok=True)
+    (od / "validation_results.json").write_text(json.dumps({
+        "timestamp": "2026-06-07T00:00:00",
+        "validation_method": "blast",
+        "results": {
+            "barcode14": {
+                "263": {
+                    "species": "Francisella tularensis",
+                    "kraken_reads": 100, "blast_hits": 98, "hit_rate": 0.98,
+                    "avg_identity": 99.7,
+                }
+            }
+        },
+    }))
+    results = ValidationParser(str(tmp_path)).get_validation_results()
+    blast = [r for r in results
+             if r.sample_id == "barcode14" and r.taxid == 263
+             and r.validation_method == "blast"]
+    assert len(blast) == 1                          # superseded, not duplicated
+    assert blast[0].percent_identity_mean == pytest.approx(99.7)
+
+
 # ---------------------------------------------------------------------------
 # Cumulative / per-batch realtime drill-down
 # ---------------------------------------------------------------------------
