@@ -423,8 +423,23 @@ def _generate_pathogen_genomes_json(config: Dict[str, Any], main_dir: str):
                     f"Taxid mapping: NCBI {ncbi_taxid} -> Kraken2 db {kraken_taxid}"
                 )
 
+    # Cross-species guard: warn if a registered reference genome's organism does
+    # not match the watchlist species for its taxid (a wrong-genome registration
+    # would let an identity-only CONFIRMED be attributed to the wrong organism).
+    from nanometa_live.core.parsers.validation_guards import check_reference_organism
+    _name_by_taxid = {
+        s.get('taxid', 0): s.get('name', '') for s in species_list_full
+    }
     for taxid in ncbi_taxids:
-        logging.debug(f"Taxid {taxid} has_genome={genome_manager.has_genome(taxid)}")
+        has_g = genome_manager.has_genome(taxid)
+        logging.debug(f"Taxid {taxid} has_genome={has_g}")
+        if has_g:
+            gpath = genome_manager.get_genome_path(taxid)
+            if gpath:
+                warn = check_reference_organism(gpath, _name_by_taxid.get(taxid, ''))
+                if warn:
+                    logging.warning("Validation reference mismatch (taxid %s): %s",
+                                    taxid, warn)
 
     json_output_path = os.path.join(main_dir, "validation", "pathogen_genomes.json")
     os.makedirs(os.path.dirname(json_output_path), exist_ok=True)

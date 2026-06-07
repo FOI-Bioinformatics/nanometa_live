@@ -128,6 +128,22 @@ def create_coverage_depth_figure(
         hovermode="x unified",
     )
 
+    # Amplicon-aware zoom: when reads concentrate on a short locus (e.g. 16S),
+    # default the x-range to that region (+padding) so the peak is visible rather
+    # than an invisible spike on a flat multi-Mb axis. The range slider still
+    # exposes the whole reference.
+    # Only zoom for a single tight locus; a multi-copy rRNA gene spans megabases
+    # between operons, so zooming to min..max would not help -- leave full view.
+    _single_locus = (0 < coverage.covered_span <= coverage.ref_length * 0.05)
+    if getattr(coverage, "is_concentrated", False) and _single_locus:
+        pad = max(coverage.covered_span // 2, 200)
+        lo = max(0, coverage.covered_start - pad)
+        hi = min(coverage.ref_length, coverage.covered_end + pad)
+        fig.update_xaxes(
+            range=[lo, hi],
+            title="Position along genome (zoomed to covered region)",
+        )
+
     return fig
 
 
@@ -251,6 +267,8 @@ def create_coverage_stats_summary(coverage: CoverageData) -> html.Div:
     Returns:
         html.Div with stat badges and an interpretation line.
     """
+    concentrated = getattr(coverage, "is_concentrated", False)
+
     items = [
         ("Genome Covered", f"{coverage.breadth * 100:.1f}%",
          "Percentage of the reference genome with at least one matching sequence"),
@@ -264,6 +282,23 @@ def create_coverage_stats_summary(coverage: CoverageData) -> html.Div:
          "Total length of the reference genome"),
     ]
 
+    # For amplicon-like coverage (reads concentrated on a short locus, e.g. a
+    # full-length 16S in a multi-Mb genome) the genome-relative breadth is
+    # expectedly tiny; surface the covered region itself so the operator sees the
+    # real, deep local signal instead of a misleading "low coverage".
+    if concentrated:
+        items.insert(1, (
+            "Covered Region",
+            f"{coverage.covered_bp:,} bp",
+            "Total reference length the reads actually cover (an amplicon / 16S "
+            "locus rather than the whole genome; sums multi-copy rRNA loci)",
+        ))
+        items.insert(2, (
+            "Depth in Region",
+            f"{coverage.local_mean_depth:.0f}x",
+            "Average depth across the covered region (ignoring the uncovered genome)",
+        ))
+
     cols = []
     for label, value, tooltip_text in items:
         cols.append(dbc.Col(
@@ -275,9 +310,32 @@ def create_coverage_stats_summary(coverage: CoverageData) -> html.Div:
             className="col",
         ))
 
-    # Add interpretation line
+    # Add interpretation line. Amplicon-aware: when coverage is concentrated,
+    # judge on the LOCAL region (local breadth + local depth), not the
+    # genome-wide breadth which is meaninglessly small for an amplicon.
     breadth_pct = coverage.breadth * 100
-    if breadth_pct >= 80 and coverage.mean_depth >= 10:
+    if concentrated:
+        local_depth = coverage.local_mean_depth
+        if local_depth >= 20:
+            interp_color = "success"
+            interp_text = (
+                f"Focused coverage - reads concentrate on a {coverage.covered_bp:,} bp "
+                f"region (consistent with an amplicon / 16S locus) at {local_depth:.0f}x "
+                "depth. Whole-genome breadth is expectedly low for amplicon data."
+            )
+        elif local_depth >= 10:
+            interp_color = "warning"
+            interp_text = (
+                f"Focused coverage of a {coverage.covered_bp:,} bp region at "
+                f"{local_depth:.0f}x - some support; more sequencing would strengthen it."
+            )
+        else:
+            interp_color = "danger"
+            interp_text = (
+                "Sparse coverage of a short region - insufficient data to confirm "
+                "this species. Continue sequencing or verify with another method."
+            )
+    elif breadth_pct >= 80 and coverage.mean_depth >= 10:
         interp_color = "success"
         interp_text = "Good coverage - species identification is well-supported by the data."
     elif breadth_pct >= 50 or coverage.mean_depth >= 5:
@@ -292,7 +350,7 @@ def create_coverage_stats_summary(coverage: CoverageData) -> html.Div:
         interp_color = "secondary"
         interp_text = "No coverage detected for this reference genome."
 
-    return html.Div([
+    children = [
         dbc.Row(cols, className="mb-2 g-2"),
         dbc.Alert(
             [
@@ -303,7 +361,19 @@ def create_coverage_stats_summary(coverage: CoverageData) -> html.Div:
             className="mb-0 py-2",
             style={"fontSize": "13px"},
         ),
-    ])
+    ]
+
+    # Conserved-region (16S) specificity caveat: high identity on a short
+    # concentrated locus does not discriminate close species.
+    from nanometa_live.core.parsers.validation_guards import conserved_region_caveat
+    caveat = conserved_region_caveat(coverage)
+    if caveat:
+        children.append(dbc.Alert(
+            [html.I(className="bi bi-info-circle-fill me-2"), html.Span(caveat)],
+            color="warning", className="mb-0 mt-2 py-2", style={"fontSize": "12px"},
+        ))
+
+    return html.Div(children)
 
 
 def create_empty_coverage_figure(

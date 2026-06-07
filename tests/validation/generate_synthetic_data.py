@@ -260,6 +260,35 @@ def _generate_paf_lines(ref_name, ref_length, num_reads, seed=42):
     return lines
 
 
+def _generate_amplicon_paf_lines(ref_name, ref_length, window_start, window_len,
+                                 num_reads, seed=16):
+    """Generate PAF lines emulating a full-length amplicon (e.g. 16S rRNA).
+
+    All reads align inside a narrow ``window_len`` window of an otherwise large
+    ``ref_length`` reference -- the realistic minimap2 output when ~1500 bp 16S
+    reads map to the 16S locus of a multi-Mb genome. Drives the amplicon
+    coverage-detection tests deterministically without a read simulator.
+    """
+    import random
+    rng = random.Random(seed)
+    lines = []
+    for i in range(num_reads):
+        rstart = window_start + rng.randint(0, max(1, window_len // 10))
+        rend = min(window_start + window_len - rng.randint(0, max(1, window_len // 10)),
+                   ref_length)
+        if rend <= rstart:
+            rend = min(rstart + 1, ref_length)
+        qlen = rend - rstart
+        mapq = rng.choice([30, 40, 50, 60])
+        nmatch = int(qlen * rng.uniform(0.92, 0.99))
+        lines.append("\t".join([
+            f"amp_read_{i}", str(qlen), "0", str(qlen), "+",
+            ref_name, str(ref_length), str(rstart), str(rend),
+            str(nmatch), str(qlen), str(mapq),
+        ]))
+    return lines
+
+
 def _blast_tsv_lines(n_unique, identity_mean, seed, dup_fraction=0.2):
     """Generate BLAST outfmt-6 lines (15 columns) for ``n_unique`` reads.
 

@@ -31,6 +31,28 @@ class CoverageData:
     median_depth: float = 0.0
     max_depth: int = 0
     positions_above_threshold: Dict[int, float] = field(default_factory=dict)
+    # Amplicon-awareness: for full-length 16S / amplicon reads the alignments
+    # concentrate in a short window of an otherwise large reference, so the
+    # genome-relative ``breadth`` is misleadingly tiny. These describe the
+    # covered region itself so the GUI can report "focused coverage" instead of
+    # a false "low coverage" verdict (see app/components/coverage_plots.py).
+    covered_bp: int = 0           # total positions with depth >= 1
+    covered_start: int = -1       # first covered position (-1 if none)
+    covered_end: int = -1         # last covered position (-1 if none)
+    covered_span: int = 0         # covered_end - covered_start + 1
+    local_breadth: float = 0.0    # covered_bp / covered_span (~1.0 for one tight locus)
+    local_mean_depth: float = 0.0  # mean depth across COVERED positions only
+    is_concentrated: bool = False  # amplicon-like: deep coverage over a tiny genome fraction
+
+    # Concentrated (amplicon) coverage = only a tiny fraction of the reference is
+    # covered, yet that covered material is reasonably deep. Keyed on
+    # depth-over-covered rather than the contiguous span so it also fires for a
+    # multi-copy 16S gene (the rrn operons of a genome sit megabases apart, so a
+    # min..max span is misleading). Tuned so a 16S locus (single or multi-copy)
+    # in a multi-Mb genome trips it while a partially-covered WGS genome does not.
+    _CONCENTRATION_RATIO = 0.05      # covered fraction of the genome < 5%
+    _CONCENTRATION_MIN_DEPTH = 10    # mean depth across covered positions
+    _CONCENTRATION_MIN_COVERED_BP = 200
 
     def __post_init__(self):
         if self.depth_array is not None and len(self.depth_array) > 0:
@@ -43,6 +65,21 @@ class CoverageData:
                     self.positions_above_threshold[threshold] = float(
                         np.sum(self.depth_array >= threshold) / self.ref_length
                     )
+
+            covered = np.nonzero(self.depth_array)[0]
+            self.covered_bp = int(covered.size)
+            if self.covered_bp:
+                self.covered_start = int(covered[0])
+                self.covered_end = int(covered[-1])
+                self.covered_span = self.covered_end - self.covered_start + 1
+                self.local_breadth = float(self.covered_bp / self.covered_span)
+                # mean depth where there IS coverage (robust to multi-locus gaps)
+                self.local_mean_depth = float(np.mean(self.depth_array[covered]))
+                self.is_concentrated = bool(
+                    self.breadth <= self._CONCENTRATION_RATIO
+                    and self.local_mean_depth >= self._CONCENTRATION_MIN_DEPTH
+                    and self.covered_bp >= self._CONCENTRATION_MIN_COVERED_BP
+                )
 
 
 def parse_paf_coverage(

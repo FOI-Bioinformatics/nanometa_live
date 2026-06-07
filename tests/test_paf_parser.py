@@ -222,3 +222,67 @@ class TestAggregateContigCoverage:
         result = aggregate_contig_coverage({})
         assert result.ref_length == 0
         assert len(result.depth_array) == 0
+
+
+class TestAmpliconConcentration:
+    """CoverageData local metrics that distinguish amplicon (16S) coverage --
+    deep reads in a short window of a large reference -- from genome-wide WGS
+    coverage. See app/components/coverage_plots.py for how these drive the GUI."""
+
+    def _amplicon_cov(self) -> CoverageData:
+        # 1.87 Mb reference; a 1500 bp locus covered ~50x, rest empty (16S amplicon).
+        ref_len = 1_870_206
+        depth = np.zeros(ref_len, dtype=np.uint32)
+        depth[943_350:944_850] = 50
+        return CoverageData(ref_name="NZ_CP009607.1", ref_length=ref_len, depth_array=depth)
+
+    def test_amplicon_is_concentrated(self) -> None:
+        cov = self._amplicon_cov()
+        assert cov.is_concentrated is True
+        assert cov.covered_span == 1500
+        assert cov.covered_bp == 1500
+        assert cov.local_breadth == 1.0
+        assert cov.local_mean_depth == 50.0  # mean depth across covered positions
+        # genome-relative breadth is tiny -- the misleading number the GUI must
+        # NOT judge on for amplicons.
+        assert cov.breadth < 0.001
+
+    def test_multicopy_16s_is_concentrated(self) -> None:
+        # Three rrn operons megabases apart (the real F. tularensis layout): the
+        # min..max span is ~1 Mb but only ~4.5 kb is covered, deeply. Must still
+        # be flagged concentrated via depth-over-covered, not span.
+        ref_len = 1_870_206
+        depth = np.zeros(ref_len, dtype=np.uint32)
+        for start in (433_809, 943_402, 1_416_013):
+            depth[start:start + 1500] = 130
+        cov = CoverageData(ref_name="NZ_CP009607.1", ref_length=ref_len, depth_array=depth)
+        assert cov.is_concentrated is True
+        assert cov.covered_bp == 4500             # 3 x 1500, total covered
+        assert cov.covered_span > 900_000          # min..max spans the operons
+        assert cov.local_mean_depth == 130.0       # deep where covered
+        assert cov.breadth < 0.005
+
+    def test_wgs_is_not_concentrated(self) -> None:
+        # Reads spread across the whole genome at modest depth -> not amplicon.
+        ref_len = 2_000_000
+        rng = np.random.default_rng(0)
+        depth = rng.integers(0, 3, size=ref_len, dtype=np.uint32)
+        cov = CoverageData(ref_name="chrW", ref_length=ref_len, depth_array=depth)
+        assert cov.is_concentrated is False
+        assert cov.covered_span > ref_len * 0.5
+
+    def test_sparse_shallow_locus_not_concentrated(self) -> None:
+        # A short covered span but only depth 1-2 is not a confident amplicon hit.
+        ref_len = 1_000_000
+        depth = np.zeros(ref_len, dtype=np.uint32)
+        depth[500_000:501_000] = 2  # below _CONCENTRATION_MIN_DEPTH (5)
+        cov = CoverageData(ref_name="r", ref_length=ref_len, depth_array=depth)
+        assert cov.is_concentrated is False
+
+    def test_no_coverage_metrics_safe(self) -> None:
+        cov = CoverageData(ref_name="r", ref_length=1000,
+                           depth_array=np.zeros(1000, dtype=np.uint32))
+        assert cov.is_concentrated is False
+        assert cov.covered_span == 0
+        assert cov.covered_start == -1
+        assert cov.local_breadth == 0.0
