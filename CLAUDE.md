@@ -584,20 +584,41 @@ pytest -n 0                                         # serial, for pdb/print debu
 pytest --cov=nanometa_live --cov-report=term-missing   # with the coverage gate
 ```
 
-2159 tests as of 2026-06-03, ~56% line coverage. `pytest.ini` enforces a
-`fail_under = 55` floor on coverage runs only (the default `pytest` dev loop
-does not load coverage), `filterwarnings = error::DeprecationWarning:nanometa_live`
-(our own deprecations fail the build), and the `unit` / `callback` / `integration`
-markers. CI runs the suite and the gate on Python 3.11 and 3.12 for every push
-and PR to `main` / `dev` (`.github/workflows/tests.yml`). Tests marked `slow`
-need Nextflow/conda and are skipped by default.
+2321 tests as of 2026-06-07, ~63% line coverage. `pytest.ini` enforces a
+`fail_under = 62` floor on coverage runs only (the default `pytest` dev loop
+does not load coverage); the floor ratchets up as coverage rises — keep it ~1
+point below the measured total, never lower it. Also
+`filterwarnings = error::DeprecationWarning:nanometa_live` (our own deprecations
+fail the build), and the `unit` / `callback` / `integration` markers. CI runs the
+suite and the gate on Python 3.11 and 3.12 for every push and PR to `main` /
+`dev` (`.github/workflows/tests.yml`). Tests marked `slow` need Nextflow/conda
+and are skipped by default.
 
 Synthetic datasets are auto-generated under `/tmp/nanometa_test_datasets/` by
 `conftest.py` via `scripts/generate_test_datasets.py`. Mock Kraken2/FASTP
-generators live in `core/testing/mock_data_generator.py`. Dash callbacks are
-tested by registering on a throwaway `Dash` app, locating the spec in
-`app.callback_map`, and unwrapping `spec["callback"].__wrapped__`; shared
-helpers for this live in `tests/dash_test_utils.py`.
+generators live in `core/testing/mock_data_generator.py`;
+`generate_test_dataset(dir, scenario=MockDataScenario.PATHOGEN_DETECTED,
+num_samples=N)` writes a realistic results tree (`kraken2/`, `fastp/`, `qc/`,
+`multiqc/`) that drives populated-data callback/loader tests — back-date the
+files (`os.utime` to ~30s ago) so the loaders' file-stability checks pass.
+
+**Callback tests.** Dash callbacks are tested by registering on a throwaway
+`Dash` app and extracting the unwrapped function with
+`tests/dash_test_utils.get_callback_fn(app, output_id, input_contains=...)`
+(walks `app.callback_map`, unwraps `spec["callback"].__wrapped__`); pass
+`input_contains` to disambiguate when several callbacks share an output (e.g. the
+many `toast-message`/`tabs.active_tab` writers). Invoke the extracted function
+directly with realistic store values and assert the returned component structure
++ content, not just `is not None`. **`ctx` gotcha:** `dash_test_utils.ctx_with`
+patches `dash.ctx`, which only reaches callbacks that reference `dash.ctx` at call
+time; modules that did `from dash import ctx` (main_tab, qc_tab, classification_tab,
+dashboard_tab) bind a module-local name, so patch `<module>.ctx` instead. Pure
+helpers and module-level guards inside `register_*` are closures — re-register the
+app (function-scoped fixture) to reset a once-per-session guard. Background
+(`background=True`) callbacks and subprocess managers (`nextflow_manager`,
+`on_demand_validator`) are intentionally light on unit coverage — testing them
+needs DiskcacheManager/`set_progress`/subprocess harnessing that yields brittle
+wiring-only tests; prefer covering the pure helpers they delegate to.
 
 Real test data:
 ```
