@@ -101,7 +101,7 @@ def _main_watched_species_section():
                             children=[
                                 EmptyStateMessage(
                                     title="No Watched Organisms",
-                                    message="Add species to your watchlist in the Watchlist tab to monitor specific organisms.",
+                                    message="Add species to your watchlist in the Watchlist & Preparation tab to monitor specific organisms.",
                                     icon="bi-star"
                                 )
                             ]
@@ -395,19 +395,24 @@ def _main_operator_guide_modal():
                     "Set input directory and Kraken2 database in Configuration tab"
                 ]),
                 dbc.ListGroupItem([
-                    html.Strong("2. Start: "),
+                    html.Strong("2. Prepare: "),
+                    "Select organisms to monitor and download reference genomes "
+                    "in the Watchlist & Preparation tab"
+                ]),
+                dbc.ListGroupItem([
+                    html.Strong("3. Start: "),
                     "Click 'Start Analysis' to begin processing"
                 ]),
                 dbc.ListGroupItem([
-                    html.Strong("3. Monitor: "),
+                    html.Strong("4. Monitor: "),
                     "Watch Dashboard for pathogen alerts and status"
                 ]),
                 dbc.ListGroupItem([
-                    html.Strong("4. Review: "),
+                    html.Strong("5. Review: "),
                     "Check Organisms tab for detailed results"
                 ]),
                 dbc.ListGroupItem([
-                    html.Strong("5. Export: "),
+                    html.Strong("6. Export: "),
                     "Download reports using Export menu"
                 ]),
             ], flush=True, className="mb-4"),

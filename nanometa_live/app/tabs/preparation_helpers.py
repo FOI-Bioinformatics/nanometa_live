@@ -92,7 +92,7 @@ def _execute_wizard_step(step_idx, config):
             if count == 0:
                 return dbc.Alert(
                     [html.I(className="bi bi-exclamation-triangle me-2"),
-                     "No watchlist entries enabled. Enable pathogens in the Watchlist tab first."],
+                     "No watchlist entries enabled. Enable pathogens in the Watchlist & Preparation tab first."],
                     color="warning", className="mt-2 py-2",
                 )
             return dbc.Alert(

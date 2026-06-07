@@ -421,7 +421,7 @@ def build_config_from_form(
     if min_reads_for_validation is not None:
         config["min_reads_for_validation"] = int(min_reads_for_validation)
 
-    # Note: Species watchlist is now managed via the Watchlist tab
+    # Note: Species watchlist is now managed via the Watchlist & Preparation tab
     # and WatchlistManager, not through this config form
 
     # Apply Settings is the operator's explicit signal that they

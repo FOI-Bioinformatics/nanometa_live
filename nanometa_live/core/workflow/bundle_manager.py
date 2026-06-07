@@ -343,8 +343,8 @@ Bundle version: {version}
 ## Quick-start
 
 1. Transfer this bundle and the Kraken2 database to the field machine.
-2. Open the Preparation tab in Nanometa Live.
-3. In the Export/Import section, click "Import Bundle" and provide:
+2. Open the Deployment tab in Nanometa Live.
+3. In the Import Bundle card, click "Import Bundle" and provide:
    - Path to this bundle file
    - Path to the Kraken2 database on this machine
 4. The application will automatically enter offline mode.

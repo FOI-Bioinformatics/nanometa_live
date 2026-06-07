@@ -544,7 +544,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
         # "Not Found" -- which misleads the operator into thinking the
         # species are absent from the database rather than the index
         # being absent. Render a single empty-state card pointing at
-        # the Preparation tab control instead.
+        # the Watchlist & Preparation tab control instead.
         index_appears_empty = not mapping_dict
         if index_appears_empty:
             empty_state = dbc.Card(

@@ -334,7 +334,7 @@ _VALIDATION_BADGE_STYLES = {
         "tooltip": (
             "Validation has run for other detections in this run, but "
             "this one has not been confirmed yet. Click Validate on the "
-            "Main tab to add it."
+            "Organisms tab to add it."
         ),
     },
 }

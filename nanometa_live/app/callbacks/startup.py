@@ -163,8 +163,8 @@ def register_startup(app, backend_manager):
         This callback runs once when the app-config is first set and loads
         any cached mappings for the configured Kraken2 database. This enables
         proper pathogen detection with GTDB databases where taxids differ from
-        NCBI taxids, and populates the Dash stores so the Preparation tab
-        shows correct status on first visit.
+        NCBI taxids, and populates the Dash stores so the Watchlist &
+        Preparation tab shows correct status on first visit.
         """
         from nanometa_live.app.utils.config_manager import atomic_config_update
 
@@ -206,7 +206,7 @@ def register_startup(app, backend_manager):
                         f"{collection.mapped_exact} exact, {collection.mapped_fuzzy} fuzzy"
                     )
 
-                    # Populate Dash stores for Preparation tab display
+                    # Populate Dash stores for Watchlist & Preparation tab display
                     coll_dict = collection.to_dict()
                     collection_data = {
                         "mappings": {

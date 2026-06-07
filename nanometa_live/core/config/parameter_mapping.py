@@ -452,7 +452,7 @@ def _generate_pathogen_genomes_json(config: Dict[str, Any], main_dir: str):
     else:
         logging.warning(
             "No downloaded genomes found for enabled watchlist species. "
-            "Download genomes using the Watchlist tab to enable validation."
+            "Download genomes using the Watchlist & Preparation tab to enable validation."
         )
     return pathogen_genomes_path
 
@@ -768,13 +768,13 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
             logging.warning(
                 "blast_validation is enabled but no watchlist species configured. "
                 "Disabling validation (requires species to validate against). "
-                "Enable pathogens in the Watchlist tab to use validation."
+                "Enable pathogens in the Watchlist & Preparation tab to use validation."
             )
         elif not has_genomes:
             logging.warning(
                 "blast_validation is enabled but no pathogen genomes downloaded. "
                 "Disabling validation (requires reference genomes). "
-                "Download pathogen genomes in the Watchlist tab first."
+                "Download pathogen genomes in the Watchlist & Preparation tab first."
             )
 
     kraken2_memory_mapping = _resolve_kraken2_memory_mapping(config)

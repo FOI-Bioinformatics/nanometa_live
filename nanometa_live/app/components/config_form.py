@@ -13,7 +13,7 @@ needs are not buried:
   navigable section per concern -- Pipeline Source, Database, Processing, Read
   Filtering, Analysis Options, Display, Performance.
 
-Species watchlist management is handled in the dedicated Watchlist tab.
+Species watchlist management is handled in the Watchlist & Preparation tab.
 """
 
 from dash import html, dcc

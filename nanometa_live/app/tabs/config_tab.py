@@ -901,7 +901,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             True,  # Mark form as initialized (suppresses first "Modified" badge)
         ]
 
-    # Species watchlist management is now handled in the Watchlist tab
+    # Species watchlist management is now handled in the Watchlist & Preparation tab
     # via WatchlistManager - all legacy species callbacks have been removed
 
     # NOTE: populate_kraken_database_options moved to preparation_tab.py
