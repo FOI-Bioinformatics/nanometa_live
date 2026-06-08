@@ -49,6 +49,58 @@ _COLOR_TO_TOAST_TYPE = {
     "secondary": "info",
 }
 
+# Icon class per toast severity.
+_TOAST_ICON_MAP = {
+    "success": "bi-check-circle-fill text-success",
+    "warning": "bi-exclamation-triangle-fill text-warning",
+    "danger": "bi-x-circle-fill text-danger",
+    "info": "bi-info-circle-fill text-info",
+}
+
+
+def _toast_is_duplicate(sig) -> bool:
+    """True if *sig* repeats a recent toast within the dedup window.
+
+    Updates the dedup state's timestamp on a match so a sustained burst keeps
+    coalescing; records the new signature otherwise.
+    """
+    now = time.time()
+    if (sig == _toast_dedup["sig"]
+            and (now - _toast_dedup["ts"]) < _TOAST_DEDUP_WINDOW_S):
+        _toast_dedup["ts"] = now
+        return True
+    _toast_dedup["sig"] = sig
+    _toast_dedup["ts"] = now
+    return False
+
+
+def _build_toast_node(toast_type: str, title: str, message: str):
+    """Build a single floating-notification DOM node."""
+    from dash import html
+
+    icon_class = _TOAST_ICON_MAP.get(toast_type, _TOAST_ICON_MAP["info"])
+    return html.Div(
+        className=f"toast-notification toast-{toast_type}",
+        children=[
+            html.I(className=f"bi {icon_class} toast-icon"),
+            html.Div(
+                className="toast-content",
+                children=[
+                    html.Div(title, className="toast-title"),
+                    html.Div(message, className="toast-message") if message else None,
+                ]
+            ),
+            html.Button(
+                html.I(className="bi bi-x"),
+                className="toast-close",
+                n_clicks=0,
+                # Use inline onclick to remove parent toast element
+                **{"data-dismiss": "toast", "aria-label": "Dismiss notification"}
+            )
+        ],
+        id=f"toast-{int(time.time()*1000)}"
+    )
+
 
 def register_indicators(app, backend_manager):
     @app.callback(
@@ -207,8 +259,6 @@ def register_indicators(app, backend_manager):
         navigate_to field on notification-trigger is consumed separately by
         switch_to_results_tab; it is ignored here.)
         """
-        from dash import html
-
         # Pick the payload from whichever store actually fired.
         payload = toast_data if dash.ctx.triggered_id == "toast-message" else notification_data
 
@@ -228,46 +278,10 @@ def register_indicators(app, backend_manager):
 
             # Coalesce a burst of identical toasts (e.g. a per-entry prep loop
             # writing the same "Validated x/x" message repeatedly) into one.
-            sig = (toast_type, title, message)
-            now = time.time()
-            if (sig == _toast_dedup["sig"]
-                    and (now - _toast_dedup["ts"]) < _TOAST_DEDUP_WINDOW_S):
-                _toast_dedup["ts"] = now
+            if _toast_is_duplicate((toast_type, title, message)):
                 return current_toasts or []
-            _toast_dedup["sig"] = sig
-            _toast_dedup["ts"] = now
 
-            # Icon mapping
-            icon_map = {
-                "success": "bi-check-circle-fill text-success",
-                "warning": "bi-exclamation-triangle-fill text-warning",
-                "danger": "bi-x-circle-fill text-danger",
-                "info": "bi-info-circle-fill text-info",
-            }
-
-            icon_class = icon_map.get(toast_type, icon_map["info"])
-
-            new_toast = html.Div(
-                className=f"toast-notification toast-{toast_type}",
-                children=[
-                    html.I(className=f"bi {icon_class} toast-icon"),
-                    html.Div(
-                        className="toast-content",
-                        children=[
-                            html.Div(title, className="toast-title"),
-                            html.Div(message, className="toast-message") if message else None,
-                        ]
-                    ),
-                    html.Button(
-                        html.I(className="bi bi-x"),
-                        className="toast-close",
-                        n_clicks=0,
-                        # Use inline onclick to remove parent toast element
-                        **{"data-dismiss": "toast", "aria-label": "Dismiss notification"}
-                    )
-                ],
-                id=f"toast-{int(time.time()*1000)}"
-            )
+            new_toast = _build_toast_node(toast_type, title, message)
 
             # Auto-remove after 4 seconds (handled by CSS animation).
             # Cap the list so repeated toasts over a long session do not

@@ -389,6 +389,40 @@ BUILTIN_CATEGORIES = {
 }
 
 
+def _reset_taxonomy_circuit_breaker() -> None:
+    """Reset the per-host circuit breaker before a bulk validation run.
+
+    A transient host failure from an earlier run must not silently
+    short-circuit this whole run. The in-run breaker still trips after the
+    threshold for a genuinely-down host, so the batch never stalls.
+    """
+    try:
+        from nanometa_live.core.taxonomy.taxonomy_api import TaxonomyAPIClient
+        TaxonomyAPIClient.reset_circuit_breaker()
+    except ImportError:
+        pass
+
+
+def _collect_api_failures() -> Dict[str, Any]:
+    """Return {host: human-readable reason} for hosts whose breaker tripped.
+
+    Empty dict when nothing failed or the taxonomy module is unavailable.
+    """
+    try:
+        from nanometa_live.core.taxonomy.taxonomy_api import (
+            TaxonomyAPIClient, describe_failure_reason,
+        )
+        summary = TaxonomyAPIClient.circuit_failure_summary()
+        if summary:
+            return {
+                host: describe_failure_reason(reason)
+                for host, reason in summary.items()
+            }
+    except ImportError:
+        pass
+    return {}
+
+
 class WatchlistManager:
     """
     Unified manager for species watchlists.
@@ -1425,15 +1459,7 @@ class WatchlistManager:
                 if not entry.validated
             ]
 
-        # Reset the per-host circuit breaker so a transient host failure from
-        # an earlier run cannot silently short-circuit this whole run. The
-        # in-run breaker still trips after the threshold for a genuinely-down
-        # host, so the batch never stalls.
-        try:
-            from nanometa_live.core.taxonomy.taxonomy_api import TaxonomyAPIClient
-            TaxonomyAPIClient.reset_circuit_breaker()
-        except ImportError:
-            pass
+        _reset_taxonomy_circuit_breaker()
 
         results = {
             "validated": 0,
@@ -1465,18 +1491,9 @@ class WatchlistManager:
 
         # Surface which API host(s) failed and why, so the UI can report a
         # cause instead of a silent partial count.
-        try:
-            from nanometa_live.core.taxonomy.taxonomy_api import (
-                TaxonomyAPIClient, describe_failure_reason,
-            )
-            summary = TaxonomyAPIClient.circuit_failure_summary()
-            if summary:
-                results["api_failures"] = {
-                    host: describe_failure_reason(reason)
-                    for host, reason in summary.items()
-                }
-        except ImportError:
-            pass
+        api_failures = _collect_api_failures()
+        if api_failures:
+            results["api_failures"] = api_failures
 
         logger.info(f"Bulk validation: {results['validated']} validated, "
                    f"{results['failed']} failed out of {total}")

@@ -817,6 +817,22 @@ def _resolve_sunburst_parent(node_taxid, taxon_name_full, row_idx, level_idx,
     return "root"
 
 
+def _count_sunburst_levels(filtered_df, tax_levels, cap):
+    """Count items per level (for colour variation), bounded by ``cap``.
+
+    The count is bounded by the cap so the within-level brightness spread
+    matches the number of nodes actually rendered. Returns
+    ``(level_counts, level_positions)`` with positions zero-initialised.
+    """
+    level_counts = {}
+    level_positions = {}
+    for level in tax_levels:
+        n_level = len(filtered_df[filtered_df["rank"] == level])
+        level_counts[level] = min(n_level, cap) if cap else n_level
+        level_positions[level] = 0
+    return level_counts, level_positions
+
+
 def _build_sunburst_nodes(filtered_df, tax_levels, total_reads, palette,
                           use_taxid_parents, taxid_to_parent, taxid_to_key,
                           max_taxa_per_level=0):
@@ -836,15 +852,7 @@ def _build_sunburst_nodes(filtered_df, tax_levels, total_reads, palette,
     ids, labels, parents, values, colors, custom_data = [], [], [], [], [], []
     cap = max_taxa_per_level if max_taxa_per_level and max_taxa_per_level > 0 else None
 
-    # First pass: count items per level (for colour variation). The count is
-    # bounded by the cap so the within-level brightness spread matches the
-    # number of nodes actually rendered.
-    level_counts = {}
-    level_positions = {}
-    for level in tax_levels:
-        n_level = len(filtered_df[filtered_df["rank"] == level])
-        level_counts[level] = min(n_level, cap) if cap else n_level
-        level_positions[level] = 0
+    level_counts, level_positions = _count_sunburst_levels(filtered_df, tax_levels, cap)
 
     first_level = tax_levels[0] if tax_levels else "D"
     first_level_reads = filtered_df[filtered_df["rank"] == first_level]["recalc_cumul"].sum()

@@ -423,23 +423,7 @@ def _generate_pathogen_genomes_json(config: Dict[str, Any], main_dir: str):
                     f"Taxid mapping: NCBI {ncbi_taxid} -> Kraken2 db {kraken_taxid}"
                 )
 
-    # Cross-species guard: warn if a registered reference genome's organism does
-    # not match the watchlist species for its taxid (a wrong-genome registration
-    # would let an identity-only CONFIRMED be attributed to the wrong organism).
-    from nanometa_live.core.parsers.validation_guards import check_reference_organism
-    _name_by_taxid = {
-        s.get('taxid', 0): s.get('name', '') for s in species_list_full
-    }
-    for taxid in ncbi_taxids:
-        has_g = genome_manager.has_genome(taxid)
-        logging.debug(f"Taxid {taxid} has_genome={has_g}")
-        if has_g:
-            gpath = genome_manager.get_genome_path(taxid)
-            if gpath:
-                warn = check_reference_organism(gpath, _name_by_taxid.get(taxid, ''))
-                if warn:
-                    logging.warning("Validation reference mismatch (taxid %s): %s",
-                                    taxid, warn)
+    _warn_on_reference_mismatch(genome_manager, ncbi_taxids, species_list_full)
 
     json_output_path = os.path.join(main_dir, "validation", "pathogen_genomes.json")
     os.makedirs(os.path.dirname(json_output_path), exist_ok=True)
@@ -453,23 +437,54 @@ def _generate_pathogen_genomes_json(config: Dict[str, Any], main_dir: str):
         taxid_mapping=ncbi_to_kraken_mapping if ncbi_to_kraken_mapping else None,
     )
 
-    if pathogen_genomes_path is not None:
-        logging.info(f"Generated pathogen_genomes.json at {pathogen_genomes_path}")
-        try:
-            import json
-            with open(pathogen_genomes_path, 'r') as f:
-                content = json.load(f)
-            logging.debug(f"pathogen_genomes.json contains {len(content)} entries")
-        except (FileNotFoundError, PermissionError, OSError) as e:
-            logging.debug(f"Could not read pathogen_genomes.json: {e}")
-        except json.JSONDecodeError as e:
-            logging.debug(f"Malformed pathogen_genomes.json: {e}")
-    else:
+    _log_pathogen_genomes_result(pathogen_genomes_path)
+    return pathogen_genomes_path
+
+
+def _warn_on_reference_mismatch(genome_manager, ncbi_taxids, species_list_full):
+    """Warn if a registered reference genome's organism does not match the
+    watchlist species for its taxid.
+
+    A wrong-genome registration would let an identity-only CONFIRMED be
+    attributed to the wrong organism, so surface it as a warning.
+    """
+    from nanometa_live.core.parsers.validation_guards import check_reference_organism
+    name_by_taxid = {
+        s.get('taxid', 0): s.get('name', '') for s in species_list_full
+    }
+    for taxid in ncbi_taxids:
+        has_g = genome_manager.has_genome(taxid)
+        logging.debug(f"Taxid {taxid} has_genome={has_g}")
+        if not has_g:
+            continue
+        gpath = genome_manager.get_genome_path(taxid)
+        if not gpath:
+            continue
+        warn = check_reference_organism(gpath, name_by_taxid.get(taxid, ''))
+        if warn:
+            logging.warning("Validation reference mismatch (taxid %s): %s",
+                            taxid, warn)
+
+
+def _log_pathogen_genomes_result(pathogen_genomes_path):
+    """Log the outcome of pathogen_genomes.json generation."""
+    if pathogen_genomes_path is None:
         logging.warning(
             "No downloaded genomes found for enabled watchlist species. "
             "Download genomes using the Watchlist & Preparation tab to enable validation."
         )
-    return pathogen_genomes_path
+        return
+
+    logging.info(f"Generated pathogen_genomes.json at {pathogen_genomes_path}")
+    try:
+        import json
+        with open(pathogen_genomes_path, 'r') as f:
+            content = json.load(f)
+        logging.debug(f"pathogen_genomes.json contains {len(content)} entries")
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        logging.debug(f"Could not read pathogen_genomes.json: {e}")
+    except json.JSONDecodeError as e:
+        logging.debug(f"Malformed pathogen_genomes.json: {e}")
 
 
 def _resolve_kraken2_memory_mapping(config: Dict[str, Any]) -> bool:

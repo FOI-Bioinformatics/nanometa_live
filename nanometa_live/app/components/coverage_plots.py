@@ -254,21 +254,8 @@ def create_depth_histogram_figure(
     return fig
 
 
-def create_coverage_stats_summary(coverage: CoverageData) -> html.Div:
-    """
-    Create a row of summary statistics for coverage data.
-
-    Uses plain-language labels so that non-expert operators can
-    interpret the results without bioinformatics knowledge.
-
-    Args:
-        coverage: CoverageData object.
-
-    Returns:
-        html.Div with stat badges and an interpretation line.
-    """
-    concentrated = getattr(coverage, "is_concentrated", False)
-
+def _coverage_stat_items(coverage: CoverageData, concentrated: bool):
+    """Return the (label, value, tooltip) stat tuples for the summary row."""
     items = [
         ("Genome Covered", f"{coverage.breadth * 100:.1f}%",
          "Percentage of the reference genome with at least one matching sequence"),
@@ -298,6 +285,60 @@ def create_coverage_stats_summary(coverage: CoverageData) -> html.Div:
             f"{coverage.local_mean_depth:.0f}x",
             "Average depth across the covered region (ignoring the uncovered genome)",
         ))
+    return items
+
+
+def _coverage_interpretation(coverage: CoverageData, concentrated: bool):
+    """Return (color, text) for the coverage interpretation alert.
+
+    Amplicon-aware: when coverage is concentrated, judge on the LOCAL region
+    (local depth), not the genome-wide breadth which is meaninglessly small for
+    an amplicon.
+    """
+    breadth_pct = coverage.breadth * 100
+    if concentrated:
+        local_depth = coverage.local_mean_depth
+        if local_depth >= 20:
+            return "success", (
+                f"Focused coverage - reads concentrate on a {coverage.covered_bp:,} bp "
+                f"region (consistent with an amplicon / 16S locus) at {local_depth:.0f}x "
+                "depth. Whole-genome breadth is expectedly low for amplicon data."
+            )
+        if local_depth >= 10:
+            return "warning", (
+                f"Focused coverage of a {coverage.covered_bp:,} bp region at "
+                f"{local_depth:.0f}x - some support; more sequencing would strengthen it."
+            )
+        return "danger", (
+            "Sparse coverage of a short region - insufficient data to confirm "
+            "this species. Continue sequencing or verify with another method."
+        )
+    if breadth_pct >= 80 and coverage.mean_depth >= 10:
+        return "success", "Good coverage - species identification is well-supported by the data."
+    if breadth_pct >= 50 or coverage.mean_depth >= 5:
+        return "warning", ("Partial coverage - some evidence supports this identification, "
+                           "but more sequencing data would strengthen confidence.")
+    if breadth_pct > 0:
+        return "danger", ("Low coverage - insufficient data to confirm this species. "
+                          "Continue sequencing or verify with an alternative method.")
+    return "secondary", "No coverage detected for this reference genome."
+
+
+def create_coverage_stats_summary(coverage: CoverageData) -> html.Div:
+    """
+    Create a row of summary statistics for coverage data.
+
+    Uses plain-language labels so that non-expert operators can
+    interpret the results without bioinformatics knowledge.
+
+    Args:
+        coverage: CoverageData object.
+
+    Returns:
+        html.Div with stat badges and an interpretation line.
+    """
+    concentrated = getattr(coverage, "is_concentrated", False)
+    items = _coverage_stat_items(coverage, concentrated)
 
     cols = []
     for label, value, tooltip_text in items:
@@ -310,45 +351,7 @@ def create_coverage_stats_summary(coverage: CoverageData) -> html.Div:
             className="col",
         ))
 
-    # Add interpretation line. Amplicon-aware: when coverage is concentrated,
-    # judge on the LOCAL region (local breadth + local depth), not the
-    # genome-wide breadth which is meaninglessly small for an amplicon.
-    breadth_pct = coverage.breadth * 100
-    if concentrated:
-        local_depth = coverage.local_mean_depth
-        if local_depth >= 20:
-            interp_color = "success"
-            interp_text = (
-                f"Focused coverage - reads concentrate on a {coverage.covered_bp:,} bp "
-                f"region (consistent with an amplicon / 16S locus) at {local_depth:.0f}x "
-                "depth. Whole-genome breadth is expectedly low for amplicon data."
-            )
-        elif local_depth >= 10:
-            interp_color = "warning"
-            interp_text = (
-                f"Focused coverage of a {coverage.covered_bp:,} bp region at "
-                f"{local_depth:.0f}x - some support; more sequencing would strengthen it."
-            )
-        else:
-            interp_color = "danger"
-            interp_text = (
-                "Sparse coverage of a short region - insufficient data to confirm "
-                "this species. Continue sequencing or verify with another method."
-            )
-    elif breadth_pct >= 80 and coverage.mean_depth >= 10:
-        interp_color = "success"
-        interp_text = "Good coverage - species identification is well-supported by the data."
-    elif breadth_pct >= 50 or coverage.mean_depth >= 5:
-        interp_color = "warning"
-        interp_text = ("Partial coverage - some evidence supports this identification, "
-                       "but more sequencing data would strengthen confidence.")
-    elif breadth_pct > 0:
-        interp_color = "danger"
-        interp_text = ("Low coverage - insufficient data to confirm this species. "
-                       "Continue sequencing or verify with an alternative method.")
-    else:
-        interp_color = "secondary"
-        interp_text = "No coverage detected for this reference genome."
+    interp_color, interp_text = _coverage_interpretation(coverage, concentrated)
 
     children = [
         dbc.Row(cols, className="mb-2 g-2"),
