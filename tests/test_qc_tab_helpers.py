@@ -173,14 +173,30 @@ class TestStageStripSlot:
 
 
 class TestBuildStageStrip:
-    def test_chopper_mode_marks_raw_unavailable(self):
+    def test_chopper_mode_repurposes_first_box_to_reads_processed(self):
+        # Chopper/seqkit has no pre-filter count, so the first box is repurposed
+        # to "Reads Processed" (the available post-filter count) instead of N/A.
         strip = _build_stage_strip(
             raw_reads=None, filtered_reads=900, classified_reads=800,
             unclassified_reads=100, is_chopper=True, filter_tool="Chopper",
             timestamp_str="12:00:00",
         )
         text = str(strip.children)
-        assert "Not available (Chopper pipeline)" in text
+        assert "READS PROCESSED" in text
+        assert "900" in text
+        assert "Not available (Chopper pipeline)" not in text
+
+    def test_chopper_mode_awaiting_output_when_no_counts(self):
+        # Before any QC output exists, the repurposed box shows an awaiting note
+        # rather than a misleading zero.
+        strip = _build_stage_strip(
+            raw_reads=None, filtered_reads=0, classified_reads=0,
+            unclassified_reads=0, is_chopper=True, filter_tool="Chopper",
+            timestamp_str="12:00:00",
+        )
+        text = str(strip.children)
+        assert "READS PROCESSED" in text
+        assert "Awaiting QC output" in text
 
     def test_removed_percentage_computed(self):
         strip = _build_stage_strip(

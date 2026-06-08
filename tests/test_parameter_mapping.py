@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from nanometa_live.core.config import parameter_mapping as pm
 from nanometa_live.core.config.config_loader import ConfigLoader
 from nanometa_live.core.config.parameter_mapping import (
     _validate_single_input_source,
@@ -309,6 +310,34 @@ class TestCustomConfigTemplate:
 
 
 # ---- _validate_single_input_source helper guard ----------------------------
+
+
+class TestValidationFileGuard:
+    """Operator feedback #2: a missing pathogen_genomes.json must disable
+    validation with a clear log, never pass a dead path to Nextflow (which
+    aborts with 'No such file or directory')."""
+
+    def test_missing_pathogen_json_disables_validation(self, base_config, tmp_path):
+        base_config["blast_validation"] = True
+        dead_path = str(tmp_path / "gone" / "pathogen_genomes.json")  # does not exist
+        with patch.object(pm, "get_validation_species",
+                          return_value=(["263"], ["/g/263.fasta"])), \
+                patch.object(pm, "_generate_pathogen_genomes_json", return_value=dead_path):
+            params = create_nextflow_params(base_config)
+        assert "pathogen_genomes" not in params
+        assert params.get("run_validation") is False
+
+    def test_present_pathogen_json_enables_validation(self, base_config, tmp_path):
+        base_config["blast_validation"] = True
+        live = tmp_path / "pipeline_input" / "pathogen_genomes.json"
+        live.parent.mkdir(parents=True)
+        live.write_text("{}")
+        with patch.object(pm, "get_validation_species",
+                          return_value=(["263"], ["/g/263.fasta"])), \
+                patch.object(pm, "_generate_pathogen_genomes_json", return_value=str(live)):
+            params = create_nextflow_params(base_config)
+        assert params["pathogen_genomes"] == str(live)
+        assert params.get("run_validation") is True
 
 
 class TestSingleInputGuard:

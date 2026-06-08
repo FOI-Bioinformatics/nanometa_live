@@ -53,3 +53,30 @@ class TestMainLayout:
     def test_main_layout_constructs(self):
         # main_layout aggregates the tab layouts; assert it builds cleanly.
         assert isinstance(create_main_layout(), Component)
+
+
+def _find_by_id(component, target_id):
+    """Depth-first search for a Dash component with id == target_id."""
+    if getattr(component, "id", None) == target_id:
+        return component
+    children = getattr(component, "children", None)
+    if isinstance(children, Component):
+        children = [children]
+    if isinstance(children, (list, tuple)):
+        for child in children:
+            if isinstance(child, Component):
+                found = _find_by_id(child, target_id)
+                if found is not None:
+                    return found
+    return None
+
+
+class TestCoverageDropdownSize:
+    """Operator feedback #4: the coverage species dropdown was too small."""
+
+    def test_dropdown_exposes_more_options(self):
+        selector = _find_by_id(create_validation_layout(), "coverage-species-selector")
+        assert selector is not None
+        # Taller rows + a deeper open menu so ~8-10 options are visible at once.
+        assert getattr(selector, "optionHeight", None) == 45
+        assert getattr(selector, "maxHeight", None) == 400

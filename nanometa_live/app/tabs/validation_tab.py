@@ -51,6 +51,8 @@ from nanometa_live.app.tabs.validation_tab_helpers import (  # noqa: E402
     _CARD_LIST_INITIAL_LIMIT,
     _build_coverage_selector_options,
     _build_paginated_card_list,
+    sort_results_validated_first,
+    watchlist_species_by_taxid,
     _filter_by_method,
     _filter_results_by_sample,
     _format_scope_text,
@@ -317,16 +319,11 @@ def register_validation_callbacks(app: Dash):
                 className="text-center",
             )
 
-        sort_key = sort_by or "percent_validated"
-        reverse = sort_key != "species"
+        # Confirmed/validated results float to the top regardless of sort key.
         try:
-            results = sorted(
-                results,
-                key=lambda x: x.get(sort_key, 0) if sort_key != "species" else x.get("species", ""),
-                reverse=reverse,
-            )
+            results = sort_results_validated_first(results, sort_by or "percent_validated")
         except Exception:
-            logger.debug("Failed to sort validation results by %s; leaving unsorted", sort_key, exc_info=True)
+            logger.debug("Failed to sort validation results by %s; leaving unsorted", sort_by, exc_info=True)
 
         cards = []
         for result in results:
@@ -465,7 +462,9 @@ def register_validation_callbacks(app: Dash):
         if not data or not data.get("results"):
             return []
 
-        results = _filter_by_method(data["results"], "blast")
+        results = sort_results_validated_first(
+            _filter_by_method(data["results"], "blast"), "percent_validated"
+        )
         table_data = []
         for result in results:
             table_data.append({
@@ -620,6 +619,7 @@ def register_validation_callbacks(app: Dash):
         if not results:
             return ""
 
+        results = sort_results_validated_first(results, "coverage_breadth")
         cards = []
         for result in results:
             card = create_validation_result_card(
@@ -663,12 +663,13 @@ def register_validation_callbacks(app: Dash):
     def populate_coverage_selector(data, current_value):
         """Populate species selector from minimap2 validation results.
 
-        Preserves the current selection across auto-refresh intervals
-        if the selected key is still present in the updated options.
-        Grouping logic lives in ``_build_coverage_selector_options``
-        so it stays unit-testable without spinning up a Dash app.
+        Preserves the current selection across auto-refresh intervals. Resolves
+        species names from the watchlist (taxid -> name) so an entry whose
+        validation JSON lacks a name still shows one instead of a bare taxid.
         """
-        return _build_coverage_selector_options(data, current_value)
+        return _build_coverage_selector_options(
+            data, current_value, species_by_taxid=watchlist_species_by_taxid()
+        )
 
     @app.callback(
         [

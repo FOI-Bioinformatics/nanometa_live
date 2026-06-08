@@ -73,6 +73,10 @@ class PreparationResult:
     warnings: List[str] = field(default_factory=list)
     genomes_downloaded: int = 0
     blast_dbs_built: int = 0
+    # Honest breakdown so "N genomes, M BLAST DBs" is explainable: DBs already
+    # present from a prior run (correctly skipped) and DBs that failed to build.
+    blast_dbs_present: int = 0
+    blast_dbs_failed: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -83,6 +87,8 @@ class PreparationResult:
             "warnings": self.warnings,
             "genomes_downloaded": self.genomes_downloaded,
             "blast_dbs_built": self.blast_dbs_built,
+            "blast_dbs_present": self.blast_dbs_present,
+            "blast_dbs_failed": self.blast_dbs_failed,
         }
 
 
@@ -328,8 +334,21 @@ class MobileLabPreparer:
         )
         self._report(PrepStage.BUILD_BLAST_DBS, idx,
                      "Building missing BLAST databases", 30.0)
-        built = manager.build_missing_blast_dbs()
-        result.blast_dbs_built = built
+        report = manager.build_missing_blast_dbs_detailed(retry=True)
+        result.blast_dbs_built = report["built"]
+        result.blast_dbs_present = report["already_present"]
+        result.blast_dbs_failed = report["failed"]
+        if report["failed"]:
+            # Surface failures so the operator understands why the BLAST-DB
+            # count is below the genome count (and why BLAST validation may be
+            # empty for those species while minimap2 still works).
+            names = ", ".join(
+                f"{f.get('species') or f['taxid']} ({f['reason']})"
+                for f in report["failed"]
+            )
+            result.warnings.append(
+                f"{len(report['failed'])} BLAST database(s) failed to build: {names}"
+            )
 
     def _run_cache_taxonomy(self, idx: int, result: PreparationResult, skip_existing: bool):
         self._report(PrepStage.CACHE_TAXONOMY, idx,

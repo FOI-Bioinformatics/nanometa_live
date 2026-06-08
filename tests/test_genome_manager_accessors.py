@@ -70,6 +70,45 @@ class TestMissingAndStatus:
         assert status[1280] == {"genome": True, "blast_db": False}
 
 
+class TestBlastDbStatus:
+    """Operator feedback #1/#7: missing BLAST DBs leave BLAST empty while
+    minimap2 (FASTA-direct) still works; the status must distinguish present /
+    missing / no-genome so the gap is explainable."""
+
+    def test_blast_db_status_partitions_taxids(self, manager):
+        status = manager.blast_db_status([562, 1280, 99999])
+        assert status["present"] == [562]      # genome + .nhr
+        assert status["missing"] == [1280]     # genome, no BLAST DB
+        assert status["no_genome"] == [99999]  # nothing on disk
+
+    def test_detailed_report_counts_present_built_and_failed(self, manager):
+        # 562 already has a DB (already_present); 1280 has a genome but no DB.
+        # Stub the actual build + makeblastdb presence so the test is
+        # deterministic and offline regardless of the host toolchain.
+        def _ok(self, taxid):
+            (manager.blast_dir / f"{taxid}.fasta.nhr").write_text("x")
+            return True, None
+        with patch("nanometa_live.core.utils.genome_manager.shutil.which",
+                   return_value="/usr/bin/makeblastdb"), \
+                patch.object(type(manager), "_build_blast_db_with_reason", _ok):
+            report = manager.build_missing_blast_dbs_detailed(retry=True)
+        assert report["already_present"] == 1
+        assert report["built"] == 1
+        assert report["failed"] == []
+
+    def test_detailed_report_records_failures_with_reason(self, manager):
+        def _fail(self, taxid):
+            return False, "bad FASTA"
+        with patch("nanometa_live.core.utils.genome_manager.shutil.which",
+                   return_value="/usr/bin/makeblastdb"), \
+                patch.object(type(manager), "_build_blast_db_with_reason", _fail):
+            report = manager.build_missing_blast_dbs_detailed(retry=False)
+        assert report["built"] == 0
+        assert len(report["failed"]) == 1
+        assert report["failed"][0]["taxid"] == 1280
+        assert report["failed"][0]["reason"] == "bad FASTA"
+
+
 class TestStatistics:
     def test_counts_scanned_genomes(self, manager):
         stats = manager.get_statistics()

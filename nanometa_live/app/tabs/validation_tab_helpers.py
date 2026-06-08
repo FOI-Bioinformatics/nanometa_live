@@ -30,9 +30,102 @@ logger = logging.getLogger(__name__)
 _CARD_LIST_INITIAL_LIMIT = 30
 
 
+# Severity order used to float matched/validated results to the top of every
+# list and dropdown. Lower rank = stronger evidence = shown first. Mirrors the
+# ValidationStatus enum string values in
+# core/parsers/blast_validation_parser.py (``low_confidence`` is an accepted
+# alias for ``low``); unknown statuses sort with NO_DATA.
+_STATUS_RANK = {
+    "confirmed": 0,
+    "partial": 1,
+    "low": 2,
+    "low_confidence": 2,
+    "uncertain": 3,
+    "no_data": 4,
+    "failed": 5,
+}
+
+
+def status_rank(status: Any) -> int:
+    """Return the sort rank for a validation status string (lower = first)."""
+    return _STATUS_RANK.get(str(status or "").lower(), _STATUS_RANK["no_data"])
+
+
+def sort_results_validated_first(
+    results: List[Dict[str, Any]],
+    sort_key: str = "percent_validated",
+) -> List[Dict[str, Any]]:
+    """Order validation results so matched/validated ones come first.
+
+    Primary key is the validation status severity (CONFIRMED first), so the
+    operator sees confirmed detections at the top without scrolling. Within a
+    status group the user-selected ``sort_key`` decides order: ``species`` sorts
+    ascending by name, any other (numeric) key sorts descending. Returns a new
+    list; the input is not mutated.
+    """
+    if not results:
+        return []
+    sort_key = sort_key or "percent_validated"
+
+    if sort_key == "species":
+        return sorted(
+            results,
+            key=lambda x: (status_rank(x.get("status")), str(x.get("species", "") or "")),
+        )
+
+    def _key(x: Dict[str, Any]):
+        value = x.get(sort_key, 0) or 0
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            value = 0.0
+        return (status_rank(x.get("status")), -value)
+
+    return sorted(results, key=_key)
+
+
+def build_species_by_taxid(entries) -> Dict[Any, str]:
+    """Map every taxid-ish key of a watchlist entry to its species name.
+
+    Accepts the ``Dict[int, WatchlistEntry]`` returned by
+    ``WatchlistManager.get_all_entries()`` (or an iterable of entries). Both the
+    NCBI ``taxid`` and the database ``db_taxid`` are mapped (as int and str) so a
+    validation result keyed by either resolves. Entries without a name are
+    skipped. Pure -- no singleton access -- so it is unit-testable.
+    """
+    items = entries.values() if hasattr(entries, "values") else (entries or [])
+    name_map: Dict[Any, str] = {}
+    for entry in items:
+        name = getattr(entry, "name", None)
+        if not name:
+            continue
+        for tid in (getattr(entry, "taxid", None), getattr(entry, "db_taxid", None)):
+            if tid in (None, "", 0):
+                continue
+            name_map[tid] = name
+            name_map[str(tid)] = name
+    return name_map
+
+
+def watchlist_species_by_taxid() -> Dict[Any, str]:
+    """Build a taxid->species-name map from the WatchlistManager singleton.
+
+    Best-effort: returns an empty map if the watchlist cannot be read, so the
+    dropdown still renders (falling back to a bare ``taxid N`` label). The
+    caller runs in the main process, where the singleton is populated.
+    """
+    try:
+        from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
+        return build_species_by_taxid(get_watchlist_manager().get_all_entries())
+    except Exception:
+        logger.debug("Could not build watchlist taxid->name map", exc_info=True)
+        return {}
+
+
 def _build_coverage_selector_options(
     data: Optional[Dict[str, Any]],
     current_value: Optional[str],
+    species_by_taxid: Optional[Dict[Any, str]] = None,
 ):
     """Group minimap2 validation results into per-sample sections.
 
@@ -49,6 +142,7 @@ def _build_coverage_selector_options(
     if not data or not data.get("results"):
         return [], None
 
+    name_map = species_by_taxid or {}
     per_sample: Dict[str, List[Dict[str, Any]]] = {}
     sample_order: List[str] = []
     seen = set()
@@ -62,9 +156,20 @@ def _build_coverage_selector_options(
         if key in seen:
             continue
         seen.add(key)
+        # Always show a species name when one can be resolved -- from the
+        # result itself, else the watchlist taxid->name map -- and never the
+        # bare "Unknown" placeholder. A taxid with no resolvable name falls
+        # back to "taxid N" only.
+        species = (
+            r.get("species")
+            or name_map.get(taxid)
+            or name_map.get(str(taxid))
+        )
+        label = f"{species} (taxid {taxid})" if species else f"taxid {taxid}"
         entry = {
-            "label": f"{r.get('species', 'Unknown')} (taxid {taxid})",
+            "label": label,
             "value": key,
+            "_rank": status_rank(r.get("status")),
         }
         if sample_id not in per_sample:
             per_sample[sample_id] = []
@@ -78,7 +183,11 @@ def _build_coverage_selector_options(
             "value": f"__header__:{sample_id}",
             "disabled": True,
         })
-        options.extend(per_sample[sample_id])
+        # Matched/validated species first within each sample section.
+        entries = sorted(per_sample[sample_id], key=lambda e: e["_rank"])
+        for e in entries:
+            e.pop("_rank", None)
+        options.extend(entries)
 
     valid_values = {o["value"] for o in options if not o.get("disabled")}
     if current_value and current_value in valid_values:

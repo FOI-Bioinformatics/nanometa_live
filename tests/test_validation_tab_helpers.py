@@ -21,6 +21,9 @@ from nanometa_live.app.tabs.validation_tab_helpers import (
     _format_criteria_text,
     _format_scope_text,
     _load_real_coverage,
+    sort_results_validated_first,
+    status_rank,
+    build_species_by_taxid,
 )
 from nanometa_live.core.parsers.paf_coverage_parser import CoverageData
 
@@ -176,3 +179,100 @@ class TestEmptyIdentityPlot:
         fig = _create_empty_identity_plot()
         assert isinstance(fig, go.Figure)
         assert "No identity data" in str(fig.layout.annotations[0].text)
+
+
+class TestSortValidatedFirst:
+    """Confirmed/validated results must float to the top (operator feedback #3)."""
+
+    def _results(self):
+        # Deliberately not in status order; lower percent_validated on the
+        # confirmed one to prove status beats the numeric secondary key.
+        return [
+            {"species": "A", "status": "no_data", "percent_validated": 95},
+            {"species": "B", "status": "confirmed", "percent_validated": 10},
+            {"species": "C", "status": "partial", "percent_validated": 60},
+            {"species": "D", "status": "failed", "percent_validated": 99},
+        ]
+
+    def test_confirmed_first_regardless_of_secondary_key(self):
+        out = sort_results_validated_first(self._results(), "percent_validated")
+        assert [r["status"] for r in out] == ["confirmed", "partial", "no_data", "failed"]
+
+    def test_within_status_numeric_descending(self):
+        results = [
+            {"species": "lo", "status": "confirmed", "percent_validated": 30},
+            {"species": "hi", "status": "confirmed", "percent_validated": 90},
+        ]
+        out = sort_results_validated_first(results, "percent_validated")
+        assert [r["species"] for r in out] == ["hi", "lo"]
+
+    def test_species_sort_key_ascending_within_status(self):
+        results = [
+            {"species": "Zeta", "status": "confirmed"},
+            {"species": "Alpha", "status": "confirmed"},
+        ]
+        out = sort_results_validated_first(results, "species")
+        assert [r["species"] for r in out] == ["Alpha", "Zeta"]
+
+    def test_does_not_mutate_input_and_handles_empty(self):
+        results = self._results()
+        snapshot = list(results)
+        sort_results_validated_first(results, "percent_validated")
+        assert results == snapshot
+        assert sort_results_validated_first([], "percent_validated") == []
+
+    def test_status_rank_unknown_sorts_with_no_data(self):
+        assert status_rank("confirmed") < status_rank("partial")
+        assert status_rank("garbage") == status_rank("no_data")
+
+
+class TestSpeciesByTaxid:
+    class _Entry:
+        def __init__(self, taxid, name, db_taxid=None):
+            self.taxid = taxid
+            self.name = name
+            self.db_taxid = db_taxid
+
+    def test_maps_both_taxid_forms_int_and_str(self):
+        entries = {263: self._Entry(263, "Francisella tularensis", db_taxid=119857)}
+        name_map = build_species_by_taxid(entries)
+        assert name_map[263] == "Francisella tularensis"
+        assert name_map["263"] == "Francisella tularensis"
+        assert name_map[119857] == "Francisella tularensis"
+
+    def test_skips_entries_without_name(self):
+        entries = [self._Entry(1, ""), self._Entry(2, None)]
+        assert build_species_by_taxid(entries) == {}
+
+
+class TestCoverageSelectorLabels:
+    """Dropdown labels must always carry a species name (operator feedback #5)."""
+
+    def _data(self):
+        return {"results": [
+            {"sample_id": "bc01", "taxid": 263, "species": "",
+             "validation_method": "minimap2", "status": "confirmed"},
+            {"sample_id": "bc01", "taxid": 1773, "species": "M. tuberculosis",
+             "validation_method": "both", "status": "no_data"},
+        ]}
+
+    def test_resolves_name_from_watchlist_when_result_lacks_species(self):
+        opts, _ = _build_coverage_selector_options(
+            self._data(), None, species_by_taxid={263: "Francisella tularensis"}
+        )
+        labels = [o["label"] for o in opts if not o.get("disabled")]
+        assert any("Francisella tularensis (taxid 263)" == lbl for lbl in labels)
+        assert not any("Unknown" in lbl for lbl in labels)
+
+    def test_bare_taxid_fallback_when_unresolvable(self):
+        opts, _ = _build_coverage_selector_options(self._data(), None)
+        labels = [o["label"] for o in opts if not o.get("disabled")]
+        assert "taxid 263" in labels  # no name anywhere -> bare taxid, not "Unknown"
+
+    def test_matched_species_sorted_first_within_sample(self):
+        opts, _ = _build_coverage_selector_options(
+            self._data(), None, species_by_taxid={263: "Francisella tularensis"}
+        )
+        # Skip the disabled sample header; the confirmed entry (263) comes first.
+        entries = [o for o in opts if not o.get("disabled")]
+        assert entries[0]["value"] == "bc01_263"

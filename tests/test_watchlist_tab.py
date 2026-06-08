@@ -79,6 +79,34 @@ class TestGuards:
             with pytest.raises(PreventUpdate):
                 validate_fn(MagicMock(), 1, [], ["ncbi"], [], {})
 
+    def test_spurious_row_button_render_prevents_update(self, validate_fn):
+        # Operator feedback #6: selecting a watchlist re-renders the table,
+        # ADDING the per-row validate buttons. That fires this pattern-matching
+        # callback with a freshly-added (never-clicked) button whose triggered
+        # value is None -> it must NOT kick off a bogus "Validating 1/1".
+        spurious = MagicMock(
+            triggered_id={"type": "watchlist-row-validate", "index": 263},
+            triggered=[{"prop_id": "{...}.n_clicks", "value": None}],
+        )
+        with patch.object(wt, "ctx", spurious):
+            with pytest.raises(PreventUpdate):
+                validate_fn(MagicMock(), None, [None], ["ncbi"],
+                            [{"type": "watchlist-row-validate", "index": 263}], {})
+
+    def test_real_row_click_proceeds(self, validate_fn):
+        # A genuine click carries a positive n_clicks as the triggered value.
+        manager = MagicMock()
+        manager.bulk_validate_entries.return_value = {"validated": 1, "failed": 0}
+        manager._entries = {}
+        real = MagicMock(
+            triggered_id={"type": "watchlist-row-validate", "index": 263},
+            triggered=[{"prop_id": "{...}.n_clicks", "value": 1}],
+        )
+        with patch.object(wt, "ctx", real), \
+                patch.object(wt, "get_watchlist_manager", return_value=manager):
+            validate_fn(MagicMock(), None, [1], ["ncbi"], [], {"kraken_taxonomy": "ncbi"})
+        assert manager.bulk_validate_entries.called
+
     def test_offline_mode_passed_through(self, validate_fn):
         manager = MagicMock()
         manager.get_entries_with_toggle_state.return_value = [{"taxid": 562}]

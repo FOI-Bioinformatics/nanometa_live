@@ -238,13 +238,27 @@ def _build_stage_strip(raw_reads, filtered_reads, classified_reads, unclassified
     """
     # --- Raw slot ---
     if is_chopper or raw_reads is None:
-        raw_slot = _build_stage_strip_slot(
-            heading="RAW READS",
-            count_text="—",
-            subtitle=f"({filter_tool})",
-            count_extra="Not available (Chopper pipeline)",
-            slot_class="stage-strip-slot stage-strip-slot--raw",
-        )
+        # Chopper/seqkit QC does not record a pre-filter read count, so a "Raw
+        # reads" box would always read N/A. Repurpose it to a metric that IS
+        # available -- the number of reads that passed filtering and entered
+        # classification (seqkit num_seqs / Kraken2 total) -- so the first box
+        # carries real information instead of an empty placeholder.
+        if filtered_reads:
+            raw_slot = _build_stage_strip_slot(
+                heading="READS PROCESSED",
+                count_text=f"{filtered_reads:,}",
+                subtitle=f"({filter_tool})",
+                count_extra="Pre-filter count not recorded by this QC tool",
+                slot_class="stage-strip-slot stage-strip-slot--raw",
+            )
+        else:
+            raw_slot = _build_stage_strip_slot(
+                heading="READS PROCESSED",
+                count_text="—",
+                subtitle=f"({filter_tool})",
+                count_extra="Awaiting QC output",
+                slot_class="stage-strip-slot stage-strip-slot--raw",
+            )
         filter_delta_text = "N/A"
         filter_delta_cls = "stage-strip-delta stage-strip-delta--muted"
     else:

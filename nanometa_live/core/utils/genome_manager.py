@@ -1230,15 +1230,26 @@ class GenomeDownloadManager:
         Returns:
             True if successful, False otherwise
         """
+        ok, _reason = self._build_blast_db_with_reason(taxid)
+        return ok
+
+    def _build_blast_db_with_reason(self, taxid: int):
+        """Build the BLAST DB for ``taxid``; return ``(ok, reason_on_failure)``.
+
+        ``reason`` is None on success and a short human-readable cause on
+        failure (missing genome, makeblastdb absent, makeblastdb stderr, or the
+        exception text) so callers can surface *why* a DB is missing instead of
+        only a count.
+        """
         genome_path = self.get_genome_path(taxid)
         if not genome_path:
             logger.error(f"No genome found for taxid {taxid}")
-            return False
+            return False, "no genome file on disk"
 
         # Check if makeblastdb is available
         if not shutil.which("makeblastdb"):
             logger.error("makeblastdb not found. Install BLAST+ toolkit.")
-            return False
+            return False, "makeblastdb not installed"
 
         output_db = self.blast_dir / f"{taxid}.fasta"
         genome_size_mb = genome_path.stat().st_size / (1024 * 1024) if genome_path.exists() else 0
@@ -1274,8 +1285,10 @@ class GenomeDownloadManager:
             )
 
             if result.returncode != 0:
+                reason = (result.stderr or "").strip().splitlines()
+                reason = reason[-1] if reason else f"exit code {result.returncode}"
                 logger.error(f"makeblastdb failed for taxid {taxid}: {result.stderr}")
-                return False
+                return False, reason
 
             # Update metadata
             if taxid in self._metadata:
@@ -1283,12 +1296,12 @@ class GenomeDownloadManager:
                 self._save_metadata()
 
             logger.info(f"Successfully built BLAST database: {output_db}")
-            return True
+            return True, None
 
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
                 FileNotFoundError, PermissionError, OSError) as e:
             logger.exception(f"Failed to build BLAST database: {e}")
-            return False
+            return False, str(e)
 
     def get_all_genomes(self) -> List[GenomeMetadata]:
         """Get list of all downloaded genomes, including on-disk orphans."""
@@ -1403,33 +1416,88 @@ class GenomeDownloadManager:
         build BLAST databases for all downloaded genomes.
 
         Returns:
-            Number of BLAST databases built
+            Number of BLAST databases built (newly). See
+            ``build_missing_blast_dbs_detailed`` for the full breakdown.
         """
-        # Check if makeblastdb is available
+        return self.build_missing_blast_dbs_detailed()["built"]
+
+    def build_missing_blast_dbs_detailed(self, retry: bool = True) -> Dict[str, Any]:
+        """Build missing BLAST DBs and report an honest breakdown.
+
+        Returns a dict ``{built, already_present, failed}`` where ``failed`` is a
+        list of ``{taxid, species, reason}``. This explains the count the
+        operator sees (e.g. "35 genomes, 22 BLAST DBs"): the gap is
+        ``already_present`` (built on a prior run, correctly skipped) plus
+        ``failed`` (genuine build errors, e.g. a bad FASTA or makeblastdb
+        missing). With ``retry`` set, each failure is attempted once more before
+        being recorded, since transient causes (brief disk pressure) often clear.
+        """
+        report: Dict[str, Any] = {"built": 0, "already_present": 0, "failed": []}
+
         if not shutil.which("makeblastdb"):
             logger.error("makeblastdb not found. Install BLAST+ toolkit.")
-            return 0
+            for taxid, meta in self._metadata.items():
+                if Path(meta.fasta_path).exists():
+                    report["failed"].append({
+                        "taxid": taxid,
+                        "species": getattr(meta, "species_name", ""),
+                        "reason": "makeblastdb not installed",
+                    })
+            return report
 
-        built = 0
         for taxid, meta in self._metadata.items():
-            # Check if genome file exists
             genome_path = Path(meta.fasta_path)
             if not genome_path.exists():
                 continue
 
-            # Check if BLAST database already exists
             if self.has_blast_db(taxid):
+                report["already_present"] += 1
                 continue
 
-            # Build BLAST database
             logger.info(f"Building BLAST database for taxid {taxid} ({meta.species_name})")
-            if self.build_blast_db(taxid):
-                built += 1
+            ok, reason = self._build_blast_db_with_reason(taxid)
+            if not ok and retry:
+                logger.info(f"Retrying BLAST DB build for taxid {taxid}")
+                ok, reason = self._build_blast_db_with_reason(taxid)
+            if ok:
+                report["built"] += 1
+            else:
+                report["failed"].append({
+                    "taxid": taxid,
+                    "species": getattr(meta, "species_name", ""),
+                    "reason": reason or "unknown error",
+                })
 
-        if built > 0:
-            logger.info(f"Built {built} BLAST databases")
+        if report["built"]:
+            logger.info(f"Built {report['built']} BLAST databases")
+        if report["failed"]:
+            logger.warning(
+                "%d genome(s) still lack a BLAST DB after build: %s",
+                len(report["failed"]),
+                ", ".join(f"{f['taxid']} ({f['reason']})" for f in report["failed"]),
+            )
 
-        return built
+        return report
+
+    def blast_db_status(self, taxids: List[int]) -> Dict[str, List[int]]:
+        """Return ``{present, missing}`` taxid lists for the given taxids.
+
+        A taxid is ``missing`` when it has a downloaded genome but no BLAST DB --
+        the exact condition that leaves BLAST validation empty while minimap2
+        (which reads the FASTA directly) still works. Taxids without any genome
+        are reported under ``no_genome`` so the caller can distinguish the two.
+        """
+        present: List[int] = []
+        missing: List[int] = []
+        no_genome: List[int] = []
+        for taxid in taxids:
+            if self.has_blast_db(taxid):
+                present.append(taxid)
+            elif self.get_genome_path(taxid):
+                missing.append(taxid)
+            else:
+                no_genome.append(taxid)
+        return {"present": present, "missing": missing, "no_genome": no_genome}
 
     def refresh_unknown_metadata(self) -> int:
         """

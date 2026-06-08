@@ -424,8 +424,17 @@ def _generate_pathogen_genomes_json(config: Dict[str, Any], main_dir: str):
                 )
 
     _warn_on_reference_mismatch(genome_manager, ncbi_taxids, species_list_full)
+    _ensure_blast_dbs_for_validation(genome_manager, ncbi_taxids)
 
-    json_output_path = os.path.join(main_dir, "validation", "pathogen_genomes.json")
+    # Write to pipeline_input/, NOT validation/. validation/ is both a
+    # detect/archive subdir (BackendManager.RESULT_SUBDIRS) and a nanometanf
+    # publishDir: when the operator picks "Move existing & start fresh" the
+    # whole validation/ tree is moved into _archive_<ts>/, stranding this
+    # launch input and producing a "No such file or directory:
+    # .../validation/pathogen_genomes.json" crash. pipeline_input/ is outside
+    # both, so the absolute path passed to --pathogen_genomes stays valid
+    # across archive/rerun.
+    json_output_path = os.path.join(main_dir, "pipeline_input", "pathogen_genomes.json")
     os.makedirs(os.path.dirname(json_output_path), exist_ok=True)
     logging.debug(f"Generating pathogen_genomes.json at {json_output_path}")
     if ncbi_to_kraken_mapping:
@@ -439,6 +448,35 @@ def _generate_pathogen_genomes_json(config: Dict[str, Any], main_dir: str):
 
     _log_pathogen_genomes_result(pathogen_genomes_path)
     return pathogen_genomes_path
+
+
+def _ensure_blast_dbs_for_validation(genome_manager, ncbi_taxids):
+    """Build any missing BLAST DB for a validation taxid before launch.
+
+    BLAST validation needs a built database; minimap2 reads the FASTA directly.
+    A genome present without its BLAST DB therefore yields minimap2 hits but an
+    empty BLAST result -- the exact symptom an operator reported. Build the DB
+    for every validation taxid that has a genome but no DB; warn (do not fail)
+    for any that still lack one so the run proceeds with minimap2.
+    """
+    if not ncbi_taxids:
+        return
+    try:
+        status = genome_manager.blast_db_status(ncbi_taxids)
+    except (AttributeError, OSError) as e:
+        logging.debug(f"Could not check BLAST DB status: {e}")
+        return
+    for taxid in status.get("missing", []):
+        logging.info("Building missing BLAST DB for validation taxid %s", taxid)
+        genome_manager.build_blast_db(taxid)
+    # Re-check; anything still missing will have no BLAST results this run.
+    still = genome_manager.blast_db_status(ncbi_taxids)
+    if still.get("missing"):
+        logging.warning(
+            "BLAST DB still missing for taxid(s) %s after build; BLAST "
+            "validation will be empty for them (minimap2 still runs).",
+            ", ".join(str(t) for t in still["missing"]),
+        )
 
 
 def _warn_on_reference_mismatch(genome_manager, ncbi_taxids, species_list_full):
@@ -786,7 +824,20 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     has_genomes = False
     if config.get("blast_validation", False) and has_species:
         pathogen_genomes_path = _generate_pathogen_genomes_json(config, main_dir)
-        has_genomes = pathogen_genomes_path is not None
+        # Require the file to actually exist on disk before we promise it to
+        # Nextflow. Passing a path that is None or missing makes nanometanf
+        # abort at launch with "No such file or directory"; disabling
+        # validation instead degrades gracefully (the run still classifies).
+        if pathogen_genomes_path and os.path.exists(pathogen_genomes_path):
+            has_genomes = True
+        else:
+            if pathogen_genomes_path:
+                logging.error(
+                    "pathogen_genomes.json was reported at %s but is not on "
+                    "disk; disabling validation for this run.",
+                    pathogen_genomes_path,
+                )
+            pathogen_genomes_path = None
 
     # blast_validation and run_validation must both be false if we can't actually run validation
     can_run_validation = has_species and has_genomes

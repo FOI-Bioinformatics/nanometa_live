@@ -332,6 +332,12 @@ def _create_coverage_tab() -> dbc.Tab:
                                 clearable=True,
                                 persistence=True,
                                 persistence_type="session",
+                                # Taller rows and a deeper open menu so the
+                                # operator can scan ~8-10 species/samples at
+                                # once instead of the ~3 the default exposed.
+                                optionHeight=45,
+                                maxHeight=400,
+                                style={"minWidth": "320px"},
                             ),
                         ], md=4),
                         dbc.Col([

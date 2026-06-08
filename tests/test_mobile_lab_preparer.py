@@ -83,9 +83,12 @@ class TestDataclasses:
         assert d["success"] is True
         assert d["genomes_downloaded"] == 0
         assert d["blast_dbs_built"] == 0
+        assert d["blast_dbs_present"] == 0
+        assert d["blast_dbs_failed"] == []
         assert set(d) == {
             "success", "stages_completed", "stages_failed", "errors",
             "warnings", "genomes_downloaded", "blast_dbs_built",
+            "blast_dbs_present", "blast_dbs_failed",
         }
 
     def test_stage_labels_cover_every_stage(self):
@@ -380,8 +383,8 @@ class TestDownloadAndBlastStages:
 
     def test_build_blast_dbs_records_count(self, tmp_path, monkeypatch):
         class _Manager:
-            def build_missing_blast_dbs(self):
-                return 4
+            def build_missing_blast_dbs_detailed(self, retry=True):
+                return {"built": 4, "already_present": 2, "failed": []}
         monkeypatch.setattr(
             "nanometa_live.core.utils.genome_manager.get_genome_manager",
             lambda d, offline_mode=False: _Manager(),
@@ -390,6 +393,30 @@ class TestDownloadAndBlastStages:
         result = PreparationResult(success=True)
         prep._run_build_blast_dbs(4, result, True)
         assert result.blast_dbs_built == 4
+        assert result.blast_dbs_present == 2
+        assert result.blast_dbs_failed == []
+
+    def test_build_blast_dbs_reports_failures_as_warning(self, tmp_path, monkeypatch):
+        class _Manager:
+            def build_missing_blast_dbs_detailed(self, retry=True):
+                return {
+                    "built": 1,
+                    "already_present": 0,
+                    "failed": [{"taxid": 263, "species": "F. tularensis",
+                                "reason": "bad FASTA"}],
+                }
+        monkeypatch.setattr(
+            "nanometa_live.core.utils.genome_manager.get_genome_manager",
+            lambda d, offline_mode=False: _Manager(),
+        )
+        prep = make_preparer(tmp_path)
+        result = PreparationResult(success=True)
+        prep._run_build_blast_dbs(4, result, True)
+        assert result.blast_dbs_built == 1
+        assert len(result.blast_dbs_failed) == 1
+        # The failure surfaces to the operator as a warning explaining the gap.
+        assert any("failed to build" in w and "F. tularensis" in w
+                   for w in result.warnings)
 
 
 class TestGetWatchlistEntries:

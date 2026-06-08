@@ -906,6 +906,18 @@ def register_watchlist_callbacks(app: Dash) -> None:
         if not ctx.triggered_id:
             raise PreventUpdate
 
+        # Guard against a spurious trigger. The per-row ``watchlist-row-validate``
+        # buttons are pattern-matching inputs (index=ALL); selecting a watchlist
+        # re-renders the table, ADDING those buttons, which fires this callback
+        # even with prevent_initial_call=True -- and ctx.triggered_id points at a
+        # freshly-added (never-clicked) button, so the guard above passed and one
+        # entry validated, surfacing a bogus "Validating 1/1". A real click
+        # carries a positive n_clicks as the triggered value; a component-add
+        # render carries None (or 0). Bail unless it was a genuine click.
+        triggered_value = ctx.triggered[0].get("value") if ctx.triggered else None
+        if not triggered_value:
+            raise PreventUpdate
+
         trigger = str(ctx.triggered_id)
         use_ncbi = "ncbi" in (api_options or [])
         use_gtdb = "gtdb" in (api_options or [])

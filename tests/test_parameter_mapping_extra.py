@@ -7,7 +7,10 @@ generate_samplesheet (all three sample-handling modes + error paths),
 validate_nanometanf_params (the launch-time gate), and get_validation_species.
 """
 
-from unittest.mock import patch
+import json
+import os
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -144,3 +147,51 @@ class TestGetValidationSpecies:
     def test_empty_watchlist(self):
         with patch.object(pm, "get_validation_species_from_watchlist", return_value=([], [])):
             assert get_validation_species({}) == ([], [])
+
+
+class TestPathogenGenomesLocation:
+    """Operator feedback #2: archive/rerun crashed with 'No such file:
+    .../validation/pathogen_genomes.json'. The launch input must live OUTSIDE
+    the archived/published validation/ dir so it survives a Move/rerun."""
+
+    def _fake_manager(self):
+        manager = MagicMock()
+        manager.get_statistics.return_value = {}
+        manager.has_genome.return_value = True
+        manager.get_genome_path.return_value = None
+        manager.blast_db_status.return_value = {"present": [263], "missing": [], "no_genome": []}
+
+        def _gen(taxids, output_path=None, taxid_mapping=None):
+            # Mirror the real manager: write the JSON at the requested path.
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            with open(output_path, "w") as fh:
+                json.dump({"263": {"path": "/g/263.fasta"}}, fh)
+            return Path(output_path)
+
+        manager.generate_pathogen_genomes_json.side_effect = _gen
+        return manager
+
+    def test_written_under_pipeline_input_not_validation(self, tmp_path):
+        species = [{"taxid": 263, "kraken_taxid": 263, "name": "F. tularensis"}]
+        with patch.object(pm, "get_genome_manager", return_value=self._fake_manager()), \
+                patch.object(pm, "get_validation_species_from_watchlist",
+                             return_value=(species, ["/g/263.fasta"])):
+            path = pm._generate_pathogen_genomes_json({}, str(tmp_path))
+        assert path is not None
+        assert os.path.exists(path)
+        assert os.path.basename(os.path.dirname(path)) == "pipeline_input"
+        assert "validation" not in Path(path).parts
+
+    def test_survives_archive_of_validation_dir(self, tmp_path):
+        from nanometa_live.core.workflow.backend_manager import BackendManager
+        # Populate validation/ so archive_existing_results moves it away.
+        (tmp_path / "validation").mkdir()
+        (tmp_path / "validation" / "old.txt").write_text("stale")
+        species = [{"taxid": 263, "kraken_taxid": 263, "name": "F. tularensis"}]
+        with patch.object(pm, "get_genome_manager", return_value=self._fake_manager()), \
+                patch.object(pm, "get_validation_species_from_watchlist",
+                             return_value=(species, ["/g/263.fasta"])):
+            path = pm._generate_pathogen_genomes_json({}, str(tmp_path))
+            BackendManager.archive_existing_results(str(tmp_path))
+        # The launch input must still be present after the archive sweep.
+        assert os.path.exists(path)
