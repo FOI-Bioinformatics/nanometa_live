@@ -83,7 +83,9 @@ def register_watchlist_callbacks(app: Dash) -> None:
             manager.load_config(config)
 
         stats = manager.get_statistics()
-        validation_status = manager.get_validation_status()
+        # Count validated against the ENABLED set so un-ticking a watchlist
+        # lowers the denominator instead of leaving a stale total.
+        validation_status = manager.get_validation_status(enabled_only=True)
 
         by_threat = stats.get("by_threat_level", {})
         critical = by_threat.get("critical", 0)

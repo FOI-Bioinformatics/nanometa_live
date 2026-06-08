@@ -72,6 +72,9 @@ class PreparationResult:
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     genomes_downloaded: int = 0
+    # Genomes that were attempted but failed to download (usually NCBI/GTDB
+    # unreachable). Explains a low genome/BLAST-DB count to the operator.
+    genomes_failed: int = 0
     blast_dbs_built: int = 0
     # Honest breakdown so "N genomes, M BLAST DBs" is explainable: DBs already
     # present from a prior run (correctly skipped) and DBs that failed to build.
@@ -86,6 +89,7 @@ class PreparationResult:
             "errors": self.errors,
             "warnings": self.warnings,
             "genomes_downloaded": self.genomes_downloaded,
+            "genomes_failed": self.genomes_failed,
             "blast_dbs_built": self.blast_dbs_built,
             "blast_dbs_present": self.blast_dbs_present,
             "blast_dbs_failed": self.blast_dbs_failed,
@@ -303,6 +307,7 @@ class MobileLabPreparer:
 
         total = len(entries)
         downloaded = 0
+        failed = 0
         for i, entry in enumerate(entries):
             if self._cancelled:
                 return
@@ -321,8 +326,23 @@ class MobileLabPreparer:
                 )
                 if path:
                     downloaded += 1
+                else:
+                    failed += 1
 
         result.genomes_downloaded = downloaded
+        result.genomes_failed = failed
+        if failed:
+            # A failed download is almost always the NCBI/GTDB endpoint being
+            # unreachable (the circuit breaker then short-circuits the rest).
+            # Surface it so the operator understands why the genome -- and
+            # therefore the BLAST DB and BLAST result -- count is lower than the
+            # number of enabled species. makeblastdb is local and unaffected.
+            result.warnings.append(
+                f"{failed} reference genome(s) could not be downloaded -- this is "
+                "usually NCBI/GTDB being unreachable. BLAST will be limited to the "
+                "genomes already present; minimap2 and classification are unaffected. "
+                "Re-run Prepare once connectivity is restored."
+            )
 
     def _run_build_blast_dbs(self, idx: int, result: PreparationResult, skip_existing: bool):
         from nanometa_live.core.utils.genome_manager import get_genome_manager

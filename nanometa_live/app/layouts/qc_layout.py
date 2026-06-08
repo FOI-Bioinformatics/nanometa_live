@@ -181,15 +181,15 @@ def _qc_per_sample_table():
                                             "styleConditions": [
                                                 {
                                                     "condition": "params.data && params.data.classified_rate_latest_num >= 80",
-                                                    "style": {"color": "#155724", "fontWeight": "600"},
+                                                    "style": {"color": "var(--text-success-inline)", "fontWeight": "600"},
                                                 },
                                                 {
                                                     "condition": "params.data && params.data.classified_rate_latest_num >= 50 && params.data.classified_rate_latest_num < 80",
-                                                    "style": {"color": "#664d03"},
+                                                    "style": {"color": "var(--text-warning-inline)"},
                                                 },
                                                 {
                                                     "condition": "params.data && params.data.classified_rate_latest_num > 0 && params.data.classified_rate_latest_num < 50",
-                                                    "style": {"color": "#721c24"},
+                                                    "style": {"color": "var(--text-danger-inline)"},
                                                 },
                                             ],
                                         },

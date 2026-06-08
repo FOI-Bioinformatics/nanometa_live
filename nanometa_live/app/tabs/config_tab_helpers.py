@@ -37,6 +37,12 @@ def _validate_nanopore_dir(nanopore_dir, sample_handling, processing_mode):
         find_sample_subdirs,
     )
     detected_mode, detected_reason = detect_sample_handling(nanopore_dir)
+    # Input-content checks apply to batch mode only. In realtime mode the input
+    # directory is watched via Nextflow watchPath and is legitimately empty (or
+    # without barcode subdirs) at config-save time -- files arrive during the
+    # run -- so requiring existing FASTQ/barcode dirs would wrongly block saving.
+    if processing_mode != "batch":
+        return errors
     if sample_handling == "by_barcode":
         sample_dirs = find_sample_subdirs(nanopore_dir)
         if not sample_dirs:

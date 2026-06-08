@@ -25,6 +25,32 @@ from nanometa_live.app.utils.debounce import (
 from nanometa_live.app.app import background_callback_manager
 
 
+# Tabs that show analysis results. Completion should NOT yank the operator off
+# one of these (they may be mid-investigation); it only auto-navigates from a
+# Setup tab. Kept module-level so it is unit-testable and shared.
+RESULTS_TABS = frozenset({
+    "dashboard-tab", "main-tab", "qc-tab", "classification-tab", "validation-tab",
+})
+
+
+def _format_process_progress(completed: int, running: int, failed: int) -> str:
+    """Format the header process-progress string.
+
+    Shows the cumulative completed count and, when relevant, how many processes
+    are active or have failed right now. Avoids the old ``completed/total`` form
+    that read as ``N/N`` (total == completed+running+failed, usually with
+    running==0 at the poll), which looked like "done out of done".
+    """
+    if completed <= 0 and running <= 0 and failed <= 0:
+        return ""
+    parts = [f"{completed} done"]
+    if running > 0:
+        parts.append(f"{running} active")
+    if failed > 0:
+        parts.append(f"{failed} failed")
+    return "(" + " · ".join(parts) + ")"
+
+
 def register_progress(app, backend_manager):
     @app.callback(
         [
@@ -55,18 +81,14 @@ def register_progress(app, backend_manager):
             else:
                 return "", "", {"display": "none"}
 
-        # Build progress text
+        # Build progress text. Avoid the old "completed/total" form: total was
+        # completed+running+failed, so at most poll snapshots (running==0) it
+        # read "N/N", looking like "done out of done" while both grew. Show the
+        # completed count plus how many are active/failed right now instead.
         completed = status.get("processes_complete", 0)
         running = status.get("processes_running", 0)
         failed = status.get("processes_failed", 0)
-        total = completed + running + failed
-
-        if total > 0:
-            progress_text = f"({completed}/{total} processes)"
-            if running > 0:
-                progress_text = f"({completed}/{total}, {running} active)"
-        else:
-            progress_text = ""
+        progress_text = _format_process_progress(completed, running, failed)
 
         stage_display = html.Span([
             html.I(className="bi bi-gear-fill me-1 text-primary spinning"),
@@ -161,10 +183,14 @@ def register_progress(app, backend_manager):
     )
     def auto_navigate_on_completion(status, prev_running, current_tab, config):
         """
-        Auto-navigate to Dashboard tab when analysis completes.
+        Navigate to the Dashboard when analysis completes -- but only if the
+        operator is on a Setup tab.
 
-        Detects when backend transitions from running to not running,
-        and switches to the Dashboard tab to show results.
+        Detects the running -> not-running transition. If the operator is
+        already viewing a results tab (Dashboard/Organisms/QC/Taxonomy/
+        Validation) they may be mid-investigation, so we leave their tab
+        untouched and only show the completion toast. Switching focus out from
+        under them was a reported annoyance.
         """
         if not status:
             return no_update, False, no_update
@@ -177,24 +203,22 @@ def register_progress(app, backend_manager):
         # Detect completion: was running, now not running
         # Use explicit bool() to guard against truthy non-boolean values in the store
         if bool(prev_running) and not is_running:
-            # Analysis just completed - navigate to dashboard
-            # Only if not already on dashboard
-            if current_tab != "dashboard-tab":
-                analysis_name = config.get("analysis_name", "Analysis") if config else "Analysis"
+            analysis_name = config.get("analysis_name", "Analysis") if config else "Analysis"
+            # Stay put when already viewing results; only pull the operator to
+            # the Dashboard from a Setup tab (config/watchlist/deployment).
+            if current_tab in RESULTS_TABS:
                 toast_msg = {
                     "type": "success",
                     "title": "Analysis Complete",
-                    "message": f"{analysis_name} has finished. Viewing results on Dashboard.",
-                }
-                return "dashboard-tab", new_prev_state, toast_msg
-            else:
-                # Already on dashboard, just show toast
-                toast_msg = {
-                    "type": "success",
-                    "title": "Analysis Complete",
-                    "message": "Results are now available.",
+                    "message": f"{analysis_name} has finished. Results are up to date.",
                 }
                 return no_update, new_prev_state, toast_msg
+            toast_msg = {
+                "type": "success",
+                "title": "Analysis Complete",
+                "message": f"{analysis_name} has finished. Viewing results on Dashboard.",
+            }
+            return "dashboard-tab", new_prev_state, toast_msg
 
         # No navigation needed. Only write the tracker store when the
         # running flag actually changed (e.g. transition into running);

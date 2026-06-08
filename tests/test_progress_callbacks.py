@@ -34,8 +34,18 @@ def test_stage_shown_with_counts(prog_app):
         "processes_complete": 2, "processes_running": 1, "processes_failed": 0,
     })
     assert style["display"] == "flex"
-    assert "2/3" in text and "1 active" in text
+    # Clearer than the old "2/3" form (which read N/N at most snapshots).
+    assert "2 done" in text and "1 active" in text
     assert "Kraken2" in str(stage)
+
+
+def test_stage_progress_omits_active_when_zero(prog_app):
+    fn = get_callback_fn(prog_app, "current-pipeline-stage")
+    _stage, text, _style = fn({
+        "running": True, "current_stage": "Kraken2",
+        "processes_complete": 7, "processes_running": 0, "processes_failed": 0,
+    })
+    assert text == "(7 done)"  # no misleading "7/7"
 
 
 def test_stage_running_without_stage_but_with_processes(prog_app):
@@ -49,13 +59,24 @@ def test_stage_running_without_stage_but_with_processes(prog_app):
 # auto_navigate_on_completion
 # --------------------------------------------------------------------------- #
 
-def test_auto_navigate_on_completion_switches_to_dashboard(prog_app):
+def test_auto_navigate_switches_from_setup_tab(prog_app):
+    # From a Setup tab (e.g. configuration), completion pulls the operator to
+    # the Dashboard so they see results.
     fn = get_callback_fn(prog_app, "previous-running-state")
-    tab, prev, toast = fn({"running": False}, True, "qc-tab", {"analysis_name": "Run1"})
+    tab, prev, toast = fn({"running": False}, True, "config-tab", {"analysis_name": "Run1"})
     assert tab == "dashboard-tab"
     assert prev is False
     assert toast["title"] == "Analysis Complete"
     assert "Run1" in toast["message"]
+
+
+def test_auto_navigate_stays_on_results_tab(prog_app):
+    # Operator feedback: do NOT yank focus off a results tab mid-investigation.
+    fn = get_callback_fn(prog_app, "previous-running-state")
+    tab, prev, toast = fn({"running": False}, True, "validation-tab", {})
+    assert tab is no_update
+    assert prev is False
+    assert toast["title"] == "Analysis Complete"
 
 
 def test_auto_navigate_already_on_dashboard_only_toasts(prog_app):

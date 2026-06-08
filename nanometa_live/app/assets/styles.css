@@ -8,6 +8,17 @@
     /* Color scheme preference */
     color-scheme: light dark;
 
+    /* Theme-aware inline-text colours (light defaults; overridden under
+       [data-theme="dark"]). Referenced by Python inline styles so authored
+       dark-on-light text adapts to the active theme. */
+    --text-label: #495057;
+    --text-strong: #212529;
+    --text-muted-inline: #6c757d;
+    --text-success-inline: #155724;
+    --text-warning-inline: #664d03;
+    --text-danger-inline: #721c24;
+    --text-info-inline: #0c5460;
+
     /* Status Colors - Traffic Light System */
     --status-good: #28a745;          /* Green - Safe to proceed */
     --status-good-bg: #d4edda;       /* Light green background */
@@ -240,6 +251,18 @@
     --body-bg: #16213e;
     --card-bg: #1a1a2e;
     --card-border: #2d2d5a;
+    /* Theme-aware inline-text colours. Python inline styles reference these via
+       var(--...), so dark-on-light text authored for the light theme becomes
+       legible in dark mode without per-element overrides (Dash serialises a
+       hex inline colour to rgb(), so [style*="#hex"] CSS selectors can't catch
+       it -- a variable resolved at the element is the reliable mechanism). */
+    --text-label: #c7ccd4;
+    --text-strong: #eaeaea;
+    --text-muted-inline: #9ca3af;
+    --text-success-inline: #86efac;
+    --text-warning-inline: #f6c560;
+    --text-danger-inline: #fca5a5;
+    --text-info-inline: #7dd3fc;
 }
 
 [data-theme="dark"] .nav-tabs .nav-link {
@@ -3468,6 +3491,31 @@ body {
   [data-theme="dark"] .bg-light {
     background-color: var(--card-bg) !important;
   }
+
+  /* Dark mode: legibility audit. Several class-styled text colours were
+     authored as near-black / dark-gray / dark semantic tints for the light
+     theme and stayed dark on the dark background. Map them to the light text
+     colour (or a lightened tint) so nothing is black-on-dark. */
+  [data-theme="dark"] .config-section-title,
+  [data-theme="dark"] .stage-strip-count,
+  [data-theme="dark"] .stage-strip-slot-heading,
+  [data-theme="dark"] .stat-value,
+  [data-theme="dark"] h1, [data-theme="dark"] h2, [data-theme="dark"] h3,
+  [data-theme="dark"] h4, [data-theme="dark"] h5, [data-theme="dark"] h6,
+  [data-theme="dark"] .h1, [data-theme="dark"] .h2, [data-theme="dark"] .h3,
+  [data-theme="dark"] .h4, [data-theme="dark"] .h5, [data-theme="dark"] .h6 {
+    color: var(--dark);
+  }
+
+  /* Standalone semantic text (used outside an .alert, where the surface is the
+     dark card rather than a light tint) -- lighten the dark tints. */
+  [data-theme="dark"] .text-info { color: var(--text-info-inline) !important; }
+  [data-theme="dark"] .text-success { color: var(--text-success-inline) !important; }
+  [data-theme="dark"] .text-danger { color: var(--text-danger-inline) !important; }
+  [data-theme="dark"] .text-secondary { color: #b9c0c8 !important; }
+
+  /* Stage-strip delta tints. */
+  [data-theme="dark"] .stage-strip-delta--green { color: var(--text-success-inline); }
 
   /* ---- 6. RESPONSIVE FIELD BREAKPOINTS ---- */
 

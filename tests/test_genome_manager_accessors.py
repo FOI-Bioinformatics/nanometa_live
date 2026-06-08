@@ -108,6 +108,25 @@ class TestBlastDbStatus:
         assert report["failed"][0]["taxid"] == 1280
         assert report["failed"][0]["reason"] == "bad FASTA"
 
+    def test_db_build_is_offline_safe_with_circuits_open(self, manager):
+        # Operator feedback #2: with NCBI/GTDB unreachable, local makeblastdb
+        # builds must still proceed for on-disk genomes -- the taxonomy circuit
+        # breaker only gates network downloads, never DB construction.
+        from nanometa_live.core.utils.genome_manager import GenomeDownloadManager
+        GenomeDownloadManager._host_open = {"ncbi": True, "gtdb": True}
+        try:
+            def _ok(self, taxid):
+                (manager.blast_dir / f"{taxid}.fasta.nhr").write_text("x")
+                return True, None
+            with patch("nanometa_live.core.utils.genome_manager.shutil.which",
+                       return_value="/usr/bin/makeblastdb"), \
+                    patch.object(type(manager), "_build_blast_db_with_reason", _ok):
+                report = manager.build_missing_blast_dbs_detailed(retry=True)
+            assert report["built"] == 1  # 1280 still built despite open circuits
+            assert report["failed"] == []
+        finally:
+            GenomeDownloadManager._host_open = {}
+
 
 class TestStatistics:
     def test_counts_scanned_genomes(self, manager):

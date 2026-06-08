@@ -52,21 +52,39 @@ def test_live_indicator_completed_and_standby(ind_app):
 # update_stale_data_warning
 # --------------------------------------------------------------------------- #
 
+_RUNNING = {"running": True}
+
+
 def test_stale_warning_hidden_without_config(ind_app):
     fn = get_callback_fn(ind_app, "stale-data-warning")
-    assert fn(1, None, None) == {"display": "none"}
+    assert fn(1, None, _RUNNING, None) == {"display": "none"}
 
 
 def test_stale_warning_hidden_when_recent(ind_app):
     fn = get_callback_fn(ind_app, "stale-data-warning")
     recent = datetime.datetime.now().isoformat()
-    assert fn(1, recent, {"update_interval_seconds": 10}) == {"display": "none"}
+    assert fn(1, recent, _RUNNING, {"update_interval_seconds": 10}) == {"display": "none"}
 
 
-def test_stale_warning_shown_when_old(ind_app):
+def test_stale_warning_shown_when_old_and_running(ind_app):
     fn = get_callback_fn(ind_app, "stale-data-warning")
     old = (datetime.datetime.now() - datetime.timedelta(seconds=100)).isoformat()
-    assert fn(1, old, {"update_interval_seconds": 10}) == {"display": "flex"}
+    assert fn(1, old, _RUNNING, {"update_interval_seconds": 10}) == {"display": "flex"}
+
+
+def test_stale_warning_hidden_when_completed(ind_app):
+    # Operator feedback: once the run is Complete the dataset is final, so
+    # "Data may be stale" is misleading and must not show even if old.
+    fn = get_callback_fn(ind_app, "stale-data-warning")
+    old = (datetime.datetime.now() - datetime.timedelta(seconds=100)).isoformat()
+    completed = {"running": True, "completed": True}
+    assert fn(1, old, completed, {"update_interval_seconds": 10}) == {"display": "none"}
+
+
+def test_stale_warning_hidden_when_not_running(ind_app):
+    fn = get_callback_fn(ind_app, "stale-data-warning")
+    old = (datetime.datetime.now() - datetime.timedelta(seconds=100)).isoformat()
+    assert fn(1, old, {"running": False}, {"update_interval_seconds": 10}) == {"display": "none"}
 
 
 # --------------------------------------------------------------------------- #

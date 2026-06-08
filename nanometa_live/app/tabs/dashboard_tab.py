@@ -727,6 +727,17 @@ def register_dashboard_callbacks(app: Dash):
         if not isinstance(triggered, dict):
             return [no_update] * 16
 
+        # Guard against a spurious reopen. The per-pathogen view-report buttons
+        # are pattern-matching inputs; when the alert panel refreshes (on the
+        # results fingerprint) the buttons are recreated and this callback can
+        # fire without a real click (a persisted/re-asserted n_clicks), which
+        # reopened the modal after the operator had closed it. A genuine click
+        # carries a positive value as the triggered prop; a recreate carries
+        # None/0. Bail unless it was a real click.
+        triggered_value = ctx.triggered[0].get("value") if ctx.triggered else None
+        if not triggered_value:
+            return [no_update] * 16
+
         taxid = triggered.get("taxid", 0)
 
         # Look up actual read count and abundance from Kraken2 data

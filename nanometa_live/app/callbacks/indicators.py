@@ -172,19 +172,27 @@ def register_indicators(app, backend_manager):
         [
             Input("update-interval", "n_intervals"),
             Input("last-update-time", "data"),
+            Input("backend-status", "data"),
         ],
         State("app-config", "data"),
     )
-    def update_stale_data_warning(n_intervals, last_update_time, config):
+    def update_stale_data_warning(n_intervals, last_update_time, status, config):
         """
         Show a warning if data hasn't been updated within expected timeframe.
 
-        Data is considered stale if no update has occurred within 2x the
-        configured update interval.
+        Data is considered stale only while a run is actively in progress and
+        has gone quiet (no update within 2x the configured interval). Once the
+        pipeline has completed -- or is not running at all -- the dataset is the
+        final, authoritative result, so "Data may be stale" is misleading and is
+        hidden.
         """
         import datetime
 
         if not config:
+            return {"display": "none"}
+
+        # Stale only applies to a live, still-running pipeline.
+        if not (status and status.get("running") and not status.get("completed")):
             return {"display": "none"}
 
         try:

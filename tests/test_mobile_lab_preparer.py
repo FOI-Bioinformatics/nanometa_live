@@ -85,9 +85,10 @@ class TestDataclasses:
         assert d["blast_dbs_built"] == 0
         assert d["blast_dbs_present"] == 0
         assert d["blast_dbs_failed"] == []
+        assert d["genomes_failed"] == 0
         assert set(d) == {
             "success", "stages_completed", "stages_failed", "errors",
-            "warnings", "genomes_downloaded", "blast_dbs_built",
+            "warnings", "genomes_downloaded", "genomes_failed", "blast_dbs_built",
             "blast_dbs_present", "blast_dbs_failed",
         }
 
@@ -361,6 +362,30 @@ class TestDownloadAndBlastStages:
         result = PreparationResult(success=True)
         prep._run_download_genomes(3, result, True)
         assert result.genomes_downloaded == 2  # 562 and 1280; 999 skipped
+
+    def test_download_failures_reported_as_warning(self, tmp_path, monkeypatch):
+        # Operator feedback: with NCBI/GTDB unreachable, downloads return None.
+        # The operator must be told why the genome (and BLAST) count is low.
+        class _Manager:
+            def has_genome(self, taxid):
+                return False
+            def download_genome(self, taxid, name, **kwargs):
+                return None if taxid == 1280 else f"/genomes/{taxid}.fasta"
+        monkeypatch.setattr(
+            "nanometa_live.core.utils.genome_manager.get_genome_manager",
+            lambda d, offline_mode=False: _Manager(),
+        )
+        prep = make_preparer(tmp_path)
+        monkeypatch.setattr(prep, "_get_watchlist_entries", lambda: [
+            {"taxid": 562, "name": "E. coli"},
+            {"taxid": 1280, "name": "S. aureus"},
+        ])
+        result = PreparationResult(success=True)
+        prep._run_download_genomes(2, result, True)
+        assert result.genomes_downloaded == 1
+        assert result.genomes_failed == 1
+        assert any("could not be downloaded" in w and "NCBI/GTDB" in w
+                   for w in result.warnings)
 
     def test_download_genomes_respects_cancel(self, tmp_path, monkeypatch):
         class _Manager:

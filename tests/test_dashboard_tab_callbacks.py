@@ -52,6 +52,33 @@ def ctx_trigger(triggered_id):
 # compute_overall_status_cache
 # --------------------------------------------------------------------------- #
 
+class TestViewReportModalGuard:
+    """Operator feedback #5: the View Report modal reopened on its own after
+    being closed, because the alert-panel refresh recreated the pattern-matched
+    buttons and re-fired the callback with a persisted/None click value."""
+
+    def _fn(self, app):
+        return get_callback_fn(app, "pathogen-report-modal",
+                               input_contains="pathogen-view-report")
+
+    def test_spurious_rerender_does_not_reopen(self, dash_app):
+        fn = self._fn(dash_app)
+        trig = {"type": "pathogen-view-report", "taxid": 263}
+        fake = MagicMock(triggered_id=trig, triggered=[{"value": None}])
+        with patch.object(dash_mod, "ctx", fake):
+            # view_clicks carries a persisted click from before, but the trigger
+            # value is None (recreate) -> the modal must stay closed.
+            out = fn([1], None, None, False, {}, {}, "All Samples")
+        assert out[0] is no_update
+
+    def test_close_button_closes(self, dash_app):
+        fn = self._fn(dash_app)
+        fake = MagicMock(triggered_id="pathogen-modal-close", triggered=[{"value": 1}])
+        with patch.object(dash_mod, "ctx", fake):
+            out = fn([1], 1, None, True, {}, {}, "All Samples")
+        assert out[0] is False
+
+
 def test_overall_status_cache_none_when_nothing_to_load(dash_app):
     fn = get_callback_fn(dash_app, "dashboard-overall-status-cache")
     with ctx_trigger("results-fingerprint"):

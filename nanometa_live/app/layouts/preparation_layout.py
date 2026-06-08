@@ -681,29 +681,38 @@ def _create_genome_downloads_card() -> dbc.Card:
                 ], className="text-muted"),
             ], className="mb-3"),
 
-            # Missing genomes list
-            html.Div([
-                html.H6("Missing Genomes", className="text-muted mb-2"),
-                html.Div(
-                    id="genome-missing-list",
-                    children=[
-                        html.P("No missing genomes.", className="text-muted fst-italic")
-                    ],
-                    style={"maxHeight": "420px", "overflowY": "auto"},
-                ),
-            ], className="mb-3"),
+            # Missing + downloaded genome lists, wrapped in a Loading overlay so
+            # that Refresh (and Download/Build) give a visible spinner instead of
+            # looking like nothing is happening while the stats recompute.
+            dcc.Loading(
+                id="genome-lists-loading",
+                type="default",
+                children=[
+                    # Missing genomes list
+                    html.Div([
+                        html.H6("Missing Genomes", className="text-muted mb-2"),
+                        html.Div(
+                            id="genome-missing-list",
+                            children=[
+                                html.P("No missing genomes.", className="text-muted fst-italic")
+                            ],
+                            style={"maxHeight": "420px", "overflowY": "auto"},
+                        ),
+                    ], className="mb-3"),
 
-            # Downloaded genomes list
-            html.Div([
-                html.H6("Downloaded Genomes", className="text-muted mb-2"),
-                html.Div(
-                    id="genome-downloaded-list",
-                    children=[
-                        html.P("No genomes downloaded yet.", className="text-muted fst-italic")
-                    ],
-                    style={"maxHeight": "420px", "overflowY": "auto"},
-                ),
-            ]),
+                    # Downloaded genomes list
+                    html.Div([
+                        html.H6("Downloaded Genomes", className="text-muted mb-2"),
+                        html.Div(
+                            id="genome-downloaded-list",
+                            children=[
+                                html.P("No genomes downloaded yet.", className="text-muted fst-italic")
+                            ],
+                            style={"maxHeight": "420px", "overflowY": "auto"},
+                        ),
+                    ]),
+                ],
+            ),
 
             # Dependency status and test download
             html.Div([

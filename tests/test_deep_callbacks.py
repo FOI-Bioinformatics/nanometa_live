@@ -99,7 +99,7 @@ class TestPipelineStageDisplay:
             "processes_complete": 2, "processes_running": 1, "processes_failed": 0,
         }
         _stage, text, style = fn(status)
-        assert text == "(2/3, 1 active)"
+        assert text == "(2 done · 1 active)"
         assert style["display"] == "flex"
 
 
@@ -108,19 +108,27 @@ class TestPipelineStageDisplay:
 # --------------------------------------------------------------------------
 
 class TestStaleDataWarning:
+    _RUNNING = {"running": True}
+
     def test_no_config_hidden(self, app_backend):
         fn = _fn(app_backend[0], "stale-data-warning.style")
-        assert fn(1, None, None) == {"display": "none"}
+        assert fn(1, None, self._RUNNING, None) == {"display": "none"}
 
     def test_recent_update_not_stale(self, app_backend):
         fn = _fn(app_backend[0], "stale-data-warning.style")
         now_iso = _dt.datetime.now().isoformat()
-        assert fn(1, now_iso, {"update_interval_seconds": 10}) == {"display": "none"}
+        assert fn(1, now_iso, self._RUNNING, {"update_interval_seconds": 10}) == {"display": "none"}
 
-    def test_old_update_is_stale(self, app_backend):
+    def test_old_update_is_stale_while_running(self, app_backend):
         fn = _fn(app_backend[0], "stale-data-warning.style")
         old_iso = (_dt.datetime.now() - _dt.timedelta(hours=1)).isoformat()
-        assert fn(1, old_iso, {"update_interval_seconds": 10}) == {"display": "flex"}
+        assert fn(1, old_iso, self._RUNNING, {"update_interval_seconds": 10}) == {"display": "flex"}
+
+    def test_old_update_hidden_when_completed(self, app_backend):
+        fn = _fn(app_backend[0], "stale-data-warning.style")
+        old_iso = (_dt.datetime.now() - _dt.timedelta(hours=1)).isoformat()
+        completed = {"running": True, "completed": True}
+        assert fn(1, old_iso, completed, {"update_interval_seconds": 10}) == {"display": "none"}
 
 
 class TestTrackLastUpdateTime:

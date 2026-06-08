@@ -15,9 +15,37 @@ from nanometa_live.app.tabs.config_tab_helpers import (
     build_config_from_form,
     config_form_dirty,
     _pipeline_source_from_form,
+    _validate_nanopore_dir,
 )
 
 pytestmark = pytest.mark.unit
+
+
+class TestValidateNanoporeDir:
+    """Operator feedback: a realtime config with an empty/barcodeless input
+    dir must save cleanly -- the dir is watched (watchPath) and fills during
+    the run -- while batch keeps the input-content checks."""
+
+    def test_realtime_empty_dir_no_error(self, tmp_path):
+        empty = tmp_path / "watched"
+        empty.mkdir()
+        assert _validate_nanopore_dir(str(empty), "by_barcode", "realtime") == []
+
+    def test_realtime_single_sample_empty_dir_no_error(self, tmp_path):
+        empty = tmp_path / "watched"
+        empty.mkdir()
+        assert _validate_nanopore_dir(str(empty), "single_sample", "realtime") == []
+
+    def test_batch_by_barcode_empty_dir_still_errors(self, tmp_path):
+        empty = tmp_path / "in"
+        empty.mkdir()
+        errors = _validate_nanopore_dir(str(empty), "by_barcode", "batch")
+        assert errors and "by-barcode" in errors[0].lower()
+
+    def test_missing_dir_errors_in_any_mode(self, tmp_path):
+        missing = str(tmp_path / "nope")
+        assert _validate_nanopore_dir(missing, "by_barcode", "realtime")
+        assert _validate_nanopore_dir(missing, "by_barcode", "batch")
 
 
 class TestConfigFormDirty:

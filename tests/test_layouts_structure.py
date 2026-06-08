@@ -80,3 +80,15 @@ class TestCoverageDropdownSize:
         # Taller rows + a deeper open menu so ~8-10 options are visible at once.
         assert getattr(selector, "optionHeight", None) == 45
         assert getattr(selector, "maxHeight", None) == 400
+
+
+class TestGenomeRefreshLoading:
+    """Operator feedback #3: ref-genome Refresh gave no visual feedback."""
+
+    def test_genome_lists_wrapped_in_loading(self):
+        from dash import dcc
+        loading = _find_by_id(create_watchlist_preparation_layout(), "genome-lists-loading")
+        assert isinstance(loading, dcc.Loading)
+        # The refreshed lists live inside the Loading so the spinner shows.
+        assert _find_by_id(loading, "genome-missing-list") is not None
+        assert _find_by_id(loading, "genome-downloaded-list") is not None

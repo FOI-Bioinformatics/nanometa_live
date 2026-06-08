@@ -52,6 +52,21 @@ def test_entries_with_toggle_state_shape_and_sort(manager):
     assert rows[1]["bsl_display"] == "N/A"     # no bsl on the low entry
 
 
+def test_validation_status_enabled_only_counts_active_set(manager):
+    # Operator feedback: "validated X/Y" must reflect the ENABLED set, so
+    # un-ticking a watchlist lowers Y instead of leaving a stale total.
+    manager._entries[700].validated = True   # enabled + validated
+    manager._entries[701].validated = True   # disabled + validated
+
+    all_status = manager.get_validation_status()
+    assert all_status["total"] == 2
+    assert all_status["validated"] == 2
+
+    enabled = manager.get_validation_status(enabled_only=True)
+    assert enabled["total"] == 1            # only the enabled entry counts
+    assert enabled["validated"] == 1
+
+
 def test_export_config_includes_custom_entries(manager):
     cfg = manager.export_config()
     assert cfg["enabled"] is True

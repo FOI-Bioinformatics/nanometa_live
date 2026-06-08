@@ -1535,13 +1535,20 @@ class WatchlistManager:
             logger.info("Applied %d background validation result(s)", applied)
         return applied
 
-    def get_validation_status(self) -> Dict[str, Any]:
+    def get_validation_status(self, enabled_only: bool = False) -> Dict[str, Any]:
         """
         Get summary statistics about validation status.
 
+        Args:
+            enabled_only: When True, count only entries the operator currently
+                has enabled. The "validated X/Y" badge must use this so the
+                denominator reflects the active set -- un-ticking a watchlist
+                must lower Y, not leave a stale total from previously-ticked
+                lists.
+
         Returns:
             Dict with:
-            - total: Total entries
+            - total: Total entries (enabled-only when requested)
             - validated: Number of validated entries
             - unvalidated: Number of unvalidated entries
             - ncbi_validated: Number with NCBI links
@@ -1554,7 +1561,11 @@ class WatchlistManager:
         gtdb_validated = 0
         last_validation = None
 
-        for entry in self._entries.values():
+        entries = [
+            e for e in self._entries.values()
+            if not enabled_only or getattr(e, "enabled", True)
+        ]
+        for entry in entries:
             if entry.validated:
                 validated.append(entry)
                 if entry.ncbi_link:
@@ -1568,7 +1579,7 @@ class WatchlistManager:
                 unvalidated.append(entry)
 
         return {
-            "total": len(self._entries),
+            "total": len(entries),
             "validated": len(validated),
             "unvalidated": len(unvalidated),
             "ncbi_validated": ncbi_validated,

@@ -370,7 +370,7 @@ def OrganismCard(
                         className="mb-1",
                         style={
                             "display": "inline-block",
-                            "color": "#6c757d" if is_undetected else "inherit"
+                            "color": "var(--text-muted-inline)" if is_undetected else "inherit"
                         }
                     ),
                     html.Small(
@@ -712,7 +712,7 @@ def BaseQualityCard(
                 "margin": "12px 0"
             }),
             html.Div([
-                html.I(className="bi bi-info-circle me-1", style={"color": "#6c757d"}),
+                html.I(className="bi bi-info-circle me-1", style={"color": "var(--text-muted-inline)"}),
                 html.Small(
                     "Per-position quality curve not available (Chopper QC)",
                     className="text-muted",
@@ -724,7 +724,7 @@ def BaseQualityCard(
     return html.Div([
         # Header
         html.Div([
-            html.I(className="bi bi-speedometer2 me-2", style={"color": "#495057"}),
+            html.I(className="bi bi-speedometer2 me-2", style={"color": "var(--text-label)"}),
             html.Span("Base Quality", style={"fontWeight": "600", "fontSize": "14px"}),
             html.Small(
                 " - How accurate is each letter of the DNA sequence?",
@@ -738,10 +738,10 @@ def BaseQualityCard(
             # Q20 Rate
             html.Div([
                 html.Div([
-                    html.Span("Q20+", style={"fontWeight": "600", "fontSize": "12px", "color": "#495057"}),
+                    html.Span("Q20+", style={"fontWeight": "600", "fontSize": "12px", "color": "var(--text-label)"}),
                     html.Span(
                         " (99% accurate)",
-                        style={"fontSize": "10px", "color": "#6c757d", "fontWeight": "400"}
+                        style={"fontSize": "10px", "color": "var(--text-muted-inline)", "fontWeight": "400"}
                     ),
                 ]),
                 html.Div([
@@ -787,10 +787,10 @@ def BaseQualityCard(
             # Q30 Rate
             html.Div([
                 html.Div([
-                    html.Span("Q30+", style={"fontWeight": "600", "fontSize": "12px", "color": "#495057"}),
+                    html.Span("Q30+", style={"fontWeight": "600", "fontSize": "12px", "color": "var(--text-label)"}),
                     html.Span(
                         " (99.9% accurate)",
-                        style={"fontSize": "10px", "color": "#6c757d", "fontWeight": "400"}
+                        style={"fontSize": "10px", "color": "var(--text-muted-inline)", "fontWeight": "400"}
                     ),
                 ]),
                 html.Div([
@@ -836,12 +836,12 @@ def BaseQualityCard(
             # Total Bases
             html.Div([
                 html.Div([
-                    html.Span("Total Bases", style={"fontWeight": "600", "fontSize": "12px", "color": "#495057"}),
+                    html.Span("Total Bases", style={"fontWeight": "600", "fontSize": "12px", "color": "var(--text-label)"}),
                 ]),
                 html.Div([
                     html.Span(format_bases(total_bases), style={
                         "fontSize": "28px", "fontWeight": "700",
-                        "letterSpacing": "-0.01em", "color": "#212529"
+                        "letterSpacing": "-0.01em", "color": "var(--text-strong)"
                     })
                 ]),
                 html.Small(f"{total_bases:,} bp", className="text-muted", style={"fontSize": "10px"})
@@ -955,7 +955,7 @@ def ReadStatisticsCard(
     return html.Div([
         # Header
         html.Div([
-            html.I(className="bi bi-rulers me-2", style={"color": "#495057"}),
+            html.I(className="bi bi-rulers me-2", style={"color": "var(--text-label)"}),
             html.Span("Read Statistics", style={"fontWeight": "600", "fontSize": "14px"}),
             html.Small(
                 " - How long are the DNA sequences?",
@@ -969,14 +969,14 @@ def ReadStatisticsCard(
             # Mean Length
             html.Div([
                 html.Div([
-                    html.Span("Mean Length", style={"fontWeight": "600", "fontSize": "12px", "color": "#495057"}),
+                    html.Span("Mean Length", style={"fontWeight": "600", "fontSize": "12px", "color": "var(--text-label)"}),
                 ]),
                 html.Div([
                     html.Span(f"{format_length(mean_length)}", style={
                         "fontSize": "28px", "fontWeight": "700",
-                        "letterSpacing": "-0.01em", "color": "#212529"
+                        "letterSpacing": "-0.01em", "color": "var(--text-strong)"
                     }),
-                    html.Span(" bp", style={"fontSize": "12px", "color": "#6c757d"})
+                    html.Span(" bp", style={"fontSize": "12px", "color": "var(--text-muted-inline)"})
                 ]),
                 length_comparison if length_comparison else html.Small(
                     f"{mean_length:,.0f} bp",
@@ -996,10 +996,10 @@ def ReadStatisticsCard(
             # N50
             html.Div([
                 html.Div([
-                    html.Span("N50", style={"fontWeight": "600", "fontSize": "12px", "color": "#495057"}),
+                    html.Span("N50", style={"fontWeight": "600", "fontSize": "12px", "color": "var(--text-label)"}),
                     html.Span(
                         " (length metric)",
-                        style={"fontSize": "10px", "color": "#6c757d", "fontWeight": "400"}
+                        style={"fontSize": "10px", "color": "var(--text-muted-inline)", "fontWeight": "400"}
                     ),
                 ]),
                 html.Div([
@@ -1014,7 +1014,7 @@ def ReadStatisticsCard(
                             "color": n50_colors["bg"] if n50 is not None else "#6c757d"
                         }
                     ),
-                    html.Span(" bp", style={"fontSize": "12px", "color": "#6c757d"}) if n50 is not None else None
+                    html.Span(" bp", style={"fontSize": "12px", "color": "var(--text-muted-inline)"}) if n50 is not None else None
                 ]),
                 html.Small(
                     ("Good" if n50 >= 2000 else "Fair" if n50 >= 1000 else "Short")
@@ -1038,7 +1038,7 @@ def ReadStatisticsCard(
             # GC Content
             html.Div([
                 html.Div([
-                    html.Span("GC Content", style={"fontWeight": "600", "fontSize": "12px", "color": "#495057"}),
+                    html.Span("GC Content", style={"fontWeight": "600", "fontSize": "12px", "color": "var(--text-label)"}),
                 ]),
                 html.Div([
                     html.I(className=f"bi bi-{gc_colors['icon']} me-1",
