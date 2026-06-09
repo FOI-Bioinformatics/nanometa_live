@@ -382,6 +382,204 @@ def build_detection_meta(
     return html.Div(items, className="small")
 
 
+def _report_error_payload(taxid: Any, err: Exception) -> List[Any]:
+    """Modal payload shown when the report body could not be assembled.
+
+    The View Report modal must still open on a genuine click; a silent
+    callback exception would leave the operator looking at an unchanged page,
+    indistinguishable from a hung app. This returns an open modal that names
+    the organism and states the failure instead of raising.
+    """
+    return [
+        True,                                   # is_open
+        f"TaxID {taxid}",                       # name
+        "",                                     # common_name
+        "Unknown",                              # category
+        "Unknown",                              # bsl
+        "N/A",                                  # reads
+        "N/A",                                  # abundance
+        "Unknown",                              # confidence
+        str(taxid),                             # taxid
+        "Review classification results manually.",  # action
+        "secondary",                            # alert color
+        f"The full pathogen report could not be built: {err}",  # notes
+        "",                                     # references
+        html.Div([
+            html.I(className="bi bi-exclamation-triangle me-2"),
+            "Report unavailable",
+        ], className="alert alert-warning text-center py-2"),    # threat banner
+        "",                                     # detection meta
+        {"taxid": taxid},                       # store data
+    ]
+
+
+def build_report_payload(taxid: Any, config: Dict[str, Any],
+                         selected_sample: Optional[str]) -> List[Any]:
+    """Assemble the 16 outputs for the pathogen View Report modal.
+
+    Pure data/component assembly extracted from the ``handle_view_report``
+    callback so the build path is unit-testable and wrapped in a single
+    ``try/except``: a genuine click always opens the modal with either the
+    full report or a legible error body, never a silent 500.
+    """
+    try:
+        return _build_report_payload_inner(taxid, config, selected_sample)
+    except Exception as err:  # noqa: BLE001 - last-resort UI guard
+        logger.exception("build_report_payload failed for taxid %s", taxid)
+        return _report_error_payload(taxid, err)
+
+
+def _lookup_organism_reads(taxid: Any, config: Dict[str, Any],
+                           selected_sample: Optional[str]) -> Dict[str, Any]:
+    """Read count / abundance / name / rank for ``taxid`` from Kraken2 data."""
+    out = {"reads": "N/A", "reads_int": None, "abundance": "N/A",
+           "name": None, "rank": None}
+    try:
+        main_dir = (config.get("results_output_directory", "")
+                    or config.get("main_dir", "")) if config else ""
+        if main_dir:
+            kraken_df = load_kraken_data(main_dir, selected_sample)
+            if not kraken_df.empty and taxid:
+                match = kraken_df[kraken_df["taxid"] == int(taxid)]
+                if not match.empty:
+                    row = match.iloc[0]
+                    out["reads_int"] = int(row.get('reads', 0))
+                    out["reads"] = f"{out['reads_int']:,}"
+                    out["abundance"] = f"{row.get('%', 0):.1f}%"
+                    out["name"] = str(row.get("name", "")).strip()
+                    out["rank"] = str(row.get("rank", ""))
+    except Exception as e:
+        logger.debug("Kraken2 lookup for taxid %s: %s", taxid, e)
+    return out
+
+
+def _resolve_report_pathogen(taxid: Any):
+    """Resolve ``taxid`` to a pathogen record, NCBI taxid, and watchlist entry.
+
+    Returns ``(pathogen, ncbi_taxid, wl_entry)``; ``pathogen`` may be a built-in
+    record, a watchlist-derived pseudo-record, or None.
+    """
+    from nanometa_live.core.utils.pathogen_database import get_pathogen_by_taxid
+    from nanometa_live.core.taxonomy.taxid_mapping import get_mapping_collection
+
+    pathogen = get_pathogen_by_taxid(taxid) if taxid else None
+    ncbi_taxid = taxid
+
+    if not pathogen and taxid:
+        mapping_collection = get_mapping_collection()
+        if mapping_collection:
+            for mapped_ncbi_taxid, mapping in mapping_collection.mappings.items():
+                if mapping.db_taxid == taxid:
+                    ncbi_taxid = mapped_ncbi_taxid
+                    pathogen = get_pathogen_by_taxid(ncbi_taxid)
+                    if pathogen:
+                        break
+
+    wl_entry = None
+    try:
+        active_entries = get_watchlist_manager().get_active_entries()
+        wl_entry = active_entries.get(ncbi_taxid) or active_entries.get(taxid)
+        if wl_entry is None and isinstance(taxid, int):
+            for e in active_entries.values():
+                if getattr(e, "db_taxid", None) == taxid:
+                    wl_entry = e
+                    break
+    except Exception as e:
+        logger.debug("Watchlist enrichment lookup failed: %s", e)
+
+    if not pathogen and wl_entry is not None:
+        from types import SimpleNamespace
+        pathogen = SimpleNamespace(
+            name=wl_entry.name,
+            common_name=wl_entry.common_name or "",
+            threat_level=wl_entry.threat_level,
+            bsl=wl_entry.bsl_level,
+            category=wl_entry.category or "Watchlist",
+            notes=wl_entry.notes or "",
+            action_required=wl_entry.action_required or "Follow laboratory protocols",
+        )
+    return pathogen, ncbi_taxid, wl_entry
+
+
+def _unwatched_payload(taxid, ncbi_taxid, reads, detected_at) -> List[Any]:
+    """Modal payload for an organism that is not on any active watchlist."""
+    display_name = reads["name"] or f"TaxID: {taxid}"
+    return [
+        True, display_name, "Not in pathogen watchlist",
+        reads["rank"] or "Unknown", "Unknown", reads["reads"], reads["abundance"],
+        compute_detection_confidence(reads["reads_int"]), str(taxid),
+        "Follow standard laboratory biosafety protocols", "secondary",
+        "This organism is not in any active watchlist. Review classification results for context.",
+        build_reference_links(ncbi_taxid=ncbi_taxid),
+        html.Div([
+            html.I(className="bi bi-info-circle me-2"), "Not on watchlist",
+        ], className="alert alert-secondary text-center py-2"),
+        build_detection_meta(detected_at=detected_at, on_watchlist=False),
+        {"taxid": taxid, "ncbi_taxid": ncbi_taxid},
+    ]
+
+
+def _pathogen_payload(pathogen, taxid, ncbi_taxid, wl_entry, reads, detected_at) -> List[Any]:
+    """Modal payload for a watchlist/known pathogen, with threat styling."""
+    threat_level = pathogen.threat_level
+    if hasattr(threat_level, 'value'):
+        threat_level = threat_level.value
+    threat_colors = {
+        "critical": ("danger", "#8b0000", "bi-exclamation-octagon-fill"),
+        "high": ("warning", "#dc3545", "bi-exclamation-triangle-fill"),
+        "moderate": ("info", "#fd7e14", "bi-eye-fill"),
+        "low": ("secondary", "#17a2b8", "bi-info-circle"),
+    }
+    alert_color, banner_color, banner_icon = threat_colors.get(
+        threat_level, ("secondary", "#6c757d", "bi-question-circle")
+    )
+    icon_el = html.I(className=f"bi {banner_icon} me-2", style={"fontSize": "20px"})
+    threat_banner = html.Div([
+        icon_el,
+        html.Strong(f"{threat_level.upper()} THREAT LEVEL", style={"fontSize": "16px"}),
+    ], className=f"alert alert-{alert_color} text-center py-2 mb-0",
+       style={"borderLeft": f"5px solid {banner_color}"})
+
+    bsl_val = pathogen.bsl
+    if hasattr(bsl_val, 'value'):
+        bsl_val = bsl_val.value
+    bsl_text = f"BSL-{bsl_val}" if bsl_val else "BSL Unknown"
+
+    references = build_reference_links(
+        ncbi_taxid=ncbi_taxid,
+        ncbi_link=getattr(wl_entry, "ncbi_link", None),
+        gtdb_link=getattr(wl_entry, "gtdb_link", None),
+    )
+    detection_meta = build_detection_meta(
+        detected_at=detected_at,
+        taxonomy_validated=bool(getattr(wl_entry, "validated", False)),
+        validation_date=getattr(wl_entry, "validation_date", None),
+        lineage=getattr(wl_entry, "lineage", None),
+        gtdb_taxonomy=getattr(wl_entry, "gtdb_taxonomy", None),
+        on_watchlist=wl_entry is not None,
+    )
+    return [
+        True, pathogen.name, pathogen.common_name or "No common name",
+        pathogen.category or "Uncategorized", bsl_text, reads["reads"],
+        reads["abundance"], compute_detection_confidence(reads["reads_int"]),
+        str(ncbi_taxid), pathogen.action_required, alert_color,
+        pathogen.notes or "No additional notes available.", references,
+        threat_banner, detection_meta,
+        {"taxid": taxid, "name": pathogen.name, "threat_level": threat_level},
+    ]
+
+
+def _build_report_payload_inner(taxid: Any, config: Dict[str, Any],
+                                selected_sample: Optional[str]) -> List[Any]:
+    """Inner builder for :func:`build_report_payload` (may raise)."""
+    reads = _lookup_organism_reads(taxid, config, selected_sample)
+    pathogen, ncbi_taxid, wl_entry = _resolve_report_pathogen(taxid)
+    detected_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+    if not pathogen:
+        return _unwatched_payload(taxid, ncbi_taxid, reads, detected_at)
+    return _pathogen_payload(pathogen, taxid, ncbi_taxid, wl_entry, reads, detected_at)
+
+
 # ----------------------------------------------------------------------------
 # Clinical verdict-banner decision logic (Zone 1).
 #

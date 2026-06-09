@@ -66,14 +66,15 @@ class TestLoadValidationData:
         fn = self._fn(validation_app)
         with _vt_ctx("results-fingerprint"):
             out = fn({"fp": "a"}, None, 0, "cumulative", None,
-                     {"blast_validation": False})
+                     {"blast_validation": False}, None)
         assert out["results"] == []
         assert "disabled" in out["message"].lower()
+        assert out["status"]["code"] == "disabled"
 
     def test_no_config_returns_no_configuration(self, validation_app):
         fn = self._fn(validation_app)
         with _vt_ctx("results-fingerprint"):
-            out = fn({"fp": "a"}, None, 0, "cumulative", None, None)
+            out = fn({"fp": "a"}, None, 0, "cumulative", None, None, None)
         assert out["message"] == "No configuration loaded"
 
     def test_missing_results_dir(self, validation_app):
@@ -81,13 +82,14 @@ class TestLoadValidationData:
         with _vt_ctx("results-fingerprint"):
             out = fn({"fp": "a"}, None, 0, "cumulative", None,
                      {"blast_validation": True,
-                      "results_output_directory": "/no/such/dir"})
-        assert out["message"] == "Results directory not found"
+                      "results_output_directory": "/no/such/dir"}, None)
+        assert "Results directory not found" in out["message"]
+        assert out["status"]["code"] == "no_results_dir"
 
     def test_populated_returns_all_methods(self, validation_app, enabled_config):
         fn = self._fn(validation_app)
         with _vt_ctx("results-fingerprint"):
-            out = fn({"fp": "a"}, None, 0, "cumulative", None, enabled_config)
+            out = fn({"fp": "a"}, None, 0, "cumulative", None, enabled_config, None)
         assert out["message"] is None
         # 6 ValidationResults from the aggregate: both -> 2 (taxid 1773),
         # blast x2 (1280, 562), minimap2 x2 (1639, plus barcode05 TUL4 taxid 263).
@@ -98,14 +100,14 @@ class TestLoadValidationData:
     def test_sample_filter_narrows(self, validation_app, enabled_config):
         fn = self._fn(validation_app)
         with _vt_ctx("results-fingerprint"):
-            out = fn({"fp": "a"}, "barcode02", 0, "cumulative", None, enabled_config)
+            out = fn({"fp": "a"}, "barcode02", 0, "cumulative", None, enabled_config, None)
         assert out["results"], "barcode02 should have at least one result"
         assert all(r["sample_id"] == "barcode02" for r in out["results"])
 
     def test_batch_view_routes_through_batch_id(self, validation_app, enabled_config):
         fn = self._fn(validation_app)
         with _vt_ctx("results-fingerprint"):
-            out = fn({"fp": "a"}, None, 0, "batch", "1", enabled_config)
+            out = fn({"fp": "a"}, None, 0, "batch", "1", enabled_config, None)
         # batch 1 only carries taxid 1773 (blast + minimap2)
         assert out["results"]
         assert all(r["taxid"] == 1773 for r in out["results"])
@@ -118,7 +120,7 @@ class TestLoadValidationData:
         mark_rendered("load_validation_data", fp)
         with _vt_ctx("update-interval"):
             with pytest.raises(PreventUpdate):
-                fn(fp, None, 5, "cumulative", None, enabled_config)
+                fn(fp, None, 5, "cumulative", None, enabled_config, None)
 
 
 # ---------------------------------------------------------------------------

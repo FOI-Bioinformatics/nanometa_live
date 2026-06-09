@@ -35,6 +35,10 @@ from nanometa_live.app.components.coverage_plots import (
     create_empty_coverage_figure,
 )
 from nanometa_live.app.utils.callback_helpers import log_callback_error
+from nanometa_live.app.tabs.validation_status_helpers import (
+    build_validation_status_payload,
+    empty_state_view,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -108,11 +112,14 @@ def register_validation_callbacks(app: Dash):
             Input("validation-view-mode", "value"),
             Input("validation-batch-selector", "value"),
         ],
-        State("app-config", "data"),
+        [
+            State("app-config", "data"),
+            State("backend-status", "data"),
+        ],
         prevent_initial_call=True,
     )
     def load_validation_data(_fingerprint, selected_sample, _n_intervals,
-                             view_mode, batch_value, config):
+                             view_mode, batch_value, config, backend_status):
         """Load validation data filtered by the selected sample.
 
         The Validation tab honours the same sample selector as the
@@ -138,27 +145,26 @@ def register_validation_callbacks(app: Dash):
                 return {"results": [], "summary": {}, "message": "No configuration loaded",
                         "selected_sample": selected_sample}
 
-            if not config.get("blast_validation", False):
-                return {
-                    "results": [],
-                    "summary": {},
-                    "message": "Validation is disabled. Enable it in Configuration tab.",
-                    "selected_sample": selected_sample,
-                }
-
             results_dir = config.get("results_output_directory") or config.get("main_dir", "")
-            if not results_dir or not os.path.isdir(results_dir):
-                return {"results": [], "summary": {}, "message": "Results directory not found",
-                        "selected_sample": selected_sample}
+            results_dir_ok = bool(results_dir and os.path.isdir(results_dir))
+
+            # No-results diagnostic: explain *why* (disabled / no organisms /
+            # missing databases / run in progress) instead of a bare wait
+            # message. Cheap to compute and only reached on the empty paths.
+            def _empty():
+                status = build_validation_status_payload(
+                    config, results_dir_ok, backend_status,
+                    has_results=False, results_count=0,
+                )
+                return {"results": [], "summary": {}, "message": status["message"],
+                        "status": status, "selected_sample": selected_sample}
+
+            if not config.get("blast_validation", False) or not results_dir_ok:
+                return _empty()
 
             parser = BlastValidationParser(results_dir)
             if not parser.has_validation_data():
-                return {
-                    "results": [],
-                    "summary": {},
-                    "message": "Waiting for validation results from pipeline...",
-                    "selected_sample": selected_sample,
-                }
+                return _empty()
 
             results = parser.get_validation_results(batch_id=batch_id)
             # The cumulative summary is run-wide; in single-batch view the
@@ -224,13 +230,19 @@ def register_validation_callbacks(app: Dash):
     def update_blast_summary(data):
         """Render summary card for BLAST results."""
         if not data or not data.get("results"):
+            status = data.get("status") if data else None
+            if status:
+                children = [html.I(className="bi bi-info-circle me-2"),
+                            html.Strong(status.get("headline", ""))]
+                detail = status.get("detail")
+                if detail:
+                    children.append(html.Div(detail, className="small mt-1"))
+                return dbc.Alert(children, color=status.get("severity", "info"))
             message = data.get("message") if data else None
             if not message:
                 return ""
-            return dbc.Alert([
-                html.I(className="bi bi-info-circle me-2"),
-                html.Span(message),
-            ], color="info", className="text-center")
+            return dbc.Alert([html.I(className="bi bi-info-circle me-2"), html.Span(message)],
+                             color="info", className="text-center")
 
         blast_results = _filter_by_method(data["results"], "blast")
         counts = _compute_summary(blast_results)
@@ -267,22 +279,10 @@ def register_validation_callbacks(app: Dash):
             ), hidden
 
         if not data.get("results"):
-            message = data.get("message") or "No BLAST validation results available."
-            # Distinguish disabled vs waiting vs no data
-            if "disabled" in message.lower():
-                title = "Validation Disabled"
-                icon = "bi-shield-x"
-            elif "waiting" in message.lower():
-                title = "Awaiting Results"
-                icon = "bi-hourglass-split"
-            else:
-                title = "No Validation Results"
-                icon = "bi-shield-check"
-            return visible, EmptyStateMessage(
-                title=title,
-                message=message,
-                icon=icon,
-            ), hidden
+            status = data.get("status") or {}
+            message = status.get("message") or data.get("message") or "No BLAST validation results available."
+            title, icon = empty_state_view(status, message)
+            return visible, EmptyStateMessage(title=title, message=message, icon=icon), hidden
 
         blast_results = _filter_by_method(data["results"], "blast")
         if blast_results:
@@ -537,10 +537,8 @@ def register_validation_callbacks(app: Dash):
             message = data.get("message") if data else None
             if not message:
                 return ""
-            return dbc.Alert([
-                html.I(className="bi bi-info-circle me-2"),
-                html.Span(message),
-            ], color="info", className="text-center")
+            return dbc.Alert([html.I(className="bi bi-info-circle me-2"), html.Span(message)],
+                             color="info", className="text-center")
 
         cov_results = _filter_by_method(data["results"], "minimap2")
         if not cov_results:

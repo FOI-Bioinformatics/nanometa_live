@@ -88,7 +88,6 @@
     "nanometa_live/app/tabs/dashboard_helpers.py::_make_banner_content",
     "nanometa_live/app/tabs/dashboard_tab.py",
     "nanometa_live/app/tabs/dashboard_tab.py::register_dashboard_callbacks",
-    "nanometa_live/app/tabs/dashboard_tab.py::register_dashboard_callbacks.handle_view_report",
     "nanometa_live/app/tabs/dashboard_tab.py::register_dashboard_callbacks.update_verdict_banner",
     "nanometa_live/app/tabs/main_tab.py",
     "nanometa_live/app/tabs/main_tab.py::register_main_callbacks",

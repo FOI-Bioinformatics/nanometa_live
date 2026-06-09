@@ -80,6 +80,7 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     build_reference_links,
     compute_detection_confidence,
     build_detection_meta,
+    build_report_payload,
 )
 
 logger = logging.getLogger(__name__)
@@ -184,8 +185,17 @@ def register_dashboard_callbacks(app: Dash):
                               config, status, overall_status, validation_data,
                               available_samples):
         """Update the clinical verdict banner based on analysis status and pathogen screening."""
-        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("dashboard_verdict_banner", _fingerprint):
-                raise PreventUpdate
+        # While the pipeline is running we must re-render every interval tick so
+        # the wall-clock auto-stop countdown and elapsed time keep advancing. The
+        # fingerprint stops changing once Kraken2 finishes (~5 min) but the run
+        # continues through validation, so a fingerprint-only debounce would
+        # freeze the countdown. The redundant-render short-circuit therefore
+        # applies only when the pipeline is not actively running.
+        pipeline_running_now = bool(status and status.get("running"))
+        if (get_trigger_type(ctx) == "interval"
+                and not pipeline_running_now
+                and interval_render_is_redundant("dashboard_verdict_banner", _fingerprint)):
+            raise PreventUpdate
         mark_rendered("dashboard_verdict_banner", _fingerprint)
 
         pipeline_running = status.get("running", False) if status else False
@@ -740,184 +750,11 @@ def register_dashboard_callbacks(app: Dash):
 
         taxid = triggered.get("taxid", 0)
 
-        # Look up actual read count and abundance from Kraken2 data
-        from nanometa_live.core.utils.classification_loaders import load_kraken_data
-        organism_reads = "N/A"
-        organism_reads_int = None
-        organism_abundance = "N/A"
-        organism_name = None
-        organism_rank = None
-        try:
-            main_dir = (config.get("results_output_directory", "") or config.get("main_dir", "")) if config else ""
-            if main_dir:
-                kraken_df = load_kraken_data(main_dir, selected_sample)
-                if not kraken_df.empty and taxid:
-                    match = kraken_df[kraken_df["taxid"] == int(taxid)]
-                    if not match.empty:
-                        row = match.iloc[0]
-                        organism_reads_int = int(row.get('reads', 0))
-                        organism_reads = f"{organism_reads_int:,}"
-                        pct = row.get("%", 0)
-                        organism_abundance = f"{pct:.1f}%"
-                        organism_name = str(row.get("name", "")).strip()
-                        organism_rank = str(row.get("rank", ""))
-        except Exception as e:
-            logger.debug(f"Kraken2 lookup for taxid {taxid}: {e}")
-
-        # Get pathogen details - try multiple lookup strategies
-        from nanometa_live.core.utils.pathogen_database import get_pathogen_by_taxid
-        from nanometa_live.core.taxonomy.taxid_mapping import get_mapping_collection
-
-        pathogen = None
-        ncbi_taxid = taxid  # May be NCBI or Kraken2 taxid
-
-        # Strategy 1: Direct lookup by taxid (works if taxid is NCBI taxid)
-        if taxid:
-            pathogen = get_pathogen_by_taxid(taxid)
-
-        # Strategy 2: If not found, try mapping Kraken2 taxid -> NCBI taxid
-        if not pathogen and taxid:
-            mapping_collection = get_mapping_collection()
-            if mapping_collection:
-                # Build reverse mapping: db_taxid -> ncbi_taxid
-                for mapped_ncbi_taxid, mapping in mapping_collection.mappings.items():
-                    if mapping.db_taxid == taxid:
-                        # Found the mapping - try to look up by NCBI taxid
-                        ncbi_taxid = mapped_ncbi_taxid
-                        pathogen = get_pathogen_by_taxid(ncbi_taxid)
-                        if pathogen:
-                            logger.debug(f"Found pathogen via taxid mapping: Kraken2 {taxid} -> NCBI {ncbi_taxid}")
-                            break
-
-        # Shared watchlist-entry lookup: carries the resolved reference links
-        # (ncbi_link / gtdb_link), lineage, and taxonomy-ID validation status
-        # used to enrich the report regardless of which pathogen source above
-        # matched. Matched by NCBI taxid, the raw (db) taxid, or db_taxid.
-        wl_entry = None
-        try:
-            active_entries = get_watchlist_manager().get_active_entries()
-            wl_entry = active_entries.get(ncbi_taxid) or active_entries.get(taxid)
-            if wl_entry is None and isinstance(taxid, int):
-                for e in active_entries.values():
-                    if getattr(e, "db_taxid", None) == taxid:
-                        wl_entry = e
-                        break
-        except Exception as e:
-            logger.debug(f"Watchlist enrichment lookup failed: {e}")
-
-        # Strategy 3: build a pseudo-pathogen from the watchlist entry when the
-        # built-in database had no hit.
-        if not pathogen and wl_entry is not None:
-            from types import SimpleNamespace
-            pathogen = SimpleNamespace(
-                name=wl_entry.name,
-                common_name=wl_entry.common_name or "",
-                threat_level=wl_entry.threat_level,
-                bsl=wl_entry.bsl_level,
-                category=wl_entry.category or "Watchlist",
-                notes=wl_entry.notes or "",
-                action_required=wl_entry.action_required or "Follow laboratory protocols"
-            )
-            logger.debug(f"Found organism in watchlist: {wl_entry.name}")
-
-        detected_at = datetime.now().strftime("%Y-%m-%d %H:%M")
-
-        if not pathogen:
-            # Show modal with actual Kraken2 data when available
-            display_name = organism_name or f"TaxID: {taxid}"
-            return [
-                True,  # is_open
-                display_name,  # name
-                "Not in pathogen watchlist",  # common_name
-                organism_rank or "Unknown",  # category
-                "Unknown",  # bsl
-                organism_reads,  # reads
-                organism_abundance,  # abundance
-                compute_detection_confidence(organism_reads_int),  # confidence
-                str(taxid),  # taxid
-                "Follow standard laboratory biosafety protocols",  # action
-                "secondary",  # alert color
-                "This organism is not in any active watchlist. Review classification results for context.",  # notes
-                build_reference_links(ncbi_taxid=ncbi_taxid),  # references
-                html.Div([
-                    html.I(className="bi bi-info-circle me-2"),
-                    "Not on watchlist"
-                ], className="alert alert-secondary text-center py-2"),  # threat banner
-                build_detection_meta(detected_at=detected_at, on_watchlist=False),  # meta
-                {"taxid": taxid, "ncbi_taxid": ncbi_taxid}  # store data
-            ]
-
-        # Determine threat level styling
-        threat_level = pathogen.threat_level
-        if hasattr(threat_level, 'value'):
-            threat_level = threat_level.value
-        threat_colors = {
-            "critical": ("danger", "#8b0000", "bi-exclamation-octagon-fill"),
-            "high": ("warning", "#dc3545", "bi-exclamation-triangle-fill"),
-            "moderate": ("info", "#fd7e14", "bi-eye-fill"),
-            "low": ("secondary", "#17a2b8", "bi-info-circle")
-        }
-        alert_color, banner_color, banner_icon = threat_colors.get(
-            threat_level, ("secondary", "#6c757d", "bi-question-circle")
-        )
-
-        # Create threat banner icon element
-        if banner_icon.startswith("bi-"):
-            icon_el = html.I(className=f"bi {banner_icon} me-2", style={"fontSize": "20px"})
-        else:
-            icon_el = html.Span(banner_icon, className="me-2", style={"fontSize": "1.5em"})
-
-        # Create threat banner
-        threat_banner = html.Div([
-            icon_el,
-            html.Strong(f"{threat_level.upper()} THREAT LEVEL", style={"fontSize": "16px"})
-        ], className=f"alert alert-{alert_color} text-center py-2 mb-0",
-           style={"borderLeft": f"5px solid {banner_color}"})
-
-        # BSL badge text
-        bsl_val = pathogen.bsl
-        if hasattr(bsl_val, 'value'):
-            bsl_val = bsl_val.value
-        bsl_text = f"BSL-{bsl_val}" if bsl_val else "BSL Unknown"
-
-        # Confidence reflects read support for the call (see helper docstring).
-        confidence = compute_detection_confidence(organism_reads_int)
-
-        # References + lineage drawn from the resolved watchlist entry when
-        # present, so a GTDB run gets a working GTDB link instead of a
-        # possibly-wrong NCBI one.
-        references = build_reference_links(
-            ncbi_taxid=ncbi_taxid,
-            ncbi_link=getattr(wl_entry, "ncbi_link", None),
-            gtdb_link=getattr(wl_entry, "gtdb_link", None),
-        )
-        detection_meta = build_detection_meta(
-            detected_at=detected_at,
-            taxonomy_validated=bool(getattr(wl_entry, "validated", False)),
-            validation_date=getattr(wl_entry, "validation_date", None),
-            lineage=getattr(wl_entry, "lineage", None),
-            gtdb_taxonomy=getattr(wl_entry, "gtdb_taxonomy", None),
-            on_watchlist=wl_entry is not None,
-        )
-
-        return [
-            True,  # is_open
-            pathogen.name,  # name (scientific)
-            pathogen.common_name or "No common name",  # common_name
-            pathogen.category or "Uncategorized",  # category
-            bsl_text,  # bsl
-            organism_reads,  # reads
-            organism_abundance,  # abundance
-            confidence,  # confidence
-            str(ncbi_taxid),  # taxid
-            pathogen.action_required,  # action
-            alert_color,  # alert color
-            pathogen.notes or "No additional notes available.",  # notes
-            references,  # references
-            threat_banner,  # threat banner
-            detection_meta,  # meta
-            {"taxid": taxid, "name": pathogen.name, "threat_level": threat_level}  # store data
-        ]
+        # All report-body assembly (Kraken lookup, pathogen/watchlist resolution,
+        # reference links, threat banner) lives in build_report_payload, which is
+        # wrapped in try/except so a genuine click always opens the modal -- with
+        # the full report or a legible error -- instead of failing to a 500.
+        return build_report_payload(taxid, config, selected_sample)
 
     @app.callback(
         Output("notification-trigger", "data", allow_duplicate=True),
