@@ -171,10 +171,88 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Complete UI rewrite using Dash Bootstrap Components
 - Configuration management via GUI instead of config files only
 
-## [0.1.0] - 2024-01-01
+## [0.4.3] - 2024-01-22
+
+### Fixed
+- Remote access to the GUI
+
+### Changed
+- Installation and README documentation updates
+
+## [0.4.2] - 2024-01-18
 
 ### Added
-- Initial release
-- Basic Kraken2 result visualization
-- Simple species-of-interest tracking
-- Command-line configuration
+- In-GUI editing of BLAST cutoffs, the update frequency, the danger-colour threshold, and the dashboard headline
+
+### Changed
+- Snakefile, `config.yaml`, and `nanometa_gui.py` updates
+
+## [0.4.1] - 2023-11-23
+
+### Fixed
+- Configuration bugs
+- Error handling differing file timestamps
+
+## [0.4.0] - 2023-11-19
+
+### Added
+- Support for external Kraken2 databases, with a bundled YAML of downloadable databases
+- Buttons to save the Kraken2 report and species lists from the GUI
+- Config variables editable via `nanometa-new`
+- Requirement that the data path be set explicitly
+- Demo dataset and an Installation guide
+
+### Changed
+- More robust config reading in the Snakefile
+- Top-aligned main-tab sections
+
+## [0.3.2] - 2023-10-04
+
+### Fixed
+- Dependency specifications
+
+## [0.3.1] - 2023-10-01
+
+### Added
+- GTDB filtering
+- Local-file processing (`process_local_files`)
+- Batch and real-time processing modes
+
+### Changed
+- BLAST handling refactored
+
+## [0.3.0] - 2023-09-28
+
+### Added
+- Temporary-file cleanup in the wrapper script (with a clean exit when the config file is missing or unparseable)
+- Type hints on helper functions
+- NCBI Datasets added to the conda environment
+
+### Changed
+- Major reorganisation of functions into modules
+- Global `__version__` definition
+- Renamed "live" to "runner"
+- More flexible config handling
+
+## [0.2.0] - 2023-09-07
+
+### Added
+- GitHub Actions continuous integration
+
+### Changed
+- Refactored the `new` and `sim` entry points
+- Introduced the in-code `__version__` value
+
+## [0.1.1] - 2023-06-29
+
+### Added
+- `-h` / `--help` for the command-line entry points
+- `install_requires` in `setup.py`
+
+### Changed
+- Renamed the pipeline script to `nanometa-pipe`
+
+## [0.1.0] - 2023-06-27
+
+### Added
+- Initial release: real-time Kraken2 result visualisation, species-of-interest tracking, and command-line configuration
