@@ -6,7 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-09
+
 ### Added
+- BLAST-database build diagnostics: an honest built / already-present / failed breakdown with `makeblastdb` failure reasons, one automatic retry, and a launch-time guarantee that every validation taxid with a genome has a BLAST database
+- Amplicon-aware coverage detection for multi-copy 16S and single-copy genes, with covered-region and local-depth metrics plus a cross-species 16S guard; TUL4 amplicon test fixture
+- Validation result ordering: confirmed/validated detections sorted to the top of the BLAST cards, coverage cards, and stats table
+- Reference-genome download-failure reporting, surfacing NCBI/GTDB-unreachable as the cause of a low genome/BLAST-database count
+- Loading spinner on the reference-genome Refresh action
+- Code-size ratchet (`scripts/check_code_size.py`) enforced in CI
 - Canonical waterfall loading pattern (`canonical_loaders.py`): tries pre-computed JSON first, falls back to raw file parsing
 - Manifest-based sample detection in `sample_detector.py` with glob fallback for backward compatibility
 - `kraken2_helpers.py` module extracted from `classification_tab.py` (375 LOC of Kraken2-specific logic)
@@ -33,6 +41,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - "Remove All" button for bulk genome deletion with confirmation dialog
 
 ### Changed
+- `pathogen_genomes.json` written to `pipeline_input/` instead of `validation/` so it survives the archive/rerun sweep (was causing a launch crash)
+- QC stage-strip first box repurposed to "Reads Processed" in seqkit/chopper mode instead of showing N/A
+- Coverage species dropdown enlarged and always labelled with a resolved species name
+- Pipeline completion no longer switches away from a results tab the operator is viewing (only auto-navigates from a Setup tab)
+- Header process counter shows "N done · M active" instead of a misleading "N/N"
+- "Verify against DB" validation count reflects the enabled watchlist set
+- Full dark-mode legibility pass: theme-aware inline-text colour variables and per-class `[data-theme="dark"]` overrides
+- README, Installation, and tutorial tab references updated for the v2.0 tab layout (Watchlist & Preparation merged into one tab; Deployment tab added); Nextflow floor corrected to 26.04.0 and Python requirement to 3.11+
 - `data_loaders.py` refactored from monolithic module (1,630 LOC) to re-export hub backed by `classification_loaders.py`, `qc_loaders.py`, `validation_loaders.py`, and `loader_utils.py`
 - `sample_detector.py` updated to manifest-based detection with glob fallback
 - `nanometa-sim` deprecated in favour of nanorunner (stub prints notice and exits)
@@ -46,6 +62,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `_is_file_stable()` replaced blocking sleep with mtime-based check (non-blocking)
 
 ### Fixed
+- Realtime config save rejecting an empty/watched input directory (by-barcode input-content checks now apply to batch mode only)
+- Pathogen "View Report" modal reopening itself on a data refresh (pattern-matched button recreation re-firing the callback)
+- Spurious "Validating 1/1" toast when merely selecting a watchlist
+- "Data may be stale" badge persisting after a run completed
+- BLAST validation empty while minimap2 worked, traced to missing BLAST databases for downloaded genomes
 - Genome accession column showing placeholders (`virus_taxid_*`, `taxid_*`, `discovered`) instead of real NCBI accessions
 - Offline deploy crash: `TaxidMapper.load_database()` called without required `database_path` argument
 - `offline_mode` not propagated to API clients (NCBI, GTDB, genome manager) — network calls attempted in air-gapped mode

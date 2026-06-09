@@ -1,6 +1,10 @@
 # Nanometa Live Tutorial
 
-This tutorial will guide you through setting up and using Nanometa Live for real-time metagenomic analysis.
+This tutorial is an introductory walkthrough of setting up and using Nanometa
+Live for real-time metagenomic analysis. For the complete, maintained
+tab-by-tab reference — including the Validation, Watchlist & Preparation, and
+Deployment tabs introduced in v2.0 — see the
+[user guide](docs/user-guide.md).
 
 ## Table of Contents
 
@@ -19,7 +23,7 @@ This tutorial will guide you through setting up and using Nanometa Live for real
 
 Before installing Nanometa Live, ensure you have:
 
-- Python 3.9 or higher
+- Python 3.11 or higher
 - Conda/Mamba (recommended) or pip
 - At least 8GB of RAM
 - Sufficient disk space for sequence data and analysis results
@@ -112,9 +116,9 @@ Once your configuration is complete:
 
 ## Monitoring Results
 
-### Main Results Tab
+### Organisms Tab
 
-The Main Results tab shows:
+The Organisms tab shows:
 
 1. **Species of Interest**: A bar chart and table showing read counts for species you specified
 2. **Top Matches**: A table of the most abundant taxonomic classifications
@@ -125,9 +129,9 @@ Use the controls to:
 - Filter top matches by taxonomy level and domain
 - Change the number of displayed entries
 
-### QC Tab
+### Quality Control Tab
 
-The QC tab provides quality metrics:
+The Quality Control tab provides quality metrics:
 
 1. **QC Statistics**: Processing statistics, filtering results, and classification rates
 2. **QC Plots**:
@@ -137,6 +141,8 @@ The QC tab provides quality metrics:
    - Base pairs per batch
 
 ## Exploring Visualizations
+
+The Sankey and sunburst views live on the **Taxonomy** tab.
 
 ### Sankey Plot
 
@@ -164,13 +170,13 @@ Nanometa Live provides several ways to export your results:
 
 ### Export Tables
 
-1. In the Main Results tab, click "Export Data" under either the Species of Interest or Top Matches sections
+1. In the Organisms tab, click "Export Data" under either the Species of Interest or Top Matches sections
 2. Enter a filename (or use the default)
 3. Click "Export" to save as CSV
 
 ### Export Plots
 
-1. In the QC tab, click "Export Plots"
+1. In the Quality Control tab, click "Export Plots"
 2. Specify an export directory and base filename
 3. Click "Export" to save images of all four QC plots
 

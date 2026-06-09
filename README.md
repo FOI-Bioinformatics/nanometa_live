@@ -6,7 +6,7 @@ Real-time visualisation dashboard for Oxford Nanopore metagenomic sequencing
 analysis.
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
 Nanometa Live is the front end for the
 [nanometanf](https://github.com/FOI-Bioinformatics/nanometanf) Nextflow
@@ -48,18 +48,23 @@ nanometanf.
 
 ## Dashboard tabs
 
-| Tab            | Purpose |
-|----------------|---------|
-| Dashboard      | Run status, pathogen alerts, sample summary, classification overview |
-| Organisms      | Detected organisms with abundance, confidence, and watchlist flags |
-| Quality Control| Nanopore-calibrated metrics and filtering statistics |
-| Taxonomy       | Sankey flow and sunburst views for taxonomic exploration |
-| Validation     | BLAST identity scores and minimap2 coverage plots |
-| Watchlist      | Built-in watchlists, quick-start buttons, and custom imports |
-| Configuration  | Analysis settings, pipeline control, save and load configurations |
-| Preparation    | Offline bundle wizard, genome import, readiness checks |
+Tabs are grouped by workflow: an **Analysis** group for monitoring a run and a
+**Setup** group for configuring and preparing one.
+
+| Tab | Group | Purpose |
+|-----|-------|---------|
+| Dashboard | Overview | Run status, pathogen alerts, sample summary, classification overview |
+| Organisms | Analysis | Detected organisms with abundance, confidence, and watchlist flags |
+| Quality Control | Analysis | Nanopore-calibrated metrics and filtering statistics |
+| Taxonomy | Analysis | Sankey flow and sunburst views for taxonomic exploration |
+| Validation | Analysis | BLAST identity scores and minimap2 coverage plots |
+| Configuration | Setup | Analysis settings, pipeline control, save and load configurations |
+| Watchlist & Preparation | Setup | Built-in watchlists and custom imports, reference-genome download and BLAST-database build, readiness checks |
+| Deployment | Setup | Offline bundle export and import for air-gapped field laboratories |
 
 ## Requirements
+
+Python 3.11+ and, for the dashboard, the core runtime stack:
 
 ```
 dash>=4.0.0
@@ -67,14 +72,19 @@ dash-ag-grid>=31.0.0
 dash-bootstrap-components>=1.7.1
 plotly>=6.0.0
 pandas>=2.2.3
-ruamel.yaml>=0.18.10
+numpy>=2.0.0
 biopython>=1.85
-psutil>=6.0.0
 diskcache>=5.6.0
+psutil>=6.0.0
 ```
 
-For pipeline execution: Nextflow 25.10 or later. Container engines are
-not required; nanometanf runs under the `conda` profile by default.
+The complete, authoritative list (including the background-callback and
+export dependencies) is in [`requirements.txt`](requirements.txt) and is
+installed automatically by `pip install`.
+
+For pipeline execution: Nextflow 26.04.0 or later (the version nanometanf
+floors at). Container engines are not required; nanometanf runs under the
+`conda` profile by default.
 
 ## Development
 

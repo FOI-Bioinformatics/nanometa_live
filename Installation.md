@@ -32,13 +32,16 @@ Using Docker, you can run Nanometa Live in a container, which is a great way to 
 
 2. **Pull the Nanometa Live Docker image:**
 
-   To get the Nanometa Live image, use this command:
+   To get the Nanometa Live image, use this command (replace the tag with the
+   current one — browse the available tags on the
+   [BioContainers page](https://quay.io/repository/biocontainers/nanometa-live?tab=tags)):
 
    ```bash
-   docker pull quay.io/biocontainers/nanometa-live:0.4.3--pyhdfd78af_0
+   docker pull quay.io/biocontainers/nanometa-live:<latest-tag>
    ```
 
-   This downloads the specific Nanometa Live image for Docker. Make sure to download the latest version. 
+   BioContainers publishes one image tag per bioconda release, so always pick
+   the most recent tag rather than an older pinned one.
 
 3. **Start Nanometa Live in a Docker container:**
 
@@ -47,7 +50,7 @@ Using Docker, you can run Nanometa Live in a container, which is a great way to 
    ```bash
    DATADIR=/path/to/host/data
    
-   docker run -it -v $DATADIR:$DATADIR -p 8050:8050 quay.io/biocontainers/nanometa-live:0.4.3--pyhdfd78af_0 /bin/bash
+   docker run -it -v $DATADIR:$DATADIR -p 8050:8050 quay.io/biocontainers/nanometa-live:<latest-tag> /bin/bash
    ```
 
    Replace /path/to/host/data with your data folder path. The -v flag links your local data folder to the Docker container. The -p flag allows you to use Nanometa Live's web interface from your browser.
@@ -60,7 +63,7 @@ Using Docker, you can run Nanometa Live in a container, which is a great way to 
 
 4. **Learn More About Docker:**
 
-   FFor advanced Docker features, like setting environment variables or running in detached mode, see the [Docker documentation](https://docs.docker.com).
+   For advanced Docker features, like setting environment variables or running in detached mode, see the [Docker documentation](https://docs.docker.com).
 
 
 
@@ -85,7 +88,7 @@ Nanometa Live can also be used through Singularity, a program that allows you to
    ```bash
    DATADIR=/path/to/host/data
    
-   singularity  shell --nohttps --bind $DATADIR:$DATADIR docker://quay.io/biocontainers/nanometa-live:0.4.3--pyhdfd78af_0
+   singularity  shell --nohttps --bind $DATADIR:$DATADIR docker://quay.io/biocontainers/nanometa-live:<latest-tag>
    ```
 
    Replace /path/to/host/data with the path to your data. This command downloads the container with Nanometa Live.
@@ -123,7 +126,7 @@ Nanometa Live can also be used through Singularity, a program that allows you to
     cd nanometa_live
     ```
    
-4. **Set Up the Environment:**
+3. **Set Up the Environment:**
 
     Run the following command to create a new environment based on the `nanometa_live_env.yml` file:
 
@@ -131,7 +134,7 @@ Nanometa Live can also be used through Singularity, a program that allows you to
     mamba env create -f nanometa_live_env.yml
     ```
 
-5. **Activate the Environment:**
+4. **Activate the Environment:**
 
     Activate the newly created environment:
 
@@ -140,7 +143,7 @@ Nanometa Live can also be used through Singularity, a program that allows you to
     ```
     You're now working in the environment specifically configured for Nanometa Live.
 
-6. **Install the Program:**
+5. **Install the Program:**
 
     While in the directory that contains the `setup.py` file, execute the following command to install the program:
 
