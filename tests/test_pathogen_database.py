@@ -121,3 +121,41 @@ class TestTemplateAndReload:
     def test_reload_returns_true(self):
         assert reload_database() is True
         assert pdb._database is not None
+
+
+# --------------------------------------------------------------------------- #
+# Bug-hunt #3: genus-substring false-positive (safety)
+# --------------------------------------------------------------------------- #
+
+def test_genus_prefix_does_not_false_match_select_agent():
+    """A bare genus read must not be attributed to a binomial select agent
+    (e.g. 'Bacillus' -> 'Bacillus anthracis') and raise a false CRITICAL alert."""
+    pathogens = [p for p in get_all_dangerous_pathogens().values() if " " in p.name]
+    assert pathogens, "expected binomial pathogens in the built-in DB"
+    p = pathogens[0]
+    genus = p.name.split()[0]
+    res = check_for_dangerous_pathogens(
+        [{"name": genus, "reads": 10_000, "taxid": 0}], None
+    )
+    assert not any(a["name"] == p.name for a in res), (
+        f"bare genus '{genus}' falsely matched '{p.name}'"
+    )
+
+
+def test_exact_species_name_still_matches():
+    pathogens = [p for p in get_all_dangerous_pathogens().values() if " " in p.name]
+    p = pathogens[0]
+    res = check_for_dangerous_pathogens(
+        [{"name": p.name, "reads": 10_000, "taxid": 0}], None
+    )
+    assert any(a["name"] == p.name for a in res)
+
+
+def test_more_specific_subspecies_name_still_matches():
+    """A more-specific detected name (subspecies) still matches the species."""
+    pathogens = [p for p in get_all_dangerous_pathogens().values() if " " in p.name]
+    p = pathogens[0]
+    res = check_for_dangerous_pathogens(
+        [{"name": p.name + " subsp. testus", "reads": 10_000, "taxid": 0}], None
+    )
+    assert any(a["name"] == p.name for a in res)

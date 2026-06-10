@@ -144,3 +144,38 @@ def test_can_resume_true_with_nextflow_cache(tmp_path):
     (data / ".nextflow").mkdir()
     m = BackendManager(str(data))
     assert m.can_resume() is True
+
+
+# --------------------------------------------------------------------------- #
+# Bug-hunt #2: realtime auto-stop must not kill batch runs
+# --------------------------------------------------------------------------- #
+
+def test_auto_stop_countdown_only_for_realtime(manager):
+    from datetime import datetime, timedelta
+    old = (datetime.now() - timedelta(minutes=1)).isoformat()
+    manager.status = {"running": True, "start_time": old, "errors": []}
+
+    # Batch mode: no realtime timeout, so no countdown (and no auto-stop).
+    manager.config = {"processing_mode": "batch", "realtime_timeout_minutes": 60}
+    assert manager._compute_auto_stop_remaining() is None
+
+    # Realtime mode: a positive remaining time.
+    manager.config = {"processing_mode": "realtime", "realtime_timeout_minutes": 60}
+    remaining = manager._compute_auto_stop_remaining()
+    assert remaining is not None and remaining > 0
+
+
+# --------------------------------------------------------------------------- #
+# Bug-hunt #4: get_status must expose a top-level `completed` boolean
+# --------------------------------------------------------------------------- #
+
+def test_get_status_sets_completed_boolean(manager):
+    from unittest.mock import MagicMock
+    manager.workflow_manager.get_status = MagicMock(return_value={"running": False})
+
+    manager.status["running"] = False
+    manager.status["pipeline_status"] = "completed"
+    assert manager.get_status()["completed"] is True
+
+    manager.status["pipeline_status"] = "stopped"
+    assert manager.get_status()["completed"] is False

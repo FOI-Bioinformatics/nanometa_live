@@ -724,6 +724,14 @@ class BackendManager:
             # thread already enforces the timeout; this is read-only.
             self.status["auto_stop_remaining_s"] = self._compute_auto_stop_remaining()
 
+            # Expose a top-level boolean `completed` derived from pipeline_status.
+            # Consumers (verdict banner run-state badge, header indicator, load
+            # gating) read status.get("completed"); without this it was never
+            # written, so a finished run rendered as STANDBY instead of COMPLETE.
+            self.status["completed"] = (
+                self.status.get("pipeline_status") == "completed"
+            )
+
             # Return a copy to prevent external modification
             return dict(self.status)
 
@@ -737,6 +745,10 @@ class BackendManager:
         if not self.status.get("running"):
             return None
         if not self.config:
+            return None
+        # The countdown only applies to the realtime inactivity timeout; batch
+        # runs are not auto-stopped (see _monitor_status).
+        if self.config.get("processing_mode") != "realtime":
             return None
         timeout_minutes = self.config.get("realtime_timeout_minutes")
         if not timeout_minutes:
@@ -811,9 +823,12 @@ class BackendManager:
         """Monitor the status of the backend processes in a separate thread."""
         logging.info("BackendManager status monitoring started")
 
-        # Determine realtime timeout from config (in minutes, converted to seconds)
+        # Determine realtime timeout from config (in minutes, converted to seconds).
+        # This is a REALTIME-only inactivity stop. The config validator defaults
+        # realtime_timeout_minutes to 60 regardless of mode, so without this
+        # processing_mode guard a long batch run would be killed at 60 minutes.
         timeout_seconds = None
-        if self.config:
+        if self.config and self.config.get("processing_mode") == "realtime":
             timeout_minutes = self.config.get("realtime_timeout_minutes")
             if timeout_minutes:
                 timeout_seconds = int(timeout_minutes) * 60

@@ -201,12 +201,19 @@ def check_for_dangerous_pathogens(
         if taxid and taxid in dangerous_db:
             pathogen_entry = dangerous_db[taxid]
         elif name:
-            # Try name-based lookup
+            # Name-based lookup. Match when the detected name EQUALS the pathogen
+            # name or is MORE specific than it (e.g. "Francisella tularensis
+            # subsp. novicida" -> "Francisella tularensis"). Do NOT match when the
+            # detected name is a less-specific prefix of the pathogen name: a bare
+            # genus read "Bacillus" must not be attributed to "Bacillus anthracis"
+            # and raise a false CRITICAL alert.
             for p in dangerous_db.values():
-                if name in p.name.lower():
+                pname = p.name.lower()
+                cname = (p.common_name or "").lower()
+                if name == pname or pname in name:
                     pathogen_entry = p
                     break
-                if p.common_name and name in p.common_name.lower():
+                if cname and (name == cname or cname in name):
                     pathogen_entry = p
                     break
 
