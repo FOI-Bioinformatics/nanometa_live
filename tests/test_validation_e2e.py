@@ -57,7 +57,9 @@ def _build_config(results_dir: str) -> dict:
         "pipeline_profile": "conda",
         "pipeline_source": str(PIPELINE_SOURCE),
         "data_dir": str(DATA_DIR),
-        "genome_cache_dir": str(DATA_DIR / "genomes"),
+        # GenomeManager treats cache_dir as the root and looks in <root>/genomes
+        # and <root>/blast, so this must be the datadir itself, not datadir/genomes.
+        "genome_cache_dir": str(DATA_DIR),
         "blast_validation": True,
         "validation_method": "both",
         "save_reads_assignment": True,
