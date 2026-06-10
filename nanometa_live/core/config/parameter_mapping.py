@@ -310,6 +310,7 @@ def generate_samplesheet(
                 f"Configuration tab points at the correct path."
             )
 
+        seen_names: Dict[str, int] = {}
         for fastq_file in fastq_files:
             if sample_handling == "single_sample":
                 # All files belong to one sample
@@ -322,8 +323,15 @@ def generate_samplesheet(
                     if file_sample_name.endswith(ext):
                         file_sample_name = file_sample_name[:-len(ext)]
                         break
-                # Clean sample name
+                # Clean sample name. Sanitisation maps every non-word char to '_',
+                # so distinct files (e.g. 'a-1.fastq' and 'a.1.fastq') can collapse
+                # to the same name. In per_file mode each file must stay its own
+                # sample, so disambiguate a repeated name with a numeric suffix.
                 file_sample_name = re.sub(r'[^\w]', '_', file_sample_name)
+                count = seen_names.get(file_sample_name, 0) + 1
+                seen_names[file_sample_name] = count
+                if count > 1:
+                    file_sample_name = f"{file_sample_name}_{count}"
                 rows.append([file_sample_name, str(Path(fastq_file).resolve())])
 
     # Write samplesheet
