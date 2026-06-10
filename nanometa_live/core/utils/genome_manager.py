@@ -698,13 +698,13 @@ class GenomeDownloadManager:
             # Find exact match with representative status
             for row in rows:
                 if row.get("isGtdbSpeciesRep"):
-                    accession = row.get("gid", "").lstrip("RS_")
+                    accession = row.get("gid", "").removeprefix("RS_").removeprefix("GB_")
                     if accession:
                         return (accession, row)
 
             # Return first result if no exact rep found
             if rows:
-                accession = rows[0].get("gid", "").lstrip("RS_")
+                accession = rows[0].get("gid", "").removeprefix("RS_").removeprefix("GB_")
                 if accession:
                     return (accession, rows[0])
 

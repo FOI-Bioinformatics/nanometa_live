@@ -317,3 +317,26 @@ class TestParseNanometanfAggregateJson:
         results = parser.parse_nanometanf_aggregate_json(f, taxid=562)
         assert len(results) == 2
         assert {r.taxid for r in results} == {562}
+
+
+# --------------------------------------------------------------------------- #
+# Bug-hunt: robust column detection + percent_validated clamp
+# --------------------------------------------------------------------------- #
+
+class TestBlastColumnRobustness:
+    def test_leading_blank_line_does_not_shift_columns(self, parser, tmp_path):
+        f = tmp_path / "b.blast.txt"
+        row = ['r1', 'ref', '99.0', '150', '1', '0', '1', '150', '1', '150',
+               '1e-50', '300', '150', '1000', '90']  # 15 columns
+        f.write_text("\n" + "\t".join(row) + "\n")    # leading blank line
+        result = parser.parse_blast_tabular(f, "barcode01", 562, total_reads=1)
+        import pytest as _pt
+        assert result.percent_identity_mean == _pt.approx(99.0)
+
+    def test_percent_validated_clamped_to_100(self, parser, tmp_path):
+        f = tmp_path / "b.blast.txt"
+        rows = [[f'q{i}', 'ref', '99.0', '150', '1', '0', '1', '150', '1',
+                 '150', '1e-50', '300'] for i in range(5)]  # 5 unique qseqid
+        f.write_text("".join("\t".join(r) + "\n" for r in rows))
+        result = parser.parse_blast_tabular(f, "barcode01", 562, total_reads=2)
+        assert result.percent_validated <= 100.0

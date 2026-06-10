@@ -504,6 +504,17 @@ def format_bp(value: int) -> str:
     Returns:
         Formatted string with appropriate unit
     """
+    # Guard against None / non-numeric sentinels (several QC paths produce
+    # "N/A" or a missing count); return a neutral display instead of raising.
+    if value is None or isinstance(value, bool):
+        return "N/A"
+    if not isinstance(value, (int, float)):
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return "N/A"
+    if value < 0:
+        return "N/A"
     if value >= 1e9:
         return f"{value/1e9:.2f} Gb"
     elif value >= 1e6:
@@ -511,4 +522,4 @@ def format_bp(value: int) -> str:
     elif value >= 1e3:
         return f"{value/1e3:.2f} Kb"
     else:
-        return f"{value:,} bp"
+        return f"{int(value):,} bp"

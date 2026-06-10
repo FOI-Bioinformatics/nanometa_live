@@ -327,30 +327,25 @@ class ValidationParser:
             ]
             _cols_15 = _cols_12 + ['qlen', 'slen', 'qcovs']
 
-            # Peek at the first line to determine number of fields
-            with open(filepath) as _peek:
-                first_line = _peek.readline()
-            ncols = len(first_line.strip().split('\t'))
-            col_names = _cols_15 if ncols >= 15 else _cols_12
-
-            df = pd.read_csv(
-                filepath,
-                sep='\t',
-                header=None,
-                names=col_names,
-            )
-
-            if df.empty:
+            # Read first, then name columns from the ACTUAL width. Peeking one
+            # line to pick 12-vs-15 names is fragile (a leading blank line shifts
+            # every column); read_csv skips blank lines so df.shape[1] is reliable.
+            df = pd.read_csv(filepath, sep='\t', header=None)
+            if df.empty or df.shape[1] < 12:
                 result.status = ValidationStatus.NO_DATA
                 return result
+            ncols = df.shape[1]
+            base = _cols_15 if ncols >= 15 else _cols_12
+            df.columns = base[:ncols] + [f"col_{i}" for i in range(len(base), ncols)]
 
             # Count unique validated reads
             unique_reads = df['qseqid'].nunique()
             result.validated_reads = unique_reads
 
-            # Calculate percentage if total_reads provided
+            # Calculate percentage if total_reads provided. Clamp to 100: BLAST
+            # can validate more distinct reads than a stale/low Kraken total.
             if total_reads > 0:
-                result.percent_validated = (unique_reads / total_reads) * 100
+                result.percent_validated = min(100.0, (unique_reads / total_reads) * 100)
             else:
                 # If no total provided, use validated count as total
                 result.percent_validated = 100.0 if unique_reads > 0 else 0.0

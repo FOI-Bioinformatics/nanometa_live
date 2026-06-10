@@ -223,3 +223,29 @@ class TestLoadSeqkitStatsLegacyLayouts:
 
         # The flat file is read; the per-batch summation is not used.
         assert int(df.iloc[0]["num_seqs"]) == 77
+
+
+# --------------------------------------------------------------------------- #
+# Bug-hunt: multi-sample NanoStats means must be read-weighted
+# --------------------------------------------------------------------------- #
+
+def test_nanoplot_multisample_mean_is_read_weighted(tmp_path):
+    from nanometa_live.core.utils.qc_loaders import load_nanoplot_stats
+    nd = tmp_path / "nanoplot"
+    (nd / "barcode01").mkdir(parents=True)
+    (nd / "barcode02").mkdir(parents=True)
+    (nd / "barcode01" / "NanoStats.txt").write_text(
+        "Mean read length: 1,000.0\nMean read quality: 10.0\n"
+        "Number of reads: 1,000\nTotal bases: 1,000,000\nRead length N50: 1,200\n"
+    )
+    (nd / "barcode02" / "NanoStats.txt").write_text(
+        "Mean read length: 5,000.0\nMean read quality: 20.0\n"
+        "Number of reads: 10\nTotal bases: 50,000\nRead length N50: 6,000\n"
+    )
+    agg = load_nanoplot_stats(str(tmp_path), None)
+    # read-weighted length = 1,050,000 / 1,010 ~= 1039.6 (NOT the naive 3000)
+    assert 1000 < agg["mean_read_length"] < 1100
+    # read-weighted quality = (10*1000 + 20*10) / 1010 ~= 10.1 (NOT 15)
+    assert 10.0 <= agg["mean_read_quality"] < 10.3
+    assert agg["number_of_reads"] == 1010
+    assert agg["total_bases"] == 1_050_000

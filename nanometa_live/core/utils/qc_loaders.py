@@ -356,17 +356,21 @@ def load_nanoplot_stats(main_dir: str, sample: Optional[str] = None) -> Dict[str
     # Parse and aggregate stats
     aggregated = _empty_nanoplot_stats()
     file_count = 0
+    # Read-weighted accumulator for mean quality. The mean read length is
+    # recovered exactly from total_bases / total_reads. A simple average of
+    # per-sample means would badly mis-weight samples with very different read
+    # counts (e.g. a 10-read sample dragging a 10,000-read sample's mean).
+    quality_weighted_sum = 0.0
 
     for stats_file in nanostats_files:
         try:
             stats = _parse_nanostats_file(stats_file)
             if stats:
                 file_count += 1
-                aggregated['number_of_reads'] += stats.get('number_of_reads', 0)
+                reads = stats.get('number_of_reads', 0)
+                aggregated['number_of_reads'] += reads
                 aggregated['total_bases'] += stats.get('total_bases', 0)
-                # For averages, we'll recalculate after summing
-                aggregated['mean_read_length'] += stats.get('mean_read_length', 0)
-                aggregated['mean_read_quality'] += stats.get('mean_read_quality', 0)
+                quality_weighted_sum += stats.get('mean_read_quality', 0) * reads
                 aggregated['read_length_n50'] = max(
                     aggregated['read_length_n50'],
                     stats.get('read_length_n50', 0)
@@ -378,10 +382,12 @@ def load_nanoplot_stats(main_dir: str, sample: Optional[str] = None) -> Dict[str
             logging.warning(f"Malformed NanoStats file {stats_file}: {e}")
             continue
 
-    # Average the mean values
+    # Recover read-weighted means from the summed totals.
+    total_reads = aggregated['number_of_reads']
+    if total_reads > 0:
+        aggregated['mean_read_length'] = aggregated['total_bases'] / total_reads
+        aggregated['mean_read_quality'] = quality_weighted_sum / total_reads
     if file_count > 0:
-        aggregated['mean_read_length'] /= file_count
-        aggregated['mean_read_quality'] /= file_count
         aggregated['source'] = 'nanoplot'
 
     return aggregated

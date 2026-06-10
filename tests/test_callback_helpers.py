@@ -190,3 +190,18 @@ class TestSafeLoadAndLog:
     def test_log_callback_error_does_not_raise(self):
         # Smoke: logging a handled error must never propagate.
         log_callback_error("my_cb", ValueError("boom"), level=logging.WARNING)
+
+
+# --------------------------------------------------------------------------- #
+# Bug-hunt: format_bp must not crash on None / non-numeric / negative
+# --------------------------------------------------------------------------- #
+
+def test_format_bp_handles_none_and_nonnumeric():
+    from nanometa_live.app.utils.callback_helpers import format_bp
+    assert format_bp(None) == "N/A"
+    assert format_bp("N/A") == "N/A"
+    assert format_bp(-5) == "N/A"
+    assert format_bp(True) == "N/A"
+    assert format_bp(1500) == "1.50 Kb"
+    assert format_bp(500) == "500 bp"
+    assert format_bp(2_000_000) == "2.00 Mb"
