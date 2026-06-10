@@ -108,17 +108,32 @@ class TestFormatText:
         assert "bc01" in _format_scope_text("bc01")
         assert "all samples" in _format_scope_text("All Samples")
 
-    def test_criteria_uses_config_thresholds(self):
+    def test_criteria_states_true_hardcoded_thresholds(self):
+        # Hit-rate (80% confirmed / 50% partial) and identity (90%) are
+        # hardcoded in ValidationResult.determine_status, NOT config-driven.
         text = _format_criteria_text({
-            "validation_identity_threshold": 95,
-            "validation_hit_rate_threshold": 0.6,
+            "validation_identity_threshold": 95,   # ignored
+            "validation_hit_rate_threshold": 0.6,  # ignored
             "minimap2_min_mapq": 20,
         })
-        assert "95%" in text and "60%" in text and "20" in text
+        assert "80%" in text   # Confirmed hit-rate floor
+        assert "90%" in text   # Confirmed identity floor
+        assert "50%" in text   # Partial hit-rate floor
+        assert "20" in text    # mapq IS config-driven
+        # The ignored config values must not appear.
+        assert "95%" not in text
+        assert "60%" not in text
 
-    def test_criteria_defaults_on_garbage(self):
-        text = _format_criteria_text({"validation_identity_threshold": "x"})
+    def test_criteria_mapq_config_driven(self):
+        text = _format_criteria_text({"minimap2_min_mapq": "20"})
+        assert "20" in text
+
+    def test_criteria_mapq_defaults_on_garbage(self):
+        text = _format_criteria_text({"minimap2_min_mapq": "x"})
+        assert "10" in text  # mapq default
+        assert "80%" in text
         assert "90%" in text
+        assert "50%" in text
 
 
 class TestComputeSummary:

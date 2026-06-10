@@ -45,12 +45,41 @@ def test_no_species_enabled():
     assert "Watchlist" in s.detail
 
 
-def test_missing_databases_flagged():
-    s = _status(db_status={"present": [263], "missing": [9999], "no_genome": [123]})
+def test_missing_databases_only_no_db():
+    # genome present but BLAST DB missing -> buildable, counted distinctly
+    s = _status(
+        validation_taxids=["263", "9999"],
+        db_status={"present": [263], "missing": [9999], "no_genome": []},
+    )
     assert s.code == "missing_dbs"
     assert s.severity == "warning"
-    # 2 of (3 taxids) lack a database
-    assert "of" in s.headline
+    assert s.headline == "1 of 2 organism(s) have a reference genome but no BLAST database."
+    assert "Build the missing databases" in s.detail
+
+
+def test_missing_databases_only_no_genome():
+    # no genome at all -> not buildable, reported separately
+    s = _status(
+        validation_taxids=["263", "123"],
+        db_status={"present": [263], "missing": [], "no_genome": [123]},
+    )
+    assert s.code == "missing_dbs"
+    assert s.severity == "warning"
+    assert s.headline == "1 of 2 organism(s) have no reference genome."
+    assert "cannot be BLAST" in s.detail
+    assert "Build the missing databases" not in s.detail
+
+
+def test_missing_databases_both():
+    s = _status(
+        validation_taxids=["263", "9999", "123"],
+        db_status={"present": [263], "missing": [9999], "no_genome": [123]},
+    )
+    assert s.code == "missing_dbs"
+    assert s.severity == "warning"
+    assert s.headline == "1 organism(s) have no BLAST database and 1 have no reference genome."
+    assert "Build the missing databases" in s.detail
+    assert "cannot be BLAST" in s.detail
 
 
 def test_results_present_summary():

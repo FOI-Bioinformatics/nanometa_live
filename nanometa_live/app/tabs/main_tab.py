@@ -1043,7 +1043,8 @@ def register_main_callbacks(app: Dash):
             # Create validator instance
             validator = OnDemandValidator(
                 results_dir=main_dir,
-                input_dir=input_dir if input_dir else None
+                input_dir=input_dir if input_dir else None,
+                cache_dir=(config.get("genome_cache_dir") if config else None),
             )
 
             add_log("Checking reference genome...", "info")

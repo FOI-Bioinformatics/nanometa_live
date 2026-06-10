@@ -12,8 +12,9 @@ that drive the new behaviour:
   as no-op.
 * ``_format_scope_text`` produces operator-friendly text that
   reflects the live sample selection.
-* ``_format_criteria_text`` reads the active cutoffs from config
-  with sensible defaults when keys are missing or invalid.
+* ``_format_criteria_text`` states the fixed thresholds applied by
+  ``ValidationResult.determine_status`` (80% confirmed hit rate, 90%
+  identity, 50% partial) and the config-driven minimap2 MAPQ floor.
 """
 
 from __future__ import annotations
@@ -102,47 +103,47 @@ class TestFormatScopeText:
 
 
 class TestFormatCriteriaText:
-    def test_defaults_when_config_empty(self):
+    def test_fixed_thresholds_when_config_empty(self):
         text = _format_criteria_text({})
-        assert "90%" in text  # identity default
-        assert "50%" in text  # hit rate default 0.5
+        assert "80%" in text  # confirmed hit-rate floor (hardcoded)
+        assert "90%" in text  # identity floor (hardcoded)
+        assert "50%" in text  # partial hit-rate floor (hardcoded)
         assert "10" in text   # mapq default
         assert "Confirmed" in text
         assert "Partial" in text
 
-    def test_custom_thresholds_shown(self):
+    def test_hit_rate_and_identity_not_config_driven(self):
+        # determine_status hardcodes these, so config must NOT change them.
         text = _format_criteria_text({
-            "validation_identity_threshold": 80,
+            "validation_identity_threshold": 85,
             "validation_hit_rate_threshold": 0.3,
             "minimap2_min_mapq": 5,
         })
         assert "80%" in text
-        assert "30%" in text
-        assert "5" in text
-
-    def test_handles_string_numerics(self):
-        # Saved config sometimes round-trips numbers as strings.
-        text = _format_criteria_text({
-            "validation_identity_threshold": "85",
-            "validation_hit_rate_threshold": "0.4",
-            "minimap2_min_mapq": "20",
-        })
-        assert "85%" in text
-        assert "40%" in text
-        assert "20" in text
-
-    def test_handles_bad_values_with_defaults(self):
-        text = _format_criteria_text({
-            "validation_identity_threshold": "not-a-number",
-            "validation_hit_rate_threshold": None,
-            "minimap2_min_mapq": "x",
-        })
-        # Falls back to documented defaults rather than raising.
         assert "90%" in text
         assert "50%" in text
+        assert "5" in text    # mapq IS config-driven
+        assert "85%" not in text
+        assert "30%" not in text
+
+    def test_mapq_handles_string_numerics(self):
+        # Saved config sometimes round-trips numbers as strings.
+        text = _format_criteria_text({"minimap2_min_mapq": "20"})
+        assert "20" in text
+        assert "80%" in text
+        assert "90%" in text
+        assert "50%" in text
+
+    def test_mapq_handles_bad_values_with_default(self):
+        text = _format_criteria_text({"minimap2_min_mapq": "x"})
+        # Falls back to the documented MAPQ default rather than raising.
         assert "10" in text
+        assert "80%" in text
+        assert "90%" in text
+        assert "50%" in text
 
     def test_none_config(self):
         text = _format_criteria_text(None)
+        assert "80%" in text
         assert "90%" in text
         assert "Confirmed" in text

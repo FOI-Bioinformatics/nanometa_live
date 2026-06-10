@@ -301,31 +301,33 @@ def _format_scope_text(selected_sample):
 def _format_criteria_text(config):
     """Build the criteria line for the validation tab's intro banner.
 
-    Pulls the active thresholds from config so the operator always
-    sees the live cutoffs, not the documented defaults.
+    The hit-rate and identity cutoffs are NOT config-driven: the
+    displayed status comes from ``ValidationResult.determine_status``,
+    which applies fixed thresholds (``CONFIRMED_THRESHOLD`` = 80%,
+    ``MIN_IDENTITY_THRESHOLD`` = 90%, ``PARTIAL_THRESHOLD`` = 50%, defined
+    on ``ValidationParser``). The constants are quoted here so the banner
+    text cannot drift from the verdict logic. Only the minimap2 MAPQ floor
+    is a real pipeline knob (``minimap2_min_mapq``, default 10), so that
+    part stays config-driven.
     """
+    from nanometa_live.core.parsers.blast_validation_parser import ValidationParser
+
     cfg = config or {}
-    identity = cfg.get("validation_identity_threshold", 90)
-    hit_rate = cfg.get("validation_hit_rate_threshold", 0.5)
     mapq = cfg.get("minimap2_min_mapq", 10)
-    try:
-        identity_str = f"{float(identity):.0f}%"
-    except (TypeError, ValueError):
-        identity_str = "90%"
-    try:
-        hit_rate_str = f"{float(hit_rate):.0%}"
-    except (TypeError, ValueError):
-        hit_rate_str = "50%"
     try:
         mapq_str = str(int(mapq))
     except (TypeError, ValueError):
         mapq_str = "10"
+
+    confirmed = f"{ValidationParser.CONFIRMED_THRESHOLD:.0f}%"
+    identity = f"{ValidationParser.MIN_IDENTITY_THRESHOLD:.0f}%"
+    partial = f"{ValidationParser.PARTIAL_THRESHOLD:.0f}%"
+
     return (
-        f"Confirmed: hit rate >= {hit_rate_str} of classified reads "
-        f"AND mean identity >= {identity_str}. "
-        f"Partial: at least half the hit-rate threshold OR within 90% "
-        f"of the identity floor. "
-        f"Low Confidence: below both. "
+        f"Confirmed: hit rate >= {confirmed} of classified reads "
+        f"AND mean identity >= {identity}. "
+        f"Partial: hit rate >= {partial}. "
+        f"Low Confidence: below that. "
         f"Minimap2 also requires alignment MAPQ >= {mapq_str}."
     )
 

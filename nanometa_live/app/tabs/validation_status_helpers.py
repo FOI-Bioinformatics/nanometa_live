@@ -36,6 +36,33 @@ class ValidationStatus:
         return f"{self.headline} {self.detail}".strip()
 
 
+def _missing_reference_status(no_db, no_genome, n_taxids):
+    """Warning ValidationStatus when organisms lack a genome or BLAST DB.
+
+    ``no_db`` = genome present but BLAST database missing (buildable);
+    ``no_genome`` = no reference genome at all (not buildable). Returns None
+    when nothing is missing.
+    """
+    if not no_db and not no_genome:
+        return None
+    n_no_db, n_no_genome = len(no_db), len(no_genome)
+    if no_db and no_genome:
+        headline = (f"{n_no_db} organism(s) have no BLAST database and "
+                    f"{n_no_genome} have no reference genome.")
+    elif no_db:
+        headline = (f"{n_no_db} of {n_taxids} organism(s) have a reference "
+                    "genome but no BLAST database.")
+    else:
+        headline = f"{n_no_genome} of {n_taxids} organism(s) have no reference genome."
+    detail_parts = []
+    if no_db:
+        detail_parts.append("Build the missing databases in the Watchlist & Preparation tab.")
+    if no_genome:
+        detail_parts.append("Organisms without a reference genome cannot be BLAST- or "
+                            "minimap2-validated; minimap2 still runs where a genome exists.")
+    return ValidationStatus("missing_dbs", "warning", headline, " ".join(detail_parts))
+
+
 def compute_validation_status(
     *,
     blast_enabled: bool,
@@ -75,15 +102,13 @@ def compute_validation_status(
             "Enable organisms in the Watchlist & Preparation tab.",
         )
 
-    missing = list((db_status or {}).get("missing", [])) + list((db_status or {}).get("no_genome", []))
-    if missing:
-        n_missing = len(missing)
-        return ValidationStatus(
-            "missing_dbs", "warning",
-            f"{n_missing} of {n_taxids} organisms lack a reference genome or BLAST database.",
-            "BLAST will be limited to the prepared organisms (minimap2 still runs where a "
-            "genome exists). Build the missing databases in the Watchlist & Preparation tab.",
-        )
+    missing = _missing_reference_status(
+        list((db_status or {}).get("missing", [])),
+        list((db_status or {}).get("no_genome", [])),
+        n_taxids,
+    )
+    if missing is not None:
+        return missing
 
     if has_results:
         return ValidationStatus(
