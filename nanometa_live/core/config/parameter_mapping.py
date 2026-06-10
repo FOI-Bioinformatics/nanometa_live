@@ -24,6 +24,7 @@ nanopore_output_dir) before the pipeline starts.
 import os
 import glob
 import csv
+import json
 import platform
 import re
 import logging
@@ -446,8 +447,33 @@ def _generate_pathogen_genomes_json(config: Dict[str, Any], main_dir: str):
         taxid_mapping=ncbi_to_kraken_mapping if ncbi_to_kraken_mapping else None,
     )
 
+    _write_validation_taxon_names(species_list_full, main_dir)
+
     _log_pathogen_genomes_result(pathogen_genomes_path)
     return pathogen_genomes_path
+
+
+def _write_validation_taxon_names(species_list_full, main_dir):
+    """Write an authoritative ``{kraken_taxid: species_name}`` map from the
+    watchlist to ``pipeline_input/validation_taxon_names.json``.
+
+    The pipeline aggregator uses this as the primary species-name source so the
+    published validation_results.json is deterministically named, independent of
+    which per-batch Kraken2 reports happen to reach the realtime aggregator.
+    """
+    try:
+        names = {
+            str(s["kraken_taxid"]): s["name"]
+            for s in species_list_full
+            if s.get("kraken_taxid") and s.get("name")
+        }
+        if names:
+            names_path = os.path.join(main_dir, "pipeline_input", "validation_taxon_names.json")
+            with open(names_path, "w") as fh:
+                json.dump(names, fh, indent=2)
+            logging.debug(f"Wrote {len(names)} validation taxon names to {names_path}")
+    except (OSError, TypeError, ValueError) as e:
+        logging.debug(f"Could not write validation_taxon_names.json: {e}")
 
 
 def _ensure_blast_dbs_for_validation(genome_manager, ncbi_taxids):
@@ -882,6 +908,15 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         if pathogen_genomes_path:
             params["pathogen_genomes"] = str(pathogen_genomes_path)
             logging.info(f"Pathogen genomes JSON: {pathogen_genomes_path}")
+            # Companion authoritative taxid->name map (written alongside it), so
+            # the aggregator names results deterministically regardless of report
+            # timing. Only promise it to Nextflow if it actually exists on disk.
+            names_path = os.path.join(
+                os.path.dirname(str(pathogen_genomes_path)),
+                "validation_taxon_names.json",
+            )
+            if os.path.exists(names_path):
+                params["validation_taxon_names"] = names_path
         elif genome_paths:
             logging.info(f"Found {len(genome_paths)} downloaded genomes for validation")
 

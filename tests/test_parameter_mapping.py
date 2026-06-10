@@ -405,3 +405,29 @@ class TestSingleInputGuard:
         with pytest.raises(ValueError) as exc:
             _validate_single_input_source(params)
         assert "multiple input modes" in str(exc.value).lower()
+
+
+# --------------------------------------------------------------------------- #
+# Deterministic species names: validation_taxon_names.json is written from the
+# watchlist so the aggregator names results without relying on report timing.
+# --------------------------------------------------------------------------- #
+
+def test_generates_validation_taxon_names_json(tmp_path):
+    import json
+    from unittest.mock import patch, MagicMock
+    species = [
+        {"taxid": 263, "kraken_taxid": 263, "name": "Francisella tularensis"},
+        {"taxid": 1392, "kraken_taxid": 1392, "name": "Bacillus anthracis"},
+        {"taxid": 99, "kraken_taxid": 99, "name": ""},  # no name -> skipped
+    ]
+    mgr = MagicMock()
+    mgr.generate_pathogen_genomes_json.return_value = str(tmp_path / "pipeline_input" / "pathogen_genomes.json")
+    with patch.object(pm, "get_validation_species_from_watchlist", return_value=(species, [])), \
+         patch.object(pm, "get_genome_manager", return_value=mgr):
+        pm._generate_pathogen_genomes_json({"genome_cache_dir": str(tmp_path)}, str(tmp_path))
+    names_file = tmp_path / "pipeline_input" / "validation_taxon_names.json"
+    assert names_file.exists()
+    data = json.loads(names_file.read_text())
+    assert data["263"] == "Francisella tularensis"
+    assert data["1392"] == "Bacillus anthracis"
+    assert "99" not in data  # entries without a name are omitted
