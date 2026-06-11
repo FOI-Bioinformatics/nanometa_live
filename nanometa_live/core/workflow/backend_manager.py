@@ -848,21 +848,35 @@ class BackendManager:
         # this GUI stop is a last-resort backstop for a GENUINELY stalled run, so
         # we only fire it when no task has completed for timeout_seconds.
         last_progress_time = start_time
-        last_complete_count = -1
+        last_finished_count = -1
+        pipeline_has_worked = False
 
         while self.status.get("running"):
             try:
                 # Get workflow manager status (also drives progress tracking)
                 workflow_status = self.workflow_manager.get_status()
 
-                # Advance the inactivity clock whenever task progress is made.
-                complete_count = workflow_status.get("processes_complete", 0)
-                if complete_count != last_complete_count:
-                    last_complete_count = complete_count
+                # Progress signal: tasks running now, or the cumulative finished
+                # (completed + failed) count advanced since the last poll. Either
+                # resets the inactivity clock so an actively-working run is not
+                # killed. A long conda-env build at the start of a fresh run
+                # produces NO task activity, so we also defer the timeout until
+                # the pipeline has done at least some task work -- otherwise the
+                # build window looks like inactivity and the run is killed before
+                # any task runs.
+                finished_count = (
+                    workflow_status.get("processes_complete", 0)
+                    + workflow_status.get("processes_failed", 0)
+                )
+                running_now = workflow_status.get("processes_running", 0)
+                if running_now > 0 or finished_count != last_finished_count:
+                    last_finished_count = finished_count
                     last_progress_time = time.time()
+                    if running_now > 0 or finished_count > 0:
+                        pipeline_has_worked = True
 
-                # Check realtime timeout (inactivity-based)
-                if timeout_seconds is not None:
+                # Check realtime timeout (inactivity-based, once work has begun)
+                if timeout_seconds is not None and pipeline_has_worked:
                     idle = time.time() - last_progress_time
                     if idle >= timeout_seconds:
                         logging.warning(
