@@ -837,23 +837,46 @@ class BackendManager:
                 )
 
         start_time = time.time()
+        # Inactivity tracking for the realtime timeout. The timeout is an
+        # INACTIVITY stop (as its config documents), NOT a wall-clock cap: a run
+        # still actively draining work (classification/validation tasks
+        # completing) must not be killed mid-flight, or its downstream results
+        # are truncated -- the symptom behind nanometanf issue #29, where the
+        # GUI SIGTERM'd a run at realtime_timeout_minutes while hundreds of
+        # validation tasks were still pending. The pipeline has its own bounds
+        # (max_files .take / its realtime timer) that close the watchPath stream;
+        # this GUI stop is a last-resort backstop for a GENUINELY stalled run, so
+        # we only fire it when no task has completed for timeout_seconds.
+        last_progress_time = start_time
+        last_complete_count = -1
 
         while self.status.get("running"):
             try:
-                # Check realtime timeout
+                # Get workflow manager status (also drives progress tracking)
+                workflow_status = self.workflow_manager.get_status()
+
+                # Advance the inactivity clock whenever task progress is made.
+                complete_count = workflow_status.get("processes_complete", 0)
+                if complete_count != last_complete_count:
+                    last_complete_count = complete_count
+                    last_progress_time = time.time()
+
+                # Check realtime timeout (inactivity-based)
                 if timeout_seconds is not None:
-                    elapsed = time.time() - start_time
-                    if elapsed >= timeout_seconds:
+                    idle = time.time() - last_progress_time
+                    if idle >= timeout_seconds:
                         logging.warning(
-                            f"Realtime timeout reached after "
-                            f"{elapsed / 60:.1f} minutes, stopping pipeline"
+                            f"Realtime inactivity timeout reached after "
+                            f"{idle / 60:.1f} minutes with no task progress, "
+                            f"stopping pipeline"
                         )
                         with self._status_lock:
                             self.status["running"] = False
                             self.status["pipeline_status"] = "stopped"
                             self.status["errors"].append(
-                                f"Pipeline stopped: realtime timeout "
-                                f"({int(timeout_seconds / 60)} minutes) reached"
+                                f"Pipeline stopped: realtime inactivity timeout "
+                                f"({int(timeout_seconds / 60)} minutes with no "
+                                f"task progress) reached"
                             )
                         # Stop the underlying Nextflow process
                         try:
@@ -861,9 +884,6 @@ class BackendManager:
                         except (OSError, RuntimeError, AttributeError) as e:
                             logging.exception(f"Error stopping pipeline after timeout: {e}")
                         break
-
-                # Get workflow manager status
-                workflow_status = self.workflow_manager.get_status()
 
                 # Thread-safe status update
                 with self._status_lock:
