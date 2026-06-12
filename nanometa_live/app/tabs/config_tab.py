@@ -1342,7 +1342,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         feedback = ""
         try:
             found = backend_manager.detect_existing_results(expanded_path) if backend_manager else []
-        except Exception:
+        except Exception as e:
+            logging.debug("detect_existing_results(%s) failed; no overwrite advisory shown: %s", expanded_path, e)
             found = []
         if found:
             has_meta = (

@@ -76,7 +76,8 @@ def register_status(app, backend_manager):
         else:
             try:
                 seen = first_batch_seen(main_dir)
-            except Exception:
+            except Exception as e:
+                logging.debug("first_batch_seen(%s) failed: %s", main_dir, e)
                 seen = False
 
         if fp == (prev or {}).get("fp") and seen == prev_seen:

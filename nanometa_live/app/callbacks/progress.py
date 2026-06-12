@@ -146,7 +146,8 @@ def register_progress(app, backend_manager):
                 describe_kraken_scan_locations,
             )
             scan = describe_kraken_scan_locations(main_dir)
-        except Exception:
+        except Exception as e:
+            logging.debug("describe_kraken_scan_locations(%s) failed: %s", main_dir, e)
             scan = {"kraken_dir": "", "exists": False, "patterns": []}
 
         kraken_dir = scan.get("kraken_dir") or "(results directory not configured)"

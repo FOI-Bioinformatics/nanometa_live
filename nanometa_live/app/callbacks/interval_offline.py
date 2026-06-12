@@ -111,7 +111,8 @@ def register_interval_offline(app, backend_manager):
             if os.path.exists(session_path):
                 try:
                     existing = loader.load_config(session_path)
-                except Exception:
+                except Exception as e:
+                    logging.debug("Could not load last-session.yaml (%s); starting fresh: %s", session_path, e)
                     existing = {}
             existing["offline_mode"] = offline
             loader.save_config(existing, "last-session.yaml")
