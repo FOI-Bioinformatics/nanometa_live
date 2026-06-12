@@ -148,8 +148,8 @@ class TestVerdictBannerAttributionRuns:
                  "is_negative_control": False},
             ]},
         ), patch(
-            "nanometa_live.app.tabs.dashboard_tab.get_trigger_type",
-            return_value="store",
+            "nanometa_live.app.tabs.dashboard_tab.interval_tick_is_redundant",
+            return_value=False,
         ):
             # Args follow the declared order: fingerprint, watchlist_state,
             # n_intervals, config, status, overall_status, validation_data,

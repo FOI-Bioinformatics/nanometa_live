@@ -4,19 +4,17 @@ Reference documentation for Nanometa Live's Python APIs.
 
 ## Data Loaders
 
-### `nanometa_live.core.utils.data_loaders`
-
-`data_loaders.py` is a re-export hub. The actual implementation lives in
-category-specific modules: `classification_loaders`, `qc_loaders`,
-`validation_loaders`, `loader_utils`, and `canonical_loaders`. All public
-functions are importable from either `data_loaders` or the sub-module directly.
+The loader package has no re-export hub; import each symbol directly from the
+leaf module that owns it: `classification_loaders` (Kraken2),
+`qc_loaders` (fastp/seqkit), `validation_loaders` (BLAST/minimap2),
+`canonical_loaders`, and the shared `loader_utils` (caching, file-stability).
 
 #### `load_kraken_data(main_dir, sample=None)`
 
-Load Kraken2 classification results (implemented in `classification_loaders.py`).
+Load Kraken2 classification results (in `classification_loaders.py`).
 
 ```python
-from nanometa_live.core.utils.data_loaders import load_kraken_data
+from nanometa_live.core.utils.classification_loaders import load_kraken_data
 
 # Load all samples aggregated
 df = load_kraken_data("/path/to/results", sample="All Samples")
@@ -35,16 +33,15 @@ df = load_kraken_data("/path/to/results", sample="barcode01")
 **File Priority:**
 1. `*.cumulative.kraken2.report.txt` (real-time mode)
 2. `*.kraken2.report.txt` (standard)
-3. `*.kreport2.txt` (legacy)
 
 ---
 
 #### `load_fastp_data(main_dir, sample=None)`
 
-Load FASTP quality filtering statistics.
+Load FASTP quality filtering statistics (in `qc_loaders.py`).
 
 ```python
-from nanometa_live.core.utils.data_loaders import load_fastp_data
+from nanometa_live.core.utils.qc_loaders import load_fastp_data
 
 stats = load_fastp_data("/path/to/results", sample="barcode01")
 ```

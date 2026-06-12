@@ -19,8 +19,8 @@ from nanometa_live.app.utils.callback_helpers import (
 )
 from nanometa_live.app.components.modern_components import EmptyStateMessage
 from nanometa_live.app.utils.debounce import (
-    get_trigger_type,
-    interval_render_is_redundant, mark_rendered,
+    interval_tick_is_redundant,
+    mark_rendered,
 )
 from nanometa_live.app.tabs.kraken2_helpers import (
     COLORS_TABLEAU,
@@ -161,7 +161,7 @@ def register_classification_callbacks(app: Dash):
         """
 
         # Debounce interval-triggered refreshes
-        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("classification_plot", _fingerprint):
+        if interval_tick_is_redundant(ctx, "classification_plot", _fingerprint):
             raise PreventUpdate
         mark_rendered("classification_plot", _fingerprint)
 

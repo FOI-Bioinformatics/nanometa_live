@@ -34,8 +34,8 @@ from nanometa_live.app.utils.callback_helpers import (
     log_callback_error,
 )
 from nanometa_live.app.utils.debounce import (
-    should_skip_update, get_trigger_type,
-    interval_render_is_redundant, mark_rendered,
+    should_skip_update, interval_tick_is_redundant,
+    mark_rendered,
 )
 from nanometa_live.app.utils.throughput import (
     BUFFER_LIMIT,
@@ -135,7 +135,7 @@ def register_dashboard_callbacks(app: Dash):
     )
     def compute_overall_status_cache(_fingerprint, _n_intervals, config, status, available_samples):
         """Compute overall status once per interval and cache for other callbacks."""
-        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("dashboard_overall_status", _fingerprint):
+        if interval_tick_is_redundant(ctx, "dashboard_overall_status", _fingerprint):
             raise PreventUpdate
         mark_rendered("dashboard_overall_status", _fingerprint)
 
@@ -192,9 +192,8 @@ def register_dashboard_callbacks(app: Dash):
         # freeze the countdown. The redundant-render short-circuit therefore
         # applies only when the pipeline is not actively running.
         pipeline_running_now = bool(status and status.get("running"))
-        if (get_trigger_type(ctx) == "interval"
-                and not pipeline_running_now
-                and interval_render_is_redundant("dashboard_verdict_banner", _fingerprint)):
+        if (not pipeline_running_now
+                and interval_tick_is_redundant(ctx, "dashboard_verdict_banner", _fingerprint)):
             raise PreventUpdate
         mark_rendered("dashboard_verdict_banner", _fingerprint)
 

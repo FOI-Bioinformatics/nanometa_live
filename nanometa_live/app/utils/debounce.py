@@ -116,6 +116,23 @@ def interval_render_is_redundant(callback_id: str, fingerprint) -> bool:
         return _render_fp.get(callback_id) == fp
 
 
+def interval_tick_is_redundant(ctx, callback_id: str, fingerprint) -> bool:
+    """Return True when the callback was fired by an interval ("backstop") tick
+    AND the data fingerprint is unchanged since it last rendered -- i.e. the
+    refresh is redundant and the callback should ``raise PreventUpdate``.
+
+    Collapses the ``get_trigger_type(ctx) == "interval" and
+    interval_render_is_redundant(callback_id, fingerprint)`` predicate that every
+    results-driven tab callback opens with, so the "is this a redundant interval
+    refresh" rule lives in exactly one place. Pair the proceed path with
+    :func:`mark_rendered` as before.
+    """
+    return (
+        get_trigger_type(ctx) == "interval"
+        and interval_render_is_redundant(callback_id, fingerprint)
+    )
+
+
 def mark_rendered(callback_id: str, fingerprint) -> None:
     """Record the fingerprint a callback just rendered (see
     :func:`interval_render_is_redundant`). Call on every render path, not only

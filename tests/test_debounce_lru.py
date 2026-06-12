@@ -7,6 +7,7 @@ fix bounds it to ``_DEBOUNCE_MAX_KEYS`` entries with LRU eviction.
 """
 
 import time
+from types import SimpleNamespace
 
 from nanometa_live.app.utils import debounce as dbm
 
@@ -128,3 +129,29 @@ class TestFingerprintRenderGate:
         for i in range(dbm._DEBOUNCE_MAX_KEYS + 50):
             dbm.mark_rendered(f"cb-{i}", {"fp": str(i)})
         assert len(dbm._render_fp) <= dbm._DEBOUNCE_MAX_KEYS
+
+
+class TestIntervalTickIsRedundant:
+    """interval_tick_is_redundant collapses the
+    ``get_trigger_type(ctx) == "interval" and interval_render_is_redundant(...)``
+    predicate every results-driven tab callback opens with."""
+
+    def setup_method(self):
+        dbm._render_fp.clear()
+
+    def _ctx(self, triggered_id):
+        return SimpleNamespace(triggered_id=triggered_id)
+
+    def test_interval_tick_unchanged_fp_is_redundant(self):
+        dbm.mark_rendered("cb", {"fp": "A"})
+        assert dbm.interval_tick_is_redundant(self._ctx("update-interval"), "cb", {"fp": "A"}) is True
+
+    def test_interval_tick_advanced_fp_is_not_redundant(self):
+        dbm.mark_rendered("cb", {"fp": "A"})
+        assert dbm.interval_tick_is_redundant(self._ctx("update-interval"), "cb", {"fp": "B"}) is False
+
+    def test_non_interval_trigger_always_proceeds(self):
+        # A user action (e.g. a sort button) must render even if the fingerprint
+        # is unchanged -- only interval backstop ticks are gated.
+        dbm.mark_rendered("cb", {"fp": "A"})
+        assert dbm.interval_tick_is_redundant(self._ctx("sort-button"), "cb", {"fp": "A"}) is False

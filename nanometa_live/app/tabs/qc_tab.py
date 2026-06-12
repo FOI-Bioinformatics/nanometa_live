@@ -37,8 +37,8 @@ from nanometa_live.app.utils.callback_helpers import (
     get_classification_stats,
 )
 from nanometa_live.app.utils.debounce import (
-    should_skip_update, get_trigger_type,
-    interval_render_is_redundant, mark_rendered,
+    should_skip_update, interval_tick_is_redundant,
+    mark_rendered,
 )
 
 
@@ -92,7 +92,7 @@ def register_qc_callbacks(app: Dash):
         Shows actual reads and base pairs that passed through the pipeline,
         ordered by file modification time to show processing progress.
         """
-        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("qc_plots", _fingerprint):
+        if interval_tick_is_redundant(ctx, "qc_plots", _fingerprint):
             raise PreventUpdate
         mark_rendered("qc_plots", _fingerprint)
 
@@ -226,7 +226,7 @@ def register_qc_callbacks(app: Dash):
     )
     def update_qc_stats(_fingerprint, selected_sample, _n_intervals, config, status):
         """Update the QC statistics based on the latest data."""
-        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("qc_stats", _fingerprint):
+        if interval_tick_is_redundant(ctx, "qc_stats", _fingerprint):
             raise PreventUpdate
         mark_rendered("qc_stats", _fingerprint)
 
@@ -504,7 +504,7 @@ def register_qc_callbacks(app: Dash):
 
         This table shows individual stats for each detected sample/barcode.
         """
-        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("qc_per_sample_table", _fingerprint):
+        if interval_tick_is_redundant(ctx, "qc_per_sample_table", _fingerprint):
             raise PreventUpdate
         mark_rendered("qc_per_sample_table", _fingerprint)
 
@@ -548,7 +548,7 @@ def register_qc_callbacks(app: Dash):
         - FASTP: q20_bases, q30_bases, total_bases, quality_curves
         - Seqkit (Chopper): Q20(%), Q30(%), sum_len
         """
-        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("qc_base_quality", _fingerprint):
+        if interval_tick_is_redundant(ctx, "qc_base_quality", _fingerprint):
             raise PreventUpdate
         mark_rendered("qc_base_quality", _fingerprint)
 
@@ -659,7 +659,7 @@ def register_qc_callbacks(app: Dash):
         - FASTP: read1_mean_length (before/after), gc_content
         - Seqkit (Chopper): avg_len, N50, GC(%)
         """
-        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("qc_read_stats", _fingerprint):
+        if interval_tick_is_redundant(ctx, "qc_read_stats", _fingerprint):
             raise PreventUpdate
         mark_rendered("qc_read_stats", _fingerprint)
 
@@ -760,7 +760,7 @@ def register_qc_callbacks(app: Dash):
           since chopper feeds Kraken2 in the pipeline order)
         - Classified: Kraken2 cumulative root.cumul_reads (classified reads)
         """
-        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("qc_stage_strip", _fingerprint):
+        if interval_tick_is_redundant(ctx, "qc_stage_strip", _fingerprint):
             raise PreventUpdate
         mark_rendered("qc_stage_strip", _fingerprint)
 
@@ -926,7 +926,7 @@ def register_qc_callbacks(app: Dash):
         Translates raw metrics into plain-language recommendations for
         operators who may not have bioinformatics expertise.
         """
-        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("qc_action_guidance", _fingerprint):
+        if interval_tick_is_redundant(ctx, "qc_action_guidance", _fingerprint):
             raise PreventUpdate
         mark_rendered("qc_action_guidance", _fingerprint)
 

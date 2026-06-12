@@ -22,7 +22,7 @@ from typing import List
 import dash
 from dash import Dash, Input, Output, State, ctx, no_update, html
 from nanometa_live.app.utils.debounce import (
-    get_trigger_type, interval_render_is_redundant, mark_rendered,
+    interval_tick_is_redundant, mark_rendered,
 )
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
@@ -177,7 +177,7 @@ def register_main_callbacks(app: Dash):
         # so the Organisms view does not re-read Kraken2 every poll on a quiet
         # outdir. User actions (Apply, sample, watchlist, filters) are not
         # "interval" triggers, so they always render.
-        if get_trigger_type(ctx) == "interval" and interval_render_is_redundant("main_results", _fingerprint):
+        if interval_tick_is_redundant(ctx, "main_results", _fingerprint):
             raise PreventUpdate
         mark_rendered("main_results", _fingerprint)
 
