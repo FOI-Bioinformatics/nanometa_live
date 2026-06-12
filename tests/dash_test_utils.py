@@ -43,6 +43,30 @@ def get_callback_fn(app, output_id, *, input_contains=None):
     return getattr(fn, "__wrapped__", fn)
 
 
+def make_callback_app(register_callbacks):
+    """Build a throwaway Dash app with a module's callbacks registered, ready for
+    :func:`get_callback_fn` extraction.
+
+    Replaces the three-line app fixture every callback-test module copy-pasted
+    (``app = Dash(...); register_<tab>_callbacks(app); return app`` -- only the
+    ``register_*`` function differed). Use it in a one-line fixture::
+
+        @pytest.fixture
+        def main_app():
+            return make_callback_app(register_main_callbacks)
+    """
+    import dash_bootstrap_components as dbc
+    from dash import Dash
+
+    app = Dash(
+        __name__,
+        external_stylesheets=[dbc.themes.BOOTSTRAP],
+        suppress_callback_exceptions=True,
+    )
+    register_callbacks(app)
+    return app
+
+
 @contextmanager
 def ctx_with(triggered_id):
     """Patch the dash callback context's triggered_id for the duration.

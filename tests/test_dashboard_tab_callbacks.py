@@ -16,14 +16,12 @@ from nanometa_live.core.testing.mock_data_generator import (
     generate_test_dataset,
     MockDataScenario,
 )
-from dash_test_utils import get_callback_fn
+from dash_test_utils import get_callback_fn, make_callback_app
 
 
 @pytest.fixture(scope="module")
 def dash_app():
-    app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
-    register_dashboard_callbacks(app)
-    return app
+    return make_callback_app(register_dashboard_callbacks)
 
 
 @pytest.fixture(scope="module")

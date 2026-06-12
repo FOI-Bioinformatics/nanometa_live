@@ -19,7 +19,7 @@ from nanometa_live.core.testing.mock_data_generator import (
     generate_test_dataset,
     MockDataScenario,
 )
-from dash_test_utils import get_callback_fn
+from dash_test_utils import get_callback_fn, make_callback_app
 
 
 def _backdate(root, seconds=30):
@@ -42,9 +42,7 @@ def populated_config(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def qc_app():
-    app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
-    register_qc_callbacks(app)
-    return app
+    return make_callback_app(register_qc_callbacks)
 
 
 @contextmanager

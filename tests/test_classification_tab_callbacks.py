@@ -5,14 +5,12 @@ from dash import Dash, no_update
 import dash_bootstrap_components as dbc
 
 from nanometa_live.app.tabs.classification_tab import register_classification_callbacks
-from dash_test_utils import get_callback_fn
+from dash_test_utils import get_callback_fn, make_callback_app
 
 
 @pytest.fixture(scope="module")
 def cls_app():
-    app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
-    register_classification_callbacks(app)
-    return app
+    return make_callback_app(register_classification_callbacks)
 
 
 # --------------------------------------------------------------------------- #
