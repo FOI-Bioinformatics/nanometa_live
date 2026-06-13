@@ -6,12 +6,14 @@ as a likely bug; several of the "likely bugs" turned out to be safe and are kept
 here as guards so they cannot regress.
 """
 
+import csv
 import os
 import time
 
 import pytest
 
 from nanometa_live.core.config.parameter_mapping import (
+    create_nextflow_params,
     generate_samplesheet,
     validate_sample_handling_layout,
 )
@@ -144,3 +146,67 @@ def test_available_samples_cache_sees_new_file(tmp_path):
     _backdate(f2)
     s2 = get_available_samples(str(tmp_path))
     assert "barcode02" in s2, f"cache did not surface new sample: {s2}"
+
+
+# --------------------------------------------------------------------------- #
+# Integrated launch-path test: create_nextflow_params end-to-end for batch mode
+# across all three sample-handling layouts. This is the launch-critical mapping
+# (which input param + samplesheet each mode produces); the components are unit-
+# tested above, this asserts they compose correctly.
+# --------------------------------------------------------------------------- #
+
+def _base_config(tmp_path, nanopore_dir, sample_handling, sample_name="sample"):
+    results = tmp_path / "results"
+    results.mkdir(exist_ok=True)
+    return {
+        "nanopore_output_directory": str(nanopore_dir),
+        "results_output_directory": str(results),
+        "kraken_db": str(tmp_path / "kraken2_db"),  # absence tolerated by the mapper
+        "processing_mode": "batch",
+        "sample_handling": sample_handling,
+        "sample_name": sample_name,
+        "analysis_name": "Run",
+        "check_intervals_seconds": 15,
+        "blast_validation": False,  # avoid the genome-download path
+    }
+
+
+def _samplesheet_samples(path):
+    with open(path) as fh:
+        rows = list(csv.reader(fh))
+    return [r[0] for r in rows[1:] if r and r[0]]  # sample column, minus header
+
+
+def test_batch_by_barcode_uses_input_dir_scenario_e(tmp_path):
+    inp = tmp_path / "input"
+    for bc in ("barcode01", "barcode02"):
+        (inp / bc).mkdir(parents=True)
+        (inp / bc / "reads.fastq.gz").write_bytes(b"@s\nACGT\n+\n!!!!\n")
+    params = create_nextflow_params(_base_config(tmp_path, inp, "by_barcode"))
+    # Scenario E: by_barcode with no samplesheet -> --input_dir, INPUT_SCANNER discovers barcodes.
+    assert params.get("input_dir") == str(inp)
+    assert not params.get("input")
+
+
+def test_batch_single_sample_one_sample_samplesheet(tmp_path):
+    inp = tmp_path / "input"
+    inp.mkdir()
+    for n in ("a.fastq.gz", "b.fastq.gz", "c.fastq.gz"):
+        (inp / n).write_bytes(b"@s\nACGT\n+\n!!!!\n")
+    params = create_nextflow_params(_base_config(tmp_path, inp, "single_sample", "mysample"))
+    assert params.get("input") and os.path.isfile(params["input"])
+    samples = _samplesheet_samples(params["input"])
+    # All files collapse to the one configured sample name.
+    assert len(samples) == 3 and set(samples) == {"mysample"}
+
+
+def test_batch_per_file_one_sample_per_file(tmp_path):
+    inp = tmp_path / "input"
+    inp.mkdir()
+    for n in ("alpha.fastq.gz", "beta.fastq.gz", "gamma.fastq.gz"):
+        (inp / n).write_bytes(b"@s\nACGT\n+\n!!!!\n")
+    params = create_nextflow_params(_base_config(tmp_path, inp, "per_file"))
+    assert params.get("input") and os.path.isfile(params["input"])
+    samples = _samplesheet_samples(params["input"])
+    # Each file is its own sample.
+    assert sorted(samples) == ["alpha", "beta", "gamma"]
