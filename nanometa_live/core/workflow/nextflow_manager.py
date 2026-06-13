@@ -65,6 +65,10 @@ class NextflowManager:
         self._run_config: Optional[Dict[str, Any]] = None
 
         self._last_trace_status = {}
+        # Trace-parser drift detection: log an unrecognised status value or a
+        # missing-column header only once each, not on every poll.
+        self._trace_unknown_statuses: set = set()
+        self._trace_header_warned = False
 
         # Status dictionary matching SnakemakeManager interface
         self.status = {
@@ -866,8 +870,17 @@ class NextflowManager:
             name_col = col_indices.get('name')
             status_col = col_indices.get('status')
             if name_col is None or status_col is None:
-                logging.warning("Trace file missing required columns (name, status)")
-                return {}
+                # Format drift: the trace header changed and our column lookup no
+                # longer applies. Warn ONCE (not every poll) and keep showing the
+                # last-known status rather than resetting the GUI to empty.
+                if not self._trace_header_warned:
+                    logging.warning(
+                        "Nextflow trace header missing required columns "
+                        "(name, status); got %s. Pipeline status may be stale -- "
+                        "the trace format may have changed.", header
+                    )
+                    self._trace_header_warned = True
+                return self._last_trace_status or {}
 
             name_idx = name_col
             status_idx = status_col
@@ -907,23 +920,36 @@ class NextflowManager:
                         "total": 0
                     }
 
-                # Count status
-                if status == "COMPLETED":
+                # Count status. CACHED is a -resume cache hit -- a successful,
+                # finished task -- so it counts as completed (omitting it
+                # undercounts resumed runs). Validate against the known Nextflow
+                # trace statuses; an unrecognised value means format drift, so
+                # log it ONCE per distinct value rather than silently dropping it.
+                if status in ("COMPLETED", "CACHED"):
                     completed += 1
                     if process_name:
                         stage_progress[process_name]["completed"] += 1
                         stage_progress[process_name]["total"] += 1
-                elif status in ["RUNNING", "SUBMITTED"]:
+                elif status in ("RUNNING", "SUBMITTED"):
                     running += 1
                     if process_name:
                         stage_progress[process_name]["running"] += 1
                         stage_progress[process_name]["total"] += 1
                         current_stage = process_name  # Track currently running stage
-                elif status in ["FAILED", "ABORTED"]:
+                elif status in ("FAILED", "ABORTED"):
                     failed += 1
                     if process_name:
                         stage_progress[process_name]["failed"] += 1
                         stage_progress[process_name]["total"] += 1
+                elif status in ("NEW", "PENDING", "RETRY", ""):
+                    # Not-yet-run / transient states: legitimately uncounted.
+                    pass
+                elif status not in self._trace_unknown_statuses:
+                    self._trace_unknown_statuses.add(status)
+                    logging.warning(
+                        "Nextflow trace: unrecognised task status %r (not counted). "
+                        "The trace format may have changed.", status
+                    )
 
             total = completed + running + failed
 
