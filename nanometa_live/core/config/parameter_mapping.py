@@ -610,6 +610,16 @@ def _build_base_params(config: Dict[str, Any], main_dir: str, kraken_db: str,
         "validation_identity_threshold": config.get("validation_identity_threshold", 90.0),
         "minimap2_preset": config.get("minimap2_preset", "map-ont"),
         "minimap2_min_mapq": config.get("minimap2_min_mapq", 10),
+        # NOTE: ``min_reads_for_validation`` (default 50) is a CUMULATIVE reporting
+        # threshold applied in the GUI/aggregation layer -- an organism needs this
+        # many reads across the whole run to be treated as validated. It is
+        # deliberately NOT forwarded to nanometanf's per-batch pre-extraction gate
+        # (``min_batch_reads_for_validation``): gating per batch on a cumulative
+        # value would skip an organism that accumulates slowly (e.g. 8 reads/batch
+        # x 18 batches = 144) but never crosses the floor within a single batch,
+        # producing a false negative. The pipeline's per-batch gate stays at its
+        # safe default of 1 (skip only zero-read taxids), which is results-identical
+        # to extracting every taxid every batch.
 
         # Legacy parameter (deprecated, nanometanf maps to run_validation internally)
         "blast_validation": blast_validation_enabled,
