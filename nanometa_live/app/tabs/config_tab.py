@@ -40,6 +40,16 @@ from nanometa_live.app.tabs.config_tab_helpers import (  # noqa: E402
     config_form_dirty,
     _pipeline_source_from_form,
 )
+from nanometa_live.app.tabs.config_field_registry import CONFIG_FORM_FIELDS  # noqa: E402
+
+# The Configuration-form widget bindings are generated from the single registry
+# (config_field_registry) so apply_config_changes' State list and its mapping to
+# build_config_from_form keywords cannot drift from each other. Order does not
+# matter -- the callback maps values to keywords by position in the SAME tuple,
+# so a registry re-order stays correct. tests/test_config_field_registry.py
+# asserts every Configuration consumer matches this registry.
+_FORM_STATES = [State(cid, "value") for cid, _ in CONFIG_FORM_FIELDS]
+_FORM_KWARGS = [kw for _, kw in CONFIG_FORM_FIELDS]
 
 
 def register_config_callbacks(app: Dash, backend_manager: BackendManager):
@@ -448,108 +458,29 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("config-feedback-alert", "is_open"),
         ],
         Input("apply-config-button", "n_clicks"),
-        [
-            State("analysis-name-input", "value"),
-            State("nanopore-dir-input", "value"),
-            State("kraken-db-input", "value"),
-            State("results-dir-input", "value"),
-            State("update-interval-input", "value"),
-            State("danger-threshold-input", "value"),
-            State("kraken-taxonomy-input", "value"),
-            State("check-interval-input", "value"),
-            State("realtime-timeout-minutes-input", "value"),
-            State("min-reads-per-level-input", "value"),
-            State("memory-mapping-input", "value"),
-            State("blast-validation-input", "value"),
-            State("validation-method-input", "value"),
-            State("e-value-cutoff-input", "value"),
-            State("genome-cache-dir-input", "value"),
-            State("cores-input", "value"),
-            State("gui-port-input", "value"),
-            State("clean-temp-input", "value"),
-            State("pipeline-profile-input", "value"),
-            State("pipeline-source-type-input", "value"),
-            State("pipeline-branch-input", "value"),
-            State("minimap2-preset-input", "value"),
-            State("minimap2-min-mapq-input", "value"),
-            State("pipeline-local-path-input", "value"),
-            State("processing-mode-input", "value"),
-            State("sample-handling-input", "value"),
-            State("sample-name-input", "value"),
-            State("qc-tool-input", "value"),
-            State("skip-nanoplot-input", "value"),
-            State("kraken2-incremental-input", "value"),
-            State("enable-krona-input", "value"),
-            State("enable-nanopore-stats-input", "value"),
-            # Read filtering and validation overrides (Wave: amplicon support)
-            State("chopper-minlength-input", "value"),
-            State("chopper-quality-input", "value"),
-            State("filtlong-minlength-input", "value"),
-            State("validation-identity-input", "value"),
-            State("kraken2-confidence-input", "value"),
-            State("kraken2-hitgroups-input", "value"),
-            # Newly exposed settings (2026-05-31): realtime file-age bound and
-            # the on-demand-validation read gate. (Offline mode is toggled
-            # live from the header, not from this form.)
-            State("max-file-age-input", "value"),
-            State("min-reads-for-validation-input", "value"),
-            State("app-config", "data"),
-        ],
+        # Form-field States generated from the single CONFIG_FORM_FIELDS registry
+        # (was 40 hand-maintained State() lines that had to stay in lock-step
+        # with build_config_from_form's keywords). app-config is appended last.
+        [*_FORM_STATES, State("app-config", "data")],
         prevent_initial_call=True,
     )
-    def apply_config_changes(
-        n_clicks,
-        analysis_name,
-        nanopore_dir,
-        kraken_db,
-        results_dir,
-        update_interval,
-        danger_threshold,
-        taxonomy,
-        check_interval,
-        realtime_timeout_minutes,
-        min_reads_per_level,
-        memory_mapping,
-        blast_validation,
-        validation_method,
-        e_value_cutoff,
-        genome_cache_dir,
-        cores,
-        gui_port,
-        clean_temp,
-        pipeline_profile,
-        pipeline_source_type,
-        pipeline_branch,
-        minimap2_preset,
-        minimap2_min_mapq,
-        pipeline_local_path,
-        processing_mode,
-        sample_handling,
-        sample_name,
-        qc_tool,
-        skip_nanoplot,
-        kraken2_incremental,
-        enable_krona,
-        enable_nanopore_stats,
-        chopper_minlength,
-        chopper_quality,
-        filtlong_minlength,
-        validation_identity,
-        kraken2_confidence,
-        kraken2_hitgroups,
-        max_file_age_minutes,
-        min_reads_for_validation,
-        current_config,
-    ):
+    def apply_config_changes(n_clicks, *form_values_and_config):
         """Apply configuration changes with validation.
 
         Thin wiring: the validate-and-build logic lives in the pure
         ``build_config_from_form`` helper (unit-tested without a running app);
         this callback only gathers inputs, renders the toast, and persists the
         session on success.
+
+        The form States are generated from CONFIG_FORM_FIELDS, so the values
+        arrive positionally; map them to build_config_from_form keywords by the
+        registry order (``_FORM_KWARGS``). app-config is the final State.
         """
         if not n_clicks:
             return no_update, no_update, no_update, no_update
+
+        *form_values, current_config = form_values_and_config
+        form_kwargs = dict(zip(_FORM_KWARGS, form_values))
 
         if not current_config:
             return no_update, no_update, {
@@ -558,49 +489,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 "color": "danger",
             }, False
 
-        config, errors = build_config_from_form(
-            current_config,
-            analysis_name=analysis_name,
-            nanopore_dir=nanopore_dir,
-            kraken_db=kraken_db,
-            results_dir=results_dir,
-            update_interval=update_interval,
-            danger_threshold=danger_threshold,
-            taxonomy=taxonomy,
-            check_interval=check_interval,
-            realtime_timeout_minutes=realtime_timeout_minutes,
-            min_reads_per_level=min_reads_per_level,
-            memory_mapping=memory_mapping,
-            blast_validation=blast_validation,
-            validation_method=validation_method,
-            e_value_cutoff=e_value_cutoff,
-            genome_cache_dir=genome_cache_dir,
-            cores=cores,
-            gui_port=gui_port,
-            clean_temp=clean_temp,
-            pipeline_profile=pipeline_profile,
-            pipeline_source_type=pipeline_source_type,
-            pipeline_branch=pipeline_branch,
-            minimap2_preset=minimap2_preset,
-            minimap2_min_mapq=minimap2_min_mapq,
-            pipeline_local_path=pipeline_local_path,
-            processing_mode=processing_mode,
-            sample_handling=sample_handling,
-            sample_name=sample_name,
-            qc_tool=qc_tool,
-            skip_nanoplot=skip_nanoplot,
-            kraken2_incremental=kraken2_incremental,
-            enable_krona=enable_krona,
-            enable_nanopore_stats=enable_nanopore_stats,
-            chopper_minlength=chopper_minlength,
-            chopper_quality=chopper_quality,
-            filtlong_minlength=filtlong_minlength,
-            validation_identity=validation_identity,
-            kraken2_confidence=kraken2_confidence,
-            kraken2_hitgroups=kraken2_hitgroups,
-            max_file_age_minutes=max_file_age_minutes,
-            min_reads_for_validation=min_reads_for_validation,
-        )
+        config, errors = build_config_from_form(current_config, **form_kwargs)
 
         if errors:
             return no_update, no_update, {
@@ -614,7 +503,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
         return config, "Apply Settings", {
             "title": "Changes Applied",
-            "message": f"Configuration changes have been applied. Analysis name: {analysis_name}",
+            "message": (
+                "Configuration changes have been applied. "
+                f"Analysis name: {form_kwargs.get('analysis_name')}"
+            ),
             "color": "success",
         }, True  # Show the feedback alert
 

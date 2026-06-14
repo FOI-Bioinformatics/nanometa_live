@@ -12,12 +12,15 @@ import inspect
 import re
 from unittest.mock import MagicMock
 
+from unittest.mock import patch
+
 import pytest
 
-from dash_test_utils import make_callback_app
+from dash_test_utils import make_callback_app, get_callback_fn
 from nanometa_live.app.tabs.config_tab import register_config_callbacks
 from nanometa_live.app.tabs.config_tab_helpers import build_config_from_form
 from nanometa_live.app.tabs.config_field_registry import (
+    CONFIG_FORM_FIELDS,
     FORM_FIELD_IDS,
     FORM_FIELD_KWARGS,
 )
@@ -77,3 +80,33 @@ def test_build_config_from_form_kwargs_match_registry():
         if p.kind == inspect.Parameter.KEYWORD_ONLY
     }
     assert kw_only == FORM_FIELD_KWARGS
+
+
+def test_apply_maps_each_state_value_to_its_keyword(config_app):
+    """apply_config_changes now receives form values positionally (States are
+    generated from the registry) and zips them to build_config_from_form keywords
+    by _FORM_KWARGS. Drive it with a distinct value per field and assert each
+    keyword received the value of its OWN field -- i.e. the positional zip did
+    not shift the mapping. build_config_from_form is mocked to isolate the
+    callback's value->keyword wiring from path/range validation."""
+    # apply is the only callback that writes config-feedback-alert.is_open.
+    fn = get_callback_fn(config_app, "config-feedback-alert")
+
+    # One distinct value per field, in registry (State) order.
+    values = [f"val::{kw}" for _, kw in CONFIG_FORM_FIELDS]
+    captured = {}
+
+    def fake_build(current_config, **kwargs):
+        captured.update(kwargs)
+        return {"ok": True}, []  # (config, errors)
+
+    with patch("nanometa_live.app.tabs.config_tab.build_config_from_form",
+               side_effect=fake_build), \
+         patch("nanometa_live.app.tabs.config_tab.autosave_session_config"):
+        # n_clicks=1, then the 40 form values, then app-config (last State).
+        fn(1, *values, {"existing": "config"})
+
+    # Every keyword got exactly its own field's value (no off-by-one shift).
+    for _, kw in CONFIG_FORM_FIELDS:
+        assert captured.get(kw) == f"val::{kw}", f"keyword {kw} got {captured.get(kw)!r}"
+    assert set(captured) == FORM_FIELD_KWARGS

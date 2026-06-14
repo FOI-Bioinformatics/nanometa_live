@@ -10,11 +10,10 @@ range at a time and assert the matching message is surfaced.
 
 from __future__ import annotations
 
-import inspect
-
 import dash
 
 from nanometa_live.app.tabs.config_tab import register_config_callbacks
+from nanometa_live.app.tabs.config_field_registry import CONFIG_FORM_FIELDS
 from tests.dash_test_utils import get_callback_fn
 
 
@@ -44,7 +43,11 @@ def _apply_callback():
 
 
 def _invoke(**overrides):
-    """Call apply_config_changes with all params None except the overrides.
+    """Call apply_config_changes with all form fields None except the overrides.
+
+    apply now takes ``(n_clicks, *form_values, current_config)`` with form values
+    in CONFIG_FORM_FIELDS order, so build that positional list (overrides applied
+    by their build_config_from_form keyword).
 
     Numeric checks are guarded by ``is not None`` so unrelated fields are
     skipped. nanopore_dir/kraken_db are left empty, which appends 'required'
@@ -52,12 +55,10 @@ def _invoke(**overrides):
     that is returned together. We assert on the specific bound message.
     """
     fn = _apply_callback()
-    params = list(inspect.signature(fn).parameters)
-    kwargs = {p: None for p in params}
-    kwargs["n_clicks"] = 1
-    kwargs["current_config"] = {"data_dir": "/tmp/nanometa_rangetest"}
-    kwargs.update(overrides)
-    return fn(**kwargs)
+    by_name = {kw: None for _, kw in CONFIG_FORM_FIELDS}
+    by_name.update(overrides)
+    values = [by_name[kw] for _, kw in CONFIG_FORM_FIELDS]
+    return fn(1, *values, {"data_dir": "/tmp/nanometa_rangetest"})
 
 
 def _message(result) -> str:
