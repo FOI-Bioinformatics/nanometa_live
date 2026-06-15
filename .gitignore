@@ -193,6 +193,12 @@ verify_visualizations.py
 # Playwright scratch screenshots from interactive scenario runs
 scenario*.png
 page-*.png
+val*.md
+
+# Pipeline run output written under the repo when a GUI run is launched from
+# here without an explicit results override (resolve_run_outdir derives
+# <project>/results/<run-slug>).
+results/
 
 # Project-local Nanometa state (session, watchlist selection, taxid mappings)
 # created when the app is run from a project/working directory.
