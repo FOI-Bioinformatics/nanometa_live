@@ -22,6 +22,37 @@ from nanometa_live.core.parsers.paf_coverage_parser import (
     aggregate_contig_coverage,
     CoverageData,
 )
+from nanometa_live.app.layouts.validation_layout import create_validation_result_card
+
+
+def _result_card(result, *, show_coverage_button, default_method):
+    """Build a validation result card from a result dict.
+
+    Shared by the BLAST and coverage card callbacks (only the coverage button and
+    default method differ), so the full kwarg mapping -- including the enriched
+    detail fields (identity range, alignment length, reference accession/size) --
+    lives in one place.
+    """
+    return create_validation_result_card(
+        species=result.get("species", "Unknown"),
+        taxid=result.get("taxid", 0),
+        status=result.get("status", "no_data"),
+        percent_validated=result.get("percent_validated", 0),
+        percent_identity=result.get("percent_identity_mean", 0),
+        total_reads=result.get("total_reads", 0),
+        validated_reads=result.get("validated_reads", 0),
+        coverage=result.get("coverage_breadth", 0),
+        sample_id=result.get("sample_id", ""),
+        validation_method=result.get("validation_method", default_method),
+        avg_mapq=result.get("avg_mapq", 0.0),
+        show_coverage_button=show_coverage_button,
+        percent_identity_min=result.get("percent_identity_min", 0.0),
+        percent_identity_max=result.get("percent_identity_max", 0.0),
+        alignment_length_mean=result.get("alignment_length_mean", 0.0),
+        coverage_depth_mean=result.get("coverage_depth_mean", 0.0),
+        reference_accession=result.get("reference_accession", ""),
+        reference_length=result.get("reference_length", 0),
+    )
 
 logger = logging.getLogger(__name__)
 

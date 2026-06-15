@@ -52,6 +52,7 @@ logger = logging.getLogger(__name__)
 # Pure helpers extracted to validation_tab_helpers.py; re-exported so the
 # callbacks below (and any importers) keep working.
 from nanometa_live.app.tabs.validation_tab_helpers import (  # noqa: E402
+    _result_card,
     _CARD_LIST_INITIAL_LIMIT,
     _build_coverage_selector_options,
     _build_paginated_card_list,
@@ -325,23 +326,10 @@ def register_validation_callbacks(app: Dash):
         except Exception:
             logger.debug("Failed to sort validation results by %s; leaving unsorted", sort_by, exc_info=True)
 
-        cards = []
-        for result in results:
-            card = create_validation_result_card(
-                species=result.get("species", "Unknown"),
-                taxid=result.get("taxid", 0),
-                status=result.get("status", "no_data"),
-                percent_validated=result.get("percent_validated", 0),
-                percent_identity=result.get("percent_identity_mean", 0),
-                total_reads=result.get("total_reads", 0),
-                validated_reads=result.get("validated_reads", 0),
-                coverage=result.get("coverage_breadth", 0),
-                sample_id=result.get("sample_id", ""),
-                validation_method=result.get("validation_method", "blast"),
-                avg_mapq=result.get("avg_mapq", 0.0),
-                show_coverage_button=False,
-            )
-            cards.append(card)
+        cards = [
+            _result_card(result, show_coverage_button=False, default_method="blast")
+            for result in results
+        ]
 
         return _build_paginated_card_list(
             cards, show_all=bool(show_all),
@@ -474,7 +462,14 @@ def register_validation_callbacks(app: Dash):
                 "validated_reads": result.get("validated_reads", 0),
                 "percent_validated": round(result.get("percent_validated", 0), 1),
                 "percent_identity_mean": round(result.get("percent_identity_mean", 0), 1),
+                "identity_range": (
+                    f"{result.get('percent_identity_min', 0):.1f}-{result.get('percent_identity_max', 0):.1f}"
+                    if result.get("percent_identity_max", 0) else ""
+                ),
+                "alignment_length_mean": round(result.get("alignment_length_mean", 0), 0),
                 "coverage_breadth": round(result.get("coverage_breadth", 0) * 100, 1),
+                "reference_accession": result.get("reference_accession", ""),
+                "reference_length": result.get("reference_length", 0),
                 "status": result.get("status", "no_data"),
             })
         return table_data
@@ -618,23 +613,10 @@ def register_validation_callbacks(app: Dash):
             return ""
 
         results = sort_results_validated_first(results, "coverage_breadth")
-        cards = []
-        for result in results:
-            card = create_validation_result_card(
-                species=result.get("species", "Unknown"),
-                taxid=result.get("taxid", 0),
-                status=result.get("status", "no_data"),
-                percent_validated=result.get("percent_validated", 0),
-                percent_identity=result.get("percent_identity_mean", 0),
-                total_reads=result.get("total_reads", 0),
-                validated_reads=result.get("validated_reads", 0),
-                coverage=result.get("coverage_breadth", 0),
-                sample_id=result.get("sample_id", ""),
-                validation_method=result.get("validation_method", "minimap2"),
-                avg_mapq=result.get("avg_mapq", 0.0),
-                show_coverage_button=True,
-            )
-            cards.append(card)
+        cards = [
+            _result_card(result, show_coverage_button=True, default_method="minimap2")
+            for result in results
+        ]
 
         return _build_paginated_card_list(
             cards, show_all=bool(show_all),

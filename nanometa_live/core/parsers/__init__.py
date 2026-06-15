@@ -14,8 +14,8 @@ from .blast_validation_parser import (
     BlastValidationParser,
     ValidationResult,
     ValidationStatus,
-    generate_mock_validation_data,
 )
+from .mock_validation import generate_mock_validation_data
 from .paf_coverage_parser import (
     CoverageData,
     parse_paf_coverage,

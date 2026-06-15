@@ -241,9 +241,17 @@ def _create_blast_tab() -> dbc.Tab:
                                             {"headerName": "Confirmed %", "field": "percent_validated", "type": "numericColumn",
                                              "headerTooltip": "Percentage of sequences confirmed. 80%+ is strong evidence."},
                                             {"headerName": "Match %", "field": "percent_identity_mean", "type": "numericColumn",
-                                             "headerTooltip": "How closely sequences match the reference. 95%+ is a strong match."},
+                                             "headerTooltip": "Mean identity. 95%+ is a strong match."},
+                                            {"headerName": "Identity range", "field": "identity_range",
+                                             "headerTooltip": "Minimum-maximum per-read identity across the alignments (from blast.tsv)."},
+                                            {"headerName": "Mean align (bp)", "field": "alignment_length_mean", "type": "numericColumn",
+                                             "headerTooltip": "Mean alignment length in base pairs."},
                                             {"headerName": "Read Alignment %", "field": "coverage_breadth", "type": "numericColumn",
                                              "headerTooltip": "Average percentage of each sequence that aligned to the reference. Higher = stronger matches. Computed per-method: BLAST uses qcovs, minimap2 uses span/qlen."},
+                                            {"headerName": "Reference", "field": "reference_accession",
+                                             "headerTooltip": "Reference genome accession the reads were compared against."},
+                                            {"headerName": "Genome (bp)", "field": "reference_length", "type": "numericColumn",
+                                             "headerTooltip": "Reference genome length in base pairs."},
                                             {
                                                 "headerName": "Status",
                                                 "field": "status",
@@ -683,7 +691,13 @@ def create_validation_result_card(
     sample_id: str = "",
     validation_method: str = "blast",
     avg_mapq: float = 0.0,
-    show_coverage_button: bool = False
+    show_coverage_button: bool = False,
+    percent_identity_min: float = 0.0,
+    percent_identity_max: float = 0.0,
+    alignment_length_mean: float = 0.0,
+    coverage_depth_mean: float = 0.0,
+    reference_accession: str = "",
+    reference_length: int = 0,
 ) -> dbc.Card:
     """
     Create a card displaying validation results for a single species.
@@ -739,6 +753,32 @@ def create_validation_result_card(
     }
 
     config = status_config.get(status, status_config["no_data"])
+
+    # Optional secondary detail, shown only for fields that are actually
+    # populated so the line stays empty (and hidden) for sparse results.
+    # These come from the enriched validation parse (identity range +
+    # alignment length from blast.tsv, reference identity/size from the
+    # aggregate JSON) -- previously parsed but never surfaced.
+    _detail_bits = []
+    if percent_identity_max > 0 and percent_identity_max != percent_identity_min:
+        _detail_bits.append(f"Identity range {percent_identity_min:.1f}-{percent_identity_max:.1f}%")
+    if alignment_length_mean > 0:
+        _detail_bits.append(f"Mean align {alignment_length_mean:.0f} bp")
+    if coverage_depth_mean > 0:
+        _detail_bits.append(f"Mean depth {coverage_depth_mean:.1f}x")
+    if reference_accession:
+        ref = reference_accession
+        if reference_length > 0:
+            ref += f" ({reference_length / 1e6:.2f} Mbp)"
+        _detail_bits.append(f"Ref: {ref}")
+    _detail_line = (
+        html.Div(
+            html.Small(" | ".join(_detail_bits), className="text-muted",
+                       style={"fontSize": "0.75rem"}),
+            className="mt-2",
+        )
+        if _detail_bits else ""
+    )
 
     # Plain-language explanation for the status
     status_explanation = {
@@ -841,6 +881,7 @@ def create_validation_result_card(
                     ])
                 ], md=4),
             ]),
+            _detail_line,
             html.Div([
                 dbc.Progress(
                     value=percent_validated,
