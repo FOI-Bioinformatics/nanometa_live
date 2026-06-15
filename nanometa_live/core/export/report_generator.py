@@ -41,6 +41,8 @@ _RAW_SUBDIRS = (
     "validation",
     "on_demand_validation",
     "pipeline_info",
+    # MultiQC report so the export's Pipeline Reports links resolve offline.
+    "multiqc",
 )
 
 # Default ceiling on the raw payload. macOS bind-mounts and full result trees
@@ -91,8 +93,9 @@ class ReportGenerator:
         if not selected_samples:
             selected_samples = [None]  # Aggregated view only
 
-        # Collect data
-        report_data = self._collect_data(selected_samples)
+        # Collect data. Pass include_raw so report links are only emitted when
+        # the report files are actually bundled under raw/ (else they'd dangle).
+        report_data = self._collect_data(selected_samples, include_raw=include_raw)
 
         # Build HTML
         html_content = self._build_html_report(report_data)
@@ -110,7 +113,7 @@ class ReportGenerator:
 
         return report_file
 
-    def _collect_data(self, samples: List[Optional[str]]) -> Dict[str, Any]:
+    def _collect_data(self, samples: List[Optional[str]], include_raw: bool = True) -> Dict[str, Any]:
         """Collect all data needed for the report."""
         # Aggregated data. get_qc_stats already abstracts fastp/seqkit (the two
         # are mutually exclusive), so a separate fastp-only summary is dropped.
@@ -125,6 +128,16 @@ class ReportGenerator:
 
         # Alerts
         alerts = self._collect_alerts()
+
+        # Pipeline reports (MultiQC, Nextflow) -- linked only when raw files are
+        # bundled, since the links point at the copied files under raw/.
+        pipeline_reports = []
+        if include_raw:
+            from nanometa_live.core.utils.reports_loader import export_report_links
+            pipeline_reports = [
+                {"label": r["label"], "href": f"raw/{r['relpath']}"}
+                for r in export_report_links(self.results_dir)
+            ]
 
         # Per-sample data
         per_sample = {}
@@ -162,6 +175,7 @@ class ReportGenerator:
             "watched_results": watched_results,
             "alerts": alerts,
             "per_sample": per_sample,
+            "pipeline_reports": pipeline_reports,
         }
 
     def _get_classification_counts(self, df: pd.DataFrame):

@@ -89,6 +89,25 @@ def detect_reports(results_dir: Optional[str]) -> List[Dict[str, Any]]:
     return out
 
 
+def export_report_links(results_dir: Optional[str]) -> List[Dict[str, str]]:
+    """Return ``[{label, relpath}]`` for reports present under ``results_dir``.
+
+    ``relpath`` is the matched file's path relative to the results dir (e.g.
+    ``multiqc/multiqc_report.html``). Used by the standalone export to link the
+    reports it copies under ``raw/`` -- all REPORT_SPECS live under ``multiqc/``
+    or ``pipeline_info/``, which the export bundles.
+    """
+    base = Path(results_dir) if results_dir else None
+    if not base or not base.is_dir():
+        return []
+    out: List[Dict[str, str]] = []
+    for spec in REPORT_SPECS:
+        match = _latest_match(base, spec["glob"])
+        if match is not None:
+            out.append({"label": spec["label"], "relpath": str(match.relative_to(base))})
+    return out
+
+
 def resolve_report_path(key: str) -> Optional[Path]:
     """Resolve the on-disk path for a report key under the current results dir.
 

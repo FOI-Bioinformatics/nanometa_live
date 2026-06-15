@@ -401,6 +401,24 @@
   </div>
   {% endif %}
 
+  <!-- PIPELINE REPORTS -->
+  {% if data.pipeline_reports %}
+  <h2>Pipeline Reports</h2>
+  <div class="card">
+    <div class="card-body">
+      <p style="color:#6c757d;margin-top:0;">
+        Detailed reports produced by the pipeline, bundled under
+        <code>raw/</code> in this export.
+      </p>
+      <ul>
+        {% for r in data.pipeline_reports %}
+        <li><a href="{{ r.href }}">{{ r.label }}</a></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- PER-SAMPLE DETAILS -->
   {% if data.per_sample %}
   <h2 class="page-break">Sample Details</h2>
