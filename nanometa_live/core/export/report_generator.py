@@ -126,8 +126,8 @@ class ReportGenerator:
         # Watchlist screening
         watched_results = self._screen_watchlist(kraken_all)
 
-        # Alerts
-        alerts = self._collect_alerts()
+        # Alerts (pathogen + QC) from the post-run watchlist screen and QC stats.
+        alerts = self._collect_alerts(qc_stats=qc_all, watched_results=watched_results)
 
         # Pipeline reports (MultiQC, Nextflow) -- linked only when raw files are
         # bundled, since the links point at the copied files under raw/.
@@ -291,14 +291,36 @@ class ReportGenerator:
 
         return results
 
-    def _collect_alerts(self) -> List[Dict[str, Any]]:
-        """Collect current alerts from the alert engine."""
+    def _collect_alerts(self, qc_stats=None, watched_results=None) -> List[Dict[str, Any]]:
+        """Generate the report's alerts from the post-run state.
+
+        Previously called a non-existent ``get_alert_engine().get_active_alerts()``
+        -- the AttributeError was swallowed, so every exported report had an empty
+        Alerts section. Use the real ``generate_alerts(status, samples, ...)`` API
+        with the data the report already has: QC stats and the watchlist screen
+        (so pathogen + QC alerts surface). An export has no live backend status or
+        per-sample stream, so those are passed empty. Degrades to [] on any
+        problem -- alerts are a secondary section.
+        """
         try:
             from nanometa_live.core.utils.alert_engine import get_alert_engine
             engine = get_alert_engine()
-            return [a.to_dict() for a in engine.get_active_alerts()]
-        except (ImportError, AttributeError) as e:
-            logger.exception("Could not collect alerts: %s", e)
+            watched_results = watched_results or []
+            detected = [
+                {"name": w.get("name"), "taxid": w.get("taxid"), "reads": w.get("reads", 0)}
+                for w in watched_results if w.get("detected")
+            ]
+            watched_species = [
+                {"name": w.get("name"), "taxid": w.get("taxid"),
+                 "threat_level": w.get("threat_level")}
+                for w in watched_results
+            ]
+            return engine.generate_alerts(
+                {}, [], qc_stats=qc_stats,
+                detected_organisms=detected, watched_species=watched_species,
+            )
+        except Exception as e:  # noqa: BLE001 -- alerts are best-effort
+            logger.debug("Could not generate alerts for report: %s", e, exc_info=True)
             return []
 
     def _get_plotly_js(self) -> str:

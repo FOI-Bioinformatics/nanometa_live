@@ -50,7 +50,8 @@ setup(
     entry_points={
         'console_scripts': [
             'nanometa-live=nanometa_live.nanometa_live:main',
-            'nanometa-prepare=nanometa_live.cli.prepare:main'
+            'nanometa-prepare=nanometa_live.cli.prepare:main',
+            'nanometa-report=nanometa_live.cli.report:main'
         ]
     },
     install_requires=requirements,
