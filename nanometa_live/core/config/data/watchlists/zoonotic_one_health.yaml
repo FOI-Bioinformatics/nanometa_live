@@ -114,7 +114,7 @@ pathogens:
 
   - name: "Bartonella henselae"
     names_alt: ["Bartonella_henselae"]
-    taxid_ncbi: 32188
+    taxid_ncbi: 38323
     common_name: "Cat scratch disease"
     threat_level: "moderate"
     bsl_level: 2

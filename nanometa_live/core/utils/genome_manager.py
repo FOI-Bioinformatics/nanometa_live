@@ -956,83 +956,101 @@ class GenomeDownloadManager:
 
         output_file = self.genomes_dir / f"{taxid}.fasta"
 
+        logger.info(
+            f"Downloading virus genome for {species_name} "
+            f"(taxid={taxid}) via datasets CLI..."
+        )
+
+        # The watchlist taxid is sometimes an old or no-rank node with no RefSeq
+        # genome AT that taxid -- `datasets` then exits 0 with an EMPTY archive
+        # (no genomic.fna). Fall back to the species name and progressively relax
+        # the RefSeq / complete-only filters; the first attempt yielding a real
+        # FASTA wins. (e.g. Poliovirus resolves by name+refseq+complete-only; RSV
+        # only resolves by name with no filter, where its RefSeq lives under a
+        # reclassified child taxon the parent-name+refseq query does not return.)
+        attempts = [
+            (str(taxid), ["--refseq", "--complete-only"]),
+            (species_name, ["--refseq", "--complete-only"]),
+            (species_name, ["--refseq"]),
+            (species_name, []),
+        ]
+        tried = set()
+        for taxon, flags in attempts:
+            key = (taxon, tuple(flags))
+            if not taxon or key in tried:
+                continue
+            tried.add(key)
+            accession = self._try_virus_download(taxon, flags, output_file)
+            if accession is not None:
+                logger.info(
+                    f"Downloaded virus genome to {output_file} "
+                    f"(accession={accession or 'unknown'}, taxon='{taxon}', flags={flags})"
+                )
+                return output_file, accession
+
+        msg = (
+            f"No virus genome found for {species_name} (taxid={taxid}) via "
+            f"datasets (tried the taxid and the species name)"
+        )
+        logger.error(msg)
+        self._last_errors[taxid] = msg
+        return None, None
+
+    def _try_virus_download(self, taxon: str, extra_flags, output_file: Path):
+        """Run one ``datasets download virus genome`` attempt for ``taxon``.
+
+        Returns the accession string (``""`` if it could not be parsed) on
+        success with a real FASTA written to ``output_file``, or ``None`` when
+        the attempt produced no genome (non-zero exit, missing archive, or the
+        exit-0 empty archive that ``datasets`` emits when nothing matches).
+        """
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 zip_file = Path(tmpdir) / "virus_genome.zip"
-
-                cmd = [
-                    "datasets", "download", "virus", "genome", "taxon",
-                    str(taxid),
-                    "--refseq",
-                    "--complete-only",
-                    "--include", "genome",
-                    "--filename", str(zip_file)
-                ]
-
-                logger.info(
-                    f"Downloading virus genome for {species_name} "
-                    f"(taxid={taxid}) via datasets CLI..."
+                cmd = (
+                    ["datasets", "download", "virus", "genome", "taxon", str(taxon)]
+                    + list(extra_flags)
+                    + ["--include", "genome", "--filename", str(zip_file)]
                 )
                 logger.debug(f"Running: {' '.join(cmd)}")
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=600
-                )
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+                if result.returncode != 0 or not zip_file.exists():
+                    logger.debug(
+                        f"virus download attempt produced nothing "
+                        f"(taxon='{taxon}', flags={extra_flags}): "
+                        f"{(result.stderr or '').strip()[:200]}"
+                    )
+                    return None
 
-                if result.returncode != 0:
-                    logger.error(f"Virus genome download failed: {result.stderr}")
-                    return None, None
-
-                if not zip_file.exists():
-                    logger.error("Downloaded virus archive not found")
-                    return None, None
-
-                # Extract FASTA from zip
                 # Virus zips use a flat path: ncbi_dataset/data/genomic.fna
                 with zipfile.ZipFile(zip_file, "r") as zf:
                     fasta_files = [
                         f for f in zf.namelist()
                         if f.endswith(".fna") or f.endswith(".fasta")
                     ]
-
                     if not fasta_files:
-                        logger.error(
-                            "No FASTA file found in virus genome archive"
-                        )
-                        return None, None
-
-                    fasta_name = fasta_files[0]
+                        # exit-0 empty archive: no genome at this taxon/filter.
+                        return None
                     temp_fasta = Path(tmpdir) / "virus_genome.fasta"
-
-                    with zf.open(fasta_name) as src, \
-                            open(temp_fasta, "wb") as dst:
+                    with zf.open(fasta_files[0]) as src, open(temp_fasta, "wb") as dst:
                         dst.write(src.read())
-
                     shutil.move(str(temp_fasta), str(output_file))
 
                 if not _validate_fasta(output_file):
-                    logger.error(f"Downloaded virus genome failed FASTA validation: {output_file}")
+                    logger.debug(
+                        f"virus FASTA failed validation (taxon='{taxon}'); discarding"
+                    )
                     output_file.unlink(missing_ok=True)
-                    return None, None
-
-                accession = _extract_fasta_accession(output_file)
-                logger.info(
-                    f"Downloaded virus genome to {output_file} "
-                    f"(accession={accession or 'unknown'})"
-                )
-                return output_file, accession
+                    return None
+                return _extract_fasta_accession(output_file) or ""
 
         except subprocess.TimeoutExpired:
-            logger.error(f"Virus genome download timed out for taxid {taxid}")
-            return None, None
+            logger.warning(f"virus download timed out (taxon='{taxon}', flags={extra_flags})")
+            return None
         except (subprocess.CalledProcessError, FileNotFoundError, PermissionError,
                 OSError, zipfile.BadZipFile) as e:
-            logger.exception(
-                f"Virus genome download failed for taxid {taxid}: {e}"
-            )
-            return None, None
+            logger.debug(f"virus download error (taxon='{taxon}'): {e}")
+            return None
 
     def _download_ncbi_genome(self, accession: str, taxid: int) -> Optional[Path]:
         """
@@ -1163,23 +1181,26 @@ class GenomeDownloadManager:
                     timeout=600
                 )
 
-                if result.returncode != 0:
-                    # Try without --reference flag
-                    logger.info(f"No reference genome, retrying without --reference...")
-                    cmd.remove("--reference")
-                    result = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=600
+                if result.returncode != 0 or not zip_file.exists():
+                    # `datasets download genome ... --reference` exits non-zero
+                    # when the taxon has no genome flagged as the reference (e.g.
+                    # the Salmonella Typhi serovar taxid: 0 reference assemblies
+                    # but hundreds of complete ones). Retrying WITHOUT --reference
+                    # would pull every assembly for the taxon (thousands of them,
+                    # which then times out), so resolve a single complete-assembly
+                    # accession and fetch just that.
+                    logger.info(
+                        f"No reference genome for {species_name} (taxid={taxid}); "
+                        "resolving a single complete-assembly accession..."
                     )
-
-                if result.returncode != 0:
-                    logger.error(f"Download by taxid failed for {species_name}: {result.stderr}")
-                    return None, None
-
-                if not zip_file.exists():
-                    logger.error("Downloaded file not found")
+                    acc = self._resolve_assembly_accession(taxid)
+                    if acc:
+                        path = self._download_ncbi_genome(acc, taxid)
+                        if path:
+                            return path, acc
+                    logger.error(
+                        f"No downloadable assembly found for {species_name} (taxid={taxid})"
+                    )
                     return None, None
 
                 with zipfile.ZipFile(zip_file, 'r') as zf:
@@ -1189,6 +1210,21 @@ class GenomeDownloadManager:
                     ]
 
                     if not fasta_files:
+                        # `datasets download ... --reference` exits 0 with an
+                        # empty archive when the taxon has no genome flagged as
+                        # the reference (e.g. the Salmonella Typhi serovar taxid:
+                        # 0 reference assemblies but hundreds of complete ones).
+                        # Resolve a concrete complete-assembly accession and
+                        # fetch that instead of failing.
+                        logger.info(
+                            f"By-taxid archive for {species_name} (taxid={taxid}) "
+                            "carried no genome; resolving a complete-assembly accession..."
+                        )
+                        acc = self._resolve_assembly_accession(taxid)
+                        if acc:
+                            path = self._download_ncbi_genome(acc, taxid)
+                            if path:
+                                return path, acc
                         logger.error("No FASTA file found in downloaded archive")
                         return None, None
 
@@ -1219,6 +1255,32 @@ class GenomeDownloadManager:
                 OSError, zipfile.BadZipFile) as e:
             logger.exception(f"Download by taxid failed for {taxid}: {e}")
             return None, None
+
+    def _resolve_assembly_accession(self, taxon) -> Optional[str]:
+        """Resolve a single genome assembly accession for ``taxon`` via summary.
+
+        Preference order: the reference assembly, then any complete assembly,
+        then any assembly. Used when a by-taxid download returns an exit-0 empty
+        archive (no reference flagged) so a concrete accession can be fetched
+        instead. Returns the accession string or ``None``.
+        """
+        if not shutil.which("datasets"):
+            return None
+        for extra in (["--reference"], ["--assembly-level", "complete"], []):
+            cmd = [
+                "datasets", "summary", "genome", "taxon", str(taxon), "--limit", "1"
+            ] + extra
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                if result.returncode != 0:
+                    continue
+                reports = (json.loads(result.stdout or "{}").get("reports") or [])
+                if reports and reports[0].get("accession"):
+                    return reports[0]["accession"]
+            except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError) as e:
+                logger.debug(f"assembly accession resolve failed (taxon={taxon}, {extra}): {e}")
+                continue
+        return None
 
     def build_blast_db(self, taxid: int) -> bool:
         """
