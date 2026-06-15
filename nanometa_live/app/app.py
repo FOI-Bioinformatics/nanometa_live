@@ -135,6 +135,7 @@ from nanometa_live.app.layouts.classification_layout import create_classificatio
 from nanometa_live.app.layouts.config_layout import create_config_layout
 from nanometa_live.app.layouts.dashboard_layout import create_dashboard_layout
 from nanometa_live.app.layouts.validation_layout import create_validation_layout
+from nanometa_live.app.layouts.reports_layout import create_reports_layout
 from nanometa_live.app.layouts.watchlist_preparation_layout import create_watchlist_preparation_layout
 from nanometa_live.app.layouts.deployment_layout import create_deployment_layout
 from nanometa_live.app.components.header import create_header
@@ -318,6 +319,22 @@ def create_app(
             response.headers['Pragma'] = 'no-cache'
             response.headers['Expires'] = '0'
         return response
+
+    # Serve pipeline report artifacts (MultiQC, Nextflow execution report /
+    # timeline / trace) from the operator's current results directory so the
+    # Reports tab can link to them. Only the fixed report keys in
+    # reports_loader.REPORT_SPECS resolve, and the resolved file must stay inside
+    # the current results dir (traversal guard in resolve_report_path); the
+    # directory is held server-side (refreshed by the Reports-tab callback), not
+    # taken from the URL.
+    @app.server.route("/reports/<key>")
+    def serve_pipeline_report(key):
+        from flask import abort, send_file
+        from nanometa_live.core.utils.reports_loader import resolve_report_path
+        path = resolve_report_path(key)
+        if path is None:
+            abort(404)
+        return send_file(str(path))
 
     # Create app layout with tabs
     app.layout = html.Div([
@@ -550,6 +567,12 @@ def create_app(
                     tab_id="validation-tab",
                     children=create_validation_layout(),
                     tabClassName="tab-validation"
+                ),
+                dbc.Tab(
+                    label=_tab_label("bi-journal-text", "Reports"),
+                    tab_id="reports-tab",
+                    children=create_reports_layout(),
+                    tabClassName="tab-reports"
                 ),
                 # Setup group (ordered by workflow: configure -> prepare -> deploy)
                 dbc.Tab(
@@ -839,6 +862,7 @@ def register_callbacks(app: Dash, backend_manager: BackendManager):
     from nanometa_live.app.tabs.dashboard_tab import register_dashboard_callbacks
     from nanometa_live.app.tabs.watchlist_tab import register_watchlist_callbacks
     from nanometa_live.app.tabs.validation_tab import register_validation_callbacks
+    from nanometa_live.app.tabs.reports_tab import register_reports_callbacks
     from nanometa_live.app.tabs.preparation_tab import register_preparation_callbacks
     from nanometa_live.app.callbacks import register_core_callbacks
 
@@ -851,6 +875,7 @@ def register_callbacks(app: Dash, backend_manager: BackendManager):
     register_classification_callbacks(app)
     register_watchlist_callbacks(app)
     register_validation_callbacks(app)
+    register_reports_callbacks(app, backend_manager)
     register_preparation_callbacks(app)
 
     # Clientside callback: watchlist collapse toggle (pure UI, no server needed)
