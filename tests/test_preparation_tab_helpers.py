@@ -48,6 +48,21 @@ def test_build_prep_result_clean_success():
     assert "3 genomes" in str(alert)
 
 
+def test_build_prep_result_reports_ready_not_just_newly_built():
+    # Regression: the genome manager auto-builds DBs on scan, so during a fresh
+    # prep most DBs are already present by the time the prep's own batch runs.
+    # The banner must report TOTAL ready (built + present), not just this run's
+    # builds -- the old message showed "11 built" when all 35 existed.
+    alert = _build_prep_result(_result(
+        success=True, stages_completed=["a"],
+        genomes_downloaded=35, blast_dbs_built=11, blast_dbs_present=24,
+        blast_dbs_failed=[],
+    ))
+    text = str(alert)
+    assert "35 BLAST DBs ready" in text
+    assert "11 built now" in text and "24 already present" in text
+
+
 def test_build_prep_result_completed_with_warnings():
     alert = _build_prep_result(_result(
         success=True, warnings=["genome X missing"],

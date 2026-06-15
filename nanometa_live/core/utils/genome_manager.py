@@ -265,6 +265,16 @@ class GenomeDownloadManager:
         self.genomes_dir.mkdir(parents=True, exist_ok=True)
         self.blast_dir.mkdir(parents=True, exist_ok=True)
 
+        # Per-taxid BLAST-build locks. Two paths build BLAST DBs and can run
+        # concurrently: the auto-build on every _scan_existing_genomes (main
+        # thread) and the explicit prep batch (ThreadPoolExecutor). Without a
+        # guard both can launch makeblastdb on the same blast/<taxid>.fasta.*
+        # output. A per-taxid lock (created under the master lock) serialises
+        # builds of the same taxid; the build primitive re-checks has_blast_db
+        # inside the lock so the loser is a no-op rather than a redundant build.
+        self._blast_build_master_lock = threading.Lock()
+        self._blast_build_locks: Dict[int, threading.Lock] = {}
+
         # Load existing metadata
         self._metadata: Dict[int, GenomeMetadata] = {}
         self._last_errors: Dict[int, str] = {}  # taxid -> error message
@@ -1295,6 +1305,19 @@ class GenomeDownloadManager:
         ok, _reason = self._build_blast_db_with_reason(taxid)
         return ok
 
+    def _blast_build_lock_for(self, taxid: int) -> threading.Lock:
+        """Return the per-taxid BLAST-build lock, creating it on first use.
+
+        The tiny critical section (dict get/set) is guarded by the master lock
+        so concurrent callers share one lock object per taxid.
+        """
+        with self._blast_build_master_lock:
+            lock = self._blast_build_locks.get(taxid)
+            if lock is None:
+                lock = threading.Lock()
+                self._blast_build_locks[taxid] = lock
+            return lock
+
     def _build_blast_db_with_reason(self, taxid: int):
         """Build the BLAST DB for ``taxid``; return ``(ok, reason_on_failure)``.
 
@@ -1314,6 +1337,25 @@ class GenomeDownloadManager:
             return False, "makeblastdb not installed"
 
         output_db = self.blast_dir / f"{taxid}.fasta"
+
+        # Serialise builds of THIS taxid across the auto-build-on-scan and the
+        # explicit prep batch. Re-check inside the lock: if the other path
+        # already produced the DB while we waited, treat it as success rather
+        # than running a second makeblastdb on the same output.
+        build_lock = self._blast_build_lock_for(taxid)
+        with build_lock:
+            if self.has_blast_db(taxid):
+                if taxid in self._metadata and self._metadata[taxid].blast_db_path is None:
+                    self._metadata[taxid].blast_db_path = str(output_db)
+                    self._save_metadata()
+                return True, None
+            return self._run_makeblastdb(taxid, genome_path, output_db)
+
+    def _run_makeblastdb(self, taxid: int, genome_path: "Path", output_db: "Path"):
+        """Run makeblastdb for one taxid; return ``(ok, reason_on_failure)``.
+
+        Caller holds the per-taxid build lock.
+        """
         genome_size_mb = genome_path.stat().st_size / (1024 * 1024) if genome_path.exists() else 0
 
         # Check available disk space before building

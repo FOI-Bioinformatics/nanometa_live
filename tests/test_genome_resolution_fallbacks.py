@@ -130,5 +130,24 @@ class TestByTaxidReferenceFallback:
         assert fake_run.call_count == 1
 
 
+class TestBlastBuildIdempotent:
+    def test_existing_db_skips_makeblastdb(self, tmp_path):
+        """The per-taxid build lock re-checks has_blast_db inside the lock, so a
+        second builder (auto-build-on-scan racing the prep batch) is a no-op
+        instead of a redundant makeblastdb on the same output."""
+        mgr = _mgr(tmp_path)
+        genome = tmp_path / "562.fasta"
+        genome.write_text(">s\nACGT\n")
+        mgr.get_genome_path = MagicMock(return_value=genome)
+        mgr.has_blast_db = MagicMock(return_value=True)  # already built by the other path
+        run = MagicMock()
+        with patch("nanometa_live.core.utils.genome_manager.shutil.which",
+                   return_value="/usr/bin/makeblastdb"), \
+             patch("nanometa_live.core.utils.genome_manager.subprocess.run", run):
+            ok, reason = mgr._build_blast_db_with_reason(562)
+        assert ok is True and reason is None
+        run.assert_not_called()  # no second makeblastdb on the same DB
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

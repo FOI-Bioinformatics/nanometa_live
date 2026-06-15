@@ -49,8 +49,24 @@ def _build_prep_result(result):
         [html.I(className="bi bi-arrow-clockwise me-2"), "Retry Preparation"],
         id="retry-preparation-btn", color="warning", size="sm",
     )
+    # Report total BLAST DBs READY, not just the ones this stage built. The
+    # genome manager also auto-builds missing DBs on every scan
+    # (_build_missing_blast_dbs), so during a fresh prep many DBs are already
+    # present by the time the prep's own batch runs -- showing only
+    # blast_dbs_built (the stage's own count) badly understates how many are
+    # actually ready (e.g. "11 built" when all 35 exist). built + present is the
+    # real ready count.
+    blast_built = getattr(result, "blast_dbs_built", 0)
+    blast_present = getattr(result, "blast_dbs_present", 0)
+    blast_ready = blast_built + blast_present
     counts = (f"{result.genomes_downloaded} genomes downloaded, "
-              f"{result.blast_dbs_built} BLAST DBs built.")
+              f"{blast_ready} BLAST DBs ready")
+    if blast_present:
+        counts += f" ({blast_built} built now, {blast_present} already present)"
+    n_blast_failed = len(getattr(result, "blast_dbs_failed", []) or [])
+    if n_blast_failed:
+        counts += f"; {n_blast_failed} could not be built"
+    counts += "."
 
     if not result.success:
         body = [

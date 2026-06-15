@@ -90,8 +90,17 @@ def _deploy(args):
         print(f"  {_RED}Stages failed: {', '.join(result.stages_failed)}{_RESET}")
     if result.genomes_downloaded:
         print(f"  Genomes downloaded: {result.genomes_downloaded}")
-    if result.blast_dbs_built:
-        print(f"  BLAST DBs built: {result.blast_dbs_built}")
+    # Total ready = built this run + already present (the genome manager
+    # auto-builds DBs on scan, so blast_dbs_built alone understates readiness).
+    blast_ready = result.blast_dbs_built + result.blast_dbs_present
+    if blast_ready:
+        detail = ""
+        if result.blast_dbs_present:
+            detail = (f" ({result.blast_dbs_built} built now, "
+                      f"{result.blast_dbs_present} already present)")
+        print(f"  BLAST DBs ready: {blast_ready}{detail}")
+    if result.blast_dbs_failed:
+        print(f"  {_YELLOW}BLAST DBs failed: {len(result.blast_dbs_failed)}{_RESET}")
     if result.warnings:
         print(f"\n{_YELLOW}Warnings:{_RESET}")
         for w in result.warnings:

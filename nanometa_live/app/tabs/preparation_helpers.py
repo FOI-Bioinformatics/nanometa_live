@@ -160,7 +160,13 @@ def _execute_wizard_step(step_idx, config):
         from nanometa_live.core.workflow.mobile_lab_preparer import PreparationResult
         pr = PreparationResult(success=True)
         preparer._run_build_blast_dbs(0, pr, skip_existing=True)
-        msg = f"BLAST database build complete. {pr.blast_dbs_built} database(s) built."
+        # Report total ready (built + already-present), not just this run's
+        # builds -- the genome manager auto-builds DBs on scan, so blast_dbs_built
+        # alone understates how many are ready. See preparation_tab.render.
+        blast_ready = pr.blast_dbs_built + pr.blast_dbs_present
+        msg = f"BLAST database build complete. {blast_ready} database(s) ready."
+        if pr.blast_dbs_present:
+            msg += f" ({pr.blast_dbs_built} built now, {pr.blast_dbs_present} already present.)"
         return dbc.Alert(
             [html.I(className="bi bi-check-circle me-2"), msg],
             color="success", className="mt-2 py-2",
