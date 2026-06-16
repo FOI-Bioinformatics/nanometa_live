@@ -111,7 +111,7 @@ pathogens:
     notes: "Leading infectious disease killer globally. WHO 2024 critical priority."
 
   - name: "Candida auris"
-    names_alt: ["Candida_auris"]
+    names_alt: ["Candida_auris", "Candidozyma auris"]
     taxid_ncbi: 498019
     common_name: "C. auris"
     threat_level: "critical"
