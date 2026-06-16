@@ -57,6 +57,8 @@ class PathogenEntry:
     notes: str = ""
     alert_threshold: int = 10  # Minimum reads to trigger alert
     action_required: str = "Follow laboratory biosafety protocols"
+    organism_type: Optional[str] = None  # virus / bacteria / fungi / ...
+    annotation: str = ""  # Free-text note shown next to the species name
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert PathogenEntry to dictionary representation."""
@@ -70,6 +72,8 @@ class PathogenEntry:
             "notes": self.notes,
             "alert_threshold": self.alert_threshold,
             "action_required": self.action_required,
+            "organism_type": self.organism_type,
+            "annotation": self.annotation,
         }
 
 
@@ -229,6 +233,8 @@ def _dict_to_pathogen_entry(
             "action_required",
             defaults.get("action_required", "Follow laboratory biosafety protocols"),
         ),
+        organism_type=data.get("organism_type", defaults.get("organism_type")),
+        annotation=data.get("annotation", defaults.get("annotation", "")),
     )
 
 

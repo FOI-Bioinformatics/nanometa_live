@@ -296,7 +296,10 @@ def register_dashboard_callbacks(app: Dash):
                 nm = d.get("name") or d.get("common_name")
                 if nm and nm not in seen_names:
                     seen_names.add(nm)
-                    pathogen_names.append(nm)
+                    annotation = d.get("annotation")
+                    pathogen_names.append(
+                        f"{nm} ({annotation})" if annotation else nm
+                    )
             triggering_pathogens = pathogen_names or None
             collected: List[str] = []
             total_count = 0
@@ -671,6 +674,7 @@ def register_dashboard_callbacks(app: Dash):
             Output("pathogen-report-modal", "is_open"),
             Output("pathogen-modal-name", "children"),
             Output("pathogen-modal-common-name", "children"),
+            Output("pathogen-modal-annotation", "children"),
             Output("pathogen-modal-category", "children"),
             Output("pathogen-modal-bsl", "children"),
             Output("pathogen-modal-reads", "children"),
@@ -717,7 +721,7 @@ def register_dashboard_callbacks(app: Dash):
 
         # Handle close button
         if triggered == "pathogen-modal-close":
-            return [False] + [no_update] * 15
+            return [False] + [no_update] * 16
 
         # Handle acknowledge button - close modal and log acknowledgment
         if triggered == "pathogen-modal-acknowledge":
@@ -727,14 +731,14 @@ def register_dashboard_callbacks(app: Dash):
                 f"PATHOGEN ALERT ACKNOWLEDGED (modal): {name} (TaxID {taxid}) "
                 f"at {datetime.now().isoformat()}"
             )
-            return [False] + [no_update] * 15
+            return [False] + [no_update] * 16
 
         # Handle view report buttons
         if not view_clicks or not any(view_clicks):
-            return [no_update] * 16
+            return [no_update] * 17
 
         if not isinstance(triggered, dict):
-            return [no_update] * 16
+            return [no_update] * 17
 
         # Guard against a spurious reopen. The per-pathogen view-report buttons
         # are pattern-matching inputs; when the alert panel refreshes (on the
@@ -745,7 +749,7 @@ def register_dashboard_callbacks(app: Dash):
         # None/0. Bail unless it was a real click.
         triggered_value = ctx.triggered[0].get("value") if ctx.triggered else None
         if not triggered_value:
-            return [no_update] * 16
+            return [no_update] * 17
 
         taxid = triggered.get("taxid", 0)
 

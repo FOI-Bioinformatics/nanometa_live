@@ -15,6 +15,20 @@ from typing import Any, Dict, List, Optional
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 
+from nanometa_live.core.watchlist.watchlist_manager import ORGANISM_TYPES
+
+
+def _organism_type_options(include_blank: bool = True) -> List[Dict[str, str]]:
+    """Build dbc.Select options for the organism_type field.
+
+    Reuses ORGANISM_TYPES so the form choices cannot drift from validation.
+    """
+    options: List[Dict[str, str]] = []
+    if include_blank:
+        options.append({"label": "Unspecified", "value": ""})
+    options.extend({"label": t.capitalize(), "value": t} for t in ORGANISM_TYPES)
+    return options
+
 logger = logging.getLogger(__name__)
 
 # NOTE: the old top-level ``create_watchlist_layout()`` was retired when the
@@ -586,6 +600,37 @@ def _create_collapsible_add_species() -> dbc.Accordion:
                     ], size="sm"),
                 ], md=2),
             ]),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label("Organism Type", className="small"),
+                    dbc.Select(
+                        id="watchlist-add-organism-type",
+                        options=_organism_type_options(),
+                        value="",
+                        size="sm",
+                    ),
+                ], md=3),
+                dbc.Col([
+                    dbc.Label([
+                        "Annotation ",
+                        html.I(className="bi bi-info-circle text-muted",
+                               id="add-annotation-info",
+                               style={"fontSize": "0.7rem", "cursor": "help"}),
+                        dbc.Tooltip(
+                            "Optional short note shown next to the species name "
+                            "wherever it appears (for example, the toxin a "
+                            "producer secretes).",
+                            target="add-annotation-info",
+                        ),
+                    ], className="small"),
+                    dbc.Input(
+                        id="watchlist-add-annotation",
+                        type="text",
+                        placeholder="e.g., produces enterotoxin B",
+                        size="sm",
+                    ),
+                ], md=9),
+            ], className="mt-2"),
 
             # API lookup results
             html.Div([
@@ -655,14 +700,21 @@ def _create_entry_edit_modal() -> dbc.Modal:
                         type="text",
                         disabled=True,
                     ),
-                ], width=6),
+                ], width=4),
                 dbc.Col([
                     dbc.Label("Common Name"),
                     dbc.Input(
                         id="watchlist-edit-common",
                         type="text",
                     ),
-                ], width=6),
+                ], width=4),
+                dbc.Col([
+                    dbc.Label("Organism Type"),
+                    dbc.Select(
+                        id="watchlist-edit-organism-type",
+                        options=_organism_type_options(),
+                    ),
+                ], width=4),
             ], className="mb-3"),
 
             dbc.Row([
@@ -718,6 +770,28 @@ def _create_entry_edit_modal() -> dbc.Modal:
                         className="mt-2",
                     ),
                 ], width=3),
+            ], className="mb-3"),
+
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label([
+                        "Annotation ",
+                        html.I(className="bi bi-info-circle text-muted",
+                               id="edit-annotation-info",
+                               style={"fontSize": "0.8rem", "cursor": "help"}),
+                        dbc.Tooltip(
+                            "Short note shown next to the species name wherever "
+                            "it appears (for example, the toxin a producer "
+                            "secretes). Use Notes for longer context.",
+                            target="edit-annotation-info",
+                        ),
+                    ]),
+                    dbc.Input(
+                        id="watchlist-edit-annotation",
+                        type="text",
+                        placeholder="e.g., produces enterotoxin B",
+                    ),
+                ]),
             ], className="mb-3"),
 
             dbc.Row([
@@ -821,6 +895,8 @@ def create_pathogen_row(
     taxid = entry.get("taxid", 0) or 0
     name = entry.get("name") or "Unknown"
     common_name = entry.get("common_name") or ""
+    organism_type = entry.get("organism_type") or ""
+    annotation = entry.get("annotation") or ""
     threat_level = entry.get("threat_level") or "moderate"
     bsl = entry.get("bsl_level")
     enabled = entry.get("enabled", True)
@@ -879,7 +955,17 @@ def create_pathogen_row(
                         f" ({common_name})" if common_name else "",
                         className="text-muted",
                     ),
+                    dbc.Badge(
+                        organism_type.capitalize(),
+                        color="light",
+                        text_color="dark",
+                        className="ms-2 border",
+                    ) if organism_type else "",
                 ]),
+                html.Small(
+                    annotation,
+                    className="text-info fst-italic d-block",
+                ) if annotation else "",
                 html.Small(f"ID: {taxid}", className="text-muted",
                            title="NCBI Taxonomy identifier"),
             ], width=3),

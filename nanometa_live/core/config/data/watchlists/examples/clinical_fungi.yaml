@@ -1,0 +1,94 @@
+# Clinical Fungi Watchlist
+# Medically important fungi for clinical and surveillance workflows.
+# Demonstrates the organism_type field ("fungi") and the annotation field.
+# Note: detection requires a Kraken2 database that contains fungal references;
+# a bacteria-only database (e.g. GTDB bac120) will not classify these taxa.
+
+version: "2.0"
+taxonomy_support: ["ncbi", "gtdb"]
+
+metadata:
+  name: "Clinical Fungi"
+  description: "Medically important fungal pathogens, annotated with key clinical or resistance context"
+  source: "Example watchlist for organism_type / annotation demonstration"
+  reference: "https://www.ncbi.nlm.nih.gov/taxonomy"
+  notes: "Requires a fungal or comprehensive Kraken2 database. Several species names follow recent NCBI taxonomy revisions."
+
+pathogens:
+  - name: "Candidozyma auris"
+    names_alt: ["Candidozyma_auris", "Candida auris", "C. auris"]
+    taxid_ncbi: 498019
+    common_name: "C. auris"
+    organism_type: "fungi"
+    annotation: "multidrug-resistant; nosocomial outbreaks"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Clinical fungus"
+    alert_threshold: 5
+    action_required: "Implement contact precautions and screening. Report to infection control."
+    notes: "Reclassified from Candida auris to Candidozyma auris in NCBI taxonomy. Frequently multidrug-resistant."
+
+  - name: "Candida albicans"
+    names_alt: ["Candida_albicans", "C. albicans"]
+    taxid_ncbi: 5476
+    common_name: "C. albicans"
+    organism_type: "fungi"
+    annotation: "most common invasive candidiasis agent"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Clinical fungus"
+    alert_threshold: 15
+    action_required: "Correlate with clinical picture. Distinguish colonisation from invasive disease."
+    notes: "Common commensal that can cause mucosal and invasive candidiasis in at-risk hosts."
+
+  - name: "Aspergillus fumigatus"
+    names_alt: ["Aspergillus_fumigatus", "A. fumigatus"]
+    taxid_ncbi: 746128
+    common_name: "A. fumigatus"
+    organism_type: "fungi"
+    annotation: "produces gliotoxin; invasive aspergillosis"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Clinical fungus"
+    alert_threshold: 10
+    action_required: "Assess immunocompromised status. Consider azole-resistance testing."
+    notes: "Leading cause of invasive aspergillosis; gliotoxin contributes to immune evasion."
+
+  - name: "Cryptococcus neoformans"
+    names_alt: ["Cryptococcus_neoformans", "C. neoformans"]
+    taxid_ncbi: 5207
+    common_name: "C. neoformans"
+    organism_type: "fungi"
+    annotation: "encapsulated; meningitis in immunocompromised hosts"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Clinical fungus"
+    alert_threshold: 10
+    action_required: "Assess for meningitis. Correlate with CD4 count in HIV-positive patients."
+    notes: "Polysaccharide capsule is a key virulence factor; a major cause of fungal meningitis."
+
+  - name: "Aspergillus flavus"
+    names_alt: ["Aspergillus_flavus", "A. flavus"]
+    taxid_ncbi: 5059
+    common_name: "A. flavus"
+    organism_type: "fungi"
+    annotation: "produces aflatoxin (carcinogen)"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Clinical fungus"
+    alert_threshold: 15
+    action_required: "Assess clinical and food-safety relevance. Consider invasive disease in at-risk hosts."
+    notes: "Second most common Aspergillus in invasive disease and a principal aflatoxin producer."
+
+  - name: "Histoplasma capsulatum"
+    names_alt: ["Histoplasma_capsulatum", "H. capsulatum"]
+    taxid_ncbi: 5037
+    common_name: "Histoplasmosis"
+    organism_type: "fungi"
+    annotation: "dimorphic; pulmonary histoplasmosis (handle at BSL-3)"
+    threat_level: "high"
+    bsl_level: 3
+    category: "Clinical fungus"
+    alert_threshold: 10
+    action_required: "Handle cultures at BSL-3. Assess exposure history and immune status."
+    notes: "Thermally dimorphic fungus; mould-phase cultures require BSL-3 containment."

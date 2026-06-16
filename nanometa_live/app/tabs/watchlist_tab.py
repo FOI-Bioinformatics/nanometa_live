@@ -23,6 +23,7 @@ from nanometa_live.core.watchlist.watchlist_manager import (
     get_watchlist_manager,
     WatchlistEntry,
     ThreatLevel,
+    normalize_organism_type,
 )
 from nanometa_live.app.layouts.watchlist_layout import (
     create_pathogen_row,
@@ -730,6 +731,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
             Output("watchlist-edit-threshold", "value"),
             Output("watchlist-edit-enabled", "value"),
             Output("watchlist-edit-notes", "value"),
+            Output("watchlist-edit-organism-type", "value"),
+            Output("watchlist-edit-annotation", "value"),
             Output("watchlist-edit-ncbi-taxid", "children"),
             Output("watchlist-edit-kraken-taxid", "children"),
             Output("watchlist-edit-kraken-name", "children"),
@@ -749,6 +752,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
             State("watchlist-edit-threshold", "value"),
             State("watchlist-edit-enabled", "value"),
             State("watchlist-edit-notes", "value"),
+            State("watchlist-edit-organism-type", "value"),
+            State("watchlist-edit-annotation", "value"),
             State("taxmap-collection", "data"),
         ],
         prevent_initial_call=True,
@@ -766,6 +771,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
         threshold: int,
         enabled: bool,
         notes: str,
+        organism_type: Optional[str],
+        annotation: Optional[str],
         taxmap_collection: Dict,
     ) -> Tuple:
         """Handle the edit modal open/close and save."""
@@ -774,8 +781,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         trigger = str(ctx.triggered_id)
 
-        # Default return values (13 outputs)
-        default_return = (no_update, False, None, "", "", "moderate", "", 10, True, "", "-", "-", "-")
+        # Default return values (15 outputs)
+        default_return = (no_update, False, None, "", "", "moderate", "", 10, True, "", "", "", "-", "-", "-")
 
         # Cancel or close
         if "cancel" in trigger:
@@ -802,8 +809,10 @@ def register_watchlist_callbacks(app: Dash) -> None:
                 entry.alert_threshold = int(threshold) if threshold else 10
                 entry.enabled = enabled
                 entry.notes = notes or ""
+                entry.organism_type = normalize_organism_type(organism_type)
+                entry.annotation = (annotation or "").strip()
             # Return tab state update to trigger table refresh
-            return ({"last_update": f"edit-{edit_taxid}"}, False, None, "", "", "moderate", "", 10, True, "", "-", "-", "-")
+            return ({"last_update": f"edit-{edit_taxid}"}, False, None, "", "", "moderate", "", 10, True, "", "", "", "-", "-", "-")
 
         # Open modal for edit
         if any(edit_clicks):
@@ -850,6 +859,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
                     entry.alert_threshold,
                     entry.enabled,
                     entry.notes or "",
+                    entry.organism_type or "",
+                    entry.annotation or "",
                     str(taxid),
                     kraken_taxid,
                     kraken_name,
@@ -1247,6 +1258,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
             Output("watchlist-add-taxid", "value", allow_duplicate=True),
             Output("watchlist-add-threat", "value", allow_duplicate=True),
             Output("watchlist-add-threshold", "value", allow_duplicate=True),
+            Output("watchlist-add-organism-type", "value", allow_duplicate=True),
+            Output("watchlist-add-annotation", "value", allow_duplicate=True),
             Output("watchlist-lookup-section", "style", allow_duplicate=True),
         ],
         Input("watchlist-add-btn", "n_clicks"),
@@ -1256,6 +1269,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
             State("watchlist-add-db-taxid", "value"),
             State("watchlist-add-threat", "value"),
             State("watchlist-add-threshold", "value"),
+            State("watchlist-add-organism-type", "value"),
+            State("watchlist-add-annotation", "value"),
             State("api-lookup-result", "data"),
         ],
         prevent_initial_call=True,
@@ -1267,6 +1282,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
         db_taxid: Optional[int],
         threat: str,
         threshold: int,
+        organism_type: Optional[str],
+        annotation: Optional[str],
         lookup_result: Dict,
     ) -> Tuple:
         """Add a custom species to the watchlist."""
@@ -1281,6 +1298,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
             "db_taxid": int(db_taxid) if db_taxid else None,  # GTDB/custom DB taxid
             "threat_level": threat or "moderate",
             "alert_threshold": int(threshold) if threshold else 10,
+            "organism_type": organism_type or None,
+            "annotation": (annotation or "").strip(),
         }
 
         # Add API data if available
@@ -1317,6 +1336,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
                     "",  # Clear taxid
                     "moderate",  # Reset threat
                     10,  # Reset threshold
+                    "",  # Reset organism type
+                    "",  # Clear annotation
                     {"display": "none"},  # Hide lookup section
                 )
             else:
@@ -1328,11 +1349,15 @@ def register_watchlist_callbacks(app: Dash) -> None:
                     no_update,
                     no_update,
                     no_update,
+                    no_update,
+                    no_update,
                 )
         except Exception as e:
             return (
                 no_update,
                 dbc.Alert(f"Error: {e}", color="danger", duration=3000),
+                no_update,
+                no_update,
                 no_update,
                 no_update,
                 no_update,

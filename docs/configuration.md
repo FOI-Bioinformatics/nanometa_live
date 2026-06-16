@@ -168,6 +168,8 @@ pathogens:
     names_alt: ["Genus_species"]     # Alternative names for matching (GTDB uses underscores)
     taxid_ncbi: 12345                # NCBI taxonomy ID (required)
     common_name: "Common name"       # Display name in the UI
+    organism_type: "bacteria"        # virus, bacteria, fungi, archaea, parasite, other
+    annotation: "produces toxin X"   # Short note shown next to the species name
     threat_level: "high"             # critical, high, moderate, or low
     bsl_level: 2                     # Biosafety level (1-4)
     category: "BACTERIA"             # Grouping category (free text)
@@ -184,6 +186,8 @@ pathogens:
 | `names_alt` | no | list | Alternative names (underscore variants, synonyms) |
 | `taxid_ncbi` | yes | int | NCBI taxonomy identifier |
 | `common_name` | no | string | Short display name for the UI |
+| `organism_type` | no | virus/bacteria/fungi/archaea/parasite/other | Declared organism kingdom; shown as a badge and usable for grouping (unrecognised values are ignored) |
+| `annotation` | no | string | Short free-text note shown next to the species name wherever it appears (e.g. the toxin a producer secretes). Distinct from `notes`, which holds longer context shown in the edit dialog and report |
 | `threat_level` | yes | critical/high/moderate/low | Determines alert severity and color |
 | `bsl_level` | no | 1-4 | Biosafety level for handling guidance |
 | `category` | no | string | Grouping label (e.g., BACTERIA, VIRUSES, FUNGI) |
@@ -207,6 +211,9 @@ Save a YAML file following the v2.0 format and import it through the Watchlist &
 - `sti_pathogens.yaml` - Sexually transmitted infection organisms
 - `neglected_tropical_diseases.yaml` - NTD surveillance targets
 - `agricultural_plant.yaml` - Plant pathogen monitoring
+- `toxin_producing_bacteria.yaml` - Toxin-producing bacteria, each annotated with its principal toxin
+- `respiratory_viruses.yaml` - Respiratory viruses (requires a viral or comprehensive Kraken2 database)
+- `clinical_fungi.yaml` - Clinical fungi (requires a fungal or comprehensive Kraken2 database)
 
 ### Taxid Mapping
 

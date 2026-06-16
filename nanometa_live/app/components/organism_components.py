@@ -230,7 +230,8 @@ def OrganismCard(
     is_watched: bool = False,
     blast_validation: Optional[Dict] = None,
     show_validate_button: bool = False,
-    on_demand_validation: Optional[Dict] = None
+    on_demand_validation: Optional[Dict] = None,
+    annotation: Optional[str] = None
 ) -> dbc.Card:
     """
     Create a visual card for displaying organism information.
@@ -377,7 +378,11 @@ def OrganismCard(
                         f" ({common_name})" if common_name else "",
                         className="text-muted"
                     ),
-                    status_badge
+                    status_badge,
+                    html.Small(
+                        annotation,
+                        className="text-info fst-italic d-block"
+                    ) if annotation else "",
                 ], style={"display": "inline-block", "verticalAlign": "middle"})
             ], className="mb-3 d-flex align-items-center"),
 

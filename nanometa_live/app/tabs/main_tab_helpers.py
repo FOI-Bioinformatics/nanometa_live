@@ -243,7 +243,9 @@ def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
             'abundance': detection['abundance'] if detection else 0.0,
             'detected': detection is not None and detection['reads'] > 0,
             'category': entry.category,
-            'threat_level': entry.threat_level.value if entry.threat_level else 'unknown'
+            'threat_level': entry.threat_level.value if entry.threat_level else 'unknown',
+            'organism_type': entry.organism_type,
+            'annotation': entry.annotation or ''
         })
 
     # Also include legacy watchlist entries not in WatchlistManager.
@@ -271,7 +273,9 @@ def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
                 'abundance': detection['abundance'] if detection else 0.0,
                 'detected': detection is not None and detection['reads'] > 0,
                 'category': 'custom',
-                'threat_level': 'unknown'
+                'threat_level': 'unknown',
+                'organism_type': s.get('organism_type'),
+                'annotation': s.get('annotation', '')
             })
 
     # Sort by: detected first (desc), then by reads (desc), then by name

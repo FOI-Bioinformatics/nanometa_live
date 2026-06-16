@@ -619,6 +619,8 @@ def create_app(
                     dbc.Col([
                         html.H4(id="pathogen-modal-name", className="mb-1"),
                         html.P(id="pathogen-modal-common-name", className="text-muted mb-2"),
+                        html.P(id="pathogen-modal-annotation",
+                               className="text-info fst-italic mb-2"),
                         dbc.Badge(id="pathogen-modal-category", color="secondary", className="me-2"),
                         dbc.Badge(id="pathogen-modal-bsl", color="info"),
                     ], md=8),

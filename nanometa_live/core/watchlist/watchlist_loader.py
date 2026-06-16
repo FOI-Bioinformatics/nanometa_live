@@ -52,6 +52,13 @@ class WatchlistPathogenEntry:
     alert_threshold: int = 10
     action_required: str = "Follow laboratory biosafety protocols"
     notes: str = ""
+    # Organism kingdom/type declared by the operator (virus / bacteria /
+    # fungi / archaea / parasite / other). Inference from taxonomy is no longer
+    # required for grouping.
+    organism_type: Optional[str] = None
+    # Free-text extra information shown next to the species name (e.g. the toxin
+    # a producer secretes). Distinct from ``notes`` (longer context).
+    annotation: str = ""
 
 
 class WatchlistLoader:
@@ -263,7 +270,9 @@ class WatchlistLoader:
                         category=p_data.get("category"),
                         alert_threshold=p_data.get("alert_threshold", 10),
                         action_required=p_data.get("action_required", "Follow laboratory biosafety protocols"),
-                        notes=p_data.get("notes", "")
+                        notes=p_data.get("notes", ""),
+                        organism_type=p_data.get("organism_type"),
+                        annotation=p_data.get("annotation", "")
                     )
                     pathogens.append(entry)
                 except (TypeError, ValueError, AttributeError) as e:
