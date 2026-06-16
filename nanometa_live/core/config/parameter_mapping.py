@@ -610,6 +610,11 @@ def _build_base_params(config: Dict[str, Any], main_dir: str, kraken_db: str,
         "validation_identity_threshold": config.get("validation_identity_threshold", 90.0),
         "minimap2_preset": config.get("minimap2_preset", "map-ont"),
         "minimap2_min_mapq": config.get("minimap2_min_mapq", 10),
+        # Consensus sequence generation (amplicon-focused). Off unless the
+        # operator enables it; only meaningful when validation runs (it reuses
+        # the extracted reads + reference genome).
+        "generate_consensus": config.get("generate_consensus", False) and run_validation_enabled,
+        "consensus_min_depth": config.get("consensus_min_depth", 10),
         # NOTE: ``min_reads_for_validation`` (default 50) is a CUMULATIVE reporting
         # threshold applied in the GUI/aggregation layer -- an organism needs this
         # many reads across the whole run to be treated as validated. It is

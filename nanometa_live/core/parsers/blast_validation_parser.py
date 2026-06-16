@@ -121,7 +121,10 @@ class ValidationResult:
             raw = data['status']
             data = dict(data)
             data['status'] = ValidationStatus(_status_map.get(raw, raw))
-        return cls(**data)
+        # Drop unknown keys so a dict from a newer schema does not raise
+        # TypeError (mirrors NCBIResult/GTDBResult.from_dict in this codebase).
+        return cls(**{k: v for k, v in data.items()
+                      if k in cls.__dataclass_fields__})
 
     def determine_status(self) -> ValidationStatus:
         """Determine validation status based on metrics."""
@@ -847,8 +850,11 @@ def parse_blast_per_read(
              "mean_pident": round(float(r.mean_pident), 1)}
             for r in top.itertuples(index=False)
         ]
+        # Guard top.iloc[0]: a malformed TSV whose sseqid column is all-null
+        # yields an empty groupby, so check not-empty as well as total_reads.
         subject_agreement = (
-            float(top.iloc[0]['reads']) / total_reads if total_reads else 0.0
+            float(top.iloc[0]['reads']) / total_reads
+            if total_reads and not top.empty else 0.0
         )
 
         # Per-read table: cap to top-N by bitscore for the DOM.

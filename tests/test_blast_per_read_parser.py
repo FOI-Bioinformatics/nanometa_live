@@ -78,6 +78,23 @@ def test_12_column_file(tmp_path):
     assert all(r["qcovs"] == 0.0 for r in res["records"])
 
 
+def test_all_null_subject_does_not_crash(tmp_path):
+    # A malformed TSV whose subject column is empty must not raise on the
+    # top-subject access; it should still return per-read records.
+    p = tmp_path / "s_taxid1.blast.tsv"
+    rows = []
+    for i in range(3):
+        # sseqid (col 2) left empty
+        rows.append("\t".join(str(v) for v in [
+            f"r{i}", "", 96.0, 400, 2, 0, 1, 400, 1, 400, "1e-50", 700,
+            450, 1900000, 90]))
+    _write(p, rows)
+    res = parse_blast_per_read(p, "s", 1)
+    assert res["total_reads"] == 3
+    # subject_agreement is well-defined (0.0..1.0), no IndexError
+    assert 0.0 <= res["subject_agreement"] <= 1.0
+
+
 def test_empty_or_missing_file(tmp_path):
     missing = tmp_path / "nope.blast.tsv"
     res = parse_blast_per_read(missing, "s", 1)

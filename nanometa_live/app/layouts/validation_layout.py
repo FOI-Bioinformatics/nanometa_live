@@ -577,8 +577,6 @@ def _create_consensus_tab() -> dbc.Tab:
         label="Consensus",
         tab_id="consensus-tab",
         children=html.Div([
-            html.Div(id="consensus-summary-container", className="mb-3"),
-
             # Empty state (no consensus artifacts on disk)
             html.Div(
                 id="consensus-empty-message",

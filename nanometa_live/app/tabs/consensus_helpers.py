@@ -64,11 +64,24 @@ def build_consensus_selector_options(
     valid_values = {o["value"] for o in options if not o.get("disabled")}
     if current_value and current_value in valid_values:
         return options, current_value
-    first_value = next(
-        (o["value"] for o in options if not o.get("disabled")),
+    # Prefer a species that actually produced a consensus for the default
+    # selection, so the panel does not open on a "no consensus" warning.
+    with_seq = {
+        f"{r.get('sample_id', '')}_{r.get('taxid', '')}"
+        for r in results
+        if r.get("has_sequence", r.get("consensus_length", 0) > 0)
+    }
+    default_value = next(
+        (o["value"] for o in options
+         if not o.get("disabled") and o["value"] in with_seq),
         None,
     )
-    return options, first_value
+    if default_value is None:
+        default_value = next(
+            (o["value"] for o in options if not o.get("disabled")),
+            None,
+        )
+    return options, default_value
 
 
 def find_consensus_result(
