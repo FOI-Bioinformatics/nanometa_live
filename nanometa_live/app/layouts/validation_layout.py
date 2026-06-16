@@ -296,6 +296,81 @@ def _create_blast_tab() -> dbc.Tab:
                             )
                         ], title="Detailed Results Table (Advanced)")
                     ], start_collapsed=True, className="mb-4"),
+
+                    # Per-read detail (collapsible + per-organism selector so
+                    # the heavy per-read parse runs only on demand).
+                    dbc.Accordion([
+                        dbc.AccordionItem([
+                            html.P(
+                                "Read-level evidence for one organism: the spread of "
+                                "per-read identity, alignment length and bitscore, which "
+                                "reference subjects the reads hit, a derived confidence "
+                                "call, and the individual reads behind it.",
+                                className="text-muted mb-3",
+                            ),
+                            dbc.Row([
+                                dbc.Col([
+                                    dbc.Label("Species / Sample:", className="fw-bold"),
+                                    dcc.Dropdown(
+                                        id="blast-detail-selector",
+                                        placeholder="Select a species to inspect its reads...",
+                                        clearable=True,
+                                        persistence=True,
+                                        persistence_type="session",
+                                        optionHeight=45,
+                                        maxHeight=400,
+                                        style={"minWidth": "320px"},
+                                    ),
+                                ], md=6),
+                                dbc.Col([
+                                    dbc.Button(
+                                        [html.I(className="bi bi-download me-2"),
+                                         "Export reads (TSV)"],
+                                        id="export-perread-button",
+                                        color="secondary",
+                                        outline=True,
+                                        className="float-end mt-4",
+                                    )
+                                ], md=6, className="d-flex justify-content-end align-items-end"),
+                            ], className="mb-3"),
+
+                            html.Div(id="blast-confidence-container"),
+
+                            dbc.Row([
+                                dbc.Col(dcc.Loading(type="circle", children=[dcc.Graph(
+                                    id="blast-identity-hist", config=CHART_CONFIG,
+                                    style={"height": "280px"})]), md=4),
+                                dbc.Col(dcc.Loading(type="circle", children=[dcc.Graph(
+                                    id="blast-length-hist", config=CHART_CONFIG,
+                                    style={"height": "280px"})]), md=4),
+                                dbc.Col(dcc.Loading(type="circle", children=[dcc.Graph(
+                                    id="blast-bitscore-hist", config=CHART_CONFIG,
+                                    style={"height": "280px"})]), md=4),
+                            ], className="mb-3"),
+
+                            html.H6("Reference subjects", className="fw-bold"),
+                            dag.AgGrid(
+                                id="blast-top-subjects-table",
+                                columnDefs=[],
+                                rowData=[],
+                                defaultColDef={"sortable": True, "filter": True, "resizable": True},
+                                style={"height": "200px"},
+                                className="mb-3",
+                            ),
+
+                            html.H6("Per-read detail", className="fw-bold"),
+                            html.Div(id="blast-perread-note", className="small text-muted mb-1"),
+                            dag.AgGrid(
+                                id="blast-perread-table",
+                                columnDefs=[],
+                                rowData=[],
+                                defaultColDef={"sortable": True, "filter": True, "resizable": True},
+                                dashGridOptions={"pagination": True, "paginationPageSize": 50},
+                                style={"height": "400px"},
+                            ),
+                            dcc.Download(id="download-perread-tsv"),
+                        ], title="Per-read Detail (Advanced)")
+                    ], start_collapsed=True, className="mb-4"),
                 ]
             ),
 
@@ -490,6 +565,77 @@ def _create_coverage_tab() -> dbc.Tab:
     )
 
 
+def _create_consensus_tab() -> dbc.Tab:
+    """Create the Consensus Sequence sub-tab.
+
+    Surfaces the per-(sample, taxid) consensus FASTA produced by the pipeline
+    (``--generate_consensus``). Shows depth-window stats and offers a FASTA
+    download. The amplicon case is the primary use: a short, deeply covered
+    region trimmed to its covered span.
+    """
+    return dbc.Tab(
+        label="Consensus",
+        tab_id="consensus-tab",
+        children=html.Div([
+            html.Div(id="consensus-summary-container", className="mb-3"),
+
+            # Empty state (no consensus artifacts on disk)
+            html.Div(
+                id="consensus-empty-message",
+                children=[
+                    EmptyStateMessage(
+                        title="No Consensus Sequences",
+                        message=(
+                            "No consensus sequences available. Enable consensus "
+                            "generation in the pipeline (generate_consensus) to "
+                            "build a per-organism consensus from the read mapping."
+                        ),
+                        icon="bi-card-text",
+                    )
+                ],
+            ),
+
+            # Controls - shown only when consensus results exist
+            html.Div(
+                id="consensus-controls-section",
+                style={"display": "none"},
+                children=[
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Label("Species / Sample:", className="fw-bold"),
+                            dcc.Dropdown(
+                                id="consensus-species-selector",
+                                placeholder="Select a species to view its consensus...",
+                                clearable=True,
+                                persistence=True,
+                                persistence_type="session",
+                                optionHeight=45,
+                                maxHeight=400,
+                                style={"minWidth": "320px"},
+                            ),
+                        ], md=6),
+                        dbc.Col([
+                            dbc.Button(
+                                [html.I(className="bi bi-download me-2"), "Download FASTA"],
+                                id="download-consensus-button",
+                                color="secondary",
+                                outline=True,
+                                className="float-end mt-4",
+                            )
+                        ], md=6, className="d-flex justify-content-end align-items-end"),
+                    ], className="mb-3"),
+                ],
+            ),
+
+            # Stats badges for the selected consensus
+            html.Div(id="consensus-stats-container", className="mb-3"),
+
+            # Download component
+            dcc.Download(id="download-consensus-fasta"),
+        ], className="pt-3")
+    )
+
+
 def create_validation_layout() -> html.Div:
     """
     Create the validation results tab layout with BLAST and coverage sub-tabs.
@@ -591,6 +737,9 @@ def create_validation_layout() -> html.Div:
 
         # Shared data store
         dcc.Store(id="validation-data-store", data={}),
+        # Consensus results live in a dedicated store so the consensus glob
+        # never slows the main validation poll path.
+        dcc.Store(id="consensus-data-store", data={}),
 
         # Sub-tabs
         dbc.Tabs(
@@ -601,6 +750,7 @@ def create_validation_layout() -> html.Div:
             children=[
                 _create_blast_tab(),
                 _create_coverage_tab(),
+                _create_consensus_tab(),
             ],
             className="mb-4",
         ),

@@ -231,6 +231,87 @@ def _build_coverage_selector_options(
     return options, first_value
 
 
+def _build_blast_detail_selector_options(
+    data: Optional[Dict[str, Any]],
+    current_value: Optional[str],
+    species_by_taxid: Optional[Dict[Any, str]] = None,
+):
+    """Per-sample grouped options for the BLAST per-read detail selector.
+
+    Mirrors ``_build_coverage_selector_options`` but keeps BLAST results
+    (method ``blast``/``both``), so the heavy per-read parse is driven by an
+    explicit choice rather than running for every species.
+    """
+    if not data or not data.get("results"):
+        return [], None
+
+    name_map = species_by_taxid or {}
+    per_sample: Dict[str, List[Dict[str, Any]]] = {}
+    sample_order: List[str] = []
+    seen = set()
+    for r in data["results"]:
+        if r.get("validation_method", "blast") == "minimap2":
+            continue
+        sample_id = r.get("sample_id", "")
+        taxid = r.get("taxid", "")
+        key = f"{sample_id}_{taxid}"
+        if key in seen:
+            continue
+        seen.add(key)
+        species = (
+            r.get("species")
+            or name_map.get(taxid)
+            or name_map.get(str(taxid))
+        )
+        label = f"{species} (taxid {taxid})" if species else f"taxid {taxid}"
+        entry = {"label": label, "value": key, "_rank": status_rank(r.get("status"))}
+        if sample_id not in per_sample:
+            per_sample[sample_id] = []
+            sample_order.append(sample_id)
+        per_sample[sample_id].append(entry)
+
+    options: List[Dict[str, Any]] = []
+    for sample_id in sample_order:
+        options.append({
+            "label": f"-- {sample_id} ({len(per_sample[sample_id])} species) --",
+            "value": f"__header__:{sample_id}",
+            "disabled": True,
+        })
+        entries = sorted(per_sample[sample_id], key=lambda e: e["_rank"])
+        for e in entries:
+            e.pop("_rank", None)
+        options.extend(entries)
+
+    valid_values = {o["value"] for o in options if not o.get("disabled")}
+    if current_value and current_value in valid_values:
+        return options, current_value
+    first_value = next((o["value"] for o in options if not o.get("disabled")), None)
+    return options, first_value
+
+
+def _blast_tsv_path(config: Optional[dict], selected_key: Optional[str]):
+    """Resolve the flat ``validation/blast/<sample>_taxid<tid>.blast.tsv``.
+
+    Returns a ``(path, sample_id, taxid)`` tuple, or ``(None, None, None)`` when
+    the key/config is unusable. Mirrors ``_load_real_coverage`` key parsing.
+    """
+    if not config or not selected_key:
+        return None, None, None
+    results_dir = config.get("results_output_directory") or config.get("main_dir", "")
+    if not results_dir:
+        return None, None, None
+    parts = selected_key.rsplit("_", 1)
+    if len(parts) != 2:
+        return None, None, None
+    sample_id, taxid_str = parts
+    path = Path(results_dir) / "validation" / "blast" / f"{sample_id}_taxid{taxid_str}.blast.tsv"
+    try:
+        taxid = int(taxid_str)
+    except (TypeError, ValueError):
+        taxid = 0
+    return path, sample_id, taxid
+
+
 def _build_paginated_card_list(
     cards: List[Any],
     show_all: bool,

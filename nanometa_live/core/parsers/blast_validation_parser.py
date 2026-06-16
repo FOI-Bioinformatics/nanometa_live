@@ -766,3 +766,110 @@ class ValidationParser:
 
 # Backward compatibility alias
 BlastValidationParser = ValidationParser
+
+
+# Per-read column names, matching the nanometanf BLASTN_VALIDATION outfmt.
+_PER_READ_COLS_12 = [
+    'qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen',
+    'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore',
+]
+_PER_READ_COLS_15 = _PER_READ_COLS_12 + ['qlen', 'slen', 'qcovs']
+
+
+def parse_blast_per_read(
+    filepath: Path,
+    sample_id: str,
+    taxid: int,
+    max_rows: int = 5000,
+) -> Dict[str, Any]:
+    """Parse a ``*.blast.tsv`` into per-read records + distributions.
+
+    This is the lazy, on-selection companion to :meth:`parse_blast_tabular`
+    (which only computes per-(sample, taxid) aggregates on the poll path). It is
+    O(reads) and must only be called when the operator opens the per-read panel.
+
+    Dedups by ``qseqid`` keeping the best hit (highest bitscore) per read, so a
+    read contributes exactly one row -- matching the hit-rate dedup the pipeline
+    and aggregate parser use. When the deduped read count exceeds ``max_rows``,
+    the per-read table is capped to the top ``max_rows`` reads by bitscore
+    (``sampled=True``, ``total_reads`` carries the full count); the
+    distributions and top-subject counts are still computed over ALL reads.
+
+    Returns a dict::
+
+        {
+          "sample_id", "taxid", "total_reads", "returned_rows", "sampled",
+          "records":     [ {qseqid, sseqid, pident, length, bitscore, evalue, qcovs}, ... ],
+          "top_subjects":[ {sseqid, reads, mean_pident}, ... ],
+          "distributions": {"pident": [...], "length": [...], "bitscore": [...], "evalue": [...]},
+          "subject_agreement": float,   # fraction of reads on the most-common subject
+        }
+
+    On an empty/missing/unreadable file returns the same shape with empty lists.
+    """
+    empty = {
+        "sample_id": sample_id, "taxid": taxid, "total_reads": 0,
+        "returned_rows": 0, "sampled": False, "records": [],
+        "top_subjects": [], "subject_agreement": 0.0,
+        "distributions": {"pident": [], "length": [], "bitscore": [], "evalue": []},
+    }
+    try:
+        if not filepath.exists() or filepath.stat().st_size == 0:
+            return empty
+        df = pd.read_csv(filepath, sep='\t', header=None)
+        if df.empty or df.shape[1] < 12:
+            return empty
+        ncols = df.shape[1]
+        base = _PER_READ_COLS_15 if ncols >= 15 else _PER_READ_COLS_12
+        df.columns = base[:ncols] + [f"col_{i}" for i in range(len(base), ncols)]
+
+        # One row per read: keep the highest-bitscore hit per qseqid.
+        df = df.sort_values('bitscore', ascending=False).drop_duplicates('qseqid')
+        total_reads = int(len(df))
+        if 'qcovs' not in df.columns:
+            df['qcovs'] = 0.0
+
+        # Distributions + top subjects over ALL deduped reads.
+        distributions = {
+            "pident": df['pident'].astype(float).tolist(),
+            "length": df['length'].astype(int).tolist(),
+            "bitscore": df['bitscore'].astype(float).tolist(),
+            "evalue": df['evalue'].astype(float).tolist(),
+        }
+        grp = df.groupby('sseqid')
+        top = (
+            grp.agg(reads=('qseqid', 'size'), mean_pident=('pident', 'mean'))
+            .sort_values('reads', ascending=False)
+            .reset_index()
+        )
+        top_subjects = [
+            {"sseqid": str(r.sseqid), "reads": int(r.reads),
+             "mean_pident": round(float(r.mean_pident), 1)}
+            for r in top.itertuples(index=False)
+        ]
+        subject_agreement = (
+            float(top.iloc[0]['reads']) / total_reads if total_reads else 0.0
+        )
+
+        # Per-read table: cap to top-N by bitscore for the DOM.
+        sampled = total_reads > max_rows
+        table_df = df.head(max_rows) if sampled else df
+        cols = ['qseqid', 'sseqid', 'pident', 'length', 'bitscore', 'evalue', 'qcovs']
+        records = table_df[cols].to_dict('records')
+        for rec in records:
+            rec['pident'] = round(float(rec['pident']), 1)
+            rec['qcovs'] = round(float(rec['qcovs']), 1)
+            rec['bitscore'] = round(float(rec['bitscore']), 1)
+
+        return {
+            "sample_id": sample_id, "taxid": taxid, "total_reads": total_reads,
+            "returned_rows": len(records), "sampled": sampled,
+            "records": records, "top_subjects": top_subjects,
+            "subject_agreement": subject_agreement,
+            "distributions": distributions,
+        }
+    except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+            pd.errors.ParserError, pd.errors.EmptyDataError, KeyError, ValueError,
+            TypeError) as e:
+        logger.exception(f"Error parsing per-read BLAST {filepath}: {e}")
+        return empty

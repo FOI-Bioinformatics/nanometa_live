@@ -439,17 +439,49 @@ def _build_aggregate_results():
     }
 
 
+def _consensus_stats_dict(sample, taxid, species, ref_name, ref_length,
+                          covered_start, covered_end, mean_depth, n_count,
+                          min_depth=10):
+    """Build a ``*.consensus_stats.json`` payload matching the parser fields."""
+    span = covered_end - covered_start + 1
+    return {
+        "sample_id": sample, "taxid": taxid, "species": species,
+        "validation_method": "consensus", "ref_name": ref_name,
+        "ref_length": ref_length, "covered_start": covered_start,
+        "covered_end": covered_end, "span": span, "mean_depth": mean_depth,
+        "min_depth_threshold": min_depth, "n_count": n_count,
+        "consensus_length": span, "total_reads": 3800, "mapped_reads": 3650,
+    }
+
+
+def _consensus_fasta(sample, taxid, ref_name, start, end, n_count, seed=263):
+    """Build a deterministic consensus FASTA record of length (end-start+1)."""
+    import random
+    rng = random.Random(seed)
+    span = end - start + 1
+    seq = [rng.choice("ACGT") for _ in range(span)]
+    # Scatter the masked positions in the interior (not at the trimmed ends).
+    for i in range(n_count):
+        pos = 5 + (i * max(1, (span - 10) // max(1, n_count)))
+        if pos < span:
+            seq[pos] = "N"
+    body = "".join(seq)
+    wrapped = "\n".join(body[i:i + 70] for i in range(0, len(body), 70))
+    return f">{sample}_taxid{taxid} ref={ref_name} region={start}-{end}\n{wrapped}\n"
+
+
 def _generate_validation_tree(output_dir):
     """Write a realistic validation/ tree: per-(sample,taxid) blast.tsv +
-    minimap2_stats.json, the aggregate validation_results.json, and a per-batch
-    drill-down set so GUI/loader tests have deterministic input for all three
-    methods (blast, minimap2, both)."""
+    minimap2_stats.json, the aggregate validation_results.json, consensus
+    FASTA + stats, and a per-batch drill-down set so GUI/loader tests have
+    deterministic input for all methods (blast, minimap2, both, consensus)."""
     validation_root = output_dir / "validation"
     blast_dir = validation_root / "blast"
     mm2_dir = validation_root / "minimap2"
+    consensus_dir = validation_root / "consensus"
     blast_batch = blast_dir / "batch"
     mm2_batch = mm2_dir / "batch"
-    for d in (blast_dir, mm2_dir, blast_batch, mm2_batch):
+    for d in (blast_dir, mm2_dir, consensus_dir, blast_batch, mm2_batch):
         d.mkdir(parents=True, exist_ok=True)
 
     # Aggregate (source of truth when present)
@@ -477,6 +509,26 @@ def _generate_validation_tree(output_dir):
     (mm2_dir / "barcode01_taxid1773.paf").write_text(
         "\n".join(_generate_paf_lines("ref_contig", 4411532, 500, seed=1773)) + "\n"
     )
+
+    # BLAST tsv for the TUL4 amplicon so the per-read BLAST detail panel has
+    # data for F. tularensis (barcode05 / taxid 263).
+    (blast_dir / "barcode05_taxid263.blast.tsv").write_text(
+        "\n".join(_blast_tsv_lines(3650, 97.8, seed=263)) + "\n"
+    )
+
+    # Consensus artifacts (--generate_consensus output):
+    #  - barcode05 / taxid 263: the TUL4 amplicon, trimmed to its ~428 bp window
+    #  - barcode01 / taxid 1773: a whole-genome partial consensus
+    (consensus_dir / "barcode05_taxid263.consensus_stats.json").write_text(json.dumps(
+        _consensus_stats_dict("barcode05", 263, "Francisella tularensis",
+                              "ref_contig", 1892775, 435, 863, 56.0, 3)))
+    (consensus_dir / "barcode05_taxid263.consensus.fasta").write_text(
+        _consensus_fasta("barcode05", 263, "ref_contig", 435, 863, 3, seed=263))
+    (consensus_dir / "barcode01_taxid1773.consensus_stats.json").write_text(json.dumps(
+        _consensus_stats_dict("barcode01", 1773, "Mycobacterium tuberculosis",
+                              "ref_contig", 4411532, 1200, 3800, 42.0, 60)))
+    (consensus_dir / "barcode01_taxid1773.consensus.fasta").write_text(
+        _consensus_fasta("barcode01", 1773, "ref_contig", 1200, 3800, 60, seed=1773))
 
     # Per-batch drill-down for barcode01 / taxid 1773 (batch ids "1" and "2")
     # barcode05 (TUL4 amplicon) uses cumulative results only

@@ -68,6 +68,29 @@ from nanometa_live.app.tabs.validation_tab_helpers import (  # noqa: E402
     _enumerate_batch_ids,
     _batch_selector_state,
 )
+from nanometa_live.app.tabs.consensus_helpers import (  # noqa: E402
+    build_consensus_selector_options,
+    find_consensus_result,
+    consensus_stats_badges,
+)
+from nanometa_live.core.parsers.consensus_parser import (  # noqa: E402
+    collect_consensus_results,
+    read_consensus_fasta,
+)
+from nanometa_live.app.tabs.validation_tab_helpers import (  # noqa: E402
+    _build_blast_detail_selector_options,
+    _blast_tsv_path,
+)
+from nanometa_live.core.parsers.blast_validation_parser import parse_blast_per_read  # noqa: E402
+from nanometa_live.core.parsers.blast_confidence import classification_confidence  # noqa: E402
+from nanometa_live.app.components.blast_detail_plots import (  # noqa: E402
+    create_identity_histogram_figure,
+    create_length_histogram_figure,
+    create_bitscore_histogram_figure,
+    render_confidence,
+    top_subjects_columns,
+    per_read_columns,
+)
 
 
 def register_validation_callbacks(app: Dash):
@@ -771,6 +794,274 @@ def register_validation_callbacks(app: Dash):
             return no_update, {
                 "title": "Export Failed",
                 "message": f"Could not export the coverage report: {e}",
+                "color": "danger",
+            }
+
+    # -----------------------------------------------------------------
+    # BLAST per-read detail (lazy: parses the TSV only on selection)
+    # -----------------------------------------------------------------
+
+    @app.callback(
+        [
+            Output("blast-detail-selector", "options"),
+            Output("blast-detail-selector", "value"),
+        ],
+        Input("validation-data-store", "data"),
+        State("blast-detail-selector", "value"),
+    )
+    def populate_blast_detail_selector(data, current_value):
+        """Populate the per-read detail selector from BLAST results."""
+        return _build_blast_detail_selector_options(
+            data, current_value, species_by_taxid=watchlist_species_by_taxid()
+        )
+
+    @app.callback(
+        [
+            Output("blast-confidence-container", "children"),
+            Output("blast-identity-hist", "figure"),
+            Output("blast-length-hist", "figure"),
+            Output("blast-bitscore-hist", "figure"),
+            Output("blast-top-subjects-table", "columnDefs"),
+            Output("blast-top-subjects-table", "rowData"),
+            Output("blast-perread-table", "columnDefs"),
+            Output("blast-perread-table", "rowData"),
+            Output("blast-perread-note", "children"),
+        ],
+        Input("blast-detail-selector", "value"),
+        [
+            State("validation-data-store", "data"),
+            State("app-config", "data"),
+        ],
+    )
+    def update_blast_detail(selected_key, data, config):
+        """Parse one organism's BLAST reads and render the detail panel.
+
+        This is the ONLY place ``parse_blast_per_read`` runs -- gated on an
+        explicit selector inside a collapsed accordion, never on the poll path.
+        """
+        from nanometa_live.app.tabs.qc_tab_helpers import _is_amplicon_mode
+
+        empty_fig = go.Figure().update_layout(template="nanometa")
+        blank = ("", empty_fig, empty_fig, empty_fig, [], [], [], [], "")
+        if not selected_key:
+            return blank
+
+        tsv_path, sample_id, taxid = _blast_tsv_path(config, selected_key)
+        if tsv_path is None:
+            return blank
+        try:
+            parsed = parse_blast_per_read(tsv_path, sample_id or "", taxid or 0)
+        except Exception as e:
+            log_callback_error("update_blast_detail", e)
+            return blank
+
+        if not parsed.get("records"):
+            note = "No per-read BLAST data on disk for this organism."
+            return ("", empty_fig, empty_fig, empty_fig, [], [], [], [], note)
+
+        dist = parsed["distributions"]
+        # Mean identity + breadth from the matching result dict (already loaded).
+        result = next(
+            (r for r in (data or {}).get("results", [])
+             if f"{r.get('sample_id','')}_{r.get('taxid','')}" == selected_key),
+            {},
+        )
+        mean_identity = float(result.get("percent_identity_mean", 0.0) or 0.0)
+        if not mean_identity and dist["pident"]:
+            mean_identity = sum(dist["pident"]) / len(dist["pident"])
+        coverage_breadth = float(result.get("coverage_breadth", 0.0) or 0.0)
+        confidence = classification_confidence(
+            mean_identity=mean_identity,
+            coverage_breadth=coverage_breadth,
+            subject_agreement=parsed.get("subject_agreement", 0.0),
+            n_reads=parsed.get("total_reads", 0),
+            is_concentrated=_is_amplicon_mode(config),
+        )
+
+        note = ""
+        if parsed.get("sampled"):
+            note = (f"Showing the top {parsed['returned_rows']:,} reads by bitscore "
+                    f"of {parsed['total_reads']:,} total (plots use all reads).")
+
+        return (
+            render_confidence(confidence),
+            create_identity_histogram_figure(dist),
+            create_length_histogram_figure(dist),
+            create_bitscore_histogram_figure(dist),
+            top_subjects_columns(),
+            parsed["top_subjects"],
+            per_read_columns(),
+            parsed["records"],
+            note,
+        )
+
+    @app.callback(
+        Output("download-perread-tsv", "data"),
+        Output("notification-trigger", "data", allow_duplicate=True),
+        Input("export-perread-button", "n_clicks"),
+        State("blast-detail-selector", "value"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
+    )
+    def export_perread_tsv(n_clicks, selected_key, config):
+        """Export the per-read records for the selected organism as TSV."""
+        if not n_clicks:
+            return no_update, no_update
+        tsv_path, sample_id, taxid = _blast_tsv_path(config, selected_key)
+        if tsv_path is None:
+            return no_update, {
+                "title": "Nothing to Export",
+                "message": "Select a species first.",
+                "color": "warning",
+            }
+        try:
+            parsed = parse_blast_per_read(tsv_path, sample_id or "", taxid or 0)
+            if not parsed.get("records"):
+                return no_update, {
+                    "title": "Nothing to Export",
+                    "message": "No per-read BLAST data for this organism.",
+                    "color": "warning",
+                }
+            df = pd.DataFrame(parsed["records"])
+            filename = f"{sample_id}_taxid{taxid}_per_read.tsv"
+            return (
+                dict(content=df.to_csv(sep="\t", index=False), filename=filename,
+                     type="text/tab-separated-values"),
+                no_update,
+            )
+        except Exception as e:
+            log_callback_error("export_perread_tsv", e)
+            return no_update, {
+                "title": "Export Failed",
+                "message": f"Could not export the per-read table: {e}",
+                "color": "danger",
+            }
+
+    # -----------------------------------------------------------------
+    # Consensus sub-tab
+    # -----------------------------------------------------------------
+
+    @app.callback(
+        Output("consensus-data-store", "data"),
+        [
+            Input("results-fingerprint", "data"),
+            Input("selected-sample", "data"),
+            Input("update-interval", "n_intervals"),
+        ],
+        State("app-config", "data"),
+        prevent_initial_call=True,
+    )
+    def load_consensus_data(_fingerprint, selected_sample, _n_intervals, config):
+        """Load consensus stats (small JSON only) into a dedicated store.
+
+        Kept off the main validation poll path. The FASTA itself is never read
+        here -- only on download.
+        """
+        if interval_tick_is_redundant(ctx, "load_consensus_data", _fingerprint):
+            raise PreventUpdate
+        mark_rendered("load_consensus_data", _fingerprint)
+
+        if not config:
+            return {"results": [], "selected_sample": selected_sample}
+        results_dir = config.get("results_output_directory") or config.get("main_dir", "")
+        if not results_dir or not os.path.isdir(results_dir):
+            return {"results": [], "selected_sample": selected_sample}
+
+        try:
+            sample = (
+                selected_sample
+                if selected_sample and selected_sample != "All Samples"
+                else None
+            )
+            results = collect_consensus_results(Path(results_dir), sample=sample)
+            payload = []
+            for r in results:
+                d = r.__dict__.copy()
+                d["has_sequence"] = r.has_sequence
+                payload.append(d)
+            return {"results": payload, "selected_sample": selected_sample}
+        except Exception as e:
+            log_callback_error("load_consensus_data", e)
+            return {"results": [], "selected_sample": selected_sample}
+
+    @app.callback(
+        [
+            Output("consensus-empty-message", "style"),
+            Output("consensus-controls-section", "style"),
+        ],
+        Input("consensus-data-store", "data"),
+    )
+    def update_consensus_empty_state(data):
+        """Show controls when consensus results exist, else the empty state."""
+        hidden = {"display": "none"}
+        visible = {"display": "block"}
+        if data and data.get("results"):
+            return hidden, visible
+        return visible, hidden
+
+    @app.callback(
+        [
+            Output("consensus-species-selector", "options"),
+            Output("consensus-species-selector", "value"),
+        ],
+        Input("consensus-data-store", "data"),
+        State("consensus-species-selector", "value"),
+    )
+    def populate_consensus_selector(data, current_value):
+        """Populate the consensus species selector, preserving the selection."""
+        results = data.get("results") if data else None
+        return build_consensus_selector_options(
+            results, current_value, species_by_taxid=watchlist_species_by_taxid()
+        )
+
+    @app.callback(
+        Output("consensus-stats-container", "children"),
+        Input("consensus-species-selector", "value"),
+        State("consensus-data-store", "data"),
+    )
+    def update_consensus_stats(selected_key, data):
+        """Render the depth-window stats badges for the selected consensus."""
+        results = data.get("results") if data else None
+        result = find_consensus_result(results, selected_key)
+        return consensus_stats_badges(result)
+
+    @app.callback(
+        Output("download-consensus-fasta", "data"),
+        Output("notification-trigger", "data", allow_duplicate=True),
+        Input("download-consensus-button", "n_clicks"),
+        State("consensus-species-selector", "value"),
+        State("consensus-data-store", "data"),
+        prevent_initial_call=True,
+    )
+    def download_consensus_fasta(n_clicks, selected_key, data):
+        """Stream the selected consensus FASTA to the operator."""
+        if not n_clicks:
+            return no_update, no_update
+        results = data.get("results") if data else None
+        result = find_consensus_result(results, selected_key)
+        if not result:
+            return no_update, {
+                "title": "Nothing to Download",
+                "message": "Select a species with a consensus sequence first.",
+                "color": "warning",
+            }
+        try:
+            content = read_consensus_fasta(result.get("fasta_path", ""))
+            if not content:
+                return no_update, {
+                    "title": "No Consensus",
+                    "message": "This organism has no consensus sequence on disk.",
+                    "color": "warning",
+                }
+            sample_id = result.get("sample_id", "sample")
+            taxid = result.get("taxid", "0")
+            filename = f"{sample_id}_taxid{taxid}_consensus.fasta"
+            return dict(content=content, filename=filename, type="text/plain"), no_update
+        except Exception as e:
+            log_callback_error("download_consensus_fasta", e)
+            return no_update, {
+                "title": "Download Failed",
+                "message": f"Could not read the consensus FASTA: {e}",
                 "color": "danger",
             }
 
