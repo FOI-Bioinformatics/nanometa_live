@@ -174,7 +174,26 @@ per-poll loader work from ~2 s to <0.1 s; keep these contracts:
   differ once a cumulative or batch report exists). Regression-covered in
   `tests/test_qc_loaders_horizon.py`.
 
-All four were behaviour-preserving (loader output is byte-identical, verified
+- **Per-file parsed-frame cache (`_report_frame_cache`).** `_parse_kraken2_report`
+  is a thin wrapper over `_parse_kraken2_report_uncached` that memoises the parsed
+  frame on `(realpath, st_mtime_ns, st_size)`. Within one poll the same physical
+  report is otherwise parsed 2-3x — the aggregated "All Samples" load, the
+  per-sample load, and `get_sample_statistics_summary` each go through this choke
+  point under different higher-level cache keys (cProfile, 6 samples × ~3100 taxa:
+  12 parses for 6 files in one fresh-data poll). The cache collapses that to one
+  parse per changed file and, in realtime mode, makes an *incremental* poll
+  re-parse only the sample whose report advanced. Measured on the per-poll
+  harness: full-refresh poll 137 → 89 ms, incremental poll → 63 ms. Safe because
+  parsed frames are read-only for every consumer (`apply_authoritative_taxonomy` /
+  `recalculate_cumulative_reads` copy before mutating, `_accumulate_kraken_df`
+  only reads). Only successful (non-None) parses are cached; an unstable/empty
+  file returns None and is retried next poll (its mtime is unchanged once it
+  stabilises, so the key alone cannot distinguish "unstable then" from "stable
+  now"). `check_stability=False` (test-only) bypasses the cache so the two
+  stability modes never share an entry. Regression-covered in
+  `tests/test_classification_loaders.py::TestPerFileParseCache`.
+
+All five were behaviour-preserving (loader output is byte-identical, verified
 by sha256 over the full frame incl. `parent_taxid`).
 
 **Sunburst node cap (visualization invariant).** `create_sunburst_data`
