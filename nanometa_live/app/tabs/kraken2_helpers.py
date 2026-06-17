@@ -332,8 +332,12 @@ def recalculate_cumulative_reads(df):
         vals = pd.Series(0, index=df.index)
 
     # dict(zip(...)) keeps the last value on duplicate composite keys,
-    # exactly as repeated dict assignment in the loop did.
-    return dict(zip(keys, vals))
+    # exactly as repeated dict assignment in the loop did. Materialise both
+    # columns with .tolist() first: zipping the arrow-backed string `keys`
+    # Series directly iterates it element-by-element through arrow __iter__,
+    # which is ~3 full-column iterations of pure overhead on every Sankey/
+    # Sunburst rebuild (cProfile, GTDB scale). Native Python lists zip in C.
+    return dict(zip(keys.tolist(), vals.tolist()))
 
 
 def build_parent_map(tax_df, domain_df, tax_levels, node_ids, top_filter,
