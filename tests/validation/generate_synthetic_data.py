@@ -359,7 +359,7 @@ EXPECTED_AGGREGATE_RESULTS = [
     ("barcode01", 1773, "minimap2", "confirmed"),   # expanded minimap2 side
     ("barcode01", 1280, "blast", "partial"),        # S. aureus
     ("barcode02", 1639, "minimap2", "confirmed"),   # L. monocytogenes
-    ("barcode03", 562, "blast", "no_data"),         # E. coli (low, no hits)
+    ("barcode03", 562, "blast", "low"),             # E. coli: reads classified, no BLAST hits -> examined-and-negative
     ("barcode05", 263, "minimap2", "confirmed"),    # F. tularensis TUL4 amplicon
 ]
 

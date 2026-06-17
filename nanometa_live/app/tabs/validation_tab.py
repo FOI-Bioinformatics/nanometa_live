@@ -743,11 +743,15 @@ def register_validation_callbacks(app: Dash):
                 title="No coverage data",
                 message=no_paf_msg,
             )
+            # Keep the section VISIBLE: coverage-stats-container (where this
+            # warning lands) and the placeholder figures live inside
+            # coverage-plots-section, so hiding the section would blank the tab
+            # and swallow the explanation.
             return no_paf(), no_paf(), no_paf(), dbc.Alert(
                 no_paf_msg,
                 color="warning",
                 className="text-center",
-            ), hidden
+            ), visible
 
         depth_fig = create_coverage_depth_figure(coverage, threshold=threshold)
         cum_fig = create_cumulative_coverage_figure(coverage)

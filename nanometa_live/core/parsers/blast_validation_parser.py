@@ -132,6 +132,12 @@ class ValidationResult:
             return ValidationStatus.FAILED
         if self.validated_reads == 0 and self.total_reads == 0:
             return ValidationStatus.NO_DATA
+        # Examined but nothing validated (reads were classified to this organism
+        # but BLAST/minimap2 confirmed none): a negative result, NOT "no data".
+        # Distinguishing the two matters clinically -- "checked, not confirmed"
+        # must not look identical to "not yet checked".
+        if self.validated_reads == 0 and self.total_reads > 0:
+            return ValidationStatus.LOW_CONFIDENCE
         if self.percent_validated >= 80 and self.percent_identity_mean >= 90:
             return ValidationStatus.CONFIRMED
         if self.percent_validated >= 50:
@@ -212,6 +218,23 @@ class ValidationParser:
                     m = p.stat().st_mtime
                     if m > latest:
                         latest = m
+                except OSError:
+                    continue
+            # The authoritative aggregate JSON is written one level up at
+            # validation/validation_results.json (the loader prefers it), but
+            # validation_dir often resolves to validation/blast or
+            # validation/minimap2. Without folding the aggregate's mtime in, a
+            # realtime rewrite of validation_results.json never advances this
+            # fingerprint and the cache serves stale results.
+            for agg in (
+                self.validation_dir.parent / "validation_results.json",
+                self.results_dir / "validation" / "validation_results.json",
+            ):
+                try:
+                    if agg.exists():
+                        m = agg.stat().st_mtime
+                        if m > latest:
+                            latest = m
                 except OSError:
                     continue
             return latest
@@ -444,21 +467,29 @@ class ValidationParser:
 
                     method = entry.get('validation_method', method_default)
 
-                    # Map nanometanf fields to ValidationResult
-                    kraken_reads = entry.get('kraken_reads', 0)
-                    hit_rate = entry.get('hit_rate', 0.0)
-                    validated = entry.get('blast_hits', entry.get('mapped_reads', 0))
+                    # Map nanometanf fields to ValidationResult. A JSON ``null``
+                    # makes ``.get(key, default)`` return None (the default only
+                    # applies when the key is ABSENT), and ``None <= 1.0`` /
+                    # ``float(None)`` would raise -- caught by the catch-all
+                    # except below, which would silently drop the WHOLE aggregate
+                    # and blank the Validation tab. Coerce every numeric to a real
+                    # number with ``or 0`` before arithmetic.
+                    kraken_reads = entry.get('kraken_reads', 0) or 0
+                    hit_rate = entry.get('hit_rate', 0.0) or 0.0
+                    validated = entry.get('blast_hits', entry.get('mapped_reads', 0)) or 0
 
                     result = ValidationResult(
                         sample_id=sample_id,
                         taxid=tid,
                         species=entry.get('species', ''),
-                        total_reads=kraken_reads,
-                        validated_reads=validated,
-                        percent_validated=hit_rate * 100 if hit_rate <= 1.0 else hit_rate,
-                        percent_identity_mean=float(entry.get('avg_identity', 0.0)),
-                        coverage_breadth=float(entry.get('avg_coverage', 0.0)),
-                        avg_mapq=float(entry.get('avg_mapq', 0.0)),
+                        total_reads=int(kraken_reads),
+                        validated_reads=int(validated),
+                        percent_validated=min(
+                            100.0, hit_rate * 100 if hit_rate <= 1.0 else hit_rate
+                        ),
+                        percent_identity_mean=float(entry.get('avg_identity', 0.0) or 0.0),
+                        coverage_breadth=float(entry.get('avg_coverage', 0.0) or 0.0),
+                        avg_mapq=float(entry.get('avg_mapq', 0.0) or 0.0),
                         # ref_name / ref_length are emitted by nanometanf but were
                         # previously dropped here; surface the reference identity
                         # and genome size in the GUI.
@@ -472,20 +503,23 @@ class ValidationParser:
 
                     # If 'both' method, check for minimap2 fields on a BLAST entry
                     if entry.get('minimap2_mapped') is not None:
+                        mm2_hit_rate = entry.get('minimap2_hit_rate', 0.0) or 0.0
                         mm2_result = ValidationResult(
                             sample_id=sample_id,
                             taxid=tid,
                             species=entry.get('species', ''),
-                            total_reads=kraken_reads,
-                            validated_reads=int(entry.get('minimap2_mapped', 0)),
-                            percent_validated=(
-                                entry.get('minimap2_hit_rate', 0.0) * 100
-                                if entry.get('minimap2_hit_rate', 0.0) <= 1.0
-                                else entry.get('minimap2_hit_rate', 0.0)
+                            total_reads=int(kraken_reads),
+                            validated_reads=int(entry.get('minimap2_mapped', 0) or 0),
+                            percent_validated=min(
+                                100.0,
+                                mm2_hit_rate * 100 if mm2_hit_rate <= 1.0 else mm2_hit_rate,
                             ),
-                            percent_identity_mean=float(entry.get('minimap2_identity', 0.0)),
-                            coverage_breadth=float(entry.get('minimap2_coverage', entry.get('avg_coverage', 0.0))),
-                            avg_mapq=float(entry.get('avg_mapq', 0.0)),
+                            percent_identity_mean=float(entry.get('minimap2_identity', 0.0) or 0.0),
+                            coverage_breadth=float(
+                                entry.get('minimap2_coverage',
+                                          entry.get('avg_coverage', 0.0)) or 0.0
+                            ),
+                            avg_mapq=float(entry.get('avg_mapq', 0.0) or 0.0),
                             reference_accession=entry.get('ref_name', '') or '',
                             reference_length=int(entry.get('ref_length', 0) or 0),
                             validation_method='minimap2',

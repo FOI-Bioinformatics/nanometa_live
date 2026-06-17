@@ -16,6 +16,7 @@ existing test_validation_system.py suite.
 """
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -104,13 +105,45 @@ class TestParseBlastTabular:
         assert result.status == ValidationStatus.NO_DATA
 
 
+class TestCacheFingerprintTracksAggregate:
+    """The cache fingerprint must advance when the authoritative aggregate JSON
+    (validation/validation_results.json) is rewritten -- it sits one level above
+    validation_dir (validation/blast), so a naive iterdir misses it and the
+    realtime Validation tab would serve stale results."""
+
+    def test_aggregate_rewrite_advances_fingerprint(self, tmp_path):
+        import os
+        from nanometa_live.core.parsers.blast_validation_parser import ValidationParser
+        vdir = tmp_path / "validation" / "blast"
+        vdir.mkdir(parents=True)
+        (vdir / "barcode01_taxid562.blast.tsv").write_text("x\n")
+        agg = tmp_path / "validation" / "validation_results.json"
+        agg.write_text("{}")
+        old = time.time() - 100
+        os.utime(vdir, (old, old))
+        os.utime(vdir / "barcode01_taxid562.blast.tsv", (old, old))
+        os.utime(agg, (old, old))
+
+        parser = ValidationParser(str(tmp_path))
+        assert parser.validation_dir.name == "blast"
+        fp1 = parser._validation_dir_fingerprint()
+
+        # Rewrite only the aggregate, one level above validation_dir.
+        newer = time.time()
+        agg.write_text('{"results": {}}')
+        os.utime(agg, (newer, newer))
+        fp2 = parser._validation_dir_fingerprint()
+        assert fp2 > fp1
+
+
 class TestDetermineStatusBoundaries:
     """Exact-threshold behaviour of ValidationResult.determine_status().
 
     Authoritative rule (blast_validation_parser.py): CONFIRMED iff
     percent_validated >= 80 AND percent_identity_mean >= 90; PARTIAL iff
-    percent_validated >= 50; LOW_CONFIDENCE iff > 0; else NO_DATA; FAILED on
-    errors. The boundaries are inclusive on the >= side.
+    percent_validated >= 50; LOW_CONFIDENCE iff > 0 OR (validated_reads == 0 but
+    total_reads > 0, i.e. examined-and-negative); NO_DATA only when nothing was
+    examined; FAILED on errors. Boundaries are inclusive on the >= side.
     """
 
     @pytest.mark.parametrize("pv,ident,expected", [
@@ -120,7 +153,8 @@ class TestDetermineStatusBoundaries:
         (79.9, 99.0, ValidationStatus.PARTIAL),       # validated just below 80
         (50.0, 99.0, ValidationStatus.PARTIAL),       # 50 boundary inclusive
         (49.9, 99.0, ValidationStatus.LOW_CONFIDENCE),
-        (0.0, 99.0, ValidationStatus.NO_DATA),        # no reads validated
+        # Examined (reads exist) but nothing validated -> low, NOT no_data.
+        (0.0, 99.0, ValidationStatus.LOW_CONFIDENCE),
     ])
     def test_threshold_boundaries(self, pv, ident, expected):
         # validated/total kept > 0 so the (0,0) early NO_DATA branch is not hit
@@ -132,6 +166,15 @@ class TestDetermineStatusBoundaries:
             percent_identity_mean=ident, validation_method="blast",
         )
         assert r.determine_status() == expected
+
+    def test_examined_zero_hits_is_low_not_no_data(self):
+        # A watchlist organism Kraken classified but BLAST/minimap2 confirmed
+        # none must read as "checked, not confirmed", distinct from "not run".
+        r = ValidationResult(
+            sample_id="s", taxid=1, total_reads=120, validated_reads=0,
+            percent_validated=0.0, validation_method="blast",
+        )
+        assert r.determine_status() == ValidationStatus.LOW_CONFIDENCE
 
     def test_errors_force_failed_even_with_high_metrics(self):
         r = ValidationResult(
@@ -175,6 +218,41 @@ class TestParseNanometanfAggregateJson:
         assert r.validated_reads == 90
         assert r.percent_validated == pytest.approx(90.0)
         assert r.status == ValidationStatus.CONFIRMED
+
+    def test_null_numeric_fields_do_not_drop_the_file(self, parser, tmp_path):
+        # A JSON null on a numeric field must not make None<=1.0 / float(None)
+        # raise and silently empty the whole aggregate (and the Validation tab).
+        f = tmp_path / "validation_results.json"
+        f.write_text(json.dumps(_aggregate({
+            "barcode01": {
+                "562": {
+                    "species": "Escherichia coli",
+                    "kraken_reads": 100,
+                    "blast_hits": None,
+                    "hit_rate": None,
+                    "avg_identity": None,
+                    "avg_coverage": None,
+                    "avg_mapq": None,
+                }
+            }
+        })))
+        results = parser.parse_nanometanf_aggregate_json(f)
+        assert len(results) == 1
+        r = results[0]
+        assert r.validated_reads == 0
+        assert r.percent_validated == 0.0
+        assert r.percent_identity_mean == 0.0
+
+    def test_hit_rate_above_100_is_clamped(self, parser, tmp_path):
+        # A pre-multiplied hit_rate that overshoots 100 (the >1.0 passthrough
+        # branch) must be clamped so the UI never shows e.g. 130%.
+        f = tmp_path / "validation_results.json"
+        f.write_text(json.dumps(_aggregate({
+            "barcode01": {"562": {"species": "E. coli", "kraken_reads": 10,
+                                  "blast_hits": 13, "hit_rate": 130.0,
+                                  "avg_identity": 98.0}}})))
+        r = parser.parse_nanometanf_aggregate_json(f)[0]
+        assert r.percent_validated == 100.0
 
     def test_both_method_expands_to_two_results(self, parser, tmp_path):
         f = tmp_path / "validation_results.json"
@@ -259,8 +337,9 @@ class TestParseNanometanfAggregateJson:
 
     def test_minimap2_mapped_zero_still_expands(self, parser, tmp_path):
         # ``minimap2_mapped: 0`` is a real (mapped-nothing) outcome, distinct from
-        # an absent key — it must expand to a NO_DATA minimap2 result, not be
-        # silently dropped.
+        # an absent key — it must expand to a result, not be silently dropped.
+        # Reads existed (kraken_reads=100) but none mapped, so the status is
+        # LOW_CONFIDENCE (examined-and-negative), not NO_DATA.
         f = tmp_path / "validation_results.json"
         f.write_text(json.dumps(_aggregate({
             "barcode01": {
@@ -275,7 +354,7 @@ class TestParseNanometanfAggregateJson:
         assert len(results) == 2
         mm2 = next(r for r in results if r.validation_method == "minimap2")
         assert mm2.validated_reads == 0
-        assert mm2.status == ValidationStatus.NO_DATA
+        assert mm2.status == ValidationStatus.LOW_CONFIDENCE
 
     def test_mixed_methods_across_taxids_split_correctly(self, parser, tmp_path):
         # One taxid is "both" (-> 2 results), another is blast-only (-> 1). Total 3.

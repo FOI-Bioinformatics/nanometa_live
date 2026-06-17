@@ -193,10 +193,13 @@ class TestCoveragePlots:
             "barcode01_1773", 0, 10, "batch", "1", enabled_config)
         assert style == {"display": "block"}
 
-    def test_missing_paf_returns_warning_hidden(self, validation_app, enabled_config):
+    def test_missing_paf_shows_warning_visible(self, validation_app, enabled_config):
+        # No PAF: the section must stay VISIBLE so the warning Alert (which lives
+        # inside coverage-plots-section) is actually shown, not swallowed.
         depth, cum, hist, stats, style = self._fn(validation_app)(
             "barcode99_9999", 0, 10, "cumulative", None, enabled_config)
-        assert style == {"display": "none"}
+        assert style == {"display": "block"}
+        assert "No PAF file" in str(stats)
 
     def test_negative_depth_threshold_sanitized(self, validation_app, enabled_config):
         # A negative or None threshold must not raise; it clamps internally.
