@@ -35,6 +35,19 @@ SUPPORTED_CONTAINERIZATION_MODES = ("conda", "docker", "singularity")
 # Placeholder token for absolute paths in exported metadata
 _HOME_PLACEHOLDER = "${NANOMETA_HOME}"
 
+# Placeholder the export writes for the Kraken2 DB path (the DB is moved
+# separately, so the operator supplies its path at import time).
+_KRAKEN_DB_PLACEHOLDER = "${KRAKEN_DB}"
+
+# Minimum Nextflow the bundled pipeline requires (mirrors the nanometanf
+# manifest floor ``nextflowVersion = '>=26.04.0'``). Recorded in the manifest
+# at export and warned about on import when the field machine is older.
+_NEXTFLOW_MIN_VERSION = "26.04.0"
+
+# Recognised Nextflow plugin name prefixes. Used both when selecting plugins to
+# bundle and when checking the restored plugins directory is non-empty on import.
+_PLUGIN_PREFIXES = ("nf-schema", "nf-validation", "nf-wave", "nf-console")
+
 # Where we stage pulled Docker tar archives and Singularity .sif files
 # during build. This is distinct from the existing ``containers/``
 # staging directory which holds operator-managed BLAST containers
@@ -512,6 +525,12 @@ class BundleManager:
                     "machine": platform.machine(),
                     "python": platform.python_version(),
                 },
+                # Minimum runtime versions the bundle requires; import warns
+                # when the field machine is older.
+                "min_versions": {"nextflow": _NEXTFLOW_MIN_VERSION},
+                # Non-fatal issues found while staging (e.g. a genome_metadata
+                # path outside the data home); surfaced to the operator.
+                "export_warnings": [],
             }
 
             # Record DB hash for compatibility check on import
@@ -567,11 +586,16 @@ class BundleManager:
             except (ImportError, AttributeError, OSError, json.JSONDecodeError) as e:
                 logger.warning(f"Could not export taxonomy snapshot: {e}")
 
-            # Template genome_metadata.json paths
+            # Template genome_metadata.json paths. Path-aware: any absolute
+            # path that is NOT under the data home cannot be made portable and
+            # is recorded as an export warning for the operator.
             meta_src = home / "genome_metadata.json"
             if meta_src.exists():
                 meta_dst = staging / "genome_metadata.json"
-                _template_paths(meta_src, meta_dst, str(home), _HOME_PLACEHOLDER)
+                meta_warnings = _template_genome_metadata(
+                    meta_src, meta_dst, str(home), _HOME_PLACEHOLDER
+                )
+                manifest["export_warnings"].extend(meta_warnings)
                 manifest["checksums"]["genome_metadata.json"] = _file_md5(meta_dst)
 
             # Copy per-entry watchlist toggle state so the field machine
@@ -880,6 +904,25 @@ class BundleManager:
                 )
                 result["warnings"].extend(version_warnings)
 
+            # Enforce the bundle's minimum runtime versions (warn, do not fail).
+            nf_floor = manifest.get("min_versions", {}).get("nextflow")
+            if nf_floor:
+                local_nf = _get_nextflow_version()
+                floor_t = _parse_semver(nf_floor)
+                local_t = _parse_semver(local_nf)
+                if local_nf in ("not found", "error", "unknown") or local_t is None:
+                    result["warnings"].append(
+                        f"Could not determine the field machine's Nextflow version "
+                        f"({local_nf}); the bundled pipeline requires Nextflow "
+                        f">={nf_floor}. Confirm Nextflow is installed and current."
+                    )
+                elif floor_t and local_t < floor_t:
+                    result["warnings"].append(
+                        f"Field machine Nextflow {local_nf} is older than the bundle's "
+                        f"required minimum {nf_floor}. Update Nextflow before launching "
+                        "the pipeline."
+                    )
+
             # Warn when the bundle was built on a different OS or CPU
             # architecture. Conda envs and compiled binaries are not
             # portable across platform boundaries.
@@ -943,6 +986,42 @@ class BundleManager:
                                         shutil.copy2(src_file, dst_file)
                     else:
                         shutil.copytree(src, dst)
+
+            # Re-verify checksums AFTER the copy to home. The tempdir pass
+            # above proves the bundle arrived intact; this pass catches a copy
+            # that failed midway (disk full, interrupted) and left an
+            # incomplete install. genome_metadata.json and config.yaml are
+            # templated/mutated on copy, so their on-disk hash legitimately
+            # differs from the bundle checksum -- exclude them here.
+            _copied_roots = (
+                "genomes/", "blast/", "mappings/", "cache/", "watchlists/",
+                "containers/", f"{_BUNDLED_CONDA_CACHE_DIRNAME}/",
+                f"{_BUNDLED_PIPELINE_DIRNAME}/", f"{_BUNDLED_NXF_PLUGINS_DIRNAME}/",
+            )
+            _mutated = {"genome_metadata.json", "config.yaml"}
+            post_copy_mismatches = []
+            for rel_path, expected_md5 in manifest.get("checksums", {}).items():
+                if rel_path in _mutated:
+                    continue
+                if not rel_path.startswith(_copied_roots):
+                    continue
+                dst_file = home / rel_path
+                if not dst_file.exists():
+                    post_copy_mismatches.append(f"{rel_path} (missing)")
+                elif _file_md5(dst_file) != expected_md5:
+                    post_copy_mismatches.append(rel_path)
+            if post_copy_mismatches:
+                msg = (
+                    f"{len(post_copy_mismatches)} file(s) failed checksum "
+                    f"verification AFTER copy to {home} (likely a full disk or an "
+                    f"interrupted copy): {', '.join(post_copy_mismatches[:5])}"
+                    + ("..." if len(post_copy_mismatches) > 5 else "")
+                )
+                if not force:
+                    result["success"] = False
+                    result["warnings"].append(msg + ". The install is incomplete.")
+                    return result
+                result["warnings"].append(msg + ". Continuing anyway (force=True).")
 
             # Rebase genome_metadata.json
             meta_src = tmp / "genome_metadata.json"
@@ -1031,6 +1110,25 @@ class BundleManager:
                     cfg["offline_mode"] = True
                     if kraken_db_path:
                         cfg["kraken_db"] = kraken_db_path
+                    # No DB path supplied: config still carries the export-time
+                    # placeholder (or is empty). The run will fail cryptically
+                    # later, so flag it now -- but do not abort, since
+                    # importing first and pointing the DB later is a valid flow.
+                    # ConfigLoader normalises path keys, so the export-time
+                    # "${KRAKEN_DB}" placeholder arrives here as
+                    # "<cwd>/${KRAKEN_DB}" -- match the token as a substring.
+                    eff_db = str(cfg.get("kraken_db", ""))
+                    if not kraken_db_path and (
+                        not eff_db or _KRAKEN_DB_PLACEHOLDER in eff_db
+                    ):
+                        result["kraken_db_unset"] = True
+                        result["warnings"].append(
+                            "Kraken2 database path was not provided. The Kraken2 "
+                            "database is transferred separately from the bundle; set "
+                            "its path on the Watchlist & Preparation tab (or kraken_db "
+                            "in config.yaml) before starting analysis, or the run will "
+                            "fail."
+                        )
                     if "conda_cache_path" in result:
                         cfg["nxf_conda_cachedir"] = result["conda_cache_path"]
                     # Rebase pipeline_source from relative bundle path to
@@ -1044,14 +1142,17 @@ class BundleManager:
                             logger.info(
                                 f"Rebased pipeline_source to {abs_pipeline}"
                             )
-                            # Guard against a truncated transfer: the directory
-                            # can exist yet be missing main.nf, which only
-                            # surfaces as a cryptic error at launch.
+                            # A truncated transfer can leave the directory
+                            # present but missing main.nf; that only surfaces as
+                            # a cryptic error at launch, so fail the import now.
                             if not (abs_pipeline / "main.nf").exists():
+                                result["success"] = False
+                                result["pipeline_main_missing"] = True
                                 result["warnings"].append(
-                                    "Bundled pipeline source is missing main.nf "
-                                    f"at {abs_pipeline}; the bundle may be "
-                                    "incomplete or was truncated in transfer."
+                                    "Bundled pipeline source at "
+                                    f"{abs_pipeline} is missing main.nf; the bundle "
+                                    "is incomplete or was truncated in transfer. "
+                                    "Re-export and re-transfer the bundle."
                                 )
                     # Rebase nxf_plugins_dir similarly.
                     npd = cfg.get("nxf_plugins_dir", "")
@@ -1063,6 +1164,23 @@ class BundleManager:
                             logger.info(
                                 f"Rebased nxf_plugins_dir to {abs_plugins}"
                             )
+                            # An empty plugins dir means Nextflow will fall back
+                            # to the online plugin registry, which fails on an
+                            # air-gapped machine. Warn so the operator re-exports.
+                            has_plugin = any(
+                                p.is_dir() and p.name.startswith(_PLUGIN_PREFIXES)
+                                for p in abs_plugins.iterdir()
+                            )
+                            if not has_plugin:
+                                result["plugins_empty"] = True
+                                result["warnings"].append(
+                                    "Bundled Nextflow plugins directory "
+                                    f"{abs_plugins} is empty or missing expected "
+                                    "plugin folders; Nextflow may fall back to the "
+                                    "online plugin registry, which fails offline. "
+                                    "Re-export the bundle from a machine with the "
+                                    "plugins cached."
+                                )
                     import_loader.save_config(cfg, "config.yaml")
                     logger.info("Set offline_mode=True in config")
                 except (ImportError, AttributeError, OSError, ValueError) as e:
@@ -1506,9 +1624,8 @@ class BundleManager:
                 except OSError as exc:
                     logger.warning("Could not read nextflow.config: %s", exc)
 
-        # Always include the common Nextflow helper plugins.
-        _PLUGIN_PREFIXES = ("nf-schema", "nf-validation", "nf-wave", "nf-console")
-
+        # Always include the common Nextflow helper plugins (module constant
+        # _PLUGIN_PREFIXES, shared with the import-side empty-dir check).
         def _should_include(plugin_dir: Path) -> bool:
             name = plugin_dir.name  # e.g. nf-schema-2.4.2
             for prefix in _PLUGIN_PREFIXES:
@@ -1757,6 +1874,69 @@ def _template_paths(src: Path, dst: Path, find: str, replace: str):
     content = content.replace(find, replace)
     with open(dst, "w") as f:
         f.write(content)
+
+
+def _template_genome_metadata(
+    src: Path, dst: Path, home: str, placeholder: str,
+) -> List[str]:
+    """Template absolute paths in genome_metadata.json to ``placeholder``.
+
+    Parses the JSON and replaces the ``home`` prefix with ``placeholder`` in
+    every string value that is an absolute path under ``home``. An absolute
+    path that is NOT under ``home`` cannot be made portable; it is left as-is
+    and reported in the returned warning list so the operator can fix it on the
+    field machine. On a JSON parse error, falls back to the whole-file replace
+    (a path-bearing-but-unparseable file is rare) and returns no warnings.
+
+    Returns the list of warning strings (empty in the common all-under-home
+    case).
+    """
+    warnings: List[str] = []
+    home_norm = home.rstrip("/")
+    try:
+        with open(src) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        _template_paths(src, dst, home, placeholder)
+        return warnings
+
+    def _walk(obj, path_keys):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                obj[k] = _walk(v, path_keys + [str(k)])
+            return obj
+        if isinstance(obj, list):
+            return [_walk(v, path_keys + [str(i)]) for i, v in enumerate(obj)]
+        if isinstance(obj, str) and os.path.isabs(obj):
+            if obj == home_norm or obj.startswith(home_norm + os.sep):
+                return placeholder + obj[len(home_norm):]
+            warnings.append(
+                f"genome_metadata.json: {'/'.join(path_keys) or 'value'} points "
+                f"outside the data home ({obj}); it is not portable and must be "
+                "corrected on the field machine."
+            )
+        return obj
+
+    data = _walk(data, [])
+    with open(dst, "w") as f:
+        json.dump(data, f, indent=2)
+    return warnings
+
+
+def _parse_semver(version_str: str):
+    """Return a (major, minor, patch) int tuple from a version string, or None.
+
+    Tolerant of build suffixes ('26.04.0 build 12031', 'v2.1.0', '0.12.0b').
+    Missing minor/patch default to 0.
+    """
+    match = re.search(r"(\d+)(?:\.(\d+))?(?:\.(\d+))?", version_str or "")
+    if not match:
+        return None
+    return (
+        int(match.group(1)),
+        int(match.group(2) or 0),
+        int(match.group(3) or 0),
+    )
 
 
 def _get_nextflow_version() -> str:

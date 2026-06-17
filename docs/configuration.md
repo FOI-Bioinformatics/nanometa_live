@@ -31,7 +31,7 @@ nanopore_output_directory: "/path/to/input"
 | `processing_mode` | string | "batch" | `batch` or `realtime` |
 | `sample_handling` | string | "by_barcode" | `by_barcode`, `single_sample`, or `per_file` |
 | `sample_name` | string | "sample" | Name when using single_sample mode |
-| `offline_mode` | bool | false | Skip network calls and use cached data only |
+| `offline_mode` | bool | false | Skip network calls and use cached data only. Set automatically to `true` by a Deployment-tab bundle import; if the Kraken2 database path was not supplied at import, set `kraken_db` before starting analysis. |
 
 ### Kraken2 Classification
 
@@ -48,6 +48,8 @@ nanopore_output_directory: "/path/to/input"
 |-----------|------|---------|-------------|
 | `pipeline_profile` | string | "conda"  | `conda` is the canonical and supported profile for nanometanf. `docker` and `singularity` exist but are not used by Nanometa Live. |
 | `pipeline_source` | string | "remote:master" | Pipeline location (see below) |
+| `nxf_conda_cachedir` | path | null | Field-machine path to a bundle's pre-warmed Nextflow conda cache. Set automatically by bundle import; exported as `NXF_CONDA_CACHEDIR`. |
+| `nxf_plugins_dir` | path | null | Field-machine path to a bundle's Nextflow plugin cache. Set automatically by bundle import; suppresses the online plugin-registry probe in offline mode. |
 | `pipeline_cores` | int | 1 | CPU cores for pipeline |
 | `kraken_cores` | int | 1 | CPU cores for Kraken2 classification |
 | `validation_cores` | int | 1 | CPU cores for validation tasks |

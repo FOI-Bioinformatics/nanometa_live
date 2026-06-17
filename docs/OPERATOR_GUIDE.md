@@ -124,6 +124,74 @@ The most operationally relevant tabs:
   watchlists or load a custom one.
 - **Preparation** -- before running validation on a new organism, or when
   setting up an offline-deployment bundle.
+- **Deployment** -- to package this installation for another computer, or to
+  install a package received from another computer (see the next section).
+
+---
+
+## Move Nanometa Live to another computer (offline deployment)
+
+Use this to run on an air-gapped or field computer that has no internet
+access. You prepare a bundle on a build machine that does have internet,
+transfer it, and import it on the field machine.
+
+### What transfers
+
+The bundle (a single `.tar.gz`) contains the reference genomes, BLAST
+databases, taxid mappings, taxonomy cache, watchlists, the pipeline source,
+and the Nextflow plugins -- optionally also pre-warmed conda environments or
+container images. The **Kraken2 database is not included** because of its size;
+copy it separately (for example on the same drive).
+
+### 1. On the build machine -- export
+
+1. Open the **Deployment** tab and use **Export Bundle**.
+2. Choose the container engine:
+   - **conda** -- smallest bundle, but the field machine must have the **same
+     operating system and CPU architecture** as the build machine (for example
+     both Linux x86_64, or both macOS arm64). Conda environments are not
+     portable across platforms.
+   - **docker** or **singularity/apptainer** -- portable across operating
+     systems; the bundle carries the container images.
+3. Optionally tick **pre-warm conda envs** (conda only). This bakes the
+   per-process environments so the field machine does not build them on first
+   run; it adds roughly 30 minutes and several GB, and keeps the same-OS/arch
+   restriction above.
+4. The bundle is written to the chosen folder.
+
+### 2. Transfer
+
+Copy the bundle `.tar.gz` and the Kraken2 database directory to the field
+machine (USB drive, etc.). The field machine needs roughly three times the
+bundle size in free space for extraction.
+
+### 3. On the field machine -- import
+
+1. Open the **Deployment** tab and use **Import Bundle**.
+2. Provide the path to the bundle **and** the path to the Kraken2 database on
+   this machine.
+3. If the bundle was pre-warmed, run `source activate_offline_envs.sh` from the
+   install directory in the shell that launches Nanometa Live.
+
+Messages you may see on import, and what to do:
+
+- *"Kraken2 database path was not provided"* -- you imported without giving the
+  database path. Set `kraken_db` on the Watchlist & Preparation tab (or in
+  `config.yaml`) before starting analysis.
+- *Platform mismatch* -- the bundle was built on a different OS/architecture.
+  With pre-warmed conda envs the import is refused; rebuild the bundle on a
+  matching machine, or use docker/singularity mode.
+- *"missing main.nf"* -- the bundled pipeline is incomplete or was truncated in
+  transfer; re-export and re-transfer.
+- *"empty plugins directory"* -- re-export from a machine with the Nextflow
+  plugins cached, or the offline run will fail when Nextflow probes the online
+  plugin registry.
+
+### 4. After import
+
+Offline mode is enabled automatically. Open the **Watchlist & Preparation**
+tab, run the **Readiness** checklist until everything is green, then click
+**Start Analysis**.
 
 ---
 
