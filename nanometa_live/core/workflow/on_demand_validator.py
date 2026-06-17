@@ -70,6 +70,23 @@ def _validation_timeout_seconds(config: Optional[Dict[str, Any]]) -> int:
     return max(60, int(minutes * 60))
 
 
+def _pick_result_for_method(results: list, method: str):
+    """Return the parsed ValidationResult matching the requested method.
+
+    ``ValidationParser.get_validation_results`` filters by (sample, taxid) but
+    not by method, so for a pair that already carried a result of the other
+    method, ``results[0]`` may be the wrong one. Pick the result whose
+    ``validation_method`` matches the request; for ``"both"`` prefer the
+    read-centric BLAST summary. Falls back to ``results[0]``.
+    """
+    order = ["blast", "minimap2"] if method == "both" else [method]
+    for m in order:
+        for r in results:
+            if getattr(r, "validation_method", None) == m:
+                return r
+    return results[0]
+
+
 class ValidationStatus(Enum):
     """Status of an on-demand validation job."""
     PENDING = "pending"
@@ -493,7 +510,11 @@ class OnDemandValidator:
             results = parser.get_validation_results(sample=sample, taxid=taxid)
 
             if results:
-                r = results[0]
+                # get_validation_results filters by (sample, taxid) but NOT by
+                # method, so for a pair that already carried a result of the
+                # other method, results[0] may be the wrong one. Return the
+                # result matching the requested method.
+                r = _pick_result_for_method(results, method)
                 return ValidationResult(
                     taxid=taxid,
                     name=name,
