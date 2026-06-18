@@ -9,7 +9,9 @@ import glob
 import logging
 import os
 import re
+import threading
 import time
+from collections import OrderedDict
 import pandas as pd
 from typing import Dict, List, Optional, Tuple
 
@@ -33,6 +35,36 @@ from nanometa_live.core.utils.loader_utils import (
 # Expected columns for Kraken2 report format
 KRAKEN2_EXPECTED_COLUMNS = ["%", "cumul_reads", "reads", "rank", "taxid", "name"]
 KRAKEN2_EXPECTED_COLUMN_COUNT = 6
+
+
+# Per-file parsed-frame cache, keyed on (realpath, mtime_ns, size).
+#
+# A single poll funnels every consumer through _parse_kraken2_report: the
+# aggregated "All Samples" load parses each sample's report, the per-sample
+# load re-parses the selected sample's report, and get_sample_statistics_summary
+# re-parses the cumulative reports again -- the same physical files parsed
+# 2-3x under different higher-level cache keys (cProfile, 6 samples x ~3100
+# taxa: 12 parses for 6 files in one fresh-data poll). Memoising the parse on
+# (path, mtime_ns, size) collapses that to one parse per changed file and, in
+# realtime mode, makes an incremental poll re-parse only the sample whose
+# report actually advanced instead of all of them.
+#
+# Safe because parsed frames are treated as read-only by every consumer:
+# apply_authoritative_taxonomy / recalculate_cumulative_reads copy before
+# mutating, _accumulate_kraken_df only reads, and the existing _kraken_cache
+# already shares result frames under the same contract. Only successful
+# (non-None) parses are cached; an unstable/missing file returns None and is
+# retried on the next poll (its mtime is unchanged once it stabilises, so the
+# key alone could not distinguish "unstable then" from "stable now").
+_REPORT_FRAME_CACHE_MAX = 512
+_report_frame_cache: "OrderedDict[Tuple[str, int, int], pd.DataFrame]" = OrderedDict()
+_report_frame_cache_lock = threading.Lock()
+
+
+def clear_report_frame_cache() -> None:
+    """Drop the per-file parsed-frame cache (test/teardown helper)."""
+    with _report_frame_cache_lock:
+        _report_frame_cache.clear()
 
 
 def _diagnose_empty_kraken_dir(kraken_dir: str, sample: Optional[str] = None) -> str:
@@ -116,6 +148,58 @@ def _scan_subdirs_for_pattern(
 
 
 def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Optional[pd.DataFrame]:
+    """
+    Parse a Kraken2 report file, memoised on (path, mtime, size).
+
+    Thin caching wrapper over ``_parse_kraken2_report_uncached``. A successful
+    parse for a given (realpath, mtime_ns, size) is deterministic, so repeated
+    parses of the same unchanged file within (or across) polls return the
+    cached frame. See the ``_report_frame_cache`` note for why this is the
+    dominant per-poll win and why it is safe.
+
+    Args:
+        filepath: Path to Kraken2 report file
+        check_stability: If True, verify file is not being written to (default: True)
+
+    Returns:
+        DataFrame with validated columns, or None if parsing fails or file unstable
+    """
+    # The cache is keyed only on (path, mtime, size), not check_stability. All
+    # four production callers use the default check_stability=True; the False
+    # mode is test-only and bypasses the cache so the two modes never share an
+    # entry (a cached stable parse must never be returned for a stability-
+    # skipping caller and vice versa).
+    if not check_stability:
+        return _parse_kraken2_report_uncached(filepath, check_stability=False)
+
+    # Cheap stat for the cache key; a vanished file falls straight through to
+    # the uncached parser's own missing-file handling (returns None).
+    try:
+        st = os.stat(filepath)
+        key = (os.path.realpath(filepath), st.st_mtime_ns, st.st_size)
+    except OSError:
+        return _parse_kraken2_report_uncached(filepath, check_stability)
+
+    with _report_frame_cache_lock:
+        cached = _report_frame_cache.get(key)
+        if cached is not None:
+            _report_frame_cache.move_to_end(key)  # LRU bump
+            return cached
+
+    df = _parse_kraken2_report_uncached(filepath, check_stability)
+    if df is None:
+        # Transient (unstable/empty/malformed) -- do not cache; retry next poll.
+        return None
+
+    with _report_frame_cache_lock:
+        _report_frame_cache[key] = df
+        _report_frame_cache.move_to_end(key)
+        while len(_report_frame_cache) > _REPORT_FRAME_CACHE_MAX:
+            _report_frame_cache.popitem(last=False)
+    return df
+
+
+def _parse_kraken2_report_uncached(filepath: str, check_stability: bool = True) -> Optional[pd.DataFrame]:
     """
     Parse and validate a Kraken2 report file.
 

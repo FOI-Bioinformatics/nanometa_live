@@ -1,0 +1,118 @@
+# Toxin-Producing Bacteria Watchlist
+# Bacterial species whose clinical impact is driven by secreted toxins.
+# Demonstrates the organism_type and annotation fields: each entry records
+# the principal toxin in the annotation so it appears next to the species name.
+
+version: "2.0"
+taxonomy_support: ["ncbi", "gtdb"]
+
+metadata:
+  name: "Toxin-Producing Bacteria"
+  description: "Bacterial pathogens whose virulence is mediated by secreted toxins, annotated with the principal toxin produced"
+  source: "Example watchlist for organism_type / annotation demonstration"
+  reference: "https://www.ncbi.nlm.nih.gov/taxonomy"
+
+pathogens:
+  - name: "Staphylococcus aureus"
+    names_alt: ["Staphylococcus_aureus", "S. aureus"]
+    taxid_ncbi: 1280
+    common_name: "S. aureus"
+    organism_type: "bacteria"
+    annotation: "produces enterotoxin B (SEB) and TSST-1"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Toxin producer"
+    alert_threshold: 15
+    action_required: "Assess for MRSA and toxin-mediated disease. Implement contact precautions if indicated."
+    notes: "Enterotoxins cause staphylococcal food poisoning; TSST-1 is associated with toxic shock syndrome."
+
+  - name: "Clostridium botulinum"
+    names_alt: ["Clostridium_botulinum"]
+    taxid_ncbi: 1491
+    common_name: "C. botulinum"
+    organism_type: "bacteria"
+    annotation: "produces botulinum neurotoxin"
+    threat_level: "critical"
+    bsl_level: 2
+    category: "Toxin producer"
+    alert_threshold: 5
+    action_required: "Notify public health immediately. Botulinum toxin is a Select Agent."
+    notes: "Botulinum neurotoxin is among the most potent toxins known and causes flaccid paralysis."
+
+  - name: "Clostridioides difficile"
+    names_alt: ["Clostridioides_difficile", "Clostridium difficile", "C. diff"]
+    taxid_ncbi: 1496
+    common_name: "C. difficile"
+    organism_type: "bacteria"
+    annotation: "produces toxins A (TcdA) and B (TcdB)"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Toxin producer"
+    alert_threshold: 15
+    action_required: "Contact precautions. Review antibiotic stewardship. Confirm with toxin assay."
+    notes: "Leading cause of healthcare-associated antibiotic-associated diarrhoea and colitis."
+
+  - name: "Bacillus cereus"
+    names_alt: ["Bacillus_cereus", "B. cereus"]
+    taxid_ncbi: 1396
+    common_name: "B. cereus"
+    organism_type: "bacteria"
+    annotation: "produces emetic toxin cereulide"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Toxin producer"
+    alert_threshold: 20
+    action_required: "Assess food-handling history. Distinguish emetic from diarrhoeal syndrome."
+    notes: "Cereulide is a heat-stable toxin causing the emetic form of B. cereus food poisoning."
+
+  - name: "Vibrio cholerae"
+    names_alt: ["Vibrio_cholerae", "V. cholerae"]
+    taxid_ncbi: 666
+    common_name: "Cholera"
+    organism_type: "bacteria"
+    annotation: "produces cholera toxin (CT)"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Toxin producer"
+    alert_threshold: 10
+    action_required: "Report to public health. Confirm serogroup O1/O139. Initiate rehydration management."
+    notes: "Cholera toxin drives the profuse secretory diarrhoea characteristic of cholera."
+
+  - name: "Corynebacterium diphtheriae"
+    names_alt: ["Corynebacterium_diphtheriae", "C. diphtheriae"]
+    taxid_ncbi: 1717
+    common_name: "Diphtheria"
+    organism_type: "bacteria"
+    annotation: "produces diphtheria toxin"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Toxin producer"
+    alert_threshold: 10
+    action_required: "Report to public health. Assess immunisation status. Test for toxigenicity."
+    notes: "Only toxigenic (tox+) strains cause classical diphtheria; toxin production depends on a bacteriophage."
+
+  - name: "Clostridium perfringens"
+    names_alt: ["Clostridium_perfringens", "C. perfringens"]
+    taxid_ncbi: 1502
+    common_name: "C. perfringens"
+    organism_type: "bacteria"
+    annotation: "produces alpha-toxin and enterotoxin (CPE)"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Toxin producer"
+    alert_threshold: 20
+    action_required: "Assess clinical syndrome (food poisoning versus gas gangrene)."
+    notes: "Alpha-toxin contributes to clostridial myonecrosis; enterotoxin causes food poisoning."
+
+  - name: "Shigella dysenteriae"
+    names_alt: ["Shigella_dysenteriae", "S. dysenteriae"]
+    taxid_ncbi: 622
+    common_name: "Shigellosis"
+    organism_type: "bacteria"
+    annotation: "produces Shiga toxin (Stx)"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Toxin producer"
+    alert_threshold: 10
+    action_required: "Report to public health. Monitor for haemolytic uraemic syndrome risk."
+    notes: "Shiga toxin is associated with severe dysentery and systemic complications."

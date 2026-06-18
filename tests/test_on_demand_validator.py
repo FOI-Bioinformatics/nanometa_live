@@ -17,9 +17,39 @@ from nanometa_live.core.workflow.on_demand_validator import (
     ValidationJob,
     ValidationResult,
     ValidationStatus,
+    _pick_result_for_method,
 )
 
 pytestmark = pytest.mark.unit
+
+
+class _R:
+    """Minimal stand-in for a parsed ValidationResult."""
+    def __init__(self, method, ident):
+        self.validation_method = method
+        self.percent_identity_mean = ident
+
+
+class TestPickResultForMethod:
+    """validate_via_nanometanf must return the result matching the requested
+    method -- get_validation_results filters by (sample, taxid), not method, so
+    results[0] can be the wrong method when a pair carried both."""
+
+    def test_minimap2_request_skips_leading_blast(self):
+        results = [_R("blast", 97.0), _R("minimap2", 99.0)]
+        assert _pick_result_for_method(results, "minimap2").percent_identity_mean == 99.0
+
+    def test_blast_request_picks_blast(self):
+        results = [_R("minimap2", 99.0), _R("blast", 97.0)]
+        assert _pick_result_for_method(results, "blast").percent_identity_mean == 97.0
+
+    def test_both_prefers_blast(self):
+        results = [_R("minimap2", 99.0), _R("blast", 97.0)]
+        assert _pick_result_for_method(results, "both").validation_method == "blast"
+
+    def test_falls_back_to_first_when_method_absent(self):
+        results = [_R("blast", 97.0)]
+        assert _pick_result_for_method(results, "minimap2").percent_identity_mean == 97.0
 
 
 @pytest.fixture

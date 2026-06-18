@@ -259,7 +259,7 @@ pathogens:
 
   - name: "Parechovirus"
     common_name: "Parechovirus infection"
-    taxid_ncbi: 45247
+    taxid_ncbi: 138954
     threat_level: "moderate"
     bsl_level: 2
     alert_threshold: 20

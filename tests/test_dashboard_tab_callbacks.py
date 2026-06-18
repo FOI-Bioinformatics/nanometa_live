@@ -85,7 +85,7 @@ class TestViewReportModalGuard:
         with patch.object(dash_mod, "ctx", fake):
             out = fn([1], None, None, False, {}, {}, "All Samples")
         assert out[0] is True  # is_open
-        assert str(out[8])  # a taxid string is rendered
+        assert str(out[9])  # a taxid string is rendered
 
     def test_report_build_error_still_opens_with_message(self, dash_app):
         """If the report body cannot be assembled the modal must still open with
@@ -98,7 +98,7 @@ class TestViewReportModalGuard:
                    side_effect=RuntimeError("boom")):
             out = fn([1], None, None, False, {}, {}, "All Samples")
         assert out[0] is True
-        assert "could not be built" in str(out[11])  # notes carry the error
+        assert "could not be built" in str(out[12])  # notes carry the error
 
 
 class TestVerdictCountdownRefresh:

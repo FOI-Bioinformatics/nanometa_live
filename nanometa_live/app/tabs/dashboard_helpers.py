@@ -394,6 +394,7 @@ def _report_error_payload(taxid: Any, err: Exception) -> List[Any]:
         True,                                   # is_open
         f"TaxID {taxid}",                       # name
         "",                                     # common_name
+        "",                                     # annotation
         "Unknown",                              # category
         "Unknown",                              # bsl
         "N/A",                                  # reads
@@ -415,7 +416,7 @@ def _report_error_payload(taxid: Any, err: Exception) -> List[Any]:
 
 def build_report_payload(taxid: Any, config: Dict[str, Any],
                          selected_sample: Optional[str]) -> List[Any]:
-    """Assemble the 16 outputs for the pathogen View Report modal.
+    """Assemble the 17 outputs for the pathogen View Report modal.
 
     Pure data/component assembly extracted from the ``handle_view_report``
     callback so the build path is unit-testable and wrapped in a single
@@ -497,6 +498,8 @@ def _resolve_report_pathogen(taxid: Any):
             category=wl_entry.category or "Watchlist",
             notes=wl_entry.notes or "",
             action_required=wl_entry.action_required or "Follow laboratory protocols",
+            organism_type=wl_entry.organism_type,
+            annotation=wl_entry.annotation or "",
         )
     return pathogen, ncbi_taxid, wl_entry
 
@@ -505,7 +508,7 @@ def _unwatched_payload(taxid, ncbi_taxid, reads, detected_at) -> List[Any]:
     """Modal payload for an organism that is not on any active watchlist."""
     display_name = reads["name"] or f"TaxID: {taxid}"
     return [
-        True, display_name, "Not in pathogen watchlist",
+        True, display_name, "Not in pathogen watchlist", "",
         reads["rank"] or "Unknown", "Unknown", reads["reads"], reads["abundance"],
         compute_detection_confidence(reads["reads_int"]), str(taxid),
         "Follow standard laboratory biosafety protocols", "secondary",
@@ -558,8 +561,11 @@ def _pathogen_payload(pathogen, taxid, ncbi_taxid, wl_entry, reads, detected_at)
         gtdb_taxonomy=getattr(wl_entry, "gtdb_taxonomy", None),
         on_watchlist=wl_entry is not None,
     )
+    annotation = (getattr(wl_entry, "annotation", "")
+                  or getattr(pathogen, "annotation", "") or "")
     return [
         True, pathogen.name, pathogen.common_name or "No common name",
+        annotation,
         pathogen.category or "Uncategorized", bsl_text, reads["reads"],
         reads["abundance"], compute_detection_confidence(reads["reads_int"]),
         str(ncbi_taxid), pathogen.action_required, alert_color,

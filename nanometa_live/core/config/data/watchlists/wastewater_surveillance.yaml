@@ -162,7 +162,7 @@ pathogens:
   # =========================================================================
 
   - name: "Candida auris"
-    names_alt: ["Candida_auris"]
+    names_alt: ["Candida_auris", "Candidozyma auris"]
     taxid_ncbi: 498019
     common_name: "C. auris"
     threat_level: "high"

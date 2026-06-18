@@ -763,6 +763,30 @@ def register_preparation_callbacks(app):
                     html.I(className="bi bi-check-circle me-2"),
                     html.Strong("Bundle imported. Offline mode activated."),
                 ]
+                # Setup that is not yet complete (action required) -- surface
+                # these prominently so the operator does not read "activated"
+                # as "ready to run".
+                action_needed = []
+                if result.get("kraken_db_unset"):
+                    action_needed.append(
+                        "Set the Kraken2 database path before starting analysis "
+                        "(it is transferred separately from the bundle)."
+                    )
+                if result.get("plugins_empty"):
+                    action_needed.append(
+                        "Bundled Nextflow plugins are missing; re-export from a "
+                        "machine with the plugins cached, or the offline run will "
+                        "fail when Nextflow probes the online plugin registry."
+                    )
+                if action_needed:
+                    children.append(
+                        dbc.Alert(
+                            [html.Strong("Action required: ")]
+                            + [html.Div(a, className="small") for a in action_needed],
+                            color="warning",
+                            className="mt-2 mb-2",
+                        )
+                    )
                 if result["warnings"]:
                     children.append(html.Br())
                     children.append(html.Strong("Warnings: "))

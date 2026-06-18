@@ -23,14 +23,17 @@ def _make_env(parent: Path, name: str, *, complete: bool) -> Path:
     """Build a fake conda env directory under parent.
 
     A complete env carries a `conda-meta/history` file (which conda
-    writes last). An incomplete env is missing that marker, exactly
-    like a build that was killed by SIGTERM partway through.
+    writes last) AND at least one executable under `bin/`. An incomplete
+    env is missing the marker (build killed by SIGTERM partway through)
+    or has an empty `bin/` (build that wrote history but installed no
+    binaries, e.g. conda aborting on an AppleDouble-corrupted file).
     """
     env = parent / name
     (env / "conda-meta").mkdir(parents=True)
     (env / "bin").mkdir()
     if complete:
         (env / "conda-meta" / "history").write_text("# fake history\n")
+        (env / "bin" / "tool").write_text("#!/bin/sh\n")
     return env
 
 
@@ -106,3 +109,38 @@ class TestPurgeBrokenCondaEnvs:
 
         assert removed == [str(env)]
         assert not env.exists()
+
+    def test_history_but_empty_bin_is_broken(self, tmp_path):
+        # A build that wrote the history marker but installed no binaries
+        # (e.g. conda aborting on an AppleDouble-corrupted conda-meta file):
+        # the env activates but every tool is "command not found" (exit 127).
+        cache = tmp_path / "conda"
+        cache.mkdir()
+        env = cache / "env-deadbeef"
+        (env / "conda-meta").mkdir(parents=True)
+        (env / "bin").mkdir()
+        (env / "conda-meta" / "history").write_text("# fake history\n")
+
+        removed = NextflowManager._purge_broken_conda_envs(str(tmp_path))
+
+        assert removed == [str(env)]
+        assert not env.exists()
+
+
+class TestStripAppleDoubleFiles:
+    def test_no_op_when_no_conda_cache(self, tmp_path):
+        assert NextflowManager._strip_appledouble_files(str(tmp_path)) == 0
+
+    def test_strips_appledouble_from_conda_meta(self, tmp_path):
+        cache = tmp_path / "conda"
+        env = cache / "env-abc" / "conda-meta"
+        env.mkdir(parents=True)
+        (env / "gzip-1.13.json").write_text("{}")
+        (env / "._gzip-1.13.json").write_text("appledouble")
+        (cache / "env-abc" / "._conda-meta").write_text("appledouble")
+
+        count = NextflowManager._strip_appledouble_files(str(tmp_path))
+
+        assert count == 2
+        assert (env / "gzip-1.13.json").exists()  # real file untouched
+        assert not (env / "._gzip-1.13.json").exists()

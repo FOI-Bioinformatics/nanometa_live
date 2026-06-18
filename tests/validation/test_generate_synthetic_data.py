@@ -225,13 +225,17 @@ def test_barcode05_tul4_in_aggregate_results(tmp_path):
     parser = ValidationParser(str(tmp_path))
     results = parser.get_validation_results()
 
-    # Find barcode05 / 263 result
+    # barcode05 / 263 yields BOTH methods: the aggregate's minimap2 entry and
+    # the on-disk blast.tsv (previously hidden by the minimap2-only-aggregate
+    # short-circuit; see TestAggregateWinsHidesBlast).
     barcode05_results = [r for r in results if r.sample_id == "barcode05" and r.taxid == 263]
-    assert len(barcode05_results) == 1, \
-        f"Expected 1 barcode05/263 result, got {len(barcode05_results)}"
+    assert len(barcode05_results) == 2, \
+        f"Expected 2 barcode05/263 results (minimap2 + blast), got {len(barcode05_results)}"
 
-    result = barcode05_results[0]
-    assert result.species == "Francisella tularensis"
-    assert result.validation_method == "minimap2"
-    assert result.status.value == "confirmed"  # High hit rate (96.1%)
-    assert result.validated_reads == 3650  # minimap2 mapped reads
+    by_method = {r.validation_method: r for r in barcode05_results}
+    assert set(by_method) == {"minimap2", "blast"}
+    mm2 = by_method["minimap2"]
+    assert mm2.species == "Francisella tularensis"
+    assert mm2.status.value == "confirmed"  # High hit rate (96.1%)
+    assert mm2.validated_reads == 3650  # minimap2 mapped reads
+    assert by_method["blast"].status.value == "confirmed"  # on-disk blast.tsv

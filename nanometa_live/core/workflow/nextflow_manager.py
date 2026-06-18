@@ -213,7 +213,15 @@ class NextflowManager:
             if not os.path.isdir(env_path):
                 continue
             history_marker = os.path.join(env_path, "conda-meta", "history")
-            if os.path.isfile(history_marker):
+            bin_dir = os.path.join(env_path, "bin")
+            has_history = os.path.isfile(history_marker)
+            # A history marker normally means "fully built". But a build that
+            # failed midway (e.g. conda aborting on an AppleDouble-corrupted
+            # conda-meta file) can leave the history file with an EMPTY bin/ --
+            # the env then activates but every tool is "command not found"
+            # (exit 127). Treat an env with no executables as broken too.
+            has_binaries = os.path.isdir(bin_dir) and bool(os.listdir(bin_dir))
+            if has_history and has_binaries:
                 # Fully-built env; leave it alone.
                 continue
             try:
@@ -224,6 +232,30 @@ class NextflowManager:
                     "Could not remove half-built conda env %s: %s",
                     env_path, e,
                 )
+        return removed
+
+    @staticmethod
+    def _strip_appledouble_files(work_dir: str) -> int:
+        """Delete macOS AppleDouble ``._*`` sidecars under ``<work_dir>/conda``.
+
+        macOS writes ``._<name>`` files carrying resource-fork/xattr data; when
+        they land in a conda env's ``conda-meta/`` (observed from Spotlight or
+        cloud-sync activity even on APFS), ``conda env create`` treats the env
+        as corrupt (``corrupted file: ._<pkg>.json``) and fails. They are always
+        safe to remove. Returns the count deleted.
+        """
+        conda_cache = os.path.join(work_dir, "conda")
+        if not os.path.isdir(conda_cache):
+            return 0
+        removed = 0
+        for root, _dirs, files in os.walk(conda_cache):
+            for fname in files:
+                if fname.startswith("._"):
+                    try:
+                        os.remove(os.path.join(root, fname))
+                        removed += 1
+                    except OSError:
+                        pass
         return removed
 
     def _parse_pipeline_source(self) -> Tuple[str, Optional[str]]:
@@ -525,6 +557,19 @@ class NextflowManager:
                             "interrupted run: %s",
                             len(purged),
                             ", ".join(os.path.basename(p) for p in purged),
+                        )
+                    # Strip macOS AppleDouble (._*) sidecars from the conda
+                    # cache. On some volumes (Spotlight/cloud-sync churn) these
+                    # appear inside env conda-meta/ dirs; conda then reports the
+                    # env as "corrupted file: ._<pkg>.json" and aborts trying to
+                    # recreate an env that already has a history marker -- so the
+                    # half-built-env purge above does not catch it. Removing them
+                    # lets the pre-built env activate cleanly.
+                    stripped = self._strip_appledouble_files(self.work_dir)
+                    if stripped:
+                        logging.warning(
+                            "Stripped %d macOS AppleDouble file(s) from the "
+                            "conda cache before launch.", stripped,
                         )
 
                 # Parse pipeline source configuration

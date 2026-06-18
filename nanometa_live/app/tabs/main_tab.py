@@ -358,7 +358,8 @@ def register_main_callbacks(app: Dash):
                         taxid=species['taxid'],
                         rank="S",
                         is_watched=True,
-                        blast_validation=blast_data
+                        blast_validation=blast_data,
+                        annotation=species.get('annotation', '')
                     )
                     col = dbc.Col(card, md=6, lg=4, className="mb-3")
 

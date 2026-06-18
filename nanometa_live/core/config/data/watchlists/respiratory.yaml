@@ -67,7 +67,7 @@ pathogens:
     notes: "Vaccine-preventable. Resurgence in some populations."
 
   - name: "Mycoplasma pneumoniae"
-    names_alt: ["Mycoplasma_pneumoniae"]
+    names_alt: ["Mycoplasma_pneumoniae", "Mycoplasmoides pneumoniae"]
     taxid_ncbi: 2104
     common_name: "Walking pneumonia"
     threat_level: "moderate"

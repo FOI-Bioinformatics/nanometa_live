@@ -425,7 +425,7 @@ pathogens:
 
   - name: "Orthohantavirus sinnombreense"
     names_alt: ["Sin Nombre virus", "Sin_Nombre_virus", "Sin Nombre orthohantavirus"]
-    taxid_ncbi: 3052487
+    taxid_ncbi: 3052499
     common_name: "Hantavirus pulmonary syndrome"
     threat_level: "high"
     bsl_level: 3

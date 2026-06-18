@@ -1860,3 +1860,235 @@ class TestPreparationTabContainerizationRadio:
             f"Expected >=2 callbacks reading the radio; got {len(listeners)}: "
             f"{listeners}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Deployment / move-to-another-computer import-path hardening
+# ---------------------------------------------------------------------------
+
+import yaml  # noqa: E402
+from nanometa_live.core.workflow.bundle_manager import (  # noqa: E402
+    _KRAKEN_DB_PLACEHOLDER,
+    _BUNDLED_PIPELINE_DIRNAME,
+    _BUNDLED_NXF_PLUGINS_DIRNAME,
+    _template_genome_metadata,
+)
+
+
+def _make_config_bundle(
+    tmp_path,
+    *,
+    kraken_db=_KRAKEN_DB_PLACEHOLDER,
+    with_pipeline=False,
+    pipeline_has_main=True,
+    with_plugins=False,
+    plugins_empty=False,
+    min_versions=None,
+    tamper_after=None,
+):
+    """Build a bundle that carries a config.yaml (and optionally pipeline source
+    / plugins), so the import config-rebase block runs."""
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "genomes").mkdir()
+    (staging / "genomes" / "1.fasta").write_text(">s\nACGT\n")
+
+    cfg = {"kraken_db": kraken_db}
+    if with_pipeline:
+        cfg["pipeline_source"] = f"./{_BUNDLED_PIPELINE_DIRNAME}"
+        psrc = staging / _BUNDLED_PIPELINE_DIRNAME
+        psrc.mkdir()
+        (psrc / "nextflow.config").write_text("manifest {}\n")
+        if pipeline_has_main:
+            (psrc / "main.nf").write_text("workflow {}\n")
+    if with_plugins:
+        cfg["nxf_plugins_dir"] = f"./{_BUNDLED_NXF_PLUGINS_DIRNAME}"
+        pdir = staging / _BUNDLED_NXF_PLUGINS_DIRNAME
+        pdir.mkdir()
+        if not plugins_empty:
+            (pdir / "nf-schema-2.4.2").mkdir()
+            (pdir / "nf-schema-2.4.2" / "x.jar").write_text("jar")
+        else:
+            (pdir / "placeholder.txt").write_text("not a plugin")
+    (staging / "config.yaml").write_text(yaml.safe_dump(cfg))
+
+    checksums = {}
+    for f in staging.rglob("*"):
+        if f.is_file():
+            checksums[str(f.relative_to(staging))] = _file_md5(f)
+
+    manifest = {
+        "version": "1.1", "created": "2026-01-01T00:00:00",
+        "creation_date": "2026-01-01 00:00", "creator": "test",
+        "nanometa_home": str(tmp_path / "home"), "checksums": checksums,
+        "tool_versions": {}, "container_runtime": None,
+        "build_platform": {"system": __import__("platform").system(),
+                           "machine": __import__("platform").machine(),
+                           "python": "3.11.0"},
+    }
+    if min_versions is not None:
+        manifest["min_versions"] = min_versions
+    (staging / "manifest.json").write_text(json.dumps(manifest))
+
+    if tamper_after:
+        (staging / tamper_after).write_text("CORRUPT-AFTER-CHECKSUM")
+
+    bundle = tmp_path / "bundle.tar.gz"
+    with tarfile.open(str(bundle), "w:gz") as tar:
+        for item in staging.iterdir():
+            tar.add(str(item), arcname=item.name)
+    return bundle
+
+
+def _do_import(tmp_path, bundle, *, kraken_db_path="", force=False):
+    home = tmp_path / "field"
+    home.mkdir()
+    return BundleManager().import_bundle(
+        str(bundle), kraken_db_path=kraken_db_path,
+        nanometa_home=str(home), force=force,
+    ), home
+
+
+class TestEmptyKrakenDbWarning:
+    def test_no_db_path_warns_and_flags(self, tmp_path):
+        bundle = _make_config_bundle(tmp_path)
+        result, home = _do_import(tmp_path, bundle, kraken_db_path="")
+        assert result["success"] is True
+        assert result.get("kraken_db_unset") is True
+        assert any("kraken2 database path was not provided" in w.lower()
+                   for w in result["warnings"])
+        # Import-first-point-later: config still carries the placeholder token
+        # (ConfigLoader normalises it to <cwd>/${KRAKEN_DB}), not a real path.
+        cfg = yaml.safe_load((home / "config.yaml").read_text())
+        assert _KRAKEN_DB_PLACEHOLDER in str(cfg["kraken_db"])
+
+    def test_with_db_path_no_flag(self, tmp_path):
+        bundle = _make_config_bundle(tmp_path)
+        db = tmp_path / "db"; db.mkdir()
+        result, home = _do_import(tmp_path, bundle, kraken_db_path=str(db))
+        assert result["success"] is True
+        assert not result.get("kraken_db_unset")
+        cfg = yaml.safe_load((home / "config.yaml").read_text())
+        assert cfg["kraken_db"] == str(db)
+
+
+class TestMissingMainNfHardFail:
+    def test_missing_main_nf_fails(self, tmp_path):
+        bundle = _make_config_bundle(
+            tmp_path, with_pipeline=True, pipeline_has_main=False)
+        result, _ = _do_import(tmp_path, bundle, kraken_db_path="x")
+        assert result["success"] is False
+        assert result.get("pipeline_main_missing") is True
+        assert any("main.nf" in w for w in result["warnings"])
+
+    def test_main_nf_present_succeeds(self, tmp_path):
+        bundle = _make_config_bundle(
+            tmp_path, with_pipeline=True, pipeline_has_main=True)
+        db = tmp_path / "db"; db.mkdir()
+        result, _ = _do_import(tmp_path, bundle, kraken_db_path=str(db))
+        assert result["success"] is True
+        assert not result.get("pipeline_main_missing")
+
+
+class TestEmptyPluginsWarning:
+    def test_empty_plugins_warns(self, tmp_path):
+        bundle = _make_config_bundle(
+            tmp_path, with_plugins=True, plugins_empty=True)
+        db = tmp_path / "db"; db.mkdir()
+        result, _ = _do_import(tmp_path, bundle, kraken_db_path=str(db))
+        assert result["success"] is True
+        assert result.get("plugins_empty") is True
+        assert any("plugin registry" in w for w in result["warnings"])
+
+    def test_populated_plugins_no_flag(self, tmp_path):
+        bundle = _make_config_bundle(
+            tmp_path, with_plugins=True, plugins_empty=False)
+        db = tmp_path / "db"; db.mkdir()
+        result, _ = _do_import(tmp_path, bundle, kraken_db_path=str(db))
+        assert result["success"] is True
+        assert not result.get("plugins_empty")
+
+
+class TestPostCopyChecksumReverify:
+    @staticmethod
+    def _patch_truncating_copytree(monkeypatch):
+        # The fresh-home import copies each dir with shutil.copytree; wrap it to
+        # truncate the genome after copy so the tempdir checksum passed but the
+        # post-copy re-verify catches the on-disk divergence.
+        import shutil as _sh
+        real_copytree = _sh.copytree
+
+        def bad_copytree(src, dst, *a, **k):
+            out = real_copytree(src, dst, *a, **k)
+            g = Path(dst) / "1.fasta"
+            if g.exists():
+                g.write_text("TRUNCATED")
+            return out
+
+        monkeypatch.setattr(
+            "nanometa_live.core.workflow.bundle_manager.shutil.copytree",
+            bad_copytree)
+
+    def test_post_copy_divergence_fails(self, tmp_path, monkeypatch):
+        bundle = _make_config_bundle(tmp_path)
+        self._patch_truncating_copytree(monkeypatch)
+        result, _ = _do_import(tmp_path, bundle, kraken_db_path="x")
+        assert result["success"] is False
+        assert any("after copy" in w.lower() for w in result["warnings"])
+
+    def test_post_copy_divergence_force_continues(self, tmp_path, monkeypatch):
+        bundle = _make_config_bundle(tmp_path)
+        self._patch_truncating_copytree(monkeypatch)
+        result, _ = _do_import(tmp_path, bundle, kraken_db_path="x", force=True)
+        assert result["success"] is True
+        assert any("after copy" in w.lower() for w in result["warnings"])
+
+
+class TestNextflowVersionFloor:
+    def test_old_nextflow_warns(self, tmp_path, monkeypatch):
+        bundle = _make_config_bundle(tmp_path, min_versions={"nextflow": "26.04.0"})
+        monkeypatch.setattr(
+            "nanometa_live.core.workflow.bundle_manager._get_nextflow_version",
+            lambda: "25.10.4 build 5930")
+        result, _ = _do_import(tmp_path, bundle, kraken_db_path="x")
+        assert result["success"] is True
+        assert any("older than the bundle" in w for w in result["warnings"])
+
+    def test_new_nextflow_no_floor_warning(self, tmp_path, monkeypatch):
+        bundle = _make_config_bundle(tmp_path, min_versions={"nextflow": "26.04.0"})
+        monkeypatch.setattr(
+            "nanometa_live.core.workflow.bundle_manager._get_nextflow_version",
+            lambda: "26.05.0 build 1")
+        result, _ = _do_import(tmp_path, bundle, kraken_db_path="x")
+        assert not any("older than the bundle" in w for w in result["warnings"])
+
+    def test_no_min_versions_skips(self, tmp_path, monkeypatch):
+        bundle = _make_config_bundle(tmp_path)  # no min_versions
+        monkeypatch.setattr(
+            "nanometa_live.core.workflow.bundle_manager._get_nextflow_version",
+            lambda: "1.0.0 build 1")
+        result, _ = _do_import(tmp_path, bundle, kraken_db_path="x")
+        assert not any("older than the bundle" in w for w in result["warnings"])
+
+
+class TestTemplateGenomeMetadata:
+    def test_external_path_left_with_warning(self, tmp_path):
+        home = tmp_path / "home"; home.mkdir()
+        src = tmp_path / "gm.json"; dst = tmp_path / "out.json"
+        src.write_text(json.dumps({
+            "a": {"fasta_path": str(home / "genomes" / "a.fasta"),
+                  "blast_db_path": "/mnt/ext/a.fasta"}}))
+        warns = _template_genome_metadata(src, dst, str(home), "${NANOMETA_HOME}")
+        out = json.loads(dst.read_text())
+        assert out["a"]["fasta_path"].startswith("${NANOMETA_HOME}")
+        assert out["a"]["blast_db_path"] == "/mnt/ext/a.fasta"
+        assert len(warns) == 1 and "blast_db_path" in warns[0]
+
+    def test_all_home_paths_no_warnings(self, tmp_path):
+        home = tmp_path / "home"; home.mkdir()
+        src = tmp_path / "gm.json"; dst = tmp_path / "out.json"
+        src.write_text(json.dumps({
+            "a": {"fasta_path": str(home / "genomes" / "a.fasta")}}))
+        warns = _template_genome_metadata(src, dst, str(home), "${NANOMETA_HOME}")
+        assert warns == []
+        assert "${NANOMETA_HOME}" in dst.read_text()

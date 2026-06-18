@@ -1,0 +1,94 @@
+# Respiratory Viruses Watchlist
+# Common viral causes of respiratory infection, for surveillance workflows.
+# Demonstrates the organism_type field ("virus") and the annotation field.
+# Note: detection requires a Kraken2 database that contains viral references;
+# a bacteria-only database (e.g. GTDB bac120) will not classify these taxa.
+
+version: "2.0"
+taxonomy_support: ["ncbi", "gtdb"]
+
+metadata:
+  name: "Respiratory Viruses"
+  description: "Viral pathogens associated with respiratory tract infection, annotated with key clinical context"
+  source: "Example watchlist for organism_type / annotation demonstration"
+  reference: "https://www.ncbi.nlm.nih.gov/taxonomy"
+  notes: "Requires a viral or comprehensive Kraken2 database. Several entries are detected at the species or higher rank only."
+
+pathogens:
+  - name: "Severe acute respiratory syndrome coronavirus 2"
+    names_alt: ["SARS-CoV-2", "SARS_CoV_2", "2019-nCoV"]
+    taxid_ncbi: 2697049
+    common_name: "SARS-CoV-2"
+    organism_type: "virus"
+    annotation: "causative agent of COVID-19"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Respiratory virus"
+    alert_threshold: 10
+    action_required: "Report per local respiratory-pathogen surveillance guidance."
+    notes: "Betacoronavirus responsible for the COVID-19 pandemic."
+
+  - name: "Influenza A virus"
+    names_alt: ["Influenza_A_virus", "Flu A"]
+    taxid_ncbi: 11320
+    common_name: "Influenza A"
+    organism_type: "virus"
+    annotation: "pandemic-prone; segmented genome with reassortment"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Respiratory virus"
+    alert_threshold: 10
+    action_required: "Subtype where possible. Report seasonal and novel strains to public health."
+    notes: "Segmented genome supports antigenic shift, the basis of pandemic emergence."
+
+  - name: "Influenza B virus"
+    names_alt: ["Influenza_B_virus", "Flu B"]
+    taxid_ncbi: 11520
+    common_name: "Influenza B"
+    organism_type: "virus"
+    annotation: "seasonal respiratory pathogen"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Respiratory virus"
+    alert_threshold: 15
+    action_required: "Report as part of seasonal influenza surveillance."
+    notes: "Causes seasonal influenza; lacks the broad animal reservoir of influenza A."
+
+  - name: "human respiratory syncytial virus"
+    names_alt: ["human_respiratory_syncytial_virus", "RSV", "HRSV"]
+    taxid_ncbi: 11250
+    common_name: "RSV"
+    organism_type: "virus"
+    annotation: "leading cause of infant bronchiolitis"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Respiratory virus"
+    alert_threshold: 15
+    action_required: "Assess paediatric and elderly risk groups. Report per local guidance."
+    notes: "Major cause of lower respiratory tract infection in infants and older adults."
+
+  - name: "human metapneumovirus"
+    names_alt: ["human_metapneumovirus", "hMPV", "HMPV"]
+    taxid_ncbi: 162145
+    common_name: "hMPV"
+    organism_type: "virus"
+    annotation: "RSV-like seasonal respiratory illness"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "Respiratory virus"
+    alert_threshold: 15
+    action_required: "Supportive care assessment. Consider in RSV-negative bronchiolitis."
+    notes: "Pneumovirus producing a clinical picture similar to RSV."
+
+  - name: "Measles morbillivirus"
+    names_alt: ["Measles_morbillivirus", "measles virus", "MeV"]
+    taxid_ncbi: 11234
+    common_name: "Measles"
+    organism_type: "virus"
+    annotation: "highly contagious; vaccine-preventable"
+    threat_level: "high"
+    bsl_level: 2
+    category: "Respiratory virus"
+    alert_threshold: 5
+    action_required: "Report to public health immediately. Assess immunisation coverage and contacts."
+    notes: "Among the most transmissible human pathogens; outbreaks follow gaps in vaccination."

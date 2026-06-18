@@ -160,7 +160,7 @@ class TestReportCallback:
         ):
             out = fn([1], None, None, False, {}, {}, "All Samples")
 
-        assert len(out) == 16
+        assert len(out) == 17
         assert out[0] is True  # modal opens
         rendered = _render(out)
         # Dynamic references rendered: real NCBI taxid -> NCBI link present,

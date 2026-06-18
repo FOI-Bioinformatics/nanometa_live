@@ -31,7 +31,7 @@ nanopore_output_directory: "/path/to/input"
 | `processing_mode` | string | "batch" | `batch` or `realtime` |
 | `sample_handling` | string | "by_barcode" | `by_barcode`, `single_sample`, or `per_file` |
 | `sample_name` | string | "sample" | Name when using single_sample mode |
-| `offline_mode` | bool | false | Skip network calls and use cached data only |
+| `offline_mode` | bool | false | Skip network calls and use cached data only. Set automatically to `true` by a Deployment-tab bundle import; if the Kraken2 database path was not supplied at import, set `kraken_db` before starting analysis. |
 
 ### Kraken2 Classification
 
@@ -48,6 +48,8 @@ nanopore_output_directory: "/path/to/input"
 |-----------|------|---------|-------------|
 | `pipeline_profile` | string | "conda"  | `conda` is the canonical and supported profile for nanometanf. `docker` and `singularity` exist but are not used by Nanometa Live. |
 | `pipeline_source` | string | "remote:master" | Pipeline location (see below) |
+| `nxf_conda_cachedir` | path | null | Field-machine path to a bundle's pre-warmed Nextflow conda cache. Set automatically by bundle import; exported as `NXF_CONDA_CACHEDIR`. |
+| `nxf_plugins_dir` | path | null | Field-machine path to a bundle's Nextflow plugin cache. Set automatically by bundle import; suppresses the online plugin-registry probe in offline mode. |
 | `pipeline_cores` | int | 1 | CPU cores for pipeline |
 | `kraken_cores` | int | 1 | CPU cores for Kraken2 classification |
 | `validation_cores` | int | 1 | CPU cores for validation tasks |
@@ -168,6 +170,8 @@ pathogens:
     names_alt: ["Genus_species"]     # Alternative names for matching (GTDB uses underscores)
     taxid_ncbi: 12345                # NCBI taxonomy ID (required)
     common_name: "Common name"       # Display name in the UI
+    organism_type: "bacteria"        # virus, bacteria, fungi, archaea, parasite, other
+    annotation: "produces toxin X"   # Short note shown next to the species name
     threat_level: "high"             # critical, high, moderate, or low
     bsl_level: 2                     # Biosafety level (1-4)
     category: "BACTERIA"             # Grouping category (free text)
@@ -184,6 +188,8 @@ pathogens:
 | `names_alt` | no | list | Alternative names (underscore variants, synonyms) |
 | `taxid_ncbi` | yes | int | NCBI taxonomy identifier |
 | `common_name` | no | string | Short display name for the UI |
+| `organism_type` | no | virus/bacteria/fungi/archaea/parasite/other | Declared organism kingdom; shown as a badge and usable for grouping (unrecognised values are ignored) |
+| `annotation` | no | string | Short free-text note shown next to the species name wherever it appears (e.g. the toxin a producer secretes). Distinct from `notes`, which holds longer context shown in the edit dialog and report |
 | `threat_level` | yes | critical/high/moderate/low | Determines alert severity and color |
 | `bsl_level` | no | 1-4 | Biosafety level for handling guidance |
 | `category` | no | string | Grouping label (e.g., BACTERIA, VIRUSES, FUNGI) |
@@ -207,6 +213,9 @@ Save a YAML file following the v2.0 format and import it through the Watchlist &
 - `sti_pathogens.yaml` - Sexually transmitted infection organisms
 - `neglected_tropical_diseases.yaml` - NTD surveillance targets
 - `agricultural_plant.yaml` - Plant pathogen monitoring
+- `toxin_producing_bacteria.yaml` - Toxin-producing bacteria, each annotated with its principal toxin
+- `respiratory_viruses.yaml` - Respiratory viruses (requires a viral or comprehensive Kraken2 database)
+- `clinical_fungi.yaml` - Clinical fungi (requires a fungal or comprehensive Kraken2 database)
 
 ### Taxid Mapping
 

@@ -109,6 +109,20 @@ def _threat_severity(level: ThreatLevel) -> int:
     return _THREAT_SEVERITY.get(level, 0)
 
 
+# Allowed values for ``WatchlistEntry.organism_type``. Single source of truth so
+# the Add/Edit form options, ``from_dict`` normalisation, and the tests cannot
+# drift apart. An unrecognised or empty value normalises to ``None``.
+ORGANISM_TYPES = ("bacteria", "virus", "fungi", "archaea", "parasite", "other")
+
+
+def normalize_organism_type(value: Optional[str]) -> Optional[str]:
+    """Lowercase + validate an organism_type, returning None when unrecognised."""
+    if not value:
+        return None
+    candidate = str(value).strip().lower()
+    return candidate if candidate in ORGANISM_TYPES else None
+
+
 class WatchlistSource(Enum):
     """Source of a watchlist entry."""
     BUILTIN = "builtin"      # From pathogens.yaml
@@ -135,6 +149,8 @@ class WatchlistEntry:
     category: Optional[str] = None
     notes: str = ""
     action_required: str = "Follow laboratory biosafety protocols"
+    organism_type: Optional[str] = None  # virus / bacteria / fungi / ...
+    annotation: str = ""  # Free-text note shown next to the species name
     source: WatchlistSource = WatchlistSource.USER
     enabled: bool = False
     # Multi-taxonomy support
@@ -175,6 +191,10 @@ class WatchlistEntry:
             category=pathogen.category,
             notes=pathogen.notes,
             action_required=pathogen.action_required,
+            organism_type=normalize_organism_type(
+                getattr(pathogen, "organism_type", None)
+            ),
+            annotation=getattr(pathogen, "annotation", "") or "",
             source=WatchlistSource.BUILTIN,
             enabled=False
         )
@@ -260,6 +280,8 @@ class WatchlistEntry:
             category=data.get("category", "Custom"),
             notes=data.get("notes", ""),
             action_required=data.get("action_required", "Follow laboratory biosafety protocols"),
+            organism_type=normalize_organism_type(data.get("organism_type")),
+            annotation=data.get("annotation", "") or "",
             source=source,
             enabled=data.get("enabled", False),
             names_alt=names_alt,
@@ -290,6 +312,8 @@ class WatchlistEntry:
             "category": self.category,
             "notes": self.notes,
             "action_required": self.action_required,
+            "organism_type": self.organism_type,
+            "annotation": self.annotation,
             "source": self.source.value,
             "enabled": self.enabled,
             # Always include validation fields for UI state
@@ -328,7 +352,9 @@ class WatchlistEntry:
             category=self.category,
             notes=self.notes,
             alert_threshold=self.alert_threshold,
-            action_required=self.action_required
+            action_required=self.action_required,
+            organism_type=self.organism_type,
+            annotation=self.annotation
         )
 
 
@@ -573,6 +599,8 @@ class WatchlistManager:
                         "alert_threshold": p.alert_threshold,
                         "action_required": p.action_required,
                         "notes": p.notes,
+                        "organism_type": getattr(p, "organism_type", None),
+                        "annotation": getattr(p, "annotation", ""),
                         "enabled": True,
                     }
                     self._add_entry_from_dict(
@@ -872,6 +900,8 @@ class WatchlistManager:
                     "category": entry.category,
                     "notes": entry.notes,
                     "action_required": entry.action_required,
+                    "organism_type": entry.organism_type,
+                    "annotation": entry.annotation,
                     "source": entry.source.value,
                     "threshold": entry.alert_threshold,
                     "match_score": best_score,
@@ -1131,6 +1161,8 @@ class WatchlistManager:
                 "alert_threshold": p.alert_threshold,
                 "action_required": p.action_required,
                 "notes": p.notes,
+                "organism_type": getattr(p, "organism_type", None),
+                "annotation": getattr(p, "annotation", ""),
                 "enabled": True,
             }
             self._add_entry_from_dict(
@@ -1752,6 +1784,8 @@ class WatchlistManager:
                     "category": entry.category,
                     "notes": entry.notes,
                     "action_required": entry.action_required,
+                    "organism_type": entry.organism_type,
+                    "annotation": entry.annotation,
                     "source": entry.source.value,
                     "threshold": entry.alert_threshold,
                     "match_score": best_score,

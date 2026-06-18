@@ -91,9 +91,11 @@ class TestLoadValidationData:
         with _vt_ctx("results-fingerprint"):
             out = fn({"fp": "a"}, None, 0, "cumulative", None, enabled_config, None)
         assert out["message"] is None
-        # 6 ValidationResults from the aggregate: both -> 2 (taxid 1773),
-        # blast x2 (1280, 562), minimap2 x2 (1639, plus barcode05 TUL4 taxid 263).
-        assert len(out["results"]) == 6
+        # 7 ValidationResults: both -> 2 (taxid 1773), blast x2 (1280, 562),
+        # minimap2 x2 (1639, barcode05 TUL4 taxid 263), plus the on-disk blast.tsv
+        # for barcode05/263 that the minimap2-only aggregate previously hid (now
+        # merged in -- see TestAggregateWinsHidesBlast).
+        assert len(out["results"]) == 7
         methods = {r["validation_method"] for r in out["results"]}
         assert {"both", "blast", "minimap2"} <= methods
 
@@ -193,10 +195,13 @@ class TestCoveragePlots:
             "barcode01_1773", 0, 10, "batch", "1", enabled_config)
         assert style == {"display": "block"}
 
-    def test_missing_paf_returns_warning_hidden(self, validation_app, enabled_config):
+    def test_missing_paf_shows_warning_visible(self, validation_app, enabled_config):
+        # No PAF: the section must stay VISIBLE so the warning Alert (which lives
+        # inside coverage-plots-section) is actually shown, not swallowed.
         depth, cum, hist, stats, style = self._fn(validation_app)(
             "barcode99_9999", 0, 10, "cumulative", None, enabled_config)
-        assert style == {"display": "none"}
+        assert style == {"display": "block"}
+        assert "No PAF file" in str(stats)
 
     def test_negative_depth_threshold_sanitized(self, validation_app, enabled_config):
         # A negative or None threshold must not raise; it clamps internally.

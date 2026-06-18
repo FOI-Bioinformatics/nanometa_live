@@ -124,7 +124,7 @@ pathogens:
     notes: "Reservoir in domestic and feral cats. Transmitted through cat scratches or bites, or via cat flea (Ctenocephalides felis) feces. Typically self-limiting in immunocompetent individuals."
 
   - name: "Borrelia burgdorferi"
-    names_alt: ["Borrelia_burgdorferi"]
+    names_alt: ["Borrelia_burgdorferi", "Borreliella burgdorferi"]
     taxid_ncbi: 139
     common_name: "Lyme disease"
     threat_level: "high"
@@ -140,7 +140,7 @@ pathogens:
 
   - name: "Orthohantavirus sinnombreense"
     names_alt: ["Sin Nombre virus", "Sin_Nombre_virus", "Sin Nombre orthohantavirus"]
-    taxid_ncbi: 3052487
+    taxid_ncbi: 3052499
     common_name: "Hantavirus pulmonary syndrome"
     threat_level: "high"
     bsl_level: 3
@@ -150,7 +150,7 @@ pathogens:
     notes: "Reservoir in deer mice (Peromyscus maniculatus). Transmitted through inhalation of aerosolized virus from rodent urine, droppings, or nesting materials. No person-to-person transmission documented for this species."
 
   - name: "Rabies lyssavirus"
-    names_alt: ["Rabies virus", "Rabies_lyssavirus"]
+    names_alt: ["Rabies virus", "Rabies_lyssavirus", "Lyssavirus rabies"]
     taxid_ncbi: 11292
     common_name: "Rabies"
     threat_level: "critical"

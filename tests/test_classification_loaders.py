@@ -11,12 +11,16 @@ import time
 import pandas as pd
 import pytest
 
+from unittest.mock import patch
+
 from nanometa_live.core.utils.classification_loaders import (
     KRAKEN2_EXPECTED_COLUMNS,
     _is_incremental_layout,
     _is_standard_report,
     _parse_kraken2_report,
+    _parse_kraken2_report_uncached,
     _deduplicate_batch_files,
+    clear_report_frame_cache,
     load_kraken_data,
     load_kraken_latest_batch,
 )
@@ -42,6 +46,76 @@ def _backdate_mtime(path, seconds=5):
     """Set a file's mtime to *seconds* ago so it passes the stability check."""
     old_time = time.time() - seconds
     os.utime(str(path), (old_time, old_time))
+
+
+_VALID_REPORT = (
+    "100.00\t1000\t0\tR\t1\troot\n"
+    "80.00\t800\t0\tD\t2\t  Bacteria\n"
+    "50.00\t500\t500\tS\t562\t    Escherichia coli\n"
+)
+
+
+class TestPerFileParseCache:
+    """The per-file parsed-frame cache memoises _parse_kraken2_report on
+    (path, mtime, size): the dominant per-poll win is that the same physical
+    report parsed by the aggregate, per-sample, and summary loaders is parsed
+    once, and a realtime incremental poll re-parses only the changed file."""
+
+    def _write(self, tmp_path, name="r.cumulative.kraken2.report.txt"):
+        report = tmp_path / name
+        report.write_text(_VALID_REPORT)
+        _backdate_mtime(report)
+        return str(report)
+
+    def test_unchanged_file_parsed_once(self, tmp_path):
+        clear_report_frame_cache()
+        path = self._write(tmp_path)
+        with patch(
+            "nanometa_live.core.utils.classification_loaders._parse_kraken2_report_uncached",
+            wraps=_parse_kraken2_report_uncached,
+        ) as spy:
+            d1 = _parse_kraken2_report(path)
+            d2 = _parse_kraken2_report(path)
+            d3 = _parse_kraken2_report(path)
+        assert spy.call_count == 1  # only the first call hit the parser
+        assert len(d1) == 3 and d2 is d1 and d3 is d1
+
+    def test_mtime_change_reparses(self, tmp_path):
+        clear_report_frame_cache()
+        path = self._write(tmp_path)
+        with patch(
+            "nanometa_live.core.utils.classification_loaders._parse_kraken2_report_uncached",
+            wraps=_parse_kraken2_report_uncached,
+        ) as spy:
+            _parse_kraken2_report(path)
+            new = time.time() - 3
+            os.utime(path, (new, new))  # pipeline rewrote the report
+            _parse_kraken2_report(path)
+        assert spy.call_count == 2  # changed mtime invalidates the entry
+
+    def test_check_stability_false_bypasses_cache(self, tmp_path):
+        clear_report_frame_cache()
+        path = self._write(tmp_path)
+        with patch(
+            "nanometa_live.core.utils.classification_loaders._parse_kraken2_report_uncached",
+            wraps=_parse_kraken2_report_uncached,
+        ) as spy:
+            _parse_kraken2_report(path, check_stability=False)
+            _parse_kraken2_report(path, check_stability=False)
+        assert spy.call_count == 2  # test-only mode never shares a cache entry
+
+    def test_transient_none_not_cached(self, tmp_path):
+        """An empty file returns None and is not cached; once it gains content
+        (same path, new mtime/size) the next poll parses it for real."""
+        clear_report_frame_cache()
+        report = tmp_path / "late.cumulative.kraken2.report.txt"
+        report.write_text("")
+        _backdate_mtime(report)
+        assert _parse_kraken2_report(str(report)) is None
+        report.write_text(_VALID_REPORT)
+        _backdate_mtime(report)
+        df = _parse_kraken2_report(str(report))
+        assert df is not None and len(df) == 3
 
 
 class TestParseKraken2ReportEdgeCases:

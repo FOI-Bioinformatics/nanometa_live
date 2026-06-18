@@ -260,11 +260,15 @@ def _build_sankey_frames(kraken_df, domains, tax_levels):
     taxid_to_parent = dict(zip(
         kraken_df["taxid"].astype(int), kraken_df["parent_taxid"].astype(int)
     ))
+    # Materialise the string columns with .tolist() before zipping: iterating
+    # the arrow-backed rank/name Series directly goes through arrow __iter__
+    # per element, a hot-path cost on every rebuild (cProfile, GTDB scale).
+    _tids = kraken_df["taxid"].astype(int).tolist()
+    _ranks = kraken_df["rank"].tolist()
+    _names = kraken_df["name"].tolist()
     taxid_to_key = {
-        int(tid): f"{rank}_{name.strip()}"
-        for tid, rank, name in zip(
-            kraken_df["taxid"], kraken_df["rank"], kraken_df["name"]
-        )
+        tid: f"{rank}_{name.strip()}"
+        for tid, rank, name in zip(_tids, _ranks, _names)
     }
 
     # Filter by domain via taxid subtree membership (order-independent).
@@ -999,11 +1003,15 @@ def create_sunburst_data(kraken_df, domains, tax_levels, min_reads, config,
         taxid_to_parent = dict(zip(
             kraken_df["taxid"].astype(int), kraken_df["parent_taxid"].astype(int)
         ))
+        # .tolist() before zip: iterating the arrow-backed rank/name Series
+        # directly hits arrow __iter__ per element on every rebuild (cProfile,
+        # GTDB scale); native lists zip in C.
+        _tids = kraken_df["taxid"].astype(int).tolist()
+        _ranks = kraken_df["rank"].tolist()
+        _names = kraken_df["name"].tolist()
         taxid_to_key = {
-            int(tid): f"{rank}_{name.strip()}"
-            for tid, rank, name in zip(
-                kraken_df["taxid"], kraken_df["rank"], kraken_df["name"]
-            )
+            tid: f"{rank}_{name.strip()}"
+            for tid, rank, name in zip(_tids, _ranks, _names)
         }
 
     ids, labels, parents, values, colors, custom_data = _build_sunburst_nodes(

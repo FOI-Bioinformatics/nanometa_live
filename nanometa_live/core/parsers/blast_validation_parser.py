@@ -121,7 +121,10 @@ class ValidationResult:
             raw = data['status']
             data = dict(data)
             data['status'] = ValidationStatus(_status_map.get(raw, raw))
-        return cls(**data)
+        # Drop unknown keys so a dict from a newer schema does not raise
+        # TypeError (mirrors NCBIResult/GTDBResult.from_dict in this codebase).
+        return cls(**{k: v for k, v in data.items()
+                      if k in cls.__dataclass_fields__})
 
     def determine_status(self) -> ValidationStatus:
         """Determine validation status based on metrics."""
@@ -129,6 +132,12 @@ class ValidationResult:
             return ValidationStatus.FAILED
         if self.validated_reads == 0 and self.total_reads == 0:
             return ValidationStatus.NO_DATA
+        # Examined but nothing validated (reads were classified to this organism
+        # but BLAST/minimap2 confirmed none): a negative result, NOT "no data".
+        # Distinguishing the two matters clinically -- "checked, not confirmed"
+        # must not look identical to "not yet checked".
+        if self.validated_reads == 0 and self.total_reads > 0:
+            return ValidationStatus.LOW_CONFIDENCE
         if self.percent_validated >= 80 and self.percent_identity_mean >= 90:
             return ValidationStatus.CONFIRMED
         if self.percent_validated >= 50:
@@ -209,6 +218,23 @@ class ValidationParser:
                     m = p.stat().st_mtime
                     if m > latest:
                         latest = m
+                except OSError:
+                    continue
+            # The authoritative aggregate JSON is written one level up at
+            # validation/validation_results.json (the loader prefers it), but
+            # validation_dir often resolves to validation/blast or
+            # validation/minimap2. Without folding the aggregate's mtime in, a
+            # realtime rewrite of validation_results.json never advances this
+            # fingerprint and the cache serves stale results.
+            for agg in (
+                self.validation_dir.parent / "validation_results.json",
+                self.results_dir / "validation" / "validation_results.json",
+            ):
+                try:
+                    if agg.exists():
+                        m = agg.stat().st_mtime
+                        if m > latest:
+                            latest = m
                 except OSError:
                     continue
             return latest
@@ -441,21 +467,29 @@ class ValidationParser:
 
                     method = entry.get('validation_method', method_default)
 
-                    # Map nanometanf fields to ValidationResult
-                    kraken_reads = entry.get('kraken_reads', 0)
-                    hit_rate = entry.get('hit_rate', 0.0)
-                    validated = entry.get('blast_hits', entry.get('mapped_reads', 0))
+                    # Map nanometanf fields to ValidationResult. A JSON ``null``
+                    # makes ``.get(key, default)`` return None (the default only
+                    # applies when the key is ABSENT), and ``None <= 1.0`` /
+                    # ``float(None)`` would raise -- caught by the catch-all
+                    # except below, which would silently drop the WHOLE aggregate
+                    # and blank the Validation tab. Coerce every numeric to a real
+                    # number with ``or 0`` before arithmetic.
+                    kraken_reads = entry.get('kraken_reads', 0) or 0
+                    hit_rate = entry.get('hit_rate', 0.0) or 0.0
+                    validated = entry.get('blast_hits', entry.get('mapped_reads', 0)) or 0
 
                     result = ValidationResult(
                         sample_id=sample_id,
                         taxid=tid,
                         species=entry.get('species', ''),
-                        total_reads=kraken_reads,
-                        validated_reads=validated,
-                        percent_validated=hit_rate * 100 if hit_rate <= 1.0 else hit_rate,
-                        percent_identity_mean=float(entry.get('avg_identity', 0.0)),
-                        coverage_breadth=float(entry.get('avg_coverage', 0.0)),
-                        avg_mapq=float(entry.get('avg_mapq', 0.0)),
+                        total_reads=int(kraken_reads),
+                        validated_reads=int(validated),
+                        percent_validated=min(
+                            100.0, hit_rate * 100 if hit_rate <= 1.0 else hit_rate
+                        ),
+                        percent_identity_mean=float(entry.get('avg_identity', 0.0) or 0.0),
+                        coverage_breadth=float(entry.get('avg_coverage', 0.0) or 0.0),
+                        avg_mapq=float(entry.get('avg_mapq', 0.0) or 0.0),
                         # ref_name / ref_length are emitted by nanometanf but were
                         # previously dropped here; surface the reference identity
                         # and genome size in the GUI.
@@ -469,20 +503,23 @@ class ValidationParser:
 
                     # If 'both' method, check for minimap2 fields on a BLAST entry
                     if entry.get('minimap2_mapped') is not None:
+                        mm2_hit_rate = entry.get('minimap2_hit_rate', 0.0) or 0.0
                         mm2_result = ValidationResult(
                             sample_id=sample_id,
                             taxid=tid,
                             species=entry.get('species', ''),
-                            total_reads=kraken_reads,
-                            validated_reads=int(entry.get('minimap2_mapped', 0)),
-                            percent_validated=(
-                                entry.get('minimap2_hit_rate', 0.0) * 100
-                                if entry.get('minimap2_hit_rate', 0.0) <= 1.0
-                                else entry.get('minimap2_hit_rate', 0.0)
+                            total_reads=int(kraken_reads),
+                            validated_reads=int(entry.get('minimap2_mapped', 0) or 0),
+                            percent_validated=min(
+                                100.0,
+                                mm2_hit_rate * 100 if mm2_hit_rate <= 1.0 else mm2_hit_rate,
                             ),
-                            percent_identity_mean=float(entry.get('minimap2_identity', 0.0)),
-                            coverage_breadth=float(entry.get('minimap2_coverage', entry.get('avg_coverage', 0.0))),
-                            avg_mapq=float(entry.get('avg_mapq', 0.0)),
+                            percent_identity_mean=float(entry.get('minimap2_identity', 0.0) or 0.0),
+                            coverage_breadth=float(
+                                entry.get('minimap2_coverage',
+                                          entry.get('avg_coverage', 0.0)) or 0.0
+                            ),
+                            avg_mapq=float(entry.get('avg_mapq', 0.0) or 0.0),
                             reference_accession=entry.get('ref_name', '') or '',
                             reference_length=int(entry.get('ref_length', 0) or 0),
                             validation_method='minimap2',
@@ -577,10 +614,31 @@ class ValidationParser:
                 # The aggregate JSON omits identity range + alignment length;
                 # enrich BLAST results from their blast.tsv when available.
                 self._enrich_blast_identity_range(aggregate_results)
-                if cache_this_call:
-                    self._results_cache = list(aggregate_results)
-                    self._results_cache_mtime = fingerprint
-                return aggregate_results
+                results.extend(aggregate_results)
+                # One aggregate JSON is authoritative; stop at the first match.
+                break
+
+        # The aggregate JSON is authoritative for the (sample, taxid, method)
+        # tuples it lists, but it can legitimately OMIT BLAST: nanometanf's
+        # aggregator keys entries by stats-file glob, so a (sample, taxid) whose
+        # blast stats did not reach the aggregator work dir -- or whose blast key
+        # was dropped by a realtime cumulative join -- appears as a minimap2-only
+        # entry while its blast.tsv still lands on disk. We therefore ALWAYS also
+        # scan the on-disk per-pair files below and merge in any (sample, taxid,
+        # method) the aggregate did not cover, mirroring the unconditional
+        # minimap2 individual-file fallback in collect_minimap2_results. Without
+        # this, a minimap2-only aggregate hid on-disk BLAST entirely -- Coverage
+        # sub-tab populated, BLAST sub-tab empty (regression in
+        # tests/test_blast_validation_parser.py::TestAggregateWinsHidesBlast).
+        def _method_class(method):
+            # The GUI blast sub-tab treats every non-minimap2 method as blast,
+            # so collapse blast/both/missing into one class for dedup.
+            return "minimap2" if method == "minimap2" else "blast"
+
+        seen_keys = {
+            (r.sample_id, r.taxid, _method_class(getattr(r, "validation_method", "blast")))
+            for r in results
+        }
 
         # Per-(sample, taxid) individual JSON summaries
         json_files = list(self.validation_dir.glob('*_validation.json'))
@@ -592,7 +650,12 @@ class ValidationParser:
                     continue
                 if taxid and result.taxid != taxid:
                     continue
+                key = (result.sample_id, result.taxid,
+                       _method_class(result.validation_method))
+                if key in seen_keys:
+                    continue
                 results.append(result)
+                seen_keys.add(key)
 
         # Per-(sample, taxid) BLAST tabular files (nanometanf *.blast.tsv).
         for blast_file in self.validation_dir.glob('*.blast.tsv'):
@@ -619,10 +682,12 @@ class ValidationParser:
                 if taxid and file_taxid != taxid:
                     continue
 
-                # Check if we already have JSON result for this
-                existing = [r for r in results
-                            if r.sample_id == file_sample and r.taxid == file_taxid]
-                if existing:
+                # Skip only when a BLAST-method result already exists for this
+                # pair (from the aggregate or a JSON summary). A minimap2 entry
+                # for the same pair must NOT block the blast.tsv -- that coarse
+                # (sample, taxid) dedup was the hide-on-disk-BLAST bug.
+                key = (file_sample, file_taxid, "blast")
+                if key in seen_keys:
                     continue
 
                 # Parse tabular file
@@ -630,6 +695,7 @@ class ValidationParser:
                     blast_file, file_sample, file_taxid
                 )
                 results.append(result)
+                seen_keys.add(key)
 
         # Surface per-(sample, taxid) minimap2 coverage from individual stats
         # files (core/parsers/minimap2_stats.py): keeps the Coverage tab live
@@ -766,3 +832,113 @@ class ValidationParser:
 
 # Backward compatibility alias
 BlastValidationParser = ValidationParser
+
+
+# Per-read column names, matching the nanometanf BLASTN_VALIDATION outfmt.
+_PER_READ_COLS_12 = [
+    'qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen',
+    'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore',
+]
+_PER_READ_COLS_15 = _PER_READ_COLS_12 + ['qlen', 'slen', 'qcovs']
+
+
+def parse_blast_per_read(
+    filepath: Path,
+    sample_id: str,
+    taxid: int,
+    max_rows: int = 5000,
+) -> Dict[str, Any]:
+    """Parse a ``*.blast.tsv`` into per-read records + distributions.
+
+    This is the lazy, on-selection companion to :meth:`parse_blast_tabular`
+    (which only computes per-(sample, taxid) aggregates on the poll path). It is
+    O(reads) and must only be called when the operator opens the per-read panel.
+
+    Dedups by ``qseqid`` keeping the best hit (highest bitscore) per read, so a
+    read contributes exactly one row -- matching the hit-rate dedup the pipeline
+    and aggregate parser use. When the deduped read count exceeds ``max_rows``,
+    the per-read table is capped to the top ``max_rows`` reads by bitscore
+    (``sampled=True``, ``total_reads`` carries the full count); the
+    distributions and top-subject counts are still computed over ALL reads.
+
+    Returns a dict::
+
+        {
+          "sample_id", "taxid", "total_reads", "returned_rows", "sampled",
+          "records":     [ {qseqid, sseqid, pident, length, bitscore, evalue, qcovs}, ... ],
+          "top_subjects":[ {sseqid, reads, mean_pident}, ... ],
+          "distributions": {"pident": [...], "length": [...], "bitscore": [...], "evalue": [...]},
+          "subject_agreement": float,   # fraction of reads on the most-common subject
+        }
+
+    On an empty/missing/unreadable file returns the same shape with empty lists.
+    """
+    empty = {
+        "sample_id": sample_id, "taxid": taxid, "total_reads": 0,
+        "returned_rows": 0, "sampled": False, "records": [],
+        "top_subjects": [], "subject_agreement": 0.0,
+        "distributions": {"pident": [], "length": [], "bitscore": [], "evalue": []},
+    }
+    try:
+        if not filepath.exists() or filepath.stat().st_size == 0:
+            return empty
+        df = pd.read_csv(filepath, sep='\t', header=None)
+        if df.empty or df.shape[1] < 12:
+            return empty
+        ncols = df.shape[1]
+        base = _PER_READ_COLS_15 if ncols >= 15 else _PER_READ_COLS_12
+        df.columns = base[:ncols] + [f"col_{i}" for i in range(len(base), ncols)]
+
+        # One row per read: keep the highest-bitscore hit per qseqid.
+        df = df.sort_values('bitscore', ascending=False).drop_duplicates('qseqid')
+        total_reads = int(len(df))
+        if 'qcovs' not in df.columns:
+            df['qcovs'] = 0.0
+
+        # Distributions + top subjects over ALL deduped reads.
+        distributions = {
+            "pident": df['pident'].astype(float).tolist(),
+            "length": df['length'].astype(int).tolist(),
+            "bitscore": df['bitscore'].astype(float).tolist(),
+            "evalue": df['evalue'].astype(float).tolist(),
+        }
+        grp = df.groupby('sseqid')
+        top = (
+            grp.agg(reads=('qseqid', 'size'), mean_pident=('pident', 'mean'))
+            .sort_values('reads', ascending=False)
+            .reset_index()
+        )
+        top_subjects = [
+            {"sseqid": str(r.sseqid), "reads": int(r.reads),
+             "mean_pident": round(float(r.mean_pident), 1)}
+            for r in top.itertuples(index=False)
+        ]
+        # Guard top.iloc[0]: a malformed TSV whose sseqid column is all-null
+        # yields an empty groupby, so check not-empty as well as total_reads.
+        subject_agreement = (
+            float(top.iloc[0]['reads']) / total_reads
+            if total_reads and not top.empty else 0.0
+        )
+
+        # Per-read table: cap to top-N by bitscore for the DOM.
+        sampled = total_reads > max_rows
+        table_df = df.head(max_rows) if sampled else df
+        cols = ['qseqid', 'sseqid', 'pident', 'length', 'bitscore', 'evalue', 'qcovs']
+        records = table_df[cols].to_dict('records')
+        for rec in records:
+            rec['pident'] = round(float(rec['pident']), 1)
+            rec['qcovs'] = round(float(rec['qcovs']), 1)
+            rec['bitscore'] = round(float(rec['bitscore']), 1)
+
+        return {
+            "sample_id": sample_id, "taxid": taxid, "total_reads": total_reads,
+            "returned_rows": len(records), "sampled": sampled,
+            "records": records, "top_subjects": top_subjects,
+            "subject_agreement": subject_agreement,
+            "distributions": distributions,
+        }
+    except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError,
+            pd.errors.ParserError, pd.errors.EmptyDataError, KeyError, ValueError,
+            TypeError) as e:
+        logger.exception(f"Error parsing per-read BLAST {filepath}: {e}")
+        return empty

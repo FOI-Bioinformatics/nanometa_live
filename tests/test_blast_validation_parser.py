@@ -16,6 +16,7 @@ existing test_validation_system.py suite.
 """
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -104,13 +105,45 @@ class TestParseBlastTabular:
         assert result.status == ValidationStatus.NO_DATA
 
 
+class TestCacheFingerprintTracksAggregate:
+    """The cache fingerprint must advance when the authoritative aggregate JSON
+    (validation/validation_results.json) is rewritten -- it sits one level above
+    validation_dir (validation/blast), so a naive iterdir misses it and the
+    realtime Validation tab would serve stale results."""
+
+    def test_aggregate_rewrite_advances_fingerprint(self, tmp_path):
+        import os
+        from nanometa_live.core.parsers.blast_validation_parser import ValidationParser
+        vdir = tmp_path / "validation" / "blast"
+        vdir.mkdir(parents=True)
+        (vdir / "barcode01_taxid562.blast.tsv").write_text("x\n")
+        agg = tmp_path / "validation" / "validation_results.json"
+        agg.write_text("{}")
+        old = time.time() - 100
+        os.utime(vdir, (old, old))
+        os.utime(vdir / "barcode01_taxid562.blast.tsv", (old, old))
+        os.utime(agg, (old, old))
+
+        parser = ValidationParser(str(tmp_path))
+        assert parser.validation_dir.name == "blast"
+        fp1 = parser._validation_dir_fingerprint()
+
+        # Rewrite only the aggregate, one level above validation_dir.
+        newer = time.time()
+        agg.write_text('{"results": {}}')
+        os.utime(agg, (newer, newer))
+        fp2 = parser._validation_dir_fingerprint()
+        assert fp2 > fp1
+
+
 class TestDetermineStatusBoundaries:
     """Exact-threshold behaviour of ValidationResult.determine_status().
 
     Authoritative rule (blast_validation_parser.py): CONFIRMED iff
     percent_validated >= 80 AND percent_identity_mean >= 90; PARTIAL iff
-    percent_validated >= 50; LOW_CONFIDENCE iff > 0; else NO_DATA; FAILED on
-    errors. The boundaries are inclusive on the >= side.
+    percent_validated >= 50; LOW_CONFIDENCE iff > 0 OR (validated_reads == 0 but
+    total_reads > 0, i.e. examined-and-negative); NO_DATA only when nothing was
+    examined; FAILED on errors. Boundaries are inclusive on the >= side.
     """
 
     @pytest.mark.parametrize("pv,ident,expected", [
@@ -120,7 +153,8 @@ class TestDetermineStatusBoundaries:
         (79.9, 99.0, ValidationStatus.PARTIAL),       # validated just below 80
         (50.0, 99.0, ValidationStatus.PARTIAL),       # 50 boundary inclusive
         (49.9, 99.0, ValidationStatus.LOW_CONFIDENCE),
-        (0.0, 99.0, ValidationStatus.NO_DATA),        # no reads validated
+        # Examined (reads exist) but nothing validated -> low, NOT no_data.
+        (0.0, 99.0, ValidationStatus.LOW_CONFIDENCE),
     ])
     def test_threshold_boundaries(self, pv, ident, expected):
         # validated/total kept > 0 so the (0,0) early NO_DATA branch is not hit
@@ -132,6 +166,15 @@ class TestDetermineStatusBoundaries:
             percent_identity_mean=ident, validation_method="blast",
         )
         assert r.determine_status() == expected
+
+    def test_examined_zero_hits_is_low_not_no_data(self):
+        # A watchlist organism Kraken classified but BLAST/minimap2 confirmed
+        # none must read as "checked, not confirmed", distinct from "not run".
+        r = ValidationResult(
+            sample_id="s", taxid=1, total_reads=120, validated_reads=0,
+            percent_validated=0.0, validation_method="blast",
+        )
+        assert r.determine_status() == ValidationStatus.LOW_CONFIDENCE
 
     def test_errors_force_failed_even_with_high_metrics(self):
         r = ValidationResult(
@@ -175,6 +218,41 @@ class TestParseNanometanfAggregateJson:
         assert r.validated_reads == 90
         assert r.percent_validated == pytest.approx(90.0)
         assert r.status == ValidationStatus.CONFIRMED
+
+    def test_null_numeric_fields_do_not_drop_the_file(self, parser, tmp_path):
+        # A JSON null on a numeric field must not make None<=1.0 / float(None)
+        # raise and silently empty the whole aggregate (and the Validation tab).
+        f = tmp_path / "validation_results.json"
+        f.write_text(json.dumps(_aggregate({
+            "barcode01": {
+                "562": {
+                    "species": "Escherichia coli",
+                    "kraken_reads": 100,
+                    "blast_hits": None,
+                    "hit_rate": None,
+                    "avg_identity": None,
+                    "avg_coverage": None,
+                    "avg_mapq": None,
+                }
+            }
+        })))
+        results = parser.parse_nanometanf_aggregate_json(f)
+        assert len(results) == 1
+        r = results[0]
+        assert r.validated_reads == 0
+        assert r.percent_validated == 0.0
+        assert r.percent_identity_mean == 0.0
+
+    def test_hit_rate_above_100_is_clamped(self, parser, tmp_path):
+        # A pre-multiplied hit_rate that overshoots 100 (the >1.0 passthrough
+        # branch) must be clamped so the UI never shows e.g. 130%.
+        f = tmp_path / "validation_results.json"
+        f.write_text(json.dumps(_aggregate({
+            "barcode01": {"562": {"species": "E. coli", "kraken_reads": 10,
+                                  "blast_hits": 13, "hit_rate": 130.0,
+                                  "avg_identity": 98.0}}})))
+        r = parser.parse_nanometanf_aggregate_json(f)[0]
+        assert r.percent_validated == 100.0
 
     def test_both_method_expands_to_two_results(self, parser, tmp_path):
         f = tmp_path / "validation_results.json"
@@ -259,8 +337,9 @@ class TestParseNanometanfAggregateJson:
 
     def test_minimap2_mapped_zero_still_expands(self, parser, tmp_path):
         # ``minimap2_mapped: 0`` is a real (mapped-nothing) outcome, distinct from
-        # an absent key — it must expand to a NO_DATA minimap2 result, not be
-        # silently dropped.
+        # an absent key — it must expand to a result, not be silently dropped.
+        # Reads existed (kraken_reads=100) but none mapped, so the status is
+        # LOW_CONFIDENCE (examined-and-negative), not NO_DATA.
         f = tmp_path / "validation_results.json"
         f.write_text(json.dumps(_aggregate({
             "barcode01": {
@@ -275,7 +354,7 @@ class TestParseNanometanfAggregateJson:
         assert len(results) == 2
         mm2 = next(r for r in results if r.validation_method == "minimap2")
         assert mm2.validated_reads == 0
-        assert mm2.status == ValidationStatus.NO_DATA
+        assert mm2.status == ValidationStatus.LOW_CONFIDENCE
 
     def test_mixed_methods_across_taxids_split_correctly(self, parser, tmp_path):
         # One taxid is "both" (-> 2 results), another is blast-only (-> 1). Total 3.
@@ -340,3 +419,129 @@ class TestBlastColumnRobustness:
         f.write_text("".join("\t".join(r) + "\n" for r in rows))
         result = parser.parse_blast_tabular(f, "barcode01", 562, total_reads=2)
         assert result.percent_validated <= 100.0
+
+
+# 15-column nanometanf outfmt: ROWS_12 fields + qlen slen qcovs
+ROWS_15 = [r + (200, 5000, 95) for r in ROWS_12]
+
+
+class TestAggregateWinsHidesBlast:
+    """Regression for the reported symptom: operators see the Coverage
+    (minimap2) sub-tab populated but the BLAST sub-tab empty.
+
+    ``get_validation_results`` returns the aggregate ``validation_results.json``
+    as soon as it parses to a non-empty list, regardless of whether that list
+    contains any *blast*-method entries (blast_validation_parser.py:613). The
+    per-(sample, taxid) ``blast/*.blast.tsv`` scan lives only in the fallback
+    branch *after* that short-circuit, so an on-disk blast.tsv is never read
+    when the aggregate JSON is minimap2-only -- which nanometanf can legitimately
+    emit (the aggregator keys entries by stats-file glob; a (sample, taxid) whose
+    blast stats did not reach the aggregator's work dir, or a realtime cumulative
+    join that dropped the blast key, yields a minimap2-only entry while the
+    blast.tsv still lands on disk).
+
+    These tests encode the desired behaviour and FAIL on the current
+    short-circuit; they turn green once the loader also scans blast.tsv and
+    merges by (sample, taxid, method) instead of returning the aggregate whole.
+    This mirrors the unconditional minimap2 individual-file fallback that already
+    keeps the Coverage sub-tab live mid-run.
+    """
+
+    def _build_results_dir(self, root: Path) -> None:
+        """A results dir with a minimap2-ONLY aggregate JSON plus a real
+        blast.tsv on disk for a different taxid (562) that the aggregate omits.
+        """
+        vdir = root / "validation"
+        (vdir / "blast").mkdir(parents=True)
+        (vdir / "minimap2").mkdir(parents=True)
+        # Aggregate JSON: only minimap2, only taxid 1280. No blast anywhere.
+        (vdir / "validation_results.json").write_text(json.dumps(_aggregate({
+            "barcode01": {
+                "1280": {
+                    "species": "Staphylococcus aureus",
+                    "validation_method": "minimap2",
+                    "kraken_reads": 500,
+                    "mapped_reads": 480,
+                    "hit_rate": 0.96,
+                    "avg_mapq": 55.0,
+                    "ref_name": "NC_007795.1",
+                    "ref_length": 2821361,
+                },
+            }
+        }, method="minimap2")))
+        # Real BLAST result on disk for taxid 562 (E. coli) -- never in the JSON.
+        _write_blast(vdir / "blast" / "barcode01_taxid562.blast.tsv",
+                     ROWS_15, cols=15)
+
+    def test_on_disk_blast_surfaces_despite_minimap2_only_aggregate(self, tmp_path):
+        self._build_results_dir(tmp_path)
+        parser = ValidationParser(str(tmp_path))
+        results = parser.get_validation_results()
+
+        methods = {r.validation_method for r in results}
+        # The bug: only the minimap2 aggregate entry comes back.
+        assert any(m != "minimap2" for m in methods), (
+            "BLAST results on disk were hidden by the minimap2-only aggregate "
+            f"short-circuit; got methods={methods}"
+        )
+
+    def test_on_disk_blast_taxid_is_present(self, tmp_path):
+        self._build_results_dir(tmp_path)
+        parser = ValidationParser(str(tmp_path))
+        taxids = {r.taxid for r in parser.get_validation_results()}
+        assert 562 in taxids, (
+            "the BLAST-validated taxid 562 (blast.tsv on disk) never reached the "
+            f"GUI; got taxids={taxids}"
+        )
+
+    def test_partial_aggregate_surfaces_extra_on_disk_blast(self, tmp_path):
+        # Aggregate carries blast for taxid 1280 only; blast.tsv on disk for both
+        # 1280 (already covered) and 562 (omitted). Expect: 1280 from the
+        # aggregate (not re-parsed/duplicated) and 562 from disk.
+        vdir = tmp_path / "validation"
+        (vdir / "blast").mkdir(parents=True)
+        (vdir / "validation_results.json").write_text(json.dumps(_aggregate({
+            "barcode01": {
+                "1280": {
+                    "species": "Staphylococcus aureus",
+                    "kraken_reads": 500, "blast_hits": 480, "hit_rate": 0.96,
+                    "avg_identity": 99.0,
+                },
+            }
+        })))
+        _write_blast(vdir / "blast" / "barcode01_taxid1280.blast.tsv", ROWS_15, cols=15)
+        _write_blast(vdir / "blast" / "barcode01_taxid562.blast.tsv", ROWS_15, cols=15)
+
+        results = ValidationParser(str(tmp_path)).get_validation_results()
+        by_taxid = {}
+        for r in results:
+            by_taxid.setdefault(r.taxid, []).append(r)
+        assert set(by_taxid) == {562, 1280}
+        # 1280 came from the aggregate exactly once (disk copy deduped away).
+        assert len(by_taxid[1280]) == 1
+        assert by_taxid[1280][0].validated_reads == 480   # aggregate value, not the tsv's
+        # 562 surfaced from disk.
+        assert len(by_taxid[562]) == 1
+
+    def test_complete_aggregate_not_duplicated_by_disk_scan(self, tmp_path):
+        # A complete both-method aggregate plus the matching blast.tsv on disk
+        # must NOT double-count: the always-on disk scan dedups against the
+        # aggregate's (sample, taxid, method) keys.
+        vdir = tmp_path / "validation"
+        (vdir / "blast").mkdir(parents=True)
+        (vdir / "validation_results.json").write_text(json.dumps(_aggregate({
+            "barcode01": {
+                "562": {
+                    "species": "Escherichia coli",
+                    "kraken_reads": 100, "blast_hits": 90, "hit_rate": 0.9,
+                    "avg_identity": 97.0, "minimap2_mapped": 88,
+                    "minimap2_hit_rate": 0.88, "minimap2_identity": 98.0,
+                }
+            }
+        }, method="both")))
+        _write_blast(vdir / "blast" / "barcode01_taxid562.blast.tsv", ROWS_15, cols=15)
+
+        results = ValidationParser(str(tmp_path)).get_validation_results()
+        # Exactly the two aggregate results (both + minimap2); no third from disk.
+        assert len(results) == 2
+        assert sorted(r.validation_method for r in results) == ["both", "minimap2"]
