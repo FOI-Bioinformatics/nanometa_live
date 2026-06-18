@@ -614,10 +614,31 @@ class ValidationParser:
                 # The aggregate JSON omits identity range + alignment length;
                 # enrich BLAST results from their blast.tsv when available.
                 self._enrich_blast_identity_range(aggregate_results)
-                if cache_this_call:
-                    self._results_cache = list(aggregate_results)
-                    self._results_cache_mtime = fingerprint
-                return aggregate_results
+                results.extend(aggregate_results)
+                # One aggregate JSON is authoritative; stop at the first match.
+                break
+
+        # The aggregate JSON is authoritative for the (sample, taxid, method)
+        # tuples it lists, but it can legitimately OMIT BLAST: nanometanf's
+        # aggregator keys entries by stats-file glob, so a (sample, taxid) whose
+        # blast stats did not reach the aggregator work dir -- or whose blast key
+        # was dropped by a realtime cumulative join -- appears as a minimap2-only
+        # entry while its blast.tsv still lands on disk. We therefore ALWAYS also
+        # scan the on-disk per-pair files below and merge in any (sample, taxid,
+        # method) the aggregate did not cover, mirroring the unconditional
+        # minimap2 individual-file fallback in collect_minimap2_results. Without
+        # this, a minimap2-only aggregate hid on-disk BLAST entirely -- Coverage
+        # sub-tab populated, BLAST sub-tab empty (regression in
+        # tests/test_blast_validation_parser.py::TestAggregateWinsHidesBlast).
+        def _method_class(method):
+            # The GUI blast sub-tab treats every non-minimap2 method as blast,
+            # so collapse blast/both/missing into one class for dedup.
+            return "minimap2" if method == "minimap2" else "blast"
+
+        seen_keys = {
+            (r.sample_id, r.taxid, _method_class(getattr(r, "validation_method", "blast")))
+            for r in results
+        }
 
         # Per-(sample, taxid) individual JSON summaries
         json_files = list(self.validation_dir.glob('*_validation.json'))
@@ -629,7 +650,12 @@ class ValidationParser:
                     continue
                 if taxid and result.taxid != taxid:
                     continue
+                key = (result.sample_id, result.taxid,
+                       _method_class(result.validation_method))
+                if key in seen_keys:
+                    continue
                 results.append(result)
+                seen_keys.add(key)
 
         # Per-(sample, taxid) BLAST tabular files (nanometanf *.blast.tsv).
         for blast_file in self.validation_dir.glob('*.blast.tsv'):
@@ -656,10 +682,12 @@ class ValidationParser:
                 if taxid and file_taxid != taxid:
                     continue
 
-                # Check if we already have JSON result for this
-                existing = [r for r in results
-                            if r.sample_id == file_sample and r.taxid == file_taxid]
-                if existing:
+                # Skip only when a BLAST-method result already exists for this
+                # pair (from the aggregate or a JSON summary). A minimap2 entry
+                # for the same pair must NOT block the blast.tsv -- that coarse
+                # (sample, taxid) dedup was the hide-on-disk-BLAST bug.
+                key = (file_sample, file_taxid, "blast")
+                if key in seen_keys:
                     continue
 
                 # Parse tabular file
@@ -667,6 +695,7 @@ class ValidationParser:
                     blast_file, file_sample, file_taxid
                 )
                 results.append(result)
+                seen_keys.add(key)
 
         # Surface per-(sample, taxid) minimap2 coverage from individual stats
         # files (core/parsers/minimap2_stats.py): keeps the Coverage tab live

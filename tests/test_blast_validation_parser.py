@@ -419,3 +419,129 @@ class TestBlastColumnRobustness:
         f.write_text("".join("\t".join(r) + "\n" for r in rows))
         result = parser.parse_blast_tabular(f, "barcode01", 562, total_reads=2)
         assert result.percent_validated <= 100.0
+
+
+# 15-column nanometanf outfmt: ROWS_12 fields + qlen slen qcovs
+ROWS_15 = [r + (200, 5000, 95) for r in ROWS_12]
+
+
+class TestAggregateWinsHidesBlast:
+    """Regression for the reported symptom: operators see the Coverage
+    (minimap2) sub-tab populated but the BLAST sub-tab empty.
+
+    ``get_validation_results`` returns the aggregate ``validation_results.json``
+    as soon as it parses to a non-empty list, regardless of whether that list
+    contains any *blast*-method entries (blast_validation_parser.py:613). The
+    per-(sample, taxid) ``blast/*.blast.tsv`` scan lives only in the fallback
+    branch *after* that short-circuit, so an on-disk blast.tsv is never read
+    when the aggregate JSON is minimap2-only -- which nanometanf can legitimately
+    emit (the aggregator keys entries by stats-file glob; a (sample, taxid) whose
+    blast stats did not reach the aggregator's work dir, or a realtime cumulative
+    join that dropped the blast key, yields a minimap2-only entry while the
+    blast.tsv still lands on disk).
+
+    These tests encode the desired behaviour and FAIL on the current
+    short-circuit; they turn green once the loader also scans blast.tsv and
+    merges by (sample, taxid, method) instead of returning the aggregate whole.
+    This mirrors the unconditional minimap2 individual-file fallback that already
+    keeps the Coverage sub-tab live mid-run.
+    """
+
+    def _build_results_dir(self, root: Path) -> None:
+        """A results dir with a minimap2-ONLY aggregate JSON plus a real
+        blast.tsv on disk for a different taxid (562) that the aggregate omits.
+        """
+        vdir = root / "validation"
+        (vdir / "blast").mkdir(parents=True)
+        (vdir / "minimap2").mkdir(parents=True)
+        # Aggregate JSON: only minimap2, only taxid 1280. No blast anywhere.
+        (vdir / "validation_results.json").write_text(json.dumps(_aggregate({
+            "barcode01": {
+                "1280": {
+                    "species": "Staphylococcus aureus",
+                    "validation_method": "minimap2",
+                    "kraken_reads": 500,
+                    "mapped_reads": 480,
+                    "hit_rate": 0.96,
+                    "avg_mapq": 55.0,
+                    "ref_name": "NC_007795.1",
+                    "ref_length": 2821361,
+                },
+            }
+        }, method="minimap2")))
+        # Real BLAST result on disk for taxid 562 (E. coli) -- never in the JSON.
+        _write_blast(vdir / "blast" / "barcode01_taxid562.blast.tsv",
+                     ROWS_15, cols=15)
+
+    def test_on_disk_blast_surfaces_despite_minimap2_only_aggregate(self, tmp_path):
+        self._build_results_dir(tmp_path)
+        parser = ValidationParser(str(tmp_path))
+        results = parser.get_validation_results()
+
+        methods = {r.validation_method for r in results}
+        # The bug: only the minimap2 aggregate entry comes back.
+        assert any(m != "minimap2" for m in methods), (
+            "BLAST results on disk were hidden by the minimap2-only aggregate "
+            f"short-circuit; got methods={methods}"
+        )
+
+    def test_on_disk_blast_taxid_is_present(self, tmp_path):
+        self._build_results_dir(tmp_path)
+        parser = ValidationParser(str(tmp_path))
+        taxids = {r.taxid for r in parser.get_validation_results()}
+        assert 562 in taxids, (
+            "the BLAST-validated taxid 562 (blast.tsv on disk) never reached the "
+            f"GUI; got taxids={taxids}"
+        )
+
+    def test_partial_aggregate_surfaces_extra_on_disk_blast(self, tmp_path):
+        # Aggregate carries blast for taxid 1280 only; blast.tsv on disk for both
+        # 1280 (already covered) and 562 (omitted). Expect: 1280 from the
+        # aggregate (not re-parsed/duplicated) and 562 from disk.
+        vdir = tmp_path / "validation"
+        (vdir / "blast").mkdir(parents=True)
+        (vdir / "validation_results.json").write_text(json.dumps(_aggregate({
+            "barcode01": {
+                "1280": {
+                    "species": "Staphylococcus aureus",
+                    "kraken_reads": 500, "blast_hits": 480, "hit_rate": 0.96,
+                    "avg_identity": 99.0,
+                },
+            }
+        })))
+        _write_blast(vdir / "blast" / "barcode01_taxid1280.blast.tsv", ROWS_15, cols=15)
+        _write_blast(vdir / "blast" / "barcode01_taxid562.blast.tsv", ROWS_15, cols=15)
+
+        results = ValidationParser(str(tmp_path)).get_validation_results()
+        by_taxid = {}
+        for r in results:
+            by_taxid.setdefault(r.taxid, []).append(r)
+        assert set(by_taxid) == {562, 1280}
+        # 1280 came from the aggregate exactly once (disk copy deduped away).
+        assert len(by_taxid[1280]) == 1
+        assert by_taxid[1280][0].validated_reads == 480   # aggregate value, not the tsv's
+        # 562 surfaced from disk.
+        assert len(by_taxid[562]) == 1
+
+    def test_complete_aggregate_not_duplicated_by_disk_scan(self, tmp_path):
+        # A complete both-method aggregate plus the matching blast.tsv on disk
+        # must NOT double-count: the always-on disk scan dedups against the
+        # aggregate's (sample, taxid, method) keys.
+        vdir = tmp_path / "validation"
+        (vdir / "blast").mkdir(parents=True)
+        (vdir / "validation_results.json").write_text(json.dumps(_aggregate({
+            "barcode01": {
+                "562": {
+                    "species": "Escherichia coli",
+                    "kraken_reads": 100, "blast_hits": 90, "hit_rate": 0.9,
+                    "avg_identity": 97.0, "minimap2_mapped": 88,
+                    "minimap2_hit_rate": 0.88, "minimap2_identity": 98.0,
+                }
+            }
+        }, method="both")))
+        _write_blast(vdir / "blast" / "barcode01_taxid562.blast.tsv", ROWS_15, cols=15)
+
+        results = ValidationParser(str(tmp_path)).get_validation_results()
+        # Exactly the two aggregate results (both + minimap2); no third from disk.
+        assert len(results) == 2
+        assert sorted(r.validation_method for r in results) == ["both", "minimap2"]

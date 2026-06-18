@@ -390,15 +390,32 @@ Two validation sub-tabs:
 - **Minimap2/Coverage** — genome-centric: depth chart, cumulative curve, histogram, mapq filter
 
 **Result-loading priority** (`ValidationParser.get_validation_results`): the
-aggregate `validation/validation_results.json` wins when present. Without it,
-the parser falls back to individual per-(sample, taxid) files — `blast/*.blast.tsv`
-*and* `minimap2/*.minimap2_stats.json`. The minimap2 individual-file path
-(`core/parsers/minimap2_stats.py`) is what keeps the Coverage sub-tab populated
-during a realtime run, where the aggregate JSON is not written until late; BLAST
-and minimap2 are distinct methods for the same pair, so minimap2 stats supplement
-the blast.tsv results rather than dedup against them. Added in the 2026-06-02
-validation audit after a live run showed the Coverage tab blank mid-run despite
-high-quality `.minimap2_stats.json` already on disk.
+aggregate `validation/validation_results.json` is authoritative for the
+`(sample, taxid, method)` tuples it lists, but it does **not** short-circuit the
+on-disk scan. The parser seeds its result list from the aggregate, then ALWAYS
+also scans the individual per-(sample, taxid) files — `blast/*.blast.tsv` *and*
+`minimap2/*.minimap2_stats.json` — and merges in any `(sample, taxid, method)`
+the aggregate did not already cover (method class = "minimap2" vs everything-else
+= "blast"). BLAST and minimap2 are distinct methods for the same pair, so the
+disk files supplement the aggregate rather than dedup against it across methods.
+
+This symmetry is load-bearing: nanometanf's aggregator
+(`aggregate_validation_results`) keys entries by stats-file glob, so a
+`(sample, taxid)` whose blast stats did not reach the aggregator work dir — or
+whose blast key was dropped by a realtime cumulative join — appears as a
+**minimap2-only** entry in `validation_results.json` while its `blast.tsv` still
+lands on disk. The earlier code returned the aggregate whole the moment it was
+non-empty (`if aggregate_results: return`), so a minimap2-only aggregate hid the
+on-disk BLAST entirely: Coverage sub-tab populated, BLAST sub-tab empty — the
+exact "users don't see BLAST validation" report. The minimap2 individual-file
+path (`core/parsers/minimap2_stats.py`, added in the 2026-06-02 audit after the
+Coverage tab went blank mid-run) already ran unconditionally and deduped only
+against existing *minimap2* entries by `(sample, taxid)`; the blast.tsv scan now
+does the same, deduping only against existing *blast*-class entries so a
+minimap2 entry never blocks a blast.tsv. Regression-covered in
+`tests/test_blast_validation_parser.py::TestAggregateWinsHidesBlast` (minimap2-
+only aggregate + on-disk blast.tsv must surface both) and the synthetic
+`barcode05/263` fixture (`tests/validation/`), which carries exactly that shape.
 
 ### Realtime cumulative validation + per-batch drill-down
 

@@ -360,7 +360,13 @@ EXPECTED_AGGREGATE_RESULTS = [
     ("barcode01", 1280, "blast", "partial"),        # S. aureus
     ("barcode02", 1639, "minimap2", "confirmed"),   # L. monocytogenes
     ("barcode03", 562, "blast", "low"),             # E. coli: reads classified, no BLAST hits -> examined-and-negative
-    ("barcode05", 263, "minimap2", "confirmed"),    # F. tularensis TUL4 amplicon
+    ("barcode05", 263, "minimap2", "confirmed"),    # F. tularensis TUL4 amplicon (aggregate)
+    # The aggregate lists barcode05/263 as minimap2-only, but a real blast.tsv
+    # for the same pair also lands on disk (the TUL4 per-read BLAST panel). The
+    # loader now surfaces both methods instead of letting the minimap2-only
+    # aggregate hide the on-disk BLAST -- see
+    # tests/test_blast_validation_parser.py::TestAggregateWinsHidesBlast.
+    ("barcode05", 263, "blast", "confirmed"),       # F. tularensis on-disk blast.tsv
 ]
 
 
