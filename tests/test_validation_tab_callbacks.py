@@ -170,6 +170,57 @@ class TestEmptyStateCallbacks:
         assert section == {"display": "block"}
 
 
+class TestBlastIdentityPlotEmptyStates:
+    """C5: the identity plot must distinguish 'no BLAST results' from 'results
+    examined but all zero-identity', so a tab full of rejected cards is not read
+    as missing data."""
+
+    def _fn(self, app):
+        return get_callback_fn(app, "blast-identity-plot")
+
+    def _msg(self, fig):
+        return str(fig.layout.annotations[0].text) if fig.layout.annotations else ""
+
+    def test_no_results_generic_message(self, validation_app):
+        fig = self._fn(validation_app)({"results": []})
+        assert "No identity data" in self._msg(fig)
+
+    def test_all_zero_identity_examined_message(self, validation_app):
+        # A real BLAST result that was examined but matched nothing (0 identity).
+        data = {"results": [{"validation_method": "blast", "species": "E. coli",
+                             "percent_identity_mean": 0.0, "status": "low_confidence"}]}
+        fig = self._fn(validation_app)(data)
+        assert "examined" in self._msg(fig).lower()
+
+    def test_positive_identity_renders_bars(self, validation_app):
+        data = {"results": [{"validation_method": "blast", "species": "E. coli",
+                             "percent_identity_mean": 97.0}]}
+        fig = self._fn(validation_app)(data)
+        # A real bar trace, not the empty annotation.
+        assert fig.data and len(fig.data[0].x) == 1
+
+
+class TestBlastCardsStatusFilter:
+    """C6: a status filter that matches nothing shows a clear message, not a
+    silent blank."""
+
+    def _fn(self, app):
+        return get_callback_fn(app, "blast-results-container")
+
+    def test_no_match_shows_message(self, validation_app):
+        data = {"results": [{"validation_method": "blast", "species": "E. coli",
+                             "status": "low_confidence", "percent_validated": 0}]}
+        out = self._fn(validation_app)(data, "confirmed", "percent_validated", False)
+        assert "No BLAST results match" in str(out)
+
+    def test_matching_status_renders_cards(self, validation_app):
+        data = {"results": [{"validation_method": "blast", "species": "E. coli",
+                             "status": "confirmed", "percent_validated": 90,
+                             "percent_identity_mean": 97.0}]}
+        out = self._fn(validation_app)(data, "confirmed", "percent_validated", False)
+        assert "No BLAST results match" not in str(out)
+
+
 # ---------------------------------------------------------------------------
 # update_coverage_plots
 # ---------------------------------------------------------------------------

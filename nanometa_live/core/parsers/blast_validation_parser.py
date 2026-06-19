@@ -735,6 +735,22 @@ class ValidationParser:
                     continue
                 _supersede(od_r)
 
+        # Backfill species names. A blast.tsv parsed from disk carries only a
+        # taxid (parse_blast_tabular has no species column), so a BLAST result
+        # surfaced purely from disk -- e.g. the on-disk blast.tsv recovered when
+        # the aggregate JSON was minimap2-only -- would render with a blank name.
+        # Fill any empty species from another result for the same taxid that does
+        # carry a name (typically the aggregate's minimap2 entry for that pair).
+        species_by_taxid = {
+            r.taxid: r.species
+            for r in results
+            if getattr(r, "species", "")
+        }
+        if species_by_taxid:
+            for r in results:
+                if not getattr(r, "species", "") and r.taxid in species_by_taxid:
+                    r.species = species_by_taxid[r.taxid]
+
         logger.info(f"Retrieved {len(results)} validation results")
         if cache_this_call:
             self._results_cache = list(results)

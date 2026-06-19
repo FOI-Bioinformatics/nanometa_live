@@ -1,0 +1,65 @@
+{
+  "pipeline_version": "1.1.0",
+  "validation_method": "both",
+  "timestamp": "2026-06-18T12:00:00+00:00",
+  "thresholds": {
+    "hit_rate": 0.5,
+    "identity": 90.0
+  },
+  "results": {
+    "barcode01": {
+      "1773": {
+        "taxid": 1773,
+        "species": "Mycobacterium tuberculosis",
+        "validation_method": "blast",
+        "kraken_reads": 3500,
+        "extracted_reads": 3500,
+        "blast_hits": 3200,
+        "hit_rate": 0.914,
+        "avg_identity": 97.5,
+        "avg_coverage": 88.0,
+        "validation_status": "confirmed",
+        "minimap2_mapped": 3300,
+        "minimap2_hit_rate": 0.943,
+        "minimap2_identity": 98.0,
+        "minimap2_status": "confirmed"
+      },
+      "1280": {
+        "taxid": 1280,
+        "species": "Staphylococcus aureus",
+        "validation_method": "blast",
+        "kraken_reads": 2800,
+        "extracted_reads": 2800,
+        "blast_hits": 1800,
+        "hit_rate": 0.643,
+        "avg_identity": 93.0,
+        "avg_coverage": 70.0,
+        "validation_status": "uncertain"
+      }
+    },
+    "barcode02": {
+      "1639": {
+        "taxid": 1639,
+        "species": "Listeria monocytogenes",
+        "validation_method": "minimap2",
+        "kraken_reads": 4100,
+        "extracted_reads": 4100,
+        "mapped_reads": 3900,
+        "hit_rate": 0.951,
+        "avg_identity": 98.5,
+        "avg_coverage": 92.0,
+        "avg_mapq": 56.0,
+        "ref_name": "NC_003210.1",
+        "ref_length": 2944528,
+        "validation_status": "confirmed"
+      }
+    }
+  },
+  "summary": {
+    "total_samples": 2,
+    "total_taxids_validated": 3,
+    "confirmed": 2,
+    "uncertain": 1,
+    "rejected": 0
+  }
+}

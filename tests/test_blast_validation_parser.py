@@ -545,3 +545,27 @@ class TestAggregateWinsHidesBlast:
         # Exactly the two aggregate results (both + minimap2); no third from disk.
         assert len(results) == 2
         assert sorted(r.validation_method for r in results) == ["both", "minimap2"]
+
+    def test_disk_blast_inherits_species_from_aggregate_minimap2(self, tmp_path):
+        # The blast.tsv carries only a taxid (parse_blast_tabular has no species),
+        # so a BLAST result surfaced from disk would render with a blank name.
+        # When the aggregate has a minimap2 entry for the SAME taxid, the disk
+        # blast result must inherit that species name.
+        vdir = tmp_path / "validation"
+        (vdir / "blast").mkdir(parents=True)
+        (vdir / "validation_results.json").write_text(json.dumps(_aggregate({
+            "barcode05": {
+                "263": {
+                    "species": "Francisella tularensis",
+                    "validation_method": "minimap2",
+                    "kraken_reads": 3800, "mapped_reads": 3650, "hit_rate": 0.96,
+                    "avg_mapq": 55.0,
+                },
+            }
+        }, method="minimap2")))
+        _write_blast(vdir / "blast" / "barcode05_taxid263.blast.tsv", ROWS_15, cols=15)
+
+        results = ValidationParser(str(tmp_path)).get_validation_results()
+        blast = next(r for r in results if r.validation_method != "minimap2"
+                     and r.taxid == 263)
+        assert blast.species == "Francisella tularensis"
