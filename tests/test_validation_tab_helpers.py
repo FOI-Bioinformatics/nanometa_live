@@ -12,6 +12,7 @@ from dash import html
 
 from nanometa_live.app.tabs.validation_tab_helpers import (
     _CARD_LIST_INITIAL_LIMIT,
+    _blast_tsv_path,
     _build_coverage_selector_options,
     _build_paginated_card_list,
     _compute_summary,
@@ -194,6 +195,50 @@ class TestEmptyIdentityPlot:
         fig = _create_empty_identity_plot()
         assert isinstance(fig, go.Figure)
         assert "No identity data" in str(fig.layout.annotations[0].text)
+
+    def test_custom_message(self):
+        # C5: the caller distinguishes "no results" from "examined-and-negative".
+        fig = _create_empty_identity_plot("Reads were examined but no match")
+        assert "examined" in str(fig.layout.annotations[0].text)
+
+
+class TestBlastTsvPath:
+    """B9: the per-read detail panel must find both the canonical
+    <sample>_taxid<tid>.blast.tsv and the no-prefix legacy <sample>_<tid> name."""
+
+    def _cfg(self, root):
+        return {"results_output_directory": str(root)}
+
+    def test_canonical_name(self, tmp_path):
+        d = tmp_path / "validation" / "blast"
+        d.mkdir(parents=True)
+        (d / "barcode01_taxid562.blast.tsv").write_text("x")
+        path, sample, taxid = _blast_tsv_path(self._cfg(tmp_path), "barcode01_562")
+        assert path.name == "barcode01_taxid562.blast.tsv"
+        assert path.exists() and sample == "barcode01" and taxid == 562
+
+    def test_legacy_no_prefix_name(self, tmp_path):
+        d = tmp_path / "validation" / "blast"
+        d.mkdir(parents=True)
+        (d / "barcode01_562.blast.tsv").write_text("x")  # legacy: no 'taxid'
+        path, sample, taxid = _blast_tsv_path(self._cfg(tmp_path), "barcode01_562")
+        assert path.name == "barcode01_562.blast.tsv"
+        assert path.exists() and taxid == 562
+
+    def test_prefers_canonical_when_both_exist(self, tmp_path):
+        d = tmp_path / "validation" / "blast"
+        d.mkdir(parents=True)
+        (d / "barcode01_taxid562.blast.tsv").write_text("x")
+        (d / "barcode01_562.blast.tsv").write_text("x")
+        path, _s, _t = _blast_tsv_path(self._cfg(tmp_path), "barcode01_562")
+        assert path.name == "barcode01_taxid562.blast.tsv"
+
+    def test_missing_falls_back_to_canonical_name(self, tmp_path):
+        # Neither file exists -> return the canonical path so the "not found"
+        # message references the expected name.
+        path, _s, _t = _blast_tsv_path(self._cfg(tmp_path), "barcode01_562")
+        assert path.name == "barcode01_taxid562.blast.tsv"
+        assert not path.exists()
 
 
 class TestSortValidatedFirst:

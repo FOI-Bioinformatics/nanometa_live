@@ -392,6 +392,15 @@ def register_validation_callbacks(app: Dash):
                 identity_maxs.append(result.get("percent_identity_max", 0))
 
         if not species_names:
+            # Distinguish "no BLAST results" from "results examined but none
+            # matched a reference above 0% identity" (examined-and-negative) so
+            # the plot is not misread as missing data when the cards below show
+            # rejected/low-confidence rows.
+            if results:
+                return _create_empty_identity_plot(
+                    "Reads were examined but no BLAST match reached a positive "
+                    "identity — see the result cards below for per-species status."
+                )
             return _create_empty_identity_plot()
 
         # Color bars by identity level: green >= 95, amber 90-95, red < 90

@@ -304,7 +304,16 @@ def _blast_tsv_path(config: Optional[dict], selected_key: Optional[str]):
     if len(parts) != 2:
         return None, None, None
     sample_id, taxid_str = parts
-    path = Path(results_dir) / "validation" / "blast" / f"{sample_id}_taxid{taxid_str}.blast.tsv"
+    blast_dir = Path(results_dir) / "validation" / "blast"
+    # Accept both the canonical nanometanf naming (<sample>_taxid<tid>.blast.tsv)
+    # and the no-prefix legacy form (<sample>_<tid>.blast.tsv). The poll-path
+    # parser already strips an optional 'taxid' prefix; mirror that here so the
+    # per-read detail panel does not go blank for a legacy-named file. Prefer the
+    # canonical name, and fall back to it (not the legacy one) when neither
+    # exists so the "not found" message references the expected path.
+    canonical = blast_dir / f"{sample_id}_taxid{taxid_str}.blast.tsv"
+    legacy = blast_dir / f"{sample_id}_{taxid_str}.blast.tsv"
+    path = canonical if (canonical.exists() or not legacy.exists()) else legacy
     try:
         taxid = int(taxid_str)
     except (TypeError, ValueError):
@@ -603,11 +612,17 @@ def _enumerate_batch_ids(config: Optional[dict]) -> List[str]:
     return sorted(batch_ids, reverse=True)
 
 
-def _create_empty_identity_plot() -> go.Figure:
-    """Create an empty placeholder identity plot."""
+def _create_empty_identity_plot(message: str = "No identity data available") -> go.Figure:
+    """Create an empty placeholder identity plot.
+
+    ``message`` lets the caller distinguish "no BLAST results at all" from
+    "results examined but none reached a positive identity" so a tab full of
+    rejected/low-confidence cards does not sit beside a plot that merely says
+    "no data".
+    """
     fig = go.Figure()
     fig.add_annotation(
-        text="No identity data available",
+        text=message,
         xref="paper",
         yref="paper",
         x=0.5,
