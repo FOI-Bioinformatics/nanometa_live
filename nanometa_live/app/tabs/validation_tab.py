@@ -287,8 +287,9 @@ def register_validation_callbacks(app: Dash):
             Output("blast-results-section", "style"),
         ],
         Input("validation-data-store", "data"),
+        State("app-config", "data"),
     )
-    def update_blast_empty_state(data):
+    def update_blast_empty_state(data, config):
         """Show or hide the BLAST empty-state message, with context-appropriate text."""
         from nanometa_live.app.components.modern_components import EmptyStateMessage
 
@@ -311,6 +312,27 @@ def register_validation_callbacks(app: Dash):
         blast_results = _filter_by_method(data["results"], "blast")
         if blast_results:
             return hidden, [], visible
+
+        # No BLAST results, but other (minimap2) validation data IS present.
+        # The single most common reason an operator "doesn't see BLAST
+        # validation" is that the run used validation_method=minimap2 (the GUI
+        # default), so BLAST was never executed -- yet the old message ("No
+        # BLAST read validation results found") implied BLAST ran and found
+        # nothing. Make the empty state explain the actual cause so the operator
+        # knows to switch the method rather than assume a failure or a bug.
+        method = str((config or {}).get("validation_method", "") or "").lower()
+        if method == "minimap2":
+            return visible, EmptyStateMessage(
+                title="BLAST Not Run",
+                message=(
+                    "BLAST validation was not run for this analysis — the "
+                    "validation method is set to 'minimap2'. The Genome Coverage "
+                    "tab shows the minimap2 results. To add BLAST read-level "
+                    "confirmation, set the validation method to 'both' (or "
+                    "'blast') in the Configuration tab and re-run."
+                ),
+                icon="bi-shield-check",
+            ), hidden
         return visible, EmptyStateMessage(
             title="No BLAST Results",
             message="No BLAST read validation results found for the current sample.",
