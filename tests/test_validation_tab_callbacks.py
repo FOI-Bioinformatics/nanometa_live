@@ -142,21 +142,42 @@ class TestEmptyStateCallbacks:
 
     def test_blast_disabled_state(self, validation_app):
         style, children, section = self._blast_fn(validation_app)(
-            {"results": [], "message": "Validation is disabled. Enable it in Configuration tab."})
+            {"results": [], "message": "Validation is disabled. Enable it in Configuration tab."}, {})
         assert style == {"display": "block"}
         assert "Disabled" in self._title(children)
         assert section == {"display": "none"}
 
     def test_blast_waiting_state(self, validation_app):
         style, children, section = self._blast_fn(validation_app)(
-            {"results": [], "message": "Waiting for validation results from pipeline..."})
+            {"results": [], "message": "Waiting for validation results from pipeline..."}, {})
         assert "Awaiting" in self._title(children)
 
     def test_blast_has_results_hides_empty(self, validation_app):
         style, children, section = self._blast_fn(validation_app)(
-            {"results": [{"validation_method": "blast", "species": "X"}]})
+            {"results": [{"validation_method": "blast", "species": "X"}]}, {})
         assert style == {"display": "none"}
         assert section == {"display": "block"}
+
+    def test_blast_empty_explains_minimap2_method(self, validation_app):
+        # The likeliest real cause of "I don't see BLAST validation": the run
+        # used the GUI-default validation_method=minimap2, so BLAST never ran.
+        # minimap2 results are present; the BLAST empty state must say BLAST was
+        # NOT RUN (and how to enable it), not "found nothing".
+        data = {"results": [{"validation_method": "minimap2", "species": "F. tularensis"}]}
+        style, children, section = self._blast_fn(validation_app)(
+            data, {"validation_method": "minimap2"})
+        assert style == {"display": "block"} and section == {"display": "none"}
+        title = self._title(children)
+        assert "Not Run" in title
+        assert "minimap2" in title.lower() or "both" in str(children).lower()
+
+    def test_blast_empty_generic_when_method_includes_blast(self, validation_app):
+        # method=both but no blast results yet (e.g. still processing) -> the
+        # generic "No BLAST Results", NOT the "not run" message.
+        data = {"results": [{"validation_method": "minimap2", "species": "X"}]}
+        _s, children, _sec = self._blast_fn(validation_app)(
+            data, {"validation_method": "both"})
+        assert "No BLAST Results" in self._title(children)
 
     def test_coverage_disabled_state(self, validation_app):
         style, children, section = self._cov_fn(validation_app)(
