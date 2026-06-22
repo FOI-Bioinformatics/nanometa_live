@@ -80,6 +80,50 @@ class TestDetectKrakenTaxonomy:
         assert ttype == "gtdb"
         assert "could not determine" in reason.lower()
 
+    def test_gzipped_inspect_gtdb_suffix_positive(self, tmp_path):
+        # The bioshield case: a custom/remapped DB shipping only inspect.txt.gz
+        # whose GTDB species suffixes (ambifaria_A) are the giveaway. Must be a
+        # POSITIVE detection, not the default fallthrough.
+        import gzip
+        db = _dbroot(tmp_path) / "customdb"
+        db.mkdir()
+        with gzip.open(db / "inspect.txt.gz", "wt") as fh:
+            fh.write("0.1\t100\t0\tG\t4007157\t  Burkholderia\n")
+            for sp, sfx in (("ambifaria", "A"), ("lata", "C"), ("cepacia", "F")):
+                fh.write(f"0.05\t50\t50\tS\t40071{ord(sfx)}\t    Burkholderia {sp}_{sfx}\n")
+        ttype, reason = detect_kraken_taxonomy(str(db))
+        assert ttype == "gtdb"
+        assert "could not determine" not in reason.lower()
+        assert ".gz" in reason
+
+    def test_gzipped_inspect_ncbi_taxids(self, tmp_path):
+        import gzip
+        db = _dbroot(tmp_path) / "customdb"
+        db.mkdir()
+        with gzip.open(db / "inspect.txt.gz", "wt") as fh:
+            fh.write("50.0\t100\t100\tS\t562\tEscherichia coli\n")
+            fh.write("25.0\t50\t50\tS\t1280\tStaphylococcus aureus\n")
+        assert detect_kraken_taxonomy(str(db))[0] == "ncbi"
+
+    def test_plain_inspect_in_db_dir_gtdb(self, tmp_path):
+        # inspect.txt directly in the DB dir (not the parent) is now read.
+        db = _dbroot(tmp_path) / "customdb"
+        db.mkdir()
+        (db / "inspect.txt").write_text(
+            "0.05\t50\t50\tS\t900001\t    Prevotella copri_B\n"
+            "0.05\t50\t50\tS\t900002\t    Prevotella copri_C\n"
+            "0.05\t50\t50\tS\t900003\t    Prevotella copri_D\n"
+        )
+        assert detect_kraken_taxonomy(str(db))[0] == "gtdb"
+
+    def test_gzipped_seqid_map_gtdb_accessions(self, tmp_path):
+        import gzip
+        db = _dbroot(tmp_path) / "customdb"
+        db.mkdir()
+        with gzip.open(db / "seqid2taxid.map.gz", "wt") as fh:
+            fh.write("".join(f"GB_GCA_{i:06d}.1\t{i}\n" for i in range(60)))
+        assert detect_kraken_taxonomy(str(db))[0] == "gtdb"
+
 
 class TestEstimateUpdateInterval:
     def _fastqs(self, d, n, age_seconds=0):
