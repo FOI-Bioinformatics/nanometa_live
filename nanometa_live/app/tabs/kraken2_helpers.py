@@ -203,25 +203,41 @@ def load_kraken2_taxonomy(kraken_db_path: str) -> dict:
         Dict mapping taxid -> parent_taxid. Returns empty dict if the
         inspect.txt file is missing or cannot be read.
     """
+    import gzip
     import os
 
     if not kraken_db_path:
         return {}
 
-    inspect_path = os.path.join(kraken_db_path, "inspect.txt")
-    if inspect_path in _TAXONOMY_CACHE:
-        return _TAXONOMY_CACHE[inspect_path]
+    # Cache on the database directory so a gz-only DB is cached too (the cache
+    # key used to be the plain inspect.txt path).
+    if kraken_db_path in _TAXONOMY_CACHE:
+        return _TAXONOMY_CACHE[kraken_db_path]
 
-    if not os.path.exists(inspect_path):
-        logging.debug(f"Kraken2 inspect.txt not found at {inspect_path}")
-        _TAXONOMY_CACHE[inspect_path] = {}
+    # Prefer a plain inspect.txt; fall back to a gzipped inspect.txt.gz. Some
+    # Kraken2 builds (e.g. GTDB-derived / size-conscious DBs) ship only the
+    # compressed form. The DB indexer already reads the .gz
+    # (database_indexer.build_from_inspect_gz); mirror that here so the
+    # authoritative-taxonomy correction for Sankey/Sunburst is not silently
+    # disabled on those databases.
+    plain_path = os.path.join(kraken_db_path, "inspect.txt")
+    gz_path = os.path.join(kraken_db_path, "inspect.txt.gz")
+    if os.path.exists(plain_path):
+        inspect_path = plain_path
+        _opener = lambda p: open(p)
+    elif os.path.exists(gz_path):
+        inspect_path = gz_path
+        _opener = lambda p: gzip.open(p, "rt", encoding="utf-8")
+    else:
+        logging.debug(f"Kraken2 inspect.txt[.gz] not found in {kraken_db_path}")
+        _TAXONOMY_CACHE[kraken_db_path] = {}
         return {}
 
     taxid_to_parent: dict = {}
     indent_stack = []  # list of (indent, taxid)
 
     try:
-        with open(inspect_path) as f:
+        with _opener(inspect_path) as f:
             for line in f:
                 if line.startswith("#"):
                     continue
@@ -241,16 +257,18 @@ def load_kraken2_taxonomy(kraken_db_path: str) -> dict:
                 parent = indent_stack[-1][1] if indent_stack else 0
                 taxid_to_parent[taxid] = parent
                 indent_stack.append((indent, taxid))
-    except OSError as exc:
-        logging.warning(f"Failed to read Kraken2 inspect.txt: {exc}")
-        _TAXONOMY_CACHE[inspect_path] = {}
+    except (OSError, EOFError) as exc:
+        # EOFError / gzip.BadGzipFile (an OSError subclass) cover a truncated or
+        # malformed .gz; a plain-text OSError covers an unreadable inspect.txt.
+        logging.warning(f"Failed to read Kraken2 {os.path.basename(inspect_path)}: {exc}")
+        _TAXONOMY_CACHE[kraken_db_path] = {}
         return {}
 
     logging.info(
         f"Loaded Kraken2 taxonomy from {inspect_path}: "
         f"{len(taxid_to_parent)} taxa"
     )
-    _TAXONOMY_CACHE[inspect_path] = taxid_to_parent
+    _TAXONOMY_CACHE[kraken_db_path] = taxid_to_parent
     return taxid_to_parent
 
 

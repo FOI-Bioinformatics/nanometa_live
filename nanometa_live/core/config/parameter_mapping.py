@@ -148,6 +148,12 @@ def get_validation_species_from_watchlist(
 
         species_list = []
         genome_paths = []
+        # Track entries whose Kraken2 taxid fell back to the raw NCBI taxid
+        # because nothing mapped them. On a GTDB/custom-taxid database (where the
+        # NCBI taxid is absent), read extraction by that taxid yields ZERO reads
+        # and validation silently produces nothing -- the failure mode found
+        # auditing a custom-taxid DB. We surface it as a warning below.
+        unmapped_names = []
 
         for entry in entries:
             ncbi_taxid = getattr(entry, 'taxid', 0)
@@ -159,9 +165,11 @@ def get_validation_species_from_watchlist(
             # so the operator does not have to run "Scan Database"; otherwise
             # fall back to the auto-mapping collection, then to the NCBI taxid.
             kraken_taxid = ncbi_taxid  # Default to NCBI taxid
+            mapped = False
             explicit_db_taxid = getattr(entry, 'db_taxid', None)
             if explicit_db_taxid:
                 kraken_taxid = explicit_db_taxid
+                mapped = True
                 logging.debug(
                     f"Using explicit db_taxid {explicit_db_taxid} for "
                     f"{getattr(entry, 'name', '')}"
@@ -170,9 +178,13 @@ def get_validation_species_from_watchlist(
                 db_taxid = mapping_collection.get_db_taxid(ncbi_taxid)
                 if db_taxid:
                     kraken_taxid = db_taxid
+                    mapped = True
                     logging.debug(
                         f"Mapped NCBI {ncbi_taxid} -> Kraken2 {db_taxid} for {getattr(entry, 'name', '')}"
                     )
+
+            if not mapped:
+                unmapped_names.append(getattr(entry, 'name', '') or str(ncbi_taxid))
 
             species_info = {
                 'taxid': ncbi_taxid,
@@ -190,6 +202,31 @@ def get_validation_species_from_watchlist(
             f"Found {len(species_list)} enabled watchlist species, "
             f"{len(genome_paths)} with downloaded genomes"
         )
+
+        # Warn loudly when validation taxids fell back to raw NCBI taxids: on a
+        # custom/GTDB database this silently extracts 0 reads. Distinguish "never
+        # scanned" (no mapping at all) from "scanned but these did not map".
+        if unmapped_names:
+            preview = ", ".join(unmapped_names[:5]) + (
+                f" (+{len(unmapped_names) - 5} more)" if len(unmapped_names) > 5 else "")
+            if mapping_collection is None:
+                logging.warning(
+                    "No Kraken2 taxid mapping has been generated for this database, "
+                    "so validation will use raw NCBI taxids (%d species: %s). If this "
+                    "is a GTDB or custom database whose taxids differ from NCBI, read "
+                    "extraction will find ZERO reads and validation will produce "
+                    "nothing. Run 'Scan Database' / 'Verify Taxonomy IDs' in the "
+                    "Watchlist & Preparation tab before starting.",
+                    len(unmapped_names), preview,
+                )
+            else:
+                logging.warning(
+                    "%d watchlist species could not be mapped to this Kraken2 "
+                    "database (%s); validation will fall back to their NCBI taxids "
+                    "and may find no reads if the database does not contain them.",
+                    len(unmapped_names), preview,
+                )
+
         return species_list, genome_paths
 
     except (ImportError, AttributeError) as e:
