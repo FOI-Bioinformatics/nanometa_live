@@ -149,6 +149,65 @@ class TestGetValidationSpecies:
             assert get_validation_species({}) == ([], [])
 
 
+class TestUnmappedValidationTaxidWarning:
+    """A custom/GTDB DB whose taxids differ from NCBI silently extracts 0 reads
+    when the watchlist was never mapped. get_validation_species_from_watchlist
+    must WARN at that fallback instead of failing silently."""
+
+    def _entry(self, taxid, name, db_taxid=None):
+        e = MagicMock()
+        e.taxid = taxid
+        e.name = name
+        e.db_taxid = db_taxid
+        e.names_alt = []
+        return e
+
+    def _run(self, entries, mapping_collection):
+        wm = MagicMock()
+        wm._loaded = True
+        wm.get_active_entries.return_value = {e.taxid: e for e in entries}
+        gm = MagicMock()
+        gm.get_genome_path.return_value = None
+        with patch.object(pm, "get_watchlist_manager", return_value=wm), \
+             patch.object(pm, "get_genome_manager", return_value=gm), \
+             patch("nanometa_live.core.taxonomy.taxid_mapping.get_mapping_collection",
+                   return_value=mapping_collection):
+            return pm.get_validation_species_from_watchlist({"kraken_db": "/db"})
+
+    def test_no_mapping_warns_run_scan(self, caplog):
+        import logging
+        with caplog.at_level(logging.WARNING):
+            species, _ = self._run([self._entry(263, "Francisella tularensis")], None)
+        assert species and species[0]["kraken_taxid"] == 263  # raw NCBI fallback
+        assert any("Scan Database" in r.message for r in caplog.records)
+
+    def test_scanned_all_mapped_no_warning(self, caplog):
+        import logging
+        coll = MagicMock()
+        coll.get_db_taxid.return_value = 4007169  # 263 -> custom DB taxid
+        with caplog.at_level(logging.WARNING):
+            species, _ = self._run([self._entry(263, "Francisella tularensis")], coll)
+        assert species[0]["kraken_taxid"] == 4007169
+        assert not any("could not be mapped" in r.message or "Scan Database" in r.message
+                       for r in caplog.records)
+
+    def test_scanned_partial_warns_specific(self, caplog):
+        import logging
+        coll = MagicMock()
+        coll.get_db_taxid.side_effect = lambda t: 4007169 if t == 263 else None
+        with caplog.at_level(logging.WARNING):
+            self._run([self._entry(263, "F. tularensis"),
+                       self._entry(1392, "B. anthracis")], coll)
+        assert any("could not be mapped" in r.message for r in caplog.records)
+
+    def test_explicit_db_taxid_not_warned(self, caplog):
+        import logging
+        with caplog.at_level(logging.WARNING):
+            species, _ = self._run([self._entry(263, "F. tularensis", db_taxid=4007169)], None)
+        assert species[0]["kraken_taxid"] == 4007169
+        assert not any("Scan Database" in r.message for r in caplog.records)
+
+
 class TestPathogenGenomesLocation:
     """Operator feedback #2: archive/rerun crashed with 'No such file:
     .../validation/pathogen_genomes.json'. The launch input must live OUTSIDE

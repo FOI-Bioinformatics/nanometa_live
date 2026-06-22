@@ -63,6 +63,30 @@ class TestLoadKraken2Taxonomy:
     def test_empty_path_returns_empty(self):
         assert load_kraken2_taxonomy("") == {}
 
+    def test_parses_gzipped_inspect(self, tmp_path):
+        # GTDB-derived / size-conscious DBs ship only inspect.txt.gz. The
+        # authoritative-taxonomy correction must still load (was silently empty).
+        import gzip
+        content = (
+            "100.00\t1000\t0\tR\t1\troot\n"
+            "90.00\t900\t0\tD\t2\t  Bacteria\n"
+            "50.00\t500\t0\tG\t561\t    Escherichia\n"
+            "25.00\t250\t250\tS\t562\t      Escherichia coli\n"
+        )
+        with gzip.open(tmp_path / "inspect.txt.gz", "wt", encoding="utf-8") as fh:
+            fh.write(content)
+        mapping = load_kraken2_taxonomy(str(tmp_path))
+        assert mapping == {1: 0, 2: 1, 561: 2, 562: 561}
+
+    def test_plain_inspect_preferred_over_gz(self, tmp_path):
+        import gzip
+        (tmp_path / "inspect.txt").write_text(
+            "100.00\t1000\t0\tR\t1\troot\n90.00\t900\t0\tD\t2\t  Bacteria\n"
+        )
+        with gzip.open(tmp_path / "inspect.txt.gz", "wt", encoding="utf-8") as fh:
+            fh.write("bogus\tnot\tparsed\n")  # would corrupt if gz were read
+        assert load_kraken2_taxonomy(str(tmp_path)) == {1: 0, 2: 1}
+
 
 class TestApplyAuthoritativeTaxonomy:
     def test_replaces_parent_taxid_from_mapping(self):
