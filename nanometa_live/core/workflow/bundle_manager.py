@@ -54,6 +54,14 @@ _PLUGIN_PREFIXES = ("nf-schema", "nf-validation", "nf-wave", "nf-console")
 # copied from ``~/.nanometa/containers``.
 _BUNDLED_PIPELINE_CONTAINERS_DIRNAME = "pipeline_containers"
 
+# Default container registry for refs that omit one. nanometanf sets
+# `docker.registry = 'quay.io'` (nextflow.config), so a bare ref like
+# `biocontainers/seqkit:2.9.0--h9ee0642_0` resolves to
+# `quay.io/biocontainers/...` at runtime -- it does NOT exist on Docker Hub.
+# A docker/singularity-mode export must apply the same default, or every
+# bare biocontainers pull fails and the bundle ships an incomplete image set.
+_DEFAULT_DOCKER_REGISTRY = "quay.io"
+
 # Per-engine docker/apptainer command timeout in seconds. A 1 GB
 # container image typically pulls in 30-90 s on a fast link; 600 s
 # leaves headroom for slow connections without hanging an aborted
@@ -1303,23 +1311,49 @@ class BundleManager:
         images_dir.mkdir(parents=True, exist_ok=True)
 
         for ref in refs:
+            # Apply the pipeline's default registry to bare refs (quay.io),
+            # mirroring Nextflow's docker.registry; otherwise biocontainers
+            # images are pulled from Docker Hub where they do not exist.
+            pull_ref = self._apply_default_registry(ref)
             try:
                 if engine == "docker":
-                    self._pull_one_docker_image(ref, images_dir)
+                    self._pull_one_docker_image(pull_ref, images_dir)
                 else:
-                    self._pull_one_singularity_image(ref, images_dir, cli)
-                result["pulled"].append(ref)
+                    self._pull_one_singularity_image(pull_ref, images_dir, cli)
+                result["pulled"].append(pull_ref)
                 result["image_count"] += 1
             except subprocess.SubprocessError as exc:
                 result["warnings"].append(
-                    f"Failed to pull {ref}: {exc}"
+                    f"Failed to pull {pull_ref}: {exc}"
                 )
-                logger.warning(f"{engine} pull failed for {ref}: {exc}")
+                logger.warning(f"{engine} pull failed for {pull_ref}: {exc}")
             except OSError as exc:
-                result["warnings"].append(f"OSError pulling {ref}: {exc}")
-                logger.warning(f"{engine} pull OSError for {ref}: {exc}")
+                result["warnings"].append(f"OSError pulling {pull_ref}: {exc}")
+                logger.warning(f"{engine} pull OSError for {pull_ref}: {exc}")
 
         return result
+
+    @staticmethod
+    def _apply_default_registry(ref: str, registry: str = _DEFAULT_DOCKER_REGISTRY) -> str:
+        """Prepend the default registry to a ref that omits one.
+
+        Mirrors Nextflow's ``docker.registry`` resolution: a ref whose first
+        path component has no ``.``/``:`` (and is not ``localhost``) is a Docker
+        Hub shorthand and, for nanometanf, must resolve under ``quay.io`` (where
+        the biocontainers images live). Refs that already name a registry
+        (``community.wave.seqera.io/...``, ``quay.io/...``) are returned
+        unchanged. A ``docker://`` scheme prefix is preserved.
+        """
+        prefix = ""
+        body = ref
+        if body.startswith("docker://"):
+            prefix, body = "docker://", body[len("docker://"):]
+        if body.startswith(("http://", "https://", "oras://")):
+            return ref  # explicit URL (e.g. Galaxy singularity image)
+        first = body.split("/", 1)[0]
+        if "." in first or ":" in first or first == "localhost":
+            return ref  # already has an explicit registry host
+        return f"{prefix}{registry}/{body}"
 
     @staticmethod
     def _ref_to_safe_filename(ref: str) -> str:

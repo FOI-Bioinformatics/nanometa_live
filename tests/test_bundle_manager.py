@@ -1737,7 +1737,10 @@ class TestContainerizationModes:
         # Exactly one image in the stub pipeline -> one pull + one save
         assert len(pull_cmds) == 1
         assert len(save_cmds) == 1
-        assert "biocontainers/chopper:0.12.0--hdcf5f25_0" in pull_cmds[0]
+        # The bare biocontainers ref is resolved under quay.io (Nextflow's
+        # docker.registry), where the image actually exists -- pulling it from
+        # Docker Hub fails. See BundleManager._apply_default_registry.
+        assert "quay.io/biocontainers/chopper:0.12.0--hdcf5f25_0" in pull_cmds[0]
 
         # The tar should have been bundled.
         import tarfile

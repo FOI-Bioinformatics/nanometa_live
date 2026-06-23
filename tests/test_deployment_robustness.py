@@ -119,6 +119,31 @@ class TestAppleDoubleExclusion:
         assert any(n.endswith("genomes/1.fasta") for n in names)
 
 
+class TestDefaultDockerRegistry:
+    """A docker/singularity export must resolve bare biocontainers refs under
+    quay.io (Nextflow's docker.registry), or every such pull fails on Docker Hub
+    and the bundle ships an incomplete image set."""
+
+    def test_bare_biocontainers_gets_quay(self):
+        assert (BundleManager._apply_default_registry("biocontainers/seqkit:2.9.0--h9ee0642_0")
+                == "quay.io/biocontainers/seqkit:2.9.0--h9ee0642_0")
+
+    def test_explicit_registry_unchanged(self):
+        for ref in ("community.wave.seqera.io/library/blast:2.17.0--abc",
+                    "quay.io/biocontainers/python:3.11",
+                    "localhost:5000/x:1"):
+            assert BundleManager._apply_default_registry(ref) == ref
+
+    def test_docker_scheme_preserved(self):
+        assert (BundleManager._apply_default_registry("docker://biocontainers/chopper:0.12.0b--x")
+                == "docker://quay.io/biocontainers/chopper:0.12.0b--x")
+
+    def test_url_refs_unchanged(self):
+        for ref in ("https://depot.galaxyproject.org/singularity/blast:2.17.sif",
+                    "oras://community.wave.seqera.io/library/x:tag"):
+            assert BundleManager._apply_default_registry(ref) == ref
+
+
 class TestSizeHelpers:
     def test_human_size(self):
         assert human_size(0) == "0 B"
