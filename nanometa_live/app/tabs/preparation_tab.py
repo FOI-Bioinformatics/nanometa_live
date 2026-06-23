@@ -539,6 +539,13 @@ def register_preparation_callbacks(app):
         State("bundle-export-prewarm", "value"),
         State("bundle-containerization-radio", "value"),
         State("app-config", "data"),
+        # Watchlist entries hydrated by the main process. This is a
+        # background=True callback, so the worker's WatchlistManager singleton
+        # is empty; the readiness check below MUST read the snapshot or its
+        # watchlist-active check reports "not enabled" and the export gate
+        # (pass / warn+force / critical-block) mis-evaluates. Same bridge as
+        # run_preparation / run_rescan.
+        State("watchlist-entries-snapshot", "data"),
         prevent_initial_call=True,
         background=True,
         manager=background_callback_manager,
@@ -547,7 +554,7 @@ def register_preparation_callbacks(app):
         ],
     )
     def export_bundle(n_clicks, directory, filename, pre_warm,
-                      containerization, config):
+                      containerization, config, watchlist_snapshot):
         """Check readiness, then export or show issues.
 
         Runs in a DiskcacheManager worker because pre-warming conda
@@ -569,7 +576,7 @@ def register_preparation_callbacks(app):
                 ReadinessChecker, Severity,
             )
             checker = ReadinessChecker()
-            report = checker.check_readiness(config or {})
+            report = checker.check_readiness(config or {}, watchlist_entries=watchlist_snapshot)
         except Exception as e:
             logger.error(f"Readiness check failed: {e}", exc_info=True)
             return (
