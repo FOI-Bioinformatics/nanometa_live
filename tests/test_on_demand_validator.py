@@ -135,3 +135,42 @@ class TestBuildBlastDb:
 
     def test_missing_genome_returns_false(self, validator):
         assert validator.build_blast_db(99999) is False
+
+
+class TestGenomeManagerOfflinePropagation:
+    """The lazy genome_manager must come from the shared singleton so the
+    app-wide offline_mode (set by _init_offline_mode) reaches on-demand
+    genome downloads. Constructing a fresh GenomeDownloadManager here would
+    default to offline_mode=False and hit the network in offline mode.
+    """
+
+    def test_property_delegates_to_shared_singleton(self, tmp_path):
+        from unittest.mock import patch
+
+        validator = OnDemandValidator(
+            results_dir=str(tmp_path / "results"),
+            cache_dir=str(tmp_path / "cache"),
+        )
+        sentinel = MagicMock(offline_mode=True)
+        with patch(
+            "nanometa_live.core.utils.genome_manager.get_genome_manager",
+            return_value=sentinel,
+        ) as get_gm:
+            result = validator.genome_manager
+
+        assert result is sentinel
+        get_gm.assert_called_once()
+        # cache_dir is forwarded so the singleton writes genomes to the
+        # validator's own cache directory.
+        _, kwargs = get_gm.call_args
+        assert kwargs.get("cache_dir") == str(tmp_path / "cache")
+
+    def test_explicit_genome_manager_still_wins(self, tmp_path):
+        """An injected manager (test/DI path) is used as-is, not overridden."""
+        injected = MagicMock()
+        validator = OnDemandValidator(
+            results_dir=str(tmp_path / "results"),
+            cache_dir=str(tmp_path / "cache"),
+            genome_manager=injected,
+        )
+        assert validator.genome_manager is injected
