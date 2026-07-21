@@ -785,6 +785,15 @@ def register_preparation_callbacks(app):
                         "machine with the plugins cached, or the offline run will "
                         "fail when Nextflow probes the online plugin registry."
                     )
+                if result.get("db_hash_mismatch"):
+                    action_needed.append(
+                        "The bundled taxid mappings were built for a different "
+                        "Kraken2 database; point the Kraken2 database path at the "
+                        "one the bundle was built for, or rebuild them via the "
+                        "'Taxonomy index + mappings' step on the Watchlist & "
+                        "Preparation tab. Otherwise the readiness check and the "
+                        "run will not find the mappings."
+                    )
                 if action_needed:
                     children.append(
                         dbc.Alert(

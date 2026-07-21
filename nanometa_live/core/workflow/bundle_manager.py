@@ -901,14 +901,28 @@ class BundleManager:
                     f"{mismatch_msg}. Continuing anyway (force=True)."
                 )
 
-            # Verify DB hash compatibility
+            # Verify DB hash compatibility. The bundled taxid mappings and
+            # taxonomy index are keyed off the DB hash, and readiness
+            # (_check_db_index / _check_taxid_mappings) and the run look them up
+            # by THIS database's hash. A mismatch therefore imports "cleanly"
+            # but then trips those readiness checks as CRITICAL with no obvious
+            # link back here -- so flag it explicitly and say how to fix it.
             if kraken_db_path and manifest.get("db_hash"):
                 from nanometa_live.core.taxonomy.taxid_mapping import get_database_hash
                 local_hash = get_database_hash(kraken_db_path)
                 if local_hash != manifest["db_hash"]:
+                    result["db_hash_mismatch"] = True
                     result["warnings"].append(
-                        f"Database hash mismatch: bundle={manifest['db_hash']}, "
-                        f"local={local_hash}. Mappings may need regeneration."
+                        "Kraken2 database mismatch: the bundled taxid mappings "
+                        "and taxonomy index were built for a different database "
+                        f"(bundle hash {manifest['db_hash']}, this database "
+                        f"{local_hash}). Readiness and the pipeline look up the "
+                        "mappings by this database's hash, so they will not be "
+                        "found and the 'Database index' / 'Taxid mappings' "
+                        "readiness checks will fail. Point the Kraken2 database "
+                        "at the exact one the bundle was built for, or re-run the "
+                        "'Taxonomy index + mappings' step on the Watchlist & "
+                        "Preparation tab to regenerate them for this database."
                     )
 
             # Validate tool versions against local installations

@@ -22,12 +22,14 @@ from nanometa_live.core.workflow.bundle_manager import (
 )
 
 
-def _make_minimal_bundle(tmp_path, tamper_file=None):
+def _make_minimal_bundle(tmp_path, tamper_file=None, db_hash=None):
     """Create a minimal valid bundle tar.gz for testing.
 
     Args:
         tmp_path: Directory to create the bundle in.
         tamper_file: If set, corrupt this relative path after checksumming.
+        db_hash: If set, record it as the bundle's Kraken2 DB hash so import
+            can exercise the DB-hash compatibility check.
 
     Returns:
         Tuple of (bundle_path, manifest).
@@ -61,6 +63,8 @@ def _make_minimal_bundle(tmp_path, tamper_file=None):
         },
         "container_runtime": None,
     }
+    if db_hash is not None:
+        manifest["db_hash"] = db_hash
 
     # Tamper with a file after computing checksums
     if tamper_file:
@@ -2259,3 +2263,58 @@ class TestContainerImageCompleteness:
         assert "image" in joined and ("1" in joined and "2" in joined), (
             f"expected an incomplete-image-set warning, got: {result['warnings']}"
         )
+
+
+class TestDbHashMismatch:
+    """A bundle imported against a Kraken2 DB whose hash differs from the one
+    the mappings were built for must flag it explicitly and actionably. The
+    bundled taxid mappings/index key off the DB hash, so on a mismatch the
+    readiness 'Database index'/'Taxid mappings' checks go CRITICAL -- the old
+    vague 'may need regeneration' warning left operators unable to connect the
+    successful import to the later readiness failure.
+    """
+
+    def test_mismatch_sets_flag_and_actionable_warning(self, tmp_path):
+        bundle_path, _ = _make_minimal_bundle(tmp_path, db_hash="BUNDLE_HASH_AAA")
+        home = tmp_path / "import_home"
+        home.mkdir()
+        db = tmp_path / "kdb"
+        db.mkdir()
+
+        mgr = BundleManager()
+        with patch(
+            "nanometa_live.core.taxonomy.taxid_mapping.get_database_hash",
+            return_value="LOCAL_HASH_BBB",
+        ):
+            result = mgr.import_bundle(
+                str(bundle_path),
+                kraken_db_path=str(db),
+                nanometa_home=str(home),
+            )
+
+        assert result["success"] is True
+        assert result.get("db_hash_mismatch") is True
+        txt = " ".join(result["warnings"]).lower()
+        assert "mapping" in txt
+        assert "regenerat" in txt or "taxonomy index" in txt
+
+    def test_matching_hash_sets_no_flag(self, tmp_path):
+        bundle_path, _ = _make_minimal_bundle(tmp_path, db_hash="SAME_HASH")
+        home = tmp_path / "import_home"
+        home.mkdir()
+        db = tmp_path / "kdb"
+        db.mkdir()
+
+        mgr = BundleManager()
+        with patch(
+            "nanometa_live.core.taxonomy.taxid_mapping.get_database_hash",
+            return_value="SAME_HASH",
+        ):
+            result = mgr.import_bundle(
+                str(bundle_path),
+                kraken_db_path=str(db),
+                nanometa_home=str(home),
+            )
+
+        assert result["success"] is True
+        assert result.get("db_hash_mismatch") is not True
