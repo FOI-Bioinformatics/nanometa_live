@@ -407,6 +407,9 @@ bioconda/conda-forge and fail.
 - cache/                         Taxonomy cache (GTDB + NCBI snapshots)
 - watchlists/                    Watchlist YAML configurations
 - containers/                    Container images (if included)
+- pipeline_containers/           Pipeline module images pulled at export
+                                 (docker .tar / singularity .img), for
+                                 docker/singularity bundles
 - watchlist_toggle_state.yaml    Per-entry enable/disable selections
 - config.yaml                    Application configuration snapshot
 - manifest.json                  Bundle manifest with checksums
@@ -416,7 +419,12 @@ bioconda/conda-forge and fail.
 - The Kraken2 database is NOT included due to its size.
   Transfer it separately (e.g. via USB drive).
 - Container images ({container_runtime}) are included if they were
-  cached during preparation.
+  cached during preparation. For a docker or singularity bundle the
+  import step restores ``pipeline_containers/`` under the field-machine
+  home, loads docker images via ``docker load``, and points Nextflow at
+  the singularity images automatically via ``NXF_SINGULARITY_CACHEDIR``
+  (recorded as ``nxf_singularity_cachedir`` in config.yaml); no manual
+  step is required.
 - Tool versions used during preparation are recorded in manifest.json.
 - Build-time tools such as ``conda-pack`` and ``datasets`` are not
   required at runtime; if a version warning lists them as missing
@@ -975,6 +983,7 @@ class BundleManager:
                 _BUNDLED_CONDA_CACHE_DIRNAME,
                 _BUNDLED_PIPELINE_DIRNAME,
                 _BUNDLED_NXF_PLUGINS_DIRNAME,
+                _BUNDLED_PIPELINE_CONTAINERS_DIRNAME,
             ]:
                 src = tmp / dirname
                 if src.exists():
@@ -1081,6 +1090,56 @@ class BundleManager:
                 if loaded_count > 0:
                     logger.info(f"Loaded {loaded_count} container images from bundle")
 
+            # Restore pipeline-pulled container images shipped in
+            # ``pipeline_containers/``. The export side pulls every module
+            # image here (docker ``.tar`` / singularity ``.img``); without
+            # this they ride in the tarball but are never wired to the
+            # runtime, so an air-gapped run re-pulls and fails. Docker tars
+            # are ``docker load``-ed; singularity images are used in place and
+            # surfaced via ``singularity_cache_path`` so the config below can
+            # point NXF_SINGULARITY_CACHEDIR at them.
+            pipeline_images = home / _BUNDLED_PIPELINE_CONTAINERS_DIRNAME
+            if pipeline_images.is_dir() and any(pipeline_images.iterdir()):
+                loaded_count = self._load_container_images(pipeline_images)
+                if loaded_count > 0:
+                    logger.info(
+                        f"Restored {loaded_count} pipeline container images "
+                        "from bundle"
+                    )
+                # Cross-check against the count the export side recorded. A
+                # partial pull (a single failed docker save / apptainer pull)
+                # is caught and warned about at export, not aborted, so a
+                # bundle can ship fewer images than the pipeline needs. Without
+                # this check the shortfall imports as a silent success and only
+                # surfaces as a cryptic "image not found" at the first run.
+                expected = (
+                    manifest.get("containerization", {})
+                    .get("pull_result", {})
+                    .get("image_count", 0)
+                )
+                if expected and loaded_count < expected:
+                    result["incomplete_image_set"] = True
+                    msg = (
+                        f"Only {loaded_count} of {expected} pipeline container "
+                        "images are present in the bundle; the export pulled an "
+                        "incomplete set (see the export-time warnings). Missing "
+                        "images will be re-pulled at run time, which fails on an "
+                        "air-gapped machine. Re-export from a machine that can "
+                        "reach the container registry."
+                    )
+                    logger.warning(msg)
+                    result["warnings"].append(msg)
+                has_sif = any(pipeline_images.glob("*.img")) or any(
+                    pipeline_images.glob("*.sif")
+                )
+                if has_sif:
+                    result["singularity_cache_path"] = str(pipeline_images)
+                    logger.info(
+                        "Bundled Singularity images restored to "
+                        f"{pipeline_images}; NXF_SINGULARITY_CACHEDIR will be "
+                        "set to this directory."
+                    )
+
             # If the bundle ships a pre-warmed Nextflow conda cache,
             # surface its restored location so the operator can point
             # NXF_CONDA_CACHEDIR at it.
@@ -1139,6 +1198,10 @@ class BundleManager:
                         )
                     if "conda_cache_path" in result:
                         cfg["nxf_conda_cachedir"] = result["conda_cache_path"]
+                    if "singularity_cache_path" in result:
+                        cfg["nxf_singularity_cachedir"] = result[
+                            "singularity_cache_path"
+                        ]
                     # Rebase pipeline_source from relative bundle path to
                     # absolute path on this machine.
                     ps = cfg.get("pipeline_source", "")
@@ -1381,11 +1444,34 @@ class BundleManager:
             capture_output=True,
         )
 
+    @staticmethod
+    def _singularity_cache_name(ref: str) -> str:
+        """Return the on-disk filename Nextflow expects for a pre-pulled image.
+
+        Mirrors Nextflow's ``SingularityCache.simpleName(url) + '.img'``:
+        strip the URL scheme at ``://``, then replace ``:`` and ``/`` with
+        ``-`` and append ``.img``. Nextflow reuses an image only when it is
+        cached under this exact name in ``NXF_SINGULARITY_CACHEDIR``; any
+        other name makes it re-pull, which fails on an air-gapped machine.
+        The convention has been stable across Nextflow 22.x-26.x -- keep this
+        in lock-step with it (verified against the SingularityCache class in
+        the bundled Nextflow jar).
+        """
+        p = ref.find("://")
+        name = ref[p + 3:] if p != -1 else ref
+        name = name.replace(":", "-").replace("/", "-")
+        return f"{name}.img"
+
     def _pull_one_singularity_image(
         self, ref: str, target_dir: Path, cli: str
     ) -> None:
-        """``apptainer pull`` (or ``singularity pull``) one image to .sif."""
-        out = target_dir / f"{self._ref_to_safe_filename(ref)}.sif"
+        """``apptainer pull`` (or ``singularity pull``) one image.
+
+        The output is named per Nextflow's cache convention (see
+        ``_singularity_cache_name``) so the field machine reuses it via
+        ``NXF_SINGULARITY_CACHEDIR`` instead of re-pulling.
+        """
+        out = target_dir / self._singularity_cache_name(ref)
         subprocess.run(
             [cli, "pull", "--force", str(out), ref],
             check=True,
@@ -1836,8 +1922,13 @@ class BundleManager:
                         FileNotFoundError, PermissionError, OSError) as e:
                     logger.warning(f"Failed to load container image {tar_file.name}: {e}")
 
-            # Singularity/Apptainer .sif files are used in-place, no loading needed
-            sif_count = len(list(containers_dir.glob("*.sif")))
+            # Singularity/Apptainer images are used in-place, no loading
+            # needed. Bundle-pulled images use the Nextflow-convention ``.img``
+            # extension (see _singularity_cache_name); ``.sif`` is also
+            # accepted for images staged by other means.
+            sif_count = len(list(containers_dir.glob("*.sif"))) + len(
+                list(containers_dir.glob("*.img"))
+            )
             if sif_count > 0:
                 logger.info(f"Found {sif_count} Singularity/Apptainer images (used in-place)")
                 loaded += sif_count

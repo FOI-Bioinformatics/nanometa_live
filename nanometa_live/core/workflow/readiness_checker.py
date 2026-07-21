@@ -689,10 +689,22 @@ class ReadinessChecker:
         probe blocks the readiness panel for the full timeout per endpoint
         and surfaces a warning operators are trained to treat as actionable.
         """
-        if (config or {}).get("offline_mode"):
+        cfg = config or {}
+        if cfg.get("offline_mode"):
             return [CheckResult(
                 "Network", True, Severity.INFO,
                 "Offline mode -- network probe skipped",
+            )]
+
+        # An explicit ``network_check_enabled: false`` disables the probe
+        # without switching the whole app to offline mode -- useful on a
+        # connected machine where the NCBI/GTDB endpoints are firewalled and
+        # the ~5s-per-endpoint timeout would otherwise stall the panel. The
+        # key is absent by default, so the probe runs unless opted out.
+        if cfg.get("network_check_enabled") is False:
+            return [CheckResult(
+                "Network", True, Severity.INFO,
+                "Network probe disabled by configuration",
             )]
 
         import urllib.request

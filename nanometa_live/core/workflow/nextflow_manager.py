@@ -739,6 +739,29 @@ class NextflowManager:
                     f"NXF_PLUGINS_PATH/NXF_PLUGINS_DIR will not be set."
                 )
 
+        sing_cachedir = config.get("nxf_singularity_cachedir", "")
+        if sing_cachedir:
+            abs_sing = os.path.abspath(sing_cachedir)
+            if os.path.isdir(abs_sing):
+                # NXF_SINGULARITY_CACHEDIR is where Nextflow looks for a
+                # pre-pulled ``<simpleName>.img`` before pulling from a
+                # registry; NXF_SINGULARITY_LIBRARYDIR is the read-only
+                # library it consults first. Pointing both at the bundled
+                # images (named by BundleManager._singularity_cache_name to
+                # match Nextflow's convention) lets an air-gapped run reuse
+                # them instead of hitting the registry, which fails offline.
+                env["NXF_SINGULARITY_CACHEDIR"] = abs_sing
+                env["NXF_SINGULARITY_LIBRARYDIR"] = abs_sing
+                logging.info(
+                    "NXF_SINGULARITY_CACHEDIR and NXF_SINGULARITY_LIBRARYDIR "
+                    f"set to: {abs_sing}"
+                )
+            else:
+                logging.warning(
+                    f"nxf_singularity_cachedir '{sing_cachedir}' is not an "
+                    "existing directory; NXF_SINGULARITY_CACHEDIR will not be set."
+                )
+
         # NXF_HOME and NXF_TEMP. Nextflow writes plugin metadata, the
         # history file, and ~/.nextflow.log under NXF_HOME (default
         # ~/.nextflow). On a field machine where ~ is read-only or a

@@ -233,6 +233,22 @@ class TestBuildNextflowEnv:
         assert env["NXF_PLUGINS_PATH"] == str(plugins)
         assert env["NXF_PLUGINS_DIR"] == str(plugins)
 
+    def test_singularity_cachedir_sets_both_vars(self, tmp_path):
+        cache = tmp_path / "pipeline_containers"
+        cache.mkdir()
+        env = NextflowManager._build_nextflow_env(
+            {"nxf_singularity_cachedir": str(cache)}
+        )
+        assert env["NXF_SINGULARITY_CACHEDIR"] == str(cache)
+        assert env["NXF_SINGULARITY_LIBRARYDIR"] == str(cache)
+
+    def test_singularity_cachedir_skipped_when_missing(self, tmp_path):
+        env = NextflowManager._build_nextflow_env(
+            {"nxf_singularity_cachedir": str(tmp_path / "nope")}
+        )
+        assert "NXF_SINGULARITY_CACHEDIR" not in env
+        assert "NXF_SINGULARITY_LIBRARYDIR" not in env
+
     def test_results_dir_anchors_nxf_home(self, tmp_path, monkeypatch):
         monkeypatch.delenv("NXF_HOME", raising=False)
         monkeypatch.delenv("NXF_TEMP", raising=False)

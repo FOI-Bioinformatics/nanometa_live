@@ -76,8 +76,15 @@ def _build_mapping_table(unrecognized):
         )
     return rows
 
-def _execute_wizard_step(step_idx, config):
-    """Execute a wizard step and return result component."""
+def _execute_wizard_step(step_idx, config, export_opts=None):
+    """Execute a wizard step and return result component.
+
+    ``export_opts`` (used only by step 7) carries the operator's Export-card
+    selections -- ``directory``, ``filename``, ``pre_warm``,
+    ``containerization`` -- so the guided wizard exports with the same engine
+    and pre-warm choice as the manual Export button instead of silently
+    defaulting to conda + ~/Downloads.
+    """
     from nanometa_live.core.workflow.mobile_lab_preparer import MobileLabPreparer
     from nanometa_live.core.workflow.readiness_checker import ReadinessChecker, Severity
     from nanometa_live.core.workflow.bundle_manager import BundleManager
@@ -220,8 +227,16 @@ def _execute_wizard_step(step_idx, config):
                      style={"maxHeight": "200px", "overflowY": "auto"}),
         ])
 
-    # Step 7: Export bundle (uses ~/Downloads as default)
+    # Step 7: Export bundle, honoring the Export-card selections when the
+    # caller wired them (falls back to conda + ~/Downloads + pre-warm off).
     if step_idx == 7:
-        return _run_export(config)
+        opts = export_opts or {}
+        return _run_export(
+            config,
+            filename=opts.get("filename"),
+            directory=opts.get("directory"),
+            pre_warm=bool(opts.get("pre_warm", False)),
+            containerization=opts.get("containerization") or "conda",
+        )
 
     raise ValueError(f"Unknown wizard step: {step_idx}")

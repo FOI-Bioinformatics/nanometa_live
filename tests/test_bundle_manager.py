@@ -2095,3 +2095,167 @@ class TestTemplateGenomeMetadata:
         warns = _template_genome_metadata(src, dst, str(home), "${NANOMETA_HOME}")
         assert warns == []
         assert "${NANOMETA_HOME}" in dst.read_text()
+
+
+class TestSingularityBundleWiring:
+    """Offline Singularity/Apptainer path: images pulled into
+    ``pipeline_containers/`` must be restored to the field-machine home and
+    wired to Nextflow via ``NXF_SINGULARITY_CACHEDIR``. Before this fix the
+    pulled ``.sif``/``.img`` files rode in the tarball but were never copied
+    out or pointed at, so an air-gapped run silently re-pulled and failed.
+    """
+
+    def test_cache_name_matches_nextflow_convention(self):
+        """Filenames must match Nextflow's SingularityCache naming
+        (strip scheme at ``://``, replace ``:`` and ``/`` with ``-``,
+        append ``.img``) or Nextflow re-pulls instead of reusing.
+        """
+        f = BundleManager._singularity_cache_name
+        assert (
+            f("docker://quay.io/biocontainers/foo:1.0.2--h1234_0")
+            == "quay.io-biocontainers-foo-1.0.2--h1234_0.img"
+        )
+        assert (
+            f("https://depot.galaxyproject.org/singularity/foo:1.0--0")
+            == "depot.galaxyproject.org-singularity-foo-1.0--0.img"
+        )
+        assert f("quay.io/org/img:tag") == "quay.io-org-img-tag.img"
+
+    def test_pull_one_singularity_writes_convention_name(self, tmp_path):
+        """_pull_one_singularity_image writes to the Nextflow-convention
+        ``.img`` filename, not the generic safe-slug ``.sif``.
+        """
+        mgr = BundleManager()
+        recorded = {}
+
+        def fake_run(cmd, **kwargs):
+            # cmd = [cli, "pull", "--force", out, ref]
+            recorded["out"] = Path(cmd[3])
+            recorded["out"].write_bytes(b"SIF\x00")
+            return MagicMock(returncode=0)
+
+        with patch(
+            "nanometa_live.core.workflow.bundle_manager.subprocess.run",
+            side_effect=fake_run,
+        ):
+            mgr._pull_one_singularity_image(
+                "docker://quay.io/biocontainers/foo:1.0", tmp_path, "apptainer"
+            )
+        assert recorded["out"].name == "quay.io-biocontainers-foo-1.0.img"
+
+    def test_import_restores_pipeline_containers_and_wires_cachedir(self, tmp_path):
+        """A singularity bundle restores pipeline_containers/ to home and
+        sets nxf_singularity_cachedir + result["singularity_cache_path"].
+        """
+        home = tmp_path / "build_home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+        pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
+
+        img_name = "quay.io-biocontainers-foo-1.0.img"
+
+        def fake_pull(engine, staging, config, pipeline_path):
+            images = staging / "pipeline_containers"
+            images.mkdir(parents=True, exist_ok=True)
+            (images / img_name).write_bytes(b"SIF\x00fake-image")
+            return {
+                "attempted": True,
+                "engine": engine,
+                "image_count": 1,
+                "pulled": ["quay.io/biocontainers/foo:1.0"],
+                "warnings": [],
+            }
+
+        mgr = BundleManager()
+        bundle_path = tmp_path / "bundle.tar.gz"
+        with patch.object(
+            mgr, "_pull_pipeline_containers", side_effect=fake_pull
+        ):
+            mgr.export_bundle(
+                str(bundle_path),
+                config={
+                    "kraken_db": "",
+                    "results_output_directory": str(tmp_path),
+                },
+                nanometa_home=str(home),
+                pipeline_path=str(pipeline_dir),
+                containerization="singularity",
+            )
+
+        field = tmp_path / "field_home"
+        field.mkdir()
+        result = mgr.import_bundle(
+            str(bundle_path), kraken_db_path="", nanometa_home=str(field)
+        )
+
+        assert result["success"] is True
+        restored = field / "pipeline_containers" / img_name
+        assert restored.exists(), (
+            "import_bundle must restore pipeline_containers/*.img into "
+            "<nanometa_home>/pipeline_containers/"
+        )
+        assert result.get("singularity_cache_path", "").endswith(
+            "pipeline_containers"
+        )
+
+        from nanometa_live.core.config.config_loader import ConfigLoader
+
+        cfg = ConfigLoader(str(field)).load_config(str(field / "config.yaml"))
+        assert cfg.get("nxf_singularity_cachedir", "").endswith(
+            "pipeline_containers"
+        ), "config must carry nxf_singularity_cachedir for _build_nextflow_env"
+
+
+class TestContainerImageCompleteness:
+    """A partial container pull at export (a slow/failed image is caught and
+    appended to warnings, not aborted) must not import as a silent success.
+    The import cross-checks the loaded image count against the manifest's
+    recorded pull count and warns when fewer images arrive.
+    """
+
+    def test_import_warns_on_incomplete_image_set(self, tmp_path):
+        home = tmp_path / "build_home"
+        home.mkdir()
+        (home / "genomes").mkdir()
+        (home / "genomes" / "1.fasta").write_text(">x\nA\n")
+        pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
+
+        def fake_pull(engine, staging, config, pipeline_path):
+            # Report two images pulled, but only stage one -- models a
+            # single failed `docker save` / `apptainer pull` that was
+            # caught and warned about rather than aborting the export.
+            images = staging / "pipeline_containers"
+            images.mkdir(parents=True, exist_ok=True)
+            (images / "quay.io-org-a-1.0.img").write_bytes(b"SIF\x00a")
+            return {
+                "attempted": True,
+                "engine": engine,
+                "image_count": 2,
+                "pulled": ["quay.io/org/a:1.0"],
+                "warnings": ["Failed to pull quay.io/org/b:2.0"],
+            }
+
+        mgr = BundleManager()
+        bundle_path = tmp_path / "bundle.tar.gz"
+        with patch.object(mgr, "_pull_pipeline_containers", side_effect=fake_pull):
+            mgr.export_bundle(
+                str(bundle_path),
+                config={"kraken_db": "", "results_output_directory": str(tmp_path)},
+                nanometa_home=str(home),
+                pipeline_path=str(pipeline_dir),
+                containerization="singularity",
+            )
+
+        field = tmp_path / "field_home"
+        field.mkdir()
+        result = mgr.import_bundle(
+            str(bundle_path), kraken_db_path="", nanometa_home=str(field)
+        )
+
+        # Import still succeeds (images can be re-pulled if the field
+        # machine ever gets network), but the shortfall must be surfaced.
+        joined = " ".join(result["warnings"]).lower()
+        assert "image" in joined and ("1" in joined and "2" in joined), (
+            f"expected an incomplete-image-set warning, got: {result['warnings']}"
+        )
