@@ -132,6 +132,32 @@ class TestNetworkConnectivity:
         assert results[0].passed is True
         assert "skipped" in results[0].message.lower()
 
+    def test_network_check_disabled_skips_probe(self, checker):
+        """network_check_enabled=False disables the probe without going
+        fully offline. Previously the key was referenced in the readiness
+        fingerprint but never honored by the check.
+        """
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            results = checker._check_network_connectivity(
+                {"network_check_enabled": False}
+            )
+
+        assert mock_urlopen.call_count == 0, (
+            "Network probe must not run when network_check_enabled is False"
+        )
+        assert len(results) == 1
+        assert results[0].passed is True
+        assert "disabled" in results[0].message.lower()
+
+    def test_network_check_runs_when_key_absent(self, checker):
+        """Default behaviour is preserved: absent key means the probe runs."""
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.return_value = MagicMock()
+            results = checker._check_network_connectivity({})
+
+        assert mock_urlopen.call_count > 0
+        assert len(results) == 2
+
 
 # -- Container runtime check --
 

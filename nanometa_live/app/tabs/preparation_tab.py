@@ -785,6 +785,15 @@ def register_preparation_callbacks(app):
                         "machine with the plugins cached, or the offline run will "
                         "fail when Nextflow probes the online plugin registry."
                     )
+                if result.get("db_hash_mismatch"):
+                    action_needed.append(
+                        "The bundled taxid mappings were built for a different "
+                        "Kraken2 database; point the Kraken2 database path at the "
+                        "one the bundle was built for, or rebuild them via the "
+                        "'Taxonomy index + mappings' step on the Watchlist & "
+                        "Preparation tab. Otherwise the readiness check and the "
+                        "run will not find the mappings."
+                    )
                 if action_needed:
                     children.append(
                         dbc.Alert(
@@ -2033,9 +2042,14 @@ def register_preparation_callbacks(app):
         Input({"type": "wizard-step-run", "index": MATCH}, "n_clicks"),
         State("wizard-step-state", "data"),
         State("app-config", "data"),
+        State("bundle-export-directory", "value"),
+        State("bundle-export-filename", "value"),
+        State("bundle-export-prewarm", "value"),
+        State("bundle-containerization-radio", "value"),
         prevent_initial_call=True,
     )
-    def run_wizard_step(n_clicks, wizard_state, config):
+    def run_wizard_step(n_clicks, wizard_state, config, export_dir,
+                        export_filename, export_prewarm, export_engine):
         """Run a single wizard step."""
         if not n_clicks:
             raise PreventUpdate
@@ -2050,12 +2064,20 @@ def register_preparation_callbacks(app):
             "steps": {str(i): "pending" for i in range(8)},
         }
         config = config or {}
+        export_opts = {
+            "directory": export_dir,
+            "filename": export_filename,
+            "pre_warm": export_prewarm,
+            "containerization": export_engine,
+        }
 
         # Mark running
         wizard_state["steps"][str(step_idx)] = "running"
 
         try:
-            result_children = _execute_wizard_step(step_idx, config)
+            result_children = _execute_wizard_step(
+                step_idx, config, export_opts=export_opts
+            )
             wizard_state["steps"][str(step_idx)] = "done"
             set_props("wizard-step-state-relay", {"data": wizard_state})
             return result_children
@@ -2094,6 +2116,10 @@ def register_preparation_callbacks(app):
         Input("wizard-run-all-btn", "n_clicks"),
         State("wizard-step-state", "data"),
         State("app-config", "data"),
+        State("bundle-export-directory", "value"),
+        State("bundle-export-filename", "value"),
+        State("bundle-export-prewarm", "value"),
+        State("bundle-containerization-radio", "value"),
         background=True,
         manager=background_callback_manager,
         progress=[Output("wizard-run-all-result", "children")],
@@ -2101,7 +2127,9 @@ def register_preparation_callbacks(app):
         cancel=[Input("wizard-cancel-btn", "n_clicks")],
         prevent_initial_call=True,
     )
-    def run_all_wizard_steps(set_progress, n_clicks, wizard_state, config):
+    def run_all_wizard_steps(set_progress, n_clicks, wizard_state, config,
+                             export_dir, export_filename, export_prewarm,
+                             export_engine):
         """Run all 8 offline-prep wizard steps sequentially in a worker.
 
         Background so the multi-minute steps (genome download, BLAST build,
@@ -2119,6 +2147,12 @@ def register_preparation_callbacks(app):
         wizard_state = wizard_state or {
             "current_step": 0,
             "steps": {str(i): "pending" for i in range(8)},
+        }
+        export_opts = {
+            "directory": export_dir,
+            "filename": export_filename,
+            "pre_warm": export_prewarm,
+            "containerization": export_engine,
         }
 
         # The WatchlistManager singleton is empty in this worker process, and
@@ -2149,7 +2183,7 @@ def register_preparation_callbacks(app):
             # Live stepper + result-area update before the (possibly slow) step.
             set_progress((_running_alert(step_idx),))
             try:
-                _execute_wizard_step(step_idx, config)
+                _execute_wizard_step(step_idx, config, export_opts=export_opts)
                 wizard_state["steps"][str(step_idx)] = "done"
             except Exception as e:
                 wizard_state["steps"][str(step_idx)] = "failed"

@@ -203,11 +203,22 @@ class OnDemandValidator:
 
     @property
     def genome_manager(self):
-        """Lazy load genome manager to avoid circular imports."""
+        """Lazy load genome manager to avoid circular imports.
+
+        Uses the shared singleton (``get_genome_manager``) rather than
+        constructing a fresh instance so the app-wide ``offline_mode`` set by
+        ``_init_offline_mode`` propagates here. A fresh GenomeDownloadManager
+        would default to ``offline_mode=False`` and attempt NCBI/GTDB network
+        downloads even when the operator has switched to offline mode. The
+        cache_dir is forwarded so the singleton downloads into this
+        validator's genomes directory.
+        """
         if self._genome_manager is None:
             try:
-                from nanometa_live.core.utils.genome_manager import GenomeDownloadManager
-                self._genome_manager = GenomeDownloadManager(str(self.cache_dir))
+                from nanometa_live.core.utils.genome_manager import get_genome_manager
+                self._genome_manager = get_genome_manager(
+                    cache_dir=str(self.cache_dir)
+                )
             except ImportError:
                 logger.warning("GenomeDownloadManager not available")
         return self._genome_manager

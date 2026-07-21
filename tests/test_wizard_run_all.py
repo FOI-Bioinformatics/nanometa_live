@@ -34,20 +34,22 @@ def _call(fn, execute_side_effect=None):
     with patch.object(prep, "_execute_wizard_step", side_effect=execute_side_effect) as ex, \
          patch("nanometa_live.core.watchlist.watchlist_manager.get_watchlist_manager",
                return_value=loaded_mgr):
-        state = fn(set_progress, 1, None, {"kraken_db": "/x"})
+        # Trailing args are the Export-card States: dir, filename, prewarm, engine.
+        state = fn(set_progress, 1, None, {"kraken_db": "/x"},
+                   None, None, False, "conda")
     return state, set_progress, ex
 
 
 class TestRunAllWizard:
     def test_all_steps_done(self, run_all_fn):
-        state, set_progress, ex = _call(run_all_fn, execute_side_effect=lambda i, c: None)
+        state, set_progress, ex = _call(run_all_fn, execute_side_effect=lambda i, c, export_opts=None: None)
         assert ex.call_count == 8
         assert all(state["steps"][str(i)] == "done" for i in range(8))
         # Live progress + final summary were pushed.
         assert set_progress.call_count >= 9
 
     def test_critical_failure_aborts(self, run_all_fn):
-        def boom(step_idx, config):
+        def boom(step_idx, config, export_opts=None):
             if step_idx == 1:
                 raise RuntimeError("no kraken db")
 
@@ -60,7 +62,7 @@ class TestRunAllWizard:
         assert ex.call_count == 2
 
     def test_noncritical_failure_continues(self, run_all_fn):
-        def boom(step_idx, config):
+        def boom(step_idx, config, export_opts=None):
             if step_idx == 3:  # genome download is non-critical
                 raise RuntimeError("download failed")
 
@@ -72,4 +74,4 @@ class TestRunAllWizard:
 
     def test_no_clicks_prevents_update(self, run_all_fn):
         with pytest.raises(PreventUpdate):
-            run_all_fn(MagicMock(), None, None, {})
+            run_all_fn(MagicMock(), None, None, {}, None, None, False, "conda")

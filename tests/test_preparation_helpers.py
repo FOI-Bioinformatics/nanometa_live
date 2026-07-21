@@ -7,9 +7,12 @@ stages: the unrecognised-file mapping table, the export directory guard, and the
 wizard-step dispatcher's validation errors.
 """
 
+from unittest.mock import patch
+
 import dash_bootstrap_components as dbc
 import pytest
 
+import nanometa_live.app.tabs.preparation_helpers as prep_helpers
 from nanometa_live.app.tabs.preparation_helpers import (
     _build_mapping_table,
     _execute_wizard_step,
@@ -46,3 +49,36 @@ class TestExecuteWizardStep:
     def test_verify_db_without_path_raises(self):
         with pytest.raises(ValueError, match="No kraken_db path configured"):
             _execute_wizard_step(1, {"kraken_db": ""})
+
+    def test_step7_honors_export_opts(self):
+        """The wizard export step must forward the operator's Export-card
+        selections (engine, pre-warm, directory, filename) rather than
+        hardcoding conda + ~/Downloads.
+        """
+        with patch.object(prep_helpers, "_run_export") as run:
+            _execute_wizard_step(
+                7,
+                {"kraken_db": "/x"},
+                export_opts={
+                    "directory": "/tmp/out",
+                    "filename": "b.tar.gz",
+                    "pre_warm": True,
+                    "containerization": "singularity",
+                },
+            )
+        run.assert_called_once()
+        _, kwargs = run.call_args
+        assert kwargs["containerization"] == "singularity"
+        assert kwargs["pre_warm"] is True
+        assert kwargs["directory"] == "/tmp/out"
+        assert kwargs["filename"] == "b.tar.gz"
+
+    def test_step7_defaults_when_no_opts(self):
+        """No export_opts (e.g. a caller that has not wired the card) falls
+        back to conda with pre-warm off -- never the old ~5 GB default-on.
+        """
+        with patch.object(prep_helpers, "_run_export") as run:
+            _execute_wizard_step(7, {"kraken_db": "/x"})
+        _, kwargs = run.call_args
+        assert kwargs["containerization"] == "conda"
+        assert kwargs["pre_warm"] is False

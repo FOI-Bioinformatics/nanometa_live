@@ -108,6 +108,14 @@ class TestImportBundleRendering:
         assert "Offline mode activated" in str(out)
         assert "Action required" not in str(out)
 
+    def test_db_hash_mismatch_surfaces_action_required(self, app, tmp_path):
+        out = self._drive(app, {
+            "success": True, "warnings": [], "db_hash_mismatch": True,
+        }, tmp_path)
+        s = str(out)
+        assert "Action required" in s
+        assert "mapping" in s.lower() and "database" in s.lower()
+
     def test_failure_surfaces_detail(self, app, tmp_path):
         out = self._drive(app, {
             "success": False, "warnings": ["platform mismatch", "checksum failed"],
