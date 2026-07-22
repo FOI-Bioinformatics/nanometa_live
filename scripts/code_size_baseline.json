@@ -102,6 +102,7 @@
     "nanometa_live/app/tabs/preparation_tab.py::register_preparation_callbacks.build_missing_blast_dbs",
     "nanometa_live/app/tabs/preparation_tab.py::register_preparation_callbacks.download_missing_genomes",
     "nanometa_live/app/tabs/preparation_tab.py::register_preparation_callbacks.import_bundle",
+    "nanometa_live/app/tabs/preparation_tab.py::register_preparation_callbacks.run_all_wizard_steps",
     "nanometa_live/app/tabs/preparation_tab.py::register_preparation_callbacks.run_rescan",
     "nanometa_live/app/tabs/preparation_tab.py::register_preparation_callbacks.update_genome_stats",
     "nanometa_live/app/tabs/qc_tab.py",
@@ -203,6 +204,7 @@
     "nanometa_live/core/workflow/nextflow_manager.py::NextflowManager.start",
     "nanometa_live/core/workflow/nextflow_manager.py::NextflowManager.validate_pipeline_source",
     "nanometa_live/core/workflow/on_demand_validator.py::OnDemandValidator.validate_via_nanometanf",
+    "nanometa_live/core/workflow/readiness_checker.py",
     "nanometa_live/core/workflow/readiness_checker.py::ReadinessChecker.check_readiness",
     "nanometa_live/nanometa_live.py::main"
   ]

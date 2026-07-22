@@ -16,6 +16,19 @@ from dash import html
 logger = logging.getLogger(__name__)
 
 
+def _build_export_opts(directory, filename, pre_warm, containerization):
+    """Bundle the Export-card selections into the dict step 7 forwards to
+    ``_run_export``. Shared by the single-step and run-all wizard callbacks so
+    the two entry points stay in lock-step.
+    """
+    return {
+        "directory": directory,
+        "filename": filename,
+        "pre_warm": pre_warm,
+        "containerization": containerization,
+    }
+
+
 def _run_export(config, filename=None, directory=None, pre_warm=True,
                 containerization="conda"):
     """Perform the actual bundle export. Returns an Alert component."""

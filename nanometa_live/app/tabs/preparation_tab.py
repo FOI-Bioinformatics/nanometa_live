@@ -26,6 +26,7 @@ from dash.exceptions import PreventUpdate
 from nanometa_live.app.app import background_callback_manager
 from nanometa_live.app.tabs.preparation_helpers import (
     _run_export,
+    _build_export_opts,
     _build_mapping_table,
     _execute_wizard_step,
 )
@@ -2064,12 +2065,9 @@ def register_preparation_callbacks(app):
             "steps": {str(i): "pending" for i in range(8)},
         }
         config = config or {}
-        export_opts = {
-            "directory": export_dir,
-            "filename": export_filename,
-            "pre_warm": export_prewarm,
-            "containerization": export_engine,
-        }
+        export_opts = _build_export_opts(
+            export_dir, export_filename, export_prewarm, export_engine
+        )
 
         # Mark running
         wizard_state["steps"][str(step_idx)] = "running"
@@ -2148,12 +2146,9 @@ def register_preparation_callbacks(app):
             "current_step": 0,
             "steps": {str(i): "pending" for i in range(8)},
         }
-        export_opts = {
-            "directory": export_dir,
-            "filename": export_filename,
-            "pre_warm": export_prewarm,
-            "containerization": export_engine,
-        }
+        export_opts = _build_export_opts(
+            export_dir, export_filename, export_prewarm, export_engine
+        )
 
         # The WatchlistManager singleton is empty in this worker process, and
         # steps 0/3/4 read it (get_active_entries / _get_watchlist_entries).
