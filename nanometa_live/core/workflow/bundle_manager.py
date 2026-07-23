@@ -158,18 +158,57 @@ def _dir_size(path: Path) -> int:
     return total
 
 
-def estimate_bundle_size(nanometa_home: str, *, pre_warm: bool = False) -> int:
+def _local_pipeline_dir_for_estimate(config, pipeline_path):
+    """Resolve the local pipeline checkout the bundle would ship, or None.
+
+    Mirrors the export-side resolution: an explicit ``pipeline_path`` wins;
+    otherwise a ``pipeline_source`` config value that names a local directory
+    (not a ``remote:`` / URL / bundle-relative ``./`` sentinel) is used.
+    """
+    if pipeline_path:
+        p = Path(pipeline_path)
+        if p.is_dir():
+            return p
+    ps = (config or {}).get("pipeline_source", "") if config else ""
+    if isinstance(ps, str) and ps and not ps.startswith(
+        ("remote:", "http://", "https://", "git@", "./", "../")
+    ):
+        p = Path(ps).expanduser()
+        if p.is_dir():
+            return p
+    return None
+
+
+def estimate_bundle_size(
+    nanometa_home: str,
+    *,
+    pre_warm: bool = False,
+    config=None,
+    pipeline_path=None,
+) -> int:
     """Rough pre-gzip size estimate (bytes) of the data a bundle would stage.
 
     Sums the home subdirectories that export copies; includes the pre-warmed
-    conda cache only when *pre_warm* is set. Intended for a disk-space preflight,
-    not exact accounting -- gzip shrinks the final tar, but staging needs the
-    raw size, so this is a conservative bound.
+    conda cache only when *pre_warm* is set. When *config*/*pipeline_path* name
+    a local pipeline checkout, its size is added (it is bundled too), along
+    with the ``~/.nextflow/plugins`` cache. Intended for a disk-space
+    preflight, not exact accounting -- gzip shrinks the final tar, but staging
+    needs the raw size, so this is a conservative bound (it deliberately
+    over-counts, e.g. the checkout's ``.git``, since under-counting lets an
+    export run out of disk mid-write).
+
+    Note: pulled container images (docker/singularity ``pipeline_containers/``)
+    cannot be sized before the pull runs, so they are NOT included; a
+    docker/singularity export needs additional headroom beyond this estimate.
     """
     home = Path(nanometa_home)
     total = sum(_dir_size(home / d) for d in _BUNDLE_SOURCE_DIRS)
     if pre_warm:
         total += _dir_size(home / _BUNDLED_CONDA_CACHE_DIRNAME)
+    pipeline_dir = _local_pipeline_dir_for_estimate(config, pipeline_path)
+    if pipeline_dir:
+        total += _dir_size(pipeline_dir)
+    total += _dir_size(Path.home() / ".nextflow" / "plugins")
     return total
 
 # Patterns of files and directories to skip when copying the pipeline source

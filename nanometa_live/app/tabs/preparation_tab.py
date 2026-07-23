@@ -187,7 +187,9 @@ def _export_preflight(directory, config, pre_warm):
             estimate_bundle_size, human_size,
         )
         home = str(NanometaPaths.from_config(config or {}).data_dir)
-        est = estimate_bundle_size(home, pre_warm=bool(pre_warm))
+        est = estimate_bundle_size(
+            home, pre_warm=bool(pre_warm), config=config
+        )
         free = _sh.disk_usage(directory).free
         if est and free < est:
             return dbc.Alert(
