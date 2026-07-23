@@ -1920,10 +1920,18 @@ def register_preparation_callbacks(app):
         Output("genome-test-result", "children"),
         Input("test-genome-download-btn", "n_clicks"),
         State("app-config", "data"),
+        background=True,
+        manager=background_callback_manager,
+        # NCBI `datasets` download (network + subprocess) -- runs in a worker so
+        # it does not block the request thread. The genome lands on disk and the
+        # callback only reports a path, so there is no in-process side effect to
+        # bring back to the main process; a plain background callback suffices.
+        progress=[Output("genome-test-result", "children")],
+        running=[(Output("test-genome-download-btn", "disabled"), True, False)],
         prevent_initial_call=True,
     )
-    def test_genome_download(n_clicks, config):
-        """Test genome download with E. coli (taxid 562)."""
+    def test_genome_download(set_progress, n_clicks, config):
+        """Test genome download with E. coli (taxid 562), in the background."""
         if not n_clicks:
             raise PreventUpdate
 
@@ -1952,6 +1960,13 @@ def register_preparation_callbacks(app):
             genome_mgr = get_genome_manager(cache_dir=cache_dir)
             logger.info(f"Testing genome download with cache_dir: {genome_mgr.cache_dir}")
 
+            set_progress((
+                dbc.Alert(
+                    [dbc.Spinner(size="sm", spinner_class_name="me-2"),
+                     "Downloading E. coli test genome..."],
+                    color="info", className="py-2 mb-0",
+                ),
+            ))
             result = genome_mgr.download_genome(
                 taxid=562,
                 species_name="Escherichia coli",

@@ -392,7 +392,8 @@ class TestOnDemandRun:
 
     def test_missing_results_dir_fails_cleanly(self, main_app):
         fn = self._fn(main_app)
-        out = fn(1, {"taxid": 562, "name": "E. coli", "sample": "s"},
+        # Background callback: set_progress is the first positional arg.
+        out = fn(MagicMock(), 1, {"taxid": 562, "name": "E. coli", "sample": "s"},
                  {}, {}, "blast")
         assert "no results directory" in out[1].lower()
 
@@ -400,7 +401,7 @@ class TestOnDemandRun:
         # results dir exists but has no Kraken2 per-read .output files.
         (tmp_path / "kraken2").mkdir()
         fn = self._fn(main_app)
-        out = fn(1, {"taxid": 562, "name": "E. coli", "sample": "s"},
+        out = fn(MagicMock(), 1, {"taxid": 562, "name": "E. coli", "sample": "s"},
                  {"results_output_directory": str(tmp_path)}, {}, "blast")
         assert "per-read output" in out[1].lower()
         # start/cancel stay visible so the operator can retry
@@ -420,7 +421,7 @@ class TestOnDemandRun:
         with patch.object(odv, "OnDemandValidator") as Cls:
             Cls.return_value.validate_organism.return_value = fake
             fn = self._fn(main_app)
-            out = fn(1, {"taxid": 562, "name": "E. coli", "sample": "barcode01"},
+            out = fn(MagicMock(), 1, {"taxid": 562, "name": "E. coli", "sample": "barcode01"},
                      {"results_output_directory": str(tmp_path)}, {}, "blast")
         assert "validation failed" in out[1].lower()
         assert "pipeline_source" in out[1]
