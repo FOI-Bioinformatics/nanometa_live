@@ -465,6 +465,10 @@ def build_import_bundle_card():
                     color="info",
                 ),
             ]),
+            # Import runs in a background worker; it writes its outcome here and
+            # a main-process callback renders it + activates offline mode (the
+            # worker cannot re-init the live singletons).
+            dcc.Store(id="import-bundle-result-store"),
             dcc.Loading(html.Div(id="import-result", className="mt-2"),
                         type="default"),
             # Result area for the "Regenerate mappings for this database"

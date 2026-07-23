@@ -19,6 +19,7 @@ from dash.exceptions import PreventUpdate
 from dash_test_utils import get_callback_fn
 import nanometa_live.app.tabs.preparation_tab as prep
 from nanometa_live.app.tabs.preparation_tab import register_preparation_callbacks
+from nanometa_live.app.tabs.preparation_helpers import _render_import_result
 
 
 @pytest.fixture
@@ -83,61 +84,132 @@ class TestExportBundleReadinessGate:
         assert out[1] == {"display": "none"}  # force area stays hidden on critical
 
 
-class TestImportBundleRendering:
+class TestRenderImportResult:
+    """Pure renderer for the import outcome (shared by the finalize callback).
+    Offline activation is NOT its job -- that lives in finalize_import.
+    """
+
+    def test_success_with_action_required(self):
+        out = _render_import_result({
+            "success": True, "warnings": [],
+            "kraken_db_unset": True, "plugins_empty": True,
+        })
+        s = str(out)
+        assert "Offline mode activated" in s
+        assert "Action required" in s and "Kraken2 database path" in s and "plugins" in s
+
+    def test_success_clean(self):
+        out = _render_import_result({"success": True, "warnings": []})
+        assert "Offline mode activated" in str(out)
+        assert "Action required" not in str(out)
+
+    def test_db_hash_mismatch_renders_regenerate_button(self):
+        out = _render_import_result({
+            "success": True, "warnings": [], "db_hash_mismatch": True,
+        })
+        s = str(out)
+        assert "Action required" in s and "mapping" in s.lower()
+        assert "regenerate-mappings-btn" in s
+
+    def test_clean_import_has_no_regenerate_button(self):
+        out = _render_import_result({"success": True, "warnings": []})
+        assert "regenerate-mappings-btn" not in str(out)
+
+    def test_failure_surfaces_detail(self):
+        out = _render_import_result({
+            "success": False, "warnings": ["platform mismatch", "checksum failed"],
+        })
+        s = str(out)
+        assert "Import failed" in s and "platform mismatch" in s and "checksum failed" in s
+
+    def test_early_error_uses_its_color(self):
+        out = _render_import_result({
+            "success": False, "early_error": "Bundle not found: /x", "color": "danger",
+        })
+        assert out.color == "danger"
+        assert "not found" in str(out.children)
+
+    def test_exception_surfaces_as_failure(self):
+        out = _render_import_result({"success": False, "exception": "boom"})
+        assert out.color == "danger"
+        assert "Import failed" in str(out.children) and "boom" in str(out.children)
+
+
+class TestImportBundleWorker:
+    """Background worker: validates, imports, and writes a wrapped result to
+    the Store. It must NOT activate offline mode (wrong process).
+    """
+
     def _fn(self, app):
-        return get_callback_fn(app, "import-result.children", input_contains="import-bundle-btn")
+        return get_callback_fn(
+            app, "import-bundle-result-store.data",
+            input_contains="import-bundle-btn",
+        )
 
     def _drive(self, app, result, tmp_path):
         bundle = tmp_path / "b.tar.gz"
         bundle.write_bytes(b"x" * 100)
         mgr = MagicMock()
         mgr.import_bundle.return_value = result
-        with patch("nanometa_live.core.workflow.bundle_manager.BundleManager", return_value=mgr), \
-             patch("nanometa_live.app.app._init_offline_mode"):
-            return self._fn(app)(1, str(bundle), "/db")
+        set_progress = MagicMock()
+        with patch("nanometa_live.core.workflow.bundle_manager.BundleManager",
+                   return_value=mgr), \
+             patch("nanometa_live.app.app._init_offline_mode") as init:
+            out = self._fn(app)(set_progress, 1, str(bundle), "/db")
+        return out, init, set_progress
 
-    def test_success_with_action_required(self, app, tmp_path):
-        out = self._drive(app, {
-            "success": True, "warnings": [], "kraken_db_unset": True, "plugins_empty": True,
-        }, tmp_path)
-        s = str(out)
-        assert "Offline mode activated" in s
-        assert "Action required" in s and "Kraken2 database path" in s and "plugins" in s
+    def test_success_wraps_manager_result_without_offline_init(self, app, tmp_path):
+        payload, init, set_progress = self._drive(
+            app, {"success": True, "warnings": []}, tmp_path
+        )
+        assert payload["result"] == {"success": True, "warnings": []}
+        assert payload["_click"] == 1          # wrapped for finalize re-fire
+        assert not init.called                 # worker must not touch singletons
+        assert set_progress.called             # spinner shown while working
 
-    def test_success_clean(self, app, tmp_path):
-        out = self._drive(app, {"success": True, "warnings": []}, tmp_path)
-        assert "Offline mode activated" in str(out)
-        assert "Action required" not in str(out)
-
-    def test_db_hash_mismatch_surfaces_action_required(self, app, tmp_path):
-        out = self._drive(app, {
-            "success": True, "warnings": [], "db_hash_mismatch": True,
-        }, tmp_path)
-        s = str(out)
-        assert "Action required" in s
-        assert "mapping" in s.lower() and "database" in s.lower()
-
-    def test_db_hash_mismatch_renders_regenerate_button(self, app, tmp_path):
-        out = self._drive(app, {
-            "success": True, "warnings": [], "db_hash_mismatch": True,
-        }, tmp_path)
-        assert "regenerate-mappings-btn" in str(out)
-
-    def test_clean_import_has_no_regenerate_button(self, app, tmp_path):
-        out = self._drive(app, {"success": True, "warnings": []}, tmp_path)
-        assert "regenerate-mappings-btn" not in str(out)
-
-    def test_failure_surfaces_detail(self, app, tmp_path):
-        out = self._drive(app, {
-            "success": False, "warnings": ["platform mismatch", "checksum failed"],
-        }, tmp_path)
-        s = str(out)
-        assert "Import failed" in s and "platform mismatch" in s and "checksum failed" in s
-
-    def test_missing_paths_warn(self, app, tmp_path):
-        assert "bundle path" in str(self._fn(app)(1, "", "/db"))
+    def test_missing_paths_return_early_error(self, app, tmp_path):
+        set_progress = MagicMock()
+        out = self._fn(app)(set_progress, 1, "", "/db")
+        assert "bundle path" in out["result"]["early_error"]
         b = tmp_path / "b.tar.gz"; b.write_bytes(b"x")
-        assert "Kraken2 database path" in str(self._fn(app)(1, str(b), ""))
+        out = self._fn(app)(set_progress, 1, str(b), "")
+        assert "Kraken2 database path" in out["result"]["early_error"]
+
+    def test_bundle_not_found_early_error(self, app):
+        out = self._fn(app)(MagicMock(), 1, "/does/not/exist.tar.gz", "/db")
+        assert "not found" in out["result"]["early_error"]
+        assert out["result"]["color"] == "danger"
+
+    def test_no_clicks_prevents_update(self, app):
+        with pytest.raises(PreventUpdate):
+            self._fn(app)(MagicMock(), None, "/b", "/db")
+
+
+class TestFinalizeImport:
+    """Main-process finalizer: activates offline mode on success, renders."""
+
+    def _fn(self, app):
+        return get_callback_fn(
+            app, "import-result.children",
+            input_contains="import-bundle-result-store",
+        )
+
+    def test_success_activates_offline_and_renders(self, app):
+        with patch("nanometa_live.app.app._init_offline_mode") as init:
+            out = self._fn(app)({"_click": 1, "result": {"success": True, "warnings": []}})
+        init.assert_called_once_with(True)
+        assert "Offline mode activated" in str(out)
+
+    def test_failure_does_not_activate_offline(self, app):
+        with patch("nanometa_live.app.app._init_offline_mode") as init:
+            out = self._fn(app)({"_click": 1, "result": {
+                "success": False, "warnings": ["checksum failed"]}})
+        assert not init.called
+        assert "Import failed" in str(out) and "checksum failed" in str(out)
+
+    def test_empty_store_prevents_update(self, app):
+        with pytest.raises(PreventUpdate):
+            self._fn(app)(None)
 
 
 class TestRegenerateMappingsCallback:

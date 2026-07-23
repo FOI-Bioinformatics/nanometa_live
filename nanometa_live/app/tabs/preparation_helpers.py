@@ -65,6 +65,102 @@ def _run_export(config, filename=None, directory=None, pre_warm=True,
         logger.error(f"Export failed: {e}", exc_info=True)
         return dbc.Alert(f"Export failed: {e}", color="danger")
 
+def _render_import_result(result):
+    """Render the import outcome from the worker's result dict into an Alert.
+
+    Pure (no I/O, no singleton mutation) so the background-import split can call
+    it from the main-process finalize callback and so it is unit-testable. The
+    dict is one of:
+      - ``{"early_error": msg, "color": ...}``  -- a pre-import validation stop
+      - ``{"exception": msg}``                  -- the import raised
+      - ``{"success": True, ...manager result}``
+      - ``{"success": False, "warnings": [...]}`` -- the manager refused
+
+    Offline-mode activation is NOT done here -- that is a main-process side
+    effect handled by the finalize callback, since a background worker cannot
+    re-init the live singletons.
+    """
+    if result.get("early_error"):
+        return dbc.Alert(
+            result["early_error"], color=result.get("color", "warning")
+        )
+    if result.get("exception"):
+        return dbc.Alert(f"Import failed: {result['exception']}", color="danger")
+
+    if not result.get("success"):
+        # The manager's own diagnostics (platform mismatch, checksum failure,
+        # unsupported version, ...).
+        detail = "; ".join(result.get("warnings", [])) or "see logs"
+        return dbc.Alert(f"Import failed: {detail}", color="danger")
+
+    return dbc.Alert(_import_success_children(result), color="success")
+
+
+def _import_success_children(result):
+    """Build the body of the success Alert: header, action-required items, the
+    DB-hash regenerate button, warnings, and the next-steps line.
+    """
+    children = [
+        html.I(className="bi bi-check-circle me-2"),
+        html.Strong("Bundle imported. Offline mode activated."),
+    ]
+    # Setup that is not yet complete (action required) -- surface prominently so
+    # the operator does not read "activated" as "ready to run".
+    action_needed = []
+    if result.get("kraken_db_unset"):
+        action_needed.append(
+            "Set the Kraken2 database path before starting analysis "
+            "(it is transferred separately from the bundle)."
+        )
+    if result.get("plugins_empty"):
+        action_needed.append(
+            "Bundled Nextflow plugins are missing; re-export from a machine "
+            "with the plugins cached, or the offline run will fail when "
+            "Nextflow probes the online plugin registry."
+        )
+    if result.get("db_hash_mismatch"):
+        action_needed.append(
+            "The bundled taxid mappings were built for a different Kraken2 "
+            "database; point the Kraken2 database path at the one the bundle "
+            "was built for, or click 'Regenerate mappings for this database' "
+            "below to rebuild them here. Otherwise the readiness check and the "
+            "run will not find the mappings."
+        )
+    if action_needed:
+        children.append(
+            dbc.Alert(
+                [html.Strong("Action required: ")]
+                + [html.Div(a, className="small") for a in action_needed],
+                color="warning",
+                className="mt-2 mb-2",
+            )
+        )
+    # One-click recovery for a DB-hash mismatch (background callback
+    # `regenerate_mappings`, result rendered in `regenerate-mappings-result`).
+    if result.get("db_hash_mismatch"):
+        children.append(
+            dbc.Button(
+                [html.I(className="bi bi-arrow-repeat me-2"),
+                 "Regenerate mappings for this database"],
+                id="regenerate-mappings-btn",
+                color="warning",
+                size="sm",
+                className="mt-1 mb-2",
+            )
+        )
+    if result.get("warnings"):
+        children.append(html.Br())
+        children.append(html.Strong("Warnings: "))
+        children.extend([html.Span(w + "; ") for w in result["warnings"]])
+    children.append(html.Hr(className="my-2"))
+    children.append(html.Div([
+        html.Strong("Next steps: "),
+        "open the Watchlist & Preparation tab, run the Readiness checklist to "
+        "confirm everything is green, then click Start Analysis.",
+    ], className="small"))
+    return children
+
+
 def _regenerate_mappings(config, watchlist_entries=None):
     """Rebuild the taxonomy index + taxid mappings for the configured Kraken2
     database.

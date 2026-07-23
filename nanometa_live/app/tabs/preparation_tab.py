@@ -30,6 +30,7 @@ from nanometa_live.app.tabs.preparation_helpers import (
     _build_mapping_table,
     _execute_wizard_step,
     _regenerate_mappings,
+    _render_import_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -720,25 +721,46 @@ def register_preparation_callbacks(app):
             pre_warm=pre_warm,
             containerization=containerization,
         )
-    # --- Import Bundle ---
+    # --- Import Bundle (split: background worker does the I/O, a main-process
+    # callback renders + activates offline mode) ---
+    #
+    # The offline-mode singleton re-init (_init_offline_mode) MUST run in the
+    # main process, so it cannot live in the background worker (which runs in a
+    # separate OS process with its own, ignored, singletons). The worker writes
+    # its outcome to `import-bundle-result-store`; `finalize_import` reads it,
+    # activates offline mode on success, and renders. The result dict is wrapped
+    # with the click count so re-importing produces a distinct Store value and
+    # the finalize callback re-fires.
     @app.callback(
-        Output("import-result", "children"),
+        Output("import-bundle-result-store", "data"),
         Input("import-bundle-btn", "n_clicks"),
         State("import-bundle-path", "value"),
         State("import-kraken-db-path", "value"),
+        background=True,
+        manager=background_callback_manager,
+        progress=[Output("import-result", "children")],
+        running=[(Output("import-bundle-btn", "disabled"), True, False)],
         prevent_initial_call=True,
     )
-    def import_bundle(n_clicks, bundle_path, kraken_db_path):
+    def import_bundle_worker(set_progress, n_clicks, bundle_path, kraken_db_path):
         if not n_clicks:
             raise PreventUpdate
 
-        if not bundle_path:
-            return dbc.Alert("Please provide a bundle path.", color="warning")
-        if not kraken_db_path:
-            return dbc.Alert("Please provide the Kraken2 database path.", color="warning")
+        def _wrap(result):
+            return {"_click": n_clicks, "result": result}
 
+        if not bundle_path:
+            return _wrap({"success": False,
+                          "early_error": "Please provide a bundle path.",
+                          "color": "warning"})
+        if not kraken_db_path:
+            return _wrap({"success": False,
+                          "early_error": "Please provide the Kraken2 database path.",
+                          "color": "warning"})
         if not Path(bundle_path).exists():
-            return dbc.Alert(f"Bundle not found: {bundle_path}", color="danger")
+            return _wrap({"success": False,
+                          "early_error": f"Bundle not found: {bundle_path}",
+                          "color": "danger"})
 
         # Free-space preflight: a gzip bundle expands well beyond its file size
         # once extracted and copied. Stop early rather than fail mid-extract.
@@ -750,102 +772,57 @@ def register_preparation_callbacks(app):
             bundle_size = Path(bundle_path).stat().st_size
             free = _sh.disk_usage(home).free
             if free < bundle_size * 3:
-                return dbc.Alert(
-                    f"Not enough free space to import: the bundle is "
-                    f"{human_size(bundle_size)} and unpacking needs roughly "
-                    f"{human_size(bundle_size * 3)}, but only {human_size(free)} "
-                    f"is free at {home}. Free up space and try again.",
-                    color="danger",
-                )
+                return _wrap({
+                    "success": False,
+                    "color": "danger",
+                    "early_error": (
+                        f"Not enough free space to import: the bundle is "
+                        f"{human_size(bundle_size)} and unpacking needs roughly "
+                        f"{human_size(bundle_size * 3)}, but only "
+                        f"{human_size(free)} is free at {home}. Free up space "
+                        "and try again."
+                    ),
+                })
         except Exception as e:
             logger.debug(f"Import space preflight skipped: {e}")
 
+        set_progress((
+            dbc.Alert(
+                [dbc.Spinner(size="sm", spinner_class_name="me-2"),
+                 "Importing bundle... (extracting and verifying; this can "
+                 "take a few minutes for a large bundle)"],
+                color="info", className="mt-2 py-2",
+            ),
+        ))
         try:
             from nanometa_live.core.workflow.bundle_manager import BundleManager
             manager = BundleManager()
             result = manager.import_bundle(bundle_path, kraken_db_path)
-
-            if result["success"]:
-                # Bundle import enables offline_mode — propagate to singletons
-                from nanometa_live.app.app import _init_offline_mode
-                _init_offline_mode(True)
-
-                children = [
-                    html.I(className="bi bi-check-circle me-2"),
-                    html.Strong("Bundle imported. Offline mode activated."),
-                ]
-                # Setup that is not yet complete (action required) -- surface
-                # these prominently so the operator does not read "activated"
-                # as "ready to run".
-                action_needed = []
-                if result.get("kraken_db_unset"):
-                    action_needed.append(
-                        "Set the Kraken2 database path before starting analysis "
-                        "(it is transferred separately from the bundle)."
-                    )
-                if result.get("plugins_empty"):
-                    action_needed.append(
-                        "Bundled Nextflow plugins are missing; re-export from a "
-                        "machine with the plugins cached, or the offline run will "
-                        "fail when Nextflow probes the online plugin registry."
-                    )
-                if result.get("db_hash_mismatch"):
-                    action_needed.append(
-                        "The bundled taxid mappings were built for a different "
-                        "Kraken2 database; point the Kraken2 database path at the "
-                        "one the bundle was built for, or click 'Regenerate "
-                        "mappings for this database' below to rebuild them here. "
-                        "Otherwise the readiness check and the run will not find "
-                        "the mappings."
-                    )
-                if action_needed:
-                    children.append(
-                        dbc.Alert(
-                            [html.Strong("Action required: ")]
-                            + [html.Div(a, className="small") for a in action_needed],
-                            color="warning",
-                            className="mt-2 mb-2",
-                        )
-                    )
-                # One-click recovery for a DB-hash mismatch: rebuild the index
-                # and mappings for the local database (background callback
-                # `regenerate_mappings`, result rendered below in
-                # `regenerate-mappings-result`).
-                if result.get("db_hash_mismatch"):
-                    children.append(
-                        dbc.Button(
-                            [html.I(className="bi bi-arrow-repeat me-2"),
-                             "Regenerate mappings for this database"],
-                            id="regenerate-mappings-btn",
-                            color="warning",
-                            size="sm",
-                            className="mt-1 mb-2",
-                        )
-                    )
-                if result["warnings"]:
-                    children.append(html.Br())
-                    children.append(html.Strong("Warnings: "))
-                    children.extend([
-                        html.Span(w + "; ") for w in result["warnings"]
-                    ])
-                # Tell the operator where to go next.
-                children.append(html.Hr(className="my-2"))
-                children.append(html.Div([
-                    html.Strong("Next steps: "),
-                    "open the Watchlist & Preparation tab, run the Readiness "
-                    "checklist to confirm everything is green, then click "
-                    "Start Analysis.",
-                ], className="small"))
-                return dbc.Alert(children, color="success")
-            else:
-                # Surface the manager's own diagnostics (platform mismatch,
-                # checksum failure, unsupported version, ...).
-                detail = "; ".join(result.get("warnings", [])) or "see logs"
-                return dbc.Alert(f"Import failed: {detail}", color="danger")
-
+            return _wrap(result)
         except Exception as e:
             logger.error(f"Import failed: {e}", exc_info=True)
-            return dbc.Alert(f"Import failed: {e}", color="danger")
+            return _wrap({"success": False, "exception": str(e)})
+
+    @app.callback(
+        Output("import-result", "children", allow_duplicate=True),
+        Input("import-bundle-result-store", "data"),
+        prevent_initial_call=True,
+    )
+    def finalize_import(payload):
+        """Main-process finalizer for the background import.
+
+        Activates offline mode (re-inits the live singletons -- only possible
+        here, not in the worker) on a successful import, then renders the
+        outcome. Runs in the main process so the singleton switch takes effect
+        for the running app.
+        """
+        if not payload:
+            raise PreventUpdate
+        result = payload.get("result") or {}
+        if result.get("success"):
+            from nanometa_live.app.app import _init_offline_mode
+            _init_offline_mode(True)
+        return _render_import_result(result)
 
     @app.callback(
         Output("regenerate-mappings-result", "children"),
