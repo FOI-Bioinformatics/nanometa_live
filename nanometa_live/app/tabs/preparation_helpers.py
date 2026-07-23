@@ -65,6 +65,83 @@ def _run_export(config, filename=None, directory=None, pre_warm=True,
         logger.error(f"Export failed: {e}", exc_info=True)
         return dbc.Alert(f"Export failed: {e}", color="danger")
 
+def _regenerate_mappings(config, watchlist_entries=None):
+    """Rebuild the taxonomy index + taxid mappings for the configured Kraken2
+    database.
+
+    Recovers from a bundle imported against a different database (db_hash
+    mismatch): the bundled mappings are keyed by the *bundle's* DB hash, so
+    readiness and the run cannot find them. Rebuilding here writes them under
+    ``{local_db_hash}_*`` in ``<home>/mappings`` where those consumers look.
+
+    ``watchlist_entries`` is the ``watchlist-entries-snapshot`` payload; it is
+    forwarded to MobileLabPreparer so this works in a background worker where
+    the WatchlistManager singleton is empty. Returns a dbc.Alert.
+    """
+    import shutil
+
+    db_path = (config or {}).get("kraken_db", "")
+    if not db_path:
+        return dbc.Alert(
+            "No Kraken2 database configured; set the database path before "
+            "regenerating mappings.",
+            color="danger",
+        )
+
+    # Building the taxonomy index needs the database's inspect.txt; when it is
+    # absent it is generated with kraken2-inspect. On an air-gapped field
+    # machine with neither present, regeneration cannot proceed -- fail with
+    # clear guidance rather than leaving stale, mis-keyed mappings in place.
+    if not (Path(db_path) / "inspect.txt").exists() and not shutil.which(
+        "kraken2-inspect"
+    ):
+        return dbc.Alert(
+            [
+                html.Strong("Cannot regenerate mappings: "),
+                "the database has no inspect.txt and kraken2-inspect is not "
+                "installed, so the taxonomy index cannot be built. Install "
+                "kraken2 (which provides kraken2-inspect) on this machine, or "
+                "ship an inspect.txt alongside the database, then retry.",
+            ],
+            color="danger",
+        )
+
+    try:
+        from nanometa_live.core.workflow.mobile_lab_preparer import (
+            MobileLabPreparer,
+            PreparationResult,
+        )
+
+        preparer = MobileLabPreparer(
+            config=config, watchlist_entries=watchlist_entries
+        )
+        pr = PreparationResult(success=True)
+        # skip_existing=False: force a rebuild for the local DB hash even if a
+        # partial artefact exists. verify_db also ensures inspect.txt.
+        preparer._run_verify_db(0, pr, skip_existing=False)
+        preparer._run_build_index(1, pr, skip_existing=False)
+        preparer._run_generate_mappings(2, pr, skip_existing=False)
+
+        msgs = [
+            "Taxonomy index rebuilt",
+            "Taxid mappings regenerated for this database",
+        ]
+        if pr.warnings:
+            msgs.extend(pr.warnings)
+        return dbc.Alert(
+            [
+                html.I(className="bi bi-check-circle me-2"),
+                ". ".join(msgs)
+                + ". Re-run the Readiness checklist to confirm the "
+                "'Database index' and 'Taxid mappings' checks now pass.",
+            ],
+            color="success",
+        )
+    except Exception as e:
+        logger.error(f"Mapping regeneration failed: {e}", exc_info=True)
+        return dbc.Alert(f"Regeneration failed: {e}", color="danger")
+
+
 def _build_mapping_table(unrecognized):
     """Build a table of unrecognized files for manual taxid mapping."""
     rows = []

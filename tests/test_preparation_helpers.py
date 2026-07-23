@@ -7,7 +7,7 @@ stages: the unrecognised-file mapping table, the export directory guard, and the
 wizard-step dispatcher's validation errors.
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import dash_bootstrap_components as dbc
 import pytest
@@ -16,6 +16,7 @@ import nanometa_live.app.tabs.preparation_helpers as prep_helpers
 from nanometa_live.app.tabs.preparation_helpers import (
     _build_mapping_table,
     _execute_wizard_step,
+    _regenerate_mappings,
     _run_export,
 )
 
@@ -82,3 +83,70 @@ class TestExecuteWizardStep:
         _, kwargs = run.call_args
         assert kwargs["containerization"] == "conda"
         assert kwargs["pre_warm"] is False
+
+
+class TestRegenerateMappings:
+    """Recover from a bundle imported against a different Kraken2 DB by
+    rebuilding the taxonomy index + taxid mappings for the local DB, so they
+    land under {local_db_hash}_* where readiness and the run look.
+    """
+
+    def test_no_db_returns_danger(self):
+        alert = _regenerate_mappings({"kraken_db": ""})
+        assert isinstance(alert, dbc.Alert)
+        assert alert.color == "danger"
+        assert "database" in str(alert.children).lower()
+
+    def test_missing_inspect_and_binary_fails_with_guidance(self, tmp_path):
+        db = tmp_path / "kdb"
+        db.mkdir()  # no inspect.txt
+        with patch("shutil.which", return_value=None):
+            alert = _regenerate_mappings({"kraken_db": str(db)})
+        assert alert.color == "danger"
+        s = str(alert.children).lower()
+        assert "inspect" in s and "kraken2-inspect" in s
+
+    def test_success_runs_prep_stages_and_forwards_entries(self, tmp_path):
+        db = tmp_path / "kdb"
+        db.mkdir()
+        (db / "inspect.txt").write_text("# inspect\n")  # prerequisite satisfied
+        snapshot = [{"name": "Francisella tularensis", "taxid": 263}]
+
+        prep = MagicMock()
+        prep_ctor = MagicMock(return_value=prep)
+        pr = MagicMock(warnings=[])
+        with patch(
+            "nanometa_live.core.workflow.mobile_lab_preparer.MobileLabPreparer",
+            prep_ctor,
+        ), patch(
+            "nanometa_live.core.workflow.mobile_lab_preparer.PreparationResult",
+            return_value=pr,
+        ):
+            alert = _regenerate_mappings(
+                {"kraken_db": str(db)}, watchlist_entries=snapshot
+            )
+
+        assert alert.color == "success"
+        # Watchlist snapshot forwarded to the preparer (background-worker path).
+        _, kwargs = prep_ctor.call_args
+        assert kwargs.get("watchlist_entries") == snapshot
+        # Index + mappings stages ran (force rebuild for the new hash).
+        assert prep._run_build_index.called
+        assert prep._run_generate_mappings.called
+
+    def test_stage_failure_returns_danger(self, tmp_path):
+        db = tmp_path / "kdb"
+        db.mkdir()
+        (db / "inspect.txt").write_text("# inspect\n")
+        prep = MagicMock()
+        prep._run_build_index.side_effect = RuntimeError("boom")
+        with patch(
+            "nanometa_live.core.workflow.mobile_lab_preparer.MobileLabPreparer",
+            return_value=prep,
+        ), patch(
+            "nanometa_live.core.workflow.mobile_lab_preparer.PreparationResult",
+            return_value=MagicMock(warnings=[]),
+        ):
+            alert = _regenerate_mappings({"kraken_db": str(db)})
+        assert alert.color == "danger"
+        assert "boom" in str(alert.children)
