@@ -467,6 +467,14 @@ def build_import_bundle_card():
             ]),
             dcc.Loading(html.Div(id="import-result", className="mt-2"),
                         type="default"),
+            # Result area for the "Regenerate mappings for this database"
+            # action, surfaced inside import-result on a Kraken2 DB-hash
+            # mismatch. Kept persistent (outside import-result) so its
+            # background callback can write here without being replaced by the
+            # next import render.
+            dcc.Loading(html.Div(id="regenerate-mappings-result",
+                                 className="mt-2"),
+                        type="default"),
         ]),
     ])
 

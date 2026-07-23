@@ -29,6 +29,7 @@ from nanometa_live.app.tabs.preparation_helpers import (
     _build_export_opts,
     _build_mapping_table,
     _execute_wizard_step,
+    _regenerate_mappings,
 )
 
 logger = logging.getLogger(__name__)
@@ -790,10 +791,10 @@ def register_preparation_callbacks(app):
                     action_needed.append(
                         "The bundled taxid mappings were built for a different "
                         "Kraken2 database; point the Kraken2 database path at the "
-                        "one the bundle was built for, or rebuild them via the "
-                        "'Taxonomy index + mappings' step on the Watchlist & "
-                        "Preparation tab. Otherwise the readiness check and the "
-                        "run will not find the mappings."
+                        "one the bundle was built for, or click 'Regenerate "
+                        "mappings for this database' below to rebuild them here. "
+                        "Otherwise the readiness check and the run will not find "
+                        "the mappings."
                     )
                 if action_needed:
                     children.append(
@@ -802,6 +803,21 @@ def register_preparation_callbacks(app):
                             + [html.Div(a, className="small") for a in action_needed],
                             color="warning",
                             className="mt-2 mb-2",
+                        )
+                    )
+                # One-click recovery for a DB-hash mismatch: rebuild the index
+                # and mappings for the local database (background callback
+                # `regenerate_mappings`, result rendered below in
+                # `regenerate-mappings-result`).
+                if result.get("db_hash_mismatch"):
+                    children.append(
+                        dbc.Button(
+                            [html.I(className="bi bi-arrow-repeat me-2"),
+                             "Regenerate mappings for this database"],
+                            id="regenerate-mappings-btn",
+                            color="warning",
+                            size="sm",
+                            className="mt-1 mb-2",
                         )
                     )
                 if result["warnings"]:
@@ -828,6 +844,43 @@ def register_preparation_callbacks(app):
         except Exception as e:
             logger.error(f"Import failed: {e}", exc_info=True)
             return dbc.Alert(f"Import failed: {e}", color="danger")
+
+    @app.callback(
+        Output("regenerate-mappings-result", "children"),
+        Input("regenerate-mappings-btn", "n_clicks"),
+        State("app-config", "data"),
+        State("import-kraken-db-path", "value"),
+        State("watchlist-entries-snapshot", "data"),
+        background=True,
+        manager=background_callback_manager,
+        progress=[Output("regenerate-mappings-result", "children")],
+        running=[(Output("regenerate-mappings-btn", "disabled"), True, False)],
+        prevent_initial_call=True,
+    )
+    def regenerate_mappings(set_progress, n_clicks, config, import_db, snapshot):
+        """Rebuild the taxonomy index + taxid mappings for the local Kraken2
+        database after a bundle was imported against a different one.
+
+        Background because kraken2-inspect + mapping generation are
+        multi-minute. The imported DB path lives in the import form
+        (``import-kraken-db-path``); app-config is not refreshed by import, so
+        prefer the form value. The watchlist snapshot is forwarded so mapping
+        generation works in this worker where the singleton is empty.
+        """
+        if not n_clicks:
+            raise PreventUpdate
+        config = dict(config or {})
+        if import_db:
+            config["kraken_db"] = import_db
+        set_progress((
+            dbc.Alert(
+                [dbc.Spinner(size="sm", spinner_class_name="me-2"),
+                 "Regenerating taxonomy index and mappings for this "
+                 "database... (this can take several minutes)"],
+                color="info", className="mt-2 py-2",
+            ),
+        ))
+        return _regenerate_mappings(config, watchlist_entries=snapshot)
 
     # =========================================================================
     # Import Genomes (manual directory / archive)

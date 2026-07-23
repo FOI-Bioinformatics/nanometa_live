@@ -14,6 +14,7 @@ import pytest
 pytestmark = pytest.mark.callback
 
 from dash import Dash
+from dash.exceptions import PreventUpdate
 
 from dash_test_utils import get_callback_fn
 import nanometa_live.app.tabs.preparation_tab as prep
@@ -116,6 +117,16 @@ class TestImportBundleRendering:
         assert "Action required" in s
         assert "mapping" in s.lower() and "database" in s.lower()
 
+    def test_db_hash_mismatch_renders_regenerate_button(self, app, tmp_path):
+        out = self._drive(app, {
+            "success": True, "warnings": [], "db_hash_mismatch": True,
+        }, tmp_path)
+        assert "regenerate-mappings-btn" in str(out)
+
+    def test_clean_import_has_no_regenerate_button(self, app, tmp_path):
+        out = self._drive(app, {"success": True, "warnings": []}, tmp_path)
+        assert "regenerate-mappings-btn" not in str(out)
+
     def test_failure_surfaces_detail(self, app, tmp_path):
         out = self._drive(app, {
             "success": False, "warnings": ["platform mismatch", "checksum failed"],
@@ -127,3 +138,30 @@ class TestImportBundleRendering:
         assert "bundle path" in str(self._fn(app)(1, "", "/db"))
         b = tmp_path / "b.tar.gz"; b.write_bytes(b"x")
         assert "Kraken2 database path" in str(self._fn(app)(1, str(b), ""))
+
+
+class TestRegenerateMappingsCallback:
+    def _fn(self, app):
+        return get_callback_fn(
+            app, "regenerate-mappings-result.children",
+            input_contains="regenerate-mappings-btn",
+        )
+
+    def test_prefers_import_db_and_forwards_snapshot(self, app):
+        snap = [{"name": "Francisella tularensis", "taxid": 263}]
+        set_progress = MagicMock()
+        with patch.object(prep, "_regenerate_mappings", return_value="REGEN") as rg:
+            out = self._fn(app)(
+                set_progress, 1, {"kraken_db": "/bundle/db"}, "/local/db", snap
+            )
+        assert out == "REGEN"
+        # The import-form DB path wins over the (stale) app-config value.
+        args, kwargs = rg.call_args
+        assert args[0]["kraken_db"] == "/local/db"
+        assert kwargs.get("watchlist_entries") == snap
+        # A running spinner was pushed before the work.
+        assert set_progress.called
+
+    def test_no_clicks_prevents_update(self, app):
+        with pytest.raises(PreventUpdate):
+            self._fn(app)(MagicMock(), None, {}, None, None)
