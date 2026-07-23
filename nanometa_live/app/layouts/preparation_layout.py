@@ -822,6 +822,10 @@ def _create_import_genomes_card() -> dbc.Card:
                 ], label="Archive", tab_id="import-archive"),
             ], id="genome-import-tabs", active_tab="import-dir"),
 
+            # Genome imports run in a background worker; each writes its outcome
+            # here and a main-process finalize renders it + reloads the
+            # genome-manager singleton so the live app sees the new genomes.
+            dcc.Store(id="genome-import-result-store"),
             # Import result area
             html.Div(id="genome-import-result", className="mt-3"),
 

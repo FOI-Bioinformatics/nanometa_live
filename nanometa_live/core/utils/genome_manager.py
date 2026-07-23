@@ -470,6 +470,18 @@ class GenomeDownloadManager:
                     json.JSONDecodeError, ValueError, TypeError) as e:
                 logger.warning(f"Failed to load genome metadata: {e}")
 
+    def reload_metadata(self) -> None:
+        """Re-read genome metadata from disk into the in-memory cache.
+
+        Needed after a separate process -- a DiskcacheManager background worker
+        importing genomes -- mutates its own in-memory ``_metadata`` and writes
+        ``genome_metadata.json`` to disk, while this (main-process) singleton
+        keeps a stale in-memory copy. Clearing and reloading lets the live app
+        see the newly imported genomes without a restart.
+        """
+        self._metadata = {}
+        self._load_metadata()
+
     def _save_metadata(self) -> None:
         """Save genome metadata to cache.
 
