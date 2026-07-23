@@ -31,6 +31,7 @@ from nanometa_live.app.tabs.preparation_helpers import (
     _execute_wizard_step,
     _regenerate_mappings,
     _render_import_result,
+    _render_genome_import_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -865,156 +866,166 @@ def register_preparation_callbacks(app):
     # Import Genomes (manual directory / archive)
     # =========================================================================
 
+    # Genome imports (directory / archive / mapped) all mutate the
+    # get_genome_manager singleton's in-memory metadata and copy files, so they
+    # run in a background worker that writes a plain-data result to
+    # genome-import-result-store; the main-process finalize_genome_import then
+    # reloads the singleton (a worker's in-memory additions do not cross the
+    # process boundary) and renders the shared four outputs.
+    def _genome_import_payload(n_clicks, result):
+        return {"_click": n_clicks, "result": result}
+
+    def _genome_import_spinner(label):
+        return (dbc.Alert(
+            [dbc.Spinner(size="sm", spinner_class_name="me-2"), label],
+            color="info", className="mt-3",
+        ),)
+
     @app.callback(
-        Output("genome-import-result", "children"),
-        Output("genome-import-unrecognized", "data"),
-        Output("genome-import-mapping-area", "style"),
-        Output("genome-import-mapping-table", "children"),
+        Output("genome-import-result-store", "data", allow_duplicate=True),
         Input("genome-import-dir-btn", "n_clicks"),
         State("genome-import-dir-path", "value"),
         State("app-config", "data"),
+        background=True,
+        manager=background_callback_manager,
+        progress=[Output("genome-import-result", "children")],
+        running=[(Output("genome-import-dir-btn", "disabled"), True, False)],
         prevent_initial_call=True,
     )
-    def import_genomes_from_dir(n_clicks, dir_path, config):
-        """Import genome FASTA files from a directory."""
+    def import_genomes_from_dir_worker(set_progress, n_clicks, dir_path, config):
+        """Scan a directory and import its FASTA files (background)."""
         if not n_clicks:
             raise PreventUpdate
-
         if not dir_path:
-            return (
-                dbc.Alert("Please provide a directory path.", color="warning"),
-                [], {"display": "none"}, [],
-            )
-
+            return _genome_import_payload(n_clicks, {
+                "source": "dir",
+                "early": {"message": "Please provide a directory path.", "color": "warning"}})
         if not Path(dir_path).is_dir():
-            return (
-                dbc.Alert(f"Directory not found: {dir_path}", color="danger"),
-                [], {"display": "none"}, [],
-            )
+            return _genome_import_payload(n_clicks, {
+                "source": "dir",
+                "early": {"message": f"Directory not found: {dir_path}", "color": "danger"}})
+        set_progress(_genome_import_spinner("Importing genomes from directory..."))
+        try:
+            from nanometa_live.core.utils.genome_manager import get_genome_manager
+            cache_dir = config.get("genome_cache_dir") if config else None
+            imported, unrecognized = get_genome_manager(
+                cache_dir=cache_dir).import_genomes_from_directory(dir_path)
+            return _genome_import_payload(n_clicks, {
+                "source": "dir", "imported": imported, "unrecognized": unrecognized})
+        except Exception as e:
+            logger.error(f"Genome import failed: {e}", exc_info=True)
+            return _genome_import_payload(n_clicks, {"source": "dir", "error": str(e)})
 
+    @app.callback(
+        Output("genome-import-result-store", "data", allow_duplicate=True),
+        Input("genome-import-archive-btn", "n_clicks"),
+        State("genome-import-archive-path", "value"),
+        State("app-config", "data"),
+        background=True,
+        manager=background_callback_manager,
+        progress=[Output("genome-import-result", "children")],
+        running=[(Output("genome-import-archive-btn", "disabled"), True, False)],
+        prevent_initial_call=True,
+    )
+    def import_genomes_from_archive_worker(set_progress, n_clicks, archive_path, config):
+        """Extract an archive and import its FASTA files (background)."""
+        if not n_clicks:
+            raise PreventUpdate
+        if not archive_path:
+            return _genome_import_payload(n_clicks, {
+                "source": "archive",
+                "early": {"message": "Please provide an archive path.", "color": "warning"}})
+        if not Path(archive_path).exists():
+            return _genome_import_payload(n_clicks, {
+                "source": "archive",
+                "early": {"message": f"Archive not found: {archive_path}", "color": "danger"}})
+        set_progress(_genome_import_spinner("Extracting and importing genomes from archive..."))
+        try:
+            from nanometa_live.core.utils.genome_manager import get_genome_manager
+            cache_dir = config.get("genome_cache_dir") if config else None
+            imported, unrecognized = get_genome_manager(
+                cache_dir=cache_dir).import_genomes_from_archive(archive_path)
+            return _genome_import_payload(n_clicks, {
+                "source": "archive", "imported": imported, "unrecognized": unrecognized})
+        except Exception as e:
+            logger.error(f"Genome archive import failed: {e}", exc_info=True)
+            return _genome_import_payload(n_clicks, {"source": "archive", "error": str(e)})
+
+    @app.callback(
+        Output("genome-import-result-store", "data", allow_duplicate=True),
+        Input("genome-import-mapped-btn", "n_clicks"),
+        State("genome-import-unrecognized", "data"),
+        State({"type": "genome-taxid-input", "index": ALL}, "value"),
+        State({"type": "genome-taxid-input", "index": ALL}, "id"),
+        State("app-config", "data"),
+        background=True,
+        manager=background_callback_manager,
+        progress=[Output("genome-import-result", "children")],
+        running=[(Output("genome-import-mapped-btn", "disabled"), True, False)],
+        prevent_initial_call=True,
+    )
+    def import_mapped_genomes_worker(set_progress, n_clicks, unrecognized,
+                                     taxid_values, taxid_ids, config):
+        """Import unrecognized files with operator-supplied taxids (background)."""
+        if not n_clicks or not unrecognized:
+            raise PreventUpdate
+        set_progress(_genome_import_spinner("Importing mapped genomes..."))
         try:
             from nanometa_live.core.utils.genome_manager import get_genome_manager
             cache_dir = config.get("genome_cache_dir") if config else None
             mgr = get_genome_manager(cache_dir=cache_dir)
-            imported, unrecognized = mgr.import_genomes_from_directory(dir_path)
-
-            alert = dbc.Alert(
-                f"Imported {imported} genome(s). "
-                + (f"{len(unrecognized)} file(s) need manual taxid mapping."
-                   if unrecognized else "All files recognized."),
-                color="success" if not unrecognized else "info",
-            )
-
-            if unrecognized:
-                mapping_rows = _build_mapping_table(unrecognized)
-                return alert, unrecognized, {"display": "block"}, mapping_rows
-
-            return alert, [], {"display": "none"}, []
-
+            imported = 0
+            skipped = 0
+            for i, entry in enumerate(unrecognized):
+                if i >= len(taxid_values):
+                    break
+                val = taxid_values[i]
+                if not val:
+                    skipped += 1
+                    continue
+                try:
+                    taxid = int(val)
+                except (ValueError, TypeError):
+                    skipped += 1
+                    continue
+                if mgr.import_genome_with_taxid(entry["path"], taxid):
+                    imported += 1
+                else:
+                    skipped += 1
+            return _genome_import_payload(n_clicks, {
+                "source": "mapped", "imported": imported, "skipped": skipped})
         except Exception as e:
-            logger.error(f"Genome import failed: {e}", exc_info=True)
-            return (
-                dbc.Alert(f"Import failed: {e}", color="danger"),
-                [], {"display": "none"}, [],
-            )
+            logger.error(f"Mapped genome import failed: {e}", exc_info=True)
+            return _genome_import_payload(n_clicks, {"source": "mapped", "error": str(e)})
 
     @app.callback(
         Output("genome-import-result", "children", allow_duplicate=True),
         Output("genome-import-unrecognized", "data", allow_duplicate=True),
         Output("genome-import-mapping-area", "style", allow_duplicate=True),
         Output("genome-import-mapping-table", "children", allow_duplicate=True),
-        Input("genome-import-archive-btn", "n_clicks"),
-        State("genome-import-archive-path", "value"),
+        Input("genome-import-result-store", "data"),
         State("app-config", "data"),
         prevent_initial_call=True,
     )
-    def import_genomes_from_archive(n_clicks, archive_path, config):
-        """Import genome FASTA files from an archive."""
-        if not n_clicks:
+    def finalize_genome_import(payload, config):
+        """Main-process finalizer for the background genome imports.
+
+        Reloads the genome-manager singleton so the running app sees the newly
+        imported genomes -- the worker's in-memory additions live in a separate
+        process and never reach here otherwise -- then renders the shared four
+        outputs from the worker's result.
+        """
+        if not payload:
             raise PreventUpdate
-
-        if not archive_path:
-            return (
-                dbc.Alert("Please provide an archive path.", color="warning"),
-                [], {"display": "none"}, [],
-            )
-
-        if not Path(archive_path).exists():
-            return (
-                dbc.Alert(f"Archive not found: {archive_path}", color="danger"),
-                [], {"display": "none"}, [],
-            )
-
-        try:
-            from nanometa_live.core.utils.genome_manager import get_genome_manager
-            cache_dir = config.get("genome_cache_dir") if config else None
-            mgr = get_genome_manager(cache_dir=cache_dir)
-            imported, unrecognized = mgr.import_genomes_from_archive(archive_path)
-
-            alert = dbc.Alert(
-                f"Imported {imported} genome(s). "
-                + (f"{len(unrecognized)} file(s) need manual taxid mapping."
-                   if unrecognized else "All files recognized."),
-                color="success" if not unrecognized else "info",
-            )
-
-            if unrecognized:
-                mapping_rows = _build_mapping_table(unrecognized)
-                return alert, unrecognized, {"display": "block"}, mapping_rows
-
-            return alert, [], {"display": "none"}, []
-
-        except Exception as e:
-            logger.error(f"Genome archive import failed: {e}", exc_info=True)
-            return (
-                dbc.Alert(f"Import failed: {e}", color="danger"),
-                [], {"display": "none"}, [],
-            )
-
-    @app.callback(
-        Output("genome-import-result", "children", allow_duplicate=True),
-        Output("genome-import-mapping-area", "style", allow_duplicate=True),
-        Input("genome-import-mapped-btn", "n_clicks"),
-        State("genome-import-unrecognized", "data"),
-        State({"type": "genome-taxid-input", "index": ALL}, "value"),
-        State({"type": "genome-taxid-input", "index": ALL}, "id"),
-        State("app-config", "data"),
-        prevent_initial_call=True,
-    )
-    def import_mapped_genomes(n_clicks, unrecognized, taxid_values, taxid_ids, config):
-        """Import unrecognized genome files with user-provided taxid mappings."""
-        if not n_clicks or not unrecognized:
-            raise PreventUpdate
-
-        from nanometa_live.core.utils.genome_manager import get_genome_manager
-        cache_dir = config.get("genome_cache_dir") if config else None
-        mgr = get_genome_manager(cache_dir=cache_dir)
-
-        imported = 0
-        skipped = 0
-        for i, entry in enumerate(unrecognized):
-            if i >= len(taxid_values):
-                break
-            val = taxid_values[i]
-            if not val:
-                skipped += 1
-                continue
+        result = payload.get("result") or {}
+        if result.get("imported"):
             try:
-                taxid = int(val)
-            except (ValueError, TypeError):
-                skipped += 1
-                continue
-
-            if mgr.import_genome_with_taxid(entry["path"], taxid):
-                imported += 1
-            else:
-                skipped += 1
-
-        alert = dbc.Alert(
-            f"Imported {imported} mapped genome(s). {skipped} skipped.",
-            color="success" if imported > 0 else "warning",
-        )
-        return alert, {"display": "none"}
+                from nanometa_live.core.utils.genome_manager import get_genome_manager
+                cache_dir = config.get("genome_cache_dir") if config else None
+                get_genome_manager(cache_dir=cache_dir).reload_metadata()
+            except Exception as e:
+                logger.debug(f"genome-manager reload after import skipped: {e}")
+        return _render_genome_import_result(result)
     # =========================================================================
     # Kraken2 Database Download (moved from config_tab.py)
     # =========================================================================
@@ -1920,10 +1931,18 @@ def register_preparation_callbacks(app):
         Output("genome-test-result", "children"),
         Input("test-genome-download-btn", "n_clicks"),
         State("app-config", "data"),
+        background=True,
+        manager=background_callback_manager,
+        # NCBI `datasets` download (network + subprocess) -- runs in a worker so
+        # it does not block the request thread. The genome lands on disk and the
+        # callback only reports a path, so there is no in-process side effect to
+        # bring back to the main process; a plain background callback suffices.
+        progress=[Output("genome-test-result", "children")],
+        running=[(Output("test-genome-download-btn", "disabled"), True, False)],
         prevent_initial_call=True,
     )
-    def test_genome_download(n_clicks, config):
-        """Test genome download with E. coli (taxid 562)."""
+    def test_genome_download(set_progress, n_clicks, config):
+        """Test genome download with E. coli (taxid 562), in the background."""
         if not n_clicks:
             raise PreventUpdate
 
@@ -1952,6 +1971,13 @@ def register_preparation_callbacks(app):
             genome_mgr = get_genome_manager(cache_dir=cache_dir)
             logger.info(f"Testing genome download with cache_dir: {genome_mgr.cache_dir}")
 
+            set_progress((
+                dbc.Alert(
+                    [dbc.Spinner(size="sm", spinner_class_name="me-2"),
+                     "Downloading E. coli test genome..."],
+                    color="info", className="py-2 mb-0",
+                ),
+            ))
             result = genome_mgr.download_genome(
                 taxid=562,
                 species_name="Escherichia coli",
@@ -2318,11 +2344,11 @@ def register_preparation_callbacks(app):
                 new_config = dict(config or {})
                 new_config["kraken_db"] = extract_path
                 new_config["external_kraken2_db"] = extract_path
-                # Persist to last-session.yaml so the newly downloaded DB
-                # path survives a browser refresh or server restart. Reuse the
-                # shared session-autosave helper (it is best-effort and its
-                # watchlist export is guarded by the manager's _loaded flag, so
-                # it stays a no-op for the watchlist in this background worker).
+                # Persist to last-session.yaml so the newly downloaded DB path
+                # survives a browser refresh or server restart. Best-effort;
+                # runs in a worker where the WatchlistManager singleton is empty,
+                # so autosave_session_config preserves the watchlist already in
+                # last-session.yaml rather than dropping it.
                 from nanometa_live.app.tabs.config_tab_helpers import (
                     autosave_session_config,
                 )

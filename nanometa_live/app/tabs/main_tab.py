@@ -61,6 +61,8 @@ from nanometa_live.app.tabs.main_tab_helpers import (  # noqa: E402
     get_all_watchlist_with_detection,
     create_species_alert_banner,
     build_organism_export,
+    render_validation_results_card,
+    validation_store_entry,
 )
 
 
@@ -973,10 +975,20 @@ def register_main_callbacks(app: Dash):
             State("on-demand-validation-results", "data"),
             State("on-demand-method-select", "value"),
         ],
+        background=True,
+        manager=background_callback_manager,
+        # Stream a live status line while the (minutes-long) validation runs.
+        # progress targeting the same component as a regular Output is allowed
+        # within one callback (see regenerate_mappings). No Python singleton is
+        # mutated here -- the only state output is the results dcc.Store, which
+        # crosses back to the main process fine -- so a plain background
+        # callback (no separate finalize) is sufficient.
+        progress=[Output("validation-status-text", "children", allow_duplicate=True)],
+        running=[(Output("start-on-demand-validation", "disabled"), True, False)],
         prevent_initial_call=True,
     )
-    def run_on_demand_validation(n_clicks, target, config, existing_results, validation_method):
-        """Run on-demand BLAST validation for the selected organism."""
+    def run_on_demand_validation(set_progress, n_clicks, target, config, existing_results, validation_method):
+        """Run on-demand BLAST validation for the selected organism (background)."""
         if not n_clicks or not target:
             return no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update
 
@@ -1049,9 +1061,8 @@ def register_main_callbacks(app: Dash):
             )
 
             add_log("Checking reference genome...", "info")
+            set_progress((f"Validating {name} (taxid {taxid})...",))
 
-            # Run validation (synchronous for now - could be made async with background callback)
-            # Note: For production, this should use Dash background callbacks
             method = validation_method if validation_method in ("blast", "minimap2", "both") else "blast"
             # Passing ``config`` routes through the nanometanf
             # validation_only entry point (with -resume) when a
@@ -1068,54 +1079,13 @@ def register_main_callbacks(app: Dash):
             if result.success:
                 add_log(f"Validation complete: {result.validated_reads}/{result.extracted_reads} reads validated", "success")
 
-                # Create results display
-                results_display = dbc.Card([
-                    dbc.CardHeader([
-                        html.I(className="bi bi-check-circle-fill text-success me-2"),
-                        html.Strong("Validation Results")
-                    ]),
-                    dbc.CardBody([
-                        dbc.Row([
-                            dbc.Col([
-                                html.H4(f"{result.validation_rate:.1f}%", className="text-success mb-0"),
-                                html.Small("Validation Rate", className="text-muted")
-                            ], className="text-center"),
-                            dbc.Col([
-                                html.H4(f"{result.validated_reads:,}", className="text-primary mb-0"),
-                                html.Small("Validated Reads", className="text-muted")
-                            ], className="text-center"),
-                            dbc.Col([
-                                html.H4(f"{result.avg_identity:.1f}%", className="text-info mb-0"),
-                                html.Small("Avg Identity", className="text-muted")
-                            ], className="text-center"),
-                        ], className="mb-3"),
-                        html.Div([
-                            dbc.Badge(
-                                "BLAST Verified" if result.validation_rate >= 80 else
-                                "Partial Match" if result.validation_rate >= 50 else "Low Match",
-                                color="success" if result.validation_rate >= 80 else
-                                      "warning" if result.validation_rate >= 50 else "danger",
-                                className="me-2"
-                            ),
-                            html.Small(
-                                f"{result.extracted_reads:,} reads extracted from {result.total_classified_reads:,} classified",
-                                className="text-muted"
-                            )
-                        ])
-                    ])
-                ])
+                results_display = render_validation_results_card(result)
 
-                # Update stored results
+                # Update stored results (a dcc.Store output -- crosses back to
+                # the main process via the callback response, so it is safe from
+                # the background worker).
                 updated_results = existing_results or {}
-                updated_results[str(taxid)] = {
-                    "taxid": taxid,
-                    "name": name,
-                    "validation_rate": result.validation_rate,
-                    "validated_reads": result.validated_reads,
-                    "extracted_reads": result.extracted_reads,
-                    "avg_identity": result.avg_identity,
-                    "success": True
-                }
+                updated_results[str(taxid)] = validation_store_entry(result, taxid, name)
 
                 return (
                     100, "Validation complete!",

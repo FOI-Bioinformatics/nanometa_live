@@ -507,6 +507,23 @@ def config_form_dirty(snapshot, *, form):
     return False
 
 
+def _existing_session_watchlist(configs_dir):
+    """Return the ``watchlist`` block already persisted in last-session.yaml, or
+    None. Used to avoid clobbering it when autosave runs where the
+    WatchlistManager singleton is empty (a background worker).
+    """
+    import yaml
+    from pathlib import Path
+    session_path = Path(configs_dir) / "last-session.yaml"
+    if not session_path.exists():
+        return None
+    try:
+        data = yaml.safe_load(session_path.read_text()) or {}
+        return data.get("watchlist")
+    except (OSError, yaml.YAMLError):
+        return None
+
+
 def autosave_session_config(config):
     """Persist the applied config (plus current watchlist) to last-session.yaml.
 
@@ -517,12 +534,21 @@ def autosave_session_config(config):
         from nanometa_live.core.config.config_loader import ConfigLoader
         from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
         save_config = dict(config)
-        # Include current watchlist state if loaded
+        from nanometa_live.core.utils.paths import NanometaPaths
+        paths = NanometaPaths.from_config(save_config)
+        # Include current watchlist state if loaded. When the singleton is empty
+        # -- e.g. this runs in a DiskcacheManager background worker, whose
+        # WatchlistManager is a fresh, unloaded instance in a separate process
+        # -- do NOT overwrite the watchlist away: preserve whatever
+        # last-session.yaml already holds, since the worker's action (a Kraken2
+        # DB download) does not change the watchlist.
         manager = get_watchlist_manager()
         if manager._loaded:
             save_config["watchlist"] = manager.export_config()
-        from nanometa_live.core.utils.paths import NanometaPaths
-        paths = NanometaPaths.from_config(save_config)
+        else:
+            existing = _existing_session_watchlist(paths.configs)
+            if existing is not None:
+                save_config["watchlist"] = existing
         loader = ConfigLoader(str(paths.configs))
         loader.save_config(save_config, "last-session.yaml")
         logging.debug("Auto-saved configuration to last-session.yaml")

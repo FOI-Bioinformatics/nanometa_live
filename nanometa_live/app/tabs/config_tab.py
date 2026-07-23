@@ -20,6 +20,7 @@ from dash import html
 from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.config.config_loader import ConfigLoader
 from nanometa_live.app.utils.github_branches import fetch_nanometanf_branches
+from nanometa_live.app.app import background_callback_manager
 
 
 # Module-level cache of the configs directory mtime. update_available_configs
@@ -300,6 +301,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         Output("pipeline-branch-input", "options"),
         Input("pipeline-source-type-input", "value"),
         State("app-config", "data"),
+        background=True,
+        manager=background_callback_manager,
     )
     def populate_pipeline_branch_options(source_type, config):
         """Populate the pipeline-branch dropdown with the live nanometanf

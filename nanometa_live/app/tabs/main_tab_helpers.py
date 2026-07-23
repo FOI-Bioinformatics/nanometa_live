@@ -18,6 +18,70 @@ import dash_bootstrap_components as dbc
 from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
 
 
+def render_validation_results_card(result):
+    """Build the on-demand-validation results Card from a ValidationResult.
+
+    Pure (no I/O) so the background validation callback can build its final
+    display from data and this stays unit-testable. ``result`` is a
+    ValidationResult (or any object exposing validation_rate, validated_reads,
+    avg_identity, extracted_reads, total_classified_reads).
+    """
+    rate = result.validation_rate
+    badge_label = (
+        "BLAST Verified" if rate >= 80
+        else "Partial Match" if rate >= 50
+        else "Low Match"
+    )
+    badge_color = (
+        "success" if rate >= 80
+        else "warning" if rate >= 50
+        else "danger"
+    )
+    return dbc.Card([
+        dbc.CardHeader([
+            html.I(className="bi bi-check-circle-fill text-success me-2"),
+            html.Strong("Validation Results"),
+        ]),
+        dbc.CardBody([
+            dbc.Row([
+                dbc.Col([
+                    html.H4(f"{rate:.1f}%", className="text-success mb-0"),
+                    html.Small("Validation Rate", className="text-muted"),
+                ], className="text-center"),
+                dbc.Col([
+                    html.H4(f"{result.validated_reads:,}", className="text-primary mb-0"),
+                    html.Small("Validated Reads", className="text-muted"),
+                ], className="text-center"),
+                dbc.Col([
+                    html.H4(f"{result.avg_identity:.1f}%", className="text-info mb-0"),
+                    html.Small("Avg Identity", className="text-muted"),
+                ], className="text-center"),
+            ], className="mb-3"),
+            html.Div([
+                dbc.Badge(badge_label, color=badge_color, className="me-2"),
+                html.Small(
+                    f"{result.extracted_reads:,} reads extracted from "
+                    f"{result.total_classified_reads:,} classified",
+                    className="text-muted",
+                ),
+            ]),
+        ]),
+    ])
+
+
+def validation_store_entry(result, taxid, name):
+    """Plain-dict summary of a validation result for the results Store."""
+    return {
+        "taxid": taxid,
+        "name": name,
+        "validation_rate": result.validation_rate,
+        "validated_reads": result.validated_reads,
+        "extracted_reads": result.extracted_reads,
+        "avg_identity": result.avg_identity,
+        "success": True,
+    }
+
+
 def species_in_watchlist(taxid: int, watchlist: list) -> bool:
     """Check if a species is in the watchlist by taxid."""
     if not watchlist:

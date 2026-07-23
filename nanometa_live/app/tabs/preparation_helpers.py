@@ -238,6 +238,56 @@ def _regenerate_mappings(config, watchlist_entries=None):
         return dbc.Alert(f"Regeneration failed: {e}", color="danger")
 
 
+def _render_genome_import_result(result):
+    """Render the four genome-import outputs from a worker result dict.
+
+    Returns ``(result_alert, unrecognized_data, mapping_area_style,
+    mapping_table_children)``. Pure (no I/O, no singleton mutation) so the
+    background genome-import workers and the main-process finalize share it and
+    it stays unit-testable. Shapes handled: ``early`` (a pre-import validation
+    stop), ``error`` (the import raised), a ``mapped`` import, and a
+    directory/archive import that may leave files needing manual taxid mapping.
+    """
+    early = result.get("early")
+    if early:
+        return (
+            dbc.Alert(early["message"], color=early.get("color", "warning")),
+            [], {"display": "none"}, [],
+        )
+    if result.get("error"):
+        return (
+            dbc.Alert(f"Import failed: {result['error']}", color="danger"),
+            [], {"display": "none"}, [],
+        )
+
+    imported = result.get("imported", 0)
+    if result.get("source") == "mapped":
+        skipped = result.get("skipped", 0)
+        return (
+            dbc.Alert(
+                f"Imported {imported} mapped genome(s). {skipped} skipped.",
+                color="success" if imported > 0 else "warning",
+            ),
+            [], {"display": "none"}, [],
+        )
+
+    unrecognized = result.get("unrecognized") or []
+    alert = dbc.Alert(
+        f"Imported {imported} genome(s). "
+        + (
+            f"{len(unrecognized)} file(s) need manual taxid mapping."
+            if unrecognized else "All files recognized."
+        ),
+        color="success" if not unrecognized else "info",
+    )
+    if unrecognized:
+        return (
+            alert, unrecognized, {"display": "block"},
+            _build_mapping_table(unrecognized),
+        )
+    return alert, [], {"display": "none"}, []
+
+
 def _build_mapping_table(unrecognized):
     """Build a table of unrecognized files for manual taxid mapping."""
     rows = []
