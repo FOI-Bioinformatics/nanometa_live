@@ -154,6 +154,42 @@ class TestSizeHelpers:
         (home / "genomes" / "g.fasta").write_text("A" * 1000)
         assert estimate_bundle_size(str(home)) >= 1000
 
+    def test_estimate_includes_local_pipeline_checkout(self, tmp_path):
+        """A docker/singularity or local-source bundle also ships the pipeline
+        checkout; the preflight must count it or it under-estimates and the
+        export can run out of disk mid-write.
+        """
+        home = tmp_path / "home"; (home / "genomes").mkdir(parents=True)
+        (home / "genomes" / "g.fasta").write_text("A" * 1000)
+        base = estimate_bundle_size(str(home))
+        pipeline = tmp_path / "nf"; pipeline.mkdir()
+        (pipeline / "main.nf").write_bytes(b"y" * 5000)
+        with_pipeline = estimate_bundle_size(
+            str(home), config={"pipeline_source": str(pipeline)}
+        )
+        # Delta isolates the pipeline (both include the same plugins dir).
+        assert with_pipeline >= base + 5000
+
+    def test_estimate_ignores_remote_pipeline_source(self, tmp_path):
+        """A remote:/https:/git@ source is not a local dir; it must be skipped
+        without crashing and add no size.
+        """
+        home = tmp_path / "home"; (home / "genomes").mkdir(parents=True)
+        (home / "genomes" / "g.fasta").write_text("A" * 1000)
+        est = estimate_bundle_size(
+            str(home), config={"pipeline_source": "remote:dev"}
+        )
+        assert est >= 1000
+
+    def test_estimate_pipeline_path_arg_wins(self, tmp_path):
+        home = tmp_path / "home"; (home / "genomes").mkdir(parents=True)
+        (home / "genomes" / "g.fasta").write_text("A" * 1000)
+        base = estimate_bundle_size(str(home))
+        pipeline = tmp_path / "nf"; pipeline.mkdir()
+        (pipeline / "main.nf").write_bytes(b"z" * 4000)
+        est = estimate_bundle_size(str(home), pipeline_path=str(pipeline))
+        assert est >= base + 4000
+
 
 class TestExportPreflight:
     def _preflight(self):
