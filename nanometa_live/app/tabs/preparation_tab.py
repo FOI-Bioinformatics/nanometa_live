@@ -2344,11 +2344,11 @@ def register_preparation_callbacks(app):
                 new_config = dict(config or {})
                 new_config["kraken_db"] = extract_path
                 new_config["external_kraken2_db"] = extract_path
-                # Persist to last-session.yaml so the newly downloaded DB
-                # path survives a browser refresh or server restart. Reuse the
-                # shared session-autosave helper (it is best-effort and its
-                # watchlist export is guarded by the manager's _loaded flag, so
-                # it stays a no-op for the watchlist in this background worker).
+                # Persist to last-session.yaml so the newly downloaded DB path
+                # survives a browser refresh or server restart. Best-effort;
+                # runs in a worker where the WatchlistManager singleton is empty,
+                # so autosave_session_config preserves the watchlist already in
+                # last-session.yaml rather than dropping it.
                 from nanometa_live.app.tabs.config_tab_helpers import (
                     autosave_session_config,
                 )
