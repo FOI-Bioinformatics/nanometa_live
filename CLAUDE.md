@@ -493,9 +493,42 @@ Three concerns:
    launched `python -m nanometa_live.app` propagates to GUI-spawned pipeline
    runs without code changes.
 
+   **Singularity offline wiring invariant (do not regress).** A
+   docker/singularity export pulls every pipeline module image into the
+   bundle's `pipeline_containers/` (`_BUNDLED_PIPELINE_CONTAINERS_DIRNAME`),
+   and three pieces must stay in lock-step for an air-gapped singularity run
+   to reuse them instead of re-pulling (which fails offline):
+   - **Import restores the dir.** `import_bundle`'s copy loop MUST include
+     `_BUNDLED_PIPELINE_CONTAINERS_DIRNAME` so the images land under
+     `<home>/pipeline_containers/`; it then `docker load`s any `.tar` and, when
+     `.img`/`.sif` are present, sets `result["singularity_cache_path"]` and
+     writes `nxf_singularity_cachedir` into the imported config.
+   - **Env injection points Nextflow at them.** `_build_nextflow_env` sets
+     `NXF_SINGULARITY_CACHEDIR` and `NXF_SINGULARITY_LIBRARYDIR` from
+     `config['nxf_singularity_cachedir']` (symmetric with the conda-cache
+     block). nanometanf sets no `singularity.cacheDir`, so this env var is the
+     only hook.
+   - **Filename must match Nextflow's cache convention.**
+     `_pull_one_singularity_image` names images via
+     `_singularity_cache_name` — Nextflow's `SingularityCache.simpleName`
+     (strip scheme at `://`, replace `:` and `/` with `-`) plus `.img`. Any
+     other name makes Nextflow re-pull. Verified against the `SingularityCache`
+     class in the bundled Nextflow jar; stable across 22.x–26.x — keep it in
+     lock-step. Regression-covered in
+     `tests/test_bundle_manager.py::TestSingularityBundleWiring` and
+     `test_nextflow_manager.py::TestBuildNextflowEnv`. `import_bundle` also
+     cross-checks the loaded image count against the manifest's
+     `pull_result.image_count` and flags a partial set (`incomplete_image_set`).
+
 3. **Offline-mode propagation** to NCBI/GTDB callers. `GenomeManager` methods and watchlist
    Validate / Add-custom-species callbacks read `offline_mode` and short-circuit network calls.
    Caches (`TaxonomyCache` / `OfflineTaxonomyCache`) are consulted first either way.
+   Callers must reach `GenomeDownloadManager` through the shared
+   `get_genome_manager()` singleton (which carries the live `offline_mode`), not
+   by constructing a fresh instance — a direct `GenomeDownloadManager()`
+   defaults to `offline_mode=False` and downloads over the network even in
+   offline mode. `OnDemandValidator.genome_manager` was the one bypass; it now
+   delegates to the singleton.
 
 ### Toolchain floor (Nextflow 26.04.0)
 
