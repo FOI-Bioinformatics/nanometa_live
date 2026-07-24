@@ -141,13 +141,14 @@ def register_readiness(app, backend_manager):
         Input("update-interval", "n_intervals"),
         Input("app-config", "data"),
         Input("check-readiness-btn", "n_clicks"),
+        Input("genome-download-complete", "data"),
         State("readiness-state", "data"),
         State("watchlist-entries-snapshot", "data"),
         background=True,
         manager=background_callback_manager,
     )
-    def update_readiness_state(n_intervals, config, n_clicks, prev_state,
-                               watchlist_entries):
+    def update_readiness_state(n_intervals, config, n_clicks, genome_change,
+                               prev_state, watchlist_entries):
         """Compute readiness and publish it to the shared Store, deduplicated.
 
         Idle update-interval ticks must not re-run the checker's subprocess
@@ -160,10 +161,17 @@ def register_readiness(app, backend_manager):
         """
         from nanometa_live.core.workflow.readiness_checker import ReadinessChecker
 
+        # A genome import/download/delete changes neither config nor watchlist,
+        # so the fingerprint/TTL gate below would skip the recompute and the
+        # Watchlist-Genomes / BLAST-Databases checks would stay stale. Treat
+        # genome-download-complete as a forcing trigger, and reload the (stale)
+        # worker-process genome singleton before the checks read it.
         try:
-            forced = (dash.ctx.triggered_id == "check-readiness-btn")
+            trig = dash.ctx.triggered_id
         except Exception:
-            forced = False
+            trig = None
+        genome_set_changed = (trig == "genome-download-complete")
+        forced = trig in ("check-readiness-btn", "genome-download-complete")
 
         if not config:
             new = _empty_readiness_state("No configuration loaded")
@@ -183,7 +191,8 @@ def register_readiness(app, backend_manager):
             # worker where the WatchlistManager singleton is empty, so the
             # watchlist checks would otherwise always report "not enabled".
             report = ReadinessChecker().check_readiness(
-                config, watchlist_entries=watchlist_entries
+                config, watchlist_entries=watchlist_entries,
+                reload_genomes=genome_set_changed,
             )
             new = _serialize_report(report)
         except Exception as e:

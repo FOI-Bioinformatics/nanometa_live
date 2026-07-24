@@ -90,6 +90,7 @@ class ReadinessChecker:
         config: Dict[str, Any],
         nanometa_home: Optional[str] = None,
         watchlist_entries: Optional[List[Dict[str, Any]]] = None,
+        reload_genomes: bool = False,
     ) -> ReadinessReport:
         """
         Run all readiness checks.
@@ -117,6 +118,20 @@ class ReadinessChecker:
             from nanometa_live.core.utils.paths import NanometaPaths
             nanometa_home = str(NanometaPaths.from_config(config).data_dir)
         home = Path(nanometa_home)
+
+        # The genome/BLAST-DB checks below read gm.has_genome/has_blast_db off
+        # the in-memory genome-manager singleton. When the genome set on disk
+        # just changed in another process (a background import/download/delete),
+        # this worker's singleton is stale; reload it -- keyed by the SAME
+        # cache_dir the checks use -- so the checks see the current set.
+        if reload_genomes:
+            try:
+                from nanometa_live.core.utils.genome_manager import get_genome_manager
+                get_genome_manager(
+                    config.get("genome_cache_dir") or str(home)
+                ).reload_metadata()
+            except Exception as e:
+                logger.debug(f"genome-manager reload before readiness skipped: {e}")
 
         report = ReadinessReport()
 
