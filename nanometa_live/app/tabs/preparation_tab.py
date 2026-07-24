@@ -1003,6 +1003,7 @@ def register_preparation_callbacks(app):
         Output("genome-import-unrecognized", "data", allow_duplicate=True),
         Output("genome-import-mapping-area", "style", allow_duplicate=True),
         Output("genome-import-mapping-table", "children", allow_duplicate=True),
+        Output("genome-download-complete", "data", allow_duplicate=True),
         Input("genome-import-result-store", "data"),
         State("app-config", "data"),
         prevent_initial_call=True,
@@ -1014,18 +1015,28 @@ def register_preparation_callbacks(app):
         imported genomes -- the worker's in-memory additions live in a separate
         process and never reach here otherwise -- then renders the shared four
         outputs from the worker's result.
+
+        Reloading fixes the singleton's in-memory data, but the genome list and
+        stat tiles are painted by a SEPARATE callback (update_genome_stats) that
+        only fires on Refresh / genome-download-complete / tab-switch -- none of
+        which an import triggers. So after a successful import we also bump
+        genome-download-complete (AFTER the reload, so no race) to force that
+        re-render; on early-error / nothing-imported / reload-failure it stays
+        no_update so a stale list is never re-rendered.
         """
         if not payload:
             raise PreventUpdate
         result = payload.get("result") or {}
+        refresh = no_update
         if result.get("imported"):
             try:
                 from nanometa_live.core.utils.genome_manager import get_genome_manager
                 cache_dir = config.get("genome_cache_dir") if config else None
                 get_genome_manager(cache_dir=cache_dir).reload_metadata()
+                refresh = payload.get("_click")
             except Exception as e:
                 logger.debug(f"genome-manager reload after import skipped: {e}")
-        return _render_genome_import_result(result)
+        return (*_render_genome_import_result(result), refresh)
     # =========================================================================
     # Kraken2 Database Download (moved from config_tab.py)
     # =========================================================================
