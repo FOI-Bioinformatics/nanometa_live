@@ -123,17 +123,22 @@ class TestFinalizeGenomeImport:
         return get_callback_fn(app, "genome-import-result.children",
                                input_contains="genome-import-result-store")
 
-    def test_reloads_singleton_and_renders(self, app):
+    def test_reloads_singleton_renders_and_bumps_refresh(self, app):
+        from dash import no_update
         mgr = MagicMock()
         with patch("nanometa_live.core.utils.genome_manager.get_genome_manager",
                    return_value=mgr):
             out = self._fn(app)(
-                {"_click": 1, "result": {"source": "dir", "imported": 3, "unrecognized": []}},
+                {"_click": 7, "result": {"source": "dir", "imported": 3, "unrecognized": []}},
                 {})
         mgr.reload_metadata.assert_called_once()   # the P2 core: main-process refresh
         assert "3 genome" in str(out[0])
+        # 5th output bumps genome-download-complete so update_genome_stats
+        # repaints the genome list from the reloaded singleton.
+        assert out[4] == 7 and out[4] is not no_update
 
-    def test_no_reload_when_nothing_imported(self, app):
+    def test_no_reload_and_no_refresh_when_nothing_imported(self, app):
+        from dash import no_update
         mgr = MagicMock()
         with patch("nanometa_live.core.utils.genome_manager.get_genome_manager",
                    return_value=mgr):
@@ -142,6 +147,7 @@ class TestFinalizeGenomeImport:
                  "early": {"message": "Please provide a directory path.", "color": "warning"}}},
                 {})
         assert not mgr.reload_metadata.called
+        assert out[4] is no_update   # never re-render a stale list
 
     def test_empty_store_prevents_update(self, app):
         with pytest.raises(PreventUpdate):
