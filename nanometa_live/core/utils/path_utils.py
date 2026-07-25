@@ -25,6 +25,13 @@ logger = logging.getLogger(__name__)
 # normalisation. Listed explicitly rather than inferred so a future
 # string-typed but non-path config key (e.g. an analysis label that
 # happens to start with "/") does not get silently rewritten.
+#
+# Adding a non-path key here corrupts it silently and irreversibly:
+# normalise_path() runs abspath() on any value that is not a recognised
+# sentinel, so an enum-like value such as "ncbi" becomes "<cwd>/ncbi" and
+# every downstream comparison against it fails. "kraken_taxonomy" was listed
+# here and did exactly that -- see the regression test in
+# tests/test_config_taxonomy_roundtrip.py.
 PATH_CONFIG_KEYS: tuple[str, ...] = (
     "nanopore_output_directory",
     "results_output_directory",
@@ -32,7 +39,6 @@ PATH_CONFIG_KEYS: tuple[str, ...] = (
     "kraken_db",
     "external_kraken2_db",
     "blast_db_dir",
-    "kraken_taxonomy",
     "genome_cache_dir",
     "data_dir",
     "pipeline_source",  # only when the value is a local checkout path
@@ -44,8 +50,9 @@ def normalise_path(value: Optional[str]) -> str:
 
     Behaviour:
         empty or whitespace-only -> ""
-        starts with "remote:" or a URL scheme -> returned stripped, NOT resolved
-            (these are pipeline-source identifiers, not filesystem paths)
+        starts with "remote:", "local:" or a URL scheme -> returned stripped,
+            NOT resolved (these are pipeline-source identifiers, not bare
+            filesystem paths)
         otherwise -> stripped, expanduser, abspath
 
     Returns the empty string for None or empty input so the result is
@@ -60,9 +67,16 @@ def normalise_path(value: Optional[str]) -> str:
     # Pipeline-source identifiers are stored in the same string-typed
     # config key as filesystem checkout paths. Recognise the prefixes
     # used elsewhere in the codebase (see CLAUDE.md, pipeline_source).
+    # "local:" is as much an identifier as "remote:" -- nextflow_manager,
+    # readiness_checker and bundle_manager all dispatch on the prefix and
+    # strip it themselves. Resolving it here produced
+    # "<cwd>/local:/path/to/checkout", which no longer matches
+    # startswith("local:"), so the checkout was no longer recognised as
+    # local at all. The shipped config.yaml uses this form.
     lowered = s.lower()
     if (
         lowered.startswith("remote:")
+        or lowered.startswith("local:")
         or lowered.startswith("http://")
         or lowered.startswith("https://")
         or lowered.startswith("git@")
@@ -137,6 +151,14 @@ def report_missing_paths(
             or lowered.startswith("git@")
         ):
             continue
-        if not os.path.exists(value):
+        # "local:<path>" does name a filesystem location, so it is worth
+        # checking -- but the prefix has to come off first, or the check is
+        # against a string that can never exist and every such value is
+        # reported missing. Consumers strip it the same way (see
+        # readiness_checker._check_pipeline_source).
+        probe = value[len("local:"):] if lowered.startswith("local:") else value
+        if not probe:
+            continue
+        if not os.path.exists(probe):
             missing[key] = value
     return missing
