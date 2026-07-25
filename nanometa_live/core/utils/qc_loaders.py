@@ -21,6 +21,7 @@ from nanometa_live.core.utils.sample_detector import (
 from nanometa_live.core.utils.loader_utils import (
     _get_cache_key,
     _check_mtime_cache,
+    _mtime_cache_state,
     _store_mtime_cache,
     _is_file_stable,
 )
@@ -550,9 +551,30 @@ def _is_incremental_seqkit_layout(
     return False
 
 
+def _seqkit_fingerprint_paths(seqkit_dir: str, sample: Optional[str]) -> List[str]:
+    """Paths whose state determines one cached seqkit result.
+
+    Scoped per sample for the same reason as the Kraken2 equivalent: the
+    cache key is per sample, so a directory-wide fingerprint would both cost
+    a full walk per lookup and invalidate every sample whenever any one of
+    them advanced.
+    """
+    if sample is None or sample == "All Samples":
+        return [seqkit_dir]
+    return [
+        os.path.join(seqkit_dir, sample),          # batch_stats/ lives here
+        os.path.join(seqkit_dir, f"{sample}.tsv"),  # flat merged output
+    ]
+
+
 def load_seqkit_stats(main_dir: str, sample: Optional[str] = None) -> pd.DataFrame:
     """
     Load seqkit sequence statistics (used when QC tool is chopper).
+
+    Results are memoised against the mtime of the sample's own seqkit files.
+    Without it this loader re-globbed and re-parsed every TSV on each call,
+    and it is called once per sample from ``get_sample_statistics_summary``
+    as well as twice directly per poll.
 
     The loader supports two upstream layouts:
 
@@ -584,6 +606,21 @@ def load_seqkit_stats(main_dir: str, sample: Optional[str] = None) -> pd.DataFra
         logging.debug(f"Seqkit directory not found: {seqkit_dir}")
         return pd.DataFrame()
 
+    mtime_key = f"seqkit:{_get_cache_key(main_dir, sample)}"
+    fingerprint_paths = _seqkit_fingerprint_paths(seqkit_dir, sample)
+    state, cached = _mtime_cache_state(mtime_key, fingerprint_paths)
+    if state == "hit":
+        return cached
+
+    result = _load_seqkit_stats_uncached(main_dir, seqkit_dir, sample)
+    _store_mtime_cache(mtime_key, fingerprint_paths, result)
+    return result
+
+
+def _load_seqkit_stats_uncached(
+    main_dir: str, seqkit_dir: str, sample: Optional[str]
+) -> pd.DataFrame:
+    """Read and aggregate seqkit TSVs, bypassing the mtime cache."""
     incremental = _is_incremental_seqkit_layout(seqkit_dir, sample)
 
     if sample is None or sample == "All Samples":
@@ -894,6 +931,18 @@ def get_sample_statistics_summary(main_dir: str) -> pd.DataFrame:
     samples = get_available_samples(main_dir)
     summary_data = []
 
+    # Aggregate NanoPlot/seqkit fallback, resolved lazily and at most once.
+    # This used to be called from inside the per-sample loop, where each call
+    # re-read every sample's stats files -- quadratic in the sample count on
+    # the seqkit path, which has no loader cache of its own.
+    _aggregate_nanoplot: Optional[Dict[str, Any]] = None
+
+    def aggregate_nanoplot_stats() -> Dict[str, Any]:
+        nonlocal _aggregate_nanoplot
+        if _aggregate_nanoplot is None:
+            _aggregate_nanoplot = load_nanoplot_stats(main_dir, None)
+        return _aggregate_nanoplot
+
     for sample in samples:
         if sample == "All Samples":
             continue
@@ -924,7 +973,7 @@ def get_sample_statistics_summary(main_dir: str) -> pd.DataFrame:
             # Fall back to NanoPlot stats (used when chopper is the QC tool)
             nanoplot_stats = load_nanoplot_stats(main_dir, sample)
             if nanoplot_stats.get('number_of_reads', 0) == 0:
-                nanoplot_stats = load_nanoplot_stats(main_dir, None)
+                nanoplot_stats = aggregate_nanoplot_stats()
 
             if nanoplot_stats.get('number_of_reads', 0) > 0:
                 total_reads = nanoplot_stats['number_of_reads']

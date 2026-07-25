@@ -37,11 +37,28 @@ _kraken_cache: Dict[str, Tuple[float, pd.DataFrame]] = {}
 _fastp_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 _last_cache_cleanup: float = 0.0  # Track last cleanup time
 
-# File mtime/size cache: maps (dir, sample) -> (mtime, size, cached_result)
-# Used for O(stat) freshness checks instead of O(parse)
-_file_mtimes: Dict[str, Tuple[float, int, Any]] = {}
+# File mtime/size cache: maps cache_key -> (path_fingerprint, epoch, result).
+# Used for O(stat) freshness checks instead of O(parse).
+_file_mtimes: Dict[str, Tuple[Tuple[float, int, int], int, Any]] = {}
 # Last freshness fingerprint for change detection
 _last_freshness_fingerprint: str = ""
+
+# Monotonic counter bumped by check_data_freshness whenever the results tree
+# changes. It is the authority for "has anything at all changed since the
+# last poll", and lets _check_mtime_cache answer a repeat lookup within the
+# same poll without touching the filesystem.
+#
+# A single poll issues roughly 3N + 8 load_kraken_data calls (the dashboard
+# per-sample loop, the pathogen attribution loop, and the QC summary loop
+# each walk every sample). Before the epoch check, each of those calls paid
+# its own directory fingerprint walk even on a cache hit, which is what made
+# a quiet 24-sample poll cost ~74k stat() calls.
+#
+# Epoch 0 means check_data_freshness has never run in this process. Callers
+# that never poll -- tests, the CLI, one-shot report generation -- stay on
+# the unconditional path-fingerprint check, so the shortcut cannot serve
+# them stale data.
+_freshness_epoch: int = 0
 
 # Per-key parse locks. Concurrent callbacks that all miss the mtime cache
 # at the same instant (because kraken2/ mtime advanced since their last
@@ -308,20 +325,53 @@ def _check_mtime_cache(
     returns the cached result without reparsing. Returns None on cache miss
     or when data has changed.
 
+    Two levels of validation, cheapest first:
+
+    1. If the entry was stored during the current freshness epoch, nothing in
+       the results tree has changed since, so the entry is still valid and no
+       filesystem call is needed. This is the common case: the same cache key
+       is looked up several times within one poll.
+    2. Otherwise fall back to fingerprinting ``paths``. On a match the entry
+       is re-stamped with the current epoch, so the remaining lookups in this
+       poll take path 1.
+
     Thread-safe: acquires _cache_lock for the dict lookup.
+    """
+    state, result = _mtime_cache_state(cache_key, paths)
+    return result if state == "hit" else None
+
+
+def _mtime_cache_state(
+    cache_key: str,
+    paths: List[str],
+) -> Tuple[str, Any]:
+    """Classify an mtime-cache lookup as ``hit``, ``stale`` or ``absent``.
+
+    ``_check_mtime_cache`` collapses "no entry yet" and "the files changed"
+    into a single ``None``, which loses the distinction callers need. A caller
+    that falls back to a time-to-live cache after a ``stale`` result would
+    return data it has just proven to be out of date; after an ``absent``
+    result the TTL cache is a legitimate fallback.
+
+    Returns ``(state, result)`` where ``result`` is meaningful only for
+    ``hit``.
     """
     with _cache_lock:
         if cache_key not in _file_mtimes:
-            return None
-        stored_fp, cached_result = _file_mtimes[cache_key]
+            return ("absent", None)
+        stored_fp, stored_epoch, cached_result = _file_mtimes[cache_key]
+        epoch = _freshness_epoch
 
-    # Filesystem stat is done outside the lock (I/O should not block other threads)
+    if epoch and stored_epoch == epoch:
+        return ("hit", cached_result)
+
     current_fp = _get_path_fingerprint(paths)
-
     if current_fp == stored_fp:
-        return cached_result
+        with _cache_lock:
+            _file_mtimes[cache_key] = (stored_fp, epoch, cached_result)
+        return ("hit", cached_result)
 
-    return None
+    return ("stale", None)
 
 
 def _store_mtime_cache(
@@ -329,10 +379,14 @@ def _store_mtime_cache(
     paths: List[str],
     result: Any,
 ) -> None:
-    """Store a result keyed by the (mtime, size, count) fingerprint of paths."""
+    """Store a result keyed by the (mtime, size, count) fingerprint of paths.
+
+    The current freshness epoch is recorded alongside so that repeat lookups
+    within the same poll can skip the fingerprint walk entirely.
+    """
     fp = _get_path_fingerprint(paths)
     with _cache_lock:
-        _file_mtimes[cache_key] = (fp, result)
+        _file_mtimes[cache_key] = (fp, _freshness_epoch, result)
 
 
 def check_data_freshness(main_dir: str) -> str:
@@ -353,7 +407,7 @@ def check_data_freshness(main_dir: str) -> str:
 
     When data has changed, stale cache entries are cleaned up as a side effect.
     """
-    global _last_freshness_fingerprint
+    global _last_freshness_fingerprint, _freshness_epoch
 
     main_dir = resolve_analysis_directory(main_dir)
 
@@ -370,6 +424,13 @@ def check_data_freshness(main_dir: str) -> str:
     with _cache_lock:
         if fingerprint != _last_freshness_fingerprint:
             _last_freshness_fingerprint = fingerprint
+            # Something in the tree moved. Bump the epoch so every mtime-cache
+            # entry re-validates against its own paths on next lookup.
+            _freshness_epoch += 1
+        elif _freshness_epoch == 0:
+            # First call of the process on an unchanged tree: start the epoch
+            # so downstream lookups can use the shortcut.
+            _freshness_epoch = 1
         _cleanup_stale_cache_entries()
 
     return fingerprint

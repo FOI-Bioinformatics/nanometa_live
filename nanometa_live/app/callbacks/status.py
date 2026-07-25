@@ -50,8 +50,16 @@ def register_status(app, backend_manager):
         Data-bound callbacks consume this Store as their Input instead of
         ``update-interval``. PreventUpdate on an unchanged fingerprint
         means downstream callbacks do not run, so unchanged ticks become
-        zero-cost. The gate itself is four ``os.scandir`` calls plus an
-        MD5 -- microseconds at any realistic dataset size.
+        zero-cost.
+
+        The gate itself is four bounded recursive ``os.walk`` calls (one per
+        watched output subdirectory) plus an MD5, so its cost scales with the
+        total file count of the results tree rather than being constant. The
+        walk is required: real-time output lands in nested subdirectories
+        such as ``kraken2/<sample>/batch_reports/``, which a non-recursive
+        scan would never see. It also sets the freshness epoch that lets the
+        loader caches skip their own per-key fingerprint walks for the rest
+        of the poll, so this is the only tree traversal a quiet poll pays.
         """
         if not config:
             raise PreventUpdate

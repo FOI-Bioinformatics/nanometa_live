@@ -73,3 +73,35 @@ jobs:
 
       - name: Check code size (no new oversized files/functions)
         run: python scripts/check_code_size.py
+
+  per-poll-cost:
+    # Ratchet against per-poll loader cost regressions as the barcode count
+    # grows. Asserts on syscall counts over a deterministically generated
+    # results tree, never on wall time: shared runners vary too much between
+    # runs for a timing threshold to be anything but flaky.
+    #
+    # Restricted to the cells that matter and are cheap: the quiet and
+    # incremental scenarios, no figure building. The full matrix is run
+    # manually (see scripts/perf/README.md).
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Check per-poll cost
+        run: |
+          python -m scripts.perf.scaling_bench \
+            --n 1,6,24 \
+            --scenarios quiet,incremental \
+            --layouts batch,realtime_incremental \
+            --no-figures --repeat 1 --check
