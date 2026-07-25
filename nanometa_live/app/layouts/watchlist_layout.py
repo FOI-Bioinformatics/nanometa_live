@@ -436,6 +436,22 @@ def _create_collapsible_watchlist_files() -> dbc.Accordion:
                         multiple=False,
                         accept=".yaml,.yml",
                     ),
+                    # Export the live selection as a shareable YAML file.
+                    # Species added one at a time via "Add custom species"
+                    # live only in the session; without this there is no way
+                    # to turn a curated list into a file.
+                    dbc.Button(
+                        [
+                            html.I(className="bi bi-download me-1"),
+                            "Download as YAML",
+                        ],
+                        id="watchlist-download-btn",
+                        color="secondary",
+                        outline=True,
+                        size="sm",
+                        className="mt-2 w-100",
+                    ),
+                    dcc.Download(id="watchlist-download"),
                     html.Div(id="watchlist-upload-feedback", className="mt-1 small"),
                     # Help text for custom watchlists
                     html.Details([
@@ -450,9 +466,17 @@ def _create_collapsible_watchlist_files() -> dbc.Accordion:
                                 "and can be enabled, expanded, and toggled in the same way."
                             ], className="small text-muted mb-2"),
                             html.P([
-                                "Custom YAML files are saved to ",
+                                "Custom YAML files are saved to the watchlist "
+                                "directory of this installation (",
+                                html.Code("<data-dir>/watchlists/"),
+                                ", by default ",
                                 html.Code("~/.nanometa/watchlists/"),
-                                " and persist across sessions.",
+                                ") and persist across sessions.",
+                            ], className="small text-muted mb-2"),
+                            html.P([
+                                "To start from the current selection instead, "
+                                "use ", html.Strong("Download as YAML"),
+                                " and edit the file.",
                             ], className="small text-muted mb-2"),
                             html.P("Expected YAML format:", className="small fw-bold mb-1"),
                             html.Pre(

@@ -1,15 +1,19 @@
 """
 CLI entry point for offline deployment preparation.
 
-Provides four subcommands:
+Provides six subcommands:
+  doctor  - Config-free sanity check of a fresh install (Nextflow, conda, pipeline).
   deploy  - Run full MobileLabPreparer pipeline with console progress.
   check   - Run ReadinessChecker only, print pass/fail table.
   export  - Export an offline bundle from a prepared ~/.nanometa.
+  verify  - Check a bundle without installing anything.
   import  - Import a portable bundle via BundleManager.
 """
 
 import argparse
 import os
+import shutil
+import subprocess
 import sys
 import textwrap
 
@@ -26,6 +30,33 @@ def _progress_bar(pct, width=30):
     filled = int(width * pct / 100)
     bar = "#" * filled + "-" * (width - filled)
     return f"[{bar}] {pct:5.1f}%"
+
+
+def _ensure_data_dirs(args):
+    """Create the per-installation directory layout.
+
+    Previously only ``app.py`` called ``ensure_dirs()``, so on an install
+    where the GUI had never been launched every CLI subcommand operated on
+    directories that did not exist -- ``check`` in particular reported
+    CRITICAL failures whose real cause was "the GUI was never started".
+    Called for every subcommand; it is idempotent.
+    """
+    from nanometa_live.core.utils.paths import NanometaPaths
+
+    home = getattr(args, "home", None)
+    try:
+        if home:
+            paths = NanometaPaths.from_data_dir(home)
+        else:
+            from nanometa_live.core.utils.paths import get_data_dir_from_env
+            paths = NanometaPaths.from_data_dir(get_data_dir_from_env())
+        paths.ensure_dirs()
+    except OSError as e:
+        print(
+            f"{_YELLOW}Could not create the Nanometa data directories: {e}"
+            f"{_RESET}",
+            file=sys.stderr,
+        )
 
 
 def _deploy(args):
@@ -270,6 +301,205 @@ def _export(args):
     sys.exit(0)
 
 
+def _verify(args):
+    """Verify a bundle without installing anything.
+
+    ``import`` is the only other code path that checks a bundle, and it
+    writes as it goes; an operator with a USB copy of a multi-GB bundle
+    could not confirm the transfer before committing the field machine to
+    it. Shares one implementation with the import path
+    (``BundleManager._verify_extracted_bundle``) so the dry run cannot
+    disagree with the real thing.
+    """
+    from nanometa_live.core.workflow.bundle_manager import BundleManager
+
+    if not os.path.exists(args.bundle):
+        print(f"{_RED}Bundle not found: {args.bundle}{_RESET}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"{_BOLD}Nanometa Live - Verify Bundle{_RESET}")
+    print(f"  Bundle: {args.bundle}")
+    if args.db:
+        print(f"  Kraken2 DB: {args.db}")
+    print(f"{_DIM}  Read-only: nothing on this machine is modified.{_RESET}")
+    print()
+
+    result = BundleManager().verify_bundle(args.bundle, kraken_db_path=args.db)
+
+    manifest = result.get("manifest", {})
+    if manifest:
+        print(f"  Created:        {manifest.get('created', 'unknown')}")
+        print(f"  Built by:       {manifest.get('creator', 'unknown')}")
+        plat = manifest.get("build_platform", {})
+        if plat:
+            print(
+                f"  Build platform: {plat.get('system', '?')}/"
+                f"{plat.get('machine', '?')}"
+            )
+        print(f"  Files:          {len(manifest.get('checksums', {}))}")
+        mode = manifest.get("containerization", {}).get("mode")
+        if mode:
+            print(f"  Containerization: {mode}")
+        print()
+
+    mismatches = result.get("checksum_mismatches") or []
+    if mismatches:
+        print(f"{_RED}Checksum failures ({len(mismatches)}):{_RESET}")
+        for m in mismatches[:20]:
+            print(f"  - {m}")
+        if len(mismatches) > 20:
+            print(f"  ... and {len(mismatches) - 20} more")
+        print()
+
+    if result.get("warnings"):
+        print(f"{_YELLOW}Warnings:{_RESET}")
+        for w in result["warnings"]:
+            print(f"  - {w}")
+        print()
+
+    if result["success"]:
+        print(f"{_GREEN}{_BOLD}Bundle verified. Safe to import.{_RESET}")
+    else:
+        print(f"{_RED}{_BOLD}Bundle verification FAILED. Do not import "
+              f"without --force.{_RESET}")
+
+    sys.exit(0 if result["success"] else 1)
+
+
+def _doctor(args):
+    """Config-free sanity check of a fresh install.
+
+    ``check`` needs an existing ``--config``, so it cannot answer the first
+    question an operator has on a new machine: is the toolchain here at all?
+    This checks only what is needed before any config exists.
+    """
+    print(f"{_BOLD}Nanometa Live - Install Doctor{_RESET}")
+    print()
+
+    problems = []
+
+    def report(name, ok, message, hint=None, fatal=True):
+        status = f"{_GREEN}PASS{_RESET}" if ok else (
+            f"{_RED}FAIL{_RESET}" if fatal else f"{_YELLOW}WARN{_RESET}")
+        print(f"  {status}  {name:<22} {message}")
+        if not ok and hint:
+            print(f"        {_DIM}{hint}{_RESET}")
+        if not ok and fatal:
+            problems.append(name)
+
+    _doctor_check_toolchain(report)
+    _doctor_check_runtimes(report)
+    _doctor_check_pipeline(args, report)
+    _doctor_check_data_dirs(args, report)
+    _doctor_summarise(problems)
+
+
+def _doctor_check_toolchain(report):
+    """Python and Nextflow, both hard requirements for a run."""
+    from nanometa_live.core.workflow.bundle_manager import (
+        _NEXTFLOW_MIN_VERSION,
+        _get_nextflow_version,
+        _parse_semver,
+    )
+
+    py = sys.version_info
+    report(
+        "Python", py >= (3, 11),
+        f"{py.major}.{py.minor}.{py.micro}",
+        "Nanometa Live requires Python 3.11 or newer.",
+    )
+
+    # Nextflow, and its version floor.
+    nf_version = _get_nextflow_version()
+    nf_found = shutil.which("nextflow") is not None
+    if not nf_found:
+        report(
+            "Nextflow", False, "not found on PATH",
+            "The pipeline cannot run without it. Install with "
+            "`conda install -c bioconda nextflow` "
+            f"(>= {_NEXTFLOW_MIN_VERSION} required).",
+        )
+    else:
+        local_t = _parse_semver(nf_version)
+        floor_t = _parse_semver(_NEXTFLOW_MIN_VERSION)
+        ok = bool(local_t and floor_t and local_t >= floor_t)
+        report(
+            "Nextflow", ok, nf_version,
+            f"nanometanf requires Nextflow >= {_NEXTFLOW_MIN_VERSION}. "
+            "Update it before launching a run.",
+        )
+
+def _doctor_check_runtimes(report):
+    """Conda and the container engines.
+
+    Conda is a warning rather than a failure: it is only needed for the
+    default profile, and a docker or singularity user legitimately has none.
+    """
+    conda = shutil.which("conda") or shutil.which("mamba")
+    report(
+        "conda/mamba", conda is not None, conda or "not found on PATH",
+        "The default pipeline profile is conda. Install conda/mamba, or "
+        "run with a docker or singularity profile.",
+        fatal=False,
+    )
+
+    # Container runtimes are informational: only one is needed, and only
+    # when the operator has chosen that profile.
+    for tool in ("docker", "apptainer", "singularity"):
+        path = shutil.which(tool)
+        if path:
+            print(f"  {_DIM}INFO{_RESET}  {tool:<22} {path}")
+
+def _doctor_check_pipeline(args, report):
+    """The local nanometanf checkout, when one was named."""
+    if args.pipeline:
+        main_nf = os.path.join(args.pipeline, "main.nf")
+        report(
+            "Pipeline checkout", os.path.isfile(main_nf),
+            args.pipeline,
+            "The path does not contain main.nf; point --pipeline at a "
+            "nanometanf checkout.",
+        )
+    else:
+        print(
+            f"  {_DIM}INFO{_RESET}  {'Pipeline checkout':<22} "
+            "not checked (pass --pipeline <path> to verify a local checkout)"
+        )
+
+def _doctor_check_data_dirs(args, report):
+    """Report the data directories; _ensure_data_dirs already created them."""
+    from nanometa_live.core.utils.paths import NanometaPaths, get_data_dir_from_env
+
+    data_dir = args.home or get_data_dir_from_env()
+    paths = NanometaPaths.from_data_dir(data_dir)
+    report(
+        "Data directories", paths.data_dir.is_dir(), str(paths.data_dir),
+        "Could not create the data directory. Check permissions, or set "
+        "--home to a writable location.",
+    )
+
+def _doctor_summarise(problems):
+    """Print the verdict and exit non-zero on any fatal problem."""
+    print()
+    if problems:
+        print(
+            f"{_RED}{_BOLD}Install is not ready: {', '.join(problems)}."
+            f"{_RESET}"
+        )
+        print(
+            f"{_DIM}Next: fix the failures above, then "
+            f"`nanometa-prepare check --config <config.yaml>` for a "
+            f"run-specific check.{_RESET}"
+        )
+    else:
+        print(f"{_GREEN}{_BOLD}Install looks sane.{_RESET}")
+        print(
+            f"{_DIM}Next: `nanometa-prepare check --config <config.yaml> "
+            f"--db <kraken2_db>` to check a specific run.{_RESET}"
+        )
+    sys.exit(1 if problems else 0)
+
+
 def _import_bundle(args):
     """Import a portable bundle."""
     from nanometa_live.core.workflow.bundle_manager import BundleManager
@@ -317,11 +547,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
             examples:
+              nanometa-prepare doctor
+              nanometa-prepare doctor --pipeline /path/to/nanometanf
               nanometa-prepare deploy --config config.yaml --db /data/kraken2_db
               nanometa-prepare deploy --config config.yaml --output bundle.tar.gz
               nanometa-prepare check --config config.yaml --db /data/kraken2_db
               nanometa-prepare export --config config.yaml --output bundle.tar.gz \\
                   --pre-warm --pipeline /path/to/nanometanf
+              nanometa-prepare verify --bundle bundle.tar.gz
               nanometa-prepare import --bundle bundle.tar.gz --db /data/kraken2_db
         """),
     )
@@ -330,8 +563,26 @@ def main():
         "--home", default=None,
         help="Nanometa home directory (default: ~/.nanometa)",
     )
+    # The version_check CI workflow invokes `nanometa-prepare --version`;
+    # without this flag argparse exits 2 on an unrecognised argument.
+    from nanometa_live import __version__
+    parser.add_argument(
+        "--version", action="version",
+        version=f"nanometa-prepare {__version__}",
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # doctor
+    doctor_p = subparsers.add_parser(
+        "doctor",
+        help="Config-free sanity check of a fresh install",
+    )
+    doctor_p.add_argument(
+        "--pipeline", default=None,
+        help="Optional path to a local nanometanf checkout to verify",
+    )
+    doctor_p.set_defaults(func=_doctor)
 
     # deploy
     deploy_p = subparsers.add_parser(
@@ -415,6 +666,21 @@ def main():
     )
     export_p.set_defaults(func=_export)
 
+    # verify
+    verify_p = subparsers.add_parser(
+        "verify",
+        help="Verify a bundle without installing anything",
+    )
+    verify_p.add_argument(
+        "--bundle", "-b", required=True,
+        help="Path to the bundle tar.gz file",
+    )
+    verify_p.add_argument(
+        "--db", default=None,
+        help="Optional local Kraken2 database, to check the bundle's DB hash",
+    )
+    verify_p.set_defaults(func=_verify)
+
     # import
     import_p = subparsers.add_parser(
         "import",
@@ -431,6 +697,9 @@ def main():
     import_p.set_defaults(func=_import_bundle)
 
     args = parser.parse_args()
+    # `verify` is the one subcommand that must not touch this machine.
+    if args.command != "verify":
+        _ensure_data_dirs(args)
     args.func(args)
 
 

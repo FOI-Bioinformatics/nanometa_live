@@ -1383,12 +1383,13 @@ def register_watchlist_callbacks(app: Dash) -> None:
         if not contents or not filename:
             raise PreventUpdate
 
-        try:
-            import base64
-            import tempfile
-            from pathlib import Path
-            from nanometa_live.core.watchlist.watchlist_loader import get_watchlist_loader
+        import base64
+        import tempfile
+        from pathlib import Path
+        from nanometa_live.core.watchlist.watchlist_loader import get_watchlist_loader
 
+        temp_path = None
+        try:
             # Decode the file
             content_type, content_string = contents.split(",")
             decoded = base64.b64decode(content_string)
@@ -1402,12 +1403,11 @@ def register_watchlist_callbacks(app: Dash) -> None:
                 f.write(decoded)
                 temp_path = Path(f.name)
 
-            # Validate and persist to ~/.nanometa/watchlists/
+            # Validate and persist to the operator watchlist directory
             loader = get_watchlist_loader()
             is_valid, errors = loader.validate_file(temp_path)
 
             if not is_valid:
-                temp_path.unlink(missing_ok=True)
                 error_list = html.Ul(
                     [html.Li(e, className="small") for e in errors],
                     className="mb-0 ps-3"
@@ -1420,9 +1420,16 @@ def register_watchlist_callbacks(app: Dash) -> None:
                     ], color="danger", duration=10000),
                 )
 
-            # Persist: copy to user watchlist directory
-            success, message = loader.import_watchlist(temp_path, destination="user")
-            temp_path.unlink(missing_ok=True)
+            # Entries without a taxonomy ID load and display but can never
+            # match a Kraken2 report; say so instead of letting the operator
+            # believe an organism is being watched.
+            no_taxid = loader.find_entries_without_taxid(temp_path)
+
+            # Persist: copy to user watchlist directory under the operator's
+            # own filename (temp_path has a random name).
+            success, message = loader.import_watchlist(
+                temp_path, destination="user", file_name=filename
+            )
 
             if not success:
                 return (
@@ -1433,7 +1440,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
             # Load into active session
             manager = get_watchlist_manager()
             watchlist_id = Path(filename).stem
-            dest_dir = Path.home() / ".nanometa" / "watchlists"
+            dest_dir = loader.user_watchlist_dir
             dest_file = dest_dir / filename
             if dest_file.exists():
                 manager._load_custom_yaml_file(str(dest_file))
@@ -1442,18 +1449,42 @@ def register_watchlist_callbacks(app: Dash) -> None:
             pathogens = loader.load_watchlist(watchlist_id)
             count = len(pathogens) if pathogens else 0
 
+            body = [
+                html.Div([
+                    html.I(className="bi bi-check-circle me-2"),
+                    html.Strong(f"Imported: {filename}"),
+                ]),
+                html.Small(
+                    f"{count} pathogens added. Saved to {dest_dir}",
+                    className="text-muted d-block mt-1",
+                ),
+            ]
+            if no_taxid:
+                shown = ", ".join(no_taxid[:5])
+                if len(no_taxid) > 5:
+                    shown += f", and {len(no_taxid) - 5} more"
+                body.append(html.Small(
+                    [
+                        html.I(className="bi bi-exclamation-triangle me-2"),
+                        html.Strong(
+                            f"{len(no_taxid)} entr"
+                            f"{'y has' if len(no_taxid) == 1 else 'ies have'} "
+                            "no taxonomy ID: "
+                        ),
+                        f"{shown}. These are shown and counted but cannot match "
+                        "a Kraken2 report. Add taxid_ncbi (or db_taxid) to each, "
+                        "or resolve them with Verify Taxonomy IDs.",
+                    ],
+                    className="d-block mt-2 text-warning-emphasis",
+                ))
+
             return (
                 {"last_update": f"upload-{filename}"},
-                dbc.Alert([
-                    html.Div([
-                        html.I(className="bi bi-check-circle me-2"),
-                        html.Strong(f"Imported: {filename}"),
-                    ]),
-                    html.Small(
-                        f"{count} pathogens added. Saved to ~/.nanometa/watchlists/",
-                        className="text-muted d-block mt-1",
-                    ),
-                ], color="success", duration=8000),
+                dbc.Alert(
+                    body,
+                    color="warning" if no_taxid else "success",
+                    duration=12000 if no_taxid else 8000,
+                ),
             )
 
         except Exception as e:
@@ -1461,6 +1492,51 @@ def register_watchlist_callbacks(app: Dash) -> None:
                 no_update,
                 dbc.Alert(f"Upload failed: {e}", color="danger", duration=8000),
             )
+        finally:
+            # validate_file can raise, and the blanket except above used to
+            # swallow it -- leaking the NamedTemporaryFile(delete=False) into
+            # /tmp on every failed upload.
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+
+    # ---------------------------------------------------------------------
+    # Download the current watchlist as YAML
+    # ---------------------------------------------------------------------
+
+    @app.callback(
+        Output("watchlist-download", "data"),
+        Input("watchlist-download-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def handle_download_watchlist(n_clicks):
+        """Serialise the active watchlist selection to a shareable YAML file.
+
+        Species added through "Add custom species" exist only in the session
+        (they reach disk only indirectly, inside last-session.yaml), so this
+        is the only way to turn a curated selection into a file that can be
+        re-imported or handed to another operator.
+        """
+        if not n_clicks:
+            raise PreventUpdate
+
+        import yaml as _yaml
+        from nanometa_live.core.watchlist.watchlist_loader import (
+            build_watchlist_yaml,
+        )
+
+        manager = get_watchlist_manager()
+        entries = [e.to_dict() for e in manager.get_active_entries().values()]
+        doc = build_watchlist_yaml(
+            entries,
+            name="Nanometa Live watchlist export",
+            description=(
+                f"{len(entries)} active organisms, exported "
+                f"{datetime.now().strftime('%Y-%m-%d %H:%M')}."
+            ),
+        )
+        text = _yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        return dict(content=text, filename=f"watchlist-{stamp}.yaml")
 
     # -----------------------------------------------------------------
     # Delete custom watchlist

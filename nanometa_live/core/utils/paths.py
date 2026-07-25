@@ -225,6 +225,27 @@ def set_project_dir_env(project_dir: str | os.PathLike[str]) -> None:
     os.environ[_PROJECT_DIR_ENV] = str(project_dir)
 
 
+def get_watchlists_dir_from_env() -> str:
+    """Resolve the operator watchlist directory from the environment.
+
+    Project-local (``<project_dir>/.nanometa/watchlists``) when
+    ``NANOMETA_PROJECT_DIR`` is set, else ``<data_dir>/watchlists``.
+    Mirrors :pyattr:`NanometaPaths.watchlists`.
+
+    This is the single answer to "where do uploaded watchlists live". The
+    watchlist loader, the upload callback, and the bundle exporter all read
+    it; when they each hard-coded ``~/.nanometa/watchlists`` instead, a run
+    started with ``--data-dir`` or ``--project-dir`` put the GUI's uploads
+    somewhere the exporter never looked, and the bundle silently shipped
+    without them."""
+    project = get_project_dir_from_env()
+    if project:
+        return os.path.join(
+            os.path.abspath(os.path.expanduser(project)), ".nanometa", "watchlists"
+        )
+    return os.path.join(get_data_dir_from_env(), "watchlists")
+
+
 def get_mappings_dir_from_env() -> str:
     """Resolve the taxid-mappings directory from the environment.
 

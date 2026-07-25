@@ -606,11 +606,33 @@ class BundleManager:
                             rel = f.relative_to(staging)
                             manifest["checksums"][str(rel)] = _file_md5(f)
 
-            # Copy watchlists (include actual YAML files, not just references)
-            watchlist_dir = home / "watchlists"
-            if watchlist_dir.exists():
-                shutil.copytree(watchlist_dir, staging / "watchlists")
-                for f in (staging / "watchlists").rglob("*"):
+            # Copy watchlists (include actual YAML files, not just references).
+            # Under --project-dir the GUI writes uploads to
+            # <project_dir>/.nanometa/watchlists, which is NOT under `home`;
+            # reading only home/watchlists shipped a bundle with the
+            # operator's own lists silently missing. Take both, with the
+            # project-scoped directory winning on a name collision since that
+            # is the one the running app is reading.
+            watchlist_sources = [home / "watchlists"]
+            if (config or {}).get("project_dir"):
+                from nanometa_live.core.utils.paths import NanometaPaths
+                project_watchlists = NanometaPaths.from_config(config).watchlists
+                if project_watchlists != watchlist_sources[0]:
+                    watchlist_sources.append(project_watchlists)
+
+            staged_watchlists = staging / "watchlists"
+            for src_dir in watchlist_sources:
+                if not src_dir.is_dir():
+                    continue
+                staged_watchlists.mkdir(parents=True, exist_ok=True)
+                for wl_file in src_dir.rglob("*"):
+                    if not wl_file.is_file():
+                        continue
+                    dst = staged_watchlists / wl_file.relative_to(src_dir)
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(wl_file, dst)
+            if staged_watchlists.is_dir():
+                for f in staged_watchlists.rglob("*"):
                     if f.is_file():
                         rel = f.relative_to(staging)
                         manifest["checksums"][str(rel)] = _file_md5(f)
@@ -818,6 +840,325 @@ class BundleManager:
         logger.info(f"Bundle exported to {output}")
         return output
 
+    def verify_bundle(
+        self,
+        bundle_path: str,
+        kraken_db_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Verify a bundle without writing anything to this machine.
+
+        Runs exactly the checks ``import_bundle`` runs before it starts
+        copying -- archive validity, manifest version, recorded export
+        warnings, per-file checksums, Kraken2 DB hash, tool and Nextflow
+        versions, build platform -- so an operator can check a USB copy
+        before committing to an import. Nothing outside the temporary
+        extraction directory is touched.
+
+        Args:
+            bundle_path: Path to the bundle tar.gz.
+            kraken_db_path: Optional Kraken2 DB to check the manifest hash
+                against.
+
+        Returns:
+            Dict with ``success``, ``warnings``, ``blockers``, ``manifest``
+            and the per-check flags described in
+            ``_verify_extracted_bundle``.
+        """
+        result: Dict[str, Any] = {
+            "success": True,
+            "warnings": [],
+            "blockers": [],
+            "manifest": {},
+        }
+
+        bundle = Path(bundle_path)
+        if not bundle.exists():
+            result["success"] = False
+            result["warnings"].append(f"Bundle file not found: {bundle_path}")
+            return result
+
+        if not tarfile.is_tarfile(str(bundle)):
+            result["success"] = False
+            result["warnings"].append("File is not a valid tar archive")
+            return result
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            try:
+                with tarfile.open(bundle_path, "r:gz") as tar:
+                    tar.extractall(path=tmpdir, filter="data")
+            except (tarfile.TarError, OSError) as e:
+                result["success"] = False
+                result["warnings"].append(f"Could not extract bundle: {e}")
+                return result
+
+            report = self._verify_extracted_bundle(
+                Path(tmpdir), kraken_db_path=kraken_db_path
+            )
+
+        result["manifest"] = report["manifest"]
+        result["warnings"].extend(report["warnings"])
+        result["blockers"] = [b["message"] for b in report["blockers"]]
+        for key in (
+            "export_warnings", "checksum_mismatches",
+            "db_hash_mismatch", "platform_mismatch",
+        ):
+            if key in report:
+                result[key] = report[key]
+        if report["blockers"]:
+            result["success"] = False
+            result["warnings"].extend(result["blockers"])
+        return result
+
+    def _verify_extracted_bundle(
+        self,
+        tmp: Path,
+        kraken_db_path: Optional[str] = None,
+        stop_on_blocker: bool = False,
+    ) -> Dict[str, Any]:
+        """Run the read-only bundle checks against an extracted bundle tree.
+
+        Shared by ``verify_bundle`` (which extracts to a throwaway dir and
+        stops there) and ``import_bundle`` (which continues on to copy).
+        Keeping one implementation is the point: a check that only lived in
+        the import path could not be offered as a dry run.
+
+        A *blocker* is a problem that aborts an import unless it is forced;
+        a *warning* never aborts. ``stop_on_blocker`` reproduces the import's
+        short-circuit ordering, so an unforced import does not spend time on
+        later checks after it has already decided to abort.
+        """
+        report: Dict[str, Any] = {
+            "manifest": {},
+            "warnings": [],
+            "blockers": [],
+            "export_warnings": [],
+            "checksum_mismatches": [],
+            "db_hash_mismatch": False,
+            "platform_mismatch": False,
+        }
+
+        def _blocked() -> bool:
+            return stop_on_blocker and bool(report["blockers"])
+
+        manifest = self._verify_load_manifest(tmp, report)
+        if manifest is None or _blocked():
+            return report
+
+        self._verify_replay_export_warnings(manifest, report)
+
+        self._verify_checksums(tmp, manifest, report)
+        if _blocked():
+            return report
+
+        self._verify_db_hash(manifest, kraken_db_path, report)
+        self._verify_tool_versions(manifest, report)
+        self._verify_build_platform(manifest, report)
+
+        return report
+
+    def _verify_load_manifest(
+        self, tmp: Path, report: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Load and version-check manifest.json.
+
+        Returns None when the manifest is missing or corrupt, which are both
+        fatal. An unsupported format version is recorded as a non-fatal
+        blocker (forceable) but the manifest is still returned, so refusing
+        the import stays the caller's decision.
+        """
+        manifest_path = tmp / "manifest.json"
+        if not manifest_path.exists():
+            report["blockers"].append({
+                "code": "manifest_missing",
+                "fatal": True,
+                "message": (
+                    "No manifest.json found in bundle. "
+                    "This may not be a valid Nanometa Live bundle."
+                ),
+            })
+            return None
+
+        try:
+            with open(manifest_path) as f:
+                manifest = json.load(f)
+            report["manifest"] = manifest
+        except (json.JSONDecodeError, IOError) as e:
+            report["blockers"].append({
+                "code": "manifest_corrupt",
+                "fatal": True,
+                "message": f"Corrupted manifest.json: {e}",
+            })
+            return None
+
+        # Refuse bundles written by an incompatible (newer) format so
+        # missing required fields surface here, not as a cryptic runtime
+        # error after a "successful" import.
+        manifest_version = str(manifest.get("version", ""))
+        if manifest_version and manifest_version not in _SUPPORTED_MANIFEST_VERSIONS:
+            report["blockers"].append({
+                "code": "unsupported_manifest_version",
+                "fatal": False,
+                "message": (
+                    f"Unsupported bundle format (manifest version "
+                    f"{manifest_version!r}; this build understands "
+                    f"{sorted(_SUPPORTED_MANIFEST_VERSIONS)}). Update Nanometa "
+                    "Live on this machine, or force the import."
+                ),
+                "force_message": (
+                    f"Unsupported manifest version {manifest_version!r}; "
+                    "continuing anyway (force=True)."
+                ),
+            })
+        return manifest
+
+    def _verify_replay_export_warnings(self, manifest: Dict[str, Any], report: Dict[str, Any]) -> None:
+        """Replay non-fatal problems the export recorded.
+
+        They are otherwise visible only on the build machine, and the
+        operator running the import is usually not the one who built the
+        bundle.
+        """
+        export_warnings = [str(w) for w in (manifest.get("export_warnings") or [])]
+        if export_warnings:
+            report["export_warnings"] = export_warnings
+            for w in export_warnings:
+                logger.warning(f"Export-time warning: {w}")
+                report["warnings"].append(f"Recorded at export: {w}")
+
+
+    def _verify_checksums(self, tmp: Path, manifest: Dict[str, Any], report: Dict[str, Any]) -> None:
+        """Check every manifest checksum against the extracted tree."""
+        mismatches = []
+        for rel_path, expected_md5 in manifest.get("checksums", {}).items():
+            full_path = tmp / rel_path
+            if full_path.exists():
+                if _file_md5(full_path) != expected_md5:
+                    mismatches.append(rel_path)
+            else:
+                mismatches.append(f"{rel_path} (missing)")
+
+        if mismatches:
+            report["checksum_mismatches"] = mismatches
+            for f_path in mismatches:
+                logger.warning(f"Checksum mismatch: {f_path}")
+            mismatch_msg = (
+                f"{len(mismatches)} file(s) failed checksum verification: "
+                f"{', '.join(mismatches[:5])}"
+                + ("..." if len(mismatches) > 5 else "")
+            )
+            report["blockers"].append({
+                "code": "checksum_mismatch",
+                "fatal": False,
+                "message": (
+                    f"{mismatch_msg}. Import aborted. "
+                    "Use force=True to import despite mismatches."
+                ),
+                "force_message": (
+                    f"{mismatch_msg}. Continuing anyway (force=True)."
+                ),
+            })
+
+
+    def _verify_db_hash(self, manifest: Dict[str, Any], kraken_db_path: Optional[str], report: Dict[str, Any]) -> None:
+        """Flag a Kraken2 database that does not match the bundled artefacts.
+
+        The bundled taxid mappings and taxonomy index are keyed off the DB
+        hash, so a mismatch imports cleanly and then trips readiness checks
+        as CRITICAL with no obvious link back to the import.
+        """
+        if kraken_db_path and manifest.get("db_hash"):
+            from nanometa_live.core.taxonomy.taxid_mapping import get_database_hash
+            local_hash = get_database_hash(kraken_db_path)
+            if local_hash != manifest["db_hash"]:
+                report["db_hash_mismatch"] = True
+                report["warnings"].append(
+                    "Kraken2 database mismatch: the bundled taxid mappings "
+                    "and taxonomy index were built for a different database "
+                    f"(bundle hash {manifest['db_hash']}, this database "
+                    f"{local_hash}). Readiness and the pipeline look up the "
+                    "mappings by this database's hash, so they will not be "
+                    "found and the 'Database index' / 'Taxid mappings' "
+                    "readiness checks will fail. Point the Kraken2 database "
+                    "at the exact one the bundle was built for, or re-run the "
+                    "'Taxonomy index + mappings' step on the Watchlist & "
+                    "Preparation tab to regenerate them for this database."
+                )
+
+
+    def _verify_tool_versions(self, manifest: Dict[str, Any], report: Dict[str, Any]) -> None:
+        """Compare bundled tool versions with local ones; warnings only."""
+        bundle_versions = manifest.get("tool_versions", {})
+        if bundle_versions:
+            local_versions = self._collect_tool_versions()
+            report["warnings"].extend(
+                _check_version_compatibility(bundle_versions, local_versions)
+            )
+
+        # Enforce the bundle's minimum runtime versions (warn, do not fail).
+        nf_floor = manifest.get("min_versions", {}).get("nextflow")
+        if nf_floor:
+            local_nf = _get_nextflow_version()
+            floor_t = _parse_semver(nf_floor)
+            local_t = _parse_semver(local_nf)
+            if local_nf in ("not found", "error", "unknown") or local_t is None:
+                report["warnings"].append(
+                    f"Could not determine the field machine's Nextflow version "
+                    f"({local_nf}); the bundled pipeline requires Nextflow "
+                    f">={nf_floor}. Confirm Nextflow is installed and current."
+                )
+            elif floor_t and local_t < floor_t:
+                report["warnings"].append(
+                    f"Field machine Nextflow {local_nf} is older than the bundle's "
+                    f"required minimum {nf_floor}. Update Nextflow before launching "
+                    "the pipeline."
+                )
+
+
+    def _verify_build_platform(self, manifest: Dict[str, Any], report: Dict[str, Any]) -> None:
+        """Warn on an OS/architecture mismatch.
+
+        Conda environments and compiled binaries are not portable across
+        platform boundaries, so pre-warmed envs make it a blocker.
+        """
+        build_plat = manifest.get("build_platform", {})
+        if build_plat:
+            local_system = platform.system()
+            local_machine = platform.machine()
+            bundle_system = build_plat.get("system", "")
+            bundle_machine = build_plat.get("machine", "")
+            if (bundle_system and bundle_machine) and (
+                local_system != bundle_system or local_machine != bundle_machine
+            ):
+                report["platform_mismatch"] = True
+                msg = (
+                    f"Bundle was built on {bundle_system}/{bundle_machine} "
+                    f"but field machine is {local_system}/{local_machine}. "
+                    "Pre-warmed conda envs and bundled binaries will likely "
+                    "not work. Plan to rebuild conda envs from "
+                    "environment.yml on the field machine."
+                )
+                logger.warning(msg)
+                report["warnings"].append(msg)
+
+                # Pre-warmed conda envs embed absolute build-host paths and
+                # per-arch binaries; on a platform mismatch they cannot run
+                # at all. Refuse the import (unless forced) so the operator
+                # learns now instead of at the first pipeline process.
+                prewarm = manifest.get("pre_warm_conda_envs", {})
+                if prewarm.get("success"):
+                    report["blockers"].append({
+                        "code": "platform_prewarm_conda",
+                        "fatal": False,
+                        "message": (
+                            "Import aborted: the bundle ships pre-warmed conda "
+                            "environments that cannot run on this OS/architecture. "
+                            "Rebuild the bundle on a matching machine, use Docker "
+                            "mode, or force the import and rebuild conda envs here."
+                        ),
+                    })
+
+
+
     def import_bundle(
         self,
         bundle_path: str,
@@ -871,163 +1212,29 @@ class BundleManager:
 
             tmp = Path(tmpdir)
 
-            # Load and validate manifest
-            manifest_path = tmp / "manifest.json"
-            if not manifest_path.exists():
+            # Read-only verification, shared with verify_bundle so the
+            # dry run and the real import cannot drift apart.
+            verify = self._verify_extracted_bundle(
+                tmp, kraken_db_path=kraken_db_path, stop_on_blocker=not force
+            )
+            manifest = verify["manifest"]
+            result["manifest"] = manifest
+            result["warnings"].extend(verify["warnings"])
+            for _key in ("export_warnings", "checksum_mismatches"):
+                if verify[_key]:
+                    result[_key] = verify[_key]
+            if verify["db_hash_mismatch"]:
+                result["db_hash_mismatch"] = True
+
+            for blocker in verify["blockers"]:
+                if force and not blocker.get("fatal"):
+                    result["warnings"].append(
+                        blocker.get("force_message", blocker["message"])
+                    )
+                    continue
                 result["success"] = False
-                result["warnings"].append(
-                    "No manifest.json found in bundle. "
-                    "This may not be a valid Nanometa Live bundle."
-                )
+                result["warnings"].append(blocker["message"])
                 return result
-
-            try:
-                with open(manifest_path) as f:
-                    manifest = json.load(f)
-                result["manifest"] = manifest
-            except (json.JSONDecodeError, IOError) as e:
-                result["success"] = False
-                result["warnings"].append(f"Corrupted manifest.json: {e}")
-                return result
-
-            # Refuse bundles written by an incompatible (newer) format so
-            # missing required fields surface here, not as a cryptic runtime
-            # error after a "successful" import.
-            manifest_version = str(manifest.get("version", ""))
-            if manifest_version and manifest_version not in _SUPPORTED_MANIFEST_VERSIONS:
-                if not force:
-                    result["success"] = False
-                    result["warnings"].append(
-                        f"Unsupported bundle format (manifest version "
-                        f"{manifest_version!r}; this build understands "
-                        f"{sorted(_SUPPORTED_MANIFEST_VERSIONS)}). Update Nanometa "
-                        "Live on this machine, or force the import."
-                    )
-                    return result
-                result["warnings"].append(
-                    f"Unsupported manifest version {manifest_version!r}; "
-                    "continuing anyway (force=True)."
-                )
-
-            # Validate checksums before extracting to home
-            checksums = manifest.get("checksums", {})
-            mismatches = []
-            for rel_path, expected_md5 in checksums.items():
-                full_path = tmp / rel_path
-                if full_path.exists():
-                    actual = _file_md5(full_path)
-                    if actual != expected_md5:
-                        mismatches.append(rel_path)
-                else:
-                    mismatches.append(f"{rel_path} (missing)")
-
-            if mismatches:
-                for f_path in mismatches:
-                    logger.warning(f"Checksum mismatch: {f_path}")
-                mismatch_msg = (
-                    f"{len(mismatches)} file(s) failed checksum verification: "
-                    f"{', '.join(mismatches[:5])}"
-                    + ("..." if len(mismatches) > 5 else "")
-                )
-                if not force:
-                    result["success"] = False
-                    result["warnings"].append(
-                        f"{mismatch_msg}. Import aborted. "
-                        "Use force=True to import despite mismatches."
-                    )
-                    return result
-                result["warnings"].append(
-                    f"{mismatch_msg}. Continuing anyway (force=True)."
-                )
-
-            # Verify DB hash compatibility. The bundled taxid mappings and
-            # taxonomy index are keyed off the DB hash, and readiness
-            # (_check_db_index / _check_taxid_mappings) and the run look them up
-            # by THIS database's hash. A mismatch therefore imports "cleanly"
-            # but then trips those readiness checks as CRITICAL with no obvious
-            # link back here -- so flag it explicitly and say how to fix it.
-            if kraken_db_path and manifest.get("db_hash"):
-                from nanometa_live.core.taxonomy.taxid_mapping import get_database_hash
-                local_hash = get_database_hash(kraken_db_path)
-                if local_hash != manifest["db_hash"]:
-                    result["db_hash_mismatch"] = True
-                    result["warnings"].append(
-                        "Kraken2 database mismatch: the bundled taxid mappings "
-                        "and taxonomy index were built for a different database "
-                        f"(bundle hash {manifest['db_hash']}, this database "
-                        f"{local_hash}). Readiness and the pipeline look up the "
-                        "mappings by this database's hash, so they will not be "
-                        "found and the 'Database index' / 'Taxid mappings' "
-                        "readiness checks will fail. Point the Kraken2 database "
-                        "at the exact one the bundle was built for, or re-run the "
-                        "'Taxonomy index + mappings' step on the Watchlist & "
-                        "Preparation tab to regenerate them for this database."
-                    )
-
-            # Validate tool versions against local installations
-            bundle_versions = manifest.get("tool_versions", {})
-            if bundle_versions:
-                local_versions = self._collect_tool_versions()
-                version_warnings = _check_version_compatibility(
-                    bundle_versions, local_versions
-                )
-                result["warnings"].extend(version_warnings)
-
-            # Enforce the bundle's minimum runtime versions (warn, do not fail).
-            nf_floor = manifest.get("min_versions", {}).get("nextflow")
-            if nf_floor:
-                local_nf = _get_nextflow_version()
-                floor_t = _parse_semver(nf_floor)
-                local_t = _parse_semver(local_nf)
-                if local_nf in ("not found", "error", "unknown") or local_t is None:
-                    result["warnings"].append(
-                        f"Could not determine the field machine's Nextflow version "
-                        f"({local_nf}); the bundled pipeline requires Nextflow "
-                        f">={nf_floor}. Confirm Nextflow is installed and current."
-                    )
-                elif floor_t and local_t < floor_t:
-                    result["warnings"].append(
-                        f"Field machine Nextflow {local_nf} is older than the bundle's "
-                        f"required minimum {nf_floor}. Update Nextflow before launching "
-                        "the pipeline."
-                    )
-
-            # Warn when the bundle was built on a different OS or CPU
-            # architecture. Conda envs and compiled binaries are not
-            # portable across platform boundaries.
-            build_plat = manifest.get("build_platform", {})
-            if build_plat:
-                local_system = platform.system()
-                local_machine = platform.machine()
-                bundle_system = build_plat.get("system", "")
-                bundle_machine = build_plat.get("machine", "")
-                if (bundle_system and bundle_machine) and (
-                    local_system != bundle_system or local_machine != bundle_machine
-                ):
-                    msg = (
-                        f"Bundle was built on {bundle_system}/{bundle_machine} "
-                        f"but field machine is {local_system}/{local_machine}. "
-                        "Pre-warmed conda envs and bundled binaries will likely "
-                        "not work. Plan to rebuild conda envs from "
-                        "environment.yml on the field machine."
-                    )
-                    logger.warning(msg)
-                    result["warnings"].append(msg)
-
-                    # Pre-warmed conda envs embed absolute build-host paths and
-                    # per-arch binaries; on a platform mismatch they cannot run
-                    # at all. Refuse the import (unless forced) so the operator
-                    # learns now instead of at the first pipeline process.
-                    prewarm = manifest.get("pre_warm_conda_envs", {})
-                    if prewarm.get("success") and not force:
-                        result["success"] = False
-                        result["warnings"].append(
-                            "Import aborted: the bundle ships pre-warmed conda "
-                            "environments that cannot run on this OS/architecture. "
-                            "Rebuild the bundle on a matching machine, use Docker "
-                            "mode, or force the import and rebuild conda envs here."
-                        )
-                        return result
 
             # Copy directories to home (handle partial imports gracefully)
             for dirname in [
@@ -1063,10 +1270,15 @@ class BundleManager:
             # incomplete install. genome_metadata.json and config.yaml are
             # templated/mutated on copy, so their on-disk hash legitimately
             # differs from the bundle checksum -- exclude them here.
+            # NOTE: pipeline_containers/ holds the largest artefacts in a
+            # docker/singularity bundle (multi-hundred-MB image archives), so
+            # it is exactly what an interrupted copy truncates first. It must
+            # stay in this tuple.
             _copied_roots = (
                 "genomes/", "blast/", "mappings/", "cache/", "watchlists/",
                 "containers/", f"{_BUNDLED_CONDA_CACHE_DIRNAME}/",
                 f"{_BUNDLED_PIPELINE_DIRNAME}/", f"{_BUNDLED_NXF_PLUGINS_DIRNAME}/",
+                f"{_BUNDLED_PIPELINE_CONTAINERS_DIRNAME}/",
             )
             _mutated = {"genome_metadata.json", "config.yaml"}
             post_copy_mismatches = []
@@ -1139,9 +1351,11 @@ class BundleManager:
             # Load container images if present
             containers_dir = home / "containers"
             if containers_dir.exists() and any(containers_dir.iterdir()):
-                loaded_count = self._load_container_images(containers_dir)
-                if loaded_count > 0:
-                    logger.info(f"Loaded {loaded_count} container images from bundle")
+                op_report = self._load_container_images(containers_dir)
+                if op_report["loaded"] > 0:
+                    logger.info(
+                        f"Loaded {op_report['loaded']} container images from bundle"
+                    )
 
             # Restore pipeline-pulled container images shipped in
             # ``pipeline_containers/``. The export side pulls every module
@@ -1153,7 +1367,8 @@ class BundleManager:
             # point NXF_SINGULARITY_CACHEDIR at them.
             pipeline_images = home / _BUNDLED_PIPELINE_CONTAINERS_DIRNAME
             if pipeline_images.is_dir() and any(pipeline_images.iterdir()):
-                loaded_count = self._load_container_images(pipeline_images)
+                load_report = self._load_container_images(pipeline_images)
+                loaded_count = load_report["loaded"]
                 if loaded_count > 0:
                     logger.info(
                         f"Restored {loaded_count} pipeline container images "
@@ -1170,7 +1385,36 @@ class BundleManager:
                     .get("pull_result", {})
                     .get("image_count", 0)
                 )
-                if expected and loaded_count < expected:
+                # Separate the two causes of a low count. If the bundle
+                # carries Docker archives but this machine has no working
+                # Docker, nothing could have been loaded regardless of how
+                # complete the bundle is -- the fix is here, not on the
+                # build machine.
+                docker_broken = (
+                    load_report["tar_count"] > 0
+                    and load_report["tar_loaded"] == 0
+                    and not load_report["docker_usable"]
+                )
+                if docker_broken:
+                    result["container_runtime_unavailable"] = True
+                    if not load_report["docker_available"]:
+                        cause = (
+                            "the 'docker' command was not found on this machine"
+                        )
+                    else:
+                        cause = (
+                            "the Docker daemon did not respond ('docker info' failed)"
+                        )
+                    msg = (
+                        f"The bundle ships {load_report['tar_count']} Docker image "
+                        f"archive(s) but none could be loaded: {cause}. The bundle "
+                        "itself is intact. Install Docker (or start the Docker "
+                        "daemon) on this machine and re-run the import, or use a "
+                        "bundle built in singularity or conda mode."
+                    )
+                    logger.warning(msg)
+                    result["warnings"].append(msg)
+                elif expected and loaded_count < expected:
                     result["incomplete_image_set"] = True
                     msg = (
                         f"Only {loaded_count} of {expected} pipeline container "
@@ -1958,22 +2202,55 @@ class BundleManager:
         except (ImportError, AttributeError, OSError) as e:
             logger.debug(f"Could not copy built-in watchlists: {e}")
 
-    def _load_container_images(self, containers_dir: Path) -> int:
-        """Load container images from the bundle's containers directory."""
+    def _load_container_images(self, containers_dir: Path) -> Dict[str, Any]:
+        """Load container images from a restored bundle directory.
+
+        Returns a report rather than a bare count so the caller can tell
+        apart the two very different reasons ``loaded`` can come out low:
+        the bundle shipped fewer images than the pipeline needs (a
+        build-machine problem), or the field machine cannot run Docker at
+        all (a field-machine problem). Blaming the former for the latter
+        sends the operator back to re-export a bundle that is fine.
+
+        Report keys:
+            loaded: images now usable (docker-loaded tars + in-place images)
+            tar_count / tar_loaded: Docker archives found / loaded
+            image_count: Singularity/Apptainer images found (used in place)
+            docker_available: the ``docker`` client is on PATH
+            docker_usable: the client is present and the daemon responded
+            failures: per-file load failure messages
+        """
         import subprocess
-        loaded = 0
+
+        report: Dict[str, Any] = {
+            "loaded": 0,
+            "tar_count": 0,
+            "tar_loaded": 0,
+            "image_count": 0,
+            "docker_available": True,
+            "docker_usable": True,
+            "failures": [],
+        }
+
         try:
-            # Try Docker tar files
-            for tar_file in containers_dir.glob("*.tar"):
+            tar_files = sorted(containers_dir.glob("*.tar"))
+            report["tar_count"] = len(tar_files)
+
+            if tar_files:
+                report["docker_available"] = shutil.which("docker") is not None
+                report["docker_usable"] = report["docker_available"] and _docker_daemon_ok()
+
+            for tar_file in tar_files:
                 try:
                     subprocess.run(
                         ["docker", "load", "-i", str(tar_file)],
                         capture_output=True, check=True, timeout=300,
                     )
-                    loaded += 1
+                    report["tar_loaded"] += 1
                 except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
                         FileNotFoundError, PermissionError, OSError) as e:
                     logger.warning(f"Failed to load container image {tar_file.name}: {e}")
+                    report["failures"].append(f"{tar_file.name}: {e}")
 
             # Singularity/Apptainer images are used in-place, no loading
             # needed. Bundle-pulled images use the Nextflow-convention ``.img``
@@ -1982,14 +2259,31 @@ class BundleManager:
             sif_count = len(list(containers_dir.glob("*.sif"))) + len(
                 list(containers_dir.glob("*.img"))
             )
+            report["image_count"] = sif_count
             if sif_count > 0:
                 logger.info(f"Found {sif_count} Singularity/Apptainer images (used in-place)")
-                loaded += sif_count
 
         except OSError as e:
             logger.warning(f"Error loading container images: {e}")
 
-        return loaded
+        report["loaded"] = report["tar_loaded"] + report["image_count"]
+        return report
+
+
+def _docker_daemon_ok() -> bool:
+    """Return True when a Docker client is present and its daemon responds.
+
+    ``docker load`` fails identically whether the daemon is stopped or the
+    archive is corrupt, so probe the daemon once before attributing the
+    failure to the bundle.
+    """
+    try:
+        proc = subprocess.run(
+            ["docker", "info"], capture_output=True, timeout=30
+        )
+        return proc.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, PermissionError, OSError):
+        return False
 
 
 def _resolve_builtin_watchlist_dir() -> Optional[Path]:

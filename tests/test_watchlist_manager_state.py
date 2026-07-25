@@ -39,7 +39,10 @@ def _isolate(monkeypatch, tmp_path):
     """Redirect data dir + home so toggle-state writes never touch real home,
     and reset both module singletons around every test."""
     monkeypatch.setenv("NANOMETA_DATA_DIR", str(tmp_path / "data"))
-    # Home redirect protects the loader's user-watchlist search path.
+    # The loader's user-watchlist search path follows the data dir (see
+    # NanometaPaths.watchlists), not $HOME. The home redirect stays as a
+    # backstop for anything else that still reads Path.home().
+    monkeypatch.delenv("NANOMETA_PROJECT_DIR", raising=False)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
     reset_watchlist_manager()
     reset_watchlist_loader()
@@ -231,12 +234,12 @@ class TestSourcePriority:
     def test_project_overrides_user_in_discovery(self, tmp_path):
         """Same watchlist id present in both project and user dirs: the project
         copy wins in discover_watchlists / load_watchlist."""
-        home = tmp_path / "home"
+        user_watchlists = tmp_path / "data" / "watchlists"
         project = tmp_path / "proj"
 
         # User copy: low threat, threshold 100
         _write_watchlist(
-            home / ".nanometa" / "watchlists",
+            user_watchlists,
             "shared",
             [{"name": "Conflict organism", "taxid_ncbi": 4242,
               "threat_level": "low", "alert_threshold": 100}],
@@ -265,10 +268,10 @@ class TestSourcePriority:
     def test_user_overrides_builtin_when_no_project(self, tmp_path):
         """With no project copy, the user dir wins over the bundled built-in
         for a colliding id."""
-        home = tmp_path / "home"
+        user_watchlists = tmp_path / "data" / "watchlists"
         # Reuse a real built-in id so the built-in dir also contains it.
         _write_watchlist(
-            home / ".nanometa" / "watchlists",
+            user_watchlists,
             "foodborne",
             [{"name": "Override foodborne", "taxid_ncbi": 9001,
               "threat_level": "high", "alert_threshold": 3}],

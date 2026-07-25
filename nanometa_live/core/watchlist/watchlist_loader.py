@@ -3,7 +3,8 @@ Watchlist Loader for Nanometa Live.
 
 This module handles loading watchlist files from multiple locations:
 1. Project directory: <project_dir>/watchlists/
-2. User directory: ~/.nanometa/watchlists/
+2. User directory: NanometaPaths.watchlists (``<data_dir>/watchlists``, or
+   ``<project_dir>/.nanometa/watchlists`` when a project is set)
 3. Built-in: core/config/data/watchlists/
 
 Project watchlists take precedence over user defaults, which take
@@ -73,13 +74,13 @@ class WatchlistLoader:
 
     # Default search paths
     BUILTIN_SUBDIR = Path("core/config/data/watchlists")
-    USER_SUBDIR = Path(".nanometa/watchlists")
     PROJECT_SUBDIR = Path("watchlists")
 
     def __init__(
         self,
         project_dir: Optional[Path] = None,
-        app_root: Optional[Path] = None
+        app_root: Optional[Path] = None,
+        user_dir: Optional[Path] = None,
     ):
         """
         Initialize the watchlist loader.
@@ -87,11 +88,28 @@ class WatchlistLoader:
         Args:
             project_dir: Project directory to search for custom watchlists
             app_root: Application root directory (for built-in watchlists)
+            user_dir: Operator watchlist directory. Defaults to the one
+                :func:`get_watchlists_dir_from_env` resolves, so the loader,
+                the GUI upload callback, and the bundle exporter agree on a
+                single location under ``--data-dir`` / ``--project-dir``.
         """
         self._project_dir = project_dir
         self._app_root = app_root or self._find_app_root()
+        self._user_dir = Path(user_dir) if user_dir else None
         self._cached_watchlists: Dict[str, WatchlistMetadata] = {}
         self._loaded_pathogens: Dict[str, List[WatchlistPathogenEntry]] = {}
+
+    @property
+    def user_watchlist_dir(self) -> Path:
+        """Directory holding operator-uploaded watchlists.
+
+        Resolved lazily rather than at construction so a loader built before
+        the CLI set ``NANOMETA_DATA_DIR`` still lands in the right place.
+        """
+        if self._user_dir is not None:
+            return self._user_dir
+        from nanometa_live.core.utils.paths import get_watchlists_dir_from_env
+        return Path(get_watchlists_dir_from_env())
 
     def _find_app_root(self) -> Path:
         """Find the application root directory."""
@@ -124,9 +142,8 @@ class WatchlistLoader:
             if project_watchlists.exists():
                 paths.append((project_watchlists, "project"))
 
-        # 2. User home directory
-        home = Path.home()
-        user_watchlists = home / self.USER_SUBDIR
+        # 2. Operator watchlist directory (uploads land here)
+        user_watchlists = self.user_watchlist_dir
         if user_watchlists.exists():
             paths.append((user_watchlists, "user"))
 
@@ -356,10 +373,41 @@ class WatchlistLoader:
 
         return len(errors) == 0, errors
 
+    @staticmethod
+    def find_entries_without_taxid(file_path: Path) -> List[str]:
+        """Return the names of pathogen entries that carry no taxonomy ID.
+
+        A taxid is not required for a file to be structurally valid, and an
+        entry without one is loaded, displayed, and counted like any other.
+        It can never match a Kraken2 report, though: matching keys on
+        ``taxid_ncbi`` / ``db_taxid``, and an entry lacking both is assigned a
+        synthetic key by ``_stable_pseudo_taxid`` that no classifier will ever
+        emit. Such an entry is therefore a permanently silent watch item --
+        worth telling the operator about at upload time.
+        """
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+        except (OSError, UnicodeDecodeError, yaml.YAMLError):
+            return []
+
+        if not isinstance(data, dict):
+            return []
+
+        missing = []
+        for i, p in enumerate(data.get("pathogens") or []):
+            if not isinstance(p, dict):
+                continue
+            if p.get("taxid_ncbi") is None and p.get("db_taxid") is None:
+                missing.append(str(p.get("name") or f"entry {i + 1}"))
+        return missing
+
     def import_watchlist(
         self,
         source_path: Path,
-        destination: str = "user"
+        destination: str = "user",
+        overwrite: bool = False,
+        file_name: Optional[str] = None,
     ) -> Tuple[bool, str]:
         """
         Import a watchlist file to user or project directory.
@@ -367,6 +415,12 @@ class WatchlistLoader:
         Args:
             source_path: Path to the source YAML file
             destination: "user" or "project"
+            overwrite: Replace an existing file of the same name. Without
+                this an existing destination file, or a name that shadows a
+                built-in watchlist, is refused rather than silently replaced.
+            file_name: Destination file name. Defaults to the source file
+                name; pass the operator's original upload name when the
+                source is a temporary file.
 
         Returns:
             Tuple of (success, message)
@@ -380,13 +434,41 @@ class WatchlistLoader:
         if destination == "project" and self._project_dir:
             dest_dir = self._project_dir / self.PROJECT_SUBDIR
         else:
-            dest_dir = Path.home() / self.USER_SUBDIR
+            dest_dir = self.user_watchlist_dir
 
         # Create directory if needed
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        # Copy file
-        dest_path = dest_dir / source_path.name
+        dest_name = file_name or source_path.name
+        dest_path = dest_dir / dest_name
+        watchlist_id = Path(dest_name).stem
+
+        # Collision guards. A watchlist is keyed by its file stem, so two
+        # different files with the same stem are the same watchlist as far
+        # as discovery is concerned: the copy would replace the operator's
+        # earlier upload, or shadow a built-in list, with no indication that
+        # anything was lost.
+        if not overwrite:
+            if dest_path.exists():
+                return False, (
+                    f"A watchlist file named '{dest_name}' already exists in "
+                    f"{dest_dir}. Rename the file, or confirm the replacement."
+                )
+            builtin_dir = self._app_root / self.BUILTIN_SUBDIR
+            builtin_stems = set()
+            if builtin_dir.is_dir():
+                builtin_stems = {
+                    p.stem for p in builtin_dir.iterdir()
+                    if p.suffix in (".yaml", ".yml")
+                }
+            if watchlist_id in builtin_stems:
+                return False, (
+                    f"'{watchlist_id}' is the name of a built-in watchlist. An "
+                    "imported file with this name would take precedence over it "
+                    "everywhere without saying so. Rename the file before "
+                    "importing."
+                )
+
         try:
             shutil.copy2(source_path, dest_path)
 
@@ -401,9 +483,73 @@ class WatchlistLoader:
 
     def create_user_watchlist_dir(self) -> Path:
         """Create the user watchlist directory if it does not exist."""
-        user_dir = Path.home() / self.USER_SUBDIR
+        user_dir = self.user_watchlist_dir
         user_dir.mkdir(parents=True, exist_ok=True)
         return user_dir
+
+
+# Real NCBI taxids are currently below ~10 million; WatchlistManager assigns
+# synthetic keys at or above this base to name-only entries. A synthetic key
+# must never be written to an exported file as if it were an NCBI taxid.
+PSEUDO_TAXID_BASE = 2_000_000_000
+
+
+def build_watchlist_yaml(
+    entries: List[Dict[str, object]],
+    name: str = "Exported watchlist",
+    description: str = "",
+) -> Dict[str, object]:
+    """Assemble a v2.0 watchlist document from serialised watchlist entries.
+
+    Takes the dicts ``WatchlistEntry.to_dict()`` produces and emits the same
+    schema the built-in YAML files use, so an exported file can be re-imported
+    through the upload control unchanged. Session-only fields (validation
+    results, source, watchlist membership) are dropped; they are recomputed on
+    load and would otherwise go stale in the file.
+
+    Synthetic keys assigned to name-only entries are not written as
+    ``taxid_ncbi`` -- they are internal identifiers, and a downstream reader
+    would treat them as real taxonomy IDs.
+    """
+    pathogens: List[Dict[str, object]] = []
+    for e in entries:
+        taxid = e.get("taxid")
+        entry: Dict[str, object] = {"name": e.get("name", "")}
+        if e.get("names_alt"):
+            entry["names_alt"] = list(e["names_alt"])
+        if isinstance(taxid, int) and taxid < PSEUDO_TAXID_BASE:
+            entry["taxid_ncbi"] = taxid
+        if e.get("db_taxid"):
+            entry["db_taxid"] = e["db_taxid"]
+        if e.get("common_name"):
+            entry["common_name"] = e["common_name"]
+        entry["threat_level"] = e.get("threat_level", "moderate")
+        if e.get("bsl_level"):
+            entry["bsl_level"] = e["bsl_level"]
+        if e.get("category"):
+            entry["category"] = e["category"]
+        entry["alert_threshold"] = e.get("alert_threshold", 10)
+        if e.get("action_required"):
+            entry["action_required"] = e["action_required"]
+        if e.get("organism_type"):
+            entry["organism_type"] = e["organism_type"]
+        if e.get("annotation"):
+            entry["annotation"] = e["annotation"]
+        if e.get("notes"):
+            entry["notes"] = e["notes"]
+        pathogens.append(entry)
+
+    return {
+        "version": "2.0",
+        "taxonomy_support": ["ncbi", "gtdb"],
+        "metadata": {
+            "name": name,
+            "description": description or (
+                "Exported from the Nanometa Live watchlist tab."
+            ),
+        },
+        "pathogens": pathogens,
+    }
 
 
 # Module-level singleton
