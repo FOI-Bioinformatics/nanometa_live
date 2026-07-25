@@ -24,6 +24,11 @@ dependencies:
   - gzip >=1.10
   - kraken2 >=2.1.4
   - fastp >=0.23.2
+  # The nanometanf pipeline is launched as a subprocess and floors at
+  # Nextflow 26.04.0 (manifest in nanometanf/nextflow.config). Without it
+  # this environment gives a working dashboard and a pipeline that fails
+  # the moment Start Analysis is pressed.
+  - nextflow >=26.04.0
   - ruamel.yaml >=0.18.10
   - ncbi-datasets-cli >=17.1.0
   - pyfastx >=2.2.0

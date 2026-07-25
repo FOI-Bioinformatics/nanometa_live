@@ -1,6 +1,30 @@
 ## Installation Guide
 This guide explains how to set up Nanometa Live on your computer. For the smoothest installation, we suggest using [Mambaforge](https://github.com/conda-forge/miniforge#mambaforge).
 
+### What a complete installation consists of
+
+Installing the Python package gives you the dashboard. Analysis additionally
+requires three components that are not part of the package:
+
+| Component | Purpose | How it is obtained |
+|-----------|---------|--------------------|
+| **Nextflow** (>= 26.04.0) | Runs the analysis pipeline as a subprocess | Included in `nanometa_live_env.yml` (option 4). For the other options, install separately: `mamba install -c bioconda "nextflow>=26.04.0"` |
+| **nanometanf pipeline** | The workflow itself (Kraken2, QC, validation) | Fetched by Nextflow on first run from `pipeline_source: "remote:dev"`, or point `pipeline_source` at a local checkout of [nanometanf](https://github.com/FOI-Bioinformatics/nanometanf). A local checkout is required for offline deployment. |
+| **Kraken2 database** | Taxonomic classification reference | Downloaded through the Setup tab, or supplied separately and set as `kraken_db` in the config. Databases range from a few GB to over 100 GB and are never bundled with the software. |
+
+Python 3.11 or newer is required.
+
+After installing, confirm the toolchain before your first run:
+
+```bash
+nanometa-prepare doctor
+```
+
+This checks Python, Nextflow and its version floor, conda, the available
+container runtimes, and the data directories, and needs no config file. Once
+you have a config, `nanometa-prepare check --config config.yaml --db <kraken2_db>`
+performs the run-specific readiness check.
+
 ### Option 1: Install with Conda/Mamba (Recommended)
 
 1. **Create a New Environment:**
@@ -21,6 +45,18 @@ This guide explains how to set up Nanometa Live on your computer. For the smooth
     ```
 
     You'll know you're in the right environment when you see 'nanometa_live_env' in your command prompt.
+
+3. **Add Nextflow:**
+
+    The bioconda package does not pull in Nextflow, so install it into the same
+    environment:
+
+    ```bash
+    mamba install -c bioconda "nextflow>=26.04.0"
+    nanometa-prepare doctor
+    ```
+
+    `doctor` should report PASS for both Python and Nextflow before you continue.
 
 ### Option 2: Install with Docker
 
@@ -145,9 +181,28 @@ Nanometa Live can also be used through Singularity, a program that allows you to
 
 5. **Install the Program:**
 
-    While in the directory that contains the `setup.py` file, execute the following command to install the program:
+    While in the directory that contains `pyproject.toml`, execute the following command to install the program:
 
     ```bash
     pip install .
     ```
     This command installs Nanometa Live on your system.
+
+6. **Verify the installation:**
+
+    ```bash
+    nanometa-prepare doctor
+    ```
+
+    The environment file includes Nextflow, so every check should pass. Add
+    `--pipeline /path/to/nanometanf` to also verify a local pipeline checkout.
+
+### Next steps
+
+With the software installed, you still need a Kraken2 database and, for a
+pipeline run, a reachable nanometanf source. See
+[`docs/quickstart-with-nanorunner.md`](docs/quickstart-with-nanorunner.md) for
+an end-to-end walkthrough using simulated input, and
+[`docs/configuration.md`](docs/configuration.md) for the full set of config
+options. For deployment to a machine without network access, see
+[`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md).

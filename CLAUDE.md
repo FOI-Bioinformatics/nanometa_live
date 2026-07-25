@@ -61,6 +61,22 @@ python -m nanometa_live.app --config config.yaml
 DASH_DEBUG=true python -m nanometa_live.app --main_dir /path/to/results
 ```
 
+### Packaging
+
+Metadata lives in `pyproject.toml` (PEP 621); there is no `setup.py`. Version
+and dependencies stay dynamic (`nanometa_live.__version__` and
+`requirements.txt`) so each has one place to edit. Console scripts:
+`nanometa-live`, `nanometa-prepare`, `nanometa-report`.
+
+`nanometa_live_env.yml` includes Nextflow (`>=26.04.0`) — without it the
+environment yields a working dashboard and a pipeline that fails the moment
+Start Analysis is pressed. `nanometa-prepare doctor` is the config-free
+post-install check (Python, Nextflow + floor, conda, container runtimes, data
+dirs); `nanometa-prepare check --config` is the run-specific one. Every CLI
+subcommand except `verify` calls `NanometaPaths.ensure_dirs()` before
+dispatch, so a never-launched install no longer reports CRITICAL failures
+whose real cause is "the GUI was never started".
+
 ### Adding a new tab
 
 Layout in `app/layouts/`, callbacks in `app/tabs/`, wire both in `app/app.py`.
@@ -144,6 +160,44 @@ which returns `(classified_reads, unclassified_reads, rate)` from
 `root.cumul_reads + unclassified.cumul_reads`. Do not use `kraken_df['reads'].sum()`;
 the per-rank assignment column collapses to 0 when every read is parked at
 root level (the degenerate single-read input case caught by the audit).
+
+**Cache-scope invariants (do not regress).** Three rules keep per-poll cost
+from growing with the barcode count. The 2026-07-25 scaling pass measured a
+*quiet* 24-sample realtime poll — one where nothing changed — at 74,462
+`stat()` calls and 772 ms; it is now 2,119 calls and 59 ms, and the scaling
+exponent dropped from O(N^1.65) to O(N^0.91). Regression-covered by
+`tests/test_loader_cache_transparency.py` and the `per-poll-cost` CI job.
+
+- **A per-sample cache entry must be fingerprinted against that sample's own
+  files.** `_sample_fingerprint_paths` (`classification_loaders.py`) and
+  `_seqkit_fingerprint_paths` (`qc_loaders.py`) return the sample-scoped path
+  list; only an aggregate ("All Samples") load may pass the whole directory.
+  Passing the shared directory for a per-sample key costs a full recursive
+  walk on *every* lookup — N lookups over a tree of O(N x batches) files is
+  quadratic — and makes one sample's new batch invalidate all the others.
+- **The freshness epoch is the once-per-poll authority.** `check_data_freshness`
+  bumps `_freshness_epoch` when the tree changes; `_check_mtime_cache` returns
+  a cached entry with no filesystem call when the entry was stored in the
+  current epoch. A poll issues roughly 3N + 2 `load_kraken_data` calls, so
+  without this each one repeated the same fingerprint work. Epoch 0 means
+  `check_data_freshness` has never run (CLI, report generation, tests), and
+  those callers stay on the unconditional path check so they can never be
+  served stale data.
+- **A `stale` mtime verdict must not fall through to the TTL cache.**
+  `_mtime_cache_state` returns `hit` / `stale` / `absent` precisely so callers
+  can tell "no entry yet" (TTL is a fair fallback) from "the files
+  demonstrably changed" (TTL is by definition older than that change). The
+  earlier code collapsed both into `None` and consulted the TTL cache either
+  way, so a report that advanced was ignored for up to `CACHE_TTL_SECONDS`
+  (30 s) even though the loader had already detected it. Note this makes a
+  genuine full-refresh poll *slower* than the pre-fix measurement, because
+  the pre-fix run was skipping the re-parse it should have done.
+
+`sample_detector.get_available_samples` consults its mtime cache *before* the
+canonical manifest for the same reason — the manifest check re-parses
+`_manifest.json` on every call, and the function runs several times per poll.
+`canonical/` is in `_WATCHED_SUBDIRS` so a rewritten manifest still
+invalidates the cache.
 
 **Loader hot-path invariants (do not regress).** The Kraken2 loaders run on
 every poll, so per-element pandas access is the dominant cost on a large
@@ -337,8 +391,26 @@ session-scoped convenience, not a saved config.
 Sources searched in priority order:
 
 1. Project: `{project_dir}/watchlists/*.yaml`
-2. User: `~/.nanometa/watchlists/*.yaml` (custom uploads persist here)
+2. User: `NanometaPaths.watchlists` (custom uploads persist here) —
+   `<data_dir>/watchlists`, or `<project_dir>/.nanometa/watchlists` when a
+   project is set
 3. Built-in: `core/config/data/watchlists/*.yaml`
+
+**One watchlist directory, resolved in one place.** The user tier resolves
+through `get_watchlists_dir_from_env()` (`core/utils/paths.py`), exposed as
+`WatchlistLoader.user_watchlist_dir`. The loader's search path, the GUI upload
+callback (`watchlist_tab.handle_upload`), and `BundleManager.export_bundle`
+all read it. When all three hard-coded `~/.nanometa/watchlists` instead, a run
+started with `--data-dir`/`--project-dir` wrote uploads somewhere the exporter
+never looked and the bundle silently shipped without them. `import_watchlist`
+refuses a destination filename that already exists or that shadows a built-in
+stem (a watchlist is keyed by file stem, so either collision replaces a list
+invisibly); pass `overwrite=True` to force. An uploaded entry with neither
+`taxid_ncbi` nor `db_taxid` gets a synthetic key from `_stable_pseudo_taxid`
+and can never match a Kraken2 report — `find_entries_without_taxid` surfaces
+those at upload time. `build_watchlist_yaml` is the inverse (session entries →
+v2.0 YAML) behind the Watchlist tab's Download-as-YAML control; it never emits
+a synthetic key as `taxid_ncbi`.
 
 Format examples live in `core/config/data/watchlists/` — see any built-in YAML
 for the v2.0 schema (pathogens with `taxid_ncbi`, `threat_level`, `bsl_level`,
@@ -478,6 +550,18 @@ Three concerns:
    Kraken2 DB excluded by size — transferred separately. `import_bundle` rewrites
    relative paths to absolute and warns on platform mismatch.
 
+   The pre-copy checks (manifest version, recorded `export_warnings`,
+   per-file checksums, DB hash, tool/Nextflow versions, build platform) live
+   in `_verify_extracted_bundle`, shared by `import_bundle` and the
+   non-mutating `verify_bundle` / `nanometa-prepare verify --bundle <path>`.
+   Add a new check there, not in the import path, or the dry run stops
+   matching what the import will do. Blockers are forcible unless marked
+   `fatal`; `stop_on_blocker` reproduces the import's short-circuit ordering.
+   `_load_container_images` returns a report (not a count) so the import can
+   distinguish "the bundle is short of images" (build machine) from "this
+   machine has no working Docker" (field machine) — the two need opposite
+   remedies and the old single message named the wrong one.
+
 2. **Subprocess env injection** (`NextflowManager._build_nextflow_env`). When
    `config['offline_mode']` is true:
    ```
@@ -502,7 +586,11 @@ Three concerns:
      `_BUNDLED_PIPELINE_CONTAINERS_DIRNAME` so the images land under
      `<home>/pipeline_containers/`; it then `docker load`s any `.tar` and, when
      `.img`/`.sif` are present, sets `result["singularity_cache_path"]` and
-     writes `nxf_singularity_cachedir` into the imported config.
+     writes `nxf_singularity_cachedir` into the imported config. The same name
+     must also appear in the post-copy `_copied_roots` prefix tuple — those
+     images are the largest files in the bundle and therefore what an
+     interrupted copy truncates first, yet they were the one thing the
+     re-verify skipped.
    - **Env injection points Nextflow at them.** `_build_nextflow_env` sets
      `NXF_SINGULARITY_CACHEDIR` and `NXF_SINGULARITY_LIBRARYDIR` from
      `config['nxf_singularity_cachedir']` (symmetric with the conda-cache
@@ -606,6 +694,29 @@ function so they stay testable without a running app. This mirrors the broader
 `*_tab.py` → `*_helpers.py` split (pure logic in helpers, thin callback wiring
 in the tab module) used across the dashboard, main, qc, and validation tabs.
 
+**Per-sample attribution has one resolver: `core/utils/attribution.py`.** A
+watchlist detection carries two taxids — `taxid` (the NCBI taxid on the
+watchlist entry) and `detected_taxid` (the Kraken2 report taxid it matched) —
+while `_load_per_sample_organisms` keys its dict by the *report* taxid. On an
+NCBI database the two coincide, so looking a detection up by the wrong one
+fails only on GTDB/custom databases, and it fails silently: a detection with no
+resolved samples renders identically to one that legitimately spans none.
+Never index `taxid_to_samples` directly; call `samples_for_detection(detection,
+taxid_to_samples)` (tries `detected_taxid`, then `taxid`). Both watchlist match
+paths emit `detected_taxid` — `check_organisms_with_mapping` always did,
+`check_organisms` since the 2026-07-25 pass. `build_pathogen_attribution` pairs
+each detection with its own samples and applies the entry's `alert_threshold`
+per sample: the verdict is decided on the aggregate, so without that gate ten
+barcodes at 50 reads each are all named for a pathogen with a threshold of 100.
+Samples that clear only the discovery floor render as "aggregate across N
+samples". When attribution is attempted and resolves nothing, the verdict
+banner says so explicitly (`attribution_failed`) rather than omitting the line.
+Negative controls come from `is_negative_control` — the config's
+`negative_control_samples` list when declared, otherwise token patterns that
+catch `NTC` / `neg_ctrl` / `blank` without flagging `negative_strand_test`.
+Regression-covered in `tests/test_attribution.py` and
+`tests/test_verdict_banner_callback.py`.
+
 **Pathogen Report modal references are built dynamically.** The report's
 external links come from `build_reference_links()` in `dashboard_helpers.py`,
 which never emits a link to a wrong or nonexistent record: NCBI Taxonomy only
@@ -653,8 +764,8 @@ pytest -n 0                                         # serial, for pdb/print debu
 pytest --cov=nanometa_live --cov-report=term-missing   # with the coverage gate
 ```
 
-2321 tests as of 2026-06-07, ~63% line coverage. `pytest.ini` enforces a
-`fail_under = 62` floor on coverage runs only (the default `pytest` dev loop
+2873 tests as of 2026-07-25, ~68% line coverage. `pytest.ini` enforces a
+`fail_under = 67` floor on coverage runs only (the default `pytest` dev loop
 does not load coverage); the floor ratchets up as coverage rises — keep it ~1
 point below the measured total, never lower it. Also
 `filterwarnings = error::DeprecationWarning:nanometa_live` (our own deprecations

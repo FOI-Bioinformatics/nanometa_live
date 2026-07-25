@@ -27,7 +27,7 @@ pip install nanometa-live
 ### Install with conda
 
 ```bash
-conda create -n nanometa python=3.10
+conda create -n nanometa "python>=3.11"
 conda activate nanometa
 pip install nanometa-live
 ```
