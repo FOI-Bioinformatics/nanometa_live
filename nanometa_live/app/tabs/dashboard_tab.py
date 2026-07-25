@@ -64,6 +64,7 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     _verdict_banner_style,
     select_verdict,
     _classify_dangerous,
+    build_pathogen_attribution,
     _get_idle_alerts,
     _get_error_alerts,
     _calculate_overall_status,
@@ -282,9 +283,10 @@ def register_dashboard_callbacks(app: Dash):
         # IO is shared via the loader cache + per-key parse lock, so this adds
         # minimal cost on top of the main aggregation above. Only ACTION
         # REQUIRED needs it -- the operator must know which barcode is hot.
-        triggering_samples: Optional[List[str]] = None
         total_real_samples: Optional[int] = None
         triggering_pathogens: Optional[List[str]] = None
+        triggering_attribution = None
+        attribution_failed = False
         if descriptor.needs_attribution:
             critical, high_risk = _classify_dangerous(dangerous)
             # Name the pathogens above threshold (critical first), deduped.
@@ -301,7 +303,6 @@ def register_dashboard_callbacks(app: Dash):
                         f"{nm} ({annotation})" if annotation else nm
                     )
             triggering_pathogens = pathogen_names or None
-            collected: List[str] = []
             total_count = 0
             try:
                 resolved_samples = _resolve_samples(
@@ -311,28 +312,24 @@ def register_dashboard_callbacks(app: Dash):
                     [s for s in resolved_samples if s != "All Samples"]
                 )
                 taxid_to_samples = _load_per_sample_organisms(
-                    main_dir, resolved_samples
+                    main_dir, resolved_samples, config
                 )
-                # Union the samples that triggered any critical or high-risk
-                # pathogen, preserving descending-by-reads order via a stable
-                # accumulator.
-                seen = set()
-                for d in critical + high_risk:
-                    taxid = d.get("taxid") or d.get("kraken_taxid")
-                    if taxid is None:
-                        continue
-                    for entry in taxid_to_samples.get(int(taxid), []):
-                        name = entry.get("sample")
-                        if name and name not in seen:
-                            seen.add(name)
-                            collected.append(name)
+                # Keep each pathogen paired with its own samples: two
+                # organisms in two different barcodes must not collapse into
+                # one undifferentiated list.
+                triggering_attribution = build_pathogen_attribution(
+                    critical + high_risk, taxid_to_samples
+                )
+                attribution_failed = not all(
+                    a.resolved for a in triggering_attribution
+                )
             except Exception as exc:
                 logger.warning(
                     "Verdict-banner attribution unavailable: %s",
                     exc,
                     exc_info=True,
                 )
-            triggering_samples = collected or None
+                attribution_failed = True
             total_real_samples = total_count or None
 
         return (
@@ -345,9 +342,10 @@ def register_dashboard_callbacks(app: Dash):
                 last_updated_str=last_updated_str,
                 auto_stop_remaining_s=auto_stop_remaining_s,
                 icon_extra_class=descriptor.icon_extra_class,
-                triggering_samples=triggering_samples,
                 total_sample_count=total_real_samples,
                 triggering_pathogens=triggering_pathogens,
+                triggering_attribution=triggering_attribution,
+                attribution_failed=attribution_failed,
             ),
             _verdict_banner_style(descriptor.bg_color, descriptor.border_color),
             time_elapsed, run_state, run_state_color
@@ -650,7 +648,9 @@ def register_dashboard_callbacks(app: Dash):
 
             # Build per-sample attribution: taxid -> [{sample, reads, abundance, is_nc}]
             resolved_samples = _resolve_samples(main_dir, available_samples)
-            taxid_to_samples = _load_per_sample_organisms(main_dir, resolved_samples)
+            taxid_to_samples = _load_per_sample_organisms(
+                main_dir, resolved_samples, config
+            )
 
             # Get only ENABLED watchlist entries for alerting
             watched_species = _get_active_watchlist_entries(config)

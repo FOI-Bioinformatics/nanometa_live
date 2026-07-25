@@ -1,21 +1,21 @@
-"""Regression tests for ``update_verdict_banner`` (Phase 5a / B2).
+"""Regression tests for ``update_verdict_banner`` (Phase 5a / B2, Phase 3).
 
-The previous implementation referenced an ``available_samples`` name in
-the per-sample-attribution branch without declaring it as a callback
-input. The reference lived inside a try/except logging at DEBUG, so the
-``NameError`` was swallowed silently: the banner rendered without the
-"Triggered by" subhead and the operator never saw which barcode caused
-the alert.
+Two generations of bugs are pinned here.
 
-These tests pin both pieces of the fix:
+*Phase 5a/B2* -- the per-sample-attribution branch referenced an
+``available_samples`` name that was not a declared callback input. The
+reference sat inside a try/except logging at DEBUG, so the ``NameError``
+was swallowed: the banner rendered without the "Triggered by" subhead and
+the operator never saw which barcode caused the alert.
 
-1. The registered callback wires ``available-samples`` into its State
-   list -- if the wiring is dropped, the parameter is back to being
-   undefined.
-2. Calling the registered function with a populated kraken_df and a
-   matching watchlist entry produces a banner that includes the
-   triggering sample name (i.e. the attribution branch ran without
-   raising ``NameError``).
+*Phase 3* -- the attribution branch looked the detection up in
+``taxid_to_samples`` under the watchlist entry's **NCBI** taxid, while
+that dict is keyed by the **Kraken2 report** taxid. On an NCBI database
+the two are the same, so the bug was invisible; on GTDB or a custom
+database they differ and every lookup missed, again dropping the subhead
+with no error. The original version of this file hard-coded
+``taxid == kraken_taxid``, which is exactly why the bug survived.
+The tests below therefore keep the two taxids deliberately distinct.
 """
 
 from __future__ import annotations
@@ -48,6 +48,85 @@ def _find_callback_by_output(app: Dash, output_id: str):
     return None, None
 
 
+def _run_verdict_banner(
+    tmp_path,
+    *,
+    detections,
+    taxid_to_samples,
+    available_samples,
+    per_sample_side_effect=None,
+):
+    """Drive ``update_verdict_banner`` with mocked pathogen/attribution data.
+
+    Returns the rendered outputs serialised to JSON so tests can assert on
+    the text the operator actually sees.
+    """
+    app = Dash(__name__, suppress_callback_exceptions=True)
+    register_dashboard_callbacks(app)
+    _, spec = _find_callback_by_output(app, "dashboard-verdict-banner")
+    assert spec is not None, "Verdict-banner callback was not registered"
+    callback_fn = getattr(spec["callback"], "__wrapped__", spec["callback"])
+
+    results_dir = tmp_path / "results"
+    (results_dir / "kraken2").mkdir(parents=True, exist_ok=True)
+    config = {
+        "results_output_directory": str(results_dir),
+        "main_dir": str(results_dir),
+    }
+    status = {"running": True, "completed": False, "start_time": None}
+
+    kraken_df = pd.DataFrame([
+        {
+            "perc": 99.0, "cumul_reads": 1000, "reads": 1000,
+            "rank": "S", "taxid": 88888, "name": "Bacillus anthracis",
+            "parent_taxid": 1,
+        },
+    ])
+
+    per_sample_kwargs = (
+        {"side_effect": per_sample_side_effect}
+        if per_sample_side_effect is not None
+        else {"return_value": taxid_to_samples}
+    )
+
+    with patch(
+        "nanometa_live.app.tabs.dashboard_tab.load_kraken_data",
+        return_value=kraken_df,
+    ), patch(
+        "nanometa_live.app.tabs.dashboard_tab._species_df_to_organisms",
+        return_value=detections,
+    ), patch(
+        "nanometa_live.app.tabs.dashboard_tab._get_active_watchlist_entries",
+        return_value=[{"taxid": 1392, "name": "Bacillus anthracis"}],
+    ), patch(
+        "nanometa_live.app.tabs.dashboard_tab._check_pathogens_with_mapping",
+        return_value=detections,
+    ), patch(
+        "nanometa_live.app.tabs.dashboard_tab._load_per_sample_organisms",
+        **per_sample_kwargs,
+    ), patch(
+        "nanometa_live.app.tabs.dashboard_tab.interval_tick_is_redundant",
+        return_value=False,
+    ):
+        outputs = callback_fn(
+            "fp1", None, 0,
+            config, status, {"status": "ok"}, {"results": []},
+            available_samples,
+        )
+
+    assert outputs is not None
+    return json.dumps(outputs, default=str)
+
+
+def _sample(name, reads, abundance=5.0, is_nc=False):
+    return {
+        "sample": name,
+        "reads": reads,
+        "abundance": abundance,
+        "is_negative_control": is_nc,
+    }
+
+
 # -- Wiring regression ---------------------------------------------------
 
 
@@ -73,106 +152,192 @@ class TestVerdictBannerCallbackWiring:
 
 
 class TestVerdictBannerAttributionRuns:
-    """Drive the attribution branch end-to-end. If ``available_samples``
-    is undefined the inner ``except Exception`` swallows the NameError,
-    ``triggering_samples`` stays empty, and the rendered banner does not
-    contain the per-sample subhead. Asserting on the rendered output is
-    enough to pin the fix.
-    """
+    """Drive the attribution branch end-to-end with an NCBI taxid that
+    differs from the Kraken2 report taxid -- the GTDB / custom-database
+    case the previous test never covered."""
 
-    def _kraken_df_with_critical(self) -> pd.DataFrame:
-        # Minimal shape consumed by the verdict-banner code path:
-        # rank == "S" and reads >= 5 rows are turned into "organisms",
-        # then watchlist matching identifies dangerous taxa.
-        return pd.DataFrame([
-            {
-                "perc": 99.0, "cumul_reads": 1000, "reads": 1000,
-                "rank": "S", "taxid": 12345, "name": "Bacillus anthracis",
-                "parent_taxid": 1,
-            },
-            {
-                "perc": 1.0, "cumul_reads": 10, "reads": 10,
-                "rank": "S", "taxid": 99999, "name": "Generic species",
-                "parent_taxid": 1,
-            },
-        ])
-
-    def test_attribution_branch_completes_without_nameerror(self, tmp_path):
-        app = Dash(__name__, suppress_callback_exceptions=True)
-        register_dashboard_callbacks(app)
-        _, spec = _find_callback_by_output(app, "dashboard-verdict-banner")
-        # Access the unwrapped function: Dash decorates the registered
-        # callback with an add_context wrapper, but the original function
-        # is preserved via __wrapped__.
-        callback_fn = getattr(spec["callback"], "__wrapped__", spec["callback"])
-
-        # Ensure the State count matches the wired signature.
-        states = spec.get("state", []) or []
-        assert "available-samples" in _state_ids(spec)
-
-        # Build the inputs in declared order.
-        results_dir = tmp_path / "results"
-        (results_dir / "kraken2").mkdir(parents=True)
-        config = {
-            "results_output_directory": str(results_dir),
-            "main_dir": str(results_dir),
-        }
-        status = {"running": True, "completed": False, "start_time": None}
-        overall_status = {"status": "ok"}
-        validation_data = {"results": []}
-        available_samples = ["barcode01", "barcode02"]
-
-        critical_organisms = [{
-            "taxid": 12345,
+    def test_gtdb_taxid_divergence_still_names_the_sample(self, tmp_path):
+        detections = [{
+            "taxid": 1392,           # NCBI taxid from the watchlist entry
+            "detected_taxid": 88888,  # Kraken2 (GTDB) report taxid
             "name": "Bacillus anthracis",
             "threat_level": "critical",
-            "kraken_taxid": 12345,
+            "reads": 1000,
+            "threshold": 10,
         }]
-
-        with patch(
-            "nanometa_live.app.tabs.dashboard_tab.load_kraken_data",
-            return_value=self._kraken_df_with_critical(),
-        ), patch(
-            "nanometa_live.app.tabs.dashboard_tab._species_df_to_organisms",
-            return_value=critical_organisms,
-        ), patch(
-            "nanometa_live.app.tabs.dashboard_tab._get_active_watchlist_entries",
-            return_value=[{"taxid_ncbi": 12345, "name": "Bacillus anthracis"}],
-        ), patch(
-            "nanometa_live.app.tabs.dashboard_tab._check_pathogens_with_mapping",
-            return_value=critical_organisms,
-        ), patch(
-            "nanometa_live.app.tabs.dashboard_tab._load_per_sample_organisms",
-            return_value={12345: [
-                {"sample": "barcode01", "reads": 1000, "abundance": 90.0,
-                 "is_negative_control": False},
-            ]},
-        ), patch(
-            "nanometa_live.app.tabs.dashboard_tab.interval_tick_is_redundant",
-            return_value=False,
-        ):
-            # Args follow the declared order: fingerprint, watchlist_state,
-            # n_intervals, config, status, overall_status, validation_data,
-            # available_samples
-            outputs = callback_fn(
-                "fp1", None, 0,
-                config, status, overall_status, validation_data,
-                available_samples,
-            )
-
-        assert outputs is not None
-        rendered = json.dumps(outputs, default=str)
-        # ACTION REQUIRED branch must have rendered.
+        rendered = _run_verdict_banner(
+            tmp_path,
+            detections=detections,
+            # Keyed by the Kraken2 taxid, as _load_per_sample_organisms builds it
+            taxid_to_samples={88888: [_sample("barcode01", 1000)]},
+            available_samples=["barcode01", "barcode02"],
+        )
         assert "ACTION REQUIRED" in rendered
-        # Per-sample attribution branch must have completed (no NameError).
-        # If `available_samples` was undefined, the outer except swallowed it
-        # and "Triggered by" never made it into the banner.
-        assert "Triggered by" in rendered
-        assert "barcode01" in rendered
-        # The banner must also NAME the triggering pathogen(s) -- the count
-        # alone ("N of M above threshold") left the operator asking "which?".
         assert "Above threshold" in rendered
         assert "Bacillus anthracis" in rendered
+        # The attribution must survive the NCBI-vs-Kraken taxid divergence.
+        assert "Triggered by" in rendered
+        assert "barcode01" in rendered
+
+    def test_ncbi_taxid_only_detection_still_attributes(self, tmp_path):
+        """A detection carrying no ``detected_taxid`` (the check_organisms
+        fallback path) must still resolve via the NCBI taxid."""
+        detections = [{
+            "taxid": 1392,
+            "name": "Bacillus anthracis",
+            "threat_level": "critical",
+            "reads": 1000,
+            "threshold": 10,
+        }]
+        rendered = _run_verdict_banner(
+            tmp_path,
+            detections=detections,
+            taxid_to_samples={1392: [_sample("barcode03", 1000)]},
+            available_samples=["barcode03"],
+        )
+        assert "Triggered by" in rendered
+        assert "barcode03" in rendered
+
+
+class TestPathogenSamplePairing:
+    """Two pathogens in two different barcodes must not collapse into one
+    undifferentiated sample list."""
+
+    def test_each_pathogen_names_its_own_samples(self, tmp_path):
+        detections = [
+            {
+                "taxid": 1392, "detected_taxid": 88888,
+                "name": "Bacillus anthracis", "threat_level": "critical",
+                "reads": 900, "threshold": 10,
+            },
+            {
+                "taxid": 632, "detected_taxid": 77777,
+                "name": "Yersinia pestis", "threat_level": "high",
+                "reads": 400, "threshold": 10,
+            },
+        ]
+        rendered = _run_verdict_banner(
+            tmp_path,
+            detections=detections,
+            taxid_to_samples={
+                88888: [_sample("barcode01", 900)],
+                77777: [_sample("barcode07", 400)],
+            },
+            available_samples=["barcode01", "barcode07"],
+        )
+        assert "Bacillus anthracis (barcode01)" in rendered
+        assert "Yersinia pestis (barcode07)" in rendered
+
+    def test_pathogens_sorted_by_reads_descending(self, tmp_path):
+        detections = [
+            {
+                "taxid": 632, "detected_taxid": 77777,
+                "name": "Yersinia pestis", "threat_level": "critical",
+                "reads": 50, "threshold": 10,
+            },
+            {
+                "taxid": 1392, "detected_taxid": 88888,
+                "name": "Bacillus anthracis", "threat_level": "critical",
+                "reads": 5000, "threshold": 10,
+            },
+        ]
+        rendered = _run_verdict_banner(
+            tmp_path,
+            detections=detections,
+            taxid_to_samples={
+                77777: [_sample("barcode07", 50)],
+                88888: [_sample("barcode01", 5000)],
+            },
+            available_samples=["barcode01", "barcode07"],
+        )
+        attribution = rendered.split("Triggered by")[1]
+        assert attribution.index("Bacillus anthracis") < attribution.index(
+            "Yersinia pestis"
+        ), "Attribution must be ordered by read support, descending"
+
+
+class TestPerSampleThreshold:
+    """The positive verdict is decided on AGGREGATE reads against the
+    pathogen's alert_threshold. A sample is only named as triggering when
+    it clears that threshold on its own."""
+
+    def test_ten_barcodes_below_threshold_are_not_named(self, tmp_path):
+        detections = [{
+            "taxid": 1392, "detected_taxid": 88888,
+            "name": "Bacillus anthracis", "threat_level": "critical",
+            "reads": 500,          # aggregate, above threshold
+            "threshold": 100,
+        }]
+        rendered = _run_verdict_banner(
+            tmp_path,
+            detections=detections,
+            taxid_to_samples={
+                88888: [_sample(f"barcode{i:02d}", 50) for i in range(1, 11)]
+            },
+            available_samples=[f"barcode{i:02d}" for i in range(1, 11)],
+        )
+        assert "ACTION REQUIRED" in rendered
+        # No single barcode cleared 100 reads -- naming them would tell the
+        # operator to pull ten samples that are each individually negative.
+        assert "barcode01)" not in rendered
+        assert "aggregate across 10 samples" in rendered
+
+    def test_only_the_sample_above_threshold_is_named(self, tmp_path):
+        detections = [{
+            "taxid": 1392, "detected_taxid": 88888,
+            "name": "Bacillus anthracis", "threat_level": "critical",
+            "reads": 350, "threshold": 100,
+        }]
+        rendered = _run_verdict_banner(
+            tmp_path,
+            detections=detections,
+            taxid_to_samples={
+                88888: [
+                    _sample("barcode04", 300),
+                    _sample("barcode05", 50),
+                ]
+            },
+            available_samples=["barcode04", "barcode05"],
+        )
+        assert "Bacillus anthracis (barcode04)" in rendered
+        assert "barcode05" not in rendered
+
+
+class TestAttributionFailureIsVisible:
+    """An unattributed positive must not look like a positive in one
+    unnamed sample -- the operator has to know the difference."""
+
+    def test_loader_exception_renders_an_explicit_note(self, tmp_path):
+        detections = [{
+            "taxid": 1392, "detected_taxid": 88888,
+            "name": "Bacillus anthracis", "threat_level": "critical",
+            "reads": 1000, "threshold": 10,
+        }]
+        rendered = _run_verdict_banner(
+            tmp_path,
+            detections=detections,
+            taxid_to_samples={},
+            available_samples=["barcode01"],
+            per_sample_side_effect=OSError("results directory vanished"),
+        )
+        assert "ACTION REQUIRED" in rendered
+        assert "attribution unavailable" in rendered.lower()
+
+    def test_no_matching_taxid_renders_an_explicit_note(self, tmp_path):
+        """The loader succeeded but knows nothing about this taxid --
+        still an attribution gap, not a silent omission."""
+        detections = [{
+            "taxid": 1392, "detected_taxid": 88888,
+            "name": "Bacillus anthracis", "threat_level": "critical",
+            "reads": 1000, "threshold": 10,
+        }]
+        rendered = _run_verdict_banner(
+            tmp_path,
+            detections=detections,
+            taxid_to_samples={12345: [_sample("barcode01", 900)]},
+            available_samples=["barcode01"],
+        )
+        assert "attribution unavailable" in rendered.lower()
 
 
 class TestPathogenNaming:

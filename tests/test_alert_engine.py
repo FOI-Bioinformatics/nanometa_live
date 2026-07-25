@@ -207,6 +207,45 @@ class TestGenerateAlertsPathogen:
         assert not any(a["category"] == "pathogen" for a in alerts)
 
 
+class TestPathogenAlertAttribution:
+    """QC alerts have always named their samples; a pathogen alert without a
+    barcode is the one an operator cannot act on."""
+
+    def _organisms(self):
+        return [{"taxid": 1392, "name": "Bacillus anthracis", "reads": 500}]
+
+    def _pathogen_alert(self, engine, taxid_to_samples):
+        alerts = engine.generate_alerts(
+            status={"running": True},
+            samples=[],
+            detected_organisms=self._organisms(),
+            taxid_to_samples=taxid_to_samples,
+        )
+        pathogen_alerts = [a for a in alerts if a["category"] == "pathogen"]
+        assert pathogen_alerts, f"expected pathogen alert, got {alerts}"
+        return pathogen_alerts[0]
+
+    def test_message_and_field_name_the_samples(self, engine):
+        alert = self._pathogen_alert(engine, {1392: [
+            {"sample": "barcode03", "reads": 400},
+            {"sample": "barcode09", "reads": 100},
+        ]})
+        assert alert["samples"] == ["barcode03", "barcode09"]
+        assert "barcode03" in alert["message"]
+        assert "barcode09" in alert["message"]
+
+    def test_many_samples_are_summarised_in_the_message(self, engine):
+        rows = [{"sample": f"barcode{i:02d}", "reads": 100} for i in range(6)]
+        alert = self._pathogen_alert(engine, {1392: rows})
+        assert len(alert["samples"]) == 6
+        assert "+3 more" in alert["message"]
+
+    def test_no_attribution_leaves_the_message_unchanged(self, engine):
+        alert = self._pathogen_alert(engine, None)
+        assert alert["samples"] == []
+        assert " in barcode" not in alert["message"]
+
+
 class TestGenerateAlertsOrdering:
     def test_critical_alerts_come_first(self, engine):
         samples = [

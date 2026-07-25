@@ -26,6 +26,15 @@ from nanometa_live.core.utils.qc_loaders import (
     load_seqkit_stats,
 )
 from nanometa_live.core.utils.alert_engine import get_alert_engine
+from nanometa_live.core.utils.attribution import (  # noqa: F401  (re-exported)
+    PER_SAMPLE_DISCOVERY_FLOOR,
+    PathogenAttribution,
+    build_pathogen_attribution,
+    format_attribution_text,
+    is_negative_control,
+    resolve_attribution_taxids,
+    samples_for_detection,
+)
 from nanometa_live.core.utils.pathogen_database import check_for_dangerous_pathogens
 from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
 from nanometa_live.app.utils.callback_helpers import (
@@ -80,6 +89,72 @@ def _count_input_files(nanopore_dir: str) -> int:
     return count
 
 
+_ATTRIBUTION_STYLE = {
+    "fontSize": "13px",
+    "fontWeight": "500",
+    "opacity": "0.85",
+}
+
+
+def _attribution_children(
+    sub_color: str,
+    *,
+    triggering_samples: Optional[List[str]] = None,
+    total_sample_count: Optional[int] = None,
+    triggering_attribution: Optional[List["PathogenAttribution"]] = None,
+    attribution_failed: bool = False,
+) -> List[Any]:
+    """Build the "Triggered by" subhead lines for the verdict banner.
+
+    Prefers the pathogen-to-sample pairing when the caller has it; falls back
+    to the flat sample list. When attribution was attempted and did not
+    resolve, an explicit note is rendered -- an unattributed positive must not
+    look like a positive in one unnamed sample.
+    """
+    children: List[Any] = []
+
+    def _line(text: str, extra_style: Optional[Dict[str, str]] = None) -> html.P:
+        style = {"color": sub_color, **_ATTRIBUTION_STYLE, **(extra_style or {})}
+        return html.P(
+            text,
+            className="dashboard-verdict-attribution mb-0 mt-1",
+            style=style,
+        )
+
+    text = (
+        format_attribution_text(triggering_attribution)
+        if triggering_attribution else None
+    )
+    if text:
+        children.append(_line(text))
+    elif triggering_samples:
+        shown = triggering_samples[:3]
+        overflow = max(0, len(triggering_samples) - len(shown))
+        names = ", ".join(shown)
+        if overflow > 0:
+            flat = f"Triggered by: {names} (+{overflow} more"
+            if total_sample_count:
+                flat += f" of {total_sample_count} samples"
+            flat += ")"
+        else:
+            n_total = total_sample_count or len(triggering_samples)
+            flat = (
+                f"Triggered by: {names} ({len(triggering_samples)} of "
+                f"{n_total} samples)"
+            )
+        children.append(_line(flat))
+
+    if attribution_failed:
+        children.append(
+            _line(
+                "Sample attribution unavailable — see the Organisms tab for "
+                "per-sample counts.",
+                {"fontStyle": "italic"},
+            )
+        )
+    return children
+
+
 def _make_banner_content(
     icon_name: str,
     icon_color: str,
@@ -95,6 +170,8 @@ def _make_banner_content(
     total_sample_count: Optional[int] = None,
     auto_stop_remaining_s: Optional[int] = None,
     triggering_pathogens: Optional[List[str]] = None,
+    triggering_attribution: Optional[List[PathogenAttribution]] = None,
+    attribution_failed: bool = False,
 ) -> dbc.Row:
     """
     Build the inner content for the Zone 1 clinical verdict banner.
@@ -183,34 +260,15 @@ def _make_banner_content(
                 style={"color": sub_color, "fontSize": "14px", "fontWeight": "600"},
             )
         )
-    if triggering_samples:
-        # Top 3 named inline; tail summarized as "(+N more)"
-        shown = triggering_samples[:3]
-        overflow = max(0, len(triggering_samples) - len(shown))
-        names = ", ".join(shown)
-        if overflow > 0:
-            attribution = f"Triggered by: {names} (+{overflow} more"
-            if total_sample_count:
-                attribution += f" of {total_sample_count} samples"
-            attribution += ")"
-        else:
-            n_total = total_sample_count or len(triggering_samples)
-            attribution = (
-                f"Triggered by: {names} ({len(triggering_samples)} of "
-                f"{n_total} samples)"
-            )
-        verdict_text_children.append(
-            html.P(
-                attribution,
-                className="dashboard-verdict-attribution mb-0 mt-1",
-                style={
-                    "color": sub_color,
-                    "fontSize": "13px",
-                    "fontWeight": "500",
-                    "opacity": "0.85",
-                },
-            )
+    verdict_text_children.extend(
+        _attribution_children(
+            sub_color,
+            triggering_samples=triggering_samples,
+            total_sample_count=total_sample_count,
+            triggering_attribution=triggering_attribution,
+            attribution_failed=attribution_failed,
         )
+    )
 
     return dbc.Row([
         dbc.Col([
@@ -354,6 +412,7 @@ def build_detection_meta(
     lineage: Optional[List[str]] = None,
     gtdb_taxonomy: Optional[str] = None,
     on_watchlist: bool = True,
+    sample_breakdown: Optional[List[Dict[str, Any]]] = None,
 ) -> Any:
     """Compact detection-metadata block for the report modal.
 
@@ -373,6 +432,26 @@ def build_detection_meta(
         items.append(_meta_row("Taxonomy ID", txt, badge="success"))
     elif on_watchlist:
         items.append(_meta_row("Taxonomy ID", "Not yet validated", badge="secondary"))
+    # Per-sample breakdown. The card that opens this modal is computed over
+    # All Samples while the modal's read count follows the selected sample, so
+    # without this the two can disagree with no explanation.
+    if sample_breakdown:
+        shown = sample_breakdown[:5]
+        parts = [
+            f"{s['sample']} ({int(s.get('reads', 0)):,} reads)" for s in shown
+        ]
+        overflow = len(sample_breakdown) - len(shown)
+        if overflow > 0:
+            parts.append(f"+{overflow} more")
+        total = sum(int(s.get("reads", 0)) for s in sample_breakdown)
+        items.append(_meta_row("Detected in", ", ".join(parts)))
+        items.append(
+            _meta_row(
+                "Across samples",
+                f"{total:,} reads in {len(sample_breakdown)} sample"
+                f"{'s' if len(sample_breakdown) != 1 else ''}",
+            )
+        )
     if lineage:
         items.append(_meta_row("Lineage", " > ".join(lineage)))
     elif gtdb_taxonomy:
@@ -454,6 +533,32 @@ def _lookup_organism_reads(taxid: Any, config: Dict[str, Any],
     return out
 
 
+def _lookup_sample_breakdown(taxid: Any,
+                             config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Per-sample read counts for ``taxid``, highest first.
+
+    The pathogen card is computed over All Samples while the modal's headline
+    read count follows the selected sample; the breakdown makes the difference
+    legible instead of leaving the operator with two numbers that disagree.
+    Returns [] on any failure -- this is supplementary detail, never a reason
+    for the modal not to open.
+    """
+    try:
+        main_dir = (config.get("results_output_directory", "")
+                    or config.get("main_dir", "")) if config else ""
+        if not main_dir or not taxid:
+            return []
+        from nanometa_live.core.utils.sample_detector import get_available_samples
+        samples = [s for s in get_available_samples(main_dir) if s != "All Samples"]
+        if not samples:
+            return []
+        taxid_to_samples = _load_per_sample_organisms(main_dir, samples, config)
+        return taxid_to_samples.get(int(taxid), [])
+    except Exception as e:
+        logger.debug("Per-sample breakdown for taxid %s: %s", taxid, e)
+        return []
+
+
 def _resolve_report_pathogen(taxid: Any):
     """Resolve ``taxid`` to a pathogen record, NCBI taxid, and watchlist entry.
 
@@ -504,7 +609,8 @@ def _resolve_report_pathogen(taxid: Any):
     return pathogen, ncbi_taxid, wl_entry
 
 
-def _unwatched_payload(taxid, ncbi_taxid, reads, detected_at) -> List[Any]:
+def _unwatched_payload(taxid, ncbi_taxid, reads, detected_at,
+                       sample_breakdown=None) -> List[Any]:
     """Modal payload for an organism that is not on any active watchlist."""
     display_name = reads["name"] or f"TaxID: {taxid}"
     return [
@@ -517,12 +623,14 @@ def _unwatched_payload(taxid, ncbi_taxid, reads, detected_at) -> List[Any]:
         html.Div([
             html.I(className="bi bi-info-circle me-2"), "Not on watchlist",
         ], className="alert alert-secondary text-center py-2"),
-        build_detection_meta(detected_at=detected_at, on_watchlist=False),
+        build_detection_meta(detected_at=detected_at, on_watchlist=False,
+                             sample_breakdown=sample_breakdown),
         {"taxid": taxid, "ncbi_taxid": ncbi_taxid},
     ]
 
 
-def _pathogen_payload(pathogen, taxid, ncbi_taxid, wl_entry, reads, detected_at) -> List[Any]:
+def _pathogen_payload(pathogen, taxid, ncbi_taxid, wl_entry, reads, detected_at,
+                      sample_breakdown=None) -> List[Any]:
     """Modal payload for a watchlist/known pathogen, with threat styling."""
     threat_level = pathogen.threat_level
     if hasattr(threat_level, 'value'):
@@ -560,6 +668,7 @@ def _pathogen_payload(pathogen, taxid, ncbi_taxid, wl_entry, reads, detected_at)
         lineage=getattr(wl_entry, "lineage", None),
         gtdb_taxonomy=getattr(wl_entry, "gtdb_taxonomy", None),
         on_watchlist=wl_entry is not None,
+        sample_breakdown=sample_breakdown,
     )
     annotation = (getattr(wl_entry, "annotation", "")
                   or getattr(pathogen, "annotation", "") or "")
@@ -579,11 +688,14 @@ def _build_report_payload_inner(taxid: Any, config: Dict[str, Any],
                                 selected_sample: Optional[str]) -> List[Any]:
     """Inner builder for :func:`build_report_payload` (may raise)."""
     reads = _lookup_organism_reads(taxid, config, selected_sample)
+    breakdown = _lookup_sample_breakdown(taxid, config)
     pathogen, ncbi_taxid, wl_entry = _resolve_report_pathogen(taxid)
     detected_at = datetime.now().strftime("%Y-%m-%d %H:%M")
     if not pathogen:
-        return _unwatched_payload(taxid, ncbi_taxid, reads, detected_at)
-    return _pathogen_payload(pathogen, taxid, ncbi_taxid, wl_entry, reads, detected_at)
+        return _unwatched_payload(taxid, ncbi_taxid, reads, detected_at,
+                                  breakdown)
+    return _pathogen_payload(pathogen, taxid, ncbi_taxid, wl_entry, reads,
+                             detected_at, breakdown)
 
 
 # ----------------------------------------------------------------------------
@@ -1167,7 +1279,8 @@ def _generate_alerts(
     overall_status: Dict[str, Any],
     main_dir: str,
     config: Dict[str, Any],
-    samples_data: List[Dict[str, Any]]
+    samples_data: List[Dict[str, Any]],
+    taxid_to_samples: Optional[Dict[int, List[Dict[str, Any]]]] = None
 ) -> List[Dict[str, Any]]:
     """
     Generate alerts using the AlertEngine.
@@ -1177,6 +1290,10 @@ def _generate_alerts(
         main_dir: Main data directory
         config: Application configuration
         samples_data: List of sample information
+        taxid_to_samples: Optional pre-built per-taxid attribution. Built here
+            from ``samples_data`` when omitted so pathogen alerts name their
+            samples; the per-sample loads share the loader cache with the
+            other callbacks on the same tick.
 
     Returns:
         List of alert dictionaries
@@ -1264,13 +1381,24 @@ def _generate_alerts(
     except Exception as e:
         logger.error(f"Error loading organisms for pathogen check: {e}")
 
+    if taxid_to_samples is None:
+        sample_names = [s["name"] for s in samples if s.get("name")]
+        try:
+            taxid_to_samples = _load_per_sample_organisms(
+                main_dir, sample_names, config
+            )
+        except Exception as e:
+            logger.debug(f"Per-sample attribution unavailable for alerts: {e}")
+            taxid_to_samples = {}
+
     # Generate alerts using alert engine (now includes pathogen detection)
     alerts = alert_engine.generate_alerts(
         status,
         samples,
         qc_stats,
         detected_organisms=detected_organisms,
-        watched_species=species_of_interest
+        watched_species=species_of_interest,
+        taxid_to_samples=taxid_to_samples
     )
 
     return alerts
@@ -1381,12 +1509,11 @@ def _create_pathogen_alert_panel(
             action = detection.get("action_required", "Follow biosafety protocols")
             taxid = detection.get("taxid")
 
-            # Resolve per-sample attribution: prefer the Kraken2 db taxid used during
-            # detection, fall back to the NCBI taxid stored on the watchlist entry.
-            kraken_taxid = detection.get("detected_taxid") or taxid
-            samples_for_detection = taxid_to_samples.get(kraken_taxid, [])
-            if not samples_for_detection and kraken_taxid != taxid:
-                samples_for_detection = taxid_to_samples.get(taxid, [])
+            # Resolve per-sample attribution: prefer the Kraken2 db taxid used
+            # during detection, fall back to the NCBI taxid stored on the
+            # watchlist entry. Shared with the verdict banner so the two
+            # cannot drift.
+            detection_samples = samples_for_detection(detection, taxid_to_samples)
 
             # Cross-sample validation summary for this watchlist hit. Returns
             # None when no sample in the detection has a validation entry --
@@ -1395,7 +1522,7 @@ def _create_pathogen_alert_panel(
             # validation has run for OTHER taxids), suppressing the badge
             # entirely otherwise.
             validation = _summarise_validation_for_taxid(
-                samples_for_detection, taxid, validation_lookup
+                detection_samples, taxid, validation_lookup
             )
             if validation is None and validation_lookup:
                 # Validation has run elsewhere but produced no result for
@@ -1406,7 +1533,7 @@ def _create_pathogen_alert_panel(
                     "identity": 0.0,
                     "method": "",
                     "n_validated": 0,
-                    "n_samples": len(samples_for_detection),
+                    "n_samples": len(detection_samples),
                 }
 
             if threat_level == "critical":
@@ -1420,7 +1547,7 @@ def _create_pathogen_alert_panel(
                         confidence="HIGH" if reads >= 100 else "MODERATE",
                         taxid=taxid,
                         recommendation=action,
-                        samples=samples_for_detection,
+                        samples=detection_samples,
                         validation=validation,
                     )
                 )
@@ -1434,7 +1561,7 @@ def _create_pathogen_alert_panel(
                         abundance_pct=abundance,
                         taxid=taxid,
                         recommendation=action,
-                        samples=samples_for_detection,
+                        samples=detection_samples,
                         validation=validation,
                     )
                 )
@@ -1447,7 +1574,7 @@ def _create_pathogen_alert_panel(
                         read_count=reads,
                         abundance_pct=abundance,
                         taxid=taxid,
-                        samples=samples_for_detection,
+                        samples=detection_samples,
                         validation=validation,
                     )
                 )
@@ -1523,19 +1650,28 @@ def _species_df_to_organisms(species_df: pd.DataFrame) -> List[Dict[str, Any]]:
 
 def _load_per_sample_organisms(
     main_dir: str,
-    available_samples: List[str]
+    available_samples: List[str],
+    config: Optional[Dict[str, Any]] = None,
 ) -> Dict[int, List[Dict[str, Any]]]:
     """
     Load species-level organisms from each sample and return a per-taxid attribution dict.
 
     Keyed by the Kraken2 database taxid (as it appears in reports), each value is a
-    list of sample-level dicts sorted descending by reads. A sample is flagged as
-    negative control when its name contains "negative" (case-insensitive) — the
-    codebase has no explicit manifest NC flag at this stage.
+    list of sample-level dicts sorted descending by reads. Negative controls are
+    identified by ``is_negative_control`` — the config's
+    ``negative_control_samples`` list when the operator declared one, otherwise
+    the documented name patterns.
+
+    The ``reads >= PER_SAMPLE_DISCOVERY_FLOOR`` filter is a discovery floor
+    only: it decides whether a taxon is present in a sample at all, not
+    whether that sample is above any pathogen's alert threshold. That second
+    gate lives in ``build_pathogen_attribution``, which knows the per-entry
+    threshold.
 
     Args:
         main_dir: Results output directory
         available_samples: All sample names including "All Samples"
+        config: Application configuration dict (for declared negative controls)
 
     Returns:
         Dict[int, List[{sample, reads, abundance, is_negative_control}]]
@@ -1547,13 +1683,14 @@ def _load_per_sample_organisms(
     taxid_to_samples: Dict[int, List[Dict[str, Any]]] = {}
 
     for sample in real_samples:
-        is_nc = "negative" in sample.lower()
+        is_nc = is_negative_control(sample, config)
         try:
             kraken_df = load_kraken_data(main_dir, sample)
             if kraken_df.empty:
                 continue
             species_df = kraken_df[
-                (kraken_df["rank"] == "S") & (kraken_df["reads"] >= 5)
+                (kraken_df["rank"] == "S")
+                & (kraken_df["reads"] >= PER_SAMPLE_DISCOVERY_FLOOR)
             ]
             if species_df.empty:
                 continue

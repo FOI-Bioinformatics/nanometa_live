@@ -891,6 +891,12 @@ class WatchlistManager:
             if entry and best_score >= 0.7 and reads >= entry.alert_threshold:
                 alerts.append({
                     "taxid": entry.taxid,
+                    # The taxid as it appeared in the Kraken2 report. Callers
+                    # attribute detections to samples by this key; without it
+                    # attribution is unrecoverable on a GTDB or custom
+                    # database, where the report taxid differs from the
+                    # watchlist entry's NCBI taxid.
+                    "detected_taxid": taxid,
                     "name": entry.name,
                     "common_name": entry.common_name,
                     "reads": reads,

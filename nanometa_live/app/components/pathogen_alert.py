@@ -46,9 +46,13 @@ def _render_sample_attribution(
     """
     Render the "DETECTED IN:" attribution row for a pathogen alert card.
 
-    Suppression rule (per design spec):
+    Suppression rule:
       - Returns None when samples is empty.
-      - Returns None when tier is "watched" and len(samples) > 1.
+      - A "watched" hit spanning more than one sample collapses to a single
+        count pill with the full list in a popover. Per-sample chips are too
+        heavy for a moderate hit, but suppressing the row entirely (the
+        original behaviour) left a multi-barcode positive with no attribution
+        at all.
 
     Chip colors are tier-specific with a negative-control override.
     Tooltip: "{reads} reads | {abundance}% of sample | #{rank} by read count"
@@ -65,9 +69,11 @@ def _render_sample_attribution(
     if not samples:
         return None
 
-    # Suppression: watched tier with multiple samples shows no attribution row
-    if tier == "watched" and len(samples) > 1:
-        return None
+    # A multi-sample watched hit is summarised as a count pill rather than a
+    # chip per barcode.
+    summarise_only = tier == "watched" and len(samples) > 1
+    if summarise_only:
+        max_inline = 0
 
     # Determine chip palette for this tier
     tier_key = tier if tier in _CHIP_COLORS else "watched"
@@ -119,9 +125,12 @@ def _render_sample_attribution(
     if overflow > 0:
         pill_bg, pill_border, pill_text = _CHIP_MORE
         pill_id = _attribution_pill_id(samples, tier_key)
+        pill_label = (
+            f"{len(samples)} samples" if summarise_only else f"+{overflow} more"
+        )
         chips.append(
             html.Span(
-                f"+{overflow} more",
+                pill_label,
                 id=pill_id,
                 title=(
                     f"Click to see all {len(samples)} samples where this "

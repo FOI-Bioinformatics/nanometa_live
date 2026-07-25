@@ -159,6 +159,62 @@ class TestScreenWatchlist:
         assert rows[0]["reads"] == 500
 
 
+class TestScreenWatchlistPerSample:
+    """The archived report has to say WHICH barcode a hit came from; an
+    aggregate-only screen tells the operator a pathogen is in the run but not
+    where, which is not actionable."""
+
+    def _entries(self):
+        return {1392: WatchlistEntry(
+            taxid=1392, name="Bacillus anthracis",
+            threat_level=ThreatLevel.CRITICAL, enabled=True,
+        )}
+
+    def _sample_frame(self, reads):
+        df = _kraken_df()
+        df.loc[df["name"] == "Bacillus anthracis", "reads"] = reads
+        df.loc[df["name"] == "Bacillus anthracis", "cumul_reads"] = reads
+        return df
+
+    def test_detected_rows_carry_a_sample_breakdown(self, generator):
+        frames = {
+            "barcode01": self._sample_frame(400),
+            "barcode02": self._sample_frame(100),
+        }
+        with patch(_MGR_PATH, return_value=_mock_manager(self._entries())):
+            rows = generator._screen_watchlist(_kraken_df(), frames)
+        breakdown = rows[0]["samples"]
+        # Sorted by read support, highest first.
+        assert [s["sample"] for s in breakdown] == ["barcode01", "barcode02"]
+        assert [s["reads"] for s in breakdown] == [400, 100]
+
+    def test_samples_without_the_organism_are_omitted(self, generator):
+        clean = _kraken_df()
+        clean = clean[clean["name"] != "Bacillus anthracis"]
+        frames = {"barcode01": self._sample_frame(400), "barcode02": clean}
+        with patch(_MGR_PATH, return_value=_mock_manager(self._entries())):
+            rows = generator._screen_watchlist(_kraken_df(), frames)
+        assert [s["sample"] for s in rows[0]["samples"]] == ["barcode01"]
+
+    def test_undetected_entry_has_no_breakdown(self, generator):
+        entries = {99999: WatchlistEntry(
+            taxid=99999, name="Yersinia pestis",
+            threat_level=ThreatLevel.HIGH, enabled=True,
+        )}
+        with patch(_MGR_PATH, return_value=_mock_manager(entries)):
+            rows = generator._screen_watchlist(
+                _kraken_df(), {"barcode01": _kraken_df()}
+            )
+        assert rows[0]["samples"] == []
+
+    def test_aggregate_only_call_still_works(self, generator):
+        """Callers that pass no per-sample frames keep the old behaviour."""
+        with patch(_MGR_PATH, return_value=_mock_manager(self._entries())):
+            rows = generator._screen_watchlist(_kraken_df())
+        assert rows[0]["detected"] is True
+        assert rows[0]["samples"] == []
+
+
 class TestReportSurfacesThreat:
     """End-to-end: a detected watchlist pathogen must reach the rendered
     report and the machine-readable summary -- the user-visible payoff of the

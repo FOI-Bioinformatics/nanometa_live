@@ -14,8 +14,32 @@ import threading
 from nanometa_live.core.utils.pathogen_database import (
     check_for_dangerous_pathogens,
 )
+from nanometa_live.core.utils.attribution import samples_for_detection
 
 logger = logging.getLogger(__name__)
+
+
+def _attributed_samples(
+    detection: Dict,
+    taxid_to_samples: Optional[Dict[int, List[Dict]]]
+) -> List[str]:
+    """Sample names carrying this detection, sorted descending by reads."""
+    if not taxid_to_samples:
+        return []
+    rows = samples_for_detection(detection, taxid_to_samples)
+    return [r["sample"] for r in rows if r.get("sample")]
+
+
+def _sample_suffix(sample_names: List[str], max_named: int = 3) -> str:
+    """" in barcode01, barcode02 (+3 more)" -- empty when nothing is known."""
+    if not sample_names:
+        return ""
+    shown = sample_names[:max_named]
+    overflow = len(sample_names) - len(shown)
+    suffix = " in " + ", ".join(shown)
+    if overflow > 0:
+        suffix += f" (+{overflow} more)"
+    return suffix
 
 
 # Maximum number of alerts to keep in history to prevent memory leaks
@@ -50,13 +74,18 @@ class Alert:
         message: str,
         recommendation: Optional[str] = None,
         technical_details: Optional[str] = None,
-        timestamp: Optional[datetime] = None
+        timestamp: Optional[datetime] = None,
+        samples: Optional[List[str]] = None
     ):
         self.severity = severity
         self.category = category
         self.message = message
         self.recommendation = recommendation
         self.technical_details = technical_details
+        # Samples the alert is attributable to. Empty for alerts that are not
+        # per-sample (system, QC aggregate); populated for pathogen alerts so
+        # the operator can act on a barcode rather than on a run.
+        self.samples = list(samples or [])
         self.timestamp = timestamp or datetime.now()
         self.id = f"{self.category.value}_{self.timestamp.strftime('%Y%m%d%H%M%S')}"
 
@@ -70,7 +99,8 @@ class Alert:
             "recommendation": self.recommendation,
             "technical_details": self.technical_details,
             "timestamp": self.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-            "priority": self.severity.value
+            "priority": self.severity.value,
+            "samples": self.samples,
         }
 
 
@@ -131,7 +161,8 @@ class AlertEngine:
         samples: List[Dict],
         qc_stats: Optional[Dict] = None,
         detected_organisms: Optional[List[Dict]] = None,
-        watched_species: Optional[List[Dict]] = None
+        watched_species: Optional[List[Dict]] = None,
+        taxid_to_samples: Optional[Dict[int, List[Dict]]] = None
     ) -> List[Dict]:
         """
         Generate alerts based on current system state.
@@ -142,6 +173,9 @@ class AlertEngine:
             qc_stats: Optional QC statistics
             detected_organisms: Optional list of detected organisms from Kraken2
             watched_species: Optional list of user-configured species to watch
+            taxid_to_samples: Optional per-taxid sample attribution, keyed by
+                Kraken2 report taxid (as built by ``_load_per_sample_organisms``).
+                When supplied, pathogen alerts name the samples they came from.
 
         Returns:
             List of alert dictionaries sorted by priority
@@ -152,7 +186,8 @@ class AlertEngine:
         if detected_organisms:
             alerts.extend(self._check_dangerous_pathogens(
                 detected_organisms,
-                watched_species
+                watched_species,
+                taxid_to_samples
             ))
 
         # System status alerts
@@ -267,7 +302,8 @@ class AlertEngine:
     def _check_dangerous_pathogens(
         self,
         detected_organisms: List[Dict],
-        watched_species: Optional[List[Dict]] = None
+        watched_species: Optional[List[Dict]] = None,
+        taxid_to_samples: Optional[Dict[int, List[Dict]]] = None
     ) -> List[Alert]:
         """
         Check for dangerous pathogens in classification results.
@@ -278,6 +314,10 @@ class AlertEngine:
         Args:
             detected_organisms: List of detected organisms with 'taxid', 'name', 'reads'
             watched_species: Optional user-configured watchlist
+            taxid_to_samples: Optional per-taxid sample attribution. Pathogen
+                alerts name their samples when it is supplied -- QC alerts
+                have always named theirs, and a pathogen alert without a
+                barcode is the one an operator cannot act on.
 
         Returns:
             List of Alert objects for detected pathogens
@@ -299,6 +339,8 @@ class AlertEngine:
                 abundance = detection.get("abundance", 0.0)
                 action = detection.get("action_required", "Follow biosafety protocols")
                 category_info = detection.get("category", "")
+                sample_names = _attributed_samples(detection, taxid_to_samples)
+                where = _sample_suffix(sample_names)
 
                 # Determine alert severity based on threat level
                 if threat_level == "critical":
@@ -310,8 +352,12 @@ class AlertEngine:
                     alerts.append(Alert(
                         severity=severity,
                         category=AlertCategory.PATHOGEN,
-                        message=f"CRITICAL PATHOGEN: {display_name} detected ({reads:,} reads)",
+                        message=(
+                            f"CRITICAL PATHOGEN: {display_name} detected "
+                            f"({reads:,} reads){where}"
+                        ),
                         recommendation=action,
+                        samples=sample_names,
                         technical_details=(
                             f"TaxID: {detection.get('taxid')}, "
                             f"Abundance: {abundance:.2f}%, "
@@ -328,8 +374,12 @@ class AlertEngine:
                     alerts.append(Alert(
                         severity=severity,
                         category=AlertCategory.PATHOGEN,
-                        message=f"HIGH RISK: {display_name} detected ({reads:,} reads)",
+                        message=(
+                            f"HIGH RISK: {display_name} detected "
+                            f"({reads:,} reads){where}"
+                        ),
                         recommendation=action,
+                        samples=sample_names,
                         technical_details=(
                             f"TaxID: {detection.get('taxid')}, "
                             f"Abundance: {abundance:.2f}%"
@@ -340,8 +390,12 @@ class AlertEngine:
                     alerts.append(Alert(
                         severity=AlertSeverity.WARNING,
                         category=AlertCategory.PATHOGEN,
-                        message=f"Watched species: {pathogen_name} detected ({reads:,} reads)",
+                        message=(
+                            f"Watched species: {pathogen_name} detected "
+                            f"({reads:,} reads){where}"
+                        ),
                         recommendation="Monitor and document according to protocols",
+                        samples=sample_names,
                         technical_details=f"TaxID: {detection.get('taxid')}, Abundance: {abundance:.2f}%"
                     ))
 
@@ -349,8 +403,12 @@ class AlertEngine:
                     alerts.append(Alert(
                         severity=AlertSeverity.INFO,
                         category=AlertCategory.PATHOGEN,
-                        message=f"Species of interest: {pathogen_name} ({reads:,} reads)",
-                        recommendation="No action required - documented for reference"
+                        message=(
+                            f"Species of interest: {pathogen_name} "
+                            f"({reads:,} reads){where}"
+                        ),
+                        recommendation="No action required - documented for reference",
+                        samples=sample_names
                     ))
 
             # Log summary if pathogens detected

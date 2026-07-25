@@ -123,8 +123,16 @@ class ReportGenerator:
         # Classification summary from aggregated kraken
         classified, unclassified = self._get_classification_counts(kraken_all)
 
+        # Per-sample kraken frames are loaded up front so the watchlist screen
+        # can attribute each hit to the samples it came from. An aggregate-only
+        # screen tells the operator a pathogen is present but not where.
+        sample_frames = {
+            sample: load_kraken_data(self.results_dir, sample)
+            for sample in samples if sample is not None
+        }
+
         # Watchlist screening
-        watched_results = self._screen_watchlist(kraken_all)
+        watched_results = self._screen_watchlist(kraken_all, sample_frames)
 
         # Alerts (pathogen + QC) from the post-run watchlist screen and QC stats.
         alerts = self._collect_alerts(qc_stats=qc_all, watched_results=watched_results)
@@ -144,7 +152,7 @@ class ReportGenerator:
         for sample in samples:
             if sample is None:
                 continue
-            sample_kraken = load_kraken_data(self.results_dir, sample)
+            sample_kraken = sample_frames[sample]
             sample_qc = get_qc_stats(self.results_dir, sample)
             s_classified, s_unclassified = self._get_classification_counts(sample_kraken)
 
@@ -229,11 +237,68 @@ class ReportGenerator:
             })
         return results
 
-    def _screen_watchlist(self, kraken_df: pd.DataFrame) -> List[Dict[str, Any]]:
+    def _match_entry_rows(
+        self,
+        df: pd.DataFrame,
+        match_id: Optional[int],
+        entry_name: Optional[str],
+    ) -> pd.DataFrame:
+        """Rows of *df* belonging to one watchlist entry.
+
+        Match by the Kraken2 database taxid (``db_taxid`` for GTDB/custom DBs,
+        else the NCBI taxid), then fall back to an exact name match -- the same
+        precedence the dashboard uses.
+        """
+        if df.empty:
+            return df
+        matched = (
+            df[df["taxid"] == match_id] if match_id else df.iloc[0:0]
+        )
+        if matched.empty and entry_name:
+            names_lower = df["name"].astype(str).str.strip().str.lower()
+            matched = df[names_lower == entry_name.strip().lower()]
+        return matched
+
+    def _attribute_entry_to_samples(
+        self,
+        sample_frames: Dict[str, pd.DataFrame],
+        match_id: Optional[int],
+        entry_name: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        """Per-sample read counts for one watchlist entry, highest first."""
+        rows: List[Dict[str, Any]] = []
+        for sample, df in (sample_frames or {}).items():
+            if df is None or df.empty:
+                continue
+            matched = self._match_entry_rows(df, match_id, entry_name)
+            if matched.empty:
+                continue
+            read_col = "cumul_reads" if "cumul_reads" in df.columns else "reads"
+            reads = int(matched[read_col].sum())
+            if reads <= 0:
+                continue
+            classified, unclassified, _rate = get_classification_stats(df)
+            total = classified + unclassified
+            rows.append({
+                "sample": sample,
+                "reads": reads,
+                "abundance": round((reads / total * 100) if total > 0 else 0, 3),
+            })
+        rows.sort(key=lambda r: r["reads"], reverse=True)
+        return rows
+
+    def _screen_watchlist(
+        self,
+        kraken_df: pd.DataFrame,
+        sample_frames: Optional[Dict[str, pd.DataFrame]] = None,
+    ) -> List[Dict[str, Any]]:
         """Screen kraken results against the active watchlist.
 
         Emits one row per active entry (detected and not) so the report's
         Watched Organisms table and decision banner reflect the full screen.
+        Each detected row carries a ``samples`` breakdown so the archived
+        artifact says which barcode a hit came from, not just that the run
+        contained it.
 
         ``get_active_entries()`` returns ``Dict[int, WatchlistEntry]`` -- the
         prior code iterated it as a list of dicts (``entry.get(...)``), which
@@ -257,25 +322,21 @@ class ReportGenerator:
             classified, unclassified, _rate = get_classification_stats(kraken_df)
             total = classified + unclassified
             read_col = "cumul_reads" if "cumul_reads" in kraken_df.columns else "reads"
-            names_lower = kraken_df["name"].astype(str).str.strip().str.lower()
 
             for entry in active_entries.values():
                 threat = entry.threat_level
                 threat_level = threat.value if hasattr(threat, "value") else str(threat)
 
-                # Match by the Kraken2 database taxid (db_taxid for GTDB/custom
-                # DBs, else the NCBI taxid), then fall back to an exact name
-                # match -- the same precedence the dashboard uses.
                 match_id = getattr(entry, "db_taxid", None) or entry.taxid
-                matched = (
-                    kraken_df[kraken_df["taxid"] == match_id]
-                    if match_id else kraken_df.iloc[0:0]
-                )
-                if matched.empty and entry.name:
-                    matched = kraken_df[names_lower == entry.name.strip().lower()]
+                matched = self._match_entry_rows(kraken_df, match_id, entry.name)
 
                 reads = int(matched[read_col].sum()) if not matched.empty else 0
                 abundance = (reads / total * 100) if total > 0 else 0
+                per_sample = (
+                    self._attribute_entry_to_samples(
+                        sample_frames, match_id, entry.name
+                    ) if reads > 0 else []
+                )
 
                 results.append({
                     "name": entry.name,
@@ -284,6 +345,7 @@ class ReportGenerator:
                     "reads": reads,
                     "abundance": round(abundance, 3),
                     "detected": reads > 0,
+                    "samples": per_sample,
                 })
 
         except Exception as e:

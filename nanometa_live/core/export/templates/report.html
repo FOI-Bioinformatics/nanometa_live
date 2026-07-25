@@ -294,6 +294,7 @@
             <th>Status</th>
             <th>Reads</th>
             <th>Abundance</th>
+            <th>Detected in</th>
           </tr>
         </thead>
         <tbody>
@@ -310,6 +311,16 @@
             </td>
             <td>{{ w.reads | format_number }}</td>
             <td>{{ w.abundance | format_pct }}</td>
+            <td>
+              {% if w.samples %}
+                {% for s in w.samples %}<div>{{ s.sample }}
+                  <span style="color:#6c757d">({{ s.reads | format_number }} reads)</span></div>{% endfor %}
+              {% elif w.detected %}
+                <span style="color:#6c757d">Not attributable to a single sample</span>
+              {% else %}
+                &mdash;
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>
