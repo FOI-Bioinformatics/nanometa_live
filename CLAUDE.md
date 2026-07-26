@@ -435,10 +435,54 @@ host is short-circuited for the remainder of the process and
 subsequent calls return `None` immediately. Default HTTP timeout is
 5 s. The breaker is in-memory only — a transient outage does not
 persist a disabled flag. The Verify Taxonomy IDs callback in
-`watchlist_tab.py` reads `config["kraken_taxonomy"]` and skips the
-API that does not match the active database, so an NCBI run does not
-stall on a degraded GTDB endpoint. Operators can still tick both
-checkboxes for explicit cross-validation.
+`watchlist_tab.py` skips the API that cannot resolve the loaded
+database's names, so an NCBI run does not stall on a degraded GTDB
+endpoint. It reads the *detected* nomenclature via
+`_apis_for_database` → `load_profile_for_db`, not a config key; an
+undetectable database queries both, since a guess there is what
+would strand the run. Operators can still tick both checkboxes for
+explicit cross-validation.
+
+### One database profile, two axes
+
+`core/taxonomy/database_profile.py` holds everything the app knows
+about a loaded Kraken2 database's taxonomy, in two independent
+fields, both detected from the database itself:
+
+- `taxids_are_ncbi` (bool) — may a raw taxid comparison be trusted?
+  Gates `ExactTaxidStrategy`, the `db_is_ncbi` shortcuts in both
+  `check_organisms` paths, and the confidence scorer's
+  `taxid_verified` weight. **Defaults to False**, because trusting an
+  unverified taxid names the *wrong organism*, while distrusting a
+  good one only skips a shortcut — name matching still runs.
+- `nomenclature` (`ncbi` | `gtdb` | `unknown`) — which service can
+  resolve these names? Drives the Verify API choice, the genome
+  `kingdom="Bacteria"` hint, and whether the GTDB genus-suffix
+  variants are generated. **UNKNOWN narrows nothing**: query both,
+  generate variants anyway.
+
+This replaced four disagreeing axes — the `kraken_taxonomy` config
+key, `DatabaseTaxonomyType`, `TaxonomyType`, and the watchlist YAML's
+`taxonomy_mode`. `MIXED` was never read by anything precisely because
+one axis was trying to answer both questions; the pair can express it
+(`taxids_are_ncbi=False, nomenclature=ncbi`).
+
+Detection lives in `database_indexer._detect_taxids_are_ncbi` (probes
+19 well-known taxids, ALL must match) and `_detect_nomenclature`
+(a GTDB rank prefix or a single `Genus_A` polyphyly suffix is
+conclusive; samples up to 5000 species nodes, *not* an
+insertion-order head). `_nomenclature_hints_from_files` is the
+fallback for signals the inspect dump lacks. Deliberately not
+detected: the directory name, and any default-to-GTDB.
+
+The profile rides `{db_hash}_index.json` (cache version 2.0; a v1
+file is discarded and rebuilt, since it holds no name evidence to
+migrate from) and is copied onto `{db_hash}_mappings.json`, which is
+kept rather than rebuilt because it carries operator verifications.
+That copy is load-bearing: background workers load the mappings file
+standalone against an empty index singleton. An operator override
+lives in a *sibling* `{db_hash}_profile_override.json` so it survives
+the index rebuild.
 
 ### Database registry: bundled + operator-managed
 

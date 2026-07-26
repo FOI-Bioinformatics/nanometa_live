@@ -188,7 +188,6 @@ def build_config_from_form(
     results_dir,
     update_interval,
     danger_threshold,
-    taxonomy,
     check_interval,
     realtime_timeout_minutes,
     min_reads_per_level,
@@ -306,9 +305,6 @@ def build_config_from_form(
 
     if danger_threshold is not None:
         config["danger_lower_limit"] = danger_threshold
-
-    if taxonomy is not None:
-        config["kraken_taxonomy"] = taxonomy
 
     if check_interval is not None:
         config["check_intervals_seconds"] = check_interval

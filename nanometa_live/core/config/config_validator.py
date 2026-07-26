@@ -175,13 +175,6 @@ def _validate_taxonomy_settings(config: Dict[str, Any]) -> None:
     Args:
         config: Configuration dictionary to validate
     """
-    # Kraken taxonomy
-    if "kraken_taxonomy" not in config or config["kraken_taxonomy"] not in [
-        "gtdb",
-        "ncbi",
-    ]:
-        config["kraken_taxonomy"] = "gtdb"
-
     # External Kraken database
     if "external_kraken2_db" not in config:
         config["external_kraken2_db"] = ""

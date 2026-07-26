@@ -3,10 +3,12 @@ Unit tests for the Verify-Taxonomy callback in app/tabs/watchlist_tab.py.
 
 The documented behaviour (CLAUDE.md, "API circuit breaker and taxonomy
 auto-selection") is that validate_entries matches the validation API set to the
-configured kraken_taxonomy: an NCBI database must not trigger GTDB calls and
-vice versa, so a degraded GTDB endpoint cannot stall an NCBI run. These tests
-drive the registered callback with a mocked Dash callback context and a mocked
-watchlist manager, asserting which APIs reach bulk_validate_entries.
+DETECTED nomenclature of the loaded database: an NCBI database must not trigger
+GTDB calls and vice versa, so a degraded GTDB endpoint cannot stall an NCBI run.
+A database whose nomenclature could not be determined queries both, since a
+guess there would be the thing that strands the run. These tests drive the
+registered callback with a mocked Dash callback context and a mocked watchlist
+manager, asserting which APIs reach bulk_validate_entries.
 """
 
 from unittest.mock import MagicMock, patch
@@ -40,34 +42,67 @@ def _call(fn, api_options, config, triggered_id="watchlist-validate-all-btn"):
         return fn(set_progress, 1, [], api_options, [], config)
 
 
+def _with_nomenclature(nomenclature):
+    """Patch the detected profile the callback reads.
+
+    The profile is loaded from the database index cache, which these tests do
+    not build; patching the loader keeps them focused on the API-narrowing
+    decision rather than on index construction.
+    """
+    from nanometa_live.core.taxonomy import database_profile as dp
+    return patch.object(
+        dp, "load_profile_for_db",
+        return_value=dp.DatabaseProfile(nomenclature=nomenclature),
+    )
+
+
 class TestApiSelectionByTaxonomy:
     def test_ncbi_database_suppresses_gtdb_only_selection(self, validate_fn):
-        # Only GTDB ticked, but the database is NCBI -> GTDB is dropped, leaving
-        # no API selected, so the callback returns the "no databases" payload
-        # without ever instantiating the watchlist manager.
-        result = _call(validate_fn, ["gtdb"], {"kraken_taxonomy": "ncbi"})
+        # Only GTDB ticked, but the database uses NCBI names -> GTDB is
+        # dropped, leaving no API selected, so the callback returns the
+        # "no databases" payload without instantiating the watchlist manager.
+        from nanometa_live.core.taxonomy.database_profile import Nomenclature
+        with _with_nomenclature(Nomenclature.NCBI):
+            result = _call(validate_fn, ["gtdb"], {"kraken_db": "/db"})
         assert result == {"error": "no_databases"}
 
     def test_gtdb_database_suppresses_ncbi_only_selection(self, validate_fn):
-        result = _call(validate_fn, ["ncbi"], {"kraken_taxonomy": "gtdb"})
+        from nanometa_live.core.taxonomy.database_profile import Nomenclature
+        with _with_nomenclature(Nomenclature.GTDB):
+            result = _call(validate_fn, ["ncbi"], {"kraken_db": "/db"})
         assert result == {"error": "no_databases"}
 
     def test_ncbi_database_runs_ncbi_only(self, validate_fn):
+        from nanometa_live.core.taxonomy.database_profile import Nomenclature
         manager = MagicMock()
         manager.get_entries_with_toggle_state.return_value = [{"taxid": 562}]
         manager.bulk_validate_entries.return_value = {"validated": 1, "failed": 0}
         with patch.object(wt, "get_watchlist_manager", return_value=manager):
-            _call(validate_fn, ["ncbi", "gtdb"], {"kraken_taxonomy": "ncbi"})
+            with _with_nomenclature(Nomenclature.NCBI):
+                _call(validate_fn, ["ncbi", "gtdb"], {"kraken_db": "/db"})
         kwargs = manager.bulk_validate_entries.call_args.kwargs
         assert kwargs["use_ncbi"] is True
         assert kwargs["use_gtdb"] is False
 
-    def test_both_selected_without_taxonomy_constraint(self, validate_fn):
+    def test_undetected_nomenclature_queries_both(self, validate_fn):
+        """The safe fallback: narrow nothing when the database is unreadable."""
+        from nanometa_live.core.taxonomy.database_profile import Nomenclature
         manager = MagicMock()
         manager.get_entries_with_toggle_state.return_value = [{"taxid": 562}]
         manager.bulk_validate_entries.return_value = {"validated": 1, "failed": 0}
         with patch.object(wt, "get_watchlist_manager", return_value=manager):
-            _call(validate_fn, ["ncbi", "gtdb"], {})  # no kraken_taxonomy
+            with _with_nomenclature(Nomenclature.UNKNOWN):
+                _call(validate_fn, ["ncbi", "gtdb"], {"kraken_db": "/db"})
+        kwargs = manager.bulk_validate_entries.call_args.kwargs
+        assert kwargs["use_ncbi"] is True
+        assert kwargs["use_gtdb"] is True
+
+    def test_no_database_configured_queries_both(self, validate_fn):
+        manager = MagicMock()
+        manager.get_entries_with_toggle_state.return_value = [{"taxid": 562}]
+        manager.bulk_validate_entries.return_value = {"validated": 1, "failed": 0}
+        with patch.object(wt, "get_watchlist_manager", return_value=manager):
+            _call(validate_fn, ["ncbi", "gtdb"], {})
         kwargs = manager.bulk_validate_entries.call_args.kwargs
         assert kwargs["use_ncbi"] is True
         assert kwargs["use_gtdb"] is True

@@ -37,6 +37,35 @@ from nanometa_live.app.app import background_callback_manager
 logger = logging.getLogger(__name__)
 
 
+def _apis_for_database(
+    config: Optional[Dict[str, Any]],
+    use_ncbi: bool,
+    use_gtdb: bool,
+) -> Tuple[bool, bool]:
+    """Narrow the operator's API selection to what the database can use.
+
+    Which name-resolution service can resolve a database's organism names is
+    a property of the database, so it is read from the detected profile
+    rather than from a config key. This runs inside background callback
+    workers where the index singleton is empty, hence ``load_profile_for_db``,
+    which reads only the small profile object out of the index cache.
+
+    An UNKNOWN nomenclature deliberately narrows nothing: querying both is
+    slower but cannot miss, and an undetectable database is exactly the case
+    where a guess would be wrong.
+    """
+    from nanometa_live.core.taxonomy.database_profile import (
+        Nomenclature, load_profile_for_db,
+    )
+
+    profile = load_profile_for_db(str((config or {}).get("kraken_db", "")))
+    if profile.nomenclature is Nomenclature.NCBI:
+        return use_ncbi, False
+    if profile.nomenclature is Nomenclature.GTDB:
+        return False, use_gtdb
+    return use_ncbi, use_gtdb
+
+
 def _save_last_session(config: Dict[str, Any]) -> None:
     """Save config to last-session.yaml for persistence across restarts."""
     try:
@@ -936,15 +965,13 @@ def register_watchlist_callbacks(app: Dash) -> None:
         use_gtdb = "gtdb" in (api_options or [])
         offline_mode = bool((config or {}).get("offline_mode", False))
 
-        # Match the validation API set to the configured taxonomy. The GTDB
-        # API is much slower than NCBI and was historically the source of
-        # multi-minute lockups when degraded. Operators can still tick both
-        # checkboxes for explicit cross-validation.
-        kraken_taxonomy = str((config or {}).get("kraken_taxonomy", "")).lower()
-        if kraken_taxonomy == "ncbi":
-            use_gtdb = False
-        elif kraken_taxonomy == "gtdb":
-            use_ncbi = False
+        # Match the validation API set to the DETECTED nomenclature of the
+        # loaded database. The GTDB API is much slower than NCBI and was
+        # historically the source of multi-minute lockups when degraded, so
+        # querying the one that cannot resolve this database's names is both
+        # wasted work and a stall risk. An undetectable database queries both.
+        # Operators can still tick both boxes for explicit cross-validation.
+        use_ncbi, use_gtdb = _apis_for_database(config, use_ncbi, use_gtdb)
 
         if not use_ncbi and not use_gtdb:
             return {"error": "no_databases"}
@@ -1152,16 +1179,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
         use_gtdb = "gtdb" in (api_options or [])
         offline_mode = bool((config or {}).get("offline_mode", False))
 
-        # Match the API set to the configured taxonomy, exactly as
-        # validate_entries does: querying the API that does not match the
-        # active database is wasted work and risks stalling on a degraded
-        # endpoint. The operator can still tick both boxes to force a
-        # cross-lookup.
-        kraken_taxonomy = str((config or {}).get("kraken_taxonomy", "")).lower()
-        if kraken_taxonomy == "ncbi":
-            use_gtdb = False
-        elif kraken_taxonomy == "gtdb":
-            use_ncbi = False
+        # Same API narrowing as validate_entries; see the note there.
+        use_ncbi, use_gtdb = _apis_for_database(config, use_ncbi, use_gtdb)
 
         if not use_ncbi and not use_gtdb:
             return (

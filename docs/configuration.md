@@ -38,7 +38,6 @@ nanopore_output_directory: "/path/to/input"
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `kraken_db` | path | required | Path to Kraken2 database |
-| `kraken_taxonomy` | string | "gtdb" | `ncbi` or `gtdb` |
 | `kraken_memory_mapping` | bool | true | Memory-map database for speed |
 | `kraken2_enable_incremental` | bool | true | Incremental classification in realtime mode |
 

@@ -236,3 +236,24 @@ def load_profile_for_db(database_path: str) -> DatabaseProfile:
             logger.debug("Could not read profile from %s: %s", index_path, exc)
 
     return apply_override(detected, db_hash, mappings_dir)
+
+
+def kingdom_hint_for_database(config) -> "Optional[str]":
+    """"Bacteria" when the loaded database is GTDB, else None.
+
+    GTDB is bacteria and archaea by construction, so on such a database the
+    per-taxid NCBI kingdom lookup can be skipped -- which matters offline,
+    where that lookup returns None and the download then fails outright.
+
+    Read from the detected profile rather than a config key: whether a
+    database is GTDB is a property of the database. Any other nomenclature,
+    including undetectable, returns None so the normal per-taxid path runs;
+    a generic custom database may hold viruses or eukaryotes, and hinting
+    "Bacteria" there would misroute their downloads.
+    """
+    from nanometa_live.core.taxonomy.database_profile import (
+        Nomenclature, load_profile_for_db,
+    )
+
+    profile = load_profile_for_db(str((config or {}).get("kraken_db", "")))
+    return "Bacteria" if profile.nomenclature is Nomenclature.GTDB else None

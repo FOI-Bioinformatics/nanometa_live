@@ -87,7 +87,6 @@ class ConfigLoader:
             "blast_cores": 1,
             "check_intervals_seconds": 15,
             "kraken_db": "",
-            "kraken_taxonomy": "gtdb",
             # Using strict boolean values
             "kraken_memory_mapping": True,
             # Validation settings

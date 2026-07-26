@@ -670,7 +670,6 @@ def _database_settings_item():
             ], md=12),
         ]),
         # Hidden input to maintain backward compatibility
-        dbc.Input(id="kraken-taxonomy-input", type="hidden", value="gtdb"),
     ], title="Database Settings")
 
 

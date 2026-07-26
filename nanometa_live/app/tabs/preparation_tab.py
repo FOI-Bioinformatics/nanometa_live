@@ -1181,9 +1181,15 @@ def register_preparation_callbacks(app):
                 collection_data = None
                 logger.warning("Rescan produced no collection data")
 
+            profile = mapper._index.profile if mapper._index else None
             db_info = {
                 "path": kraken_db,
-                "type": collection.database_type.value if collection else "unknown",
+                "type": profile.display_label if profile else "unknown",
+                # The evidence behind the label, so an operator deciding
+                # whether to override can see WHY it was detected that way
+                # rather than guessing.
+                "detected_by": profile.detected_by if profile else "",
+                "overridden": bool(profile.overridden) if profile else False,
                 "hash": collection.database_hash if collection else "",
                 "stats": mapper.get_statistics(),
             }
@@ -1223,10 +1229,13 @@ def register_preparation_callbacks(app):
     )
     def update_taxmap_status_info(rescan_time, db_info, collection):
         """Update the inline status display after rescan or on page load."""
-        # Database type
+        # Detected taxonomy profile, with its evidence.
         if db_info and db_info.get("type"):
-            db_type = db_info["type"].replace("_", " ").title()
-            db_type_text = f"Database type: {db_type}"
+            db_type_text = f"Database taxonomy: {db_info['type']}"
+            if db_info.get("overridden"):
+                db_type_text += " (operator override)"
+            elif db_info.get("detected_by"):
+                db_type_text += f" -- {db_info['detected_by']}"
         else:
             db_type_text = "No database scanned"
 
@@ -1493,12 +1502,10 @@ def register_preparation_callbacks(app):
                 dbc.Badge(f"{completed}/{total_count}", color="primary", className="me-2"),
             ))
 
-        # On a GTDB database every organism is bacteria/archaea: hint the
-        # kingdom so the batch skips per-taxid NCBI lookups and uses the
-        # name-based GTDB path (also the only path for name-only entries).
-        kingdom_hint = ("Bacteria"
-                        if str((config or {}).get("kraken_taxonomy", "")).lower() == "gtdb"
-                        else None)
+        from nanometa_live.core.taxonomy.database_profile import (
+            kingdom_hint_for_database,
+        )
+        kingdom_hint = kingdom_hint_for_database(config)
         try:
             results = genome_mgr.download_genomes_batch(
                 missing, max_workers=3, progress_callback=progress_cb,
