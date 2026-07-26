@@ -143,7 +143,6 @@
     "nanometa_live/core/parsers/blast_validation_parser.py::ValidationParser.parse_nanometanf_aggregate_json",
     "nanometa_live/core/parsers/blast_validation_parser.py::parse_blast_per_read",
     "nanometa_live/core/parsers/paf_coverage_parser.py::parse_paf_coverage",
-    "nanometa_live/core/taxonomy/database_indexer.py::DatabaseIndexBuilder._detect_taxonomy_type",
     "nanometa_live/core/taxonomy/database_indexer.py::DatabaseIndexBuilder.build_from_names_dmp",
     "nanometa_live/core/taxonomy/taxid_mapping.py",
     "nanometa_live/core/taxonomy/taxid_mapping.py::TaxidMapper.generate_mappings",

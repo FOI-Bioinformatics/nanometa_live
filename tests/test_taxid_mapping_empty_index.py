@@ -24,13 +24,14 @@ from nanometa_live.core.taxonomy.taxid_mapping import (
     TaxidMapper,
     get_database_hash,
 )
+from nanometa_live.core.taxonomy.database_profile import DatabaseProfile
 
 
 def _make_minimal_index_dict(database_path: str = "/tmp/dummy_db") -> dict:
     """Return a serialisable index dict with zero nodes."""
     empty_index = DatabaseTaxonomyIndex(
         database_path=database_path,
-        database_type=DatabaseTaxonomyType.NCBI,
+        profile=DatabaseProfile(taxids_are_ncbi=True),
     )
     return empty_index.to_dict()
 
@@ -39,7 +40,7 @@ def _make_populated_index(database_path: str = "/tmp/dummy_db") -> DatabaseTaxon
     """Return an index with one species node, suitable for round-tripping."""
     index = DatabaseTaxonomyIndex(
         database_path=database_path,
-        database_type=DatabaseTaxonomyType.NCBI,
+        profile=DatabaseProfile(taxids_are_ncbi=True),
         total_nodes=1,
         species_count=1,
     )
@@ -95,7 +96,7 @@ class TestEmptyCacheRecovery:
         mapper = TaxidMapper(cache_dir=str(cache_dir))
         empty_index = DatabaseTaxonomyIndex(
             database_path=database_path,
-            database_type=DatabaseTaxonomyType.NCBI,
+            profile=DatabaseProfile(taxids_are_ncbi=True),
         )
         with patch.object(mapper._index_builder, "build_index", return_value=empty_index):
             with pytest.raises(RuntimeError, match="zero"):
@@ -134,7 +135,7 @@ class TestGenerateMappingsGuard:
         mapper = TaxidMapper.__new__(TaxidMapper)
         mapper._index = DatabaseTaxonomyIndex(
             database_path="/tmp/x",
-            database_type=DatabaseTaxonomyType.NCBI,
+            profile=DatabaseProfile(taxids_are_ncbi=True),
         )
         with pytest.raises(RuntimeError, match="not loaded or is empty"):
             mapper.generate_mappings([{"name": "Escherichia coli", "taxid": 562}])
