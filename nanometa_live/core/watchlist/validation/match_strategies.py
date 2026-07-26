@@ -199,7 +199,12 @@ class VariantMatchStrategy(MatchStrategy):
         # Track if query is for a species (has species epithet)
         query_is_species = bool(query.species_epithet)
 
-        for variant in query.variants:
+        # The GTDB polyphyly forms (78 per name) are only worth trying when
+        # the database might actually contain them. On an NCBI database they
+        # are provably absent, so generating and probing them is pure cost.
+        for variant in query.all_variants(
+            include_gtdb=index.profile.generates_gtdb_variants
+        ):
             # Skip canonical (already tried in ExactNameStrategy)
             if variant == query.canonical:
                 continue
@@ -270,7 +275,9 @@ class ReclassificationStrategy(MatchStrategy):
             for new_name in reclassified_names:
                 # Try to find the reclassified species
                 new_normalized = normalizer.normalize(new_name)
-                for variant in new_normalized.variants:
+                for variant in new_normalized.all_variants(
+                    include_gtdb=index.profile.generates_gtdb_variants
+                ):
                     taxids = index.by_name.get(variant, [])
                     if taxids:
                         node = index.by_taxid.get(taxids[0])
@@ -300,7 +307,9 @@ class ReclassificationStrategy(MatchStrategy):
                 # Try the reclassified genus with same species epithet
                 new_name = f"{new_genus} {query.species_epithet}"
                 new_normalized = normalizer.normalize(new_name)
-                for variant in new_normalized.variants:
+                for variant in new_normalized.all_variants(
+                    include_gtdb=index.profile.generates_gtdb_variants
+                ):
                     taxids = index.by_name.get(variant, [])
                     if taxids:
                         node = index.by_taxid.get(taxids[0])

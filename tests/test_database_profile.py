@@ -247,3 +247,66 @@ class TestOperatorOverride:
         index_cache.write_text(json.dumps({"version": "2.0"}))
         index_cache.unlink()  # what a version bump does
         assert load_override("abc123", tmp_path) is not None
+
+
+class TestVariantGatingReachesMatching:
+    """The gate must narrow work without ever losing a GTDB match.
+
+    This is the safety-relevant half of the change: a false negative here
+    means a watchlist organism present in the run is not detected. The
+    existing strategy tests all leave nomenclature at its UNKNOWN default,
+    which generates variants, so they cannot catch a gate that is stuck on.
+    """
+
+    ENTRY_NAME = "Bacillus anthracis"
+    GTDB_FORM = "bacillus_a anthracis"
+
+    def _index_with(self, db_name, nomenclature):
+        from nanometa_live.core.taxonomy.database_profile import DatabaseProfile
+        index = _index([(1, db_name, "S")])
+        index.by_name[db_name.lower()] = [1]
+        index.profile = DatabaseProfile(nomenclature=nomenclature)
+        return index
+
+    def _match(self, index):
+        from nanometa_live.core.watchlist.validation.match_strategies import (
+            VariantMatchStrategy,
+        )
+        from nanometa_live.core.watchlist.validation.name_normalizer import (
+            get_name_normalizer,
+        )
+        query = get_name_normalizer().normalize(self.ENTRY_NAME)
+        return VariantMatchStrategy().match(query, None, index)
+
+    def test_gtdb_database_still_matches_a_suffixed_genus(self):
+        """The match that must not be lost."""
+        index = self._index_with(self.GTDB_FORM, Nomenclature.GTDB)
+        assert self._match(index) is not None
+
+    def test_undetected_database_still_matches_a_suffixed_genus(self):
+        """A misdetection must not cost a detection."""
+        index = self._index_with(self.GTDB_FORM, Nomenclature.UNKNOWN)
+        assert self._match(index) is not None
+
+    def test_ncbi_database_does_not_probe_suffixed_forms(self):
+        """The saving. On an NCBI database these forms are provably absent."""
+        index = self._index_with(self.GTDB_FORM, Nomenclature.NCBI)
+        assert self._match(index) is None
+
+    def test_ncbi_database_still_matches_ordinary_names(self):
+        """Gating the GTDB forms must not disturb normal matching."""
+        index = self._index_with("bacillus_anthracis", Nomenclature.NCBI)
+        assert self._match(index) is not None
+
+
+class TestVariantCost:
+    def test_gtdb_forms_are_not_generated_up_front(self):
+        """78 of 83 variants per name were being built for every database."""
+        from nanometa_live.core.watchlist.validation.name_normalizer import (
+            get_name_normalizer,
+        )
+        name = get_name_normalizer().normalize("Bacillus anthracis")
+        assert len(name.variants) < 10
+        assert len(name.gtdb_genus_variants) == 78
+        assert len(name.all_variants(include_gtdb=False)) == len(name.variants)
+        assert len(name.all_variants()) > len(name.variants)

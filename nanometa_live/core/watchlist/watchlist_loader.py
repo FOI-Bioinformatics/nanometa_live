@@ -488,10 +488,11 @@ class WatchlistLoader:
         return user_dir
 
 
-# Real NCBI taxids are currently below ~10 million; WatchlistManager assigns
-# synthetic keys at or above this base to name-only entries. A synthetic key
-# must never be written to an exported file as if it were an NCBI taxid.
-PSEUDO_TAXID_BASE = 2_000_000_000
+# A synthetic key must never be written to an exported file as if it were an
+# NCBI taxid. See core.taxonomy.pseudo_taxid.
+from nanometa_live.core.taxonomy.pseudo_taxid import (  # noqa: E402
+    PSEUDO_TAXID_BASE,
+)
 
 
 def build_watchlist_yaml(

@@ -41,20 +41,14 @@ from nanometa_live.core.taxonomy.taxonomy_api import get_ncbi_client
 logger = logging.getLogger(__name__)
 
 
-# Name-only / custom watchlist entries get a synthetic taxid in a high band
-# (watchlist_manager._PSEUDO_TAXID_BASE = 2e9). Those are NOT real NCBI taxids,
-# so NCBI-by-taxid lookups (kingdom, accession, datasets-by-taxid) must be
-# skipped for them -- they only resolve via the species-name (GTDB) path.
-_PSEUDO_TAXID_MIN = 2_000_000_000
-
-
-def _is_real_ncbi_taxid(taxid) -> bool:
-    """True for a plausible real NCBI taxid (positive, below the pseudo band)."""
-    try:
-        t = int(taxid)
-    except (TypeError, ValueError):
-        return False
-    return 0 < t < _PSEUDO_TAXID_MIN
+# Name-only / custom watchlist entries get a synthetic taxid in a reserved
+# high band. Those are NOT real NCBI taxids, so NCBI-by-taxid lookups
+# (kingdom, accession, datasets-by-taxid) must be skipped for them -- they
+# resolve only via the species-name (GTDB) path.
+from nanometa_live.core.taxonomy.pseudo_taxid import (  # noqa: E402
+    PSEUDO_TAXID_BASE as _PSEUDO_TAXID_MIN,  # noqa: F401  re-export
+    is_real_ncbi_taxid as _is_real_ncbi_taxid,
+)
 
 
 def _kingdom_from_gtdb_taxonomy(gtdb_taxonomy) -> Optional[str]:

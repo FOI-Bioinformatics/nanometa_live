@@ -133,6 +133,9 @@ class NormalizedName:
     strain: Optional[str] = None     # Strain identifier if present
     variants: List[str] = field(default_factory=list)  # All matching forms
     taxonomy_hints: List[str] = field(default_factory=list)  # Detected patterns
+    _gtdb_variants_cache: Optional[List[str]] = field(
+        default=None, repr=False, compare=False
+    )
 
     def __post_init__(self):
         """Generate variants after initialization."""
@@ -162,24 +165,49 @@ class NormalizedName:
             gtdb_species = f"s__{self.genus}_{self.species_epithet}"
             variants.append(gtdb_species.lower())
 
-        # GTDB genus suffix variants (e.g., Bacillus -> Bacillus_A, Clostridium -> Clostridium_P)
-        # GTDB uses alphabetic suffixes for taxonomic reorganizations
-        if self.genus and self.species_epithet:
-            # Generate all possible GTDB suffixes (A-Z)
-            for letter in 'abcdefghijklmnopqrstuvwxyz':
-                suffix = f"_{letter}"
-                gtdb_genus = f"{self.genus.lower()}{suffix}"
-                variants.append(f"{gtdb_genus} {self.species_epithet.lower()}")
-                variants.append(f"{gtdb_genus}_{self.species_epithet.lower()}")
-                # Also add GTDB species prefix form
-                variants.append(f"s__{gtdb_genus}_{self.species_epithet.lower()}")
-
         # Genus-only form (LOWEST priority - only for fallback matching)
         if self.genus:
             variants.append(self.genus.lower())
             variants.append(f"g__{self.genus.lower()}")
 
         return list(dict.fromkeys(variants))  # Remove duplicates, preserve order
+
+    @property
+    def gtdb_genus_variants(self) -> List[str]:
+        """Speculative GTDB polyphyly forms, e.g. bacillus_a anthracis.
+
+        GTDB splits a polyphyletic genus and suffixes the parts alphabetically,
+        so an NCBI name matches its GTDB counterpart only through one of these.
+        Which suffix a given genus received is not derivable, so all 26 are
+        tried -- 78 strings per name.
+
+        Kept out of ``variants`` and computed on demand because every caller
+        used to pay for them against every database, including the NCBI
+        databases where the suffixes are provably absent (13 of the 14
+        shipped). Callers gate on
+        ``DatabaseProfile.generates_gtdb_variants``, which is true for GTDB
+        and for an undetectable database -- a misdetected GTDB database must
+        still match, and a false positive costs only CPU.
+        """
+        if not (self.genus and self.species_epithet):
+            return []
+        if self._gtdb_variants_cache is None:
+            genus = self.genus.lower()
+            epithet = self.species_epithet.lower()
+            out: List[str] = []
+            for letter in "abcdefghijklmnopqrstuvwxyz":
+                gtdb_genus = f"{genus}_{letter}"
+                out.append(f"{gtdb_genus} {epithet}")
+                out.append(f"{gtdb_genus}_{epithet}")
+                out.append(f"s__{gtdb_genus}_{epithet}")
+            self._gtdb_variants_cache = out
+        return self._gtdb_variants_cache
+
+    def all_variants(self, include_gtdb: bool = True) -> List[str]:
+        """Variants, with the GTDB polyphyly forms appended when wanted."""
+        if not include_gtdb:
+            return self.variants
+        return list(dict.fromkeys(self.variants + self.gtdb_genus_variants))
 
 
 class NameNormalizer:

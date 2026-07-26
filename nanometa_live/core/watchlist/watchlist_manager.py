@@ -20,7 +20,6 @@ with a single, unified approach.
 import logging
 import os
 import threading
-import zlib
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -41,21 +40,12 @@ from nanometa_live.core.config.pathogen_loader import (
 
 logger = logging.getLogger(__name__)
 
-# Pseudo-taxids for name-only / custom watchlist entries (those with no NCBI
-# taxid -- typically GTDB-only organisms) must be DETERMINISTIC across process
-# restarts: they key the in-memory entry dict, the downloaded genome filename
-# (``{taxid}.fasta``) and the taxid-mapping cache. Python's builtin ``hash()``
-# randomises str hashing per process (PYTHONHASHSEED), so it produced a
-# different id every launch -- orphaning genomes and mappings on restart. crc32
-# is stable. The high base keeps pseudo-taxids clear of real NCBI taxids
-# (currently < ~10M) so the two namespaces never collide.
-_PSEUDO_TAXID_BASE = 2_000_000_000
-
-
-def _stable_pseudo_taxid(name: str) -> int:
-    """Deterministic synthetic taxid for a name-only / custom entry."""
-    digest = zlib.crc32((name or "").strip().lower().encode("utf-8"))
-    return _PSEUDO_TAXID_BASE + (digest % 1_000_000_000)
+# See core.taxonomy.pseudo_taxid for why these keys exist and why they must
+# be deterministic across process restarts.
+from nanometa_live.core.taxonomy.pseudo_taxid import (  # noqa: E402
+    PSEUDO_TAXID_BASE as _PSEUDO_TAXID_BASE,  # noqa: F401  re-export
+    stable_pseudo_taxid as _stable_pseudo_taxid,
+)
 
 
 # Import taxonomy and loader (with lazy initialization to avoid circular imports)

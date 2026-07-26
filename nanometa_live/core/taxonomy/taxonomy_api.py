@@ -29,6 +29,8 @@ import urllib3
 
 from nanometa_live.core.utils.offline_cache import get_cache as get_offline_cache
 
+from nanometa_live.core.taxonomy.pseudo_taxid import PSEUDO_TAXID_BASE as _PSEUDO_TAXID_BASE
+
 logger = logging.getLogger(__name__)
 
 
@@ -270,11 +272,11 @@ class TaxonomyAPIClient(ABC):
     # WHY a host failed rather than reporting a silent partial count.
     _circuit_last_reason: Dict[str, str] = {}
 
-    # NCBI taxids at/above this synthetic band are pseudo-taxids minted by
-    # the watchlist for name-only/custom entries (see watchlist_manager
-    # _PSEUDO_TAXID_BASE). They are NOT real NCBI ids; sending one to NCBI
-    # esummary returns HTTP 400, so by-taxid lookups must skip them.
-    _PSEUDO_TAXID_MIN: int = 2_000_000_000
+    # Pseudo-taxids minted for name-only/custom watchlist entries are NOT
+    # real NCBI ids; sending one to esummary returns HTTP 400, which would
+    # trip the shared circuit breaker for every other lookup in the run.
+    # See core.taxonomy.pseudo_taxid.
+    _PSEUDO_TAXID_MIN: int = _PSEUDO_TAXID_BASE
 
     @classmethod
     def reset_circuit_breaker(cls) -> None:

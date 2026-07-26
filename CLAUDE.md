@@ -484,6 +484,28 @@ standalone against an empty index singleton. An operator override
 lives in a *sibling* `{db_hash}_profile_override.json` so it survives
 the index rebuild.
 
+**GTDB variant gating.** GTDB splits polyphyletic genera and suffixes
+the parts alphabetically (`Bacillus_A`), and which suffix a genus got
+is not derivable, so matching an NCBI name to its GTDB counterpart
+means trying all 26 — 78 strings per name. These are no longer built
+eagerly: `NormalizedName.variants` keeps ~5 cheap forms and the GTDB
+set is a lazy `gtdb_genus_variants` property, appended only via
+`all_variants(include_gtdb=profile.generates_gtdb_variants)`. The
+three `match_strategies` call sites gate on that. UNKNOWN counts as
+"generate": a misdetected GTDB database must still match its
+organisms, and a false positive costs only CPU, whereas a false
+negative is a missed detection. Measured saving on an NCBI database
+(13 of the 14 shipped): 156k fewer string builds per 2000 names.
+Regression-covered in `tests/test_database_profile.py`.
+
+**One pseudo-taxid definition.** `core/taxonomy/pseudo_taxid.py` owns
+`PSEUDO_TAXID_BASE`, `is_real_ncbi_taxid` and `stable_pseudo_taxid`.
+The constant previously existed in four modules independently. Entries
+with no NCBI identity are keyed in this reserved band so an
+NCBI-by-taxid call can refuse them — esummary returns HTTP 400 for a
+nonexistent taxid, which would trip the shared per-host circuit
+breaker for every other organism in the run.
+
 ### Database registry: bundled + operator-managed
 
 The Kraken2 download manifest is loaded from two sources on startup
