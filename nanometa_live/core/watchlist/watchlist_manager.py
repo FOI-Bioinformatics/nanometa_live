@@ -480,7 +480,6 @@ class WatchlistManager:
         # data_dir/project_dir captured at load_config time so the toggle
         # state file resolves to the project-local location via NanometaPaths.
         self._paths_config: Dict[str, Any] = {}
-        self._taxonomy_mode: str = "auto"  # "auto", "ncbi", "gtdb"
         self._loaded = False
 
     def load_config(self, config: Dict[str, Any]) -> None:
@@ -529,7 +528,6 @@ class WatchlistManager:
         watchlist_config = config.get("watchlist", {})
 
         # Set taxonomy mode
-        self._taxonomy_mode = watchlist_config.get("taxonomy_mode", "auto")
 
         if watchlist_config.get("enabled", True):
             # Load YAML-based watchlists first (new system)
@@ -575,8 +573,7 @@ class WatchlistManager:
         self._restore_toggle_state()
 
         self._loaded = True
-        logger.info(f"WatchlistManager loaded {len(self._entries)} entries "
-                   f"(taxonomy mode: {self._taxonomy_mode})")
+        logger.info(f"WatchlistManager loaded {len(self._entries)} entries")
 
     def _load_yaml_watchlists(self, watchlist_ids: List[str]) -> None:
         """Load entries from YAML watchlist files."""
@@ -830,6 +827,49 @@ class WatchlistManager:
         """Get all critical threat level entries."""
         return self.get_entries_by_threat_level(ThreatLevel.CRITICAL)
 
+    @staticmethod
+    def _database_taxids_are_ncbi() -> bool:
+        """Whether a raw taxid comparison against this database means anything.
+
+        False whenever it cannot be established -- including before any
+        database has been indexed. Trusting an unverified taxid names the
+        wrong organism on a pathogen dashboard; distrusting a good one only
+        costs the shortcut, since name matching still runs.
+        """
+        try:
+            from nanometa_live.core.taxonomy.taxid_mapping import (
+                get_mapping_collection,
+            )
+            collection = get_mapping_collection()
+            return bool(collection and collection.profile.taxids_are_ncbi)
+        except (ImportError, AttributeError):
+            return False
+
+    @staticmethod
+    def _build_db_taxid_index(
+        active_entries: Dict[int, "WatchlistEntry"],
+        mapping_collection: Optional[Any],
+    ) -> Dict[int, int]:
+        """Map database taxid -> watchlist key, generated mappings first.
+
+        An operator-set ``db_taxid`` on an entry overrides a generated
+        mapping for the same database taxid, which is the precedence
+        ``parameter_mapping.build_species_list`` already applies when
+        building the pipeline's taxid filter. Applying it here too means
+        detection, the pipeline and the exported report finally agree about
+        what the field means.
+        """
+        db_to_ncbi: Dict[int, int] = {}
+        if mapping_collection is not None:
+            for ncbi_taxid, mapping in mapping_collection.mappings.items():
+                if mapping.db_taxid:
+                    db_to_ncbi[mapping.db_taxid] = ncbi_taxid
+        for key, entry in active_entries.items():
+            db_taxid = getattr(entry, "db_taxid", None)
+            if db_taxid:
+                db_to_ncbi[int(db_taxid)] = key
+        return db_to_ncbi
+
     def check_organisms(
         self,
         detected_organisms: List[Dict[str, Any]]
@@ -848,6 +888,18 @@ class WatchlistManager:
         alerts = []
         active_entries = self.get_active_entries()
         matcher = _get_taxonomy_matcher()
+        # A raw taxid comparison is only meaningful when the database's taxids
+        # are NCBI's. False is the safe default: trusting an unverified taxid
+        # names the WRONG organism, while distrusting a good one only falls
+        # through to name matching. Resolved once, not once per organism.
+        db_is_ncbi = self._database_taxids_are_ncbi()
+
+        # Operator-set db_taxid values, so an entry that names its taxid in the
+        # loaded database matches by that id even when its name does not
+        # normalise to the report's name. Without this the field was honoured
+        # when building pipeline parameters and when writing the export report,
+        # but ignored by live detection -- the three disagreed.
+        db_to_ncbi = self._build_db_taxid_index(active_entries, None)
 
         for organism in detected_organisms:
             taxid = organism.get("taxid")
@@ -858,23 +910,13 @@ class WatchlistManager:
             entry = None
             best_score = 0.0
 
-            # First try exact taxid match (only for NCBI databases)
-            db_is_ncbi = True  # Safe default
-            try:
-                from nanometa_live.core.taxonomy.taxid_mapping import (
-                    get_mapping_collection,
-                    DatabaseTaxonomyType,
-                )
-                mc = get_mapping_collection()
-                if mc and mc.database_type:
-                    db_is_ncbi = mc.database_type == DatabaseTaxonomyType.NCBI
-            except (ImportError, AttributeError):
-                pass
-
-            if db_is_ncbi and taxid and taxid in active_entries:
+            if taxid and taxid in db_to_ncbi:
+                entry = active_entries.get(db_to_ncbi[taxid])
+                best_score = 1.0 if entry else 0.0
+            if entry is None and db_is_ncbi and taxid and taxid in active_entries:
                 entry = active_entries[taxid]
                 best_score = 1.0
-            else:
+            if entry is None:
                 # Use TaxonomyMatcher for name-based matching
                 for e in active_entries.values():
                     score = matcher.match_organism(
@@ -1055,49 +1097,6 @@ class WatchlistManager:
     # -------------------------------------------------------------------------
     # New methods for YAML-based watchlists and multi-taxonomy support
     # -------------------------------------------------------------------------
-
-    def set_taxonomy_mode(self, mode: str) -> None:
-        """
-        Set the taxonomy matching mode.
-
-        Args:
-            mode: "auto" (detect from data), "ncbi", or "gtdb"
-        """
-        if mode in ("auto", "ncbi", "gtdb"):
-            self._taxonomy_mode = mode
-            matcher = _get_taxonomy_matcher()
-            if mode == "ncbi":
-                from .taxonomy_matcher import TaxonomyType
-                matcher.taxonomy_type = TaxonomyType.NCBI
-            elif mode == "gtdb":
-                from .taxonomy_matcher import TaxonomyType
-                matcher.taxonomy_type = TaxonomyType.GTDB
-            else:
-                from .taxonomy_matcher import TaxonomyType
-                matcher.taxonomy_type = TaxonomyType.UNKNOWN
-
-    def get_taxonomy_mode(self) -> str:
-        """Get the current taxonomy matching mode."""
-        return self._taxonomy_mode
-
-    def get_taxonomy_indicator(self) -> str:
-        """Get human-readable taxonomy indicator for UI display."""
-        matcher = _get_taxonomy_matcher()
-        return matcher.get_taxonomy_indicator()
-
-    def detect_taxonomy_from_report(self, report_path: str) -> str:
-        """
-        Auto-detect taxonomy from a Kraken2 report file.
-
-        Args:
-            report_path: Path to a Kraken2 report file
-
-        Returns:
-            Detected taxonomy type ("ncbi", "gtdb", "mixed", or "unknown")
-        """
-        matcher = _get_taxonomy_matcher()
-        taxonomy_type = matcher.detect_taxonomy_from_report(report_path)
-        return taxonomy_type.value
 
     def get_available_watchlists(self) -> List[Dict[str, Any]]:
         """
@@ -1356,7 +1355,6 @@ class WatchlistManager:
 
         return {
             "enabled": True,
-            "taxonomy_mode": self._taxonomy_mode,
             "builtin": list(self._enabled_watchlists),  # New YAML-based watchlists
             "include_builtin": list(self._enabled_categories),  # Legacy categories
             "custom": custom_entries,
@@ -1672,8 +1670,6 @@ class WatchlistManager:
             "total_entries": len(self._entries),
             "active_entries": len(active),
             "disabled_entries": len(self._entries) - len(active),
-            "taxonomy_mode": self._taxonomy_mode,
-            "taxonomy_indicator": self.get_taxonomy_indicator(),
             "by_threat_level": {
                 "critical": len([e for e in active.values() if e.threat_level == ThreatLevel.CRITICAL]),
                 "high": len([e for e in active.values() if e.threat_level == ThreatLevel.HIGH]),
@@ -1717,15 +1713,11 @@ class WatchlistManager:
         if not mapping_collection:
             return self.check_organisms(detected_organisms)
 
+
         alerts = []
         active_entries = self.get_active_entries()
 
-        # Build reverse mapping: db_taxid -> ncbi_taxid
-        db_to_ncbi = {}
-        mappings = mapping_collection.mappings
-        for ncbi_taxid, mapping in mappings.items():
-            if mapping.db_taxid:
-                db_to_ncbi[mapping.db_taxid] = ncbi_taxid
+        db_to_ncbi = self._build_db_taxid_index(active_entries, mapping_collection)
 
         for organism in detected_organisms:
             detected_taxid = organism.get("taxid")
@@ -1737,11 +1729,12 @@ class WatchlistManager:
             match_method = "none"
 
             # Try to find matching entry
-            # 1. First, try direct NCBI taxid match (only for NCBI databases)
-            db_is_ncbi = True
-            if mapping_collection and mapping_collection.database_type:
-                from nanometa_live.core.taxonomy.taxid_mapping import DatabaseTaxonomyType
-                db_is_ncbi = mapping_collection.database_type == DatabaseTaxonomyType.NCBI
+            # 1. First, try direct NCBI taxid match. See the note on the
+            #    equivalent gate in check_organisms for why False is the safe
+            #    default rather than True.
+            db_is_ncbi = bool(
+                mapping_collection and mapping_collection.profile.taxids_are_ncbi
+            )
 
             if db_is_ncbi and detected_taxid and detected_taxid in active_entries:
                 entry = active_entries[detected_taxid]
@@ -1753,10 +1746,14 @@ class WatchlistManager:
                 ncbi_taxid = db_to_ncbi[detected_taxid]
                 if ncbi_taxid in active_entries:
                     entry = active_entries[ncbi_taxid]
-                    # Get the mapping score
-                    mapping = mappings.get(ncbi_taxid)
+                    # Carry the generated mapping's own confidence when there
+                    # is one. An operator-set db_taxid has no mapping record,
+                    # and scores 1.0: it is an explicit statement, not a guess.
+                    mapping = mapping_collection.mappings.get(ncbi_taxid)
                     if mapping:
                         best_score = mapping.match_score or 0.9
+                    elif getattr(entry, "db_taxid", None) == detected_taxid:
+                        best_score = 1.0
                     else:
                         best_score = 0.9
                     match_method = "taxid_mapping"

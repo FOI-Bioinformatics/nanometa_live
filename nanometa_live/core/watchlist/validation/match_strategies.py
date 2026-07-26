@@ -598,13 +598,14 @@ class CompositeMatchStrategy:
         Returns:
             MatchResult (may be NO_MATCH if nothing found)
         """
-        from nanometa_live.core.taxonomy.taxid_mapping import DatabaseTaxonomyType
-
         # Normalize the query
         normalized = self._normalizer.normalize(name)
 
-        # For custom databases, skip taxid-based matching since taxids are incompatible
-        skip_taxid_match = index.database_type == DatabaseTaxonomyType.CUSTOM
+        # A taxid comparison only means something when the database's taxids
+        # are NCBI's. Anything else -- GTDB, an in-house build, or a database
+        # we could not verify -- assigns its own integers, so taxid 562 in the
+        # report is not necessarily Escherichia coli.
+        skip_taxid_match = not index.profile.taxids_are_ncbi
 
         # Try each strategy with primary name
         for strategy in self.strategies:

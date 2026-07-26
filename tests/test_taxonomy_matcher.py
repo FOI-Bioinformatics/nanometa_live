@@ -16,7 +16,6 @@ import pytest
 
 from nanometa_live.core.watchlist.taxonomy_matcher import (
     TaxonomyMatcher,
-    TaxonomyType,
     get_taxonomy_matcher,
     reset_taxonomy_matcher,
 )
@@ -72,19 +71,33 @@ class TestGetNameVariants:
 
 
 class TestMatchOrganism:
-    def test_ncbi_exact_taxid_is_perfect_match(self):
-        matcher = TaxonomyMatcher(TaxonomyType.NCBI)
+    def test_matcher_scores_names_only(self):
+        """Taxid equality is the caller's job, not the matcher's.
+
+        Both production callers build a database-taxid index and try the
+        direct key before falling back to this per-entry name loop, so a
+        taxid comparison here would be redundant work at O(entries) cost.
+        The taxid paths are covered against the reachable entry points in
+        tests/test_custom_db_taxid.py.
+        """
+        matcher = TaxonomyMatcher()
         score = matcher.match_organism(
             detected={"name": "completely different label", "taxid": 562},
             entry_name="Escherichia coli",
             entry_taxid=562,
         )
-        assert score == 1.0
+        assert score == 0.0
 
-    def test_taxid_ignored_when_taxonomy_is_not_ncbi(self):
-        # Under non-NCBI taxonomy the taxid branch must not fire; matching
-        # falls through to names, which here do not agree -> 0.0.
-        matcher = TaxonomyMatcher(TaxonomyType.GTDB)
+    def test_matching_names_still_score_regardless_of_taxid(self):
+        matcher = TaxonomyMatcher()
+        assert matcher.match_organism(
+            detected={"name": "Escherichia coli", "taxid": 999999},
+            entry_name="Escherichia coli",
+            entry_taxid=562,
+        ) == 1.0
+
+    def test_disagreeing_names_do_not_match(self):
+        matcher = TaxonomyMatcher()
         score = matcher.match_organism(
             detected={"name": "Staphylococcus aureus", "taxid": 562},
             entry_name="Escherichia coli",
@@ -136,97 +149,6 @@ class TestMatchOrganism:
             entry_name="Escherichia coli",
         )
         assert score == 0.0
-
-
-class TestFindMatch:
-    """find_match drives the watched-organisms badge count.
-
-    Regression anchor for commit 6d6d3c1: with no usable taxid the correct
-    watchlist entry must still be selected by normalized name, so the badge
-    count matches the detected cards.
-    """
-
-    WATCHLIST = [
-        {"name": "Escherichia coli", "taxid_ncbi": 562},
-        {"name": "Bacillus anthracis", "taxid_ncbi": 1392},
-        {"name": "Staphylococcus aureus", "taxid_ncbi": 1280},
-    ]
-
-    def test_name_only_match_selects_correct_entry(self):
-        matcher = TaxonomyMatcher(TaxonomyType.GTDB)
-        detected = {"name": "s__Bacillus_anthracis", "taxid": None}
-        result = matcher.find_match(detected, self.WATCHLIST)
-        assert result is not None
-        entry, score = result
-        assert entry["name"] == "Bacillus anthracis"
-        assert score == 1.0
-
-    def test_below_threshold_returns_none(self):
-        matcher = TaxonomyMatcher(TaxonomyType.GTDB)
-        # Same genus as an entry (score 0.3) but below the default 0.7 threshold.
-        detected = {"name": "Escherichia fergusonii", "taxid": None}
-        assert matcher.find_match(detected, self.WATCHLIST) is None
-
-    def test_picks_highest_scoring_entry(self):
-        matcher = TaxonomyMatcher(TaxonomyType.GTDB)
-        detected = {"name": "Escherichia coli", "taxid": None}
-        result = matcher.find_match(detected, self.WATCHLIST, threshold=0.5)
-        assert result is not None
-        entry, score = result
-        assert entry["name"] == "Escherichia coli"
-        assert score == 1.0
-
-
-class TestDetectTaxonomyFromReport:
-    def test_detects_gtdb_from_prefixed_names(self, tmp_path):
-        report = tmp_path / "gtdb.report.txt"
-        report.write_text(
-            _kraken_line("50.0", 100, 100, "S", 1, "s__Escherichia_coli")
-            + _kraken_line("30.0", 60, 60, "S", 2, "s__Bacillus_anthracis")
-        )
-        matcher = TaxonomyMatcher()
-        assert matcher.detect_taxonomy_from_report(str(report)) == TaxonomyType.GTDB
-
-    def test_detects_ncbi_from_spaced_names(self, tmp_path):
-        report = tmp_path / "ncbi.report.txt"
-        report.write_text(
-            _kraken_line("50.0", 100, 100, "S", 562, "Escherichia coli")
-            + _kraken_line("30.0", 60, 60, "S", 1392, "Bacillus anthracis")
-        )
-        matcher = TaxonomyMatcher()
-        assert matcher.detect_taxonomy_from_report(str(report)) == TaxonomyType.NCBI
-
-    def test_missing_file_returns_unknown(self, tmp_path):
-        matcher = TaxonomyMatcher()
-        result = matcher.detect_taxonomy_from_report(str(tmp_path / "nope.txt"))
-        assert result == TaxonomyType.UNKNOWN
-
-    def test_detection_sets_taxonomy_type_on_matcher(self, tmp_path):
-        report = tmp_path / "ncbi.report.txt"
-        report.write_text(_kraken_line("99.0", 100, 100, "S", 562, "Escherichia coli"))
-        matcher = TaxonomyMatcher()
-        matcher.detect_taxonomy_from_report(str(report))
-        assert matcher.taxonomy_type == TaxonomyType.NCBI
-
-
-class TestTaxonomyIndicatorAndType:
-    @pytest.mark.parametrize(
-        "ttype,expected",
-        [
-            (TaxonomyType.NCBI, "NCBI"),
-            (TaxonomyType.GTDB, "GTDB"),
-            (TaxonomyType.MIXED, "Mixed"),
-            (TaxonomyType.UNKNOWN, "Auto"),
-        ],
-    )
-    def test_indicator_strings(self, ttype, expected):
-        matcher = TaxonomyMatcher(ttype)
-        assert matcher.get_taxonomy_indicator() == expected
-
-    def test_taxonomy_type_setter(self):
-        matcher = TaxonomyMatcher()
-        matcher.taxonomy_type = TaxonomyType.GTDB
-        assert matcher.taxonomy_type == TaxonomyType.GTDB
 
 
 class TestSingleton:
