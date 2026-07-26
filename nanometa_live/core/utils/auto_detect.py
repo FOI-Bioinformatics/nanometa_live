@@ -10,12 +10,11 @@ Features:
 - Optimal update interval estimation
 """
 
-import gzip
 import re
 import logging
 import time
 from pathlib import Path
-from typing import Dict, Optional, Tuple, List, Any
+from typing import Any, Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -180,162 +179,6 @@ def detect_sample_handling(input_directory: str) -> Tuple[str, str]:
         return "single_sample", f"Found {len(root_fastq_files)} FASTQ files, treating as single sample"
     else:
         return "per_file", f"Found {len(root_fastq_files)} FASTQ files, treating each as separate sample"
-
-
-def detect_kraken_taxonomy(kraken_db_path: str) -> Tuple[str, str]:
-    """
-    Auto-detect whether a Kraken2 database uses GTDB or NCBI taxonomy.
-
-    Detection methods:
-    1. Check database name for hints (gtdb, ncbi)
-    2. Examine taxo.k2d file header if accessible
-    3. Sample species names from inspect output
-
-    Args:
-        kraken_db_path: Path to Kraken2 database directory
-
-    Returns:
-        Tuple of (taxonomy_type, explanation)
-    """
-    db_path = Path(kraken_db_path).expanduser()
-
-    if not db_path.exists():
-        return "gtdb", "Database not found, using default (GTDB)"
-
-    # Check database name for hints
-    db_name = db_path.name.lower()
-    parent_name = db_path.parent.name.lower() if db_path.parent != db_path else ""
-
-    if "gtdb" in db_name or "gtdb" in parent_name:
-        return "gtdb", f"Database name contains 'gtdb': {db_path.name}"
-
-    if "ncbi" in db_name or "refseq" in db_name or "ncbi" in parent_name:
-        return "ncbi", f"Database name contains 'ncbi' or 'refseq': {db_path.name}"
-
-    # Check for GTDB-specific markers
-    # GTDB taxonomy uses prefixes like "d__", "p__", "c__", etc.
-    # NCBI taxonomy uses different formatting
-
-    # Try to read library/library_report.tsv if it exists
-    library_report = db_path / "library" / "library_report.tsv"
-    if library_report.exists():
-        try:
-            with open(library_report, 'r') as f:
-                content = f.read(2000)  # Read first 2KB
-                if "d__Bacteria" in content or "s__" in content:
-                    return "gtdb", "GTDB taxonomy markers found in library report"
-                elif "cellular organisms" in content or "Bacteria" in content:
-                    return "ncbi", "NCBI taxonomy markers found in library report"
-        except IOError:
-            pass
-
-    # Content scan of the taxonomy dump (inspect.txt[.gz]) -- the authoritative
-    # signal. Reads the gzipped form too: GTDB-derived / size-conscious DBs ship
-    # only inspect.txt.gz, which the older plain-text-only probe missed, so such
-    # a DB fell through to the GTDB default by luck rather than detection.
-    ttype, reason = _detect_taxonomy_from_inspect(db_path)
-    if ttype:
-        return ttype, reason
-
-    # Check for seqid2taxid.map (plain or gzipped) -- GTDB GenBank/RefSeq
-    # accession prefixes (GB_/RS_) are a strong GTDB signal.
-    for seqid_map in (db_path / "seqid2taxid.map", db_path / "seqid2taxid.map.gz"):
-        if not seqid_map.exists():
-            continue
-        try:
-            with _open_maybe_gz(seqid_map) as f:
-                lines = [f.readline() for _ in range(200)]
-            gtdb_count = sum(1 for line in lines if "GB_" in line or "RS_" in line)
-            if gtdb_count > 50:
-                return "gtdb", "GTDB accession patterns found in seqid2taxid.map"
-        except (IOError, OSError, EOFError):
-            pass
-        break
-
-    # Default to GTDB (more common for modern databases)
-    return "gtdb", "Could not determine taxonomy type, defaulting to GTDB"
-
-
-# Well-known NCBI species taxids (bacteria). Their presence in a DB's taxid
-# column means the DB uses the real NCBI taxonomy, not a remapped/custom one.
-_NCBI_MARKER_TAXIDS = frozenset({
-    562, 1280, 287, 1773, 1351, 1396, 1313, 28901, 470, 1352, 1423, 817,
-})
-
-
-def _open_maybe_gz(path: Path):
-    """Open a path as text, transparently handling a .gz suffix."""
-    if str(path).endswith(".gz"):
-        return gzip.open(path, "rt", encoding="utf-8", errors="replace")
-    return open(path, "r", encoding="utf-8", errors="replace")
-
-
-def _find_inspect_file(db_path: Path) -> Optional[Path]:
-    """Locate a Kraken2 inspect dump, preferring the DB dir, gz-aware."""
-    for name in ("inspect.txt", "inspect.txt.gz"):
-        cand = db_path / name
-        if cand.exists():
-            return cand
-    # Fall back to a sibling/parent inspect file (older layouts).
-    for pattern in ("*inspect*.txt", "*inspect*.txt.gz"):
-        matches = sorted(db_path.parent.glob(pattern))
-        if matches:
-            return matches[0]
-    return None
-
-
-def _detect_taxonomy_from_inspect(db_path: Path) -> Tuple[Optional[str], str]:
-    """Classify a DB as gtdb/ncbi by scanning its inspect dump content.
-
-    Signals (checked in priority order):
-      - GTDB: ``s__``/``d__`` lineage prefixes, or the GTDB species/genus suffix
-        ``<epithet>_<UPPER>`` (e.g. ``Burkholderia ambifaria_A``) which NCBI
-        never produces. A custom/remapped DB built from GTDB is caught here even
-        though its taxids and most binomials look ordinary.
-      - NCBI: well-known NCBI species taxids present in the taxid column, or
-        plain binomial names with no GTDB markers.
-    Returns ``(None, "")`` when the file is absent/unreadable so the caller can
-    fall through to weaker probes.
-    """
-    inspect_file = _find_inspect_file(db_path)
-    if inspect_file is None:
-        return None, ""
-
-    gtdb_suffix = re.compile(r"[a-z]_[A-Z]\b")  # ambifaria_A, Bacillus_A
-    ncbi_binomial = re.compile(r"\b(Escherichia coli|Staphylococcus aureus)\b")
-    gtdb_hits = 0
-    ncbi_taxid_hits = 0
-    saw_binomial = False
-    try:
-        with _open_maybe_gz(inspect_file) as f:
-            for i, line in enumerate(f):
-                if i >= 40000:  # bounded scan
-                    break
-                if "s__" in line or "d__" in line:
-                    gtdb_hits += 5  # explicit GTDB lineage prefix: very strong
-                if gtdb_suffix.search(line):
-                    gtdb_hits += 1
-                cols = line.rstrip("\n").split("\t")
-                if len(cols) >= 6:
-                    try:
-                        if int(cols[4]) in _NCBI_MARKER_TAXIDS:
-                            ncbi_taxid_hits += 1
-                    except ValueError:
-                        pass
-                if not saw_binomial and ncbi_binomial.search(line):
-                    saw_binomial = True
-    except (IOError, OSError, EOFError):
-        return None, ""
-
-    # GTDB suffix is unambiguous (NCBI never emits species_<UPPER>); a few hits
-    # are decisive even when most names look like ordinary binomials.
-    if gtdb_hits >= 3:
-        return "gtdb", f"GTDB naming pattern found in {inspect_file.name}"
-    if ncbi_taxid_hits >= 2:
-        return "ncbi", f"NCBI species taxids found in {inspect_file.name}"
-    if saw_binomial and gtdb_hits == 0:
-        return "ncbi", f"NCBI species naming pattern found in {inspect_file.name}"
-    return None, ""
 
 
 def estimate_update_interval(
