@@ -1062,6 +1062,31 @@ class WatchlistManager:
             return NanometaPaths.from_config(self._paths_config).watchlist_toggle_state
         return Path(get_data_dir_from_env()) / "watchlist_toggle_state.yaml"
 
+    def _toggle_state_read_candidates(self) -> List[Path]:
+        """Paths to try when RESTORING toggle state, most specific first.
+
+        Writes always go to the project-scoped path, but reads fall back to
+        the data-dir one. That fallback is what makes a transferred bundle
+        work: ``import_bundle`` writes the operator's selection to
+        ``<data_dir>/watchlist_toggle_state.yaml`` because a bundle is
+        machine-portable and cannot know the field machine's project
+        directory. Without the fallback, a project dir -- which the GUI
+        always sets -- shadowed the imported file, and every entry the
+        operator had deliberately disabled came back enabled on the field
+        machine with no indication anything had been lost.
+
+        A project that has its own state still wins, so this seeds a fresh
+        project rather than overriding an existing selection.
+        """
+        from nanometa_live.core.utils.paths import get_data_dir_from_env
+
+        primary = self._toggle_state_path()
+        fallback = Path(get_data_dir_from_env()) / "watchlist_toggle_state.yaml"
+        candidates = [primary]
+        if fallback != primary:
+            candidates.append(fallback)
+        return candidates
+
     def _save_toggle_state(self) -> None:
         """Save disabled taxid set to disk for persistence across restarts.
 
@@ -1096,8 +1121,11 @@ class WatchlistManager:
     def _restore_toggle_state(self) -> None:
         """Restore disabled taxid set from disk after loading entries."""
         try:
-            state_path = self._toggle_state_path()
-            if not state_path.exists():
+            state_path = next(
+                (p for p in self._toggle_state_read_candidates() if p.exists()),
+                None,
+            )
+            if state_path is None:
                 return
             with open(state_path) as f:
                 data = yaml.safe_load(f) or {}
