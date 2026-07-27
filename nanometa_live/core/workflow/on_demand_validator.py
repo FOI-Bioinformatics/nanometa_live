@@ -434,6 +434,28 @@ class OnDemandValidator:
             logger.warning("No pipeline source configured for nanometanf delegation")
             return None
 
+        # Validation reads the ORIGINAL FASTQ files; the results directory is
+        # not a substitute. The command below used to fall back to it when
+        # input_dir was unset, which pointed --reads_dir at a directory with
+        # no FASTQs -- the pipeline then found nothing and, before its own
+        # guards existed, reported success having validated nothing. Refuse
+        # here instead, where the message can reach the operator.
+        if not self.input_dir:
+            logger.error(
+                "On-demand validation needs the original FASTQ directory, but "
+                "no input directory is configured. Set the Nanopore sequence "
+                "data folder in the Configuration tab and try again."
+            )
+            return None
+        if not self.input_dir.exists():
+            logger.error(
+                "On-demand validation input directory does not exist: %s. "
+                "The run's FASTQ files must still be readable to validate "
+                "against them.",
+                self.input_dir,
+            )
+            return None
+
         # Ensure genome is available
         if not self.has_genome(taxid):
             if progress_callback:
@@ -486,7 +508,7 @@ class OnDemandValidator:
             "-resume",
             "--validation_only",
             "--kraken2_output_dir", str(self.results_dir / "kraken2"),
-            "--reads_dir", str(self.input_dir) if self.input_dir else str(self.results_dir),
+            "--reads_dir", str(self.input_dir),
             "--run_validation",
             "--validation_method", method,
             "--pathogen_genomes", str(genomes_json_path),
