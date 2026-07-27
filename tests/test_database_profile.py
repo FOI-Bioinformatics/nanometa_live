@@ -310,3 +310,72 @@ class TestVariantCost:
         assert len(name.gtdb_genus_variants) == 78
         assert len(name.all_variants(include_gtdb=False)) == len(name.variants)
         assert len(name.all_variants()) > len(name.variants)
+
+
+class TestCrossKingdomDatabases:
+    """A database with no bacteria must still be recognised as NCBI.
+
+    Found against a real virus/plant/fungal database (enovation_small): every
+    probe taxon was bacterial, so a database covering other kingdoms matched
+    none of them, was reported as having remapped taxids, and silently lost
+    the exact-taxid shortcut despite using genuine NCBI ids. Synthetic
+    fixtures could not have caught it -- they all happened to be bacterial.
+    """
+
+    EUKARYOTE_VIRUS_NODES = [
+        (9606, "Homo sapiens", "S"),
+        (4932, "Saccharomyces cerevisiae", "S"),
+        (3702, "Arabidopsis thaliana", "S"),
+        (4565, "Triticum aestivum", "S"),
+        (5833, "Plasmodium falciparum", "S"),
+        (2697049, "Severe acute respiratory syndrome coronavirus 2", "S"),
+        (10298, "Human alphaherpesvirus 1", "S"),
+    ]
+
+    def test_virus_and_eukaryote_database_is_ncbi(self):
+        profile = DatabaseIndexBuilder()._detect_profile(
+            _index(self.EUKARYOTE_VIRUS_NODES)
+        )
+        assert profile.taxids_are_ncbi is True, (
+            "a database with NCBI taxids but no bacteria was reported as "
+            "remapped, which disables exact-taxid matching"
+        )
+        assert profile.nomenclature is Nomenclature.NCBI
+
+    def test_remapped_eukaryote_database_is_still_caught(self):
+        """The widened probe must not have become permissive."""
+        nodes = [(t, n, r) for t, n, r in self.EUKARYOTE_VIRUS_NODES]
+        nodes[0] = (9606, "Gallus gallus", "S")  # 9606 is not chicken
+        profile = DatabaseIndexBuilder()._detect_profile(_index(nodes))
+        assert profile.taxids_are_ncbi is False
+
+
+class TestNameAgreement:
+    """Probe-name comparison is anchored on the first token, not a substring.
+
+    With a cross-kingdom probe set, bare substring matching on short tokens
+    ("mus", "human") would match unrelated organisms and turn the check into
+    a coin flip in exactly the cases it exists to catch.
+    """
+
+    @pytest.mark.parametrize("actual,expected", [
+        ("Bacillus anthracis", "Bacillus anthracis"),
+        ("Bacillus anthracis str. Ames", "Bacillus anthracis"),   # strain suffix
+        ("Escherichia_coli", "Escherichia coli"),                 # underscores
+        ("Homo sapiens", "Homo sapiens"),
+        ("Severe acute respiratory syndrome coronavirus 2",
+         "Severe acute respiratory syndrome coronavirus 2"),
+    ])
+    def test_agrees(self, actual, expected):
+        from nanometa_live.core.taxonomy.database_indexer import _names_agree
+        assert _names_agree(actual, expected) is True
+
+    @pytest.mark.parametrize("actual,expected", [
+        ("Gallus gallus", "Homo sapiens"),
+        ("Musca domestica", "Mus musculus"),        # would pass a substring test
+        ("Human immunodeficiency virus 1", "Human alphaherpesvirus 1"),
+        ("", "Homo sapiens"),
+    ])
+    def test_disagrees(self, actual, expected):
+        from nanometa_live.core.taxonomy.database_indexer import _names_agree
+        assert _names_agree(actual, expected) is False

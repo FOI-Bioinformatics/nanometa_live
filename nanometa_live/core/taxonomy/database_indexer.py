@@ -12,9 +12,7 @@ The index enables efficient lookups by taxid or name for the
 taxonomy ID mapping system.
 """
 
-import gzip
 import logging
-import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +21,15 @@ from typing import Dict, Optional, Tuple
 from nanometa_live.core.taxonomy.database_profile import (
     DatabaseProfile,
     Nomenclature,
+)
+from nanometa_live.core.taxonomy.taxonomy_signals import (
+    _BINOMIAL_MAJORITY,
+    _GTDB_GENUS_SUFFIX_RE,
+    _GTDB_RANK_PREFIXES,
+    _NCBI_REFERENCE_TAXA,
+    _NOMENCLATURE_SAMPLE_SIZE,
+    _names_agree,
+    _nomenclature_hints_from_files,
 )
 from nanometa_live.core.taxonomy.taxid_mapping import (
     DatabaseTaxonomyIndex,
@@ -34,121 +41,10 @@ from nanometa_live.core.watchlist.validation.name_normalizer import (
 
 logger = logging.getLogger(__name__)
 
-# Well-known NCBI taxids used to test whether a database's integers mean what
-# NCBI says they mean. A database that assigns its own taxids reuses these
-# numbers for unrelated organisms, which is what makes the probe work.
-_NCBI_REFERENCE_TAXA: Dict[int, str] = {
-    562: "Escherichia coli",
-    632: "Yersinia pestis",
-    1392: "Bacillus anthracis",
-    287: "Pseudomonas aeruginosa",
-    1280: "Staphylococcus aureus",
-    1773: "Mycobacterium tuberculosis",
-    1717: "Corynebacterium diphtheriae",
-    263: "Francisella tularensis",
-    623: "Shigella flexneri",
-    727: "Haemophilus influenzae",
-    1313: "Streptococcus pneumoniae",
-    485: "Neisseria gonorrhoeae",
-    1351: "Enterococcus faecalis",
-    1352: "Enterococcus faecium",
-    1396: "Bacillus cereus",
-    1423: "Bacillus subtilis",
-    28901: "Salmonella enterica",
-    470: "Acinetobacter baumannii",
-    817: "Bacteroides fragilis",
-}
-
-# GTDB writes a rank prefix on every name; none of these occur in NCBI names,
-# so a single occurrence is conclusive.
-_GTDB_RANK_PREFIXES: Tuple[str, ...] = (
-    "d__", "p__", "c__", "o__", "f__", "g__", "s__",
-)
-
-# GTDB appends an alphabetic suffix to a genus it has split for polyphyly,
-# e.g. "Bacillus_A anthracis". Also conclusive on its own.
-_GTDB_GENUS_SUFFIX_RE = re.compile(r"^[A-Z][a-z]+_[A-Z]$")
-
-# Species nodes sampled when inferring the naming convention. Large enough to
-# find the rare suffixed genera, small enough to stay cheap on a PlusPFP-sized
-# database.
-_NOMENCLATURE_SAMPLE_SIZE = 5000
-
-# Fraction of sampled names that must be binomial before a database is called
-# NCBI-style, when no GTDB marker was found at all.
-_BINOMIAL_MAJORITY = 0.5
-
-# GTDB accession prefixes needed in the first 200 seqid2taxid lines
-# before that file is taken as evidence. A handful could be an NCBI
-# database that happens to include GTDB-sourced sequences.
-_SEQID_GTDB_MIN_LINES = 50
-
 
 def _utcnow():
     """Naive UTC timestamp, replacing the deprecated stdlib utcnow()."""
     return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-def _open_maybe_gz(path: Path):
-    """Open a path as text, transparently handling a .gz suffix."""
-    if str(path).endswith(".gz"):
-        return gzip.open(path, "rt", encoding="utf-8", errors="replace")
-    return open(path, "r", encoding="utf-8", errors="replace")
-
-
-def _nomenclature_hints_from_files(db_path: Path) -> Tuple[Nomenclature, str]:
-    """Infer nomenclature from a database's sidecar files.
-
-    A last resort, consulted only when the taxon names themselves were
-    inconclusive. These two files carry evidence the inspect dump does not:
-
-    * ``library/library_report.tsv`` records the source lineages, which keep
-      their GTDB rank prefixes even when the taxon names in the index have
-      been flattened.
-    * ``seqid2taxid.map`` keys GTDB assemblies by their GenBank/RefSeq
-      accessions, which GTDB prefixes with ``GB_``/``RS_``.
-
-    Deliberately excluded, though the previous implementation used them: the
-    directory-name hint (``"gtdb" in db_name`` fires on ``/data/gtdb_and_ncbi/``)
-    and a default of GTDB when nothing matched. Both are guesses, and guessing
-    is what this detection replaced -- an honest UNKNOWN makes the caller
-    query both APIs and generate variants anyway, which is safe.
-
-    Returns ``(nomenclature, evidence)``.
-    """
-    library_report = db_path / "library" / "library_report.tsv"
-    if library_report.exists():
-        try:
-            with open(library_report, "r", errors="replace") as fh:
-                content = fh.read(2000)
-            if "d__" in content or "s__" in content:
-                return Nomenclature.GTDB, "GTDB lineage prefixes in library report"
-            if "cellular organisms" in content:
-                return Nomenclature.NCBI, "NCBI lineage markers in library report"
-        except OSError as exc:
-            logger.debug("Could not read %s: %s", library_report, exc)
-
-    for seqid_map in (
-        db_path / "seqid2taxid.map",
-        db_path / "seqid2taxid.map.gz",
-    ):
-        if not seqid_map.exists():
-            continue
-        try:
-            with _open_maybe_gz(seqid_map) as fh:
-                lines = [fh.readline() for _ in range(200)]
-        except (OSError, EOFError) as exc:
-            logger.debug("Could not read %s: %s", seqid_map, exc)
-            break
-        gtdb_lines = sum(1 for line in lines if "GB_" in line or "RS_" in line)
-        if gtdb_lines > _SEQID_GTDB_MIN_LINES:
-            return (
-                Nomenclature.GTDB,
-                f"{gtdb_lines} GTDB accession prefixes in seqid2taxid.map",
-            )
-        break
-
-    return Nomenclature.UNKNOWN, "no nomenclature markers in database files"
 
 
 class DatabaseIndexBuilder:
@@ -629,10 +525,7 @@ class DatabaseIndexBuilder:
             if ncbi_taxid not in index.by_taxid:
                 continue
             checked += 1
-            actual_name = index.by_taxid[ncbi_taxid].name.lower()
-            expected_lower = expected_name.lower()
-            expected_genus = expected_lower.split()[0]
-            if expected_genus in actual_name or expected_lower in actual_name:
+            if _names_agree(index.by_taxid[ncbi_taxid].name, expected_name):
                 matches += 1
 
         if checked == 0:
