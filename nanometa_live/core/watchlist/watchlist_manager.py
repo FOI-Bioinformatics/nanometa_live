@@ -836,44 +836,58 @@ class WatchlistManager:
             return False
 
     @staticmethod
+    def _other_entries_on_node(
+        detected_taxid: Optional[int],
+        db_to_ncbi: Dict[int, List[int]],
+        active_entries: Dict[int, "WatchlistEntry"],
+        matched: "WatchlistEntry",
+    ) -> List[str]:
+        """Names of the other watchlist entries sharing this database node."""
+        if not detected_taxid:
+            return []
+        others = []
+        for key in db_to_ncbi.get(int(detected_taxid), []):
+            other = active_entries.get(key)
+            if other is not None and other.name != matched.name:
+                others.append(other.name)
+        return others
+
+    @staticmethod
     def _build_db_taxid_index(
         active_entries: Dict[int, "WatchlistEntry"],
         mapping_collection: Optional[Any],
-    ) -> Dict[int, int]:
-        """Map database taxid -> watchlist key, generated mappings first.
+    ) -> Dict[int, List[int]]:
+        """Map database taxid -> the watchlist keys that resolve to it.
 
-        An operator-set ``db_taxid`` on an entry overrides a generated
-        mapping for the same database taxid, which is the precedence
+        A list, not a single key, because several watchlist entries can
+        legitimately share one database node. On a GTDB-derived database
+        every *Shigella* species sits under *Escherichia coli*, and
+        *Burkholderia mallei* and *pseudomallei* share a node because GTDB
+        treats mallei as a lineage within pseudomallei. A detection landing
+        there genuinely cannot say which entry it is, so the caller reports
+        the ambiguity rather than picking one and sounding certain.
+
+        An operator-set ``db_taxid`` on an entry takes precedence over a
+        generated mapping for the same node -- the precedence
         ``parameter_mapping.build_species_list`` already applies when
-        building the pipeline's taxid filter. Applying it here too means
-        detection, the pipeline and the exported report finally agree about
-        what the field means.
+        building the pipeline's taxid filter.
         """
-        db_to_ncbi: Dict[int, int] = {}
+        db_to_ncbi: Dict[int, List[int]] = {}
         if mapping_collection is not None:
-            # Several watchlist entries can legitimately resolve to one
-            # database node -- on a GTDB-derived database every Shigella
-            # species sits under Escherichia coli. Last-writer-wins silently
-            # dropped all but one, so the survivor was arbitrary. Keep the
-            # first and log the collision: a detection genuinely cannot tell
-            # those entries apart, and the operator should hear that from the
-            # coverage report rather than discover it from a missing alert.
             for ncbi_taxid, mapping in sorted(mapping_collection.mappings.items()):
                 if not mapping.db_taxid:
                     continue
-                existing = db_to_ncbi.get(mapping.db_taxid)
-                if existing is None:
-                    db_to_ncbi[mapping.db_taxid] = ncbi_taxid
-                elif existing != ncbi_taxid:
-                    logger.debug(
-                        "Database node %s (%s) is shared by watchlist taxids "
-                        "%s and %s; detections cannot distinguish them",
-                        mapping.db_taxid, mapping.db_name, existing, ncbi_taxid,
-                    )
+                keys = db_to_ncbi.setdefault(int(mapping.db_taxid), [])
+                if ncbi_taxid not in keys:
+                    keys.append(ncbi_taxid)
         for key, entry in active_entries.items():
             db_taxid = getattr(entry, "db_taxid", None)
             if db_taxid:
-                db_to_ncbi[int(db_taxid)] = key
+                # Explicit operator statement: it leads, others still listed.
+                keys = db_to_ncbi.setdefault(int(db_taxid), [])
+                if key in keys:
+                    keys.remove(key)
+                keys.insert(0, key)
         return db_to_ncbi
 
     def check_organisms(
@@ -917,7 +931,7 @@ class WatchlistManager:
             best_score = 0.0
 
             if taxid and taxid in db_to_ncbi:
-                entry = active_entries.get(db_to_ncbi[taxid])
+                entry = active_entries.get(db_to_ncbi[taxid][0])
                 best_score = 1.0 if entry else 0.0
             if entry is None and db_is_ncbi and taxid and taxid in active_entries:
                 entry = active_entries[taxid]
@@ -1749,7 +1763,7 @@ class WatchlistManager:
 
             # 2. Try reverse mapping from database taxid to NCBI taxid
             if not entry and detected_taxid and detected_taxid in db_to_ncbi:
-                ncbi_taxid = db_to_ncbi[detected_taxid]
+                ncbi_taxid = db_to_ncbi[detected_taxid][0]
                 if ncbi_taxid in active_entries:
                     entry = active_entries[ncbi_taxid]
                     # Carry the generated mapping's own confidence when there
@@ -1800,6 +1814,16 @@ class WatchlistManager:
                     "match_score": best_score,
                     "match_method": match_method,
                     "detected_name": name,
+                    # Other watchlist entries sharing this database node. A
+                    # detection here cannot distinguish them, so naming only
+                    # the first would state a species -- and on a biothreat
+                    # panel a disease -- with more confidence than the data
+                    # supports. GTDB merges Burkholderia mallei into
+                    # pseudomallei, so a melioidosis case would otherwise be
+                    # reported as glanders.
+                    "ambiguous_with": self._other_entries_on_node(
+                        detected_taxid, db_to_ncbi, active_entries, entry
+                    ),
                 })
 
         # Sort by threat level (critical first)

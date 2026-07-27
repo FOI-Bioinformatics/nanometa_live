@@ -299,9 +299,16 @@ def register_dashboard_callbacks(app: Dash):
                 if nm and nm not in seen_names:
                     seen_names.add(nm)
                     annotation = d.get("annotation")
-                    pathogen_names.append(
-                        f"{nm} ({annotation})" if annotation else nm
-                    )
+                    label = f"{nm} ({annotation})" if annotation else nm
+                    # The database cannot separate these organisms, so the
+                    # banner must not name one as though it could. On a
+                    # biothreat panel the two can be different diseases --
+                    # GTDB merges Burkholderia mallei into pseudomallei, so
+                    # melioidosis would otherwise be announced as glanders.
+                    ambiguous = [a for a in (d.get("ambiguous_with") or []) if a]
+                    if ambiguous:
+                        label += " or " + " or ".join(ambiguous)
+                    pathogen_names.append(label)
             triggering_pathogens = pathogen_names or None
             total_count = 0
             try:

@@ -528,10 +528,16 @@ a field laptop's RAM. Three consequences the code must respect:
   as genus-only — a broad match is what they asked for, and crying
   wolf trains operators to skip the report.
 
-Note `_build_db_taxid_index` keeps the *first* entry for a shared
-database node and logs the collision rather than last-writer-wins,
-which silently dropped all but one (every *Shigella* species maps to
-the single *Escherichia coli* node on these databases).
+`_build_db_taxid_index` returns **all** watchlist keys that resolve to
+a database node, not one, because last-writer-wins silently dropped
+the rest and made the survivor arbitrary. The first is the match; the
+others become `ambiguous_with` on the alert and are rendered by the
+verdict banner as "X or Y". This matters clinically: GTDB treats
+*Burkholderia mallei* as a lineage within *pseudomallei*, so a
+melioidosis case would otherwise be announced as glanders. It is an
+upstream taxonomy limitation, unresolved in the flextaxd workflow as
+of 2026-07, so the app reports it rather than pretending to resolve
+it.
 
 **One pseudo-taxid definition.** `core/taxonomy/pseudo_taxid.py` owns
 `PSEUDO_TAXID_BASE`, `is_real_ncbi_taxid` and `stable_pseudo_taxid`.

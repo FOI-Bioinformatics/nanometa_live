@@ -150,8 +150,8 @@ class TestDbTaxidReachesDetection:
         index = manager._build_db_taxid_index(
             manager.get_active_entries(), collection
         )
-        assert index[45127] == 1280   # operator value present
-        assert index[777] == 1280     # generated value also retained
+        assert index[45127] == [1280]  # operator value present
+        assert index[777] == [1280]    # generated value also retained
 
     def test_mapping_reverse_hit_scores_without_error(self):
         """Regression: this branch dereferenced an undefined name.

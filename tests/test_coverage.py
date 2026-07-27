@@ -190,3 +190,74 @@ class TestRankFallback:
         ))
         assert cov.genus_only == [("Genus sp", "Genus")]
         assert cov.detectable == ["Species one"]
+
+
+class TestSharedNodeReachesTheAlert:
+    """A detection on a shared node must not name one organism confidently.
+
+    GTDB treats Burkholderia mallei as a lineage within pseudomallei, so a
+    flextaxd database built on it carries one node for both. Glanders and
+    melioidosis are different diseases; announcing one when the data cannot
+    distinguish them is a false identification on a biothreat panel. This is
+    an upstream taxonomy limitation, not something the app can resolve, so
+    the app has to report it rather than hide it.
+    """
+
+    def _manager_with_shared_node(self):
+        from nanometa_live.core.watchlist.watchlist_manager import (
+            WatchlistManager, WatchlistSource,
+        )
+        m = WatchlistManager()
+        for d in (
+            {"name": "Burkholderia mallei", "taxid_ncbi": 13373,
+             "threat_level": "critical", "alert_threshold": 1},
+            {"name": "Burkholderia pseudomallei", "taxid_ncbi": 28450,
+             "threat_level": "critical", "alert_threshold": 1},
+        ):
+            m._add_entry_from_dict(d, WatchlistSource.USER)
+        for e in m._entries.values():
+            e.enabled = True
+        m._loaded = True
+        return m
+
+    def _collection(self):
+        c = TaxidMappingCollection(database_path="/db")
+        for ncbi, name in ((13373, "Burkholderia mallei"),
+                           (28450, "Burkholderia pseudomallei")):
+            c.mappings[ncbi] = TaxidMapping(
+                ncbi_taxid=ncbi, canonical_name=name, db_taxid=4003703,
+                db_name="Burkholderia mallei",
+                confidence=MappingConfidence.EXACT, match_score=1.0,
+            )
+        return c
+
+    def test_alert_names_the_other_organism(self):
+        alerts = self._manager_with_shared_node().check_organisms_with_mapping(
+            [{"taxid": 4003703, "name": "Burkholderia mallei", "reads": 900}],
+            self._collection(),
+        )
+        assert len(alerts) == 1
+        assert alerts[0]["ambiguous_with"] == ["Burkholderia pseudomallei"]
+
+    def test_unshared_node_carries_no_ambiguity(self):
+        """Do not attach a caveat where the identification is sound."""
+        c = TaxidMappingCollection(database_path="/db")
+        c.mappings[13373] = TaxidMapping(
+            ncbi_taxid=13373, canonical_name="Burkholderia mallei",
+            db_taxid=4003703, db_name="Burkholderia mallei",
+            confidence=MappingConfidence.EXACT, match_score=1.0,
+        )
+        alerts = self._manager_with_shared_node().check_organisms_with_mapping(
+            [{"taxid": 4003703, "name": "Burkholderia mallei", "reads": 900}], c
+        )
+        assert alerts[0]["ambiguous_with"] == []
+
+    def test_no_watchlist_entry_is_dropped_by_a_shared_node(self):
+        """Both entries survive in the index, in a stable order.
+
+        Last-writer-wins previously kept an arbitrary one and discarded the
+        rest without a word.
+        """
+        m = self._manager_with_shared_node()
+        index = m._build_db_taxid_index(m.get_active_entries(), self._collection())
+        assert index[4003703] == [13373, 28450]
