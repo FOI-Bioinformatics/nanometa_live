@@ -1202,12 +1202,31 @@ def register_preparation_callbacks(app):
                             + stats.get("mapped_manual", 0) + stats.get("mapped_partial", 0))
             unmapped_count = stats.get("unmapped", 0)
             total_count = stats.get("total_entries", 0)
-            if unmapped_count > 0:
-                status = f"Mapped {mapped_count}/{total_count} entries ({unmapped_count} not in database)"
-                progress_label = f"Completed: {mapped_count} mapped, {unmapped_count} not in database"
-            else:
-                status = f"Mapped {mapped_count} entries"
-                progress_label = f"Completed: {mapped_count} mappings"
+            # What the watchlist can actually be screened for against THIS
+            # database. On a minimized field database some organisms are
+            # pruned to fit the RAM budget, and an ALL CLEAR for one of those
+            # is not a negative result -- it is no result. Say so plainly.
+            from nanometa_live.core.taxonomy.coverage import analyse_coverage
+            try:
+                coverage = analyse_coverage(collection, mapper._index)
+                status = coverage.summary()
+                for warning in coverage.warnings():
+                    logger.warning("Watchlist coverage: %s", warning)
+                db_info["coverage"] = {
+                    "summary": coverage.summary(),
+                    "warnings": coverage.warnings(),
+                }
+            except Exception as exc:
+                logger.warning("Coverage analysis failed: %s", exc)
+                if unmapped_count > 0:
+                    status = (f"Mapped {mapped_count}/{total_count} entries "
+                              f"({unmapped_count} not in database)")
+                else:
+                    status = f"Mapped {mapped_count} entries"
+            progress_label = (
+                f"Completed: {mapped_count} mapped, {unmapped_count} not in database"
+                if unmapped_count else f"Completed: {mapped_count} mappings"
+            )
             logger.info(f"Rescan returning: mapped={mapped_count}, unmapped={unmapped_count}, refresh={new_refresh}")
             return (collection_data, db_info, now, new_refresh, status,
                     hide_progress, 100, progress_label)

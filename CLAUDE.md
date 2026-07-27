@@ -498,6 +498,41 @@ negative is a missed detection. Measured saving on an NCBI database
 (13 of the 14 shipped): 156k fewer string builds per 2000 names.
 Regression-covered in `tests/test_database_profile.py`.
 
+**flextaxd / hybrid databases are the normal case.** The in-house field
+databases (Bioshield and similar) are built with flextaxd: an NCBI
+backbone with finer-resolution clades grafted in, then minimized to fit
+a field laptop's RAM. Three consequences the code must respect:
+
+- **The taxid space is hybrid.** Backbone taxa keep real NCBI taxids
+  (9606, 2697049); grafted nodes get new ids from a high block
+  (4,000,000+ in Bioshield, cleanly separated by a ~300k gap). Nothing
+  is renumbered, so `taxids_are_ncbi` is correctly True and the
+  exact-taxid shortcut is safe *and valuable* — on a real run it
+  rescued four detections whose names have legitimately diverged
+  (ICTV renamed SARS-CoV-2 to *Betacoronavirus pandemicum*, *Candida
+  auris* to *Candidozyma auris*). **Do not add name verification to
+  `ExactTaxidStrategy`** — it would break exactly those.
+- **Pathogens live in the grafted region under GTDB names.**
+  *Bacillus anthracis* is `Bacillus_A anthracis` at 4005020, not NCBI
+  1392. So detection depends on the GTDB genus-suffix variants, which
+  is why `nomenclature` detection and variant gating are load-bearing
+  here rather than cosmetic.
+- **Minimization prunes organisms.** A watchlist entry may not exist
+  in the database at all, and an ALL CLEAR for it is not a negative
+  result — it is no result. `core/taxonomy/coverage.py`
+  (`analyse_coverage`) classifies every watchlist entry as detectable
+  / genus-only / ambiguous / absent and the Preparation tab reports it
+  after a scan. Measured on a real Bioshield build against the shipped
+  watchlists: 108/116 detectable, 3 genus-only, 4 shared nodes, 5
+  absent. Entries that name a family (`Adenoviridae`) are not flagged
+  as genus-only — a broad match is what they asked for, and crying
+  wolf trains operators to skip the report.
+
+Note `_build_db_taxid_index` keeps the *first* entry for a shared
+database node and logs the collision rather than last-writer-wins,
+which silently dropped all but one (every *Shigella* species maps to
+the single *Escherichia coli* node on these databases).
+
 **One pseudo-taxid definition.** `core/taxonomy/pseudo_taxid.py` owns
 `PSEUDO_TAXID_BASE`, `is_real_ncbi_taxid` and `stable_pseudo_taxid`.
 The constant previously existed in four modules independently. Entries

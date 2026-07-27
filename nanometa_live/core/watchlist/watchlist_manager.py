@@ -851,9 +851,25 @@ class WatchlistManager:
         """
         db_to_ncbi: Dict[int, int] = {}
         if mapping_collection is not None:
-            for ncbi_taxid, mapping in mapping_collection.mappings.items():
-                if mapping.db_taxid:
+            # Several watchlist entries can legitimately resolve to one
+            # database node -- on a GTDB-derived database every Shigella
+            # species sits under Escherichia coli. Last-writer-wins silently
+            # dropped all but one, so the survivor was arbitrary. Keep the
+            # first and log the collision: a detection genuinely cannot tell
+            # those entries apart, and the operator should hear that from the
+            # coverage report rather than discover it from a missing alert.
+            for ncbi_taxid, mapping in sorted(mapping_collection.mappings.items()):
+                if not mapping.db_taxid:
+                    continue
+                existing = db_to_ncbi.get(mapping.db_taxid)
+                if existing is None:
                     db_to_ncbi[mapping.db_taxid] = ncbi_taxid
+                elif existing != ncbi_taxid:
+                    logger.debug(
+                        "Database node %s (%s) is shared by watchlist taxids "
+                        "%s and %s; detections cannot distinguish them",
+                        mapping.db_taxid, mapping.db_name, existing, ncbi_taxid,
+                    )
         for key, entry in active_entries.items():
             db_taxid = getattr(entry, "db_taxid", None)
             if db_taxid:
