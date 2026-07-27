@@ -261,3 +261,107 @@ class TestSharedNodeReachesTheAlert:
         m = self._manager_with_shared_node()
         index = m._build_db_taxid_index(m.get_active_entries(), self._collection())
         assert index[4003703] == [13373, 28450]
+
+
+class TestOrganismsTabAgreesWithItsBanner:
+    """The badge/cards path and the alert-banner path must agree.
+
+    ``filter_detected_species`` drives the alert banner and
+    ``get_all_watchlist_with_detection`` drives the cards. Their own comments
+    say they must use the same matching strategy, but they guarded on
+    different inputs: the banner bailed whenever the legacy ``watchlist``
+    argument was empty, even with a fully populated WatchlistManager. A run
+    whose watchlist comes from YAML rather than legacy config therefore
+    showed detections on the cards while the banner stayed silent.
+    """
+
+    def _setup(self, monkeypatch):
+        import nanometa_live.core.watchlist.watchlist_manager as wm
+        from nanometa_live.core.taxonomy.taxid_mapping import (
+            set_mapping_collection,
+        )
+        from nanometa_live.core.watchlist.watchlist_manager import (
+            WatchlistManager, WatchlistSource,
+        )
+        m = WatchlistManager()
+        m._add_entry_from_dict(
+            {"name": "Escherichia coli", "taxid_ncbi": 562,
+             "threat_level": "high", "alert_threshold": 1},
+            WatchlistSource.USER,
+        )
+        for e in m._entries.values():
+            e.enabled = True
+        m._loaded = True
+        monkeypatch.setattr(wm, "_watchlist_manager", m)
+
+        coll = TaxidMappingCollection(database_path="/db")
+        coll.mappings[562] = TaxidMapping(
+            ncbi_taxid=562, canonical_name="Escherichia coli", db_taxid=4001,
+            db_name="Escherichia coli", confidence=MappingConfidence.EXACT,
+            match_score=1.0,
+        )
+        set_mapping_collection(coll)
+        return m
+
+    def _kraken(self):
+        import pandas as pd
+        return pd.DataFrame([{
+            "taxid": 4001, "name": "Escherichia coli", "rank": "S",
+            "reads": 5000, "cumul_reads": 5000, "%": 4.2,
+        }])
+
+    def test_banner_fires_when_only_the_manager_is_populated(self, monkeypatch):
+        from nanometa_live.app.tabs import main_tab_helpers as mth
+        self._setup(monkeypatch)
+        detected = mth.filter_detected_species(self._kraken(), [])
+        assert [d["name"] for d in detected] == ["Escherichia coli"]
+
+    def test_both_paths_report_the_same_organism(self, monkeypatch):
+        from nanometa_live.app.tabs import main_tab_helpers as mth
+        self._setup(monkeypatch)
+        kraken = self._kraken()
+        banner = {d["name"] for d in mth.filter_detected_species(kraken, [])}
+        cards = {r["name"] for r in mth.get_all_watchlist_with_detection(kraken, [])
+                 if r["detected"]}
+        assert banner == cards
+
+    def test_empty_everywhere_still_returns_nothing(self, monkeypatch):
+        """The guard must still short-circuit when there is genuinely nothing."""
+        import nanometa_live.core.watchlist.watchlist_manager as wm
+        from nanometa_live.app.tabs import main_tab_helpers as mth
+        from nanometa_live.core.watchlist.watchlist_manager import WatchlistManager
+        empty = WatchlistManager()
+        empty._loaded = True
+        monkeypatch.setattr(wm, "_watchlist_manager", empty)
+        assert mth.filter_detected_species(self._kraken(), []) == []
+
+    def test_entries_sharing_a_node_all_appear_on_the_cards(self, monkeypatch):
+        """Five watchlist entries on one database node yield five rows."""
+        import nanometa_live.core.watchlist.watchlist_manager as wm
+        from nanometa_live.app.tabs import main_tab_helpers as mth
+        from nanometa_live.core.taxonomy.taxid_mapping import set_mapping_collection
+        from nanometa_live.core.watchlist.watchlist_manager import (
+            WatchlistManager, WatchlistSource,
+        )
+        shigella = [("Escherichia coli", 562), ("Shigella flexneri", 623),
+                    ("Shigella sonnei", 624), ("Shigella boydii", 625)]
+        m = WatchlistManager()
+        for name, taxid in shigella:
+            m._add_entry_from_dict(
+                {"name": name, "taxid_ncbi": taxid, "threat_level": "high",
+                 "alert_threshold": 1}, WatchlistSource.USER)
+        for e in m._entries.values():
+            e.enabled = True
+        m._loaded = True
+        monkeypatch.setattr(wm, "_watchlist_manager", m)
+
+        coll = TaxidMappingCollection(database_path="/db")
+        for name, taxid in shigella:
+            coll.mappings[taxid] = TaxidMapping(
+                ncbi_taxid=taxid, canonical_name=name, db_taxid=4001,
+                db_name="Escherichia coli",
+                confidence=MappingConfidence.EXACT, match_score=1.0)
+        set_mapping_collection(coll)
+
+        rows = mth.get_all_watchlist_with_detection(self._kraken(), [])
+        assert {r["name"] for r in rows if r["detected"]} == {n for n, _ in shigella}
