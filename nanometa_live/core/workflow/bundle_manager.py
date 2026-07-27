@@ -2395,13 +2395,31 @@ def _template_genome_metadata(
     return warnings
 
 
+#: Strips ANSI SGR sequences. A colour-coded error message contains digits
+#: (\x1b[31m) that an unanchored version regex will happily match.
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
 def _parse_semver(version_str: str):
-    """Return a (major, minor, patch) int tuple from a version string, or None.
+    r"""Return a (major, minor, patch) int tuple from a version string, or None.
 
     Tolerant of build suffixes ('26.04.0 build 12031', 'v2.1.0', '0.12.0b').
     Missing minor/patch default to 0.
+
+    The match is ANCHORED to the start of the string, and ANSI escapes are
+    stripped first. Both matter: the previous unanchored ``(\d+)`` searched
+    anywhere in the input, so ``nextflow -version`` on a machine with no Java
+    Runtime -- which prints ``\x1b[31mUnable to locate a Java Runtime`` --
+    parsed as version **31**.0.0 from the colour code and cleared the 26.4.0
+    floor. ``doctor`` then reported the machine as ready to run analyses.
+
+    Anything that is not a version at the start of the string returns None,
+    which every caller already treats as "could not determine".
     """
-    match = re.search(r"(\d+)(?:\.(\d+))?(?:\.(\d+))?", version_str or "")
+    cleaned = _ANSI_ESCAPE_RE.sub("", version_str or "").strip()
+    # Optional leading 'v', then the version must begin the string. A trailing
+    # build/qualifier suffix is still allowed ('26.04.0 build 12031', '0.12.0b').
+    match = re.match(r"v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?![\d.])", cleaned)
     if not match:
         return None
     return (
@@ -2414,9 +2432,14 @@ def _parse_semver(version_str: str):
 def _get_nextflow_version() -> str:
     """Return the Nextflow version string in 'X.Y.Z build N' form.
 
-    ``nextflow -version`` prints a multi-line banner. The useful line
-    matches ``version X.Y.Z build N``. Falls back to the first non-empty
-    output line when the pattern is absent.
+    ``nextflow -version`` prints a multi-line banner whose useful line matches
+    ``version X.Y.Z build N``.
+
+    When that pattern is absent the output is an error, not a version -- most
+    often "Unable to locate a Java Runtime", since Nextflow is a JVM
+    application. Returning such a line verbatim let it be mistaken for a
+    version downstream, so the fallback only returns a line that actually
+    contains a version-shaped token; otherwise "unknown".
     """
     import subprocess
 
@@ -2433,11 +2456,19 @@ def _get_nextflow_version() -> str:
         match = re.search(r"version\s+(\S+)\s+build\s+(\d+)", output)
         if match:
             return f"{match.group(1)} build {match.group(2)}"
-        # Fallback: return the first non-empty, non-banner line.
+        # Fallback: only a line that genuinely looks like a version. Prose
+        # (a Java error, "command not found") must not be passed off as one.
         for line in output.split("\n"):
-            stripped = line.strip()
-            if stripped and not set(stripped).issubset({" ", "N", "E", "X", "T", "F", "L", "O", "W", "-"}):
+            stripped = _ANSI_ESCAPE_RE.sub("", line).strip()
+            if not stripped:
+                continue
+            if re.match(r"v?\d+(\.\d+)+", stripped):
                 return stripped[:100]
+        if output:
+            logger.warning(
+                "nextflow -version produced no recognisable version; "
+                "output was: %s", output.splitlines()[0][:200] if output else "",
+            )
         return "unknown"
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
             FileNotFoundError, PermissionError, OSError):

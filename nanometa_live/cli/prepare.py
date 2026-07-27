@@ -394,8 +394,40 @@ def _doctor(args):
     _doctor_summarise(problems)
 
 
+def _java_runtime_available():
+    """Whether a usable Java Runtime is present.
+
+    Nextflow is a JVM application, so a laptop with the `nextflow` launcher
+    on PATH but no JRE cannot run a single task. Installing Nextflow from a
+    tarball, or as a bare conda package without its openjdk dependency,
+    produces exactly that state -- and it is a common one on a fresh field
+    machine.
+
+    Returns ``(ok, detail)`` where detail is the reported version or the
+    reason it could not be determined.
+    """
+    import subprocess
+
+    java = shutil.which("java")
+    if not java:
+        return False, "not found on PATH"
+    try:
+        result = subprocess.run(
+            ["java", "-version"], capture_output=True, text=True, timeout=10,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return False, f"could not run java -version ({exc})"
+
+    # java -version writes to stderr by convention.
+    output = (result.stderr + result.stdout).strip()
+    first = output.splitlines()[0].strip() if output else ""
+    if result.returncode != 0:
+        return False, first or f"java -version exited {result.returncode}"
+    return True, first or java
+
+
 def _doctor_check_toolchain(report):
-    """Python and Nextflow, both hard requirements for a run."""
+    """Python, Java and Nextflow -- all hard requirements for a run."""
     from nanometa_live.core.workflow.bundle_manager import (
         _NEXTFLOW_MIN_VERSION,
         _get_nextflow_version,
@@ -407,6 +439,16 @@ def _doctor_check_toolchain(report):
         "Python", py >= (3, 11),
         f"{py.major}.{py.minor}.{py.micro}",
         "Nanometa Live requires Python 3.11 or newer.",
+    )
+
+    # Java, checked before Nextflow because Nextflow cannot start without it
+    # and its absence is otherwise reported as an unreadable Nextflow version.
+    java_ok, java_detail = _java_runtime_available()
+    report(
+        "Java runtime", java_ok, java_detail,
+        "Nextflow is a JVM application and cannot start without a Java "
+        "Runtime. Install one, e.g. "
+        "`conda install -c conda-forge openjdk`.",
     )
 
     # Nextflow, and its version floor.
@@ -422,12 +464,23 @@ def _doctor_check_toolchain(report):
     else:
         local_t = _parse_semver(nf_version)
         floor_t = _parse_semver(_NEXTFLOW_MIN_VERSION)
-        ok = bool(local_t and floor_t and local_t >= floor_t)
-        report(
-            "Nextflow", ok, nf_version,
-            f"nanometanf requires Nextflow >= {_NEXTFLOW_MIN_VERSION}. "
-            "Update it before launching a run.",
-        )
+        if local_t is None:
+            # Unreadable output is a failure, not a pass. It usually means
+            # Nextflow could not start at all -- most often no Java Runtime.
+            report(
+                "Nextflow", False,
+                f"version not readable ({nf_version})",
+                "`nextflow -version` did not report a version. If the Java "
+                "check above also failed, fix that first; otherwise run "
+                "`nextflow -version` by hand to see the error.",
+            )
+        else:
+            ok = bool(floor_t and local_t >= floor_t)
+            report(
+                "Nextflow", ok, nf_version,
+                f"nanometanf requires Nextflow >= {_NEXTFLOW_MIN_VERSION}. "
+                "Update it before launching a run.",
+            )
 
 def _doctor_check_runtimes(report):
     """Conda and the container engines.

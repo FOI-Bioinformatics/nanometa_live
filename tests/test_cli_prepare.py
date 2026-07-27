@@ -216,7 +216,8 @@ class TestVerifyHandler:
 class TestDoctorHandler:
     """`check` needs a config; doctor answers 'is this fresh install sane?'."""
 
-    def _run(self, tmp_path, *, nextflow, pipeline=None, make_home=True):
+    def _run(self, tmp_path, *, nextflow, pipeline=None, make_home=True,
+             java=True):
         args = _Args(home=str(tmp_path / "home"), pipeline=pipeline)
         if make_home:
             # main() runs _ensure_data_dirs before dispatch; the doctor's
@@ -230,7 +231,13 @@ class TestDoctorHandler:
                 return "/usr/bin/conda"
             return None
 
+        java_result = (
+            (True, "openjdk version \"17.0.9\"") if java
+            else (False, "not found on PATH")
+        )
         with patch.object(cli.shutil, "which", side_effect=fake_which), \
+             patch.object(cli, "_java_runtime_available",
+                          return_value=java_result), \
              patch(
                  "nanometa_live.core.workflow.bundle_manager"
                  "._get_nextflow_version",
@@ -254,6 +261,19 @@ class TestDoctorHandler:
         out = capsys.readouterr().out
         assert code == 0, out
         assert "Install looks sane" in out
+
+    def test_missing_java_fails_even_with_nextflow_present(self, tmp_path, capsys):
+        """The field-laptop case: the launcher is there, the JVM is not.
+
+        Nextflow cannot start without a Java Runtime, so doctor must not
+        report the install as ready.
+        """
+        (tmp_path / "home").mkdir(parents=True)
+        code = self._run(tmp_path, nextflow=True, java=False)
+        out = capsys.readouterr().out
+        assert code == 1, out
+        assert "Java runtime" in out
+        assert "Install is not ready" in out
 
     def test_pipeline_checkout_without_main_nf_fails(self, tmp_path, capsys):
         checkout = tmp_path / "checkout"
