@@ -601,10 +601,6 @@ class BundleManager:
                 if src.exists():
                     dst = staging / dirname
                     shutil.copytree(src, dst)
-                    for f in dst.rglob("*"):
-                        if f.is_file():
-                            rel = f.relative_to(staging)
-                            manifest["checksums"][str(rel)] = _file_md5(f)
 
             # Copy watchlists (include actual YAML files, not just references).
             # Under --project-dir the GUI writes uploads to
@@ -631,11 +627,6 @@ class BundleManager:
                     dst = staged_watchlists / wl_file.relative_to(src_dir)
                     dst.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(wl_file, dst)
-            if staged_watchlists.is_dir():
-                for f in staged_watchlists.rglob("*"):
-                    if f.is_file():
-                        rel = f.relative_to(staging)
-                        manifest["checksums"][str(rel)] = _file_md5(f)
 
             # Also include built-in watchlists from the package
             self._copy_builtin_watchlists(staging / "watchlists")
@@ -644,10 +635,6 @@ class BundleManager:
             containers_dir = home / "containers"
             if containers_dir.exists() and any(containers_dir.iterdir()):
                 shutil.copytree(containers_dir, staging / "containers")
-                for f in (staging / "containers").rglob("*"):
-                    if f.is_file():
-                        rel = f.relative_to(staging)
-                        manifest["checksums"][str(rel)] = _file_md5(f)
 
             # Export taxonomy snapshot
             try:
@@ -657,8 +644,6 @@ class BundleManager:
                 snapshot_path.parent.mkdir(parents=True, exist_ok=True)
                 exported = cache.export_snapshot(str(snapshot_path))
                 if exported > 0:
-                    rel = snapshot_path.relative_to(staging)
-                    manifest["checksums"][str(rel)] = _file_md5(snapshot_path)
                     logger.info(f"Exported {exported} taxonomy cache entries to bundle")
             except (ImportError, AttributeError, OSError, json.JSONDecodeError) as e:
                 logger.warning(f"Could not export taxonomy snapshot: {e}")
@@ -673,7 +658,6 @@ class BundleManager:
                     meta_src, meta_dst, str(home), _HOME_PLACEHOLDER
                 )
                 manifest["export_warnings"].extend(meta_warnings)
-                manifest["checksums"]["genome_metadata.json"] = _file_md5(meta_dst)
 
             # Copy per-entry watchlist toggle state so the field machine
             # restores the operator's enable/disable selections instead of
@@ -682,9 +666,6 @@ class BundleManager:
             if toggle_src.exists():
                 toggle_dst = staging / "watchlist_toggle_state.yaml"
                 shutil.copy2(toggle_src, toggle_dst)
-                manifest["checksums"]["watchlist_toggle_state.yaml"] = _file_md5(
-                    toggle_dst
-                )
 
             # Bundle the pipeline source checkout so the field machine does
             # not depend on the build-machine's absolute path.
@@ -740,11 +721,6 @@ class BundleManager:
                     pipeline_path=pipeline_path,
                 )
                 if pre_warm_result["success"]:
-                    cache_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
-                    for f in cache_root.rglob("*"):
-                        if f.is_file():
-                            rel = f.relative_to(staging)
-                            manifest["checksums"][str(rel)] = _file_md5(f)
                     # Embed the operator activation script next to the
                     # cache so the imported bundle is self-contained.
                     script_path = staging / _ACTIVATE_SCRIPT_FILENAME
@@ -754,9 +730,6 @@ class BundleManager:
                         )
                     )
                     script_path.chmod(0o755)
-                    manifest["checksums"][_ACTIVATE_SCRIPT_FILENAME] = _file_md5(
-                        script_path
-                    )
             manifest["pre_warm_conda_envs"] = pre_warm_result
 
             # Docker / Singularity image pull. Both engines walk the
@@ -778,14 +751,6 @@ class BundleManager:
                     config=config,
                     pipeline_path=pipeline_path,
                 )
-                # Checksum every pulled artefact so the import side can
-                # detect tampering or a partial transfer.
-                images_dir = staging / _BUNDLED_PIPELINE_CONTAINERS_DIRNAME
-                if images_dir.exists():
-                    for f in images_dir.rglob("*"):
-                        if f.is_file():
-                            rel = f.relative_to(staging)
-                            manifest["checksums"][str(rel)] = _file_md5(f)
             manifest["containerization"] = {
                 "engine": containerization,
                 "pull_result": container_pull_result,
@@ -814,15 +779,33 @@ class BundleManager:
             readme_path = staging / "README_FIELD.md"
             readme_path.write_text(readme_content)
 
-            # Save manifest
-            with open(staging / "manifest.json", "w") as f:
-                json.dump(manifest, f, indent=2)
-
             # Drop the staging-only ``_pre_warm`` working directory
-            # (dummy samplesheets, scratch ``work/``) before tarring.
+            # (dummy samplesheets, scratch ``work/``) before checksumming and
+            # tarring -- it is not part of the bundle.
             scratch = staging / "_pre_warm"
             if scratch.exists():
                 shutil.rmtree(scratch, ignore_errors=True)
+
+            # Checksum EVERY staged file, in one pass, as the last thing
+            # before the manifest is written.
+            #
+            # This deliberately replaces per-tree checksum loops. Those only
+            # covered the trees whose copy code happened to include one, so
+            # pipeline_source/ and nextflow_plugins/ -- the workflow itself
+            # and the plugins without which Nextflow cannot even parse it --
+            # shipped unverified, as did the built-in watchlists, which are
+            # copied after the watchlist loop ran. On a real bundle that was
+            # 8 files of 1151, and `verify` reported "safe to import" for a
+            # bundle whose pipeline source had been replaced with garbage.
+            #
+            # A single trailing pass is what makes the coverage a property of
+            # the bundle rather than of each copy site, so a future staged
+            # directory cannot silently reintroduce the gap.
+            _checksum_staging_tree(staging, manifest)
+
+            # Save manifest (excluded from its own checksums above).
+            with open(staging / "manifest.json", "w") as f:
+                json.dump(manifest, f, indent=2)
 
             # Create tar.gz. Exclude macOS AppleDouble sidecars (._*) and
             # .DS_Store -- they ride along when a bundle is built on macOS onto
@@ -2398,6 +2381,42 @@ def _template_genome_metadata(
 #: Strips ANSI SGR sequences. A colour-coded error message contains digits
 #: (\x1b[31m) that an unanchored version regex will happily match.
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _is_tar_excluded(name: str) -> bool:
+    """Whether the tar filter drops this basename.
+
+    macOS writes AppleDouble sidecars (``._*``) and ``.DS_Store`` when staging
+    onto a non-HFS+ volume. The export tar filter strips them, so checksumming
+    them would record entries that are absent after extraction and every
+    verify would report a spurious "missing file".
+    """
+    return name.startswith("._") or name == ".DS_Store"
+
+
+def _checksum_staging_tree(staging: Path, manifest: Dict[str, Any]) -> None:
+    """Record an md5 for every file that will be shipped in the bundle.
+
+    Called once, after all staging is complete and immediately before the
+    manifest is written, so coverage cannot drift as trees are added. Keys are
+    staging-relative POSIX paths, matching what ``verify``/``import`` resolve
+    against the extracted tree.
+
+    ``manifest.json`` is excluded because it is written after this runs and
+    cannot contain its own hash.
+    """
+    checksums: Dict[str, str] = {}
+    for path in sorted(staging.rglob("*")):
+        if not path.is_file() or path.is_symlink():
+            continue
+        if _is_tar_excluded(path.name):
+            continue
+        rel = path.relative_to(staging).as_posix()
+        if rel == "manifest.json":
+            continue
+        checksums[rel] = _file_md5(path)
+    manifest["checksums"] = checksums
+    logger.info("Bundle manifest covers %d files", len(checksums))
 
 
 def _parse_semver(version_str: str):
