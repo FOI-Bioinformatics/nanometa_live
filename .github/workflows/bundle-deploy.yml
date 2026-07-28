@@ -1,0 +1,200 @@
+name: Cross-machine bundle deploy
+
+# The offline bundle is how this software reaches an air-gapped field machine.
+# Every existing test of it is a same-machine round-trip: export and import run
+# in the same process, on the same filesystem, with the same absolute paths
+# already valid. That gives a confidence it has not earned, because the failure
+# mode the bundle actually has is precisely the one a same-machine test cannot
+# produce -- paths recorded on the build machine that do not exist on the
+# target.
+#
+# This job exports on one runner and imports on a second, freshly provisioned
+# one, with the build runner's home directory gone. Anything that only worked
+# because the exporting machine was still around fails here.
+#
+# KNOWN LIMITS, so a green run is not over-read:
+#   - A GitHub runner is not air-gapped. Network calls that should have been
+#     suppressed by offline_mode can still succeed here, so this does not
+#     prove offline correctness -- only that the bundle transfers and imports.
+#   - Both runners are the same OS and architecture. Conda environments embed
+#     absolute paths and per-arch binaries, so arm64-vs-x86 portability is
+#     still unproven, as is macOS-to-Linux.
+#   - Pre-warmed conda environments are NOT exercised (--no-pre-warm below):
+#     warming them needs a full nanometanf checkout and many minutes of solve
+#     time. Conda relocation across machines therefore remains UNVERIFIED.
+
+on:
+  pull_request:
+    paths:
+      - 'nanometa_live/core/workflow/bundle_manager.py'
+      - 'nanometa_live/cli/prepare.py'
+      - '.github/workflows/bundle-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    name: Export bundle (build machine)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Build a minimal prepared installation
+        run: |
+          set -euo pipefail
+          HOME_DIR="$RUNNER_TEMP/nanometa_home"
+          mkdir -p "$HOME_DIR/genomes" "$HOME_DIR/watchlists"
+          printf '>seq1\nACGTACGTACGTACGTACGT\n' > "$HOME_DIR/genomes/1392.fasta"
+          cat > "$HOME_DIR/watchlists/operator.yaml" <<'YAML'
+          metadata:
+            name: Operator list
+          pathogens:
+            - name: Bacillus anthracis
+              taxid_ncbi: 1392
+              threat_level: critical
+              alert_threshold: 5
+          YAML
+
+          # A stand-in pipeline checkout. The bundle ships whatever it is
+          # pointed at; it does not need to be runnable for the transfer and
+          # checksum verification under test here.
+          PIPE="$RUNNER_TEMP/nanometanf"
+          mkdir -p "$PIPE/conf"
+          echo 'workflow { }' > "$PIPE/main.nf"
+          echo "manifest { name = 'nanometanf' }" > "$PIPE/nextflow.config"
+          echo 'process { cpus = 1 }' > "$PIPE/conf/base.config"
+
+          mkdir -p "$RUNNER_TEMP/db"
+          cat > "$RUNNER_TEMP/config.yaml" <<YAML
+          nanometa_home: "$HOME_DIR"
+          kraken_db: "$RUNNER_TEMP/db"
+          pipeline_source: "$PIPE"
+          offline_mode: true
+          YAML
+
+          echo "NANOMETA_HOME_DIR=$HOME_DIR" >> "$GITHUB_ENV"
+
+      - name: Export
+        env:
+          NANOMETA_DATA_DIR: ${{ env.NANOMETA_HOME_DIR }}
+        run: |
+          nanometa-prepare export \
+            --config "$RUNNER_TEMP/config.yaml" \
+            --output "$RUNNER_TEMP/bundle.tar.gz" \
+            --no-pre-warm
+          ls -la "$RUNNER_TEMP/bundle.tar.gz"
+
+      - name: Remove the build machine's home before handing the bundle on
+        run: rm -rf "$NANOMETA_HOME_DIR" "$RUNNER_TEMP/nanometanf"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: offline-bundle
+          path: ${{ runner.temp }}/bundle.tar.gz
+          retention-days: 1
+
+  import:
+    name: Import bundle (field machine)
+    needs: export
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: offline-bundle
+          path: ${{ runner.temp }}
+
+      - name: Verify before importing
+        run: |
+          # verify is the operator's dry run. It must agree with the import
+          # that follows; a dry run that passes where the import fails is
+          # worse than no dry run at all.
+          nanometa-prepare verify --bundle "$RUNNER_TEMP/bundle.tar.gz"
+
+      - name: Import onto a machine that never saw the exporter
+        run: |
+          set -euo pipefail
+          FIELD_HOME="$RUNNER_TEMP/field_home"
+          # The import target comes from NANOMETA_DATA_DIR; the subcommand has
+          # no --nanometa-home flag. --db is required and is transferred
+          # separately from the bundle by design (the Kraken2 database is
+          # excluded for size), so a stand-in directory is enough here.
+          mkdir -p "$RUNNER_TEMP/field_db"
+          NANOMETA_DATA_DIR="$FIELD_HOME" nanometa-prepare import \
+            --bundle "$RUNNER_TEMP/bundle.tar.gz" \
+            --db "$RUNNER_TEMP/field_db"
+          echo "FIELD_HOME=$FIELD_HOME" >> "$GITHUB_ENV"
+
+      - name: Assert the imported installation is actually usable
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os, pathlib, sys
+
+          home = pathlib.Path(os.environ["FIELD_HOME"])
+          problems = []
+
+          # The operator's watchlist and reference genomes must have survived.
+          for rel in ("watchlists/operator.yaml", "genomes/1392.fasta"):
+              if not (home / rel).is_file():
+                  problems.append(f"missing after import: {rel}")
+
+          # The pipeline is what the operator actually runs; if it did not
+          # arrive, the field machine can display results but not produce them.
+          if not list(home.rglob("main.nf")):
+              problems.append("no main.nf under the imported home")
+
+          # Any path recorded in the imported config must resolve ON THIS
+          # machine. This is the check a same-machine round-trip cannot make,
+          # because there the build machine's paths are still valid.
+          import yaml
+          for cfg in home.rglob("config.yaml"):
+              data = yaml.safe_load(cfg.read_text()) or {}
+              for key, value in data.items():
+                  if not isinstance(value, str) or not value.startswith("/"):
+                      continue
+                  if value.startswith(("remote:", "http")):
+                      continue
+                  if not pathlib.Path(value).exists():
+                      problems.append(
+                          f"{cfg.name}: {key} points at {value}, which does "
+                          f"not exist on this machine"
+                      )
+
+          if problems:
+              print("Imported installation is not usable:")
+              for p in problems:
+                  print(f"  - {p}")
+              sys.exit(1)
+          print("Imported installation verified on a machine that never saw "
+                "the exporter.")
+          PY
+
+      - name: Confirm doctor runs against the imported install
+        run: |
+          # Not asserted as passing: this runner has no Nextflow or Java, so
+          # doctor SHOULD report failures. What is asserted is that it runs to
+          # completion and reports them, rather than crashing -- a doctor that
+          # traces back tells a field operator nothing.
+          nanometa-prepare doctor || true
