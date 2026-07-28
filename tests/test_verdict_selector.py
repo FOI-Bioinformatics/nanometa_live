@@ -204,22 +204,13 @@ class TestNothingWatched:
     banner cannot currently tell them apart. The subtitle does read "0 of 0",
     but it is the fine print under a green all-clear headline.
 
-    Every existing test in this file passes n_watched as 5, 7 or 9, which is
+    Every existing test in this file passed n_watched as 5, 7 or 9, which is
     why the case was never noticed.
+
+    Fixed 2026-07-28: select_verdict now returns a distinct NOT_SCREENED state
+    (amber, "No watchlist active") before the ALL CLEAR return.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "OPEN DEFECT, not yet fixed. Reported 2026-07-28. The remedy is a "
-            "product decision -- most likely a distinct banner state along the "
-            "lines of NOT SCREENED, which touches the state key, the banner "
-            "rendering and any consumer that switches on it -- so the bug is "
-            "pinned here rather than patched. strict=True means this test "
-            "starts FAILING the moment the behaviour is corrected, which is "
-            "the signal to delete this marker."
-        ),
-    )
     def test_zero_watched_is_not_reported_as_all_clear(self):
         d = verdict(dangerous=[], n_watched=0)
         assert d.state != "ALL_CLEAR", (

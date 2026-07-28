@@ -1,14 +1,17 @@
 """The data directory must resolve the same way for every consumer.
 
-There are two resolvers in ``core/utils/paths.py`` and they disagree about
-whether ``NANOMETA_DATA_DIR`` exists:
+Two resolvers in ``core/utils/paths.py`` used to disagree about whether
+``NANOMETA_DATA_DIR`` exists:
 
-- ``get_watchlists_dir_from_env()`` honours it. Its docstring records why it
+- ``get_watchlists_dir_from_env()`` honoured it. Its docstring records why it
   had to: when callers hard-coded ``~/.nanometa/watchlists``, a run started
   with ``--data-dir`` put the GUI's uploads somewhere the bundle exporter never
   looked, and the bundle silently shipped without them.
-- ``NanometaPaths.from_config()`` does not. It reads ``config["data_dir"]`` and
-  otherwise falls back to the hard-coded ``DEFAULT_DATA_DIR``.
+- ``NanometaPaths.from_config()`` did not. It read ``config["data_dir"]`` and
+  otherwise fell back to the hard-coded ``DEFAULT_DATA_DIR``.
+
+Fixed 2026-07-28: ``from_config`` now falls back to ``get_data_dir_from_env()``,
+keeping precedence at config > environment > default.
 
 That second resolver decides the ROOT of an exported bundle:
 ``BundleManager.export_bundle`` falls back to
@@ -56,21 +59,6 @@ class TestResolversAgree:
         assert get_data_dir_from_env() == ISOLATED
         assert get_watchlists_dir_from_env().startswith(ISOLATED)
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "OPEN DEFECT, not yet fixed. Reported 2026-07-28. "
-            "NanometaPaths.from_config ignores NANOMETA_DATA_DIR and falls "
-            "back to DEFAULT_DATA_DIR, so `nanometa-prepare export` run with "
-            "the variable set bundles ~/.nanometa instead of the operator's "
-            "actual data dir. The fix is to fall back to "
-            "get_data_dir_from_env() rather than DEFAULT_DATA_DIR, but that "
-            "changes the resolution order for every consumer of from_config, "
-            "so it wants a deliberate review rather than a drive-by patch. "
-            "strict=True turns this into a failure once fixed, which is the "
-            "signal to delete the marker."
-        ),
-    )
     def test_from_config_honours_the_variable_when_config_is_silent(
         self, isolated_env
     ):
@@ -94,14 +82,6 @@ class TestResolversAgree:
 
 
 class TestConsistencyWithinOneExport:
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Same open defect as above, stated as the consequence that "
-            "matters: the two resolvers disagree, so one bundle draws its "
-            "watchlists and its bundle root from different homes."
-        ),
-    )
     def test_watchlists_and_bundle_root_come_from_the_same_home(
         self, isolated_env
     ):

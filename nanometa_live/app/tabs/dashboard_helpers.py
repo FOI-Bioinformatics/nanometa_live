@@ -754,6 +754,24 @@ def _standby_descriptor() -> VerdictDescriptor:
     )
 
 
+def _not_screened_descriptor() -> VerdictDescriptor:
+    """NOT SCREENED: results exist but no watchlist is active.
+
+    Distinct from ALL CLEAR on purpose. An empty hit list means one of two
+    opposite things -- every watched organism was screened and none crossed its
+    threshold, or nothing was screened at all -- and rendering both as a green
+    all-clear asserts a negative result that was never produced. Amber rather
+    than green: the run is fine, the screening is simply absent.
+    """
+    return VerdictDescriptor(
+        state="NOT_SCREENED",
+        icon="shield-slash", icon_color="#fd7e14",
+        title="NOT SCREENED",
+        subtitle="No watchlist active - results are not screened for pathogens",
+        sub_color="#664d03", bg_color="#fff3cd", border_color="#fd7e14",
+    )
+
+
 def _classify_dangerous(dangerous: List[Dict[str, Any]]) -> Tuple[list, list]:
     """Split watchlist hits into (critical, high_risk) buckets.
 
@@ -831,6 +849,10 @@ def select_verdict(
                 title="MONITORING", subtitle="Moderate-risk species found",
                 sub_color="#664d03", bg_color="#fff3cd", border_color="#fd7e14",
             )
+        # No hits. Whether that is reassuring depends entirely on whether
+        # anything was screened -- see _not_screened_descriptor.
+        if not n_watched:
+            return _not_screened_descriptor()
         return VerdictDescriptor(
             state="ALL_CLEAR",
             icon="shield-check", icon_color="#28a745",

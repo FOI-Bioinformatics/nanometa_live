@@ -67,12 +67,22 @@ class NanometaPaths:
     def from_config(cls, config: Mapping[str, object]) -> "NanometaPaths":
         """Build a resolver from the application config dict.
 
-        Reads ``config["data_dir"]`` (global root; falls back to
-        :data:`DEFAULT_DATA_DIR`) and ``config["project_dir"]`` (project
-        root; ``None`` when empty, which collapses the project scope back
-        onto ``data_dir``). Values are expanduser+abspath-normalised.
+        Reads ``config["data_dir"]`` (global root) and
+        ``config["project_dir"]`` (project root; ``None`` when empty, which
+        collapses the project scope back onto ``data_dir``). Values are
+        expanduser+abspath-normalised.
+
+        Precedence for the data root is **config > environment > default**.
+        The environment step matters because ``export_bundle`` falls back to
+        this resolver for the bundle root and ``nanometa-prepare export``
+        passes no explicit home: when this ignored ``NANOMETA_DATA_DIR`` and
+        went straight to :data:`DEFAULT_DATA_DIR`, a run started with
+        ``--data-dir`` exported ``~/.nanometa`` instead of the installation
+        the operator had prepared -- while ``get_watchlists_dir_from_env``
+        honoured the variable, so one bundle drew its watchlists and its root
+        from different homes.
         """
-        raw_data = config.get("data_dir") or DEFAULT_DATA_DIR
+        raw_data = config.get("data_dir") or get_data_dir_from_env()
         raw_project = config.get("project_dir") or ""
         project = cls._norm(raw_project) if str(raw_project).strip() else None
         return cls(cls._norm(raw_data), project)
