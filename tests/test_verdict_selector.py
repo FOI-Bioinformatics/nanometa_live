@@ -186,3 +186,49 @@ class TestDescriptorShape:
             assert isinstance(d, VerdictDescriptor)
             assert d.icon and d.icon_color and d.title and d.bg_color
             assert d.border_color
+
+
+class TestNothingWatched:
+    """The case where no watchlist is active at all.
+
+    Found on 2026-07-28 by opening the dashboard against a real results tree
+    with ``--main_dir`` and no configured watchlist. The banner rendered a
+    green shield and the word ALL CLEAR while the Organisms tab, one click
+    away, listed Francisella tularensis -- an HHS Tier 1 select agent -- as
+    the most abundant organism at 54.2% of all reads (34,103 of them).
+
+    ``select_verdict`` has no branch for ``n_watched == 0``: an empty
+    ``dangerous`` list falls through to ALL CLEAR regardless of whether it is
+    empty because 116 organisms were screened and none exceeded threshold, or
+    because nothing was screened at all. Those are opposite situations and the
+    banner cannot currently tell them apart. The subtitle does read "0 of 0",
+    but it is the fine print under a green all-clear headline.
+
+    Every existing test in this file passes n_watched as 5, 7 or 9, which is
+    why the case was never noticed.
+    """
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "OPEN DEFECT, not yet fixed. Reported 2026-07-28. The remedy is a "
+            "product decision -- most likely a distinct banner state along the "
+            "lines of NOT SCREENED, which touches the state key, the banner "
+            "rendering and any consumer that switches on it -- so the bug is "
+            "pinned here rather than patched. strict=True means this test "
+            "starts FAILING the moment the behaviour is corrected, which is "
+            "the signal to delete this marker."
+        ),
+    )
+    def test_zero_watched_is_not_reported_as_all_clear(self):
+        d = verdict(dangerous=[], n_watched=0)
+        assert d.state != "ALL_CLEAR", (
+            "with no watchlist loaded the dashboard announces ALL CLEAR, which "
+            "asserts a negative screening result that was never performed"
+        )
+
+    def test_a_populated_watchlist_with_no_hits_is_still_all_clear(self):
+        """The genuine all-clear must keep working -- this is the contrast."""
+        d = verdict(dangerous=[], n_watched=116)
+        assert d.state == "ALL_CLEAR"
+        assert "116" in d.subtitle

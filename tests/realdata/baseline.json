@@ -1,0 +1,84 @@
+{
+  "_comment": "Measured on run R1, 2026-07-28. k2_pluspfp_08_GB_20251015, batch mode, by_barcode, chopper defaults (minlength 1000, quality 10). These are observed values from one run, not independently certified truth: use them to detect drift in the NEXT release, not as a correctness oracle.",
+  "database": "k2_pluspfp_08_GB_20251015",
+  "samples": {
+    "barcode11": {
+      "classified_reads": 34120,
+      "tularensis_263_reads": 34096,
+      "top_species": [
+        {
+          "taxid": 263,
+          "name": "Francisella tularensis",
+          "reads": 34096
+        },
+        {
+          "taxid": 3988,
+          "name": "Ricinus communis",
+          "reads": 4
+        },
+        {
+          "taxid": 287,
+          "name": "Pseudomonas aeruginosa",
+          "reads": 1
+        },
+        {
+          "taxid": 9606,
+          "name": "Homo sapiens",
+          "reads": 1
+        }
+      ]
+    },
+    "barcode14": {
+      "classified_reads": 20676,
+      "tularensis_263_reads": 1,
+      "top_species": [
+        {
+          "taxid": 1613,
+          "name": "Limosilactobacillus fermentum",
+          "reads": 4229
+        },
+        {
+          "taxid": 28901,
+          "name": "Salmonella enterica",
+          "reads": 2638
+        },
+        {
+          "taxid": 96241,
+          "name": "Bacillus spizizenii",
+          "reads": 2262
+        },
+        {
+          "taxid": 287,
+          "name": "Pseudomonas aeruginosa",
+          "reads": 1927
+        },
+        {
+          "taxid": 562,
+          "name": "Escherichia coli",
+          "reads": 1202
+        }
+      ]
+    },
+    "barcode16": {
+      "classified_reads": 11,
+      "tularensis_263_reads": 6,
+      "top_species": [
+        {
+          "taxid": 263,
+          "name": "Francisella tularensis",
+          "reads": 6
+        },
+        {
+          "taxid": 287,
+          "name": "Pseudomonas aeruginosa",
+          "reads": 1
+        },
+        {
+          "taxid": 1613,
+          "name": "Limosilactobacillus fermentum",
+          "reads": 1
+        }
+      ]
+    }
+  }
+}
