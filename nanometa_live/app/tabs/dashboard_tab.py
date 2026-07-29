@@ -243,6 +243,10 @@ def register_dashboard_callbacks(app: Dash):
         kraken_has_data = False
         dangerous: List[Dict[str, Any]] = []
         n_watched = 0
+        # None (not 0) means "depth unknown", which must not be treated as
+        # "zero reads" -- the verdict keeps its previous behaviour then.
+        total_reads: Optional[int] = None
+        highest_alert_threshold: Optional[int] = None
         # Only touch disk when there is a configured, ready results directory
         # and we are not already short-circuiting on "starting" -- mirrors the
         # original control flow so no Kraken load runs in those states.
@@ -256,6 +260,24 @@ def register_dashboard_callbacks(app: Dash):
                     detected_organisms = _species_df_to_organisms(species_df)
                     watched_species = _get_active_watchlist_entries(config)
                     n_watched = len(watched_species)
+                    # Depth actually screened. A negative measured over almost
+                    # no reads is not a negative, and the verdict cannot tell
+                    # without being told: kraken_has_data only means the report
+                    # had rows.
+                    classified, unclassified, _rate = get_classification_stats(
+                        kraken_df
+                    )
+                    total_reads = classified + unclassified
+                    # Self-calibrating to the operator's own watchlist: if the
+                    # sample is shallower than the highest threshold in play,
+                    # that organism could not have been called even if every
+                    # read were it.
+                    thresholds = [
+                        int(w.get("alert_threshold") or 0)
+                        for w in watched_species
+                        if isinstance(w, dict)
+                    ]
+                    highest_alert_threshold = max(thresholds) if thresholds else None
                     dangerous = _check_pathogens_with_mapping(
                         detected_organisms, config
                     )
@@ -276,6 +298,8 @@ def register_dashboard_callbacks(app: Dash):
             dangerous=dangerous,
             n_watched=n_watched,
             validation_has_results=validation_has_results,
+            total_reads=total_reads,
+            highest_alert_threshold=highest_alert_threshold,
         )
 
         # Per-sample attribution for the ACTION REQUIRED subhead (closes

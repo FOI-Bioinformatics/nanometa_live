@@ -772,6 +772,56 @@ def _not_screened_descriptor() -> VerdictDescriptor:
     )
 
 
+#: Read count below which a negative screening result carries little weight.
+#: Anchored to ``min_reads_for_validation`` (default 50), the depth the
+#: pipeline already treats as the floor for confirming an organism: if a
+#: detection needs 50 reads to be worth validating, an absence measured over
+#: fewer than 50 is not worth reporting as a clear result either.
+DEFAULT_LOW_READ_FLOOR = 50
+
+
+def _insufficient_reads_descriptor(
+    total_reads: int, n_watched: int, highest_threshold: Optional[int] = None
+) -> VerdictDescriptor:
+    """A negative measured over too few reads is not a negative.
+
+    Distinct from ALL CLEAR because the operator needs to know the result is
+    thin, and distinct from NOT SCREENED because screening did run -- there was
+    simply almost nothing to screen. Amber, not green: the run is fine, the
+    evidence is not.
+
+    The subtitle states the actual depth, because "too few" is only actionable
+    if the operator can see how few and judge it against their own sample.
+    """
+    if total_reads <= 0:
+        detail = (
+            f"No reads were analysed, so the {n_watched} watched "
+            f"organism{'s' if n_watched != 1 else ''} could not be screened"
+        )
+    else:
+        detail = (
+            f"Only {total_reads:,} read{'s' if total_reads != 1 else ''} "
+            f"analysed - too few for a reliable negative across "
+            f"{n_watched} watched organism{'s' if n_watched != 1 else ''}"
+        )
+        if highest_threshold and total_reads < highest_threshold:
+            # Mathematically decisive, and worth saying: even if every read in
+            # the sample were one organism, it could not reach that organism's
+            # alert threshold.
+            detail += (
+                f"; the highest alert threshold is {highest_threshold}, "
+                f"which this depth cannot reach"
+            )
+
+    return VerdictDescriptor(
+        state="INSUFFICIENT_READS",
+        icon="exclamation-circle", icon_color="#fd7e14",
+        title="INSUFFICIENT READS",
+        subtitle=detail,
+        sub_color="#664d03", bg_color="#fff3cd", border_color="#fd7e14",
+    )
+
+
 def _classify_dangerous(dangerous: List[Dict[str, Any]]) -> Tuple[list, list]:
     """Split watchlist hits into (critical, high_risk) buckets.
 
@@ -809,6 +859,9 @@ def select_verdict(
     dangerous: List[Dict[str, Any]],
     n_watched: int,
     validation_has_results: bool,
+    total_reads: Optional[int] = None,
+    low_read_floor: int = DEFAULT_LOW_READ_FLOOR,
+    highest_alert_threshold: Optional[int] = None,
 ) -> VerdictDescriptor:
     """Pure decision: pick the verdict banner state from the analysis inputs.
 
@@ -853,11 +906,25 @@ def select_verdict(
         # anything was screened -- see _not_screened_descriptor.
         if not n_watched:
             return _not_screened_descriptor()
+
+        # An absence measured over almost no reads is not evidence of absence.
+        # Only applied when the caller supplies a depth: passing None keeps the
+        # previous behaviour for callers that cannot determine it, rather than
+        # silently treating "unknown" as "zero".
+        if total_reads is not None and total_reads < low_read_floor:
+            return _insufficient_reads_descriptor(
+                total_reads, n_watched, highest_alert_threshold
+            )
+
+        depth = f" across {total_reads:,} reads" if total_reads else ""
         return VerdictDescriptor(
             state="ALL_CLEAR",
             icon="shield-check", icon_color="#28a745",
             title="ALL CLEAR",
-            subtitle=f"0 of {n_watched} watched pathogens above alert threshold",
+            subtitle=(
+                f"0 of {n_watched} watched pathogens above alert "
+                f"threshold{depth}"
+            ),
             sub_color="#155724", bg_color="#d4edda", border_color="#28a745",
         )
 

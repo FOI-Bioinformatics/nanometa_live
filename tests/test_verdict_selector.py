@@ -225,55 +225,76 @@ class TestNothingWatched:
         assert "116" in d.subtitle
 
 
-class TestAllClearOnNoReads:
-    """ALL CLEAR must mean something was screened, not merely that a report exists.
+class TestAllClearRequiresEnoughReadsToMeanIt:
+    """ALL CLEAR must mean something was screened, not that a report existed.
 
-    ``select_verdict`` takes no read-depth input. ``kraken_has_data`` is set
-    from ``not kraken_df.empty`` (dashboard_tab.py:252) -- the report having
-    ROWS, not reads. So a sample whose QC produced nothing still takes the
-    data-driven path and renders
+    select_verdict took no read-depth input, and ``kraken_has_data`` is set
+    from ``not kraken_df.empty`` (dashboard_tab.py) -- the report having ROWS,
+    not reads. So a sample whose QC produced nothing rendered
 
         ALL CLEAR - 0 of 116 watched pathogens above alert threshold
 
-    identically to a sample with 34,000 reads and no hits.
+    identically to a sample with 34,000 reads and no hits. That was the end of
+    the chain in tests/test_manifest_failed_sample.py: an unreadable FASTQ,
+    absorbed by error isolation, reported as success, listed in the manifest,
+    offered in the selector -- and declared clear.
 
-    This is the end of the chain traced in tests/test_manifest_failed_sample.py:
-    an unreadable FASTQ makes CHOPPER exit 1, error isolation absorbs it, the
-    run reports success, the manifest lists the sample, the selector offers it
-    -- and here the dashboard declares it clear. "No pathogens found in zero
-    reads" is not a negative result; it is no result.
+    Fixed 2026-07-29 by passing the depth in and adding INSUFFICIENT READS.
 
-    Not fixed here because the remedy needs a decision this code cannot make:
-    zero reads is unambiguous, but "too few to screen meaningfully" is a
-    clinical judgement, and the same question was raised in round 1 by a
-    negative control carrying 6 reads against an alert_threshold of 5.
-    Whatever the answer, select_verdict needs a read count it does not
-    currently receive.
+    The floor is DEFAULT_LOW_READ_FLOOR (50), anchored to the existing
+    ``min_reads_for_validation`` default: if a detection needs 50 reads to be
+    worth confirming, an absence measured over fewer is not worth reporting as
+    clear. The message additionally names the operator's own highest alert
+    threshold when the sample is shallower than it, because that case is
+    decidable rather than a judgement -- even if every read were one organism,
+    it could not reach that threshold.
     """
 
-    def test_all_clear_requires_reads_to_have_been_screened(self):
-        d = verdict(dangerous=[], n_watched=116)
-        assert d.state == "ALL_CLEAR", "baseline: this is the current behaviour"
+    def test_zero_reads_is_not_an_all_clear(self):
+        d = verdict(dangerous=[], n_watched=116, total_reads=0)
+        assert d.state == "INSUFFICIENT_READS"
+        assert "No reads were analysed" in d.subtitle
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "OPEN DEFECT, reported 2026-07-29. select_verdict cannot see read "
-            "depth, so a sample with zero reads renders ALL CLEAR. Fixing it "
-            "means passing a read count in and deciding what floor counts as "
-            "screened -- zero is unambiguous, 'too few' is a clinical "
-            "judgement. strict=True turns this into a failure once a depth "
-            "input exists, which is the signal to delete the marker."
-        ),
-    )
-    def test_select_verdict_can_see_how_many_reads_were_screened(self):
-        """The precondition for any fix: the decision needs the information."""
-        import inspect
+    def test_a_shallow_sample_is_not_an_all_clear(self):
+        d = verdict(dangerous=[], n_watched=116, total_reads=3)
+        assert d.state == "INSUFFICIENT_READS"
 
-        from nanometa_live.app.tabs.dashboard_helpers import select_verdict
-
-        params = inspect.signature(select_verdict).parameters
-        assert any("read" in p for p in params), (
-            f"select_verdict cannot distinguish a screen over 34,000 reads "
-            f"from one over zero; its inputs are {sorted(params)}"
+    def test_the_message_states_the_actual_depth(self):
+        """"Too few" is only actionable if the operator can see how few."""
+        d = verdict(dangerous=[], n_watched=116, total_reads=3)
+        assert "3 reads" in d.subtitle, (
+            f"the operator cannot judge the result without the number: "
+            f"{d.subtitle!r}"
         )
+
+    def test_it_names_the_threshold_that_could_not_be_reached(self):
+        d = verdict(dangerous=[], n_watched=116, total_reads=3,
+                    highest_alert_threshold=25)
+        assert "25" in d.subtitle and "cannot reach" in d.subtitle, (
+            f"when the depth is below the highest alert threshold that is a "
+            f"decidable fact and worth stating: {d.subtitle!r}"
+        )
+
+    def test_it_is_not_styled_as_a_clear_result(self):
+        """Wording alone is not enough; a green banner reads as reassurance."""
+        d = verdict(dangerous=[], n_watched=116, total_reads=3)
+        assert d.bg_color != "#d4edda", "styled the same green as ALL CLEAR"
+
+    def test_a_deep_sample_still_reads_as_clear(self):
+        d = verdict(dangerous=[], n_watched=116, total_reads=34141)
+        assert d.state == "ALL_CLEAR"
+        assert "34,141 reads" in d.subtitle, (
+            "the genuine all-clear should state the depth it is based on, so "
+            "it cannot be confused with a shallow one"
+        )
+
+    def test_unknown_depth_keeps_the_previous_behaviour(self):
+        """None means "not determined", which must not be read as zero."""
+        d = verdict(dangerous=[], n_watched=116, total_reads=None)
+        assert d.state == "ALL_CLEAR"
+
+    def test_a_detection_still_wins_over_shallow_depth(self):
+        """A hit is a hit; low depth must not downgrade a real detection."""
+        d = verdict(dangerous=[{"threat_level": "critical"}], n_watched=116,
+                    total_reads=3)
+        assert d.state == "ACTION_REQUIRED"
