@@ -1,11 +1,13 @@
 # Known untested surface
 
-Written 2026-07-29, at the close of a two-round pre-release bug hunt.
+Written 2026-07-29, at the close of a three-round pre-release bug hunt.
+Last updated after round 3.
 
 This document exists because the absence of a statement reads as coverage. The
-test suite is large (3154 tests) and the campaign that produced this document
-found nine real defects, which makes it easy to assume the remaining surface is
-sound. Some of it is simply unexamined, and a biothreat tool should say which.
+test suite is large (3188 tests) and the campaign that produced this document
+found fifteen real defects, which makes it easy to assume the remaining surface
+is sound. Some of it is simply unexamined, and a biothreat tool should say
+which.
 
 Each entry states what is not known, why it is not known, and what it would
 take to find out.
@@ -126,13 +128,19 @@ the UI, watchlist upload/download round-trip, the output-collision modal, or the
 Resume/Discard session banner. Export Results is covered by unit tests against
 its generator, not by clicking the button.
 
-### Pipeline failure paths
+### Pipeline failure paths -- partially closed
 
-Nothing asserts that the pipeline fails *cleanly* on a missing database, an
-unreadable FASTQ, or a corrupt input. The one case covered is an empty input
-directory, which succeeds without scheduling work. Failure-injection tests exist
-on the Python side (process killed, truncated report, database unmounted) but
-not on the Nextflow side.
+Round 3 added `tests/failure_paths.nf.test`, which asserts the pipeline refuses
+a nonexistent database naming the path, an incomplete database naming the
+missing `.k2d` file, and no database at all while pointing at both
+`--kraken2_db` and `--skip_kraken2`.
+
+Still open, and recorded there as a finding rather than fixed: an unreadable
+FASTQ is absorbed by `conf/error_isolation.config` and the run reports success.
+That is correct for a 24-barcode run -- one bad barcode must not abort the
+other 23 -- but nothing in the pipeline records which sample was dropped. The
+GUI now marks such samples, so the operator sees it; the pipeline's own outputs
+still do not distinguish them.
 
 ---
 
