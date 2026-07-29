@@ -223,3 +223,57 @@ class TestNothingWatched:
         d = verdict(dangerous=[], n_watched=116)
         assert d.state == "ALL_CLEAR"
         assert "116" in d.subtitle
+
+
+class TestAllClearOnNoReads:
+    """ALL CLEAR must mean something was screened, not merely that a report exists.
+
+    ``select_verdict`` takes no read-depth input. ``kraken_has_data`` is set
+    from ``not kraken_df.empty`` (dashboard_tab.py:252) -- the report having
+    ROWS, not reads. So a sample whose QC produced nothing still takes the
+    data-driven path and renders
+
+        ALL CLEAR - 0 of 116 watched pathogens above alert threshold
+
+    identically to a sample with 34,000 reads and no hits.
+
+    This is the end of the chain traced in tests/test_manifest_failed_sample.py:
+    an unreadable FASTQ makes CHOPPER exit 1, error isolation absorbs it, the
+    run reports success, the manifest lists the sample, the selector offers it
+    -- and here the dashboard declares it clear. "No pathogens found in zero
+    reads" is not a negative result; it is no result.
+
+    Not fixed here because the remedy needs a decision this code cannot make:
+    zero reads is unambiguous, but "too few to screen meaningfully" is a
+    clinical judgement, and the same question was raised in round 1 by a
+    negative control carrying 6 reads against an alert_threshold of 5.
+    Whatever the answer, select_verdict needs a read count it does not
+    currently receive.
+    """
+
+    def test_all_clear_requires_reads_to_have_been_screened(self):
+        d = verdict(dangerous=[], n_watched=116)
+        assert d.state == "ALL_CLEAR", "baseline: this is the current behaviour"
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "OPEN DEFECT, reported 2026-07-29. select_verdict cannot see read "
+            "depth, so a sample with zero reads renders ALL CLEAR. Fixing it "
+            "means passing a read count in and deciding what floor counts as "
+            "screened -- zero is unambiguous, 'too few' is a clinical "
+            "judgement. strict=True turns this into a failure once a depth "
+            "input exists, which is the signal to delete the marker."
+        ),
+    )
+    def test_select_verdict_can_see_how_many_reads_were_screened(self):
+        """The precondition for any fix: the decision needs the information."""
+        import inspect
+
+        from nanometa_live.app.tabs.dashboard_helpers import select_verdict
+
+        params = inspect.signature(select_verdict).parameters
+        assert any("read" in p for p in params), (
+            f"select_verdict cannot distinguish a screen over 34,000 reads "
+            f"from one over zero; its inputs are {sorted(params)}"
+        )
