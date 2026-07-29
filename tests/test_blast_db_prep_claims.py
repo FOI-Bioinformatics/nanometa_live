@@ -68,12 +68,36 @@ class TestBuildingOverNoGenomes:
         mgr.get_all_genomes.return_value = genomes
         mgr.has_blast_db.side_effect = has_db
         seen = []
+        # The callback refuses to start without makeblastdb on PATH. That is
+        # correct behaviour and has its own test below, but leaving it to the
+        # environment made these three assertions pass on a developer machine
+        # with BLAST+ installed and fail on CI, which has none -- they never
+        # reached the branch they were written for. Pin the tool as present.
         with patch(
+            "shutil.which",
+            return_value="/usr/bin/makeblastdb",
+        ), patch(
             "nanometa_live.core.utils.genome_manager.get_genome_manager",
             return_value=mgr,
         ):
             fn(lambda v: seen.append(v), 1, {})
         return seen[-1]
+
+    def test_a_missing_makeblastdb_is_reported_as_an_error(self):
+        """The environment dependence the other tests patch away.
+
+        Asserted here rather than left implicit, so patching `shutil.which`
+        above cannot quietly disable a real guard.
+        """
+        fn = _fn("blast-build-complete", "genome-build-blast-btn")
+        seen = []
+        with patch(
+            "shutil.which",
+            return_value=None,
+        ):
+            fn(lambda v: seen.append(v), 1, {})
+        assert _badge(seen[-1]) == "Error"
+        assert "BLAST+" in _log(seen[-1])
 
     def test_no_genomes_is_not_complete(self):
         last = self._run([], lambda t: True)
