@@ -249,9 +249,24 @@
   <div class="decision-banner banner-review">
     REVIEW RECOMMENDED - {{ detected_threats | length }} watched organism{{ "s" if detected_threats | length != 1 else "" }} detected
   </div>
+  {% elif not data.watched_results %}
+  {#
+    Nothing was screened, so there is no negative result to report. Saying
+    "NO WATCHED ORGANISMS DETECTED" here announces a finding that was never
+    produced. Observed 2026-07-29 on a real results tree: the report carried
+    that green banner while Francisella tularensis -- an HHS Tier 1 select
+    agent -- appeared in the report's own organism table at 34,096 reads.
+
+    Mirrors the dashboard fix (dashboard_helpers.select_verdict -> NOT_SCREENED).
+    The report matters more: it is the artifact handed to someone else, and it
+    outlives the session that produced it.
+  #}
+  <div class="decision-banner banner-review">
+    NOT SCREENED - no watchlist was active, so no organisms were checked
+  </div>
   {% else %}
   <div class="decision-banner banner-safe">
-    NO WATCHED ORGANISMS DETECTED
+    NO WATCHED ORGANISMS DETECTED - {{ data.watched_results | length }} organism{{ "s" if data.watched_results | length != 1 else "" }} screened
   </div>
   {% endif %}
 
