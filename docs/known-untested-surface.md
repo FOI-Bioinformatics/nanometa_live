@@ -4,8 +4,8 @@ Written 2026-07-29, at the close of a three-round pre-release bug hunt.
 Last updated after round 3.
 
 This document exists because the absence of a statement reads as coverage. The
-test suite is large (3188 tests) and the campaign that produced this document
-found fifteen real defects, which makes it easy to assume the remaining surface
+test suite is large (3210 tests) and the campaign that produced this document
+found nineteen real defects, which makes it easy to assume the remaining surface
 is sound. Some of it is simply unexamined, and a biothreat tool should say
 which.
 
@@ -41,12 +41,32 @@ Stated first so the gaps below are read in proportion.
 
 - **Singularity image-cache naming**, confirmed against real Apptainer in CI.
 - **CI itself**, which had never run; now green on every job.
-- **Six "reassuring conclusion" defects** found by asking of each surface
+- **Ten "reassuring conclusion" defects** found by asking of each surface
   whether it can state something it has not earned: the exported report's
   all-clear with nothing screened, ALL CLEAR over too few reads, a sample that
   produced no data offered like a healthy one, a readiness check reading a
   config key that does not exist, untracked fixtures, and two test bugs that
   only manifested under CI's profile.
+
+  Four more in the preparation tab, which is what an operator uses to ready a
+  field deployment, so each one ships:
+
+  - The offline-prep wizard announced "All 8 steps completed. System is ready
+    for offline deployment" while its own step 0 said no watchlist was
+    enabled. Several steps report a problem by returning a warning alert
+    rather than raising, and the loop discarded the return value.
+  - Genome download reported "All genomes already downloaded" with a green
+    Complete badge when the inventory it reads had never been computed. The
+    store started as `{}`, which was indistinguishable from "nothing missing".
+  - BLAST database build reported "All BLAST databases already built" when
+    there were no genomes at all -- vacuously true, and identical on screen to
+    a prepared system.
+  - Genome download's Complete badge counted download failures only, so every
+    download landing while every BLAST build failed still read Complete.
+
+  The last three share a consequence: a genome without a BLAST database cannot
+  be validated against, so the first evidence is a validation that cannot run,
+  on a field machine, long after the green badge.
 
 ## Not verified
 
@@ -119,6 +139,18 @@ taxid 263. Multi-sample validation, the negative control through validation, and
 the realtime cumulative/per-batch validation drill-down were not exercised on
 real data. The unit tests for those paths pass, but unit tests passed throughout
 the period when validation produced nothing at all.
+
+### The preparation tab, beyond its verdicts -- partially closed
+
+872 statements at 35% coverage, the largest untested user-facing surface. Round
+3 audited every place it states an outcome and fixed the four defects listed
+above; those paths are now covered and mutation-checked.
+
+What remains untested is the work itself rather than the reporting: a bundle
+export and import driven from the UI, a genome download that actually reaches
+NCBI, a BLAST database built from a real genome. The unit tests stub the
+genome manager, so they prove the tab reports its results honestly, not that
+the results are right.
 
 ### GUI behaviour beyond rendering
 
