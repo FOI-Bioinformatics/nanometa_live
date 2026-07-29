@@ -39,13 +39,13 @@ from dash_test_utils import get_callback_fn as _fn, ctx_with as _ctx
 class TestSampleSelector:
     def test_options_built_and_reset_on_invalid_value(self, app_backend):
         fn = _fn(app_backend[0], "sample-selector.options")
-        options, value = fn(["All Samples", "barcode01"], {}, "gone")
+        options, value = fn(["All Samples", "barcode01"], {}, "gone", {"barcode01": {"kraken2": ["x"]}})
         assert len(options) == 2
         assert value == "All Samples"  # current selection no longer valid
 
     def test_valid_value_not_reset(self, app_backend):
         fn = _fn(app_backend[0], "sample-selector.options")
-        _options, value = fn(["All Samples", "barcode01"], {}, "barcode01")
+        _options, value = fn(["All Samples", "barcode01"], {}, "barcode01", {"barcode01": {"kraken2": ["x"]}})
         assert value is no_update
 
     def test_selected_sample_defaults_to_all(self, app_backend):

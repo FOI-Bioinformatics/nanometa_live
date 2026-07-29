@@ -93,8 +93,10 @@ def register_samples(app, backend_manager):
         Input("available-samples", "data"),
         Input("sample-freshness", "data"),
         State("sample-selector", "value"),
+        State("sample-file-mapping", "data"),
     )
-    def update_sample_selector_options(available_samples, freshness, current_value):
+    def update_sample_selector_options(available_samples, freshness, current_value,
+                                       file_mapping):
         """
         Update sample selector dropdown options.
 
@@ -111,6 +113,31 @@ def register_samples(app, backend_manager):
         freshness = freshness or {}
         now = time.time()
 
+        # Samples the manifest lists but which produced no files.
+        #
+        # bin/write_manifest.py does not discover outputs, it PREDICTS them --
+        # <sample>.classification.json and <sample>.qc_stats.json for every
+        # sample and active tool -- and cannot verify them, because
+        # MANIFEST_WRITER runs in its own work directory. So a sample whose QC
+        # failed (CHOPPER exit 1 on an unreadable FASTQ, absorbed by
+        # conf/error_isolation.config) is listed exactly like a healthy one and
+        # offered here identically. Selecting it shows an empty view, which
+        # reads as "nothing detected" rather than "this was never processed".
+        #
+        # sample-file-mapping is built from files actually on disk, so a sample
+        # present in available-samples but absent from it produced nothing. The
+        # sample is still offered -- hiding it would lose the fact that the
+        # barcode was attempted -- but it is marked.
+        #
+        # Guarded on the mapping being populated: before the first scan it is
+        # empty, and marking every sample then would be worse than marking none.
+        dataless = set()
+        if isinstance(file_mapping, dict) and file_mapping:
+            dataless = {
+                s for s in available_samples
+                if s != "All Samples" and not file_mapping.get(s)
+            }
+
         options = []
         for sample in available_samples:
             if sample == "All Samples":
@@ -118,10 +145,21 @@ def register_samples(app, backend_manager):
                 continue
             last_ts = freshness.get(sample)
             age = age_seconds_for(last_ts, now)
+            parts = [html.Span(sample, className="text-truncate"),
+                     freshness_pill(sample, age, class_name="ms-2")]
+            if sample in dataless:
+                # Distinct from the freshness pill's muted "--", which means
+                # "age unknown" and is also shown for samples that do have data.
+                parts.append(
+                    dbc.Badge("no data", color="warning", className="ms-2",
+                              title=(f"{sample} produced no output files. It was "
+                                     f"listed by the pipeline manifest but nothing "
+                                     f"was written -- most often its reads failed "
+                                     f"QC. An empty view of it is not a negative "
+                                     f"result."))
+                )
             label = html.Span(
-                [html.Span(sample, className="text-truncate"),
-                 freshness_pill(sample, age, class_name="ms-2")],
-                className="d-inline-flex align-items-center",
+                parts, className="d-inline-flex align-items-center",
             )
             options.append({"label": label, "value": sample})
 

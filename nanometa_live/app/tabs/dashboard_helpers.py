@@ -822,6 +822,27 @@ def _insufficient_reads_descriptor(
     )
 
 
+def _all_clear_descriptor(
+    n_watched: int, total_reads: Optional[int] = None
+) -> VerdictDescriptor:
+    """ALL CLEAR: organisms were screened at adequate depth and none was found.
+
+    States the depth it is based on, so a negative over 34,000 reads cannot be
+    confused at a glance with one over 60. The shallow and zero-read cases are
+    handled by :func:`_insufficient_reads_descriptor` before reaching here.
+    """
+    depth = f" across {total_reads:,} reads" if total_reads else ""
+    return VerdictDescriptor(
+        state="ALL_CLEAR",
+        icon="shield-check", icon_color="#28a745",
+        title="ALL CLEAR",
+        subtitle=(
+            f"0 of {n_watched} watched pathogens above alert threshold{depth}"
+        ),
+        sub_color="#155724", bg_color="#d4edda", border_color="#28a745",
+    )
+
+
 def _classify_dangerous(dangerous: List[Dict[str, Any]]) -> Tuple[list, list]:
     """Split watchlist hits into (critical, high_risk) buckets.
 
@@ -916,17 +937,7 @@ def select_verdict(
                 total_reads, n_watched, highest_alert_threshold
             )
 
-        depth = f" across {total_reads:,} reads" if total_reads else ""
-        return VerdictDescriptor(
-            state="ALL_CLEAR",
-            icon="shield-check", icon_color="#28a745",
-            title="ALL CLEAR",
-            subtitle=(
-                f"0 of {n_watched} watched pathogens above alert "
-                f"threshold{depth}"
-            ),
-            sub_color="#155724", bg_color="#d4edda", border_color="#28a745",
-        )
+        return _all_clear_descriptor(n_watched, total_reads)
 
     # Results directory present but no rows yet, pipeline still producing them.
     if main_dir_available and pipeline_running:

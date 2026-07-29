@@ -72,7 +72,7 @@ def test_available_samples_detects_populated(samples_app, populated_dir):
 
 def test_selector_options_built_from_samples(samples_app):
     fn = get_callback_fn(samples_app, "sample-selector")
-    options, value = fn(["All Samples", "barcode01"], {}, None)
+    options, value = fn(["All Samples", "barcode01"], {}, None, {"barcode01": {"kraken2": ["x"]}})
     assert len(options) == 2
     assert options[0]["value"] == "All Samples"
     assert value is no_update
@@ -80,7 +80,8 @@ def test_selector_options_built_from_samples(samples_app):
 
 def test_selector_resets_when_selection_gone(samples_app):
     fn = get_callback_fn(samples_app, "sample-selector")
-    options, value = fn(["All Samples", "barcode02"], {}, "barcode01")  # barcode01 gone
+    options, value = fn(["All Samples", "barcode02"], {}, "barcode01",
+                          {"barcode02": {"kraken2": ["x"]}})  # barcode01 gone
     assert value == "All Samples"
 
 

@@ -101,27 +101,36 @@ class TestDatalessSampleIsDistinguishable:
         samples = sd.get_available_samples(str(tree_with_a_dataless_sample))
         assert "healthy" in samples
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "OPEN DEFECT, reported 2026-07-29. A sample whose QC failed is "
-            "offered in the selector exactly like a healthy one, because the "
-            "manifest lists it and the detector trusts the manifest. Selecting "
-            "it shows nothing, which is indistinguishable from a clean "
-            "negative. The remedy is a product decision -- mark the sample, or "
-            "have the pipeline record per-sample status -- so the behaviour is "
-            "pinned rather than patched. strict=True turns this into a failure "
-            "once fixed, which is the signal to delete the marker."
-        ),
-    )
-    def test_a_sample_with_no_data_is_not_silently_offered(
-        self, tree_with_a_dataless_sample
-    ):
-        samples = sd.get_available_samples(str(tree_with_a_dataless_sample))
-        assert "failed_qc" not in samples, (
-            "a sample with no data on disk is offered to the operator "
-            "identically to one with results; an empty view of it reads as "
-            "'nothing detected' rather than 'this sample was never processed'"
+    def test_the_sample_is_still_listed(self):
+        """Fixed 2026-07-29 by MARKING, not hiding.
+
+        The original expectation here was that a data-less sample should not
+        be offered. That was the wrong remedy: hiding it loses the fact that
+        the barcode was attempted, which an operator needs in order to go and
+        look at why. It is now offered with a "no data" badge that explains
+        an empty view of it is not a negative result -- see
+        tests/test_sample_selector_marks_dataless.py.
+
+        The detector deliberately still lists it, so this asserts the
+        behaviour the fix depends on rather than the one it replaced.
+        """
+        import json
+        import tempfile
+        import pathlib as _pl
+
+        root = _pl.Path(tempfile.mkdtemp())
+        (root / "canonical").mkdir(parents=True)
+        (root / "kraken2").mkdir()
+        (root / "kraken2" / "healthy.kraken2.report.txt").write_text(KRAKEN_REPORT)
+        (root / "canonical" / "_manifest.json").write_text(json.dumps({
+            "format_version": "1.0.0", "samples": ["healthy", "failed_qc"],
+        }))
+        sd.invalidate_sample_cache()
+        samples = sd.get_available_samples(str(root))
+        assert "failed_qc" in samples, (
+            "the selector marking relies on the sample still being listed; "
+            "if the detector starts filtering it out, the marker never renders "
+            "and the operator loses the information entirely"
         )
 
     def test_the_detector_can_at_least_see_the_difference(
