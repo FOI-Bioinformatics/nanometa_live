@@ -416,7 +416,12 @@ def create_app(
         # callbacks read this as State instead of the WatchlistManager
         # singleton, which is empty in worker processes.
         dcc.Store(id='watchlist-entries-snapshot', data=[]),
-        dcc.Store(id='genome-status-data', data={}),
+        # None means "update_genome_stats has never run", which is NOT the
+        # same as the empty list meaning "it ran and nothing is missing".
+        # download_missing_genomes must be able to tell those apart or it
+        # reports "All genomes already downloaded" for a check that never
+        # happened. See its docstring.
+        dcc.Store(id='genome-status-data', data=None),
         dcc.Store(id='genome-download-complete', data=None),
         dcc.Store(id='blast-build-complete', data=None),
 

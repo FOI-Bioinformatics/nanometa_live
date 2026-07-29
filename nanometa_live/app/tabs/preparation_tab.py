@@ -1489,8 +1489,34 @@ def register_preparation_callbacks(app):
 
         set_progress((0, "Scanning for missing genomes...", "Checking watchlist entries", add_log("Starting genome download process"), []))
 
-        # Use pre-computed missing list from the main process store
-        missing = missing_store if missing_store else []
+        # Use pre-computed missing list from the main process store.
+        #
+        # An unpopulated store is not an empty one. `update_genome_stats`
+        # writes a list here; until it has run the store holds None. The
+        # earlier `missing_store if missing_store else []` mapped both to the
+        # empty list, so clicking Download before the stats callback had run
+        # -- or after it raised -- reported "All genomes already downloaded"
+        # with a green Complete badge, having checked nothing. The operator
+        # then exported a bundle whose genomes were never fetched, and the
+        # first evidence of it was validation finding no reference to align
+        # against, in the field.
+        if not isinstance(missing_store, list):
+            set_progress((
+                0,
+                "Genome status not available yet",
+                "Cannot tell which genomes are missing",
+                add_log(
+                    "The genome inventory has not been computed yet, so this "
+                    "is not a report that nothing is missing. Open the "
+                    "Preparation tab and let the genome statistics load, "
+                    "then try again.",
+                    "warning",
+                ),
+                dbc.Badge("Unknown", color="warning", className="me-2"),
+            ))
+            return [datetime.now().isoformat()]
+
+        missing = missing_store
 
         if not missing:
             set_progress((
