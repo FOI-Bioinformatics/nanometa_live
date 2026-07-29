@@ -1531,6 +1531,7 @@ def register_preparation_callbacks(app):
         total = len(missing)
         downloaded = 0
         failed = 0
+        blast_failed = 0
         failed_names = []
 
         add_log(f"Found {total} missing genome(s) to download", "info")
@@ -1585,16 +1586,34 @@ def register_preparation_callbacks(app):
                 ))
                 built = genome_mgr.build_blast_dbs_batch(successful_taxids, max_workers=2)
                 add_log(f"Built {built} BLAST database(s)", "success" if built > 0 else "warning")
+                # A genome without a BLAST database cannot be validated
+                # against, so a build failure is not cosmetic. `failed`
+                # counted downloads only, which meant every download
+                # succeeding while every build failed still reported
+                # "Complete" in green.
+                blast_failed = len(successful_taxids) - built
 
         except Exception as e:
             failed = total
             add_log(f"Batch download error: {str(e)}", "error")
             logger.error(f"Batch download error: {e}")
 
-        if failed == 0:
+        if failed == 0 and blast_failed == 0:
             result_text = f"Successfully downloaded {downloaded} genome(s)"
             status_badge = dbc.Badge("Complete", color="success", className="me-2")
             add_log(result_text, "success")
+        elif failed == 0:
+            # Downloads all landed but some BLAST databases did not build.
+            # Those genomes cannot be validated against, so this is not
+            # Complete even though nothing failed to download.
+            result_text = (
+                f"Downloaded {downloaded} genome(s), but {blast_failed} BLAST "
+                f"database(s) failed to build"
+            )
+            status_badge = dbc.Badge(
+                f"{blast_failed} BLAST failed", color="warning", className="me-2"
+            )
+            add_log(result_text, "warning")
         else:
             result_text = f"Downloaded {downloaded} of {total} ({failed} failed)"
             status_badge = dbc.Badge(f"{failed} failed", color="warning", className="me-2")
@@ -1851,12 +1870,35 @@ def register_preparation_callbacks(app):
             if not genome_mgr.has_blast_db(meta.taxid):
                 missing_blast.append(meta)
 
+        # "Every genome has a BLAST database" is vacuously true when there are
+        # no genomes, and it renders identically to a prepared system. An
+        # operator who has not downloaded genomes yet clicks Build, sees a
+        # green Complete, and exports a bundle that cannot validate anything.
+        if not all_genomes:
+            set_progress((
+                100,
+                "No genomes to build databases from",
+                "Download reference genomes first",
+                add_log(
+                    "No reference genomes are present, so there is nothing to "
+                    "build BLAST databases from. This is not a prepared "
+                    "system: download genomes first.",
+                    "warning",
+                ),
+                dbc.Badge("No genomes", color="warning", className="me-2"),
+            ))
+            return [datetime.now().isoformat()]
+
         if not missing_blast:
             set_progress((
                 100,
                 "All BLAST databases already built",
                 "Nothing to build",
-                add_log("All genomes already have BLAST databases", "success"),
+                add_log(
+                    f"All {len(all_genomes)} genome(s) already have BLAST "
+                    f"databases",
+                    "success",
+                ),
                 dbc.Badge("Complete", color="success", className="me-2"),
             ))
             return [datetime.now().isoformat()]
