@@ -35,6 +35,17 @@ Stated first so the gaps below are read in proportion.
 
 ---
 
+## Closed since this document was written
+
+- **Singularity image-cache naming**, confirmed against real Apptainer in CI.
+- **CI itself**, which had never run; now green on every job.
+- **Six "reassuring conclusion" defects** found by asking of each surface
+  whether it can state something it has not earned: the exported report's
+  all-clear with nothing screened, ALL CLEAR over too few reads, a sample that
+  produced no data offered like a healthy one, a readiness check reading a
+  config key that does not exist, untracked fixtures, and two test bugs that
+  only manifested under CI's profile.
+
 ## Not verified
 
 ### Air-gapped operation
@@ -75,11 +86,15 @@ caches a pulled image under the filename the offline bundle predicts
 upstream changes the convention, our unit test still passes while a field
 machine silently re-pulls every image.
 
-**The job has never run.** It was written on a machine with no Singularity and
-Actions cannot be executed locally. Each step's shell was extracted and checked
-with `bash -n`, and the name expression was verified to agree with our
-implementation for bare and `docker://` refs. Treat the job as unproven until
-it has passed once.
+**Verified 2026-07-29.** The job ran and passed on GitHub Actions with real
+Apptainer: the profile renders, the pipeline runs under it in stub mode, and
+Nextflow cached a pulled image under exactly the filename
+`_singularity_cache_name` predicts. The offline bundle's image naming is
+therefore confirmed against the real `SingularityCache` convention rather than
+only against our own reimplementation.
+
+Still unverified: a real (non-stub) pipeline run under Singularity, and
+Singularity on an actually air-gapped machine.
 
 ### Docker profile, locally
 
@@ -133,5 +148,17 @@ validation produced a result.
 **CI had not run at all.** The nf-test workflow fired on pushes to `master` and
 on pull requests; development happens on `dev`, so no job had run for weeks.
 Three of the defects found in this campaign are exactly what that suite would
-catch. This is now fixed (`dev` added to the push branches), and the first run
-should be expected to go red.
+catch.
+
+Fixed 2026-07-29 by adding `dev` to the push branches. The first run failed 20
+of 155 tests, almost all because thirteen test fixtures had never been
+committed -- a blanket `test_*` in .gitignore excluded them, so every affected
+test passed locally and failed on a fresh clone. The third run was fully green:
+155 tests on both Nextflow 26.04.0 and latest-everything, plus Singularity and
+all three platform profiles.
+
+`tests/lib/fixtures_are_tracked.py` now runs before the suite and fails if any
+fixture a test references is untracked. It also refuses to pass when it finds
+nothing to check, because its first version did exactly that -- an
+absolute-path skip matched the runner's checkout directory and it reported
+"0 fixture paths" while exiting 0.
