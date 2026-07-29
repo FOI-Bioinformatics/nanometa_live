@@ -28,6 +28,7 @@ from nanometa_live.app.tabs.preparation_helpers import (
     _run_export,
     _build_export_opts,
     _build_mapping_table,
+    _alert_text,
     _execute_wizard_step,
     _regenerate_mappings,
     _render_import_result,
@@ -2273,8 +2274,28 @@ def register_preparation_callbacks(app):
             # Live stepper + result-area update before the (possibly slow) step.
             set_progress((_running_alert(step_idx),))
             try:
-                _execute_wizard_step(step_idx, config, export_opts=export_opts)
-                wizard_state["steps"][str(step_idx)] = "done"
+                outcome = _execute_wizard_step(
+                    step_idx, config, export_opts=export_opts
+                )
+                # A step that returns without raising has RUN; that is not the
+                # same as having succeeded. Step 0 returns a warning alert when
+                # no watchlist is enabled, step 3 when no genome downloaded,
+                # and so on -- none of them raise. Marking those "done" made
+                # the wizard announce "System is ready for offline deployment"
+                # for a deployment with nothing to screen for.
+                #
+                # The outcome is already encoded in the returned alert's colour;
+                # the loop simply discarded it.
+                colour = getattr(outcome, "color", "success")
+                if colour in ("warning", "danger", "info"):
+                    wizard_state["steps"][str(step_idx)] = "warning"
+                    results.append(
+                        f"Step {step_idx + 1} ({_WIZARD_STEP_NAMES[step_idx]}): "
+                        f"{_alert_text(outcome)}"
+                    )
+                    all_ok = False
+                else:
+                    wizard_state["steps"][str(step_idx)] = "done"
             except Exception as e:
                 wizard_state["steps"][str(step_idx)] = "failed"
                 results.append(
@@ -2295,7 +2316,7 @@ def register_preparation_callbacks(app):
         else:
             alert = dbc.Alert([
                 html.I(className="bi bi-exclamation-triangle me-2"),
-                html.Strong("Some steps failed:"),
+                html.Strong("Not ready for offline deployment:"),
                 html.Ul([html.Li(r) for r in results]),
             ], color="warning")
 
