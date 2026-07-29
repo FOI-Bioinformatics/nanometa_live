@@ -546,8 +546,21 @@ class ReadinessChecker:
                 "No watchlist enabled - enable pathogens in the Watchlist & Preparation tab"
             )
         # Could not determine from snapshot/singleton -- fall back to config.
+        #
+        # This branch read ``wl.get("enabled_watchlists")``, which the app never
+        # writes: WatchlistManager._load_config_locked reads "enabled",
+        # "builtin", "custom", "custom_files" and "overrides". So it was dead,
+        # and every undeterminable case fell through to "No watchlist enabled".
+        #
+        # That is the safe direction -- it under-claims rather than over-claims
+        # -- but it is still wrong, and it fires exactly when the singleton is
+        # empty, which is the documented background-worker case. Telling an
+        # operator to go enable pathogens they have already enabled trains them
+        # to ignore the readiness panel.
         wl = config.get("watchlist", {})
-        if isinstance(wl, dict) and wl.get("enabled_watchlists"):
+        if isinstance(wl, dict) and wl.get("enabled", True) and (
+            wl.get("builtin") or wl.get("custom") or wl.get("custom_files")
+        ):
             return CheckResult(
                 "Watchlist Active", True, Severity.WARNING,
                 "Watchlist configured (not yet loaded)"
