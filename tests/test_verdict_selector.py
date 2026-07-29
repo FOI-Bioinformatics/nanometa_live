@@ -298,3 +298,51 @@ class TestAllClearRequiresEnoughReadsToMeanIt:
         d = verdict(dangerous=[{"threat_level": "critical"}], n_watched=116,
                     total_reads=3)
         assert d.state == "ACTION_REQUIRED"
+
+
+class TestTheDepthGateIsAggregateScoped:
+    """What the INSUFFICIENT READS fix does and does not cover.
+
+    The verdict banner is computed over ALL samples: dashboard_tab.py loads
+    ``load_kraken_data(main_dir, "All Samples")`` and its callback does not
+    take ``selected-sample`` as an input. The metric tiles ARE per-sample.
+
+    So the depth gate fires when the WHOLE RUN is empty or shallow. It does
+    not fire when one sample among several fails -- the more likely field
+    case, one bad barcode out of 24. There the operator selecting the failed
+    sample sees a banner reading ALL CLEAR (accurate for the run) above tiles
+    reading 0 sequences analysed (accurate for the sample).
+
+    That is deliberately NOT "fixed" by making the banner per-sample. The
+    banner is a safety verdict over everything analysed: scoping it to the
+    selection would hide a detection sitting in a sample the operator is not
+    currently looking at, which is a worse failure than the confusion it would
+    resolve.
+
+    These tests pin the scope so the gate is not later mistaken for per-sample
+    coverage.
+    """
+
+    def test_the_gate_fires_on_an_empty_run(self):
+        d = verdict(dangerous=[], n_watched=116, total_reads=0)
+        assert d.state == "INSUFFICIENT_READS"
+
+    def test_the_gate_does_not_fire_when_the_aggregate_is_deep(self):
+        """One failed sample among many leaves the aggregate healthy.
+
+        The banner stays ALL CLEAR, which is correct for the run. The
+        operator learns about the failed sample from the per-sample tiles,
+        not from here.
+        """
+        d = verdict(dangerous=[], n_watched=116, total_reads=34141)
+        assert d.state == "ALL_CLEAR", (
+            "the aggregate verdict should not be downgraded because one "
+            "constituent sample was empty; that would suppress the run-level "
+            "result the banner exists to give"
+        )
+
+    def test_a_detection_anywhere_still_reaches_the_banner(self):
+        """The reason the banner stays aggregate-scoped."""
+        d = verdict(dangerous=[{"threat_level": "critical"}], n_watched=116,
+                    total_reads=34141)
+        assert d.state == "ACTION_REQUIRED"
