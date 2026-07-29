@@ -229,11 +229,38 @@ The Dashboard verdict banner color is the primary signal:
 
 | State | Color | Meaning |
 |-------|-------|---------|
-| ALL CLEAR | Green | No watched pathogens detected; run is progressing or complete |
+| ALL CLEAR | Green | Watched pathogens were screened at adequate depth and none was found. The subtitle states how many organisms were screened and over how many reads |
 | ACTION REQUIRED | Red | A critical or high-risk watched pathogen was detected — follow your safety protocol |
 | MONITORING | Amber | Only moderate-risk watched species detected |
+| INSUFFICIENT READS | Amber | Screening ran, but over too few reads for the result to mean anything. **This is not a negative result** — see below |
+| NOT SCREENED | Amber | No watchlist was active, so nothing was checked. **This is not a negative result** |
 | SCREENING IN PROGRESS | Blue | Run is active; first batch not yet processed |
 | STANDBY | Grey | No run active |
+
+### The two states that are not "all clear"
+
+`INSUFFICIENT READS` and `NOT SCREENED` both mean the same thing in practice:
+**no screening result was produced.** They are deliberately distinct from ALL
+CLEAR, and deliberately not green, because an absence of detections is only
+meaningful when there was something to detect it in.
+
+- **NOT SCREENED** — no watchlist was active. Enable pathogens on the
+  *Watchlist & Preparation* tab and the screen will run against the existing
+  results; the pipeline does not need re-running.
+- **INSUFFICIENT READS** — a watchlist was active, but too few reads survived
+  QC. The banner states the actual depth, and when the sample is shallower than
+  the highest alert threshold in your watchlist it says so: at that depth the
+  organism could not have been called even if every read were it. Check the
+  Quality Control tab for why so few reads passed.
+
+The threshold is 50 reads, matching `min_reads_for_validation`: if a detection
+needs that many reads to be worth confirming, an absence measured over fewer is
+not worth reporting as clear.
+
+Note the banner covers **all samples together**. An individual sample that
+produced no output is flagged in the sample selector with a "no data" badge
+rather than in the banner, because the banner's job is to catch a detection in
+any sample, including one you are not currently looking at.
 
 ## Configuration file
 

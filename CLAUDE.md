@@ -785,9 +785,51 @@ again. The 2-second `should_skip_update("...")` debouncer or the
 `get_trigger_type(ctx) == "interval"` guard keeps the new Input from
 multiplying work — the backstop fires at most once per tick.
 
+**A verdict must never claim a result it did not earn.** Three of the defects
+found in the 2026-07 campaign were one defect: the system rendering "we did not
+check" identically to "we checked and it is fine". The verdict banner said ALL
+CLEAR with no watchlist loaded while *F. tularensis* sat at 54.2% of reads; the
+exported report said NO WATCHED ORGANISMS DETECTED in the same situation; and a
+sample whose reads were unreadable was offered like a healthy one. For a
+biothreat tool those are opposite statements — a missing measurement versus a
+negative result an operator may act on.
+
+Three guards now enforce the distinction; keep them:
+
+- `select_verdict` returns **NOT_SCREENED** when `n_watched == 0` and
+  **INSUFFICIENT_READS** when `total_reads < low_read_floor` (default 50,
+  anchored to `min_reads_for_validation`). Both are amber, not green: wording
+  alone is insufficient when a green banner reads as reassurance on its own.
+  The genuine ALL CLEAR states its own depth so it cannot be confused with a
+  shallow one.
+- `select_verdict` takes `total_reads`; `total_reads=None` means "not
+  determined" and preserves the old behaviour. Never treat unknown depth as
+  zero — that turns every caller that cannot compute it into a false
+  INSUFFICIENT READS. A detection always wins over shallow depth.
+- The report template (`core/export/templates/report.html`) has the matching
+  `{% elif not data.watched_results %}` branch.
+
+The banner is **aggregate-scoped on purpose** — it loads `"All Samples"` and
+takes no `selected-sample` input. Do not make it follow the selection: that
+would hide a detection in a sample the operator is not currently viewing. A
+single sample that produced nothing is flagged in the selector instead, by
+comparing `available-samples` against `sample-file-mapping` (see below).
+
+**`_manifest.json` predicts output files; it does not verify them.**
+`bin/write_manifest.py` derives `<sample>.classification.json` and
+`<sample>.qc_stats.json` from the sample list and active tools, because
+MANIFEST_WRITER runs in its own work directory and cannot see the publishDir.
+So a sample whose QC failed — CHOPPER exit 1 on an unreadable FASTQ, absorbed
+by `conf/error_isolation.config` — is listed exactly like a healthy one, and
+`sample_detector._samples_from_manifest` returns that list verbatim. The GUI
+compensates: the sample selector marks samples present in `available-samples`
+but absent from `sample-file-mapping`, which is built from files on disk.
+Marked rather than hidden — hiding loses the fact that the barcode was
+attempted.
+
 **Verdict-banner decision logic is a pure function.** The safety-critical
-clinical verdict (ACTION REQUIRED / MONITORING / ALL CLEAR / SCREENING /
-STANDBY) is decided by `select_verdict()` in
+clinical verdict (ACTION REQUIRED / MONITORING / ALL CLEAR / INSUFFICIENT READS
+/ NOT SCREENED / SCREENING / STANDBY) is decided by `select_verdict()` in
 `app/tabs/dashboard_helpers.py`, which returns a `VerdictDescriptor` from the
 input booleans and the watchlist hit list — no file I/O, no component build.
 The `update_verdict_banner` callback only gathers inputs (Kraken load,
@@ -864,6 +906,36 @@ Linux-native path (Docker volume or `/root/.nextflow`); short-term workaround is
 `COPYFILE_DISABLE=1` and removing existing `._*` files.
 
 ## Testing
+
+**CI runs on `dev`, and did not until 2026-07-29.** The nanometanf nf-test
+workflow fired only on pushes to `master` and on pull requests, while all
+development happens on `dev`, so no job had run for weeks. The first run after
+enabling it failed 20 of 155 tests. Three defects that shipped in that window
+were exactly what the suite exists to catch. A suite that does not run is not a
+safety net.
+
+**Test fixtures must be tracked, and a guard asserts it.** `.gitignore` carried
+a blanket `test_*`, which matches at any depth and silently excluded thirteen
+fixtures under `tests/fixtures/validation/`,
+`modules/local/validation_cumulative_aggregator/tests/fixtures/` and
+`tests/realtime_test_data/`. Every affected test passed locally, where the files
+exist, and failed on a fresh clone — which is what CI is. This pattern had
+already bitten twice before (`testing*` hid `docs/development/TESTING.md`; two
+per-directory whitelists had been added by someone who hit it earlier).
+`tests/lib/fixtures_are_tracked.py` now runs in CI before the suite and fails if
+any `$projectDir` path an nf-test references is untracked. It also **refuses to
+pass when it finds nothing to check** — its first version matched the runner's
+`/home/runner/work/...` checkout with an absolute-path skip, reported
+"0 fixture paths", and exited 0.
+
+**A test for a guard must state its own precondition.** `conf/test.config` sets
+`save_output_fastqs` and `save_reads_assignment` to true, so a test asserting
+that validation *refuses* without them could never fire the guard under
+`--profile test` — which is what CI runs. It asserted a failure that could not
+happen. Set the triggering state explicitly rather than inheriting a default a
+profile may override. For the same reason, verify new nf-tests under
+`--profile test,conda` locally, not `conda` alone.
+
 
 ```bash
 pytest                                              # full suite, parallel (pytest-xdist)
