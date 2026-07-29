@@ -135,12 +135,14 @@ a nonexistent database naming the path, an incomplete database naming the
 missing `.k2d` file, and no database at all while pointing at both
 `--kraken2_db` and `--skip_kraken2`.
 
-Still open, and recorded there as a finding rather than fixed: an unreadable
-FASTQ is absorbed by `conf/error_isolation.config` and the run reports success.
-That is correct for a 24-barcode run -- one bad barcode must not abort the
-other 23 -- but nothing in the pipeline records which sample was dropped. The
-GUI now marks such samples, so the operator sees it; the pipeline's own outputs
-still do not distinguish them.
+Closed 2026-07-29. An unreadable FASTQ is still absorbed by
+`conf/error_isolation.config` and the run still reports success -- correct for a
+24-barcode run, where one bad barcode must not abort the other 23 -- but the
+drop is now recorded rather than silent. `_manifest.json` carries
+`failed_samples`, derived from the difference between the samples attempted and
+those that emitted QC output, and the GUI marks them in the sample selector.
+`null` there means "not determined" and stays distinct from `[]` meaning "none
+failed".
 
 ---
 
