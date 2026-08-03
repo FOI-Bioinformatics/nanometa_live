@@ -1234,7 +1234,20 @@ class BundleManager:
                         ),
                     })
 
-        # Container images are checked against the FIELD machine, independently
+        self._verify_container_architecture(manifest, report)
+
+    def _verify_container_architecture(
+        self, manifest: Dict[str, Any], report: Dict[str, Any]
+    ) -> None:
+        """Refuse a bundle whose container images cannot run on this machine.
+
+        Separate from the build-platform check above because it asks a
+        different question. That one is about pre-warmed conda envs, which are
+        tied to the machine that built them. This one is about the images, and
+        a cross-platform build is *correct*: macOS arm64 producing linux/amd64
+        images for an x86_64 field machine is the normal case.
+        """
+        # Prefer what the images ARE over what the export asked for, independently
         # of where the bundle was built. Once pulls are pinned, a macOS arm64
         # host producing linux/amd64 images for a Linux x86_64 field machine is
         # correct and must not be flagged -- while an arm64 image set arriving
