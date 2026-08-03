@@ -521,6 +521,16 @@ class OnDemandValidator:
         # I/O can need more than the historical hardcoded 30 minutes.
         timeout_seconds = _validation_timeout_seconds(config)
 
+        # Every offline guarantee for a pipeline run lives in this env:
+        # NXF_OFFLINE, NXF_PLUGINS_PATH (the variable that actually suppresses
+        # the plugin-registry probe), and the conda/singularity cache dirs.
+        # Launching without it inherited the bare app environment, so this run
+        # reached for the registries on an air-gapped machine while the main
+        # pipeline -- launched through NextflowManager -- worked fine.
+        from nanometa_live.core.workflow.nextflow_manager import NextflowManager
+
+        env = NextflowManager._build_nextflow_env(config)
+
         try:
             logger.info(f"Running nanometanf validation: {' '.join(cmd)}")
             result = subprocess.run(
@@ -528,6 +538,7 @@ class OnDemandValidator:
                 capture_output=True,
                 text=True,
                 timeout=timeout_seconds,
+                env=env,
             )
 
             if result.returncode != 0:
