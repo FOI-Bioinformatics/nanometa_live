@@ -37,7 +37,18 @@ class TestInjectedWatchlistEntries:
     Start Preparation generated no taxid mappings ("No watchlist entries
     found for mapping")."""
 
-    def test_injected_entries_used_over_empty_singleton(self, tmp_path):
+    def test_injected_entries_used_over_empty_singleton(self, tmp_path, monkeypatch):
+        # State the precondition rather than inherit it. `_get_watchlist_entries`
+        # resolves kraken_taxid through the module-level mapping-collection
+        # singleton, so "falls back when no mapping exists" is only being
+        # tested if no mapping exists. Run serially (`pytest -n 0`) an earlier
+        # test leaves 562 -> 4001 in that singleton and this assertion fails on
+        # a fallback that was never exercised. CI hides it because
+        # `--dist=loadfile` gives this file its own worker.
+        monkeypatch.setattr(
+            "nanometa_live.core.taxonomy.taxid_mapping.get_mapping_collection",
+            lambda *a, **k: None,
+        )
         snapshot = [
             {"name": "Staphylococcus aureus", "taxid": 1280, "names_alt": []},
             {"name": "Escherichia coli", "taxid": 562, "names_alt": ["E. coli"]},

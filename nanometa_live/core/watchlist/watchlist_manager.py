@@ -625,8 +625,19 @@ class WatchlistManager:
             watchlist_id = path.stem
 
             for p_data in pathogens:
+                # An operator's YAML carries no ``enabled`` key, and
+                # ``WatchlistEntry.from_dict`` defaults it to False. Loading the
+                # raw dict therefore produced disabled entries while the line
+                # below marked the watchlist itself enabled -- so the toggle
+                # rendered ON, ``enable_watchlist`` short-circuited on
+                # "already enabled", and the uploaded list screened nothing.
+                # The two must agree: this method activates the watchlist, so
+                # it activates its entries. An explicit ``enabled: false`` in
+                # the file is still honoured.
+                entry_data = dict(p_data)
+                entry_data["enabled"] = entry_data.get("enabled", True)
                 self._add_entry_from_dict(
-                    p_data,
+                    entry_data,
                     WatchlistSource.IMPORTED,
                     watchlist_id=watchlist_id
                 )
@@ -1207,6 +1218,13 @@ class WatchlistManager:
                 "names_alt": p.names_alt,
                 "taxid": p.taxid_ncbi,
                 "taxid_ncbi": p.taxid_ncbi,
+                # Carried explicitly: this dict is rebuilt field by field, and
+                # omitting db_taxid dropped the operator's database-specific
+                # taxid on the way in. On a flextaxd/GTDB build the NCBI taxid
+                # does not identify the node -- that is why db_taxid was set --
+                # so losing it silently reduced the entry to name matching,
+                # which GTDB's renaming is exactly what breaks.
+                "db_taxid": getattr(p, "db_taxid", None),
                 "common_name": p.common_name,
                 "threat_level": p.threat_level,
                 "bsl_level": p.bsl_level,
