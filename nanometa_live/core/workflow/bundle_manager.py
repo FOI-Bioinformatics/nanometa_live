@@ -91,6 +91,27 @@ _OCI_ARCH_ALIASES = {
 }
 
 
+def _sif_architecture(image: Path) -> Optional[str]:
+    """Read the architecture recorded in a SIF image's global header.
+
+    ``apptainer sif header`` prints ``Primary Architecture: amd64``. Returns
+    None when apptainer is unavailable or the file is not a readable SIF --
+    the caller treats "unknown" as "cannot verify", never as "fine".
+    """
+    cli = shutil.which("apptainer") or shutil.which("singularity")
+    if not cli:
+        return None
+    try:
+        r = subprocess.run(
+            [cli, "sif", "header", str(image)],
+            capture_output=True, text=True, timeout=60,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    m = re.search(r"Primary Architecture:\s*(\S+)", r.stdout or "")
+    return m.group(1) if m else None
+
+
 def _oci_arch(platform_str: str) -> str:
     """Take the architecture out of an ``os/arch`` platform string.
 
@@ -810,7 +831,24 @@ class BundleManager:
                     if containerization in ("docker", "singularity")
                     else None
                 ),
+                # What the images actually are, as read from their headers.
+                # The import side checks this in preference to the declared
+                # target, because `--arch` is a request the registry may not
+                # honour.
+                "observed_architectures": container_pull_result.get(
+                    "observed_architectures"
+                ),
             }
+            observed = container_pull_result.get("observed_architectures") or []
+            requested_arch = _oci_arch(resolved_target_platform)
+            if observed and any(a != requested_arch for a in observed):
+                manifest["export_warnings"].append(
+                    f"Requested {resolved_target_platform} but the pulled "
+                    f"images are {', '.join(sorted(observed))}. Those refs do "
+                    "not publish the requested architecture, so the registry "
+                    "served what it had. The bundle will not run on a "
+                    f"{requested_arch} machine."
+                )
 
             # Generate README. The conda-cache section depends on
             # whether the pre-warm step actually populated the cache.
@@ -1210,7 +1248,41 @@ class BundleManager:
         containerization = manifest.get("containerization") or {}
         bundle_platform = containerization.get("target_platform")
         image_count = (containerization.get("pull_result") or {}).get("image_count", 0)
-        if bundle_platform and image_count:
+
+        # Prefer what the images *are* over what the export asked for. `--arch`
+        # is a request, not a guarantee: exporting with --target-platform
+        # linux/arm64 in an apptainer 1.5.3 rig produced 23 amd64 images (the
+        # only architecture those refs publish, served silently) and one hard
+        # failure. The manifest then declared arm64 over 24 amd64 images, and
+        # comparing the declaration against an arm64 field machine reported no
+        # mismatch for a bundle in which nothing could execute.
+        observed = containerization.get("observed_architectures") or []
+        if observed and image_count:
+            local_arch = _oci_arch(_local_container_platform())
+            wrong = sorted(a for a in observed if a != local_arch)
+            if wrong:
+                report["platform_mismatch"] = True
+                spread = (
+                    f"architectures {', '.join(sorted(observed))}"
+                    if len(observed) > 1
+                    else f"architecture {wrong[0]}"
+                )
+                report["blockers"].append({
+                    "code": "container_platform_mismatch",
+                    "fatal": False,
+                    "message": (
+                        f"Import aborted: the bundle's container images have "
+                        f"{spread}, but this machine is {local_arch}. Images "
+                        "that do not match cannot execute here and an "
+                        "air-gapped machine cannot re-pull them. Rebuild the "
+                        f"bundle on a machine that can produce {local_arch} "
+                        "images, or force the import if you will supply them "
+                        "separately."
+                    ),
+                })
+        elif bundle_platform and image_count:
+            # Older bundles carry no observed data; fall back to the
+            # declaration so they still import.
             local_platform = _local_container_platform()
             if bundle_platform != local_platform:
                 report["platform_mismatch"] = True
@@ -1746,6 +1818,19 @@ class BundleManager:
                     self._pull_one_singularity_image(
                         pull_ref, images_dir, cli, platform=target_platform
                     )
+                    # Record what actually landed. `--arch` is a request:
+                    # apptainer serves the only published architecture when
+                    # the requested one does not exist, so the bundle can
+                    # disagree with its own target_platform.
+                    arch = _sif_architecture(
+                        images_dir / self._singularity_cache_name(pull_ref)
+                    )
+                    if arch:
+                        result.setdefault("observed_architectures", [])
+                        if arch not in result["observed_architectures"]:
+                            result["observed_architectures"].append(arch)
+                    else:
+                        result.setdefault("arch_unverified", []).append(pull_ref)
                 result["pulled"].append(pull_ref)
                 result["image_count"] += 1
             except subprocess.SubprocessError as exc:
