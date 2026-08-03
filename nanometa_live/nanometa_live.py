@@ -21,7 +21,11 @@ from nanometa_live.app.app import create_app
 from nanometa_live.core.config.config_loader import ConfigLoader
 from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.utils.logging_utils import setup_logging
-from nanometa_live.core.utils.paths import set_data_dir_env, set_project_dir_env
+from nanometa_live.core.utils.paths import (
+    resolve_data_dir,
+    set_data_dir_env,
+    set_project_dir_env,
+)
 
 
 def parse_arguments():
@@ -127,19 +131,11 @@ def main():
     # Parse arguments
     args = parse_arguments()
 
-    # Set up data directory. Normalise the operator-supplied value
-    # so a stray ``~``, trailing ``/``, or accidental leading ``//``
-    # (POSIX preserves ``//`` at the head of a path) does not flow
-    # downstream into the Storage Locations panel and makedirs calls.
-    if args.data_dir:
-        data_dir = os.path.abspath(os.path.expanduser(args.data_dir))
-    else:
-        data_dir = os.path.expanduser("~/.nanometa")
-    # os.path.abspath / normpath preserve a leading "//" by POSIX
-    # rule; collapse it explicitly so Storage Locations renders the
-    # same path the operator typed.
-    while data_dir.startswith("//"):
-        data_dir = data_dir[1:]
+    # Set up data directory: flag > environment > default. See
+    # resolve_data_dir for why the environment step is load-bearing.
+    # Normalisation (``~``, trailing and doubled leading slashes) happens
+    # there too, so Storage Locations renders the path the operator typed.
+    data_dir = resolve_data_dir(args.data_dir)
 
     # Set the env var BEFORE any module-level singleton (offline cache,
     # background-callback Diskcache) gets a chance to read the legacy

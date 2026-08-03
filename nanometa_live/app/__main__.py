@@ -111,16 +111,20 @@ def main():
             logger.error("Directory not found: %s", args.main_dir)
             sys.exit(1)
 
-        # Create minimal data directory
-        data_dir = args.data_dir if args.data_dir else os.path.expanduser("~/.nanometa")
+        # Create minimal data directory. Precedence is flag > environment >
+        # default: this entry point used to only *write* NANOMETA_DATA_DIR, so
+        # a run started with the variable set relocated `nanometa-prepare`
+        # (which reads it) while the GUI silently stayed on ~/.nanometa.
+        from nanometa_live.core.utils.paths import (
+            resolve_data_dir, set_data_dir_env, set_project_dir_env,
+        )
+
+        data_dir = resolve_data_dir(args.data_dir)
         os.makedirs(data_dir, exist_ok=True)
 
         # Set NANOMETA_DATA_DIR before any singleton (offline cache,
         # background-callback Diskcache) reads the legacy default. The
         # full-mode entry point in nanometa_live.py does the same thing.
-        from nanometa_live.core.utils.paths import (
-            set_data_dir_env, set_project_dir_env,
-        )
         set_data_dir_env(data_dir)
 
         project_dir = os.path.abspath(

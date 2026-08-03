@@ -211,6 +211,31 @@ def get_data_dir_from_env() -> str:
     return os.environ.get(_DATA_DIR_ENV) or os.path.expanduser(DEFAULT_DATA_DIR)
 
 
+def resolve_data_dir(explicit: str | os.PathLike[str] | None) -> str:
+    """Resolve the data root for a CLI entry point: flag > environment > default.
+
+    Mirrors :meth:`NanometaPaths.from_config`'s config > environment > default,
+    one level up: an explicit ``--data-dir`` wins, then ``NANOMETA_DATA_DIR``,
+    then ``~/.nanometa``.
+
+    The environment step is the part that was missing. Both GUI entry points
+    only *wrote* ``NANOMETA_DATA_DIR`` (from the flag) and never read it, so a
+    session started with the variable exported relocated ``nanometa-prepare``
+    -- which resolves through :func:`get_data_dir_from_env` -- while the GUI
+    silently kept writing to ``~/.nanometa``. Half the toolchain moving is
+    worse than none of it moving, because the result looks isolated and is not.
+
+    Returns an absolute path with ``~`` expanded and a leading ``//`` collapsed
+    (POSIX preserves a doubled leading slash, which then renders oddly in the
+    Storage Locations panel).
+    """
+    raw = explicit or get_data_dir_from_env() or DEFAULT_DATA_DIR
+    resolved = os.path.abspath(os.path.expanduser(str(raw)))
+    while resolved.startswith("//"):
+        resolved = resolved[1:]
+    return resolved
+
+
 def set_data_dir_env(data_dir: str | os.PathLike[str]) -> None:
     """Set the ``NANOMETA_DATA_DIR`` env var so downstream singletons see it.
 
