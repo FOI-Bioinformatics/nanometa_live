@@ -2460,7 +2460,13 @@ def register_preparation_callbacks(app):
 
         try:
             from nanometa_live.core.utils.kraken_utils import download_kraken_database as _download
-            success, message, extract_path = _download(db_info, dest_dir)
+            # Pass the flag through even though this callback already refused
+            # above when offline: the callback runs in a DiskcacheManager
+            # worker, and the guard belongs on the capability as well as on
+            # the caller.
+            success, message, extract_path = _download(
+                db_info, dest_dir, offline_mode=bool((config or {}).get("offline_mode"))
+            )
             if success and extract_path:
                 # Update the active config so kraken_db now points at
                 # the newly extracted DB. Both keys are written so any

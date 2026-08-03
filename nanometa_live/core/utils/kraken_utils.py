@@ -19,7 +19,7 @@ import requests
 
 
 def download_kraken_database(
-    db_info: Dict[str, str], dest_dir: str
+    db_info: Dict[str, str], dest_dir: str, offline_mode: bool = False
 ) -> Tuple[bool, str, Optional[str]]:
     """
     Download a Kraken2 database from the specified URL.
@@ -42,6 +42,23 @@ def download_kraken_database(
 
     if not db_url:
         return False, f"No download URL provided for database {db_name}", None
+
+    # Guard the capability, not just the caller. This function had no offline
+    # awareness at all and relied on `preparation_tab` checking `offline_mode`
+    # before invoking it -- so any other route here (a CLI path, a new
+    # callback, a retry, a script) reached the network on an air-gapped
+    # machine and the operator waited out a 60 s timeout instead of getting an
+    # accurate refusal. Measured in the C4 sinkhole run: this reached
+    # genome-idx.s3.amazonaws.com identically with offline_mode on and off.
+    if offline_mode:
+        return (
+            False,
+            f"Offline mode is enabled, so database {db_name} cannot be "
+            "downloaded. Transfer the Kraken2 database to this machine "
+            "separately (it is deliberately excluded from deployment bundles "
+            "because of its size) and set its path in the Configuration tab.",
+            None,
+        )
 
     try:
         # Create destination directory if it doesn't exist
