@@ -11,6 +11,7 @@ import pytest
 
 from nanometa_live.core.workflow.bundle_manager import (
     BundleManager,
+    _local_container_platform,
     _ACTIVATE_SCRIPT_FILENAME,
     _ACTIVATE_SCRIPT_TEMPLATE,
     _BUNDLED_CONDA_CACHE_DIRNAME,
@@ -2176,7 +2177,7 @@ class TestSingularityBundleWiring:
 
         img_name = "quay.io-biocontainers-foo-1.0.img"
 
-        def fake_pull(engine, staging, config, pipeline_path):
+        def fake_pull(engine, staging, config, pipeline_path, target_platform=None):
             images = staging / "pipeline_containers"
             images.mkdir(parents=True, exist_ok=True)
             (images / img_name).write_bytes(b"SIF\x00fake-image")
@@ -2202,6 +2203,9 @@ class TestSingularityBundleWiring:
                 nanometa_home=str(home),
                 pipeline_path=str(pipeline_dir),
                 containerization="singularity",
+                # Imported on this same machine below, so declare this
+                # machine's platform rather than the linux/amd64 default.
+                target_platform=_local_container_platform(),
             )
 
         field = tmp_path / "field_home"
@@ -2242,7 +2246,7 @@ class TestContainerImageCompleteness:
         (home / "genomes" / "1.fasta").write_text(">x\nA\n")
         pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
 
-        def fake_pull(engine, staging, config, pipeline_path):
+        def fake_pull(engine, staging, config, pipeline_path, target_platform=None):
             # Report two images pulled, but only stage one -- models a
             # single failed `docker save` / `apptainer pull` that was
             # caught and warned about rather than aborting the export.
@@ -2266,6 +2270,9 @@ class TestContainerImageCompleteness:
                 nanometa_home=str(home),
                 pipeline_path=str(pipeline_dir),
                 containerization="singularity",
+                # Imported on this same machine below, so declare this
+                # machine's platform rather than the linux/amd64 default.
+                target_platform=_local_container_platform(),
             )
 
         field = tmp_path / "field_home"

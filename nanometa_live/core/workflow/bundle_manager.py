@@ -68,6 +68,40 @@ _DEFAULT_DOCKER_REGISTRY = "quay.io"
 # build.
 _CONTAINER_PULL_TIMEOUT_S = 600
 
+# Architecture the bundled container images are built for. This is a property
+# of the FIELD machine, not of the build machine: an operator routinely builds
+# on a macOS arm64 laptop for a Linux x86_64 field machine.
+#
+# Both `docker pull` and `apptainer pull` default to the *host* platform, so
+# without this an Apple Silicon build silently produced arm64 images that
+# checksum cleanly, verify cleanly, import cleanly, and then fail at the first
+# pipeline process on a machine with no network to re-pull from. linux/amd64
+# is the default because it is what biocontainers publish and what field
+# hardware runs; override per export when that is not true.
+_DEFAULT_TARGET_PLATFORM = "linux/amd64"
+
+# platform.machine() spellings mapped to the OCI architecture names used in
+# a "os/arch" platform string. Both spellings of each architecture appear in
+# the wild depending on OS and Python build.
+_OCI_ARCH_ALIASES = {
+    "x86_64": "amd64",
+    "amd64": "amd64",
+    "aarch64": "arm64",
+    "arm64": "arm64",
+}
+
+
+def _local_container_platform() -> str:
+    """This machine as an OCI ``os/arch`` string, e.g. ``linux/amd64``.
+
+    Containers always run Linux regardless of the host OS -- on macOS via the
+    Docker Desktop or Apptainer VM -- so only the architecture varies. An
+    unrecognised machine string is passed through rather than guessed, so a
+    mismatch is reported honestly instead of being silently normalised away.
+    """
+    machine = platform.machine().lower()
+    return f"linux/{_OCI_ARCH_ALIASES.get(machine, machine)}"
+
 # Default location inside the bundle staging area for the pre-warmed
 # Nextflow conda cache. Operators set NXF_CONDA_CACHEDIR to the
 # extracted location of this directory on the field machine.
@@ -504,6 +538,7 @@ class BundleManager:
         pre_warm_conda_envs: bool = False,
         pipeline_path: Optional[str] = None,
         containerization: Optional[ContainerizationMode] = None,
+        target_platform: Optional[str] = None,
     ) -> Path:
         """
         Export a portable bundle containing all prepared data.
@@ -744,16 +779,28 @@ class BundleManager:
                 "image_count": 0,
                 "warnings": [],
             }
+            resolved_target_platform = target_platform or _DEFAULT_TARGET_PLATFORM
             if containerization in ("docker", "singularity"):
                 container_pull_result = self._pull_pipeline_containers(
                     engine=containerization,
                     staging=staging,
                     config=config,
                     pipeline_path=pipeline_path,
+                    target_platform=resolved_target_platform,
                 )
             manifest["containerization"] = {
                 "engine": containerization,
                 "pull_result": container_pull_result,
+                # Recorded so the import side can compare the images against
+                # the FIELD machine. Comparing build_platform instead is wrong
+                # once pulls are pinned: a macOS arm64 host building
+                # linux/amd64 images for a Linux x86_64 field machine is
+                # correct, and must not be flagged.
+                "target_platform": (
+                    resolved_target_platform
+                    if containerization in ("docker", "singularity")
+                    else None
+                ),
             }
 
             # Generate README. The conda-cache section depends on
@@ -1139,6 +1186,37 @@ class BundleManager:
                             "mode, or force the import and rebuild conda envs here."
                         ),
                     })
+
+        # Container images are checked against the FIELD machine, independently
+        # of where the bundle was built. Once pulls are pinned, a macOS arm64
+        # host producing linux/amd64 images for a Linux x86_64 field machine is
+        # correct and must not be flagged -- while an arm64 image set arriving
+        # on an x86_64 machine is fatal in practice and has to stop the import.
+        #
+        # It was previously only a warning, and only via the build_platform
+        # comparison above: the images checksum cleanly, verify cleanly and
+        # import cleanly, so the operator's single dismissible advisory was
+        # followed by every pipeline process failing on a machine with no
+        # network to re-pull from.
+        containerization = manifest.get("containerization") or {}
+        bundle_platform = containerization.get("target_platform")
+        image_count = (containerization.get("pull_result") or {}).get("image_count", 0)
+        if bundle_platform and image_count:
+            local_platform = _local_container_platform()
+            if bundle_platform != local_platform:
+                report["platform_mismatch"] = True
+                report["blockers"].append({
+                    "code": "container_platform_mismatch",
+                    "fatal": False,
+                    "message": (
+                        f"Import aborted: the bundle's {image_count} container "
+                        f"image(s) were built for {bundle_platform} but this "
+                        f"machine is {local_platform}. They cannot execute here, "
+                        "and an air-gapped machine cannot re-pull them. Rebuild "
+                        f"the bundle with --target-platform {local_platform}, or "
+                        "force the import if you will supply images separately."
+                    ),
+                })
 
 
 
@@ -1546,6 +1624,7 @@ class BundleManager:
         staging: Path,
         config: Dict[str, Any],
         pipeline_path: Optional[str],
+        target_platform: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Pull every unique container image referenced by the pipeline.
 
@@ -1660,9 +1739,13 @@ class BundleManager:
             pull_ref = self._apply_default_registry(ref)
             try:
                 if engine == "docker":
-                    self._pull_one_docker_image(pull_ref, images_dir)
+                    self._pull_one_docker_image(
+                        pull_ref, images_dir, platform=target_platform
+                    )
                 else:
-                    self._pull_one_singularity_image(pull_ref, images_dir, cli)
+                    self._pull_one_singularity_image(
+                        pull_ref, images_dir, cli, platform=target_platform
+                    )
                 result["pulled"].append(pull_ref)
                 result["image_count"] += 1
             except subprocess.SubprocessError as exc:
@@ -1708,10 +1791,21 @@ class BundleManager:
             ref = ref[len("https://"):]
         return re.sub(r"[^a-zA-Z0-9._-]", "_", ref)[:200]
 
-    def _pull_one_docker_image(self, ref: str, target_dir: Path) -> None:
-        """``docker pull`` then ``docker save`` one image to a tar."""
+    def _pull_one_docker_image(
+        self, ref: str, target_dir: Path, platform: Optional[str] = None
+    ) -> None:
+        """``docker pull`` then ``docker save`` one image to a tar.
+
+        ``platform`` pins which entry of a multi-arch manifest list is
+        fetched. Without it Docker resolves to the build host, so an arm64
+        laptop shipped arm64 images to an x86_64 field machine.
+        """
+        pull_cmd = ["docker", "pull"]
+        if platform:
+            pull_cmd += ["--platform", platform]
+        pull_cmd.append(ref)
         subprocess.run(
-            ["docker", "pull", ref],
+            pull_cmd,
             check=True,
             timeout=_CONTAINER_PULL_TIMEOUT_S,
             capture_output=True,
@@ -1743,17 +1837,32 @@ class BundleManager:
         return f"{name}.img"
 
     def _pull_one_singularity_image(
-        self, ref: str, target_dir: Path, cli: str
+        self,
+        ref: str,
+        target_dir: Path,
+        cli: str,
+        platform: Optional[str] = None,
     ) -> None:
         """``apptainer pull`` (or ``singularity pull``) one image.
 
         The output is named per Nextflow's cache convention (see
         ``_singularity_cache_name``) so the field machine reuses it via
         ``NXF_SINGULARITY_CACHEDIR`` instead of re-pulling.
+
+        ``platform`` is passed only for OCI sources (``docker://``, ``oras://``
+        or a bare registry ref), where there is a manifest list to choose from.
+        A ``https://depot.galaxyproject.org/...`` reference is a direct .sif
+        download -- there is no choice to make, the file is whatever Galaxy
+        built (amd64) -- and passing a platform there is meaningless at best
+        and an error at worst.
         """
         out = target_dir / self._singularity_cache_name(ref)
+        cmd = [cli, "pull", "--force"]
+        if platform and not ref.startswith(("http://", "https://")):
+            cmd += ["--platform", platform]
+        cmd += [str(out), ref]
         subprocess.run(
-            [cli, "pull", "--force", str(out), ref],
+            cmd,
             check=True,
             timeout=_CONTAINER_PULL_TIMEOUT_S,
             capture_output=True,

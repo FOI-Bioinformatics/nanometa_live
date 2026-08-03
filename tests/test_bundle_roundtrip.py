@@ -15,7 +15,10 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from nanometa_live.core.workflow.bundle_manager import BundleManager
+from nanometa_live.core.workflow.bundle_manager import (
+    BundleManager,
+    _local_container_platform,
+)
 from nanometa_live.core.workflow.nextflow_manager import NextflowManager
 
 pytestmark = pytest.mark.unit
@@ -197,7 +200,7 @@ def test_singularity_bundle_wires_singularity_cachedir_into_run_env(
 
     img_name = "quay.io-biocontainers-seqkit-2.9.0--h9ee0642_0.img"
 
-    def fake_pull(engine, staging, config, pipeline_path):
+    def fake_pull(engine, staging, config, pipeline_path, target_platform=None):
         images = Path(staging) / "pipeline_containers"
         images.mkdir(parents=True, exist_ok=True)
         (images / img_name).write_bytes(b"SIF\x00fake")
@@ -215,6 +218,10 @@ def test_singularity_bundle_wires_singularity_cachedir_into_run_env(
             nanometa_home=str(build_home),
             pipeline_path=str(pipeline),
             containerization="singularity",
+            # Same-machine round trip: declare this machine's platform so the
+            # container-platform guard is not tripped by the linux/amd64
+            # default (which is correct for a real field build, not for this).
+            target_platform=_local_container_platform(),
         )
 
     field_home = tmp_path / "field_home"

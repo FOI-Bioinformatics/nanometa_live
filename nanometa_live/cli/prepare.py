@@ -262,6 +262,13 @@ def _export(args):
         )
         sys.exit(1)
 
+    from nanometa_live.core.workflow.bundle_manager import (
+        _DEFAULT_TARGET_PLATFORM,
+    )
+    target_platform = (
+        getattr(args, "target_platform", None) or _DEFAULT_TARGET_PLATFORM
+    )
+
     print(f"{_BOLD}Nanometa Live - Export Offline Bundle{_RESET}")
     print(f"  Output: {args.output}")
     print(f"  Containerization: {containerization}")
@@ -274,12 +281,12 @@ def _export(args):
             )
     elif containerization == "docker":
         print(
-            f"  {_CYAN}Docker mode: pulls + saves linux/amd64 images. "
+            f"  {_CYAN}Docker mode: pulls + saves {target_platform} images. "
             f"Field machine needs Docker installed.{_RESET}"
         )
     elif containerization == "singularity":
         print(
-            f"  {_CYAN}Singularity mode: pulls .sif files. "
+            f"  {_CYAN}Singularity mode: pulls {target_platform} .sif files. "
             f"Field machine must be Linux with Apptainer/Singularity.{_RESET}"
         )
     if pipeline_path:
@@ -295,6 +302,7 @@ def _export(args):
         pre_warm_conda_envs=pre_warm,
         pipeline_path=pipeline_path,
         containerization=containerization,
+        target_platform=target_platform,
     )
     size_mb = path.stat().st_size / (1024 * 1024)
     print(f"{_GREEN}Bundle exported: {path} ({size_mb:.1f} MB){_RESET}")
@@ -716,6 +724,15 @@ def main():
              "(this OS+arch only). ``docker`` ships pre-pulled images "
              "(cross-platform). ``singularity`` ships .sif files "
              "(Linux-only, rootless). Default: conda.",
+    )
+    export_p.add_argument(
+        "--target-platform", default=None,
+        help="OCI platform to pull container images for, e.g. linux/amd64 "
+             "(default) or linux/arm64. This describes the FIELD machine, not "
+             "this one: docker and apptainer otherwise pull for the build "
+             "host, so an Apple Silicon laptop silently produces arm64 images "
+             "that cannot run on an x86_64 field machine. Ignored in conda "
+             "mode.",
     )
     export_p.set_defaults(func=_export)
 
