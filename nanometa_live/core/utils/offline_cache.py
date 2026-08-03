@@ -523,12 +523,17 @@ _cache_instance: Optional[OfflineTaxonomyCache] = None
 _cache_instance_lock = threading.Lock()
 
 
-def get_cache(offline_mode: bool = False) -> OfflineTaxonomyCache:
+def get_cache(offline_mode: Optional[bool] = None) -> OfflineTaxonomyCache:
     """
     Get the global cache instance (thread-safe).
 
     Args:
-        offline_mode: Whether to enable offline mode
+        offline_mode: ``True``/``False`` sets the mode; ``None`` (the default)
+            means "no opinion" and leaves the existing instance untouched.
+            The default used to be ``False``, so any caller that just wanted
+            the cache silently took the process back online -- which also stops
+            the cache serving expired entries, the behaviour offline deployment
+            relies on.
 
     Returns:
         The global cache instance
@@ -536,7 +541,7 @@ def get_cache(offline_mode: bool = False) -> OfflineTaxonomyCache:
     global _cache_instance
 
     if _cache_instance is not None:
-        if offline_mode != _cache_instance.offline_mode:
+        if offline_mode is not None and offline_mode != _cache_instance.offline_mode:
             _cache_instance.offline_mode = offline_mode
         return _cache_instance
 
@@ -548,9 +553,12 @@ def get_cache(offline_mode: bool = False) -> OfflineTaxonomyCache:
             # any callback fires).
             _cache_instance = OfflineTaxonomyCache(
                 cache_dir=_default_cache_dir(),
-                offline_mode=offline_mode,
+                # No opinion from the caller means the conservative default for
+                # a brand-new instance: online. It is `_init_offline_mode` that
+                # arms it at startup.
+                offline_mode=bool(offline_mode),
             )
-        elif offline_mode != _cache_instance.offline_mode:
+        elif offline_mode is not None and offline_mode != _cache_instance.offline_mode:
             _cache_instance.offline_mode = offline_mode
         return _cache_instance
 

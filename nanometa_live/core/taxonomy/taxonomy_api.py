@@ -884,24 +884,38 @@ def get_taxonomy_cache() -> TaxonomyCache:
     return _taxonomy_cache
 
 
-def get_ncbi_client(api_key: Optional[str] = None, offline_mode: bool = False) -> NCBIClient:
-    """Get the NCBI client instance."""
+def get_ncbi_client(
+    api_key: Optional[str] = None, offline_mode: Optional[bool] = None
+) -> NCBIClient:
+    """Get the NCBI client instance.
+
+    ``offline_mode=None`` means "no opinion": the shared client keeps whatever
+    mode it already has. Only an explicit True/False changes it.
+
+    The default used to be ``False``, which made "I just want the client"
+    indistinguishable from "put this process back online" -- and since the
+    factory mutates the singleton, a single no-argument call anywhere disarmed
+    offline mode for every later user. ``genome_manager._resolve_species_name``
+    does exactly that, and it runs during genome import on a field machine.
+    """
     global _ncbi_client
     if _ncbi_client is None:
         _ncbi_client = NCBIClient(cache=get_taxonomy_cache(), api_key=api_key)
-    # Update offline mode if changed
-    if _ncbi_client.offline_mode != offline_mode:
+    if offline_mode is not None and _ncbi_client.offline_mode != offline_mode:
         _ncbi_client.offline_mode = offline_mode
     return _ncbi_client
 
 
-def get_gtdb_client(offline_mode: bool = False) -> GTDBClient:
-    """Get the GTDB client instance."""
+def get_gtdb_client(offline_mode: Optional[bool] = None) -> GTDBClient:
+    """Get the GTDB client instance.
+
+    ``offline_mode=None`` leaves the shared client's mode untouched; see
+    :func:`get_ncbi_client` for why the default is not ``False``.
+    """
     global _gtdb_client
     if _gtdb_client is None:
         _gtdb_client = GTDBClient(cache=get_taxonomy_cache())
-    # Update offline mode if changed
-    if _gtdb_client.offline_mode != offline_mode:
+    if offline_mode is not None and _gtdb_client.offline_mode != offline_mode:
         _gtdb_client.offline_mode = offline_mode
     return _gtdb_client
 

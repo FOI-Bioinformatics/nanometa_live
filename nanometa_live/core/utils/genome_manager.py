@@ -288,7 +288,11 @@ class GenomeDownloadManager:
             Tuple of (species_name, kingdom). Returns defaults if lookup fails.
         """
         try:
-            ncbi_client = get_ncbi_client()
+            # Pass this manager's mode explicitly. A bare get_ncbi_client()
+            # used to mean "offline_mode=False" and mutated the shared client,
+            # so resolving a species name during genome import disarmed offline
+            # mode for the rest of the process.
+            ncbi_client = get_ncbi_client(offline_mode=self.offline_mode)
             result = ncbi_client.get_by_taxid(taxid)
 
             if result:
