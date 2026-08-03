@@ -91,6 +91,15 @@ _OCI_ARCH_ALIASES = {
 }
 
 
+def _oci_arch(platform_str: str) -> str:
+    """Take the architecture out of an ``os/arch`` platform string.
+
+    ``linux/amd64`` -> ``amd64``. Apptainer takes a bare architecture via
+    ``--arch``; only Docker understands the full ``os/arch`` form.
+    """
+    return platform_str.split("/")[-1] if platform_str else platform_str
+
+
 def _local_container_platform() -> str:
     """This machine as an OCI ``os/arch`` string, e.g. ``linux/amd64``.
 
@@ -1853,13 +1862,22 @@ class BundleManager:
         or a bare registry ref), where there is a manifest list to choose from.
         A ``https://depot.galaxyproject.org/...`` reference is a direct .sif
         download -- there is no choice to make, the file is whatever Galaxy
-        built (amd64) -- and passing a platform there is meaningless at best
-        and an error at worst.
+        built (amd64) -- and passing an architecture there is meaningless at
+        best and an error at worst.
+
+        Note the flag is ``--arch <arch>``, not ``--platform <os/arch>``:
+        apptainer has no ``--platform`` and rejects it outright (verified
+        against apptainer 1.5.3). Its ``--arch`` help text says "architecture
+        to pull from library", but it does apply to ``docker://`` sources --
+        confirmed empirically: pulling alpine with ``--arch amd64`` on an arm64
+        host yields an amd64 image, which apptainer then refuses to exec with
+        "the image's architecture (amd64) could not run on the host's (arm64)".
+        Docker, by contrast, does take ``--platform linux/amd64``.
         """
         out = target_dir / self._singularity_cache_name(ref)
         cmd = [cli, "pull", "--force"]
         if platform and not ref.startswith(("http://", "https://")):
-            cmd += ["--platform", platform]
+            cmd += ["--arch", _oci_arch(platform)]
         cmd += [str(out), ref]
         subprocess.run(
             cmd,

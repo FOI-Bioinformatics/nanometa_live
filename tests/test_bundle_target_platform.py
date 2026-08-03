@@ -61,11 +61,19 @@ class TestSingularityPullPinsPlatform:
 
         assert calls, "no pull was attempted"
         argv = calls[0]
-        assert "--platform" in argv, (
-            "apptainer pull was not given a platform, so it resolved the "
-            f"manifest list to the build host's architecture. argv={argv}"
+        # `--arch <arch>`, not `--platform <os/arch>`: apptainer has no
+        # --platform and rejects it outright (verified against 1.5.3 in a
+        # container rig). Its --arch help text claims to be library-only but
+        # does apply to docker:// sources.
+        assert "--arch" in argv, (
+            "apptainer pull was not given an architecture, so it resolved the "
+            f"manifest list to the build host's. argv={argv}"
         )
-        assert argv[argv.index("--platform") + 1] == "linux/amd64"
+        assert argv[argv.index("--arch") + 1] == "amd64"
+        assert "--platform" not in argv, (
+            "apptainer does not accept --platform and errors out on it, "
+            f"which would fail every pull. argv={argv}"
+        )
 
     def test_direct_sif_url_is_not_given_a_platform(self, tmp_path, monkeypatch):
         """A depot.galaxyproject.org URL is a file download, not an OCI pull.
@@ -98,9 +106,9 @@ class TestSingularityPullPinsPlatform:
         )
 
         assert calls, "no pull was attempted"
-        assert "--platform" not in calls[0], (
-            "a direct .sif download was given --platform, which selects from "
-            f"an OCI manifest list that does not exist here. argv={calls[0]}"
+        assert "--arch" not in calls[0], (
+            "a direct .sif download was given --arch, which selects from an "
+            f"OCI manifest list that does not exist here. argv={calls[0]}"
         )
 
 
