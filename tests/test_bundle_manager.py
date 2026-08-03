@@ -2524,7 +2524,15 @@ class TestContainerRuntimeUnavailableAtImport:
         joined = " ".join(result["warnings"])
         assert "'docker' command was not found" in joined
         assert "bundle itself is intact" in joined
-        assert "re-export" not in joined.lower()
+        # Blame attribution is the point: a field machine with no Docker must
+        # not be told to re-export a bundle that is fine. Scoped to the
+        # container-runtime message rather than every warning, because other
+        # checks legitimately do advise a re-export -- this fixture also ships
+        # no Nextflow plugins, which genuinely is an export-side problem.
+        runtime_msg = next(
+            w for w in result["warnings"] if "'docker' command was not found" in w
+        )
+        assert "re-export" not in runtime_msg.lower()
 
     def test_daemon_down_blames_field_machine(self, tmp_path):
         result, _ = self._import_with_docker(

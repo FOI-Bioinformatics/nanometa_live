@@ -1602,27 +1602,18 @@ class BundleManager:
                             logger.info(
                                 f"Rebased nxf_plugins_dir to {abs_plugins}"
                             )
-                            # An empty plugins dir means Nextflow will fall back
-                            # to the online plugin registry, which fails on an
-                            # air-gapped machine. Warn so the operator re-exports.
-                            has_plugin = any(
-                                p.is_dir() and p.name.startswith(_PLUGIN_PREFIXES)
-                                for p in abs_plugins.iterdir()
-                            )
-                            if not has_plugin:
-                                result["plugins_empty"] = True
-                                result["warnings"].append(
-                                    "Bundled Nextflow plugins directory "
-                                    f"{abs_plugins} is empty or missing expected "
-                                    "plugin folders; Nextflow may fall back to the "
-                                    "online plugin registry, which fails offline. "
-                                    "Re-export the bundle from a machine with the "
-                                    "plugins cached."
-                                )
+                    # Plugin completeness is checked unconditionally below,
+                    # outside this branch -- see _check_bundled_plugins.
                     import_loader.save_config(cfg, "config.yaml")
                     logger.info("Set offline_mode=True in config")
                 except (ImportError, AttributeError, OSError, ValueError) as e:
                     result["warnings"].append(f"Could not update config: {e}")
+
+        # Outside the config-rebase block on purpose: it must also run when the
+        # bundle carried no plugins (so no key to rebase) and when the rebase
+        # itself failed above -- both are cases where an offline run cannot
+        # resolve nf-schema.
+        self._check_bundled_plugins(home, result)
 
         logger.info(f"Bundle imported to {home}")
         return result
@@ -1799,6 +1790,47 @@ class BundleManager:
         if ref.startswith("https://"):
             ref = ref[len("https://"):]
         return re.sub(r"[^a-zA-Z0-9._-]", "_", ref)[:200]
+
+    def _check_bundled_plugins(self, home: Path, result: Dict[str, Any]) -> None:
+        """Report a bundle that cannot resolve Nextflow plugins offline.
+
+        nanometanf declares ``plugins { id 'nf-schema@...' }``, so a run
+        resolves a plugin before it does anything else. Offline that can only
+        come from the bundle, via ``NXF_PLUGINS_PATH``.
+
+        Called unconditionally, because the interesting case is the one where
+        *nothing* was bundled. ``_bundle_nextflow_plugins`` reads
+        ``Path.home()/".nextflow"/"plugins"``, so a build machine that has
+        never run Nextflow -- a CI runner, a container, a laptop that only
+        exports -- bundles no plugins and never writes ``nxf_plugins_dir``.
+        The previous check lived inside ``if npd == "./nextflow_plugins"``, so
+        it only ran when plugins *had* been bundled: empty warned, absent was
+        silent. Verified end to end in an air-gapped rig, where export,
+        transfer, verify and import all reported success on a bundle that
+        could not have run one pipeline process.
+        """
+        plugins_dir = home / _BUNDLED_NXF_PLUGINS_DIRNAME
+        has_plugin = plugins_dir.is_dir() and any(
+            p.is_dir() and p.name.startswith(_PLUGIN_PREFIXES)
+            for p in plugins_dir.iterdir()
+        )
+        if has_plugin:
+            return
+
+        result["plugins_empty"] = True
+        detail = (
+            f"is empty or missing expected plugin folders ({plugins_dir})"
+            if plugins_dir.is_dir()
+            else "was not included in this bundle at all"
+        )
+        result.setdefault("warnings", []).append(
+            f"Nextflow plugins: the plugin directory {detail}. Offline, "
+            "Nextflow falls back to the online plugin registry and the run "
+            "fails before its first process. Re-export from a machine where "
+            "Nextflow has run at least once (the plugins are cached in "
+            "~/.nextflow/plugins), or install the plugins on the field "
+            "machine."
+        )
 
     def _pull_one_docker_image(
         self, ref: str, target_dir: Path, platform: Optional[str] = None
