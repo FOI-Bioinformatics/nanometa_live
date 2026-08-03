@@ -291,10 +291,19 @@ def create_app(
     # 3. Collapsible sections create/destroy components dynamically
     app = Dash(
         __name__,
-        external_stylesheets=[
-            dbc.themes.BOOTSTRAP,
-            dbc.icons.BOOTSTRAP,  # Bootstrap Icons for bi-* classes
-        ],
+        # No external_stylesheets. `dbc.themes.BOOTSTRAP` and
+        # `dbc.icons.BOOTSTRAP` are cdn.jsdelivr.net URLs fetched by the
+        # *browser*, so no offline_mode guard, socket patch or `--network none`
+        # on this process can suppress them. On an air-gapped field machine the
+        # dashboard rendered unstyled with every bi-* glyph a blank box --
+        # including the icons in the offline-mode banner itself.
+        #
+        # Both files are vendored under assets/ instead (00-bootstrap.min.css,
+        # 01-bootstrap-icons.css + fonts/), which Dash includes automatically.
+        # The numeric prefixes matter: assets load in sorted order, so
+        # Bootstrap must sort before styles.css for our overrides to win.
+        # `serve_locally` is not an alternative -- it governs Dash's own
+        # component bundles, not external_stylesheets.
         suppress_callback_exceptions=True,  # Always suppress - dynamic layouts + cache issues
         assets_folder=assets_dir,
         background_callback_manager=background_callback_manager,  # Enable async progress
