@@ -15,6 +15,7 @@ import pandas as pd
 from dash import html
 import dash_bootstrap_components as dbc
 
+from nanometa_live.app.tabs.dashboard_helpers import DEFAULT_LOW_READ_FLOOR
 from nanometa_live.core.watchlist.watchlist_manager import (
     WatchlistManager,
     get_watchlist_manager,
@@ -513,3 +514,34 @@ def create_species_alert_banner(detected_species: list) -> html.Div:
             className="text-muted",
         ),
     ], color="warning", className="mb-3")
+
+
+def not_detected_caveat(
+    total_reads,
+    n_not_detected: int,
+    low_read_floor: int = DEFAULT_LOW_READ_FLOOR,
+):
+    """Why this panel's "Not Detected" list is not yet a negative result.
+
+    Returns the caveat text, or None when the negative has been earned.
+
+    The Dashboard banner already gates on depth (select_verdict ->
+    INSUFFICIENT_READS): below the floor, an absence measured over almost no
+    reads is not evidence of absence. The Organisms panel split purely on
+    ``detected`` and inherited none of that, so a one-read run rendered
+    "Not Detected (35)" identically to a properly-powered negative -- and this
+    panel is read, screenshotted and exported on its own, without the banner.
+
+    ``total_reads=None`` means the depth could not be determined and is
+    deliberately not treated as zero; that would put a false shallow-depth
+    warning on every caller that cannot compute a total.
+    """
+    if not n_not_detected:
+        return None
+    if total_reads is None or total_reads >= low_read_floor:
+        return None
+    return (
+        f"Only {total_reads:,} read{'s' if total_reads != 1 else ''} analysed "
+        f"- too few to rule these organisms out. Screening is inconclusive "
+        f"at this depth, not negative."
+    )

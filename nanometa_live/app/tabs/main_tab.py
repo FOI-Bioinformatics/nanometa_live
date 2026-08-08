@@ -63,6 +63,10 @@ from nanometa_live.app.tabs.main_tab_helpers import (  # noqa: E402
     build_organism_export,
     render_validation_results_card,
     validation_store_entry,
+    not_detected_caveat,
+)
+from nanometa_live.app.tabs.dashboard_helpers import (  # noqa: E402
+    DEFAULT_LOW_READ_FLOOR,
 )
 
 
@@ -387,6 +391,29 @@ def register_main_callbacks(app: Dash):
 
             # Not detected section (collapsible, collapsed by default)
             if not_detected_cards:
+                # An absence measured over almost no reads is not evidence of
+                # absence. The caveat sits ABOVE the collapsed list on purpose:
+                # the list is closed by default, so a qualifier placed inside
+                # it would be invisible in exactly the default view an operator
+                # reads, screenshots or exports.
+                # Anchored to min_reads_for_validation so the Organisms
+                # panel, the Dashboard banner and the exported report
+                # agree on what counts as too shallow to call a negative.
+                low_read_floor = int(
+                    (config or {}).get("min_reads_for_validation")
+                    or DEFAULT_LOW_READ_FLOOR
+                )
+                depth_caveat = not_detected_caveat(
+                    total_reads, len(not_detected_cards), low_read_floor
+                )
+                if depth_caveat:
+                    watched_cards_content.append(
+                        dbc.Alert([
+                            html.I(className="bi bi-exclamation-triangle me-2"),
+                            depth_caveat,
+                        ], color="warning", className="mb-3 py-2")
+                    )
+
                 watched_cards_content.append(
                     html.Div([
                         dbc.Button(
