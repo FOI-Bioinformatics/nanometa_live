@@ -209,14 +209,8 @@ def _validate_validation_settings(config: Dict[str, Any]) -> None:
     Args:
         config: Configuration dictionary to validate
     """
-    # Minimum percent identity
-    if (
-        "min_perc_identity" not in config
-        or not isinstance(config["min_perc_identity"], (int, float))
-        or config["min_perc_identity"] < 50
-        or config["min_perc_identity"] > 100
-    ):
-        config["min_perc_identity"] = 90
+    # Percent identity lives in validation_identity_threshold; the legacy
+    # min_perc_identity key was retired because it silently shadowed it.
 
     # E-value cutoff
     if (

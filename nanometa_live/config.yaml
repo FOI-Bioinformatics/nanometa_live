@@ -223,7 +223,6 @@ blast_validation: True
 # Note: Adjust these values based on the stringency required for your analysis.
 # Typical Identity Cutoff: 90-95% for stringent analysis.
 # Typical E-value Cutoff: 0.01 or lower for high confidence.
-min_perc_identity: 90
 e_val_cutoff: 0.01
 
 ########## Advanced/Optional Settings ########################################

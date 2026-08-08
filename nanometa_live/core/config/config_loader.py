@@ -98,7 +98,6 @@ class ConfigLoader:
             # plots plus mapping confidence. 'blast' is more thorough but 5-10x slower
             # per pair; 'both' is available for highest confidence at 2x compute.
             "validation_method": "minimap2",  # 'blast', 'minimap2', or 'both'
-            "min_perc_identity": 90,
             "e_val_cutoff": 0.01,
             "validation_hit_rate_threshold": 0.5,
             "validation_identity_threshold": 90.0,

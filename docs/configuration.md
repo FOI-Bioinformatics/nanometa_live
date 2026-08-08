@@ -62,7 +62,7 @@ nanopore_output_directory: "/path/to/input"
 | `blast_validation` | bool | false | Enable validation of detected organisms |
 | `validation_method` | string | "blast" | `blast`, `minimap2`, or `both` |
 | `blast_db` | path | null | BLAST database path |
-| `min_perc_identity` | float | 90 | Minimum percent identity for BLAST hits |
+| `validation_identity_threshold` | float | 90 | Minimum percent identity for BLAST hits |
 | `e_val_cutoff` | float | 0.01 | E-value cutoff for BLAST |
 | `validation_hit_rate_threshold` | float | 0.5 | Minimum fraction of reads that must validate |
 | `validation_identity_threshold` | float | 90.0 | Minimum identity score for validation |

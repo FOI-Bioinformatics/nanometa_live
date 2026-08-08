@@ -635,14 +635,13 @@ def _build_base_params(config: Dict[str, Any], main_dir: str, kraken_db: str,
         "run_validation": run_validation_enabled,
         "validation_method": config.get("validation_method", "blast"),
         "blast_evalue": config.get("e_val_cutoff", 1e-10),
-        # The legacy ``min_perc_identity`` config key was collapsed into
-        # ``validation_identity_threshold`` (2026-04-30). For backwards
-        # compatibility we read ``min_perc_identity`` first if set, then fall
-        # through. New configs only carry the latter.
-        "blast_perc_identity": config.get(
-            "min_perc_identity",
-            config.get("validation_identity_threshold", 90),
-        ),
+        # One threshold, one key. This read ``min_perc_identity`` first as a
+        # back-compat shim whose comment claimed "New configs only carry the
+        # latter" -- but create_default_config wrote min_perc_identity into
+        # every config and no widget could change it, so the legacy key was
+        # always present and always won. Lowering the GUI control to catch a
+        # divergent strain left BLAST filtering at 90 and said nothing.
+        "blast_perc_identity": config.get("validation_identity_threshold", 90),
         "validation_hit_rate_threshold": config.get("validation_hit_rate_threshold", 0.5),
         "validation_identity_threshold": config.get("validation_identity_threshold", 90.0),
         "minimap2_preset": config.get("minimap2_preset", "map-ont"),
