@@ -51,7 +51,13 @@ include = ["nanometa_live*"]
 nanometa_live = [
     "config.yaml",
     "kraken2_databases.yaml",
+    # Both lines are needed: setuptools package-data globs are NOT recursive,
+    # so "app/assets/*" alone ships the stylesheets and silently drops
+    # app/assets/fonts/, leaving the icon CSS pointing at a font that is not
+    # in the wheel. Editable installs read from the source tree and cannot
+    # show this, so tests/test_wheel_ships_assets.py inspects a built wheel.
     "app/assets/*",
+    "app/assets/fonts/*",
     "core/config/data/*.yaml",
     "core/config/data/watchlists/*.yaml",
     "core/config/data/watchlists/examples/*.yaml",
