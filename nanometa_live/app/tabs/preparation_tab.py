@@ -1061,16 +1061,30 @@ def register_preparation_callbacks(app):
     @app.callback(
         Output("watchlist-entries-snapshot", "data"),
         Input("watchlist-table-refresh", "data"),
+        Input("watchlist-tab-state", "data"),
         State("app-config", "data"),
         prevent_initial_call=False,
     )
-    def hydrate_watchlist_entries_snapshot(_refresh, config):
+    def hydrate_watchlist_entries_snapshot(_refresh, _tab_state, config):
         """Mirror the current watchlist entries into a Store.
 
         Runs in the main process so the WatchlistManager singleton is
         populated. The rescan callback reads this snapshot via State,
         which lets it run in a background worker process where the
         manager singleton is empty.
+
+        Listens to BOTH change signals on purpose. ``watchlist-tab-state`` is
+        what the mutating callbacks bump -- upload, add-custom-species, and
+        the edit modal all write it and none of them write
+        ``watchlist-table-refresh``. Hydrating only on the latter meant an
+        uploaded watchlist never reached the background workers, so the
+        readiness checker, rescan and bundle export all saw the pre-upload
+        set.
+
+        Listening here rather than adding a fourth Output to each mutator is
+        deliberate: an every-mutator-must-remember contract is exactly what
+        failed, and it would fail again the next time someone adds a way to
+        change the watchlist.
         """
         from nanometa_live.core.watchlist.watchlist_manager import (
             get_watchlist_manager,
