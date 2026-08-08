@@ -157,6 +157,7 @@ def walked(live_app, playwright_browser):
     failures: list[tuple[str, int, str]] = []
     console_errors: list[str] = []
     rendered: dict[str, int] = {}
+    texts: dict[str, str] = {}
 
     updates: list[int] = []
 
@@ -185,12 +186,18 @@ def walked(live_app, playwright_browser):
             failures.append(("click", 0, f"{tab}: {exc}"))
             continue
         page.wait_for_timeout(int(TAB_SETTLE * 1000))
-        rendered[tab] = len((page.inner_text("body") or "").strip())
+        body = (page.inner_text("body") or "").strip()
+        rendered[tab] = len(body)
+        # Keep the text, not just its length. The watchlist guard below has
+        # to read what the banner actually says; a character count cannot
+        # distinguish a real verdict from "NOT SCREENED".
+        texts[tab] = body
 
     result = {
         "failures": failures,
         "console_errors": console_errors,
         "rendered": rendered,
+        "texts": texts,
         "updates": updates,
     }
     yield result
@@ -270,9 +277,41 @@ class TestWatchlistIsActuallyLoaded:
     a green run.
     """
 
+    #: Every terminal state select_verdict can reach with data present. The
+    #: guard does not care which one the run earns -- only that the banner
+    #: reports a screening outcome rather than the absence of screening.
+    _SCREENED_VERDICTS = (
+        "ACTION REQUIRED", "MONITORING", "ALL CLEAR", "INSUFFICIENT READS",
+    )
+
     def test_the_dashboard_is_not_reporting_an_unscreened_state(self, walked, live_app):
-        page_text = walked["rendered"].get("Dashboard", 0)
-        assert page_text > 0, "the Dashboard tab never rendered"
+        """Assert on what the banner SAYS, not on how much text it painted.
+
+        This asserted ``len(page_text) > 0`` until 2026-08-08, which is a
+        character count: it passes identically whether the banner reads
+        ACTION REQUIRED or NOT SCREENED. So the guard written to catch a
+        silently-unloaded watchlist could not catch one, and the whole module
+        had been walking the unscreened path -- the exact blind spot named in
+        this class's docstring.
+
+        It really had: the fixture boots with ``--config X --main_dir Y``, and
+        the entry point discarded ``--config`` outright in that combination
+        (fixed in the commit before this one).
+        """
+        page_text = walked["texts"].get("Dashboard", "")
+        assert page_text, "the Dashboard tab never rendered"
+
+        banner = page_text.upper()
+        assert "NOT SCREENED" not in banner, (
+            "the Dashboard reports NOT SCREENED, so the configured watchlist "
+            "never reached the running app and every assertion in this module "
+            "is exercising the unscreened path"
+        )
+        assert any(v in banner for v in self._SCREENED_VERDICTS), (
+            "the Dashboard shows no screening verdict at all (expected one of "
+            f"{', '.join(self._SCREENED_VERDICTS)}); the banner is not "
+            "reporting a screening outcome, so a green run here proves nothing"
+        )
 
     def test_the_configured_watchlist_loads_outside_the_browser(self):
         """Cheap, direct check of the same config the fixture writes."""
