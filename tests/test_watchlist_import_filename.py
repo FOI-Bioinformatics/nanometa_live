@@ -107,3 +107,59 @@ class TestTheFilenameCannotEscapeTheWatchlistDirectory:
 
         assert ok
         assert (loader.user_watchlist_dir / "operator_list.yaml").is_file()
+
+
+class TestStemCollisionsAreRefused:
+    """A watchlist is keyed by file stem, so .yml can hide an existing .yaml.
+
+    ``import_watchlist``'s own comment states the principle -- "A watchlist is
+    keyed by its file stem, so two different files with the same stem are the
+    same watchlist as far as discovery is concerned" -- and then enforced it
+    only against built-in names. For the operator's own uploads it checked the
+    exact filename, so ``pathogens.yml`` landing beside ``pathogens.yaml``
+    passed both guards and made the earlier upload invisible in every list,
+    count and toggle, with both uploads reporting success.
+    """
+
+    def test_a_different_extension_with_the_same_stem_is_refused(
+        self, loader, source
+    ):
+        ok, _ = loader.import_watchlist(
+            source, destination="user", file_name="pathogens.yaml"
+        )
+        assert ok
+
+        ok, message = loader.import_watchlist(
+            source, destination="user", file_name="pathogens.yml"
+        )
+
+        assert not ok, (
+            "pathogens.yml was accepted alongside pathogens.yaml; discovery "
+            "keys by stem, so the earlier upload is now invisible while both "
+            "imports reported success"
+        )
+        assert "pathogens" in message
+
+    def test_overwrite_still_forces_it_through(self, loader, source):
+        """The operator can still say they mean it."""
+        loader.import_watchlist(
+            source, destination="user", file_name="pathogens.yaml"
+        )
+
+        ok, _ = loader.import_watchlist(
+            source, destination="user", file_name="pathogens.yml",
+            overwrite=True,
+        )
+
+        assert ok
+
+    def test_an_unrelated_stem_is_unaffected(self, loader, source):
+        loader.import_watchlist(
+            source, destination="user", file_name="pathogens.yaml"
+        )
+
+        ok, _ = loader.import_watchlist(
+            source, destination="user", file_name="other_list.yaml"
+        )
+
+        assert ok

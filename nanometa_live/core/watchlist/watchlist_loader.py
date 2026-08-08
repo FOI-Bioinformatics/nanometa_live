@@ -464,6 +464,28 @@ class WatchlistLoader:
                     f"A watchlist file named '{dest_name}' already exists in "
                     f"{dest_dir}. Rename the file, or confirm the replacement."
                 )
+            # Same stem, different extension. This check used to apply only to
+            # built-in names, so 'pathogens.yml' landing beside an existing
+            # 'pathogens.yaml' passed -- and since discovery keys by stem, one
+            # of them then vanished from every list, count and toggle while
+            # both imports reported success.
+            existing = next(
+                (
+                    p for p in dest_dir.iterdir()
+                    if p.suffix in (".yaml", ".yml")
+                    and p.stem == watchlist_id
+                    and p.name != dest_name
+                ),
+                None,
+            )
+            if existing is not None:
+                return False, (
+                    f"'{existing.name}' already provides the watchlist "
+                    f"'{watchlist_id}' in {dest_dir}. A watchlist is "
+                    f"identified by its file name without the extension, so "
+                    f"importing '{dest_name}' would hide it. Rename the file, "
+                    f"or confirm the replacement."
+                )
             builtin_dir = self._app_root / self.BUILTIN_SUBDIR
             builtin_stems = set()
             if builtin_dir.is_dir():
