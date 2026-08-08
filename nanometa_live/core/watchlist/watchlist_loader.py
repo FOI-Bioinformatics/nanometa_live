@@ -439,7 +439,17 @@ class WatchlistLoader:
         # Create directory if needed
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        dest_name = file_name or source_path.name
+        # Reduce to a bare filename before joining. ``file_name`` carries the
+        # browser-supplied dcc.Upload name, so "../evil.yaml" would otherwise
+        # write outside the watchlists directory, and an absolute path would
+        # ignore dest_dir entirely. Reducing rather than refusing keeps a
+        # well-meaning upload working -- the file is still imported, just not
+        # where the string asked.
+        dest_name = Path(file_name or source_path.name).name
+        if not dest_name or dest_name in (".", ".."):
+            return False, (
+                f"'{file_name}' is not a usable watchlist file name."
+            )
         dest_path = dest_dir / dest_name
         watchlist_id = Path(dest_name).stem
 
