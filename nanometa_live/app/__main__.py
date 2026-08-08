@@ -121,16 +121,43 @@ def _run_visualization_mode(args) -> None:
     )
     set_project_dir_env(project_dir)
 
-    # Create config pointing to the main_dir
-    config = {
+    # Start from --config when given. This branch used to build the config
+    # from scratch, which silently discarded the entire YAML -- watchlist,
+    # kraken_db, thresholds, negative-control list. The operator got an
+    # unscreened dashboard reading NOT SCREENED while believing screening
+    # was armed, with nothing on screen or in the log to say otherwise.
+    config = {}
+    if getattr(args, "config", None):
+        try:
+            config = ConfigLoader(os.path.join(data_dir, "configs")).load_config(
+                args.config
+            )
+            logger.info("Loaded configuration from %s", args.config)
+        except Exception as exc:
+            # Deliberately fatal, unlike full mode's fall-back-to-defaults.
+            # Starting anyway would reproduce the defect this guards against:
+            # an app that looks configured and is not. The operator asked for
+            # this config; if it cannot be honoured, do not pretend.
+            logger.error(
+                "Failed to load configuration from %s: %s", args.config, exc
+            )
+            sys.exit(1)
+
+    # --main_dir is the explicit instruction and overrides whatever results
+    # directory the config carries -- a loaded config routinely still points
+    # at a previous run, and silently serving that instead would be the same
+    # class of misdirection one layer down.
+    main_dir = os.path.abspath(args.main_dir)
+    config.update({
         "data_dir": data_dir,
         # Per-analysis state (session, watchlist, mappings) lives under
         # <project_dir>/.nanometa/; default to the working directory or
         # --project. See NanometaPaths.
         "project_dir": project_dir,
-        "main_dir": args.main_dir,
+        "main_dir": main_dir,
+        "results_output_directory": main_dir,
         "visualization_only": True,
-    }
+    })
 
     # Initialize backend manager (won't start any processes)
     backend_manager = BackendManager(data_dir)
