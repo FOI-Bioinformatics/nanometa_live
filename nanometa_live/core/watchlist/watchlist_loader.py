@@ -19,6 +19,8 @@ from typing import Dict, List, Optional, Tuple
 
 import yaml
 
+from nanometa_live.core.config.pathogen_loader import default_alert_threshold
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,7 +52,11 @@ class WatchlistPathogenEntry:
     threat_level: str = "moderate"
     bsl_level: Optional[int] = None
     category: Optional[str] = None
-    alert_threshold: int = 10
+    # None means "not stated"; __post_init__ derives it from threat_level via
+    # the shared table. A flat default here disagreed with
+    # WatchlistEntry.from_dict, so the same entry screened at different
+    # thresholds depending on which path loaded it.
+    alert_threshold: Optional[int] = None
     action_required: str = "Follow laboratory biosafety protocols"
     notes: str = ""
     # Organism kingdom/type declared by the operator (virus / bacteria /
@@ -60,6 +66,12 @@ class WatchlistPathogenEntry:
     # Free-text extra information shown next to the species name (e.g. the toxin
     # a producer secretes). Distinct from ``notes`` (longer context).
     annotation: str = ""
+
+    def __post_init__(self):
+        # Derive the threshold only when the entry did not state one, so an
+        # operator's explicit value is never overwritten.
+        if self.alert_threshold is None:
+            self.alert_threshold = default_alert_threshold(self.threat_level)
 
 
 class WatchlistLoader:
@@ -285,7 +297,7 @@ class WatchlistLoader:
                         threat_level=p_data.get("threat_level", "moderate"),
                         bsl_level=p_data.get("bsl_level"),
                         category=p_data.get("category"),
-                        alert_threshold=p_data.get("alert_threshold", 10),
+                        alert_threshold=p_data.get("alert_threshold"),
                         action_required=p_data.get("action_required", "Follow laboratory biosafety protocols"),
                         notes=p_data.get("notes", ""),
                         organism_type=p_data.get("organism_type"),
@@ -561,7 +573,10 @@ def build_watchlist_yaml(
             entry["bsl_level"] = e["bsl_level"]
         if e.get("category"):
             entry["category"] = e["category"]
-        entry["alert_threshold"] = e.get("alert_threshold", 10)
+        entry["alert_threshold"] = e.get(
+            "alert_threshold",
+            default_alert_threshold(e.get("threat_level", "moderate")),
+        )
         if e.get("action_required"):
             entry["action_required"] = e["action_required"]
         if e.get("organism_type"):

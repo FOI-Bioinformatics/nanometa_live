@@ -35,6 +35,7 @@ from nanometa_live.core.config.pathogen_loader import (
     PathogenEntry,
     ThreatLevel,
     BiosaftyLevel,
+    default_alert_threshold,
     get_pathogen_database,
 )
 
@@ -225,14 +226,13 @@ class WatchlistEntry:
             except (ValueError, TypeError):
                 pass
 
-        # Default alert threshold based on threat level
-        default_thresholds = {
-            ThreatLevel.CRITICAL: 5,
-            ThreatLevel.HIGH: 10,
-            ThreatLevel.MODERATE: 50,
-            ThreatLevel.LOW: 100,
-        }
-        alert_threshold = data.get("alert_threshold", default_thresholds.get(threat_level, 10))
+        # Default alert threshold based on threat level. The table lives in
+        # pathogen_loader so the loader's entry type derives the same value;
+        # they used to disagree, and an entry's threshold then depended on
+        # which path happened to load it.
+        alert_threshold = data.get(
+            "alert_threshold", default_alert_threshold(threat_level)
+        )
 
         # Handle taxid - support both 'taxid' and 'taxid_ncbi' keys
         taxid = data.get("taxid") or data.get("taxid_ncbi") or 0
