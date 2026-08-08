@@ -424,7 +424,13 @@ def create_app(
         # process whenever watchlist-table-refresh ticks. Background
         # callbacks read this as State instead of the WatchlistManager
         # singleton, which is empty in worker processes.
-        dcc.Store(id='watchlist-entries-snapshot', data=[]),
+        # None, not [] -- these are different claims. The readiness checks
+        # read [] as "determined: nothing enabled" and None as "could not
+        # determine", and only the latter consults their config fallback.
+        # Defaulting to [] told every background worker authoritatively that
+        # zero pathogens were enabled before the snapshot had ever been
+        # hydrated, producing a false "No watchlist enabled".
+        dcc.Store(id='watchlist-entries-snapshot', data=None),
         # None means "update_genome_stats has never run", which is NOT the
         # same as the empty list meaning "it ran and nothing is missing".
         # download_missing_genomes must be able to tell those apart or it
