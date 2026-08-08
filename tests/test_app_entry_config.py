@@ -49,6 +49,14 @@ def captured_config(monkeypatch):
     """
     seen = {}
 
+    # _run_visualization_mode calls set_data_dir_env / set_project_dir_env,
+    # which mutate os.environ directly. Claiming both through monkeypatch
+    # first makes it record their original values and restore them on
+    # teardown, so this module cannot leak a data dir into every test that
+    # runs after it.
+    monkeypatch.setenv("NANOMETA_DATA_DIR", "")
+    monkeypatch.setenv("NANOMETA_PROJECT_DIR", "")
+
     def fake_create_app(config, data_dir, backend_manager):
         seen["config"] = config
 

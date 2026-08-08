@@ -465,54 +465,10 @@ class WatchlistLoader:
         dest_path = dest_dir / dest_name
         watchlist_id = Path(dest_name).stem
 
-        # Collision guards. A watchlist is keyed by its file stem, so two
-        # different files with the same stem are the same watchlist as far
-        # as discovery is concerned: the copy would replace the operator's
-        # earlier upload, or shadow a built-in list, with no indication that
-        # anything was lost.
         if not overwrite:
-            if dest_path.exists():
-                return False, (
-                    f"A watchlist file named '{dest_name}' already exists in "
-                    f"{dest_dir}. Rename the file, or confirm the replacement."
-                )
-            # Same stem, different extension. This check used to apply only to
-            # built-in names, so 'pathogens.yml' landing beside an existing
-            # 'pathogens.yaml' passed -- and since discovery keys by stem, one
-            # of them then vanished from every list, count and toggle while
-            # both imports reported success.
-            existing = next(
-                (
-                    p for p in dest_dir.iterdir()
-                    if p.suffix in (".yaml", ".yml")
-                    and p.stem == watchlist_id
-                    and p.name != dest_name
-                ),
-                None,
-            )
-            if existing is not None:
-                return False, (
-                    f"'{existing.name}' already provides the watchlist "
-                    f"'{watchlist_id}' in {dest_dir}. A watchlist is "
-                    f"identified by its file name without the extension, so "
-                    f"importing '{dest_name}' would hide it. Rename the file, "
-                    f"or confirm the replacement."
-                )
-            builtin_dir = self._app_root / self.BUILTIN_SUBDIR
-            builtin_stems = set()
-            if builtin_dir.is_dir():
-                builtin_stems = {
-                    p.stem for p in builtin_dir.iterdir()
-                    if p.suffix in (".yaml", ".yml")
-                }
-            if watchlist_id in builtin_stems:
-                return False, (
-                    f"'{watchlist_id}' is the name of a built-in watchlist. An "
-                    "imported file with this name would take precedence over it "
-                    "everywhere without saying so. Rename the file before "
-                    "importing."
-                )
-
+            refusal = self._import_collision(dest_dir, dest_name, watchlist_id)
+            if refusal:
+                return False, refusal
         try:
             shutil.copy2(source_path, dest_path)
 
@@ -524,6 +480,60 @@ class WatchlistLoader:
         except (FileNotFoundError, PermissionError, OSError, shutil.SameFileError) as e:
             logger.exception(f"Failed to import watchlist: {e}")
             return False, f"Failed to import: {e}"
+
+    def _import_collision(
+        self, dest_dir: Path, dest_name: str, watchlist_id: str
+    ) -> Optional[str]:
+        """Why this import must be refused, or None if it is safe.
+
+        A watchlist is keyed by its file stem, so two different files with the
+        same stem are the same watchlist as far as discovery is concerned: the
+        copy would replace the operator's earlier upload, or shadow a built-in
+        list, with no indication that anything was lost.
+        """
+        if (dest_dir / dest_name).exists():
+            return (
+                f"A watchlist file named '{dest_name}' already exists in "
+                f"{dest_dir}. Rename the file, or confirm the replacement."
+            )
+
+        # Same stem, different extension. This check used to apply only to
+        # built-in names, so 'pathogens.yml' landing beside an existing
+        # 'pathogens.yaml' passed -- and since discovery keys by stem, one of
+        # them then vanished from every list, count and toggle while both
+        # imports reported success.
+        existing = next(
+            (
+                p for p in dest_dir.iterdir()
+                if p.suffix in (".yaml", ".yml")
+                and p.stem == watchlist_id
+                and p.name != dest_name
+            ),
+            None,
+        )
+        if existing is not None:
+            return (
+                f"'{existing.name}' already provides the watchlist "
+                f"'{watchlist_id}' in {dest_dir}. A watchlist is identified by "
+                f"its file name without the extension, so importing "
+                f"'{dest_name}' would hide it. Rename the file, or confirm the "
+                f"replacement."
+            )
+
+        builtin_dir = self._app_root / self.BUILTIN_SUBDIR
+        if builtin_dir.is_dir():
+            builtin_stems = {
+                p.stem for p in builtin_dir.iterdir()
+                if p.suffix in (".yaml", ".yml")
+            }
+            if watchlist_id in builtin_stems:
+                return (
+                    f"'{watchlist_id}' is the name of a built-in watchlist. An "
+                    "imported file with this name would take precedence over "
+                    "it everywhere without saying so. Rename the file before "
+                    "importing."
+                )
+        return None
 
     def create_user_watchlist_dir(self) -> Path:
         """Create the user watchlist directory if it does not exist."""
