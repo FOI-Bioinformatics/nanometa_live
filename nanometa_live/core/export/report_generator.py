@@ -23,6 +23,7 @@ from nanometa_live.core.utils.sample_detector import (
     get_available_samples,
     resolve_analysis_directory,
 )
+from nanometa_live.app.tabs.dashboard_helpers import DEFAULT_LOW_READ_FLOOR
 from nanometa_live.app.utils.callback_helpers import get_classification_stats
 
 logger = logging.getLogger(__name__)
@@ -179,12 +180,29 @@ class ReportGenerator:
             "samples": [s for s in samples if s is not None],
             "classified_total": classified,
             "unclassified_total": unclassified,
+            # Read depth for the decision banner's INSUFFICIENT READS gate.
+            # The floor is anchored to min_reads_for_validation so the report
+            # and the dashboard agree on what counts as too shallow to call a
+            # negative; see dashboard_helpers.select_verdict.
+            "total_reads": classified + unclassified,
+            "low_read_floor": self._low_read_floor(),
             "qc_summary": qc_all,
             "watched_results": watched_results,
             "alerts": alerts,
             "per_sample": per_sample,
             "pipeline_reports": pipeline_reports,
         }
+
+    def _low_read_floor(self) -> int:
+        """Reads below which a negative result has not been earned.
+
+        Anchored to ``min_reads_for_validation`` so the report and the
+        dashboard agree on what counts as too shallow to call an absence; see
+        dashboard_helpers.select_verdict.
+        """
+        return int(
+            self.config.get("min_reads_for_validation") or DEFAULT_LOW_READ_FLOOR
+        )
 
     def _get_classification_counts(self, df: pd.DataFrame):
         """Classified/unclassified read counts via the canonical helper.

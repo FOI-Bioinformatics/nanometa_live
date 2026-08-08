@@ -264,6 +264,26 @@
   <div class="decision-banner banner-review">
     NOT SCREENED - no watchlist was active, so no organisms were checked
   </div>
+  {% elif data.total_reads is not none and data.low_read_floor
+          and data.total_reads < data.low_read_floor %}
+  {#
+    An absence measured over almost no reads is not evidence of absence.
+    The dashboard gained this guard alongside NOT SCREENED on 2026-07-29
+    (dashboard_helpers.select_verdict -> INSUFFICIENT_READS); only the
+    NOT SCREENED half was ported here, so a one-read run still rendered the
+    green all-clear in the artifact that leaves the building.
+
+    Note the ordering: a detection is reported above regardless of depth, and
+    NOT SCREENED is checked first because nothing was examined at all. Depth
+    only decides whether a genuine negative has been earned.
+
+    ``total_reads is none`` means the depth could not be determined, which is
+    not the same as zero -- treating it as zero would make every caller that
+    cannot compute it emit a false INSUFFICIENT READS.
+  #}
+  <div class="decision-banner banner-review">
+    INSUFFICIENT READS - only {{ "{:,}".format(data.total_reads) }} read{{ "s" if data.total_reads != 1 else "" }} analysed, too few for a reliable negative across {{ data.watched_results | length }} watched organism{{ "s" if data.watched_results | length != 1 else "" }}
+  </div>
   {% else %}
   <div class="decision-banner banner-safe">
     NO WATCHED ORGANISMS DETECTED - {{ data.watched_results | length }} organism{{ "s" if data.watched_results | length != 1 else "" }} screened
