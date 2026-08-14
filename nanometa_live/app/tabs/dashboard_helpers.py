@@ -855,19 +855,83 @@ def _classify_dangerous(dangerous: List[Dict[str, Any]]) -> Tuple[list, list]:
     return critical, high_risk
 
 
+def _shallow_depth_clause(
+    total_reads: Optional[int], low_read_floor: int
+) -> str:
+    """" — on only N reads total" when a detection rests on almost nothing.
+
+    A detection always outranks depth, so this never changes the verdict; it
+    only says what the verdict is standing on. ALL CLEAR already states its
+    depth for exactly this reason ("so a negative over 34,000 reads cannot be
+    confused at a glance with one over 60") and the detection path had no
+    equivalent.
+
+    The case that prompted it: a real negative control carrying 6 Francisella
+    tularensis reads out of 11 total read as ACTION REQUIRED in wording
+    identical to the same run's genuine 34,096-read detection.
+
+    ``total_reads=None`` means undetermined and adds nothing -- an unknown
+    depth must not be presented as a shallow one.
+    """
+    if total_reads is None or total_reads >= low_read_floor:
+        return ""
+    return f" — on only {total_reads:,} read{'s' if total_reads != 1 else ''} total"
+
+
 def _action_required_subtitle(n_found: int, n_watched: int,
-                              validation_has_results: bool) -> str:
+                              validation_has_results: bool,
+                              depth_clause: str = "") -> str:
     """Subtitle for ACTION REQUIRED.
 
     n_found counts only entries above each pathogen's alert_threshold; the
     Organisms tab lists every watchlist hit without that gate, so the two
     counters legitimately differ. The wording makes the threshold gate
-    explicit and flags when confirmatory validation has not yet run.
+    explicit, states the depth when it is too low to stand on its own, and
+    flags when confirmatory validation has not yet run.
     """
     sub = f"{n_found} of {n_watched} watched pathogens above alert threshold"
+    sub += depth_clause
     if not validation_has_results:
         sub += " — pending confirmatory validation"
     return sub
+
+
+def _detection_descriptor(
+    dangerous: List[Dict[str, Any]],
+    n_watched: int,
+    validation_has_results: bool,
+    total_reads: Optional[int],
+    low_read_floor: int,
+) -> VerdictDescriptor:
+    """The verdict for a run that found something on the watchlist.
+
+    A detection outranks shallow depth and always will -- suppressing an alarm
+    because the run was thin is the one thing this must not do. But the banner
+    should say what it is standing on: a real negative control carrying 6
+    Francisella tularensis reads out of 11 total read exactly like the same
+    run's genuine 34,096-read detection.
+    """
+    depth_clause = _shallow_depth_clause(total_reads, low_read_floor)
+    critical, high_risk = _classify_dangerous(dangerous)
+    if critical or high_risk:
+        return VerdictDescriptor(
+            state="ACTION_REQUIRED",
+            icon="exclamation-octagon-fill", icon_color="#8b0000",
+            title="ACTION REQUIRED",
+            subtitle=_action_required_subtitle(
+                len(dangerous), n_watched, validation_has_results,
+                depth_clause),
+            sub_color="#721c24", bg_color="#f8d7da",
+            border_color="#8b0000",
+            show_icon_mobile=True, needs_attribution=True,
+        )
+    return VerdictDescriptor(
+        state="MONITORING",
+        icon="eye-fill", icon_color="#fd7e14",
+        title="MONITORING",
+        subtitle="Moderate-risk species found" + depth_clause,
+        sub_color="#664d03", bg_color="#fff3cd", border_color="#fd7e14",
+    )
 
 
 def select_verdict(
@@ -905,23 +969,9 @@ def select_verdict(
 
     if main_dir_available and kraken_has_data:
         if dangerous:
-            critical, high_risk = _classify_dangerous(dangerous)
-            if critical or high_risk:
-                return VerdictDescriptor(
-                    state="ACTION_REQUIRED",
-                    icon="exclamation-octagon-fill", icon_color="#8b0000",
-                    title="ACTION REQUIRED",
-                    subtitle=_action_required_subtitle(
-                        len(dangerous), n_watched, validation_has_results),
-                    sub_color="#721c24", bg_color="#f8d7da",
-                    border_color="#8b0000",
-                    show_icon_mobile=True, needs_attribution=True,
-                )
-            return VerdictDescriptor(
-                state="MONITORING",
-                icon="eye-fill", icon_color="#fd7e14",
-                title="MONITORING", subtitle="Moderate-risk species found",
-                sub_color="#664d03", bg_color="#fff3cd", border_color="#fd7e14",
+            return _detection_descriptor(
+                dangerous, n_watched, validation_has_results,
+                total_reads, low_read_floor,
             )
         # No hits. Whether that is reassuring depends entirely on whether
         # anything was screened -- see _not_screened_descriptor.
