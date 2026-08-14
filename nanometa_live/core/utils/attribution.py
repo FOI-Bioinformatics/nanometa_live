@@ -17,7 +17,7 @@ pandas imports so it can be used from ``core`` as well as ``app``.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 #: Read floor for a taxon to be considered present in a sample at all. This is
@@ -99,12 +99,27 @@ class PathogenAttribution:
     ``alert_threshold`` on their own. ``below_threshold_samples`` carry the
     taxon above the discovery floor but below that threshold -- they are the
     reason an aggregate can be positive while no individual sample is.
+
+    ``negative_control_samples`` are the declared controls that carry the
+    taxon at all, with ``negative_control_reads`` their combined count and
+    ``negative_control_fraction`` that count as a percentage of the
+    non-control samples. A control carrying the organism the run is positive
+    for is the signature of barcode crosstalk or carryover and bears on how
+    the positive counts should be read -- on a real run the control held 6
+    reads against the positive's 34,096, or 0.018%.
+
+    These describe; they do not decide. A control never removes a sample from
+    ``samples`` or weakens the detection, because a contaminated control does
+    not make a real positive go away.
     """
 
     pathogen: str
     samples: List[str]
     below_threshold_samples: List[str]
     top_reads: int
+    negative_control_samples: List[str] = field(default_factory=list)
+    negative_control_reads: int = 0
+    negative_control_fraction: Optional[float] = None
 
     @property
     def resolved(self) -> bool:
@@ -189,12 +204,32 @@ def build_pathogen_attribution(
         top_reads = max(sample_reads) if sample_reads else (
             detection.get("reads", 0) or 0
         )
+
+        # Controls carrying the taxon, reported alongside the detection rather
+        # than acting on it. The fraction is against the non-control samples,
+        # because "0.02% of the positive" is what tells an operator whether
+        # this looks like crosstalk; the raw count alone does not.
+        nc_rows = [r for r in rows if r.get("is_negative_control")]
+        nc_names = [r.get("sample") for r in nc_rows if r.get("sample")]
+        nc_reads = sum(int(r.get("reads", 0) or 0) for r in nc_rows)
+        positive_reads = sum(
+            int(r.get("reads", 0) or 0)
+            for r in rows if not r.get("is_negative_control")
+        )
+        nc_fraction = (
+            (nc_reads / positive_reads * 100) if (nc_rows and positive_reads)
+            else None
+        )
+
         attributions.append(
             PathogenAttribution(
                 pathogen=label,
                 samples=above,
                 below_threshold_samples=below,
                 top_reads=int(top_reads),
+                negative_control_samples=nc_names,
+                negative_control_reads=nc_reads,
+                negative_control_fraction=nc_fraction,
             )
         )
 
@@ -202,21 +237,58 @@ def build_pathogen_attribution(
     return attributions
 
 
+def _negative_control_clause(attribution: PathogenAttribution) -> str:
+    """" — also in negative control X (N reads, P% of positives)", or "".
+
+    States what was measured and stops there. A control carrying the organism
+    looks the same whether it is barcode crosstalk, carryover, or a genuinely
+    contaminated control, so naming a cause would be asserting something the
+    data does not settle. The reads and the fraction are what let an operator
+    judge it: 6 reads at 0.02% of the positive reads differently from 6 reads
+    at 40%.
+    """
+    names = attribution.negative_control_samples
+    if not names:
+        return ""
+    shown = ", ".join(names[:2])
+    if len(names) > 2:
+        shown += f", +{len(names) - 2} more"
+    detail = f"{attribution.negative_control_reads:,} reads"
+    if attribution.negative_control_fraction is not None:
+        detail += f", {attribution.negative_control_fraction:.2f}% of positives"
+    plural = "s" if len(names) != 1 else ""
+    return f" — also in negative control{plural} {shown} ({detail})"
+
+
 def _attribution_phrase(attribution: PathogenAttribution) -> Optional[str]:
     """One "Pathogen (barcode…)" clause, or None when nothing is known."""
-    if attribution.samples:
-        shown = attribution.samples[:3]
-        overflow = len(attribution.samples) - len(shown)
+    nc = set(attribution.negative_control_samples)
+    nc_clause = _negative_control_clause(attribution)
+
+    # Controls are reported separately, never listed as triggering samples --
+    # a control that clears the alert threshold is a fact about the run, not a
+    # positive result for the subject.
+    primary = [s for s in attribution.samples if s not in nc]
+    if primary:
+        shown = primary[:3]
+        overflow = len(primary) - len(shown)
         names = ", ".join(shown)
         if overflow > 0:
             names += f", +{overflow} more"
-        return f"{attribution.pathogen} ({names})"
-    if attribution.below_threshold_samples:
-        n = len(attribution.below_threshold_samples)
+        return f"{attribution.pathogen} ({names}){nc_clause}"
+
+    below = [s for s in attribution.below_threshold_samples if s not in nc]
+    if below:
+        n = len(below)
         return (
             f"{attribution.pathogen} (aggregate across {n} "
-            f"sample{'s' if n != 1 else ''})"
+            f"sample{'s' if n != 1 else ''}){nc_clause}"
         )
+
+    if nc_clause:
+        # Nothing but the control carries it. Worth saying plainly rather than
+        # rendering an unqualified detection.
+        return f"{attribution.pathogen} (negative control only){nc_clause}"
     return None
 
 
