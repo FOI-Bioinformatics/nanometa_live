@@ -1,12 +1,12 @@
 # Known untested surface
 
 Written 2026-07-29, at the close of a three-round pre-release bug hunt.
-Last updated after round 3.
+Last updated 2026-08-14, after the August campaign.
 
 This document exists because the absence of a statement reads as coverage. The
-test suite is large (3210 tests) and the campaign that produced this document
-found nineteen real defects, which makes it easy to assume the remaining surface
-is sound. Some of it is simply unexamined, and a biothreat tool should say
+test suite is large (3426 tests) and the campaigns that produced this document
+found thirty-eight real defects between them, which makes it easy to assume the
+remaining surface is sound. Some of it is simply unexamined, and a biothreat tool should say
 which.
 
 Each entry states what is not known, why it is not known, and what it would
@@ -34,6 +34,34 @@ Stated first so the gaps below are read in proportion.
   sample, which places them in the FASTQ rather than in our demultiplexing.
 - **The dashboard serves without callback errors.** All nine tabs, 208
   `/_dash-update-component` requests, all 200/204.
+
+---
+
+## Closed by the August 2026 campaign
+
+Full record in [`audit/campaign-2026-08.md`](audit/campaign-2026-08.md).
+
+- **Air-gapped operation, on a real rig.** Ubuntu + apptainer 1.5.3, verified
+  air-gapped before any result was trusted. Nextflow reused the bundled image
+  by its `_singularity_cache_name` filename with **zero pull attempts**; the
+  GUI served with no external URLs and its icon fonts resolved. The section
+  below is narrowed accordingly, not deleted -- amd64 execution, setuid
+  apptainer and a real field kernel remain untested.
+- **Bundle export/import honesty.** A wrong `--db` path, an unwritable config,
+  and blocker wording that claimed an abort that did not happen.
+- **The exported report's read-depth gate**, and the same distinction carried
+  to the Organisms panel and to the wording of an alarm.
+- **Per-sample attribution**, which counted the per-rank `reads` column while
+  every other surface used `cumul_reads` -- a 13% discrepancy on a real
+  detection, and a negative control pushed below the discovery floor.
+- **Negative controls end to end**: recognised, reported alongside a detection
+  with reads and share of the positives, and declarable from the GUI.
+- **Four settings that did nothing** -- two removed, two wired.
+
+Worth recording because it is the campaign's clearest lesson: the last two
+entries were only reachable with a **real database and real reads**. No fixture
+in the suite produces an 11-read sample carrying a critical pathogen, and both
+defects surfaced within minutes of the real corpus being available.
 
 ---
 
@@ -77,10 +105,20 @@ raise and the paths that would reach out are driven
 (`tests/test_offline_no_network.py`). That proves the code does not *attempt* a
 connection in-process.
 
-It has never been run on a genuinely disconnected machine. Subprocess network
-access is covered only by asserting no subprocess is spawned, which is weaker
-than observing one fail. A truly air-gapped smoke test remains the only way to
-know.
+**Closed 2026-08-14.** It has now been run on a genuinely disconnected
+machine: a `--privileged` Ubuntu container with `--network none`, verified to
+have loopback only, no DNS and no outbound TCP before any result was trusted.
+A bundle was exported, verified, imported and served. Nextflow resolved the
+bundled image from `NXF_SINGULARITY_CACHEDIR` and attempted **no pull** (zero
+matches for pull/download and zero network errors in `.nextflow.log`); the GUI
+returned HTTP 200 with no external URLs and both icon fonts resolving.
+
+What that run did **not** establish, and what remains open here: the images are
+amd64 and the rig is arm64, so nothing was executed -- the run failed exactly
+at "the image's architecture (amd64) could not run on the host's (arm64)",
+which confirms the documented cross-platform restriction rather than testing
+around it. Real x86_64 execution, setuid-mode apptainer, and a field kernel and
+distro are still unknown.
 
 ### Conda environment relocation across machines
 
@@ -191,6 +229,22 @@ validation produced a result.
 on pull requests; development happens on `dev`, so no job had run for weeks.
 Three of the defects found in this campaign are exactly what that suite would
 catch.
+
+**A guard must state the precondition that lets it fail.** The August campaign
+found three tests asserting something other than what their own docstrings
+claimed: a browser check asserting `len(page_text) > 0` (a character count that
+passes whether the banner reads ACTION REQUIRED or NOT SCREENED, and whose
+docstring named that exact failure mode); a pipeline test asserting only
+`workflow.success` while its note claimed the manifest records the failure; and
+a module test whose "not supplied" case passed `[]`, the value the workflow
+sends when it HAS determined the answer. Each was written in good faith. None
+could fail.
+
+**Synthetic fixtures cannot reach some defects.** Two August defects -- an
+alarm carrying no depth on a 6-of-11-read negative control, and attribution
+counting the wrong read column -- were invisible to a 3400-test suite and
+surfaced within minutes of a real database and real reads being available. A
+real corpus is not a luxury for this tool.
 
 Fixed 2026-07-29 by adding `dev` to the push branches. The first run failed 20
 of 155 tests, almost all because thirteen test fixtures had never been
