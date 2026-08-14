@@ -656,6 +656,28 @@ class BundleManager:
             # Record DB hash for compatibility check on import
             db_path = config.get("kraken_db", "")
             if db_path:
+                # Check the database is real before hashing it. The hash is
+                # what import compares against, so one derived from a path
+                # that does not resolve makes the compatibility check
+                # meaningless -- and the operator does not find out until the
+                # first run, on the air-gapped machine. Symmetric with the
+                # import-side check; both go through check_kraken_db.
+                from nanometa_live.core.utils.kraken_utils import check_kraken_db
+
+                db_ok, db_missing = check_kraken_db(db_path)
+                if not db_ok:
+                    detail = (
+                        f"missing {', '.join(db_missing)}"
+                        if db_missing else "not a readable directory"
+                    )
+                    manifest["export_warnings"].append(
+                        f"Kraken2 database '{db_path}' is not a usable database "
+                        f"({detail}). The database is transferred separately, "
+                        "but the compatibility hash recorded here was derived "
+                        "from this path -- correct it and re-export, or the "
+                        "check on import means nothing."
+                    )
+
                 from nanometa_live.core.taxonomy.taxid_mapping import get_database_hash
                 manifest["db_hash"] = get_database_hash(db_path)
 

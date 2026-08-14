@@ -151,3 +151,64 @@ class TestAnUnwritableConfigFailsTheImport:
         assert any(
             "disk full" in w for w in result.get("warnings", [])
         ), "the underlying error must survive into the warnings"
+
+
+class TestExportWarnsAboutItsOwnDatabase:
+    """Symmetric with the import-side check above.
+
+    Export records a db_hash so import can verify compatibility, but never
+    checked that kraken_db pointed at a real database. A bundle built from a
+    config whose database path was wrong -- moved, unmounted, mistyped --
+    exported cleanly and carried a hash derived from nothing, which import
+    then compared against. The operator learns at first run, air-gapped.
+    """
+
+    @staticmethod
+    def _export_warnings(bundle_path):
+        """export_warnings recorded in the produced bundle's manifest.
+
+        export_bundle returns a Path, not a result dict; the warnings ride in
+        manifest.json, which is also where import and verify_bundle read them.
+        """
+        import json
+        import tarfile
+
+        with tarfile.open(str(bundle_path)) as tar:
+            member = tar.extractfile("manifest.json")
+            manifest = json.load(member)
+        return manifest.get("export_warnings", [])
+
+    def test_a_bad_kraken_db_is_warned_about_at_export(self, tmp_path):
+        home = tmp_path / "home"
+        (home / "genomes").mkdir(parents=True)
+        out = tmp_path / "bundle.tar.gz"
+
+        BundleManager().export_bundle(
+            str(out),
+            config={"kraken_db": str(tmp_path / "gone")},
+            nanometa_home=str(home),
+        )
+
+        warnings = self._export_warnings(out)
+        assert any("gone" in w for w in warnings), (
+            "a bundle was exported against a Kraken2 database path that does "
+            f"not exist, with no warning ({warnings}); the operator finds out "
+            "on the air-gapped machine"
+        )
+
+    def test_a_valid_database_produces_no_such_warning(self, tmp_path):
+        home = tmp_path / "home"
+        (home / "genomes").mkdir(parents=True)
+        db = tmp_path / "real_db"
+        db.mkdir()
+        for name in ("hash.k2d", "opts.k2d", "taxo.k2d"):
+            (db / name).write_bytes(b"x")
+        out = tmp_path / "bundle_ok.tar.gz"
+
+        BundleManager().export_bundle(
+            str(out), config={"kraken_db": str(db)}, nanometa_home=str(home),
+        )
+
+        assert not any(
+            "not a usable" in w for w in self._export_warnings(out)
+        )
