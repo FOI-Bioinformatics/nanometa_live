@@ -31,6 +31,15 @@ _NC_EXACT_TOKENS = frozenset({
 })
 _NC_NEGATIVE_TOKENS = frozenset({"negative", "neg"})
 _NC_CONTROL_TOKENS = frozenset({"control", "ctrl", "ctl"})
+
+#: Words that name a sample rather than describe biology. "negative" beside
+#: one of these means a control; beside anything else it is a descriptor, so
+#: ``negative_strand_test`` stays a real sample.
+_NC_SAMPLE_WORDS = frozenset({
+    "sample", "barcode", "bc", "rep", "replicate", "run", "lib", "library",
+})
+#: A bare sample identifier: barcode16, bc12, s3, 01.
+_NC_SAMPLE_ID_RE = re.compile(r"^(?:barcode|bc|sample|smpl|rep|run|s|r)?\d+$")
 def is_negative_control(
     sample: str, config: Optional[Dict[str, Any]] = None
 ) -> bool:
@@ -62,6 +71,20 @@ def is_negative_control(
         # "negative" needs a control word beside it (or to stand alone);
         # otherwise "negative_strand_test" reads as a control.
         if token_set & _NC_CONTROL_TOKENS or len(tokens) == 1:
+            return True
+        # ...or nothing beside it but a sample identifier. This is how
+        # operators actually name the control -- a real Bioshield run used
+        # "negative_barcode16", which has no control word and so was read as a
+        # clinical sample, then carried 6 F. tularensis reads out of 11 past
+        # that entry's alert threshold of 5.
+        #
+        # The distinction is what sits next to "negative": "barcode16" names a
+        # sample, "strand" describes a molecule. Only the first makes this a
+        # control, so negative_strand_test is still excluded.
+        others = token_set - _NC_NEGATIVE_TOKENS
+        if others and all(
+            t in _NC_SAMPLE_WORDS or _NC_SAMPLE_ID_RE.match(t) for t in others
+        ):
             return True
     if "template" in token_set and token_set & {"no", "non"}:
         return True

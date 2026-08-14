@@ -31,6 +31,7 @@ nanopore_output_directory: "/path/to/input"
 | `processing_mode` | string | "batch" | `batch` or `realtime` |
 | `sample_handling` | string | "by_barcode" | `by_barcode`, `single_sample`, or `per_file` |
 | `sample_name` | string | "sample" | Name when using single_sample mode |
+| `negative_control_samples` | list | [] | Samples to treat as negative controls. A detection in one of these is contamination or index hopping, not a finding about the subject. Declare them by **sample name**, which under `by_barcode` input is the barcode directory (`barcode16`) — not the FASTQ filename. A name-pattern fallback recognises forms such as `NTC`, `neg_ctrl`, `blank` and `negative_barcode16`, but a bare `barcode16` cannot be recognised from its name and must be listed here. |
 | `offline_mode` | bool | false | Skip network calls and use cached data only. Set automatically to `true` by a Deployment-tab bundle import; if the Kraken2 database path was not supplied at import, set `kraken_db` before starting analysis. |
 
 ### Kraken2 Classification

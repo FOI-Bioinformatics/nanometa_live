@@ -71,6 +71,14 @@ class ConfigLoader:
             # derived run folder is never mistaken for an operator override.
             "results_dir_override": "",
             "species_of_interest": [],
+            # Samples to treat as negative controls: a detection in one of
+            # these is contamination or index hopping, not a finding about
+            # the subject. Declared explicitly because the sample NAME often
+            # cannot say so -- under by_barcode input the sample is
+            # "barcode16" even when the FASTQ was "negative_barcode16.fastq.gz".
+            # The name-pattern fallback in core/utils/attribution.py only
+            # covers names that survive with a marker in them.
+            "negative_control_samples": [],
             "update_interval_seconds": 10,
             # Slower dashboard poll used when no run is active (complete,
             # standby, or viewing existing results). The faster
