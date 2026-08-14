@@ -1790,10 +1790,28 @@ def _species_df_to_organisms(species_df: pd.DataFrame) -> List[Dict[str, Any]]:
     else:
         abundance_col = pd.Series([0.0] * len(species_df))
 
+    # cumul_reads, not the per-rank reads column. At species rank the
+    # difference is everything assigned to subspecies below -- the same
+    # organism. This reported the per-rank count while the Organisms tab uses
+    # cumul_reads "for consistency with the organism cards", so a real run
+    # showed 29,721 reads here and 34,096 there for one detection, the 4,375
+    # difference sitting at F. tularensis holarctica.
+    #
+    # It also decided visibility: the filter in _load_per_sample_organisms
+    # compares against PER_SAMPLE_DISCOVERY_FLOOR, and that run's negative
+    # control had 4 direct against 6 cumulative, so it fell below a floor of
+    # 5 and never appeared at all.
+    #
+    # Falls back where the column is absent so partial frames still work.
+    reads_col = (
+        species_df['cumul_reads'] if 'cumul_reads' in species_df.columns
+        else species_df['reads']
+    )
+
     result_df = pd.DataFrame({
         'taxid': species_df['taxid'].fillna(0).astype(int),
         'name': species_df['name'].fillna('Unknown'),
-        'reads': species_df['reads'].fillna(0).astype(int),
+        'reads': reads_col.fillna(0).astype(int),
         'abundance': abundance_col
     })
     return result_df.to_dict('records')
@@ -1838,9 +1856,16 @@ def _load_per_sample_organisms(
             kraken_df = load_kraken_data(main_dir, sample)
             if kraken_df.empty:
                 continue
+            # Gate on the same column the organisms are reported with, or the
+            # floor and the displayed count disagree: a real negative control
+            # had 4 direct reads against 6 cumulative and was dropped by a
+            # floor of 5, so its contamination never reached the display.
+            floor_col = (
+                "cumul_reads" if "cumul_reads" in kraken_df.columns else "reads"
+            )
             species_df = kraken_df[
                 (kraken_df["rank"] == "S")
-                & (kraken_df["reads"] >= PER_SAMPLE_DISCOVERY_FLOOR)
+                & (kraken_df[floor_col] >= PER_SAMPLE_DISCOVERY_FLOOR)
             ]
             if species_df.empty:
                 continue
