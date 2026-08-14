@@ -194,7 +194,6 @@ def build_config_from_form(
     genome_cache_dir,
     cores,
     gui_port,
-    clean_temp,
     pipeline_profile,
     pipeline_source_type,
     pipeline_branch,
@@ -350,8 +349,6 @@ def build_config_from_form(
     if gui_port is not None:
         config["gui_port"] = int(gui_port)
 
-    if clean_temp is not None:
-        config["remove_temp_files"] = bool(clean_temp)
 
     if pipeline_profile is not None:
         config["pipeline_profile"] = pipeline_profile

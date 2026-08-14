@@ -133,7 +133,6 @@ class ConfigLoader:
             "external_kraken2_db": "",
             "local_package_management": None,
             "conda_frontend": "mamba",
-            "remove_temp_files": True,
             "main_dir": "",
             # QC and analysis tools
             "qc_tool": "chopper",

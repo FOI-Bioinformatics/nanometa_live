@@ -242,7 +242,6 @@ qc_tool: "chopper"
 # Description: Option to remove temporary files created during workflow execution.
 # Note: Keeping temporary files can be useful for debugging but may consume significant disk space.
 # Options: "true" (remove files), "false" (keep files)
-remove_temp_files: True
 
 ## PROJECT MAIN DIRECTORY ##
 # Description: The primary directory for the project, automatically set during project creation.

@@ -64,15 +64,6 @@ def _validate_boolean_parameters(config: Dict[str, Any]) -> None:
     else:
         config["blast_validation"] = True  # Default value
 
-    # Ensure remove_temp_files is a boolean
-    if "remove_temp_files" in config:
-        if isinstance(config["remove_temp_files"], str):
-            # Handle legacy format
-            config["remove_temp_files"] = config["remove_temp_files"] == "yes" or \
-                config["remove_temp_files"].lower() in ["true", "yes", "y", "1"]
-        config["remove_temp_files"] = bool(config["remove_temp_files"])
-    else:
-        config["remove_temp_files"] = True  # Default value
 
 
 def _validate_basic_settings(config: Dict[str, Any]) -> None:

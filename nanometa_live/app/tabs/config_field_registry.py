@@ -40,7 +40,6 @@ CONFIG_FORM_FIELDS = (
     ("genome-cache-dir-input", "genome_cache_dir"),
     ("cores-input", "cores"),
     ("gui-port-input", "gui_port"),
-    ("clean-temp-input", "clean_temp"),
     ("pipeline-profile-input", "pipeline_profile"),
     ("pipeline-source-type-input", "pipeline_source_type"),
     ("pipeline-branch-input", "pipeline_branch"),

@@ -94,7 +94,6 @@ nanopore_output_directory: "/path/to/input"
 |-----------|------|---------|-------------|
 | `qc_tool` | string | "chopper" | QC tool for read filtering |
 | `skip_nanoplot` | bool | false | Skip NanoPlot quality reporting |
-| `remove_temp_files` | bool | true | Clean up intermediate files after processing |
 
 ### Real-time Mode
 

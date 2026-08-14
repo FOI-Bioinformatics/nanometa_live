@@ -47,8 +47,11 @@ def parse_arguments():
     parser.add_argument(
         "--port",
         type=int,
-        default=8050,
-        help="Port to run the dashboard on (default: 8050)",
+        default=None,
+        help=(
+            "Port to run the dashboard on. Defaults to gui_port from the "
+            "configuration, or 8050 when that is unset."
+        ),
     )
 
     parser.add_argument(
@@ -193,7 +196,12 @@ def main():
     # caches stay shared under --data-dir. (project_dir + its env var were
     # resolved above, before singletons could read them.)
     config["project_dir"] = project_dir
-    config["gui_port"] = args.port
+    # The flag wins when given; otherwise the configured value stands. This
+    # used to assign args.port unconditionally, and since argparse defaulted
+    # it to 8050 the Configuration tab's port field was overwritten on every
+    # launch -- saved, reloaded, and silently ignored.
+    port = args.port if args.port is not None else config.get("gui_port") or 8050
+    config["gui_port"] = port
     if args.main_dir:
         config["results_output_directory"] = os.path.abspath(args.main_dir)
         config["main_dir"] = os.path.abspath(args.main_dir)
@@ -234,8 +242,8 @@ def main():
     handle_exit(app, backend_manager)
 
     # Start the Dash server
-    logging.info(f"Starting Nanometa Live v{__version__} server on port {args.port}")
-    app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
+    logging.info(f"Starting Nanometa Live v{__version__} server on port {port}")
+    app.run(host=args.host, port=port, debug=args.debug, threaded=True)
 
 
 if __name__ == "__main__":

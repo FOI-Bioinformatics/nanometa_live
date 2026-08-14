@@ -1086,14 +1086,13 @@ def _performance_item():
                     "running server keeps the port it started on."
                 )
             ], md=4),
-            dbc.Col([
-                dbc.Switch(
-                    id="clean-temp-input",
-                    label="Clean temp files",
-                    value=True,
-                    className="mt-4"
-                ),
-                dbc.FormText("Remove after processing")
-            ], md=4)
+            # "Clean temp files" (remove_temp_files) removed 2026-08-14.
+            # The switch promised "Remove after processing" and defaulted to
+            # on, while nothing anywhere acted on the value -- it was only
+            # boolean-normalised in two places. Wiring it to Nextflow's
+            # `cleanup` would have started deleting work directories for every
+            # existing installation and broken -resume, so the honest fix was
+            # to stop promising it. Delete a run's work/ directory by hand, or
+            # set `cleanup` in the pipeline config deliberately.
         ])
     ], title="Performance")

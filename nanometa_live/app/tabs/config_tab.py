@@ -600,7 +600,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("genome-cache-dir-input", "value"),
             Output("cores-input", "value"),
             Output("gui-port-input", "value"),
-            Output("clean-temp-input", "value"),
             Output("pipeline-profile-input", "value"),
             Output("pipeline-source-type-input", "value"),
             Output("pipeline-branch-input", "value"),
@@ -684,11 +683,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         cores = config.get("pipeline_cores", config.get("snakemake_cores", 1))  # Backward compatibility
         gui_port = config.get("gui_port", 8050)
 
-        clean_temp = config.get("remove_temp_files", True)
         # Ensure it's a boolean regardless of stored format
-        if isinstance(clean_temp, str):
-            clean_temp = clean_temp == "yes" or clean_temp.lower() in ["true", "yes", "y", "1"]
-        clean_temp = bool(clean_temp)
 
         # Pipeline profile
         pipeline_profile = config.get("pipeline_profile", "conda")
@@ -766,7 +761,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             genome_cache_dir,
             cores,
             gui_port,
-            clean_temp,
             pipeline_profile,
             pipeline_source_type,
             pipeline_branch,
@@ -1493,7 +1487,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("genome-cache-dir-input", "value"),
             Input("cores-input", "value"),
             Input("gui-port-input", "value"),
-            Input("clean-temp-input", "value"),
             Input("qc-tool-input", "value"),
             Input("skip-nanoplot-input", "value"),
             Input("kraken2-incremental-input", "value"),
@@ -1530,7 +1523,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         check_interval, realtime_timeout_minutes,
         min_reads_per_level, memory_mapping, blast_validation, validation_method,
         e_value_cutoff, minimap2_preset, minimap2_min_mapq,
-        genome_cache_dir, cores, gui_port, clean_temp,
+        genome_cache_dir, cores, gui_port,
         qc_tool, skip_nanoplot, kraken2_incremental, enable_krona, enable_nanopore_stats,
         chopper_minlength, chopper_quality, filtlong_minlength,
         validation_identity, kraken2_confidence, kraken2_hitgroups,
@@ -1571,7 +1564,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "genome_cache_dir": genome_cache_dir,
             "pipeline_cores": cores,
             "gui_port": gui_port,
-            "remove_temp_files": clean_temp,
             "pipeline_profile": pipeline_profile,
             "pipeline_source": _pipeline_source_from_form(
                 pipeline_source_type, pipeline_branch, pipeline_local_path
