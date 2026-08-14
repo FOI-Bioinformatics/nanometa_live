@@ -643,7 +643,7 @@ def _discover_all_sample_reports(kraken_dir: str) -> List[str]:
     if not kreport_files:
         kreport_files = _scan_subdirs_for_pattern(kraken_dir, "*.cumulative.kraken2.report.txt")
     if kreport_files:
-        kreport_files = list(dict.fromkeys(os.path.realpath(f) for f in kreport_files))
+        kreport_files = sorted(dict.fromkeys(os.path.realpath(f) for f in kreport_files))
         logging.debug(f"Found {len(kreport_files)} cumulative Kraken2 reports")
         return kreport_files
 
@@ -661,7 +661,12 @@ def _discover_all_sample_reports(kraken_dir: str) -> List[str]:
         for f in glob.glob(os.path.join(kraken_dir, "*.kraken2.report.txt")):
             if _is_standard_report(os.path.basename(f)):
                 standard.append(f)
-    standard = list(dict.fromkeys(os.path.realpath(f) for f in standard))
+    # Sorted, not merely deduplicated: glob returns filesystem enumeration
+    # order, so without this the order in which reports are accumulated --
+    # and therefore the row order of the aggregated frame an operator sees --
+    # depended on the filesystem. It happened to be stable on APFS and was
+    # not on an ext4/overlay CI runner.
+    standard = sorted(dict.fromkeys(os.path.realpath(f) for f in standard))
     if standard:
         return standard
 
