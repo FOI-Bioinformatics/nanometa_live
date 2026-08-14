@@ -182,6 +182,7 @@ def create_classification_layout() -> html.Div:
                                         {'label': 'Species Focus (Family, Genus, Species)', 'value': 'species_focus'},
                                         {'label': 'Clinical (Family to Species)', 'value': 'clinical'},
                                         {'label': 'Full Taxonomy (all 8 levels)', 'value': 'full'},
+                                        {'label': 'Subspecies Focus (Genus to Subspecies)', 'value': 'subspecies_focus'},
                                         {'label': 'Custom (select levels below)', 'value': 'custom'},
                                     ],
                                     value='standard',
@@ -203,7 +204,17 @@ def create_classification_layout() -> html.Div:
                                         {'label': 'Order', 'value': 'O'},
                                         {'label': 'Family', 'value': 'F'},
                                         {'label': 'Genus (closely related)', 'value': 'G'},
-                                        {'label': 'Species (most specific)', 'value': 'S'}
+                                        {'label': 'Species (most specific)', 'value': 'S'},
+                                        # Subspecies / strain (Kraken2 S1). Not
+                                        # in the default presets: the species
+                                        # node's value already includes its
+                                        # children, so adding this level splits
+                                        # that flow rather than adding to it.
+                                        # Offered because a database that
+                                        # resolves F. tularensis Type A from
+                                        # Type B carries a distinction worth
+                                        # seeing.
+                                        {'label': 'Subspecies / strain', 'value': 'S1'}
                                     ],
                                     value=['P', 'C', 'O', 'F', 'G', 'S'],  # Match 'standard' preset
                                     multi=True,

@@ -122,6 +122,9 @@ def register_classification_callbacks(app: Dash):
             'species_focus': ['F', 'G', 'S'],
             'clinical': ['F', 'G', 'S'],
             'full': ['D', 'K', 'P', 'C', 'O', 'F', 'G', 'S'],
+            # Subspecies below species, for databases that resolve them
+            # (e.g. F. tularensis holarctica vs tularensis -- Type B vs A).
+            'subspecies_focus': ['G', 'S', 'S1'],
         }
         if preset == 'custom':
             return no_update

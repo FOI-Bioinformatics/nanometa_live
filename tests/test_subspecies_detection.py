@@ -122,3 +122,78 @@ class TestNoDoubleCounting:
 
         assert naive_total > true_total
         assert naive_total == 9602 + 6196
+
+
+class TestSubspeciesRenderInTheTaxonomyTab:
+    """Sankey and Sunburst already handled S1; only the UI hid it.
+
+    Both build their parent links by walking the taxid parent chain rather
+    than assuming rank order, so a subspecies node hangs off its species
+    without any change to the builders. What was missing was a way for the
+    operator to ask for the level.
+    """
+
+    @staticmethod
+    def _frame():
+        import pandas as pd
+        rows = [
+            {"rank": "D", "taxid": 2, "name": "Bacteria", "reads": 0,
+             "cumul_reads": 9800, "%": 49.0, "parent_taxid": 1},
+            {"rank": "G", "taxid": 4007157, "name": "Francisella", "reads": 111,
+             "cumul_reads": 9717, "%": 48.59, "parent_taxid": 2},
+            {"rank": "S", "taxid": 4007169, "name": "Francisella tularensis",
+             "reads": 3406, "cumul_reads": 9602, "%": 48.01, "parent_taxid": 4007157},
+            {"rank": "S1", "taxid": 4007187,
+             "name": "Francisella tularensis holarctica", "reads": 6184,
+             "cumul_reads": 6184, "%": 30.92, "parent_taxid": 4007169},
+            {"rank": "S1", "taxid": 4007186,
+             "name": "Francisella tularensis tularensis", "reads": 4,
+             "cumul_reads": 4, "%": 0.02, "parent_taxid": 4007169},
+        ]
+        return pd.DataFrame(rows)
+
+    def test_the_sankey_gains_subspecies_nodes(self):
+        from nanometa_live.app.tabs.classification_helpers import create_sankey_data
+
+        without = create_sankey_data(self._frame(), ["Bacteria"], ["G", "S"],
+                                     min_reads=1, max_taxa_per_level=10)
+        with_sub = create_sankey_data(self._frame(), ["Bacteria"], ["G", "S", "S1"],
+                                      min_reads=1, max_taxa_per_level=10)
+
+        n_without = len(without.data[0].node.label)
+        n_with = len(with_sub.data[0].node.label)
+        assert n_with > n_without, "asking for S1 added no nodes"
+        # Node labels are truncated for display ("...tularensis holarc..."),
+        # so match the stem rather than the full name.
+        assert any("holarc" in l for l in with_sub.data[0].node.label), (
+            f"no subspecies node: {list(with_sub.data[0].node.label)}"
+        )
+
+    def test_the_sunburst_parents_subspecies_to_their_species(self):
+        from nanometa_live.app.tabs.classification_helpers import create_sunburst_data
+
+        fig = create_sunburst_data(self._frame(), ["Bacteria"], ["G", "S", "S1"],
+                                   min_reads=1, config={}, max_taxa_per_level=10)
+        tr = fig.data[0]
+        pairs = dict(zip(tr.labels, tr.parents))
+
+        holarctica = next(l for l in tr.labels if "holarc" in l)
+        assert "Francisella tularensis" in pairs[holarctica], (
+            f"subspecies hung off {pairs[holarctica]!r} rather than its species"
+        )
+
+    def test_the_preset_offers_the_level(self):
+        """A level nothing can select is not available."""
+        import dash
+
+        from nanometa_live.app.tabs import classification_tab
+        from tests.dash_test_utils import get_callback_fn
+
+        app = dash.Dash(__name__, suppress_callback_exceptions=True)
+        classification_tab.register_classification_callbacks(app)
+        fn = get_callback_fn(app, "classification-levels-input",
+                             input_contains="classification-level-preset")
+
+        assert fn("subspecies_focus") == ["G", "S", "S1"]
+        # the existing presets are unchanged
+        assert fn("species_focus") == ["F", "G", "S"]

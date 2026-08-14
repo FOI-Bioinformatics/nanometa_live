@@ -280,6 +280,15 @@ safe. `report_generator._top_organisms` stays species-only on purpose — listin
 a species beside its own subspecies in a "most abundant" ranking reads as
 double counting even where the arithmetic is right.
 
+The Taxonomy tab offers `S1` as a selectable level plus a "Subspecies Focus"
+preset (`G, S, S1`); the Organisms tab's rank filter offers it too. Both are
+OFF by default, because the species node's value already contains its children
+— adding the level splits that flow rather than adding to it, which is right
+for a Sankey and misleading in a flat list. The Sankey and Sunburst needed no
+change: both resolve parents by walking the taxid parent chain rather than
+assuming rank order, so an `S1` node hangs off its species correctly. Only the
+UI was hiding the level.
+
 **Sunburst node cap (visualization invariant).** `create_sunburst_data`
 (`app/tabs/classification_helpers.py`) takes `max_taxa_per_level` and keeps the
 top-N taxa by recalculated cumulative reads at each rank, mirroring
