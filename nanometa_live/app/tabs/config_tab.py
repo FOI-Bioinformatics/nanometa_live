@@ -9,6 +9,7 @@ import logging
 import os
 import json
 import threading
+from typing import List
 from datetime import datetime
 
 import dash
@@ -61,6 +62,32 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         app: Dash application
         backend_manager: Backend manager instance
     """
+
+    @app.callback(
+        Output("negative-controls-input", "options"),
+        Input("available-samples", "data"),
+        Input("negative-controls-input", "value"),
+        prevent_initial_call=False,
+    )
+    def populate_negative_control_options(available_samples, selected):
+        """Offer the detected samples, plus whatever is already selected.
+
+        Selected values are unioned in on purpose. A control is usually known
+        before the run produces anything, so an operator declaring one at
+        setup time has no sample list to pick from yet; and a name saved from
+        an earlier run must not silently vanish from the control just because
+        this run has not produced that barcode. A dcc.Dropdown drops any value
+        with no matching option, so omitting them would erase the declaration
+        without saying so.
+        """
+        names: List[str] = []
+        for source in (available_samples or [], selected or []):
+            if isinstance(source, str):
+                source = [source]
+            for name in source:
+                if name and name != "All Samples" and name not in names:
+                    names.append(str(name))
+        return [{"label": n, "value": n} for n in sorted(names)]
 
     # Dismiss any lingering dbc tooltip/popover portals when the operator
     # switches tabs. dbc renders these into a detached portal node; when the
@@ -607,6 +634,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("processing-mode-input", "value"),
             Output("sample-handling-input", "value"),
             Output("sample-name-input", "value"),
+            Output("negative-controls-input", "value"),
             Output("qc-tool-input", "value"),
             Output("skip-nanoplot-input", "value"),
             Output("kraken2-incremental-input", "value"),
@@ -718,6 +746,9 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         processing_mode = config.get("processing_mode", "batch")
         sample_handling = config.get("sample_handling", "by_barcode")
         sample_name = config.get("sample_name", "sample")
+        negative_controls = config.get("negative_control_samples") or []
+        if isinstance(negative_controls, str):
+            negative_controls = [negative_controls]
 
         # Pipeline options
         qc_tool = config.get("qc_tool", "chopper")
@@ -768,6 +799,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             processing_mode,
             sample_handling,
             sample_name,
+            negative_controls,
             qc_tool,
             skip_nanoplot,
             kraken2_incremental,
@@ -1508,6 +1540,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("processing-mode-input", "value"),
             Input("sample-handling-input", "value"),
             Input("sample-name-input", "value"),
+            Input("negative-controls-input", "value"),
             Input("max-file-age-input", "value"),
             Input("min-reads-for-validation-input", "value"),
         ],
@@ -1528,7 +1561,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         chopper_minlength, chopper_quality, filtlong_minlength,
         validation_identity, kraken2_confidence, kraken2_hitgroups,
         pipeline_profile, pipeline_source_type, pipeline_branch, pipeline_local_path,
-        processing_mode, sample_handling, sample_name,
+        processing_mode, sample_handling, sample_name, negative_controls,
         max_file_age_minutes, min_reads_for_validation,
         saved_snapshot, currently_modified, form_initialized
     ):
@@ -1571,6 +1604,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "processing_mode": processing_mode,
             "sample_handling": sample_handling,
             "sample_name": sample_name if (sample_name or "").strip() else "sample",
+            "negative_control_samples": list(negative_controls or []),
             "qc_tool": qc_tool,
             "skip_nanoplot": skip_nanoplot,
             "kraken2_enable_incremental": kraken2_incremental,

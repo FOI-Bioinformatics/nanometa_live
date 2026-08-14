@@ -198,6 +198,42 @@ def _essential_settings_card():
                 ], md=4, id="sample-name-col")
             ], className="mb-4"),
 
+            # Negative controls. A multi-select rather than free text because
+            # is_negative_control matches the sample name exactly: a typo or a
+            # stray space looks declared and silently does nothing. Options are
+            # the detected samples plus whatever is already saved, so a control
+            # can be declared before any data exists and a name that is not
+            # currently present is never dropped.
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label([
+                        "Negative Controls ",
+                        html.I(className="bi bi-info-circle text-muted ms-1",
+                               id="negative-controls-info")
+                    ], html_for="negative-controls-input"),
+                    dcc.Dropdown(
+                        id="negative-controls-input",
+                        options=[],
+                        value=[],
+                        multi=True,
+                        placeholder="Select the barcodes that are negative controls",
+                    ),
+                    dbc.Tooltip(
+                        "Samples that are negative controls. A watched organism "
+                        "found in one is reported alongside the detection, with "
+                        "its read count and share of the positive samples, so "
+                        "carryover and barcode crosstalk are visible. Controls "
+                        "are never listed as triggering samples and never "
+                        "suppress a detection.",
+                        target="negative-controls-info"
+                    ),
+                    dbc.FormText(
+                        "Under by_barcode input the name is the barcode "
+                        "directory (barcode16), not the FASTQ file name."
+                    ),
+                ], md=12)
+            ], className="mb-4"),
+
             # Kraken2 Database
             dbc.Row([
                 dbc.Col([

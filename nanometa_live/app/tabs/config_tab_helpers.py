@@ -203,6 +203,7 @@ def build_config_from_form(
     processing_mode,
     sample_handling,
     sample_name,
+    negative_controls,
     qc_tool,
     skip_nanoplot,
     kraken2_incremental,
@@ -378,6 +379,16 @@ def build_config_from_form(
 
     if sample_name is not None:
         config["sample_name"] = sample_name if sample_name.strip() else "sample"
+    # Normalised to a list of trimmed names. The dropdown yields a list, but a
+    # config edited by hand may hold a string, and is_negative_control matches
+    # exactly -- so untrimmed or scalar values would look declared and do
+    # nothing.
+    if negative_controls is not None:
+        if isinstance(negative_controls, str):
+            negative_controls = [negative_controls]
+        config["negative_control_samples"] = [
+            str(s).strip() for s in negative_controls if str(s).strip()
+        ]
 
     # Pipeline options
     if qc_tool is not None:

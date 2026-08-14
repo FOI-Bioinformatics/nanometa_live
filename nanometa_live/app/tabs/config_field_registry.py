@@ -49,6 +49,7 @@ CONFIG_FORM_FIELDS = (
     ("processing-mode-input", "processing_mode"),
     ("sample-handling-input", "sample_handling"),
     ("sample-name-input", "sample_name"),
+    ("negative-controls-input", "negative_controls"),
     ("qc-tool-input", "qc_tool"),
     ("skip-nanoplot-input", "skip_nanoplot"),
     ("kraken2-incremental-input", "kraken2_incremental"),
