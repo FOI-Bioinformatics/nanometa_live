@@ -12,6 +12,8 @@ main_tab.py re-exports these names for backward compatibility.
 import logging
 
 import pandas as pd
+
+from nanometa_live.core.taxonomy.ranks import is_species_rank
 from dash import html
 import dash_bootstrap_components as dbc
 
@@ -169,10 +171,10 @@ def filter_detected_species(kraken_df, watchlist: list) -> list:
     kraken_df['name_lower'] = kraken_df['name'].fillna('').str.lower().str.strip()
     kraken_df['rank_clean'] = kraken_df['rank'].fillna('').str.strip()
 
-    # Filter to species-level only (S = species, S1/S2 = subspecies)
-    # Exclude higher ranks like C (class), O (order), F (family), G (genus)
-    species_ranks = {'S', 'S1', 'S2'}
-    species_mask = kraken_df['rank_clean'].isin(species_ranks)
+    # Species and the subspecies ranks below it, from the shared definition --
+    # this list was {'S','S1','S2'} while every other consumer used == "S",
+    # so a subspecies was watchable here and invisible to the verdict banner.
+    species_mask = kraken_df['rank_clean'].map(is_species_rank)
     species_df = kraken_df[species_mask]
 
     if species_df.empty:

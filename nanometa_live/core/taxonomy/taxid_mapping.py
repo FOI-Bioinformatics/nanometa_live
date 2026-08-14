@@ -15,6 +15,8 @@ The mapping system:
 import hashlib
 import json
 import logging
+
+from nanometa_live.core.taxonomy.ranks import is_species_rank
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -339,7 +341,13 @@ class DatabaseTaxonomyIndex:
     def get_species(self) -> List[DatabaseTaxonomyNode]:
         """Get all species-level nodes (cached for performance)."""
         if self._species_cache is None:
-            self._species_cache = [node for node in self.by_taxid.values() if node.rank == "S"]
+            # Subspecies included: a watchlist entry naming
+            # "Francisella tularensis tularensis" must be able to resolve to
+            # the S1 node, or Type A cannot be watched separately from Type B.
+            self._species_cache = [
+                node for node in self.by_taxid.values()
+                if is_species_rank(node.rank)
+            ]
         return self._species_cache
 
     #: Bumped when the cached index gains a field that cannot be synthesised

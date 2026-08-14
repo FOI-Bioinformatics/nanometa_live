@@ -54,6 +54,7 @@ from nanometa_live.app.components.pathogen_alert import (
     HighRiskPathogenAlert,
     WatchedSpeciesAlert,
 )
+from nanometa_live.core.taxonomy.ranks import species_rank_mask
 from nanometa_live.app.tabs.dashboard_helpers import (
     _species_df_to_organisms,
     _load_per_sample_organisms,
@@ -255,7 +256,7 @@ def register_dashboard_callbacks(app: Dash):
                 kraken_df = load_kraken_data(main_dir, "All Samples")
                 if not kraken_df.empty:
                     species_df = kraken_df[
-                        (kraken_df["rank"] == "S") & (kraken_df["reads"] >= 5)
+                        species_rank_mask(kraken_df) & (kraken_df["reads"] >= 5)
                     ]
                     detected_organisms = _species_df_to_organisms(species_df)
                     watched_species = _get_active_watchlist_entries(config)
@@ -672,7 +673,7 @@ def register_dashboard_callbacks(app: Dash):
 
             # Extract species-level detections (vectorized)
             species_df = kraken_df[
-                (kraken_df["rank"] == "S") &
+                species_rank_mask(kraken_df) &
                 (kraken_df["reads"] >= 5)
             ]
             detected_organisms = _species_df_to_organisms(species_df)

@@ -26,6 +26,7 @@ from nanometa_live.core.utils.qc_loaders import (
     load_seqkit_stats,
 )
 from nanometa_live.core.utils.alert_engine import get_alert_engine
+from nanometa_live.core.taxonomy.ranks import species_rank_mask
 from nanometa_live.core.utils.attribution import (  # noqa: F401  (re-exported)
     PER_SAMPLE_DISCOVERY_FLOOR,
     PathogenAttribution,
@@ -1524,7 +1525,7 @@ def _generate_alerts(
         if not kraken_df.empty:
             # Filter to species level with meaningful read counts (vectorized)
             species_df = kraken_df[
-                (kraken_df["rank"] == "S") &
+                species_rank_mask(kraken_df) &
                 (kraken_df["reads"] >= 5)
             ]
             detected_organisms = _species_df_to_organisms(species_df)
@@ -1864,7 +1865,7 @@ def _load_per_sample_organisms(
                 "cumul_reads" if "cumul_reads" in kraken_df.columns else "reads"
             )
             species_df = kraken_df[
-                (kraken_df["rank"] == "S")
+                species_rank_mask(kraken_df)
                 & (kraken_df[floor_col] >= PER_SAMPLE_DISCOVERY_FLOOR)
             ]
             if species_df.empty:

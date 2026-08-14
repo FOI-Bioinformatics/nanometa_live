@@ -258,6 +258,28 @@ per-poll loader work from ~2 s to <0.1 s; keep these contracts:
 All five were behaviour-preserving (loader output is byte-identical, verified
 by sha256 over the full frame incl. `parent_taxid`).
 
+**Species includes subspecies.** `core/taxonomy/ranks.py` owns `SPECIES_RANKS`
+(`S`, `S1`, `S2`, `S3`) and is the single definition; before it there were
+three disagreeing rules — `== "S"` in the verdict and attribution paths,
+`{"S","S1","S2"}` in the Organisms tab's watchlist matching, and a
+`normalize_ranks` table that mapped `S1/S2/S3 -> S` and **was never called**.
+The consequence was that a subspecies watchlist entry was watchable on the
+Organisms tab and could never reach the verdict banner.
+
+The distinction is clinical: a Bioshield report resolves *F. tularensis* into
+holarctica (Type B, the LVS lineage), tularensis (Type A, markedly more
+virulent), novicida and mediasiatica, all at `S1`.
+
+**Reads are not double counted by including them, but summing across ranks
+would be.** Kraken2's `reads` is what was assigned directly at a node and
+`cumul_reads` is that node plus descendants: on that report the species row is
+3,406 direct / 9,602 cumulative and its four children sum to 6,196, which the
+cumulative figure already contains. Per-taxon consumers (watchlist matching,
+attribution, organism cards) treat each row as an independent taxid and are
+safe. `report_generator._top_organisms` stays species-only on purpose — listing
+a species beside its own subspecies in a "most abundant" ranking reads as
+double counting even where the arithmetic is right.
+
 **Sunburst node cap (visualization invariant).** `create_sunburst_data`
 (`app/tabs/classification_helpers.py`) takes `max_taxa_per_level` and keeps the
 top-N taxa by recalculated cumulative reads at each rank, mirroring

@@ -27,6 +27,7 @@ from nanometa_live.core.taxonomy.taxid_mapping import (
     DatabaseTaxonomyIndex,
     DatabaseTaxonomyNode,
 )
+from nanometa_live.core.taxonomy.ranks import is_species_rank
 from nanometa_live.core.watchlist.validation.name_normalizer import (
     GENUS_RECLASSIFICATIONS,
     KNOWN_RECLASSIFICATIONS,
@@ -160,7 +161,7 @@ class ExactNameStrategy(MatchStrategy):
         # Prefer species-rank matches
         for taxid in taxids:
             node = index.by_taxid.get(taxid)
-            if node and node.rank == "S":
+            if node and is_species_rank(node.rank):
                 return MatchResult(
                     match_type=MatchType.EXACT_NAME,
                     matched_node=node,
@@ -225,7 +226,7 @@ class VariantMatchStrategy(MatchStrategy):
             # Prefer species-rank matches
             for taxid in taxids:
                 node = index.by_taxid.get(taxid)
-                if node and node.rank == "S":
+                if node and is_species_rank(node.rank):
                     return MatchResult(
                         match_type=MatchType.VARIANT,
                         matched_node=node,
