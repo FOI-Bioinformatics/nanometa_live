@@ -33,28 +33,6 @@ RANK_NAMES = {
 # Canonical ordering of taxonomy levels from broadest to most specific
 CANONICAL_RANK_ORDER = ["D", "K", "P", "C", "O", "F", "G", "S"]
 
-# Standard ranks that require no normalization
-STANDARD_RANKS = {"D", "K", "P", "C", "O", "F", "G", "S", "R", "R1", "U"}
-
-# Extended rank normalization for Kraken2 PlusPFP (NCBI extended taxonomy).
-# PlusPFP uses sub-ranks (R2, R3, K, K1-K3, P1-P9, C1-C6, O1-O4, F1-F7, G1-G2, S1-S3)
-# that are mapped to the standard 8-level hierarchy (D, K, P, C, O, F, G, S).
-# Kingdom (K) is preserved as a distinct level between Domain and Phylum.
-RANK_NORMALIZATION = {
-    "R2": "D",   # Root level 2 (Domain in PlusPFP)
-    "R3": "K",   # Root level 3 (e.g. Opisthokonta) -> Kingdom level
-    "K": "K",    # Kingdom stays as Kingdom (separate from Domain)
-    "K1": "K", "K2": "K", "K3": "K",
-    "P1": "P", "P2": "P", "P3": "P", "P4": "P", "P5": "P",
-    "P6": "P", "P7": "P", "P8": "P", "P9": "P",
-    "C1": "C", "C2": "C", "C3": "C", "C4": "C", "C5": "C", "C6": "C",
-    "O1": "O", "O2": "O", "O3": "O", "O4": "O",
-    "F1": "F", "F2": "F", "F3": "F", "F4": "F", "F5": "F", "F6": "F", "F7": "F",
-    "G1": "G", "G2": "G",
-    "S1": "S", "S2": "S", "S3": "S",
-}
-
-
 # ============================================================================
 # Color Scheme Definitions
 # ============================================================================
@@ -145,31 +123,6 @@ TAXONOMY_COLORS = COLORS_TABLEAU
 # ============================================================================
 # Rank Normalization
 # ============================================================================
-
-def normalize_ranks(df):
-    """
-    Normalize extended Kraken2 PlusPFP ranks to standard taxonomy levels.
-
-    Maps sub-ranks (K1-K3, P1-P9, C1-C6, O1-O4, F1-F7, G1-G2, S1-S3) to their
-    parent standard rank (K, P, C, O, F, G, S). K (Kingdom) is kept as a distinct level
-    between D (Domain) and P (Phylum). Rows with unmappable ranks (R, R1, U)
-    are left unchanged. Works on a copy of the dataframe.
-
-    Args:
-        df: DataFrame with a 'rank' column containing Kraken2 rank codes
-
-    Returns:
-        DataFrame with normalized rank column; original rank preserved in
-        'original_rank' column for display purposes
-    """
-    if df.empty or "rank" not in df.columns:
-        return df
-
-    result = df.copy()
-    result["original_rank"] = result["rank"]
-    result["rank"] = result["rank"].map(lambda r: RANK_NORMALIZATION.get(r, r))
-    return result
-
 
 # ============================================================================
 # Authoritative Taxonomy from Kraken2 Database

@@ -18,7 +18,6 @@ from nanometa_live.app.tabs.kraken2_helpers import (
     filter_by_domains,
     get_level_color,
     load_kraken2_taxonomy,
-    normalize_ranks,
     recalculate_cumulative_reads,
 )
 
@@ -29,21 +28,6 @@ def _clear_taxonomy_cache():
     yield
     kh._TAXONOMY_CACHE.clear()
 
-
-class TestNormalizeRanks:
-    def test_subranks_collapse_to_standard(self):
-        df = pd.DataFrame({"rank": ["S1", "P3", "G1", "S", "R"]})
-        result = normalize_ranks(df)
-        assert result["rank"].tolist() == ["S", "P", "G", "S", "R"]
-
-    def test_original_rank_preserved(self):
-        df = pd.DataFrame({"rank": ["S1"]})
-        result = normalize_ranks(df)
-        assert result["original_rank"].tolist() == ["S1"]
-
-    def test_empty_frame_unchanged(self):
-        df = pd.DataFrame()
-        assert normalize_ranks(df).empty
 
 
 class TestLoadKraken2Taxonomy:

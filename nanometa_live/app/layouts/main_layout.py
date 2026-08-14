@@ -186,7 +186,15 @@ def _main_advanced_filters():
                     dbc.Checklist(
                         id="tax-rank-filter",
                         options=[
+                            # Subspecies is offered separately, not folded into
+                            # Species: a database that resolves them carries a
+                            # distinction worth seeing (F. tularensis Type A vs
+                            # Type B). It is off by default because the species
+                            # row's cumul_reads already includes its children,
+                            # so showing both at once lists the same reads twice
+                            # to a reader.
                             {"label": "Species", "value": "S"},
+                            {"label": "Subspecies", "value": "S1"},
                             {"label": "Genus", "value": "G"},
                             {"label": "Family", "value": "F"}
                         ],
