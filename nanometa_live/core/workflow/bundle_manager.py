@@ -1648,6 +1648,32 @@ class BundleManager:
                             "in config.yaml) before starting analysis, or the run will "
                             "fail."
                         )
+                    elif kraken_db_path:
+                        # A path that was supplied but is wrong fails the run
+                        # exactly like one that was never supplied, so it
+                        # deserves the same warning. This branch used to be
+                        # absent entirely: the guard above fires only on an
+                        # EMPTY path, so a typo, an unmounted drive or a moved
+                        # directory imported in silence.
+                        from nanometa_live.core.utils.kraken_utils import (
+                            check_kraken_db,
+                        )
+
+                        db_ok, db_missing = check_kraken_db(kraken_db_path)
+                        if not db_ok:
+                            result["kraken_db_invalid"] = True
+                            detail = (
+                                f"missing {', '.join(db_missing)}"
+                                if db_missing else "not a readable directory"
+                            )
+                            result["warnings"].append(
+                                f"Kraken2 database path '{kraken_db_path}' is not "
+                                f"a usable database ({detail}). The database is "
+                                "transferred separately from the bundle; correct "
+                                "the path on the Watchlist & Preparation tab (or "
+                                "kraken_db in config.yaml) before starting "
+                                "analysis, or the run will fail."
+                            )
                     if "conda_cache_path" in result:
                         cfg["nxf_conda_cachedir"] = result["conda_cache_path"]
                     if "singularity_cache_path" in result:
@@ -1692,7 +1718,22 @@ class BundleManager:
                     import_loader.save_config(cfg, "config.yaml")
                     logger.info("Set offline_mode=True in config")
                 except (ImportError, AttributeError, OSError, ValueError) as e:
-                    result["warnings"].append(f"Could not update config: {e}")
+                    # Fail the import. Without the rebased config the
+                    # installation still carries the export-time placeholders
+                    # ("${KRAKEN_DB}", "./pipeline_source"), so every path in
+                    # it points nowhere and offline_mode was never set -- an
+                    # unusable install, previously reported as a successful
+                    # import because this branch only appended a warning.
+                    # The missing-main.nf branch above already fails the
+                    # import for the same class of problem.
+                    result["success"] = False
+                    result["config_write_failed"] = True
+                    result["warnings"].append(
+                        f"Could not update config: {e}. The imported "
+                        "configuration still contains unresolved bundle "
+                        "placeholders, so this installation will not run. "
+                        "Re-run the import once the cause is fixed."
+                    )
 
         # Outside the config-rebase block on purpose: it must also run when the
         # bundle carried no plugins (so no key to rebase) and when the rebase

@@ -23,7 +23,8 @@ from nanometa_live.core.workflow.bundle_manager import (
 )
 
 
-def _make_minimal_bundle(tmp_path, tamper_file=None, db_hash=None):
+def _make_minimal_bundle(tmp_path, tamper_file=None, db_hash=None,
+                         extra_files=None):
     """Create a minimal valid bundle tar.gz for testing.
 
     Args:
@@ -31,6 +32,10 @@ def _make_minimal_bundle(tmp_path, tamper_file=None, db_hash=None):
         tamper_file: If set, corrupt this relative path after checksumming.
         db_hash: If set, record it as the bundle's Kraken2 DB hash so import
             can exercise the DB-hash compatibility check.
+        extra_files: ``{relative_path: text}`` written into the bundle before
+            checksums are computed. The default bundle carries no config.yaml,
+            and import skips its entire config-rebase block when that file is
+            absent -- so a test that needs to reach that block must add one.
 
     Returns:
         Tuple of (bundle_path, manifest).
@@ -42,6 +47,11 @@ def _make_minimal_bundle(tmp_path, tamper_file=None, db_hash=None):
     genomes.mkdir()
     genome_file = genomes / "12345.fasta"
     genome_file.write_text(">seq1\nATCG\n")
+
+    for rel, text in (extra_files or {}).items():
+        target = staging / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text)
 
     checksums = {}
     for f in staging.rglob("*"):
