@@ -204,6 +204,14 @@ every poll, so per-element pandas access is the dominant cost on a large
 report. The 2026-06-05 perf pass (cProfile, 6 samples × ~3100 taxa) took the
 per-poll loader work from ~2 s to <0.1 s; keep these contracts:
 
+- **Report discovery is sorted.** `_find_kraken_reports` sorts at its existing
+  realpath-dedup step. `glob.glob` returns filesystem enumeration order, and
+  the accumulation order sets the row order of the aggregated frame — so what
+  an operator saw in "All Samples" depended on the filesystem rather than the
+  data. It was stable on APFS and not on the CI runner:
+  `test_aggregation_preserves_first_occurrence` passed on the Python 3.11 job
+  and failed on 3.12 in the same run, same code, two containers. One sort over
+  a short file list; no extra filesystem work.
 - **No per-row `df.iloc[idx][col]` in a parse loop.** `_parse_kraken2_report`
   builds `parent_taxid` by iterating `df["name"].tolist()` / `df["taxid"].tolist()`,
   not `df.iloc`. Each `df.iloc[idx]` materialises a cross-section Series
@@ -313,8 +321,14 @@ pipeline_source: "remote:dev"   # or "/Users/.../nanometanf"
 # Validation
 blast_validation: true
 min_reads_for_validation: 50
-min_perc_identity: 90
+validation_identity_threshold: 90   # the only identity key; see below
 e_val_cutoff: 0.01
+
+# Samples that are negative controls. A watched organism found in one is
+# reported alongside the detection with its read count and share of the
+# positives; it is never listed as a triggering sample and never suppresses
+# a detection. Under by_barcode input the name is the barcode directory.
+negative_control_samples: []
 
 update_interval_seconds: 30
 ```
@@ -326,6 +340,15 @@ update_interval_seconds: 30
 - `nanopore_output_directory` -> `--input` (samplesheet) or `--nanopore_output_dir`
 - `kraken_db` -> `--kraken2_db`
 - `processing_mode: realtime` -> `--realtime_mode`
+- `validation_identity_threshold` -> `--blast_perc_identity` AND
+  `--validation_identity_threshold`. **One key, both params.** The legacy
+  `min_perc_identity` was read first as a back-compat shim whose comment
+  claimed "New configs only carry the latter" — but `create_default_config`
+  wrote it into every config and no widget could change it, so the shim was
+  the only path and the GUI slider was decorative. Retired 2026-08-08 from the
+  defaults, the shipped config.yaml, the validator and the mapping. The
+  dangerous direction was downward: lowering the slider to catch a divergent
+  strain left BLAST filtering at 90 and said nothing.
 
 ### Path lifecycle
 
@@ -371,6 +394,30 @@ forget to Apply and launch with stale config. Form-loader `.get(key, default)`
 fallbacks must match `create_default_config` — a divergent default (e.g.
 `validation_method`, `sample_handling`) only surfaces when a key is absent, a
 latent trap since `load_config` merges defaults on read.
+
+**A control must do something.** The 2026-08 pass found three that did not,
+and treated them on their merits rather than uniformly:
+
+- **Removed** `danger_lower_limit` ("Alert Threshold (reads)"). No consumer
+  anywhere, while its tooltip promised "Lower values are more sensitive" —
+  an explicit false claim about detection sensitivity. Alerting is driven by
+  each watchlist entry's own `alert_threshold`, which superseded this global.
+- **Removed** `remove_temp_files` ("Clean temp files"). No consumer; it was
+  only boolean-coerced in two places. Wiring it to Nextflow's `cleanup` would
+  have started deleting work directories for every existing install and broken
+  `-resume`, so promising less was the honest fix. The defensive coercion of
+  an inherited key stays, since old configs still carry it.
+- **Wired** `default_reads_per_level` and `gui_port`, which had obvious
+  consumers. The first now seeds the Taxonomy tab's min-reads control (the
+  12+-barcode aggregate heuristic takes `max(configured, 5N)`, so a configured
+  floor is a floor). The second: `--port` now defaults to `None` so main can
+  resolve flag > `gui_port` > 8050 — it used to assign argparse's 8050 over
+  the config unconditionally, so the port field was saved, reloaded and
+  ignored on every launch.
+
+Before adding a form field, decide what reads it. Before removing one, check
+whether the functionality exists elsewhere (as with the per-entry
+`alert_threshold`) or whether wiring it would be destructive.
 
 **Form-draft autosave.** Switching tabs re-fires `refresh-form-trigger`
 (`trigger_initial_form_load` on `tabs.active_tab` change), so
@@ -669,6 +716,31 @@ Three concerns:
    machine has no working Docker" (field machine) — the two need opposite
    remedies and the old single message named the wrong one.
 
+   **An import must not report success over a problem it found.** Three rules,
+   all added 2026-08-14 after an air-gapped rig run:
+   - A supplied `--db` that is not a usable database sets `kraken_db_invalid`
+     and warns, naming the missing files. The pre-existing `kraken_db_unset`
+     fires only on an EMPTY path, so a typo, an unmounted drive or a moved
+     directory imported in silence though it fails the run identically. The
+     two keep separate flags: importing first and pointing the database later
+     is a supported flow and must not start reporting an invalid path. Export
+     checks the same thing through the same `check_kraken_db`, because the
+     `db_hash` it records is derived from that path and a hash over nothing
+     makes the import's compatibility check meaningless.
+   - A failure writing the rebased config sets `success = False` and
+     `config_write_failed`. It used to append a warning and leave `success`
+     True, shipping an installation whose config still held `${KRAKEN_DB}` and
+     `./pipeline_source`.
+   - Blocker messages state the condition, not the consequence. They opened
+     with "Import aborted:", which is false in `verify_bundle` (a dry run) and
+     in a forced import that completes — both observed in the rig.
+
+   **Note the config-rebase block is skipped entirely when the bundle carries
+   no `config.yaml`**, including the `offline_mode` assignment, without
+   comment. `_make_minimal_bundle` in the tests takes `extra_files` so a test
+   can build a bundle that reaches it; the default minimal bundle does not,
+   which is why the first version of those tests passed against unfixed code.
+
 2. **Subprocess env injection** (`NextflowManager._build_nextflow_env`). When
    `config['offline_mode']` is true:
    ```
@@ -750,6 +822,38 @@ Conda envs built by Nextflow embed absolute build-machine paths and per-arch bin
 requires either shipping without pre-warmed envs or a separate `conda-pack` workflow
 (not currently automated).
 
+### What the air-gapped rig proved (2026-08-14)
+
+An Ubuntu 24.04 + apptainer 1.5.3 container, `--privileged`, on a Docker named
+volume, verified air-gapped (loopback only, no DNS, no outbound TCP) before any
+result was trusted. Rebuild recipe in the `offline-audit-rig` memory. Verified
+end to end, not by unit test:
+
+- **Container reuse, the assertion that matters.** With `NXF_OFFLINE=true` and
+  `NXF_SINGULARITY_CACHEDIR` pointing at the imported `pipeline_containers/`,
+  Nextflow logged `SingularityCache - Singularity found local library for
+  image=…; path=…` and made **zero pull attempts** with zero network errors.
+  The `_singularity_cache_name` convention holds against Nextflow 26.04.6.
+- The bundle built on an **arm64** host pulled **amd64** images
+  (`target_platform: linux/amd64` honoured), recorded
+  `observed_architectures: ['amd64']` from real SIF headers, and
+  `verify_bundle` on the arm64 rig correctly **refused** the import.
+- Import restored 25 images, rebased `pipeline_source` absolute with `main.nf`
+  present, set `offline_mode: True`, and wired the singularity cachedir.
+- The GUI served air-gapped: HTTP 200, **no external URLs**, and both icon
+  fonts resolved (130,396 / 176,032 bytes).
+
+**Not proven, and not to be reported as such:** amd64 execution (the rig is
+arm64 — the run failed exactly there with "the image's architecture (amd64)
+could not run on the host's (arm64)", which is this restriction confirmed
+rather than worked around), setuid apptainer, a real field kernel/distro, a
+pipeline run to completion, and conda-profile bundles with pre-warmed envs.
+
+The export unions singularity URLs with docker fallbacks (~30% of nf-core
+modules ship only a `community.wave.seqera.io` tag), so a singularity bundle
+holds ~25 images, not the 14 that `unique_container_refs(entries,
+"singularity")` alone reports. Sizing a bundle from that call under-counts.
+
 ### Backend hardening
 
 Three guards run on every pipeline launch and shape what an operator sees when
@@ -807,7 +911,28 @@ Three guards now enforce the distinction; keep them:
   zero — that turns every caller that cannot compute it into a false
   INSUFFICIENT READS. A detection always wins over shallow depth.
 - The report template (`core/export/templates/report.html`) has the matching
-  `{% elif not data.watched_results %}` branch.
+  `{% elif not data.watched_results %}` branch, and since 2026-08-08 the
+  sibling depth branch as well. Only NOT_SCREENED had been ported; a one-read
+  run with 35 organisms loaded still rendered the green "NO WATCHED ORGANISMS
+  DETECTED", in the artifact that leaves the building. `_collect_data` supplies
+  `total_reads` and `low_read_floor` for it.
+
+The same distinction has since been carried to two more surfaces, because a
+guard on one screen is not a guard on the tool:
+
+- **The Organisms panel** qualifies its "Not Detected (N)" list below the
+  floor (`not_detected_caveat` in `main_tab_helpers.py`). The caveat renders
+  ABOVE the collapsed list — inside it, it would be invisible in the default
+  view being misread. Nothing is hidden; the list still renders in full.
+- **An alarm states its own depth** (`_shallow_depth_clause`). A detection
+  always outranks depth and every depth from one read up still returns
+  ACTION_REQUIRED — but a real negative control carrying 6 reads out of 11
+  read identically to the same run's 34,096-read detection until the banner
+  started saying "on only 11 reads total".
+
+All three anchor `low_read_floor` to `min_reads_for_validation`, so the
+dashboard, the Organisms panel and the exported report cannot drift apart on
+what counts as too shallow.
 
 The banner is **aggregate-scoped on purpose** — it loads `"All Samples"` and
 takes no `selected-sample` input. Do not make it follow the selection: that
@@ -860,10 +985,42 @@ barcodes at 50 reads each are all named for a pathogen with a threshold of 100.
 Samples that clear only the discovery floor render as "aggregate across N
 samples". When attribution is attempted and resolves nothing, the verdict
 banner says so explicitly (`attribution_failed`) rather than omitting the line.
-Negative controls come from `is_negative_control` — the config's
-`negative_control_samples` list when declared, otherwise token patterns that
-catch `NTC` / `neg_ctrl` / `blank` without flagging `negative_strand_test`.
-Regression-covered in `tests/test_attribution.py` and
+**Attribution counts `cumul_reads`, not the per-rank `reads` column.** Both
+`_species_df_to_organisms` and the `PER_SAMPLE_DISCOVERY_FLOOR` filter above it
+use it, and they must use the SAME column — gating on one and displaying the
+other let a sample sit on both sides of the threshold. Measured on a real
+Bioshield run: `barcode11` reads=29,721 / cumul=34,096 (the difference sitting
+at *F. tularensis holarctica*), so the dashboard attributed 29,721 to a
+detection the Organisms tab reported as 34,096; and `barcode16` reads=4 /
+cumul=6, which put the run's negative control below a floor of 5 so its
+contamination appeared nowhere at all. Both sites fall back to `reads` when the
+column is absent. Regression-covered in `tests/test_attribution_read_column.py`.
+
+**Negative controls.** `is_negative_control` reads the config's
+`negative_control_samples` list first, then falls back to name patterns:
+`NTC` / `neg_ctrl` / `blank`, and "negative" beside a *sample identifier*
+(`negative_barcode16`, `neg_01`). The identifier rule is what distinguishes a
+control from `negative_strand_test`, where "negative" describes a molecule
+rather than naming a sample. Note the fallback cannot help under `by_barcode`
+input, where the sample is `barcode16` and the prefix never leaves the FASTQ
+filename — declaring it is the only route, which is why there is now a
+multi-select for it in the Configuration tab (Essential Settings). Its options
+are the detected samples UNIONED with the saved values: a `dcc.Dropdown` drops
+any value with no matching option, so without the union a control declared
+before the run produced data would be erased silently.
+
+A control that carries a detection is **reported, never acted on**.
+`build_pathogen_attribution` fills `negative_control_samples` /
+`_reads` / `_fraction`, and the banner appends "— also in negative control
+barcode16 (6 reads, 0.02% of positives)". Two limits, both test-pinned: it
+states the observation and never the cause (crosstalk, carryover and a
+genuinely contaminated control are indistinguishable from here), and it never
+weakens the detection — controls are excluded from the triggering-sample list
+but a detection carried only by a control still resolves, as "(negative
+control only)". Regression-covered in `tests/test_attribution.py`,
+`tests/test_negative_control_naming.py`,
+`tests/test_negative_control_reporting.py`,
+`tests/test_negative_controls_form_field.py` and
 `tests/test_verdict_banner_callback.py`.
 
 **Pathogen Report modal references are built dynamically.** The report's

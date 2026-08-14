@@ -63,10 +63,9 @@ nanopore_output_directory: "/path/to/input"
 | `blast_validation` | bool | false | Enable validation of detected organisms |
 | `validation_method` | string | "blast" | `blast`, `minimap2`, or `both` |
 | `blast_db` | path | null | BLAST database path |
-| `validation_identity_threshold` | float | 90 | Minimum percent identity for BLAST hits |
+| `validation_identity_threshold` | float | 90 | Minimum percent identity. Emitted as BOTH `--blast_perc_identity` and `--validation_identity_threshold`, so the filter and the reporting threshold cannot diverge. The legacy `min_perc_identity` key was retired in 2026-08; it shadowed this one in every config and made the control decorative. |
 | `e_val_cutoff` | float | 0.01 | E-value cutoff for BLAST |
 | `validation_hit_rate_threshold` | float | 0.5 | Minimum fraction of reads that must validate |
-| `validation_identity_threshold` | float | 90.0 | Minimum identity score for validation |
 | `minimap2_preset` | string | "map-ont" | Minimap2 alignment preset |
 | `minimap2_min_mapq` | int | 30 | Minimum mapping quality for minimap2 |
 
@@ -76,7 +75,7 @@ nanopore_output_directory: "/path/to/input"
 |-----------|------|---------|-------------|
 | `update_interval_seconds` | int | 10 | Dashboard refresh interval in seconds. Lowered from 30 in 2026-05; downstream callbacks are gated on a results fingerprint so unchanged ticks are near-zero cost. |
 | `check_intervals_seconds` | int | 15 | Backend file-check interval in seconds |
-| `gui_port` | int | 8050 | Web server port |
+| `gui_port` | int | 8050 | Web server port. Used when `--port` is not given; an explicit `--port` wins. Takes effect on the next launch. |
 
 ### Visualization
 
@@ -84,7 +83,7 @@ nanopore_output_directory: "/path/to/input"
 |-----------|------|---------|-------------|
 | `default_hierarchy_letters` | list | ["D","C","G","S"] | Default taxonomy levels shown |
 | `taxonomic_hierarchy_letters` | list | ["D","P","C","O","F","G","S"] | All available taxonomy levels |
-| `default_reads_per_level` | int | 10 | Minimum reads to display at each level |
+| `default_reads_per_level` | int | 10 | Seeds the Taxonomy tab's minimum-reads filter. On an All-Samples view of 12+ barcodes the floor rises to `max(this, 5 x N)`, since a 1-read per-sample hit becomes N reads in the aggregate. |
 | `enable_krona_plots` | bool | false | Generate Krona interactive HTML plots |
 | `enable_nanopore_stats_mqc` | bool | false | Include NanoPlot stats in MultiQC |
 
