@@ -1149,7 +1149,7 @@ class BundleManager:
                 "code": "checksum_mismatch",
                 "fatal": False,
                 "message": (
-                    f"{mismatch_msg}. Import aborted. "
+                    f"{mismatch_msg}. Blocking issue. "
                     "Use force=True to import despite mismatches."
                 ),
                 "force_message": (
@@ -1249,7 +1249,7 @@ class BundleManager:
                         "code": "platform_prewarm_conda",
                         "fatal": False,
                         "message": (
-                            "Import aborted: the bundle ships pre-warmed conda "
+                            "Blocking issue: the bundle ships pre-warmed conda "
                             "environments that cannot run on this OS/architecture. "
                             "Rebuild the bundle on a matching machine, use Docker "
                             "mode, or force the import and rebuild conda envs here."
@@ -1306,7 +1306,7 @@ class BundleManager:
                     "code": "container_platform_mismatch",
                     "fatal": False,
                     "message": (
-                        f"Import aborted: the bundle's container images have "
+                        f"Blocking issue: the bundle's container images have "
                         f"{spread}, but this machine is {local_arch}. Images "
                         "that do not match cannot execute here and an "
                         "air-gapped machine cannot re-pull them. Rebuild the "
@@ -1325,7 +1325,7 @@ class BundleManager:
                     "code": "container_platform_mismatch",
                     "fatal": False,
                     "message": (
-                        f"Import aborted: the bundle's {image_count} container "
+                        f"Blocking issue: the bundle's {image_count} container "
                         f"image(s) were built for {bundle_platform} but this "
                         f"machine is {local_platform}. They cannot execute here, "
                         "and an air-gapped machine cannot re-pull them. Rebuild "

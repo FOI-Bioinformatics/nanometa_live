@@ -212,3 +212,34 @@ class TestExportWarnsAboutItsOwnDatabase:
         assert not any(
             "not a usable" in w for w in self._export_warnings(out)
         )
+
+
+class TestBlockerWordingIsAccurate:
+    """A dry run aborts nothing, and a forced import completes.
+
+    The architecture and conda blockers opened with "Import aborted:". That
+    text reaches two callers where it is simply false: verify_bundle, which is
+    a read-only dry run, and a forced import, which carries on and succeeds.
+    Observed in the air-gapped rig -- verify_bundle refused an amd64 bundle on
+    an arm64 host with "Import aborted", and the forced import then reported
+    success while carrying the same sentence in its warnings.
+
+    Whether a blocker stops the import is the caller's decision (force), so
+    the message states the condition and leaves the consequence alone.
+    """
+
+    def test_no_blocker_claims_the_import_was_aborted(self):
+        import pathlib
+
+        source = pathlib.Path(
+            __import__(
+                "nanometa_live.core.workflow.bundle_manager",
+                fromlist=["bundle_manager"],
+            ).__file__
+        ).read_text()
+
+        assert "Import aborted" not in source, (
+            "a blocker message still says 'Import aborted'; it is emitted by "
+            "verify_bundle (a dry run) and by forced imports that complete, "
+            "so in both cases it describes something that did not happen"
+        )
