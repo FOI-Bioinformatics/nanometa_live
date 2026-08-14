@@ -30,7 +30,6 @@ CONFIG_FORM_FIELDS = (
     ("kraken-db-input", "kraken_db"),
     ("results-dir-input", "results_dir"),
     ("update-interval-input", "update_interval"),
-    ("danger-threshold-input", "danger_threshold"),
     ("check-interval-input", "check_interval"),
     ("realtime-timeout-minutes-input", "realtime_timeout_minutes"),
     ("min-reads-per-level-input", "min_reads_per_level"),

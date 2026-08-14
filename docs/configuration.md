@@ -76,7 +76,6 @@ nanopore_output_directory: "/path/to/input"
 | `update_interval_seconds` | int | 10 | Dashboard refresh interval in seconds. Lowered from 30 in 2026-05; downstream callbacks are gated on a results fingerprint so unchanged ticks are near-zero cost. |
 | `check_intervals_seconds` | int | 15 | Backend file-check interval in seconds |
 | `gui_port` | int | 8050 | Web server port |
-| `danger_lower_limit` | int | 100 | Read count threshold for species-of-interest alerts |
 
 ### Visualization
 
@@ -299,7 +298,6 @@ validation_method: "minimap2"
 minimap2_preset: "map-ont"
 minimap2_min_mapq: 30
 
-danger_lower_limit: 50
 ```
 
 ## Command Line Options

@@ -44,14 +44,6 @@ update_interval_seconds: 10
 # Default: "8050"
 gui_port: "8050"
 
-## DANGER CUTOFF ##
-# Description: Threshold for highlighting species based on their abundance.
-# Can be modified in the GUI as well.
-# Data type: Integer
-# Guidance: Set lower for sensitive analyses; higher for broader overview.
-# Default: 100
-danger_lower_limit: 100
-
 ########## Taxonomic Analysis Settings #######################################
 
 ## TAXONOMY LEVELS ##

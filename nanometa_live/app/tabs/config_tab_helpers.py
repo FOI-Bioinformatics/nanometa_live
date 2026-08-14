@@ -125,7 +125,6 @@ def _validate_numeric_ranges(
     chopper_minlength,
     chopper_quality,
     filtlong_minlength,
-    danger_threshold,
     max_file_age_minutes,
     min_reads_for_validation,
 ):
@@ -166,8 +165,6 @@ def _validate_numeric_ranges(
         errors.append("Chopper quality must be between 0-30")
     if filtlong_minlength is not None and filtlong_minlength < 0:
         errors.append("Filtlong minimum length must be 0 or greater")
-    if danger_threshold is not None and danger_threshold < 1:
-        errors.append("Alert Threshold must be at least 1")
     if max_file_age_minutes is not None and max_file_age_minutes != "":
         try:
             if int(max_file_age_minutes) < 0:
@@ -187,7 +184,6 @@ def build_config_from_form(
     kraken_db,
     results_dir,
     update_interval,
-    danger_threshold,
     check_interval,
     realtime_timeout_minutes,
     min_reads_per_level,
@@ -268,7 +264,6 @@ def build_config_from_form(
         chopper_minlength=chopper_minlength,
         chopper_quality=chopper_quality,
         filtlong_minlength=filtlong_minlength,
-        danger_threshold=danger_threshold,
         max_file_age_minutes=max_file_age_minutes,
         min_reads_for_validation=min_reads_for_validation,
     )
@@ -303,8 +298,6 @@ def build_config_from_form(
     if update_interval is not None:
         config["update_interval_seconds"] = update_interval
 
-    if danger_threshold is not None:
-        config["danger_lower_limit"] = danger_threshold
 
     if check_interval is not None:
         config["check_intervals_seconds"] = check_interval

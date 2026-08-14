@@ -1043,26 +1043,14 @@ def _display_settings_item():
                     target="update-interval-info"
                 )
             ], md=6),
-            dbc.Col([
-                dbc.Label([
-                    "Alert Threshold (reads) ",
-                    html.I(className="bi bi-info-circle text-muted ms-1", id="alert-threshold-info")
-                ], html_for="danger-threshold-input"),
-                dbc.Input(
-                    id="danger-threshold-input",
-                    type="number",
-                    min=1,
-                    step=10,
-                    value=100
-                ),
-                dbc.FormText("Minimum reads before an organism triggers a dashboard alert"),
-                dbc.Tooltip(
-                    "When an organism reaches this many classified reads, "
-                    "it will appear in the dashboard alerts panel. "
-                    "Lower values are more sensitive but may produce false alerts.",
-                    target="alert-threshold-info"
-                )
-            ], md=6)
+            # "Alert Threshold (reads)" (danger_lower_limit) was removed on
+            # 2026-08-14. It had no consumer anywhere in the codebase, while
+            # its tooltip promised "Lower values are more sensitive but may
+            # produce false alerts" -- an explicit, false claim about detection
+            # sensitivity on a biothreat tool. Alerting is driven by each
+            # watchlist entry's own alert_threshold, which superseded this
+            # global and left the control stranded. Edit the threshold on the
+            # entry, in the Watchlist & Preparation tab.
         ])
     ], title="Display Settings")
 

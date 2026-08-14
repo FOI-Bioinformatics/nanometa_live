@@ -588,7 +588,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("kraken-db-input", "value"),
             Output("results-dir-input", "value"),
             Output("update-interval-input", "value"),
-            Output("danger-threshold-input", "value"),
             Output("check-interval-input", "value"),
             Output("realtime-timeout-minutes-input", "value"),
             Output("min-reads-per-level-input", "value"),
@@ -653,7 +652,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         # folder, and a changed Run name re-derives on the next Apply.
         results_dir = config.get("results_dir_override", "")
         update_interval = config.get("update_interval_seconds", 10)
-        danger_threshold = config.get("danger_lower_limit", 100)
         check_interval = config.get("check_intervals_seconds", 15)
         # None in YAML means "run indefinitely"; show empty string to blank the numeric input
         realtime_timeout_raw = config.get("realtime_timeout_minutes", 60)
@@ -756,7 +754,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             kraken_db,
             results_dir,
             update_interval,
-            danger_threshold,
             check_interval,
             realtime_timeout_minutes,
             min_reads_per_level,
@@ -1484,7 +1481,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("kraken-db-input", "value"),
             Input("results-dir-input", "value"),
             Input("update-interval-input", "value"),
-            Input("danger-threshold-input", "value"),
             Input("check-interval-input", "value"),
             Input("realtime-timeout-minutes-input", "value"),
             Input("min-reads-per-level-input", "value"),
@@ -1531,7 +1527,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     )
     def detect_form_changes(
         analysis_name, nanopore_dir, kraken_db, results_dir, update_interval,
-        danger_threshold, check_interval, realtime_timeout_minutes,
+        check_interval, realtime_timeout_minutes,
         min_reads_per_level, memory_mapping, blast_validation, validation_method,
         e_value_cutoff, minimap2_preset, minimap2_min_mapq,
         genome_cache_dir, cores, gui_port, clean_temp,
@@ -1560,7 +1556,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "kraken_db": kraken_db or "",
             "results_dir_override": (results_dir or "").strip(),
             "update_interval_seconds": update_interval,
-            "danger_lower_limit": danger_threshold,
             "check_intervals_seconds": check_interval,
             "realtime_timeout_minutes": (
                 int(realtime_timeout_minutes)

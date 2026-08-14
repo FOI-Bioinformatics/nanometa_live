@@ -338,10 +338,3 @@ def _validate_gui_settings(config: Dict[str, Any]) -> None:
     if "gui_port" not in config:
         config["gui_port"] = 8050
 
-    # Danger threshold
-    if (
-        "danger_lower_limit" not in config
-        or not isinstance(config["danger_lower_limit"], int)
-        or config["danger_lower_limit"] < 1
-    ):
-        config["danger_lower_limit"] = 100

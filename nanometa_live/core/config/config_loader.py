@@ -77,7 +77,6 @@ class ConfigLoader:
             # update_interval_seconds applies while a run is running.
             "idle_update_interval_seconds": 60,
             "gui_port": 8050,
-            "danger_lower_limit": 100,
             "taxonomic_hierarchy_letters": ["D", "P", "C", "O", "F", "G", "S"],
             "default_hierarchy_letters": ["D", "C", "G", "S"],
             "default_reads_per_level": 10,
