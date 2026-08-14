@@ -25,6 +25,80 @@ from nanometa_live.app.utils.debounce import (
 from nanometa_live.app.app import background_callback_manager
 
 
+
+
+def _dataless_samples(available_samples, file_mapping, config) -> set:
+    """Samples offered in the selector that produced no output.
+
+    Two independent sources, deliberately unioned rather than one preferred:
+
+    - Inferred from ``sample-file-mapping``, which is built from files on
+      disk. Catches output that vanished after the run, which the manifest
+      cannot know about. Guarded on the mapping being populated, because
+      before the first scan it is empty and marking everything would be worse
+      than marking nothing -- which leaves a window the second source covers.
+    - Recorded by the pipeline in the manifest's ``failed_samples``. This is
+      authoritative about the run itself and needs no guard, so it closes that
+      window. ``null`` there means "could not determine" and yields nothing,
+      so an undetermined run marks no samples rather than asserting a clean one.
+
+    Marked, never hidden: dropping the sample would lose the fact that the
+    barcode was attempted at all.
+    """
+    # Samples the manifest lists but which produced no files.
+    #
+    # bin/write_manifest.py does not discover outputs, it PREDICTS them --
+    # <sample>.classification.json and <sample>.qc_stats.json for every
+    # sample and active tool -- and cannot verify them, because
+    # MANIFEST_WRITER runs in its own work directory. So a sample whose QC
+    # failed (CHOPPER exit 1 on an unreadable FASTQ, absorbed by
+    # conf/error_isolation.config) is listed exactly like a healthy one and
+    # offered here identically. Selecting it shows an empty view, which
+    # reads as "nothing detected" rather than "this was never processed".
+    #
+    # sample-file-mapping is built from files actually on disk, so a sample
+    # present in available-samples but absent from it produced nothing. The
+    # sample is still offered -- hiding it would lose the fact that the
+    # barcode was attempted -- but it is marked.
+    #
+    # Guarded on the mapping being populated: before the first scan it is
+    # empty, and marking every sample then would be worse than marking none.
+    dataless = set()
+    if isinstance(file_mapping, dict) and file_mapping:
+        dataless = {
+            s for s in available_samples
+            if s != "All Samples" and not file_mapping.get(s)
+        }
+
+    # The pipeline's own record, used ALONGSIDE the inference above rather
+    # than instead of it. The two cover different gaps: the manifest knows
+    # what failed during the run but not what disappeared afterwards, and
+    # the inference is the reverse. It is also unguarded, which matters --
+    # the inference is deliberately disabled until the first file scan
+    # populates the mapping, and in that window a failed barcode was
+    # offered exactly like a healthy one.
+    #
+    # get_failed_samples returns an empty set when the pipeline recorded
+    # null ("could not determine"), so an undetermined run marks nothing
+    # here rather than asserting a clean one.
+    from nanometa_live.core.utils.sample_detector import get_failed_samples
+
+    main_dir = ""
+    if isinstance(config, dict):
+        main_dir = (config.get("results_output_directory", "")
+                    or config.get("main_dir", ""))
+    try:
+        dataless |= {
+            s for s in get_failed_samples(main_dir)
+            if s in available_samples
+        } if main_dir else set()
+    except Exception:  # never let the selector fail over this
+        logging.debug("could not read failed_samples from manifest",
+                      exc_info=True)
+
+    return dataless
+
+
 def register_samples(app, backend_manager):
     @app.callback(
         [
@@ -94,9 +168,13 @@ def register_samples(app, backend_manager):
         Input("sample-freshness", "data"),
         State("sample-selector", "value"),
         State("sample-file-mapping", "data"),
+        # State, not Input: needed only to locate the results directory so the
+        # manifest's failed_samples can be read. It must not re-trigger the
+        # selector on every config write.
+        State("app-config", "data"),
     )
     def update_sample_selector_options(available_samples, freshness, current_value,
-                                       file_mapping):
+                                       file_mapping, config=None):
         """
         Update sample selector dropdown options.
 
@@ -113,30 +191,7 @@ def register_samples(app, backend_manager):
         freshness = freshness or {}
         now = time.time()
 
-        # Samples the manifest lists but which produced no files.
-        #
-        # bin/write_manifest.py does not discover outputs, it PREDICTS them --
-        # <sample>.classification.json and <sample>.qc_stats.json for every
-        # sample and active tool -- and cannot verify them, because
-        # MANIFEST_WRITER runs in its own work directory. So a sample whose QC
-        # failed (CHOPPER exit 1 on an unreadable FASTQ, absorbed by
-        # conf/error_isolation.config) is listed exactly like a healthy one and
-        # offered here identically. Selecting it shows an empty view, which
-        # reads as "nothing detected" rather than "this was never processed".
-        #
-        # sample-file-mapping is built from files actually on disk, so a sample
-        # present in available-samples but absent from it produced nothing. The
-        # sample is still offered -- hiding it would lose the fact that the
-        # barcode was attempted -- but it is marked.
-        #
-        # Guarded on the mapping being populated: before the first scan it is
-        # empty, and marking every sample then would be worse than marking none.
-        dataless = set()
-        if isinstance(file_mapping, dict) and file_mapping:
-            dataless = {
-                s for s in available_samples
-                if s != "All Samples" and not file_mapping.get(s)
-            }
+        dataless = _dataless_samples(available_samples, file_mapping, config)
 
         options = []
         for sample in available_samples:

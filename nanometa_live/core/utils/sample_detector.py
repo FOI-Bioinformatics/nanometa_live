@@ -32,6 +32,33 @@ _WATCHED_SUBDIRS = (
 )
 
 
+def get_failed_samples(main_dir: str) -> set:
+    """Samples the pipeline recorded as attempted but producing no output.
+
+    nanometanf writes ``failed_samples`` into canonical/_manifest.json: the
+    samples it ran that emitted no QC output, usually a tool failure absorbed
+    by conf/error_isolation.config. This is the authoritative record, as
+    against the GUI's own inference from files on disk.
+
+    ``null`` in the manifest means the pipeline could not determine the
+    answer, which is NOT "nothing failed" -- so it yields an empty set and
+    the caller marks nothing on that basis, rather than claiming a clean run.
+    An empty list is a determined "none failed" and yields the same empty
+    set; the two agree on what the caller should do, and only differ in what
+    they justify claiming, which is not this function's decision to make.
+    """
+    try:
+        manifest = load_manifest(main_dir)
+    except (OSError, ValueError):
+        return set()
+    if not isinstance(manifest, dict):
+        return set()
+    failed = manifest.get("failed_samples")
+    if not isinstance(failed, list):
+        return set()
+    return {str(s) for s in failed if s}
+
+
 def _samples_from_manifest(main_dir: str) -> Optional[List[str]]:
     """Sample list from the canonical manifest, or None when unusable.
 
