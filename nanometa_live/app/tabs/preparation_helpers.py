@@ -312,6 +312,16 @@ def _build_mapping_table(unrecognized):
         )
     return rows
 
+def _alert_text(component) -> str:
+    """Flatten an alert's visible text, for summarising a step's outcome."""
+    if isinstance(component, str):
+        return component
+    if isinstance(component, (list, tuple)):
+        return " ".join(_alert_text(c) for c in component).strip()
+    children = getattr(component, "children", None)
+    return _alert_text(children).strip() if children is not None else ""
+
+
 def _execute_wizard_step(step_idx, config, export_opts=None):
     """Execute a wizard step and return result component.
 

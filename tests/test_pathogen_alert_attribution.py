@@ -88,6 +88,27 @@ class TestAttributionPillExpandable:
         popover = _find_first(result, lambda n: isinstance(n, dbc.Popover))
         assert popover is None
 
+    def test_watched_tier_multi_sample_renders_a_count_pill(self):
+        """A moderate hit across several barcodes used to render no
+        attribution at all. It now collapses to a count pill whose popover
+        carries the full list."""
+        samples = self._build_samples(4)
+        result = _render_sample_attribution(samples, "watched")
+        assert result is not None, "watched multi-sample attribution suppressed"
+        rendered = _render_to_json(result)
+        assert "4 samples" in rendered
+        popover = _find_first(result, lambda n: isinstance(n, dbc.Popover))
+        assert popover is not None
+        assert len(popover.children[1].children) == 4
+        # No per-barcode chips inline -- the pill is the whole row.
+        assert "barcode01" not in rendered.split("Popover")[0]
+
+    def test_watched_tier_single_sample_still_names_it(self):
+        result = _render_sample_attribution(self._build_samples(1), "watched")
+        rendered = _render_to_json(result)
+        assert "barcode01" in rendered
+        assert _find_first(result, lambda n: isinstance(n, dbc.Popover)) is None
+
     def test_negative_control_visually_distinct_in_popover(self):
         """NC samples carry an "(NC)" suffix in the popover body too."""
         samples = self._build_samples(5)

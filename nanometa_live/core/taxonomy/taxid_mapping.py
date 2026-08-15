@@ -15,11 +15,15 @@ The mapping system:
 import hashlib
 import json
 import logging
+
+from nanometa_live.core.taxonomy.ranks import is_species_rank
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+
+from nanometa_live.core.taxonomy.database_profile import DatabaseProfile
 
 logger = logging.getLogger(__name__)
 
@@ -229,7 +233,7 @@ class DatabaseTaxonomyIndex:
     Includes optimized caching for frequently-accessed data.
     """
     database_path: str
-    database_type: DatabaseTaxonomyType = DatabaseTaxonomyType.UNKNOWN
+    profile: DatabaseProfile = field(default_factory=DatabaseProfile)
 
     # Primary indices
     by_taxid: Dict[int, DatabaseTaxonomyNode] = field(default_factory=dict)
@@ -247,6 +251,24 @@ class DatabaseTaxonomyIndex:
 
     # Internal caches (not serialized - rebuilt on demand)
     _species_cache: Optional[List[DatabaseTaxonomyNode]] = field(default=None, repr=False)
+
+    @property
+    def database_type(self) -> DatabaseTaxonomyType:
+        """The old single-axis view, derived from the profile.
+
+        Retained so consumers can be migrated one at a time; removed once
+        they all read ``profile`` directly. Note that a database whose taxids
+        could not be verified now reports CUSTOM where the old detector could
+        return MIXED or UNKNOWN. That is a deliberate change of behaviour in
+        the safe direction: the only thing the distinction gated was whether
+        to trust a raw taxid comparison, and trusting an unverified one names
+        the wrong organism. Name-based matching is unaffected.
+        """
+        return (
+            DatabaseTaxonomyType.NCBI
+            if self.profile.taxids_are_ncbi
+            else DatabaseTaxonomyType.CUSTOM
+        )
 
     def build_prefix_index(self) -> None:
         """Build 2-character prefix index for faster name searches."""
@@ -319,15 +341,27 @@ class DatabaseTaxonomyIndex:
     def get_species(self) -> List[DatabaseTaxonomyNode]:
         """Get all species-level nodes (cached for performance)."""
         if self._species_cache is None:
-            self._species_cache = [node for node in self.by_taxid.values() if node.rank == "S"]
+            # Subspecies included: a watchlist entry naming
+            # "Francisella tularensis tularensis" must be able to resolve to
+            # the S1 node, or Type A cannot be watched separately from Type B.
+            self._species_cache = [
+                node for node in self.by_taxid.values()
+                if is_species_rank(node.rank)
+            ]
         return self._species_cache
+
+    #: Bumped when the cached index gains a field that cannot be synthesised
+    #: from an older file. A v1 index has no node-name evidence recorded, so
+    #: its taxonomy profile cannot be inferred without re-reading the
+    #: database -- load_database therefore discards it and rebuilds.
+    CACHE_VERSION = "2.0"
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
-            "version": "1.0",
+            "version": self.CACHE_VERSION,
             "database_path": self.database_path,
-            "database_type": self.database_type.value,
+            "profile": self.profile.to_dict(),
             "total_nodes": self.total_nodes,
             "species_count": self.species_count,
             "built_at": self.built_at.isoformat() if self.built_at else None,
@@ -343,10 +377,9 @@ class DatabaseTaxonomyIndex:
         from the serialized node list rather than storing them
         redundantly.
         """
-        db_type_str = data.get("database_type", "unknown")
         index = cls(
             database_path=data.get("database_path", ""),
-            database_type=DatabaseTaxonomyType(db_type_str),
+            profile=DatabaseProfile.from_dict(data.get("profile")),
             total_nodes=data.get("total_nodes", 0),
             species_count=data.get("species_count", 0),
             built_at=(
@@ -444,7 +477,7 @@ class TaxidMappingCollection:
     # Identity
     database_path: str
     database_hash: str = ""                            # Hash of database files for change detection
-    database_type: DatabaseTaxonomyType = DatabaseTaxonomyType.UNKNOWN
+    profile: DatabaseProfile = field(default_factory=DatabaseProfile)
     watchlist_version: str = ""                        # Version of watchlist used
 
     # Mappings
@@ -458,6 +491,19 @@ class TaxidMappingCollection:
     mapped_partial: int = 0
     unmapped: int = 0
     needs_review: int = 0
+
+    @property
+    def database_type(self) -> DatabaseTaxonomyType:
+        """The old single-axis view, derived from the profile.
+
+        Kept only until the remaining consumers read ``profile`` directly.
+        See the equivalent note on ``DatabaseTaxonomyIndex``.
+        """
+        return (
+            DatabaseTaxonomyType.NCBI
+            if self.profile.taxids_are_ncbi
+            else DatabaseTaxonomyType.CUSTOM
+        )
 
     # Timestamps
     created_at: datetime = field(default_factory=_utcnow)
@@ -509,7 +555,7 @@ class TaxidMappingCollection:
             "version": "1.0",
             "database_path": self.database_path,
             "database_hash": self.database_hash,
-            "database_type": self.database_type.value,
+            "profile": self.profile.to_dict(),
             "watchlist_version": self.watchlist_version,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
@@ -527,16 +573,20 @@ class TaxidMappingCollection:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "TaxidMappingCollection":
-        """Create from dictionary."""
-        # Handle legacy "gtdb" value (renamed to "custom")
-        db_type_str = data.get("database_type", "unknown")
-        if db_type_str == "gtdb":
-            db_type_str = "custom"
+        """Create from dictionary.
 
+        A file written before the profile existed loads with the default
+        (unknown) profile. That is not a lasting state: ``load_database``
+        always resolves the index first and copies its authoritative profile
+        onto the collection immediately afterwards. The collection is not
+        discarded on a version mismatch the way the index is, because unlike
+        the index it is not purely derived -- it carries the operator's
+        manual verifications and overrides.
+        """
         collection = cls(
             database_path=data.get("database_path", ""),
             database_hash=data.get("database_hash", ""),
-            database_type=DatabaseTaxonomyType(db_type_str),
+            profile=DatabaseProfile.from_dict(data.get("profile")),
             watchlist_version=data.get("watchlist_version", ""),
             created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else _utcnow(),
             updated_at=datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else _utcnow()
@@ -764,6 +814,15 @@ class TaxidMapper:
                     raise TypeError(
                         f"Cached index has unexpected format: {type(data).__name__}"
                     )
+                cached_version = str(data.get("version", ""))
+                if cached_version != DatabaseTaxonomyIndex.CACHE_VERSION:
+                    # Not a migration: a v1 index does not record the node-name
+                    # evidence the taxonomy profile is derived from, so there
+                    # is nothing to migrate it from. Discard and rebuild.
+                    raise ValueError(
+                        f"Cached index version {cached_version or 'missing'!r} "
+                        f"predates {DatabaseTaxonomyIndex.CACHE_VERSION}; rebuilding"
+                    )
                 self._index = DatabaseTaxonomyIndex.from_dict(data)
                 load_time = time.time() - start_time
                 # Treat an empty by_taxid as a stale or corrupt cache: a
@@ -838,6 +897,13 @@ class TaxidMapper:
         if mapping_cache.exists():
             self._collection = TaxidMappingCollection.load(str(mapping_cache))
             if self._collection:
+                # The index is the authority on the profile; the copy on the
+                # collection exists so background callback workers, which load
+                # the mappings file standalone against an empty index
+                # singleton, still know whether taxids can be trusted. A
+                # mappings file written before profiles existed carries the
+                # default here, so refresh it unconditionally.
+                self._collection.profile = self._index.profile
                 set_mapping_collection(self._collection)
                 logger.info(f"Loaded cached mappings: {self._collection.total_entries} entries")
 
@@ -876,7 +942,7 @@ class TaxidMapper:
             self._collection = TaxidMappingCollection(
                 database_path=self._database_path or "",
                 database_hash=get_database_hash(self._database_path or ""),
-                database_type=self._index.database_type
+                profile=self._index.profile
             )
 
         total_entries = len(watchlist_entries)
@@ -913,7 +979,7 @@ class TaxidMapper:
             ])
 
             # Check if this is a custom database (taxid verification not applicable)
-            is_custom = self._index.database_type == DatabaseTaxonomyType.CUSTOM
+            is_custom = not self._index.profile.taxids_are_ncbi
 
             # Calculate confidence
             score = self._scorer.calculate_score(

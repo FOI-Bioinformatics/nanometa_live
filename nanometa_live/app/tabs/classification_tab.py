@@ -50,9 +50,11 @@ def register_classification_callbacks(app: Dash):
         Input("available-samples", "data"),
         Input("selected-sample", "data"),
         State("classification-filter-input", "value"),
+        State("app-config", "data"),
         prevent_initial_call=False,
     )
-    def scale_min_reads_default(available_samples, selected_sample, current_value):
+    def scale_min_reads_default(available_samples, selected_sample, current_value,
+                                config=None):
         """Scale the minimum-DNA-sequences default upward when an
         aggregated 24-barcode view is selected.
 
@@ -71,17 +73,33 @@ def register_classification_callbacks(app: Dash):
         real_samples = [s for s in (available_samples or []) if s != "All Samples"]
         n = len(real_samples)
 
+        # The operator's configured floor, which the layout cannot apply
+        # itself (it is built without config). `default_reads_per_level` is
+        # documented as "minimum reads to display at each level" and was read
+        # by nothing at all: the layout hardcoded 10 and so did this callback,
+        # so setting it in config.yaml had no effect anywhere.
+        try:
+            configured = int((config or {}).get("default_reads_per_level") or 10)
+        except (TypeError, ValueError):
+            configured = 10
+        configured = max(1, configured)
+
         # Recommended floor is independent of which view is selected --
         # operator can see it in the placeholder even when looking at a
-        # single sample.
-        floor = max(10, 5 * n) if n >= 12 else 10
+        # single sample. max() so a configured floor is never lowered by the
+        # heuristic; it is a floor, not a suggestion.
+        floor = max(configured, 5 * n) if n >= 12 else configured
         placeholder = f"min reads ({floor} recommended at {n} samples)" if n >= 12 \
-            else "min reads (10 default)"
+            else f"min reads ({configured} default)"
 
-        if is_aggregate and n >= 12 and (current_value in (None, 10)):
+        # "Untouched" now means the layout default OR the configured value --
+        # otherwise seeding the control from config would immediately look
+        # like an operator edit and block the aggregate scaling below.
+        untouched = current_value in (None, 10, configured)
+        if is_aggregate and n >= 12 and untouched:
             return floor, placeholder
         # Only update the placeholder hint, leave value as-is.
-        return current_value if current_value is not None else 10, placeholder
+        return current_value if current_value is not None else configured, placeholder
 
     @app.callback(
         Output("classification-levels-input", "value"),
@@ -104,6 +122,9 @@ def register_classification_callbacks(app: Dash):
             'species_focus': ['F', 'G', 'S'],
             'clinical': ['F', 'G', 'S'],
             'full': ['D', 'K', 'P', 'C', 'O', 'F', 'G', 'S'],
+            # Subspecies below species, for databases that resolve them
+            # (e.g. F. tularensis holarctica vs tularensis -- Type B vs A).
+            'subspecies_focus': ['G', 'S', 'S1'],
         }
         if preset == 'custom':
             return no_update

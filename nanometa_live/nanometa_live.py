@@ -21,7 +21,11 @@ from nanometa_live.app.app import create_app
 from nanometa_live.core.config.config_loader import ConfigLoader
 from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.utils.logging_utils import setup_logging
-from nanometa_live.core.utils.paths import set_data_dir_env, set_project_dir_env
+from nanometa_live.core.utils.paths import (
+    resolve_data_dir,
+    set_data_dir_env,
+    set_project_dir_env,
+)
 
 
 def parse_arguments():
@@ -43,8 +47,11 @@ def parse_arguments():
     parser.add_argument(
         "--port",
         type=int,
-        default=8050,
-        help="Port to run the dashboard on (default: 8050)",
+        default=None,
+        help=(
+            "Port to run the dashboard on. Defaults to gui_port from the "
+            "configuration, or 8050 when that is unset."
+        ),
     )
 
     parser.add_argument(
@@ -127,19 +134,11 @@ def main():
     # Parse arguments
     args = parse_arguments()
 
-    # Set up data directory. Normalise the operator-supplied value
-    # so a stray ``~``, trailing ``/``, or accidental leading ``//``
-    # (POSIX preserves ``//`` at the head of a path) does not flow
-    # downstream into the Storage Locations panel and makedirs calls.
-    if args.data_dir:
-        data_dir = os.path.abspath(os.path.expanduser(args.data_dir))
-    else:
-        data_dir = os.path.expanduser("~/.nanometa")
-    # os.path.abspath / normpath preserve a leading "//" by POSIX
-    # rule; collapse it explicitly so Storage Locations renders the
-    # same path the operator typed.
-    while data_dir.startswith("//"):
-        data_dir = data_dir[1:]
+    # Set up data directory: flag > environment > default. See
+    # resolve_data_dir for why the environment step is load-bearing.
+    # Normalisation (``~``, trailing and doubled leading slashes) happens
+    # there too, so Storage Locations renders the path the operator typed.
+    data_dir = resolve_data_dir(args.data_dir)
 
     # Set the env var BEFORE any module-level singleton (offline cache,
     # background-callback Diskcache) gets a chance to read the legacy
@@ -197,7 +196,12 @@ def main():
     # caches stay shared under --data-dir. (project_dir + its env var were
     # resolved above, before singletons could read them.)
     config["project_dir"] = project_dir
-    config["gui_port"] = args.port
+    # The flag wins when given; otherwise the configured value stands. This
+    # used to assign args.port unconditionally, and since argparse defaulted
+    # it to 8050 the Configuration tab's port field was overwritten on every
+    # launch -- saved, reloaded, and silently ignored.
+    port = args.port if args.port is not None else config.get("gui_port") or 8050
+    config["gui_port"] = port
     if args.main_dir:
         config["results_output_directory"] = os.path.abspath(args.main_dir)
         config["main_dir"] = os.path.abspath(args.main_dir)
@@ -238,8 +242,8 @@ def main():
     handle_exit(app, backend_manager)
 
     # Start the Dash server
-    logging.info(f"Starting Nanometa Live v{__version__} server on port {args.port}")
-    app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
+    logging.info(f"Starting Nanometa Live v{__version__} server on port {port}")
+    app.run(host=args.host, port=port, debug=args.debug, threaded=True)
 
 
 if __name__ == "__main__":

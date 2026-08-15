@@ -11,6 +11,7 @@ import pytest
 
 from nanometa_live.core.workflow.bundle_manager import (
     BundleManager,
+    _local_container_platform,
     _ACTIVATE_SCRIPT_FILENAME,
     _ACTIVATE_SCRIPT_TEMPLATE,
     _BUNDLED_CONDA_CACHE_DIRNAME,
@@ -22,7 +23,8 @@ from nanometa_live.core.workflow.bundle_manager import (
 )
 
 
-def _make_minimal_bundle(tmp_path, tamper_file=None, db_hash=None):
+def _make_minimal_bundle(tmp_path, tamper_file=None, db_hash=None,
+                         extra_files=None):
     """Create a minimal valid bundle tar.gz for testing.
 
     Args:
@@ -30,6 +32,10 @@ def _make_minimal_bundle(tmp_path, tamper_file=None, db_hash=None):
         tamper_file: If set, corrupt this relative path after checksumming.
         db_hash: If set, record it as the bundle's Kraken2 DB hash so import
             can exercise the DB-hash compatibility check.
+        extra_files: ``{relative_path: text}`` written into the bundle before
+            checksums are computed. The default bundle carries no config.yaml,
+            and import skips its entire config-rebase block when that file is
+            absent -- so a test that needs to reach that block must add one.
 
     Returns:
         Tuple of (bundle_path, manifest).
@@ -41,6 +47,11 @@ def _make_minimal_bundle(tmp_path, tamper_file=None, db_hash=None):
     genomes.mkdir()
     genome_file = genomes / "12345.fasta"
     genome_file.write_text(">seq1\nATCG\n")
+
+    for rel, text in (extra_files or {}).items():
+        target = staging / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text)
 
     checksums = {}
     for f in staging.rglob("*"):
@@ -1878,6 +1889,7 @@ from nanometa_live.core.workflow.bundle_manager import (  # noqa: E402
     _KRAKEN_DB_PLACEHOLDER,
     _BUNDLED_PIPELINE_DIRNAME,
     _BUNDLED_NXF_PLUGINS_DIRNAME,
+    _BUNDLED_PIPELINE_CONTAINERS_DIRNAME,
     _template_genome_metadata,
 )
 
@@ -1892,6 +1904,9 @@ def _make_config_bundle(
     plugins_empty=False,
     min_versions=None,
     tamper_after=None,
+    pipeline_container_files=None,
+    export_warnings=None,
+    pull_image_count=None,
 ):
     """Build a bundle that carries a config.yaml (and optionally pipeline source
     / plugins), so the import config-rebase block runs."""
@@ -1899,6 +1914,12 @@ def _make_config_bundle(
     staging.mkdir()
     (staging / "genomes").mkdir()
     (staging / "genomes" / "1.fasta").write_text(">s\nACGT\n")
+
+    if pipeline_container_files:
+        pcdir = staging / _BUNDLED_PIPELINE_CONTAINERS_DIRNAME
+        pcdir.mkdir()
+        for name in pipeline_container_files:
+            (pcdir / name).write_bytes(b"IMAGE\x00" + name.encode())
 
     cfg = {"kraken_db": kraken_db}
     if with_pipeline:
@@ -1935,6 +1956,13 @@ def _make_config_bundle(
     }
     if min_versions is not None:
         manifest["min_versions"] = min_versions
+    if export_warnings is not None:
+        manifest["export_warnings"] = export_warnings
+    if pull_image_count is not None:
+        manifest["containerization"] = {
+            "mode": "docker",
+            "pull_result": {"image_count": pull_image_count},
+        }
     (staging / "manifest.json").write_text(json.dumps(manifest))
 
     if tamper_after:
@@ -2159,7 +2187,7 @@ class TestSingularityBundleWiring:
 
         img_name = "quay.io-biocontainers-foo-1.0.img"
 
-        def fake_pull(engine, staging, config, pipeline_path):
+        def fake_pull(engine, staging, config, pipeline_path, target_platform=None):
             images = staging / "pipeline_containers"
             images.mkdir(parents=True, exist_ok=True)
             (images / img_name).write_bytes(b"SIF\x00fake-image")
@@ -2185,6 +2213,9 @@ class TestSingularityBundleWiring:
                 nanometa_home=str(home),
                 pipeline_path=str(pipeline_dir),
                 containerization="singularity",
+                # Imported on this same machine below, so declare this
+                # machine's platform rather than the linux/amd64 default.
+                target_platform=_local_container_platform(),
             )
 
         field = tmp_path / "field_home"
@@ -2225,7 +2256,7 @@ class TestContainerImageCompleteness:
         (home / "genomes" / "1.fasta").write_text(">x\nA\n")
         pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
 
-        def fake_pull(engine, staging, config, pipeline_path):
+        def fake_pull(engine, staging, config, pipeline_path, target_platform=None):
             # Report two images pulled, but only stage one -- models a
             # single failed `docker save` / `apptainer pull` that was
             # caught and warned about rather than aborting the export.
@@ -2249,6 +2280,9 @@ class TestContainerImageCompleteness:
                 nanometa_home=str(home),
                 pipeline_path=str(pipeline_dir),
                 containerization="singularity",
+                # Imported on this same machine below, so declare this
+                # machine's platform rather than the linux/amd64 default.
+                target_platform=_local_container_platform(),
             )
 
         field = tmp_path / "field_home"
@@ -2318,3 +2352,308 @@ class TestDbHashMismatch:
 
         assert result["success"] is True
         assert result.get("db_hash_mismatch") is not True
+
+
+class TestPipelineContainersPostCopyVerify:
+    """``pipeline_containers/`` holds the largest artefacts in a
+    docker/singularity bundle, so it is what an interrupted copy truncates
+    first. It must be covered by the post-copy checksum re-verify; before the
+    fix the ``_copied_roots`` prefix tuple omitted it and every image file
+    skipped the check entirely.
+    """
+
+    IMG = "quay.io-org-a-1.0.img"
+
+    @staticmethod
+    def _patch_truncating_copytree(monkeypatch, target_name):
+        import shutil as _sh
+        real_copytree = _sh.copytree
+
+        def bad_copytree(src, dst, *a, **k):
+            out = real_copytree(src, dst, *a, **k)
+            victim = Path(dst) / target_name
+            if victim.exists():
+                victim.write_bytes(b"TRUNCATED")
+            return out
+
+        monkeypatch.setattr(
+            "nanometa_live.core.workflow.bundle_manager.shutil.copytree",
+            bad_copytree)
+
+    def test_truncated_image_fails_post_copy_verify(self, tmp_path, monkeypatch):
+        bundle = _make_config_bundle(
+            tmp_path, pipeline_container_files=[self.IMG])
+        self._patch_truncating_copytree(monkeypatch, self.IMG)
+        result, _ = _do_import(tmp_path, bundle, kraken_db_path="x")
+        assert result["success"] is False
+        joined = " ".join(result["warnings"])
+        assert "after copy" in joined.lower()
+        assert _BUNDLED_PIPELINE_CONTAINERS_DIRNAME in joined
+
+    def test_intact_image_passes_post_copy_verify(self, tmp_path):
+        bundle = _make_config_bundle(
+            tmp_path, pipeline_container_files=[self.IMG])
+        result, home = _do_import(tmp_path, bundle, kraken_db_path="x")
+        assert result["success"] is True
+        assert (home / _BUNDLED_PIPELINE_CONTAINERS_DIRNAME / self.IMG).exists()
+
+
+class TestLoadContainerImages:
+    """Direct tests for _load_container_images. It reports enough detail for
+    the caller to tell 'the bundle is short of images' (build-machine problem)
+    apart from 'this machine cannot run Docker' (field-machine problem).
+    """
+
+    def test_sif_images_counted_in_place(self, tmp_path):
+        (tmp_path / "a.img").write_bytes(b"SIF")
+        (tmp_path / "b.sif").write_bytes(b"SIF")
+        report = BundleManager()._load_container_images(tmp_path)
+        assert report["image_count"] == 2
+        assert report["loaded"] == 2
+        assert report["tar_count"] == 0
+        # No tars, so no Docker probe was needed.
+        assert report["docker_usable"] is True
+
+    def test_docker_tars_loaded(self, tmp_path):
+        (tmp_path / "a.tar").write_bytes(b"TAR")
+        (tmp_path / "b.tar").write_bytes(b"TAR")
+        with patch(
+            "nanometa_live.core.workflow.bundle_manager.shutil.which",
+            return_value="/usr/bin/docker",
+        ), patch(
+            "nanometa_live.core.workflow.bundle_manager._docker_daemon_ok",
+            return_value=True,
+        ), patch(
+            "nanometa_live.core.workflow.bundle_manager.subprocess.run",
+            return_value=MagicMock(returncode=0),
+        ):
+            report = BundleManager()._load_container_images(tmp_path)
+        assert report["tar_count"] == 2
+        assert report["tar_loaded"] == 2
+        assert report["loaded"] == 2
+        assert report["failures"] == []
+
+    def test_docker_binary_missing(self, tmp_path):
+        (tmp_path / "a.tar").write_bytes(b"TAR")
+        with patch(
+            "nanometa_live.core.workflow.bundle_manager.shutil.which",
+            return_value=None,
+        ), patch(
+            "nanometa_live.core.workflow.bundle_manager.subprocess.run",
+            side_effect=FileNotFoundError("docker"),
+        ):
+            report = BundleManager()._load_container_images(tmp_path)
+        assert report["docker_available"] is False
+        assert report["docker_usable"] is False
+        assert report["tar_loaded"] == 0
+        assert report["failures"]
+
+    def test_docker_daemon_down(self, tmp_path):
+        (tmp_path / "a.tar").write_bytes(b"TAR")
+        import subprocess as _sp
+        with patch(
+            "nanometa_live.core.workflow.bundle_manager.shutil.which",
+            return_value="/usr/bin/docker",
+        ), patch(
+            "nanometa_live.core.workflow.bundle_manager._docker_daemon_ok",
+            return_value=False,
+        ), patch(
+            "nanometa_live.core.workflow.bundle_manager.subprocess.run",
+            side_effect=_sp.CalledProcessError(1, "docker load"),
+        ):
+            report = BundleManager()._load_container_images(tmp_path)
+        assert report["docker_available"] is True
+        assert report["docker_usable"] is False
+        assert report["tar_loaded"] == 0
+
+    def test_partial_load_keeps_docker_usable(self, tmp_path):
+        """One corrupt archive among several is a bundle problem, not a
+        runtime problem -- docker_usable must stay True."""
+        (tmp_path / "a.tar").write_bytes(b"TAR")
+        (tmp_path / "b.tar").write_bytes(b"TAR")
+        import subprocess as _sp
+        calls = {"n": 0}
+
+        def flaky(cmd, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return MagicMock(returncode=0)
+            raise _sp.CalledProcessError(1, "docker load")
+
+        with patch(
+            "nanometa_live.core.workflow.bundle_manager.shutil.which",
+            return_value="/usr/bin/docker",
+        ), patch(
+            "nanometa_live.core.workflow.bundle_manager._docker_daemon_ok",
+            return_value=True,
+        ), patch(
+            "nanometa_live.core.workflow.bundle_manager.subprocess.run",
+            side_effect=flaky,
+        ):
+            report = BundleManager()._load_container_images(tmp_path)
+        assert report["docker_usable"] is True
+        assert report["tar_loaded"] == 1
+        assert len(report["failures"]) == 1
+
+    def test_empty_dir(self, tmp_path):
+        report = BundleManager()._load_container_images(tmp_path)
+        assert report["loaded"] == 0
+        assert report["tar_count"] == 0
+
+
+class TestContainerRuntimeUnavailableAtImport:
+    """A missing/stopped Docker on the FIELD machine must not be reported as
+    an incomplete export. The old message told the operator to 're-export from
+    a machine that can reach the registry', which fixes nothing.
+    """
+
+    def _import_with_docker(self, tmp_path, *, which, daemon_ok):
+        bundle = _make_config_bundle(
+            tmp_path,
+            pipeline_container_files=["a.tar", "b.tar"],
+            pull_image_count=2,
+        )
+        import subprocess as _sp
+        with patch(
+            "nanometa_live.core.workflow.bundle_manager.shutil.which",
+            side_effect=lambda name: which if name == "docker" else None,
+        ), patch(
+            "nanometa_live.core.workflow.bundle_manager._docker_daemon_ok",
+            return_value=daemon_ok,
+        ), patch(
+            "nanometa_live.core.workflow.bundle_manager.subprocess.run",
+            side_effect=_sp.CalledProcessError(1, "docker load"),
+        ):
+            return _do_import(tmp_path, bundle, kraken_db_path="x")
+
+    def test_docker_missing_blames_field_machine(self, tmp_path):
+        result, _ = self._import_with_docker(
+            tmp_path, which=None, daemon_ok=False)
+        assert result.get("container_runtime_unavailable") is True
+        assert not result.get("incomplete_image_set")
+        joined = " ".join(result["warnings"])
+        assert "'docker' command was not found" in joined
+        assert "bundle itself is intact" in joined
+        # Blame attribution is the point: a field machine with no Docker must
+        # not be told to re-export a bundle that is fine. Scoped to the
+        # container-runtime message rather than every warning, because other
+        # checks legitimately do advise a re-export -- this fixture also ships
+        # no Nextflow plugins, which genuinely is an export-side problem.
+        runtime_msg = next(
+            w for w in result["warnings"] if "'docker' command was not found" in w
+        )
+        assert "re-export" not in runtime_msg.lower()
+
+    def test_daemon_down_blames_field_machine(self, tmp_path):
+        result, _ = self._import_with_docker(
+            tmp_path, which="/usr/bin/docker", daemon_ok=False)
+        assert result.get("container_runtime_unavailable") is True
+        joined = " ".join(result["warnings"])
+        assert "daemon did not respond" in joined
+
+    def test_working_docker_short_set_blames_export(self, tmp_path):
+        """With Docker working, a shortfall really is an incomplete export."""
+        bundle = _make_config_bundle(
+            tmp_path, pipeline_container_files=["a.tar"], pull_image_count=2)
+        with patch(
+            "nanometa_live.core.workflow.bundle_manager.shutil.which",
+            return_value="/usr/bin/docker",
+        ), patch(
+            "nanometa_live.core.workflow.bundle_manager._docker_daemon_ok",
+            return_value=True,
+        ), patch(
+            "nanometa_live.core.workflow.bundle_manager.subprocess.run",
+            return_value=MagicMock(returncode=0),
+        ):
+            result, _ = _do_import(tmp_path, bundle, kraken_db_path="x")
+        assert result.get("incomplete_image_set") is True
+        assert not result.get("container_runtime_unavailable")
+        assert any("re-export" in w.lower() for w in result["warnings"])
+
+
+class TestExportWarningsSurfacedAtImport:
+    """Warnings recorded at export (un-portable genome paths, partial pulls)
+    were written to the manifest and then never read. The operator importing
+    on the field machine is usually not the operator who built the bundle.
+    """
+
+    def test_export_warnings_reach_import_result(self, tmp_path):
+        bundle = _make_config_bundle(
+            tmp_path,
+            export_warnings=[
+                "Genome path /mnt/scratch/foo.fasta is outside the data home",
+            ],
+        )
+        result, _ = _do_import(tmp_path, bundle, kraken_db_path="x")
+        assert result["success"] is True
+        assert result["export_warnings"] == [
+            "Genome path /mnt/scratch/foo.fasta is outside the data home",
+        ]
+        assert any("Recorded at export" in w for w in result["warnings"])
+
+    def test_no_export_warnings_no_key(self, tmp_path):
+        bundle = _make_config_bundle(tmp_path)
+        result, _ = _do_import(tmp_path, bundle, kraken_db_path="x")
+        assert "export_warnings" not in result
+
+
+class TestVerifyBundleDryRun:
+    """`verify_bundle` runs the import's pre-copy checks without touching the
+    machine, so an operator can check a USB copy before committing to it.
+    """
+
+    def test_clean_bundle_verifies(self, tmp_path):
+        bundle = _make_config_bundle(tmp_path)
+        result = BundleManager().verify_bundle(str(bundle))
+        assert result["success"] is True
+        assert result["blockers"] == []
+        assert result["manifest"]["version"] == "1.1"
+
+    def test_verify_does_not_write_to_home(self, tmp_path, monkeypatch):
+        bundle = _make_config_bundle(tmp_path)
+        home = tmp_path / "untouched_home"
+        monkeypatch.setenv("NANOMETA_DATA_DIR", str(home))
+        BundleManager().verify_bundle(str(bundle))
+        assert not home.exists()
+
+    def test_tampered_bundle_reports_blocker(self, tmp_path):
+        bundle = _make_config_bundle(tmp_path, tamper_after="genomes/1.fasta")
+        result = BundleManager().verify_bundle(str(bundle))
+        assert result["success"] is False
+        assert result["checksum_mismatches"] == ["genomes/1.fasta"]
+        assert any("checksum" in b.lower() for b in result["blockers"])
+
+    def test_missing_file_reports_blocker(self, tmp_path):
+        bundle = _make_config_bundle(tmp_path)
+        result = BundleManager().verify_bundle(str(bundle))
+        assert result["success"] is True
+        missing = tmp_path / "nope.tar.gz"
+        result = BundleManager().verify_bundle(str(missing))
+        assert result["success"] is False
+        assert any("not found" in w for w in result["warnings"])
+
+    def test_not_a_tar(self, tmp_path):
+        junk = tmp_path / "junk.tar.gz"
+        junk.write_text("not a tar")
+        result = BundleManager().verify_bundle(str(junk))
+        assert result["success"] is False
+        assert any("tar archive" in w for w in result["warnings"])
+
+    def test_export_warnings_surfaced_in_dry_run(self, tmp_path):
+        bundle = _make_config_bundle(
+            tmp_path, export_warnings=["something was not portable"])
+        result = BundleManager().verify_bundle(str(bundle))
+        assert result["export_warnings"] == ["something was not portable"]
+
+    def test_db_hash_mismatch_reported_without_import(self, tmp_path):
+        bundle_path, _ = _make_minimal_bundle(tmp_path, db_hash="BUNDLE_AAA")
+        db = tmp_path / "kdb"
+        db.mkdir()
+        with patch(
+            "nanometa_live.core.taxonomy.taxid_mapping.get_database_hash",
+            return_value="LOCAL_BBB",
+        ):
+            result = BundleManager().verify_bundle(
+                str(bundle_path), kraken_db_path=str(db))
+        assert result["success"] is True
+        assert result["db_hash_mismatch"] is True

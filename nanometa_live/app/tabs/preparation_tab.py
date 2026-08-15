@@ -28,6 +28,7 @@ from nanometa_live.app.tabs.preparation_helpers import (
     _run_export,
     _build_export_opts,
     _build_mapping_table,
+    _alert_text,
     _execute_wizard_step,
     _regenerate_mappings,
     _render_import_result,
@@ -1060,16 +1061,30 @@ def register_preparation_callbacks(app):
     @app.callback(
         Output("watchlist-entries-snapshot", "data"),
         Input("watchlist-table-refresh", "data"),
+        Input("watchlist-tab-state", "data"),
         State("app-config", "data"),
         prevent_initial_call=False,
     )
-    def hydrate_watchlist_entries_snapshot(_refresh, config):
+    def hydrate_watchlist_entries_snapshot(_refresh, _tab_state, config):
         """Mirror the current watchlist entries into a Store.
 
         Runs in the main process so the WatchlistManager singleton is
         populated. The rescan callback reads this snapshot via State,
         which lets it run in a background worker process where the
         manager singleton is empty.
+
+        Listens to BOTH change signals on purpose. ``watchlist-tab-state`` is
+        what the mutating callbacks bump -- upload, add-custom-species, and
+        the edit modal all write it and none of them write
+        ``watchlist-table-refresh``. Hydrating only on the latter meant an
+        uploaded watchlist never reached the background workers, so the
+        readiness checker, rescan and bundle export all saw the pre-upload
+        set.
+
+        Listening here rather than adding a fourth Output to each mutator is
+        deliberate: an every-mutator-must-remember contract is exactly what
+        failed, and it would fail again the next time someone adds a way to
+        change the watchlist.
         """
         from nanometa_live.core.watchlist.watchlist_manager import (
             get_watchlist_manager,
@@ -1181,9 +1196,15 @@ def register_preparation_callbacks(app):
                 collection_data = None
                 logger.warning("Rescan produced no collection data")
 
+            profile = mapper._index.profile if mapper._index else None
             db_info = {
                 "path": kraken_db,
-                "type": collection.database_type.value if collection else "unknown",
+                "type": profile.display_label if profile else "unknown",
+                # The evidence behind the label, so an operator deciding
+                # whether to override can see WHY it was detected that way
+                # rather than guessing.
+                "detected_by": profile.detected_by if profile else "",
+                "overridden": bool(profile.overridden) if profile else False,
                 "hash": collection.database_hash if collection else "",
                 "stats": mapper.get_statistics(),
             }
@@ -1196,12 +1217,31 @@ def register_preparation_callbacks(app):
                             + stats.get("mapped_manual", 0) + stats.get("mapped_partial", 0))
             unmapped_count = stats.get("unmapped", 0)
             total_count = stats.get("total_entries", 0)
-            if unmapped_count > 0:
-                status = f"Mapped {mapped_count}/{total_count} entries ({unmapped_count} not in database)"
-                progress_label = f"Completed: {mapped_count} mapped, {unmapped_count} not in database"
-            else:
-                status = f"Mapped {mapped_count} entries"
-                progress_label = f"Completed: {mapped_count} mappings"
+            # What the watchlist can actually be screened for against THIS
+            # database. On a minimized field database some organisms are
+            # pruned to fit the RAM budget, and an ALL CLEAR for one of those
+            # is not a negative result -- it is no result. Say so plainly.
+            from nanometa_live.core.taxonomy.coverage import analyse_coverage
+            try:
+                coverage = analyse_coverage(collection, mapper._index)
+                status = coverage.summary()
+                for warning in coverage.warnings():
+                    logger.warning("Watchlist coverage: %s", warning)
+                db_info["coverage"] = {
+                    "summary": coverage.summary(),
+                    "warnings": coverage.warnings(),
+                }
+            except Exception as exc:
+                logger.warning("Coverage analysis failed: %s", exc)
+                if unmapped_count > 0:
+                    status = (f"Mapped {mapped_count}/{total_count} entries "
+                              f"({unmapped_count} not in database)")
+                else:
+                    status = f"Mapped {mapped_count} entries"
+            progress_label = (
+                f"Completed: {mapped_count} mapped, {unmapped_count} not in database"
+                if unmapped_count else f"Completed: {mapped_count} mappings"
+            )
             logger.info(f"Rescan returning: mapped={mapped_count}, unmapped={unmapped_count}, refresh={new_refresh}")
             return (collection_data, db_info, now, new_refresh, status,
                     hide_progress, 100, progress_label)
@@ -1223,10 +1263,13 @@ def register_preparation_callbacks(app):
     )
     def update_taxmap_status_info(rescan_time, db_info, collection):
         """Update the inline status display after rescan or on page load."""
-        # Database type
+        # Detected taxonomy profile, with its evidence.
         if db_info and db_info.get("type"):
-            db_type = db_info["type"].replace("_", " ").title()
-            db_type_text = f"Database type: {db_type}"
+            db_type_text = f"Database taxonomy: {db_info['type']}"
+            if db_info.get("overridden"):
+                db_type_text += " (operator override)"
+            elif db_info.get("detected_by"):
+                db_type_text += f" -- {db_info['detected_by']}"
         else:
             db_type_text = "No database scanned"
 
@@ -1460,8 +1503,34 @@ def register_preparation_callbacks(app):
 
         set_progress((0, "Scanning for missing genomes...", "Checking watchlist entries", add_log("Starting genome download process"), []))
 
-        # Use pre-computed missing list from the main process store
-        missing = missing_store if missing_store else []
+        # Use pre-computed missing list from the main process store.
+        #
+        # An unpopulated store is not an empty one. `update_genome_stats`
+        # writes a list here; until it has run the store holds None. The
+        # earlier `missing_store if missing_store else []` mapped both to the
+        # empty list, so clicking Download before the stats callback had run
+        # -- or after it raised -- reported "All genomes already downloaded"
+        # with a green Complete badge, having checked nothing. The operator
+        # then exported a bundle whose genomes were never fetched, and the
+        # first evidence of it was validation finding no reference to align
+        # against, in the field.
+        if not isinstance(missing_store, list):
+            set_progress((
+                0,
+                "Genome status not available yet",
+                "Cannot tell which genomes are missing",
+                add_log(
+                    "The genome inventory has not been computed yet, so this "
+                    "is not a report that nothing is missing. Open the "
+                    "Preparation tab and let the genome statistics load, "
+                    "then try again.",
+                    "warning",
+                ),
+                dbc.Badge("Unknown", color="warning", className="me-2"),
+            ))
+            return [datetime.now().isoformat()]
+
+        missing = missing_store
 
         if not missing:
             set_progress((
@@ -1476,6 +1545,7 @@ def register_preparation_callbacks(app):
         total = len(missing)
         downloaded = 0
         failed = 0
+        blast_failed = 0
         failed_names = []
 
         add_log(f"Found {total} missing genome(s) to download", "info")
@@ -1493,12 +1563,10 @@ def register_preparation_callbacks(app):
                 dbc.Badge(f"{completed}/{total_count}", color="primary", className="me-2"),
             ))
 
-        # On a GTDB database every organism is bacteria/archaea: hint the
-        # kingdom so the batch skips per-taxid NCBI lookups and uses the
-        # name-based GTDB path (also the only path for name-only entries).
-        kingdom_hint = ("Bacteria"
-                        if str((config or {}).get("kraken_taxonomy", "")).lower() == "gtdb"
-                        else None)
+        from nanometa_live.core.taxonomy.database_profile import (
+            kingdom_hint_for_database,
+        )
+        kingdom_hint = kingdom_hint_for_database(config)
         try:
             results = genome_mgr.download_genomes_batch(
                 missing, max_workers=3, progress_callback=progress_cb,
@@ -1532,16 +1600,34 @@ def register_preparation_callbacks(app):
                 ))
                 built = genome_mgr.build_blast_dbs_batch(successful_taxids, max_workers=2)
                 add_log(f"Built {built} BLAST database(s)", "success" if built > 0 else "warning")
+                # A genome without a BLAST database cannot be validated
+                # against, so a build failure is not cosmetic. `failed`
+                # counted downloads only, which meant every download
+                # succeeding while every build failed still reported
+                # "Complete" in green.
+                blast_failed = len(successful_taxids) - built
 
         except Exception as e:
             failed = total
             add_log(f"Batch download error: {str(e)}", "error")
             logger.error(f"Batch download error: {e}")
 
-        if failed == 0:
+        if failed == 0 and blast_failed == 0:
             result_text = f"Successfully downloaded {downloaded} genome(s)"
             status_badge = dbc.Badge("Complete", color="success", className="me-2")
             add_log(result_text, "success")
+        elif failed == 0:
+            # Downloads all landed but some BLAST databases did not build.
+            # Those genomes cannot be validated against, so this is not
+            # Complete even though nothing failed to download.
+            result_text = (
+                f"Downloaded {downloaded} genome(s), but {blast_failed} BLAST "
+                f"database(s) failed to build"
+            )
+            status_badge = dbc.Badge(
+                f"{blast_failed} BLAST failed", color="warning", className="me-2"
+            )
+            add_log(result_text, "warning")
         else:
             result_text = f"Downloaded {downloaded} of {total} ({failed} failed)"
             status_badge = dbc.Badge(f"{failed} failed", color="warning", className="me-2")
@@ -1798,12 +1884,35 @@ def register_preparation_callbacks(app):
             if not genome_mgr.has_blast_db(meta.taxid):
                 missing_blast.append(meta)
 
+        # "Every genome has a BLAST database" is vacuously true when there are
+        # no genomes, and it renders identically to a prepared system. An
+        # operator who has not downloaded genomes yet clicks Build, sees a
+        # green Complete, and exports a bundle that cannot validate anything.
+        if not all_genomes:
+            set_progress((
+                100,
+                "No genomes to build databases from",
+                "Download reference genomes first",
+                add_log(
+                    "No reference genomes are present, so there is nothing to "
+                    "build BLAST databases from. This is not a prepared "
+                    "system: download genomes first.",
+                    "warning",
+                ),
+                dbc.Badge("No genomes", color="warning", className="me-2"),
+            ))
+            return [datetime.now().isoformat()]
+
         if not missing_blast:
             set_progress((
                 100,
                 "All BLAST databases already built",
                 "Nothing to build",
-                add_log("All genomes already have BLAST databases", "success"),
+                add_log(
+                    f"All {len(all_genomes)} genome(s) already have BLAST "
+                    f"databases",
+                    "success",
+                ),
                 dbc.Badge("Complete", color="success", className="me-2"),
             ))
             return [datetime.now().isoformat()]
@@ -2247,8 +2356,28 @@ def register_preparation_callbacks(app):
             # Live stepper + result-area update before the (possibly slow) step.
             set_progress((_running_alert(step_idx),))
             try:
-                _execute_wizard_step(step_idx, config, export_opts=export_opts)
-                wizard_state["steps"][str(step_idx)] = "done"
+                outcome = _execute_wizard_step(
+                    step_idx, config, export_opts=export_opts
+                )
+                # A step that returns without raising has RUN; that is not the
+                # same as having succeeded. Step 0 returns a warning alert when
+                # no watchlist is enabled, step 3 when no genome downloaded,
+                # and so on -- none of them raise. Marking those "done" made
+                # the wizard announce "System is ready for offline deployment"
+                # for a deployment with nothing to screen for.
+                #
+                # The outcome is already encoded in the returned alert's colour;
+                # the loop simply discarded it.
+                colour = getattr(outcome, "color", "success")
+                if colour in ("warning", "danger", "info"):
+                    wizard_state["steps"][str(step_idx)] = "warning"
+                    results.append(
+                        f"Step {step_idx + 1} ({_WIZARD_STEP_NAMES[step_idx]}): "
+                        f"{_alert_text(outcome)}"
+                    )
+                    all_ok = False
+                else:
+                    wizard_state["steps"][str(step_idx)] = "done"
             except Exception as e:
                 wizard_state["steps"][str(step_idx)] = "failed"
                 results.append(
@@ -2269,7 +2398,7 @@ def register_preparation_callbacks(app):
         else:
             alert = dbc.Alert([
                 html.I(className="bi bi-exclamation-triangle me-2"),
-                html.Strong("Some steps failed:"),
+                html.Strong("Not ready for offline deployment:"),
                 html.Ul([html.Li(r) for r in results]),
             ], color="warning")
 
@@ -2345,7 +2474,9 @@ def register_preparation_callbacks(app):
 
         try:
             from nanometa_live.core.utils.kraken_utils import download_kraken_database as _download
-            success, message, extract_path = _download(db_info, dest_dir)
+            # Belt and braces; the guard belongs on the capability too.
+            offline = bool((config or {}).get("offline_mode"))
+            success, message, extract_path = _download(db_info, dest_dir, offline)
             if success and extract_path:
                 # Update the active config so kraken_db now points at
                 # the newly extracted DB. Both keys are written so any

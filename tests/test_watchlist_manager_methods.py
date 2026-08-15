@@ -70,7 +70,6 @@ def test_validation_status_enabled_only_counts_active_set(manager):
 def test_export_config_includes_custom_entries(manager):
     cfg = manager.export_config()
     assert cfg["enabled"] is True
-    assert "taxonomy_mode" in cfg
     custom_taxids = {e["taxid"] for e in cfg["custom"]}
     assert custom_taxids == {700, 701}        # both are USER-source custom entries
 
@@ -86,15 +85,3 @@ def test_export_config_records_builtin_override(manager):
     overrides = {o["taxid"]: o for o in cfg["overrides"]}
     assert 700 in overrides
     assert overrides[700]["alert_threshold"] == 42
-
-
-@pytest.mark.parametrize("mode", ["ncbi", "gtdb", "auto"])
-def test_set_and_get_taxonomy_mode(manager, mode):
-    manager.set_taxonomy_mode(mode)
-    assert manager.get_taxonomy_mode() == mode
-
-
-def test_set_taxonomy_mode_ignores_invalid(manager):
-    manager.set_taxonomy_mode("ncbi")
-    manager.set_taxonomy_mode("nonsense")     # invalid -> unchanged
-    assert manager.get_taxonomy_mode() == "ncbi"

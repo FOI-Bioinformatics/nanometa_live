@@ -291,10 +291,19 @@ def create_app(
     # 3. Collapsible sections create/destroy components dynamically
     app = Dash(
         __name__,
-        external_stylesheets=[
-            dbc.themes.BOOTSTRAP,
-            dbc.icons.BOOTSTRAP,  # Bootstrap Icons for bi-* classes
-        ],
+        # No external_stylesheets. `dbc.themes.BOOTSTRAP` and
+        # `dbc.icons.BOOTSTRAP` are cdn.jsdelivr.net URLs fetched by the
+        # *browser*, so no offline_mode guard, socket patch or `--network none`
+        # on this process can suppress them. On an air-gapped field machine the
+        # dashboard rendered unstyled with every bi-* glyph a blank box --
+        # including the icons in the offline-mode banner itself.
+        #
+        # Both files are vendored under assets/ instead (00-bootstrap.min.css,
+        # 01-bootstrap-icons.css + fonts/), which Dash includes automatically.
+        # The numeric prefixes matter: assets load in sorted order, so
+        # Bootstrap must sort before styles.css for our overrides to win.
+        # `serve_locally` is not an alternative -- it governs Dash's own
+        # component bundles, not external_stylesheets.
         suppress_callback_exceptions=True,  # Always suppress - dynamic layouts + cache issues
         assets_folder=assets_dir,
         background_callback_manager=background_callback_manager,  # Enable async progress
@@ -415,8 +424,19 @@ def create_app(
         # process whenever watchlist-table-refresh ticks. Background
         # callbacks read this as State instead of the WatchlistManager
         # singleton, which is empty in worker processes.
-        dcc.Store(id='watchlist-entries-snapshot', data=[]),
-        dcc.Store(id='genome-status-data', data={}),
+        # None, not [] -- these are different claims. The readiness checks
+        # read [] as "determined: nothing enabled" and None as "could not
+        # determine", and only the latter consults their config fallback.
+        # Defaulting to [] told every background worker authoritatively that
+        # zero pathogens were enabled before the snapshot had ever been
+        # hydrated, producing a false "No watchlist enabled".
+        dcc.Store(id='watchlist-entries-snapshot', data=None),
+        # None means "update_genome_stats has never run", which is NOT the
+        # same as the empty list meaning "it ran and nothing is missing".
+        # download_missing_genomes must be able to tell those apart or it
+        # reports "All genomes already downloaded" for a check that never
+        # happened. See its docstring.
+        dcc.Store(id='genome-status-data', data=None),
         dcc.Store(id='genome-download-complete', data=None),
         dcc.Store(id='blast-build-complete', data=None),
 

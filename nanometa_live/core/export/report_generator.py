@@ -23,6 +23,7 @@ from nanometa_live.core.utils.sample_detector import (
     get_available_samples,
     resolve_analysis_directory,
 )
+from nanometa_live.app.tabs.dashboard_helpers import DEFAULT_LOW_READ_FLOOR
 from nanometa_live.app.utils.callback_helpers import get_classification_stats
 
 logger = logging.getLogger(__name__)
@@ -123,8 +124,16 @@ class ReportGenerator:
         # Classification summary from aggregated kraken
         classified, unclassified = self._get_classification_counts(kraken_all)
 
+        # Per-sample kraken frames are loaded up front so the watchlist screen
+        # can attribute each hit to the samples it came from. An aggregate-only
+        # screen tells the operator a pathogen is present but not where.
+        sample_frames = {
+            sample: load_kraken_data(self.results_dir, sample)
+            for sample in samples if sample is not None
+        }
+
         # Watchlist screening
-        watched_results = self._screen_watchlist(kraken_all)
+        watched_results = self._screen_watchlist(kraken_all, sample_frames)
 
         # Alerts (pathogen + QC) from the post-run watchlist screen and QC stats.
         alerts = self._collect_alerts(qc_stats=qc_all, watched_results=watched_results)
@@ -139,24 +148,7 @@ class ReportGenerator:
                 for r in export_report_links(self.results_dir)
             ]
 
-        # Per-sample data
-        per_sample = {}
-        for sample in samples:
-            if sample is None:
-                continue
-            sample_kraken = load_kraken_data(self.results_dir, sample)
-            sample_qc = get_qc_stats(self.results_dir, sample)
-            s_classified, s_unclassified = self._get_classification_counts(sample_kraken)
-
-            # Top organisms
-            organisms = self._extract_organisms(sample_kraken)
-
-            per_sample[sample] = {
-                "classified": s_classified,
-                "unclassified": s_unclassified,
-                "qc": sample_qc,
-                "organisms": organisms[:20],
-            }
+        per_sample = self._per_sample_data(samples, sample_frames)
 
         return {
             # Timezone-aware local timestamp (carries the UTC offset) so an
@@ -171,12 +163,29 @@ class ReportGenerator:
             "samples": [s for s in samples if s is not None],
             "classified_total": classified,
             "unclassified_total": unclassified,
+            # Read depth for the decision banner's INSUFFICIENT READS gate.
+            # The floor is anchored to min_reads_for_validation so the report
+            # and the dashboard agree on what counts as too shallow to call a
+            # negative; see dashboard_helpers.select_verdict.
+            "total_reads": classified + unclassified,
+            "low_read_floor": self._low_read_floor(),
             "qc_summary": qc_all,
             "watched_results": watched_results,
             "alerts": alerts,
             "per_sample": per_sample,
             "pipeline_reports": pipeline_reports,
         }
+
+    def _low_read_floor(self) -> int:
+        """Reads below which a negative result has not been earned.
+
+        Anchored to ``min_reads_for_validation`` so the report and the
+        dashboard agree on what counts as too shallow to call an absence; see
+        dashboard_helpers.select_verdict.
+        """
+        return int(
+            self.config.get("min_reads_for_validation") or DEFAULT_LOW_READ_FLOOR
+        )
 
     def _get_classification_counts(self, df: pd.DataFrame):
         """Classified/unclassified read counts via the canonical helper.
@@ -190,19 +199,57 @@ class ReportGenerator:
         classified, unclassified, _rate = get_classification_stats(df)
         return classified, unclassified
 
-    def _extract_organisms(self, df: pd.DataFrame, max_n: int = 20) -> List[Dict[str, Any]]:
-        """Extract the top species-level organisms.
+    def _per_sample_data(self, samples, sample_frames) -> Dict[str, Any]:
+        """Per-sample classification counts, QC, organisms and subspecies.
 
-        Species rank (``S``) only: the previous S+G filter double-counted,
-        since a genus row's reads already include its species' reads. Abundance
-        is read from Kraken2's own ``%`` column (the authoritative per-clade
-        fraction of total reads) -- the prior reads/sum(reads) used the per-rank
-        ``reads`` column as denominator, which over-states abundance and can
-        push the listed values past 100%.
+        Subspecies are collected into their OWN list rather than merged into
+        ``organisms``: ranking a species against its own children reads as
+        double counting even though each row's percentage is correct alone.
+        The list is empty on databases that do not resolve below species, and
+        the template omits the section entirely in that case.
+        """
+        per_sample: Dict[str, Any] = {}
+        for sample in samples:
+            if sample is None:
+                continue
+            sample_kraken = sample_frames[sample]
+            sample_qc = get_qc_stats(self.results_dir, sample)
+            s_classified, s_unclassified = self._get_classification_counts(
+                sample_kraken
+            )
+            per_sample[sample] = {
+                "classified": s_classified,
+                "unclassified": s_unclassified,
+                "qc": sample_qc,
+                "organisms": self._extract_organisms(sample_kraken)[:20],
+                "subspecies": self._extract_organisms(
+                    sample_kraken, ranks=("S1", "S2", "S3"),
+                )[:20],
+            }
+        return per_sample
+
+    def _extract_organisms(
+        self, df: pd.DataFrame, max_n: int = 20, ranks: tuple = ("S",),
+    ) -> List[Dict[str, Any]]:
+        """Extract the top organisms at the given rank(s).
+
+        Species rank (``S``) only by default: the previous S+G filter
+        double-counted, since a genus row's reads already include its species'
+        reads. Abundance is read from Kraken2's own ``%`` column (the
+        authoritative per-clade fraction of total reads) -- the prior
+        reads/sum(reads) used the per-rank ``reads`` column as denominator,
+        which over-states abundance and can push the listed values past 100%.
+
+        ``ranks`` exists so subspecies can be listed in their OWN table.
+        Mixing them into this one would rank a species against its own
+        children -- F. tularensis at 99.87% beside F. t. holarctica at 64% --
+        which reads as double counting even though each row's percentage is
+        correct on its own.
         """
         if df.empty or "rank" not in df.columns:
             return []
-        species = df[df["rank"].astype(str).str.strip() == "S"].copy()
+        wanted = {str(r).strip() for r in ranks}
+        species = df[df["rank"].astype(str).str.strip().isin(wanted)].copy()
         if species.empty:
             return []
         species = species.sort_values("reads", ascending=False).head(max_n)
@@ -229,11 +276,68 @@ class ReportGenerator:
             })
         return results
 
-    def _screen_watchlist(self, kraken_df: pd.DataFrame) -> List[Dict[str, Any]]:
+    def _match_entry_rows(
+        self,
+        df: pd.DataFrame,
+        match_id: Optional[int],
+        entry_name: Optional[str],
+    ) -> pd.DataFrame:
+        """Rows of *df* belonging to one watchlist entry.
+
+        Match by the Kraken2 database taxid (``db_taxid`` for GTDB/custom DBs,
+        else the NCBI taxid), then fall back to an exact name match -- the same
+        precedence the dashboard uses.
+        """
+        if df.empty:
+            return df
+        matched = (
+            df[df["taxid"] == match_id] if match_id else df.iloc[0:0]
+        )
+        if matched.empty and entry_name:
+            names_lower = df["name"].astype(str).str.strip().str.lower()
+            matched = df[names_lower == entry_name.strip().lower()]
+        return matched
+
+    def _attribute_entry_to_samples(
+        self,
+        sample_frames: Dict[str, pd.DataFrame],
+        match_id: Optional[int],
+        entry_name: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        """Per-sample read counts for one watchlist entry, highest first."""
+        rows: List[Dict[str, Any]] = []
+        for sample, df in (sample_frames or {}).items():
+            if df is None or df.empty:
+                continue
+            matched = self._match_entry_rows(df, match_id, entry_name)
+            if matched.empty:
+                continue
+            read_col = "cumul_reads" if "cumul_reads" in df.columns else "reads"
+            reads = int(matched[read_col].sum())
+            if reads <= 0:
+                continue
+            classified, unclassified, _rate = get_classification_stats(df)
+            total = classified + unclassified
+            rows.append({
+                "sample": sample,
+                "reads": reads,
+                "abundance": round((reads / total * 100) if total > 0 else 0, 3),
+            })
+        rows.sort(key=lambda r: r["reads"], reverse=True)
+        return rows
+
+    def _screen_watchlist(
+        self,
+        kraken_df: pd.DataFrame,
+        sample_frames: Optional[Dict[str, pd.DataFrame]] = None,
+    ) -> List[Dict[str, Any]]:
         """Screen kraken results against the active watchlist.
 
         Emits one row per active entry (detected and not) so the report's
         Watched Organisms table and decision banner reflect the full screen.
+        Each detected row carries a ``samples`` breakdown so the archived
+        artifact says which barcode a hit came from, not just that the run
+        contained it.
 
         ``get_active_entries()`` returns ``Dict[int, WatchlistEntry]`` -- the
         prior code iterated it as a list of dicts (``entry.get(...)``), which
@@ -257,25 +361,21 @@ class ReportGenerator:
             classified, unclassified, _rate = get_classification_stats(kraken_df)
             total = classified + unclassified
             read_col = "cumul_reads" if "cumul_reads" in kraken_df.columns else "reads"
-            names_lower = kraken_df["name"].astype(str).str.strip().str.lower()
 
             for entry in active_entries.values():
                 threat = entry.threat_level
                 threat_level = threat.value if hasattr(threat, "value") else str(threat)
 
-                # Match by the Kraken2 database taxid (db_taxid for GTDB/custom
-                # DBs, else the NCBI taxid), then fall back to an exact name
-                # match -- the same precedence the dashboard uses.
                 match_id = getattr(entry, "db_taxid", None) or entry.taxid
-                matched = (
-                    kraken_df[kraken_df["taxid"] == match_id]
-                    if match_id else kraken_df.iloc[0:0]
-                )
-                if matched.empty and entry.name:
-                    matched = kraken_df[names_lower == entry.name.strip().lower()]
+                matched = self._match_entry_rows(kraken_df, match_id, entry.name)
 
                 reads = int(matched[read_col].sum()) if not matched.empty else 0
                 abundance = (reads / total * 100) if total > 0 else 0
+                per_sample = (
+                    self._attribute_entry_to_samples(
+                        sample_frames, match_id, entry.name
+                    ) if reads > 0 else []
+                )
 
                 results.append({
                     "name": entry.name,
@@ -284,6 +384,7 @@ class ReportGenerator:
                     "reads": reads,
                     "abundance": round(abundance, 3),
                     "detected": reads > 0,
+                    "samples": per_sample,
                 })
 
         except Exception as e:

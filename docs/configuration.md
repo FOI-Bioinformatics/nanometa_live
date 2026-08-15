@@ -31,6 +31,7 @@ nanopore_output_directory: "/path/to/input"
 | `processing_mode` | string | "batch" | `batch` or `realtime` |
 | `sample_handling` | string | "by_barcode" | `by_barcode`, `single_sample`, or `per_file` |
 | `sample_name` | string | "sample" | Name when using single_sample mode |
+| `negative_control_samples` | list | [] | Samples to treat as negative controls. A detection in one of these is contamination or index hopping, not a finding about the subject. Declare them by **sample name**, which under `by_barcode` input is the barcode directory (`barcode16`) — not the FASTQ filename. A name-pattern fallback recognises forms such as `NTC`, `neg_ctrl`, `blank` and `negative_barcode16`, but a bare `barcode16` cannot be recognised from its name and must be listed here. |
 | `offline_mode` | bool | false | Skip network calls and use cached data only. Set automatically to `true` by a Deployment-tab bundle import; if the Kraken2 database path was not supplied at import, set `kraken_db` before starting analysis. |
 
 ### Kraken2 Classification
@@ -38,7 +39,6 @@ nanopore_output_directory: "/path/to/input"
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `kraken_db` | path | required | Path to Kraken2 database |
-| `kraken_taxonomy` | string | "gtdb" | `ncbi` or `gtdb` |
 | `kraken_memory_mapping` | bool | true | Memory-map database for speed |
 | `kraken2_enable_incremental` | bool | true | Incremental classification in realtime mode |
 
@@ -63,10 +63,9 @@ nanopore_output_directory: "/path/to/input"
 | `blast_validation` | bool | false | Enable validation of detected organisms |
 | `validation_method` | string | "blast" | `blast`, `minimap2`, or `both` |
 | `blast_db` | path | null | BLAST database path |
-| `min_perc_identity` | float | 90 | Minimum percent identity for BLAST hits |
+| `validation_identity_threshold` | float | 90 | Minimum percent identity. Emitted as BOTH `--blast_perc_identity` and `--validation_identity_threshold`, so the filter and the reporting threshold cannot diverge. The legacy `min_perc_identity` key was retired in 2026-08; it shadowed this one in every config and made the control decorative. |
 | `e_val_cutoff` | float | 0.01 | E-value cutoff for BLAST |
 | `validation_hit_rate_threshold` | float | 0.5 | Minimum fraction of reads that must validate |
-| `validation_identity_threshold` | float | 90.0 | Minimum identity score for validation |
 | `minimap2_preset` | string | "map-ont" | Minimap2 alignment preset |
 | `minimap2_min_mapq` | int | 30 | Minimum mapping quality for minimap2 |
 
@@ -76,16 +75,15 @@ nanopore_output_directory: "/path/to/input"
 |-----------|------|---------|-------------|
 | `update_interval_seconds` | int | 10 | Dashboard refresh interval in seconds. Lowered from 30 in 2026-05; downstream callbacks are gated on a results fingerprint so unchanged ticks are near-zero cost. |
 | `check_intervals_seconds` | int | 15 | Backend file-check interval in seconds |
-| `gui_port` | int | 8050 | Web server port |
-| `danger_lower_limit` | int | 100 | Read count threshold for species-of-interest alerts |
+| `gui_port` | int | 8050 | Web server port. Used when `--port` is not given; an explicit `--port` wins. Takes effect on the next launch. |
 
 ### Visualization
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `default_hierarchy_letters` | list | ["D","C","G","S"] | Default taxonomy levels shown |
-| `taxonomic_hierarchy_letters` | list | ["D","P","C","O","F","G","S"] | All available taxonomy levels |
-| `default_reads_per_level` | int | 10 | Minimum reads to display at each level |
+| `default_hierarchy_letters` | list | ["D","C","G","S"] | Default taxonomy levels shown in the Taxonomy tab. Add `"S1"` to show subspecies by default; it is omitted because a species row already contains its subspecies, so the level splits an existing flow rather than adding to it. |
+| `taxonomic_hierarchy_letters` | list | ["D","P","C","O","F","G","S"] | All available taxonomy levels. `S1` (subspecies / strain) is selectable in the Taxonomy tab regardless of this list. |
+| `default_reads_per_level` | int | 10 | Seeds the Taxonomy tab's minimum-reads filter. On an All-Samples view of 12+ barcodes the floor rises to `max(this, 5 x N)`, since a 1-read per-sample hit becomes N reads in the aggregate. |
 | `enable_krona_plots` | bool | false | Generate Krona interactive HTML plots |
 | `enable_nanopore_stats_mqc` | bool | false | Include NanoPlot stats in MultiQC |
 
@@ -95,7 +93,6 @@ nanopore_output_directory: "/path/to/input"
 |-----------|------|---------|-------------|
 | `qc_tool` | string | "chopper" | QC tool for read filtering |
 | `skip_nanoplot` | bool | false | Skip NanoPlot quality reporting |
-| `remove_temp_files` | bool | true | Clean up intermediate files after processing |
 
 ### Real-time Mode
 
@@ -300,7 +297,6 @@ validation_method: "minimap2"
 minimap2_preset: "map-ont"
 minimap2_min_mapq: 30
 
-danger_lower_limit: 50
 ```
 
 ## Command Line Options

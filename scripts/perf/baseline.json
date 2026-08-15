@@ -1,0 +1,745 @@
+{
+  "_comment": "Per-poll scaling baseline. Regenerate with: python -m scripts.perf.scaling_bench --update-baseline. Wall times are informational; SYSCALL COUNTS are the gate. Only ever update to lower counts.",
+  "schema": 1,
+  "label": "after-phase2",
+  "fixture": {
+    "taxa_per_report": 300,
+    "batches_per_sample": 20,
+    "seed": 1337,
+    "write_manifest": false
+  },
+  "poll": {
+    "build_figures": true,
+    "max_taxa_per_level": 25,
+    "min_reads": 10,
+    "cache_ttl_seconds": 30,
+    "repeat": 3
+  },
+  "env": {
+    "python": "3.13.0",
+    "pandas": "3.0.2",
+    "platform": "darwin-arm64"
+  },
+  "cells": {
+    "batch/cold/n=1": {
+      "counts": {
+        "os.stat": 97,
+        "os.lstat": 28,
+        "os.scandir": 21,
+        "os.listdir": 3,
+        "os.walk": 7,
+        "glob.glob": 16,
+        "glob.iglob": 16,
+        "builtins.open": 4,
+        "json.load": 1,
+        "pandas.read_csv": 3
+      },
+      "wall_min_ms": 27.08,
+      "wall_med_ms": 29.06,
+      "kraken_loads": 5,
+      "frame_cache_len": 1
+    },
+    "batch/cold/n=12": {
+      "counts": {
+        "os.stat": 746,
+        "os.lstat": 325,
+        "os.scandir": 87,
+        "os.listdir": 3,
+        "os.walk": 18,
+        "glob.glob": 82,
+        "glob.iglob": 82,
+        "builtins.open": 37,
+        "json.load": 12,
+        "pandas.read_csv": 25
+      },
+      "wall_min_ms": 73.64,
+      "wall_med_ms": 75.45,
+      "kraken_loads": 38,
+      "frame_cache_len": 12
+    },
+    "batch/cold/n=2": {
+      "counts": {
+        "os.stat": 146,
+        "os.lstat": 55,
+        "os.scandir": 27,
+        "os.listdir": 3,
+        "os.walk": 8,
+        "glob.glob": 22,
+        "glob.iglob": 22,
+        "builtins.open": 7,
+        "json.load": 2,
+        "pandas.read_csv": 5
+      },
+      "wall_min_ms": 30.61,
+      "wall_med_ms": 31.46,
+      "kraken_loads": 8,
+      "frame_cache_len": 2
+    },
+    "batch/cold/n=24": {
+      "counts": {
+        "os.stat": 1730,
+        "os.lstat": 649,
+        "os.scandir": 159,
+        "os.listdir": 3,
+        "os.walk": 30,
+        "glob.glob": 154,
+        "glob.iglob": 154,
+        "builtins.open": 73,
+        "json.load": 24,
+        "pandas.read_csv": 49
+      },
+      "wall_min_ms": 99.89,
+      "wall_med_ms": 100.19,
+      "kraken_loads": 74,
+      "frame_cache_len": 24
+    },
+    "batch/cold/n=6": {
+      "counts": {
+        "os.stat": 362,
+        "os.lstat": 163,
+        "os.scandir": 51,
+        "os.listdir": 3,
+        "os.walk": 12,
+        "glob.glob": 46,
+        "glob.iglob": 46,
+        "builtins.open": 19,
+        "json.load": 6,
+        "pandas.read_csv": 13
+      },
+      "wall_min_ms": 42.46,
+      "wall_med_ms": 43.32,
+      "kraken_loads": 20,
+      "frame_cache_len": 6
+    },
+    "batch/full_refresh/n=1": {
+      "counts": {
+        "os.stat": 98,
+        "os.lstat": 26,
+        "os.scandir": 16,
+        "os.listdir": 1,
+        "os.walk": 9,
+        "glob.glob": 7,
+        "glob.iglob": 7,
+        "builtins.open": 1,
+        "json.load": 0,
+        "pandas.read_csv": 1
+      },
+      "wall_min_ms": 25.11,
+      "wall_med_ms": 27.13,
+      "kraken_loads": 5,
+      "frame_cache_len": 2
+    },
+    "batch/full_refresh/n=12": {
+      "counts": {
+        "os.stat": 824,
+        "os.lstat": 312,
+        "os.scandir": 71,
+        "os.listdir": 1,
+        "os.walk": 20,
+        "glob.glob": 51,
+        "glob.iglob": 51,
+        "builtins.open": 12,
+        "json.load": 0,
+        "pandas.read_csv": 12
+      },
+      "wall_min_ms": 55.27,
+      "wall_med_ms": 56.94,
+      "kraken_loads": 38,
+      "frame_cache_len": 24
+    },
+    "batch/full_refresh/n=2": {
+      "counts": {
+        "os.stat": 154,
+        "os.lstat": 52,
+        "os.scandir": 21,
+        "os.listdir": 1,
+        "os.walk": 10,
+        "glob.glob": 11,
+        "glob.iglob": 11,
+        "builtins.open": 2,
+        "json.load": 0,
+        "pandas.read_csv": 2
+      },
+      "wall_min_ms": 30.44,
+      "wall_med_ms": 32.0,
+      "kraken_loads": 8,
+      "frame_cache_len": 4
+    },
+    "batch/full_refresh/n=24": {
+      "counts": {
+        "os.stat": 1892,
+        "os.lstat": 624,
+        "os.scandir": 131,
+        "os.listdir": 1,
+        "os.walk": 32,
+        "glob.glob": 99,
+        "glob.iglob": 99,
+        "builtins.open": 24,
+        "json.load": 0,
+        "pandas.read_csv": 24
+      },
+      "wall_min_ms": 84.74,
+      "wall_med_ms": 84.76,
+      "kraken_loads": 74,
+      "frame_cache_len": 48
+    },
+    "batch/full_refresh/n=6": {
+      "counts": {
+        "os.stat": 398,
+        "os.lstat": 156,
+        "os.scandir": 41,
+        "os.listdir": 1,
+        "os.walk": 14,
+        "glob.glob": 27,
+        "glob.iglob": 27,
+        "builtins.open": 6,
+        "json.load": 0,
+        "pandas.read_csv": 6
+      },
+      "wall_min_ms": 39.36,
+      "wall_med_ms": 39.86,
+      "kraken_loads": 20,
+      "frame_cache_len": 12
+    },
+    "batch/incremental/n=1": {
+      "counts": {
+        "os.stat": 98,
+        "os.lstat": 26,
+        "os.scandir": 16,
+        "os.listdir": 1,
+        "os.walk": 9,
+        "glob.glob": 7,
+        "glob.iglob": 7,
+        "builtins.open": 1,
+        "json.load": 0,
+        "pandas.read_csv": 1
+      },
+      "wall_min_ms": 26.34,
+      "wall_med_ms": 26.7,
+      "kraken_loads": 5,
+      "frame_cache_len": 2
+    },
+    "batch/incremental/n=12": {
+      "counts": {
+        "os.stat": 637,
+        "os.lstat": 169,
+        "os.scandir": 71,
+        "os.listdir": 1,
+        "os.walk": 20,
+        "glob.glob": 51,
+        "glob.iglob": 51,
+        "builtins.open": 1,
+        "json.load": 0,
+        "pandas.read_csv": 1
+      },
+      "wall_min_ms": 38.38,
+      "wall_med_ms": 38.44,
+      "kraken_loads": 38,
+      "frame_cache_len": 13
+    },
+    "batch/incremental/n=2": {
+      "counts": {
+        "os.stat": 137,
+        "os.lstat": 39,
+        "os.scandir": 21,
+        "os.listdir": 1,
+        "os.walk": 10,
+        "glob.glob": 11,
+        "glob.iglob": 11,
+        "builtins.open": 1,
+        "json.load": 0,
+        "pandas.read_csv": 1
+      },
+      "wall_min_ms": 27.85,
+      "wall_med_ms": 27.99,
+      "kraken_loads": 8,
+      "frame_cache_len": 3
+    },
+    "batch/incremental/n=24": {
+      "counts": {
+        "os.stat": 1501,
+        "os.lstat": 325,
+        "os.scandir": 131,
+        "os.listdir": 1,
+        "os.walk": 32,
+        "glob.glob": 99,
+        "glob.iglob": 99,
+        "builtins.open": 1,
+        "json.load": 0,
+        "pandas.read_csv": 1
+      },
+      "wall_min_ms": 53.17,
+      "wall_med_ms": 53.41,
+      "kraken_loads": 74,
+      "frame_cache_len": 25
+    },
+    "batch/incremental/n=6": {
+      "counts": {
+        "os.stat": 313,
+        "os.lstat": 91,
+        "os.scandir": 41,
+        "os.listdir": 1,
+        "os.walk": 14,
+        "glob.glob": 27,
+        "glob.iglob": 27,
+        "builtins.open": 1,
+        "json.load": 0,
+        "pandas.read_csv": 1
+      },
+      "wall_min_ms": 33.38,
+      "wall_med_ms": 33.64,
+      "kraken_loads": 20,
+      "frame_cache_len": 7
+    },
+    "batch/quiet/n=1": {
+      "counts": {
+        "os.stat": 55,
+        "os.lstat": 0,
+        "os.scandir": 9,
+        "os.listdir": 0,
+        "os.walk": 4,
+        "glob.glob": 5,
+        "glob.iglob": 5,
+        "builtins.open": 0,
+        "json.load": 0,
+        "pandas.read_csv": 0
+      },
+      "wall_min_ms": 23.66,
+      "wall_med_ms": 23.78,
+      "kraken_loads": 5,
+      "frame_cache_len": 1
+    },
+    "batch/quiet/n=12": {
+      "counts": {
+        "os.stat": 319,
+        "os.lstat": 0,
+        "os.scandir": 53,
+        "os.listdir": 0,
+        "os.walk": 4,
+        "glob.glob": 49,
+        "glob.iglob": 49,
+        "builtins.open": 0,
+        "json.load": 0,
+        "pandas.read_csv": 0
+      },
+      "wall_min_ms": 32.21,
+      "wall_med_ms": 32.34,
+      "kraken_loads": 38,
+      "frame_cache_len": 12
+    },
+    "batch/quiet/n=2": {
+      "counts": {
+        "os.stat": 79,
+        "os.lstat": 0,
+        "os.scandir": 13,
+        "os.listdir": 0,
+        "os.walk": 4,
+        "glob.glob": 9,
+        "glob.iglob": 9,
+        "builtins.open": 0,
+        "json.load": 0,
+        "pandas.read_csv": 0
+      },
+      "wall_min_ms": 23.16,
+      "wall_med_ms": 23.48,
+      "kraken_loads": 8,
+      "frame_cache_len": 2
+    },
+    "batch/quiet/n=24": {
+      "counts": {
+        "os.stat": 607,
+        "os.lstat": 0,
+        "os.scandir": 101,
+        "os.listdir": 0,
+        "os.walk": 4,
+        "glob.glob": 97,
+        "glob.iglob": 97,
+        "builtins.open": 0,
+        "json.load": 0,
+        "pandas.read_csv": 0
+      },
+      "wall_min_ms": 43.75,
+      "wall_med_ms": 45.06,
+      "kraken_loads": 74,
+      "frame_cache_len": 24
+    },
+    "batch/quiet/n=6": {
+      "counts": {
+        "os.stat": 175,
+        "os.lstat": 0,
+        "os.scandir": 29,
+        "os.listdir": 0,
+        "os.walk": 4,
+        "glob.glob": 25,
+        "glob.iglob": 25,
+        "builtins.open": 0,
+        "json.load": 0,
+        "pandas.read_csv": 0
+      },
+      "wall_min_ms": 30.0,
+      "wall_med_ms": 30.03,
+      "kraken_loads": 20,
+      "frame_cache_len": 6
+    },
+    "realtime_incremental/cold/n=1": {
+      "counts": {
+        "os.stat": 429,
+        "os.lstat": 383,
+        "os.scandir": 45,
+        "os.listdir": 11,
+        "os.walk": 8,
+        "glob.glob": 25,
+        "glob.iglob": 25,
+        "builtins.open": 60,
+        "json.load": 0,
+        "pandas.read_csv": 60
+      },
+      "wall_min_ms": 72.13,
+      "wall_med_ms": 78.18,
+      "kraken_loads": 5,
+      "frame_cache_len": 20
+    },
+    "realtime_incremental/cold/n=12": {
+      "counts": {
+        "os.stat": 4609,
+        "os.lstat": 4596,
+        "os.scandir": 375,
+        "os.listdir": 33,
+        "os.walk": 30,
+        "glob.glob": 201,
+        "glob.iglob": 201,
+        "builtins.open": 720,
+        "json.load": 0,
+        "pandas.read_csv": 720
+      },
+      "wall_min_ms": 603.93,
+      "wall_med_ms": 607.64,
+      "kraken_loads": 38,
+      "frame_cache_len": 240
+    },
+    "realtime_incremental/cold/n=2": {
+      "counts": {
+        "os.stat": 809,
+        "os.lstat": 766,
+        "os.scandir": 75,
+        "os.listdir": 13,
+        "os.walk": 10,
+        "glob.glob": 41,
+        "glob.iglob": 41,
+        "builtins.open": 120,
+        "json.load": 0,
+        "pandas.read_csv": 120
+      },
+      "wall_min_ms": 114.25,
+      "wall_med_ms": 116.69,
+      "kraken_loads": 8,
+      "frame_cache_len": 40
+    },
+    "realtime_incremental/cold/n=24": {
+      "counts": {
+        "os.stat": 9169,
+        "os.lstat": 9192,
+        "os.scandir": 735,
+        "os.listdir": 57,
+        "os.walk": 54,
+        "glob.glob": 393,
+        "glob.iglob": 393,
+        "builtins.open": 1440,
+        "json.load": 0,
+        "pandas.read_csv": 1440
+      },
+      "wall_min_ms": 1147.56,
+      "wall_med_ms": 1174.88,
+      "kraken_loads": 74,
+      "frame_cache_len": 480
+    },
+    "realtime_incremental/cold/n=6": {
+      "counts": {
+        "os.stat": 2329,
+        "os.lstat": 2298,
+        "os.scandir": 195,
+        "os.listdir": 21,
+        "os.walk": 18,
+        "glob.glob": 105,
+        "glob.iglob": 105,
+        "builtins.open": 360,
+        "json.load": 0,
+        "pandas.read_csv": 360
+      },
+      "wall_min_ms": 296.49,
+      "wall_med_ms": 318.4,
+      "kraken_loads": 20,
+      "frame_cache_len": 120
+    },
+    "realtime_incremental/full_refresh/n=1": {
+      "counts": {
+        "os.stat": 485,
+        "os.lstat": 392,
+        "os.scandir": 52,
+        "os.listdir": 6,
+        "os.walk": 12,
+        "glob.glob": 17,
+        "glob.iglob": 17,
+        "builtins.open": 1,
+        "json.load": 0,
+        "pandas.read_csv": 1
+      },
+      "wall_min_ms": 33.14,
+      "wall_med_ms": 33.19,
+      "kraken_loads": 5,
+      "frame_cache_len": 21
+    },
+    "realtime_incremental/full_refresh/n=12": {
+      "counts": {
+        "os.stat": 5347,
+        "os.lstat": 4704,
+        "os.scandir": 481,
+        "os.listdir": 17,
+        "os.walk": 56,
+        "glob.glob": 149,
+        "glob.iglob": 149,
+        "builtins.open": 12,
+        "json.load": 0,
+        "pandas.read_csv": 12
+      },
+      "wall_min_ms": 149.08,
+      "wall_med_ms": 151.08,
+      "kraken_loads": 38,
+      "frame_cache_len": 252
+    },
+    "realtime_incremental/full_refresh/n=2": {
+      "counts": {
+        "os.stat": 927,
+        "os.lstat": 784,
+        "os.scandir": 91,
+        "os.listdir": 7,
+        "os.walk": 16,
+        "glob.glob": 29,
+        "glob.iglob": 29,
+        "builtins.open": 2,
+        "json.load": 0,
+        "pandas.read_csv": 2
+      },
+      "wall_min_ms": 43.52,
+      "wall_med_ms": 43.72,
+      "kraken_loads": 8,
+      "frame_cache_len": 42
+    },
+    "realtime_incremental/full_refresh/n=24": {
+      "counts": {
+        "os.stat": 10651,
+        "os.lstat": 9408,
+        "os.scandir": 949,
+        "os.listdir": 29,
+        "os.walk": 104,
+        "glob.glob": 293,
+        "glob.iglob": 293,
+        "builtins.open": 24,
+        "json.load": 0,
+        "pandas.read_csv": 24
+      },
+      "wall_min_ms": 279.64,
+      "wall_med_ms": 283.3,
+      "kraken_loads": 74,
+      "frame_cache_len": 504
+    },
+    "realtime_incremental/full_refresh/n=6": {
+      "counts": {
+        "os.stat": 2695,
+        "os.lstat": 2352,
+        "os.scandir": 247,
+        "os.listdir": 11,
+        "os.walk": 32,
+        "glob.glob": 77,
+        "glob.iglob": 77,
+        "builtins.open": 6,
+        "json.load": 0,
+        "pandas.read_csv": 6
+      },
+      "wall_min_ms": 86.43,
+      "wall_med_ms": 88.31,
+      "kraken_loads": 20,
+      "frame_cache_len": 126
+    },
+    "realtime_incremental/incremental/n=1": {
+      "counts": {
+        "os.stat": 485,
+        "os.lstat": 392,
+        "os.scandir": 52,
+        "os.listdir": 6,
+        "os.walk": 12,
+        "glob.glob": 17,
+        "glob.iglob": 17,
+        "builtins.open": 1,
+        "json.load": 0,
+        "pandas.read_csv": 1
+      },
+      "wall_min_ms": 32.87,
+      "wall_med_ms": 33.5,
+      "kraken_loads": 5,
+      "frame_cache_len": 21
+    },
+    "realtime_incremental/incremental/n=12": {
+      "counts": {
+        "os.stat": 4016,
+        "os.lstat": 2680,
+        "os.scandir": 393,
+        "os.listdir": 6,
+        "os.walk": 34,
+        "glob.glob": 127,
+        "glob.iglob": 127,
+        "builtins.open": 1,
+        "json.load": 0,
+        "pandas.read_csv": 1
+      },
+      "wall_min_ms": 94.0,
+      "wall_med_ms": 94.33,
+      "kraken_loads": 38,
+      "frame_cache_len": 241
+    },
+    "realtime_incremental/incremental/n=2": {
+      "counts": {
+        "os.stat": 806,
+        "os.lstat": 600,
+        "os.scandir": 83,
+        "os.listdir": 6,
+        "os.walk": 14,
+        "glob.glob": 27,
+        "glob.iglob": 27,
+        "builtins.open": 1,
+        "json.load": 0,
+        "pandas.read_csv": 1
+      },
+      "wall_min_ms": 38.49,
+      "wall_med_ms": 39.97,
+      "kraken_loads": 8,
+      "frame_cache_len": 41
+    },
+    "realtime_incremental/incremental/n=24": {
+      "counts": {
+        "os.stat": 7868,
+        "os.lstat": 5176,
+        "os.scandir": 765,
+        "os.listdir": 6,
+        "os.walk": 58,
+        "glob.glob": 247,
+        "glob.iglob": 247,
+        "builtins.open": 1,
+        "json.load": 0,
+        "pandas.read_csv": 1
+      },
+      "wall_min_ms": 166.8,
+      "wall_med_ms": 171.99,
+      "kraken_loads": 74,
+      "frame_cache_len": 481
+    },
+    "realtime_incremental/incremental/n=6": {
+      "counts": {
+        "os.stat": 2090,
+        "os.lstat": 1432,
+        "os.scandir": 207,
+        "os.listdir": 6,
+        "os.walk": 22,
+        "glob.glob": 67,
+        "glob.iglob": 67,
+        "builtins.open": 1,
+        "json.load": 0,
+        "pandas.read_csv": 1
+      },
+      "wall_min_ms": 61.0,
+      "wall_med_ms": 61.29,
+      "kraken_loads": 20,
+      "frame_cache_len": 121
+    },
+    "realtime_incremental/quiet/n=1": {
+      "counts": {
+        "os.stat": 118,
+        "os.lstat": 14,
+        "os.scandir": 17,
+        "os.listdir": 0,
+        "os.walk": 4,
+        "glob.glob": 8,
+        "glob.iglob": 8,
+        "builtins.open": 0,
+        "json.load": 0,
+        "pandas.read_csv": 0
+      },
+      "wall_min_ms": 23.03,
+      "wall_med_ms": 23.24,
+      "kraken_loads": 5,
+      "frame_cache_len": 20
+    },
+    "realtime_incremental/quiet/n=12": {
+      "counts": {
+        "os.stat": 1075,
+        "os.lstat": 168,
+        "os.scandir": 149,
+        "os.listdir": 0,
+        "os.walk": 4,
+        "glob.glob": 85,
+        "glob.iglob": 85,
+        "builtins.open": 0,
+        "json.load": 0,
+        "pandas.read_csv": 0
+      },
+      "wall_min_ms": 39.54,
+      "wall_med_ms": 40.05,
+      "kraken_loads": 38,
+      "frame_cache_len": 240
+    },
+    "realtime_incremental/quiet/n=2": {
+      "counts": {
+        "os.stat": 205,
+        "os.lstat": 28,
+        "os.scandir": 29,
+        "os.listdir": 0,
+        "os.walk": 4,
+        "glob.glob": 15,
+        "glob.iglob": 15,
+        "builtins.open": 0,
+        "json.load": 0,
+        "pandas.read_csv": 0
+      },
+      "wall_min_ms": 25.83,
+      "wall_med_ms": 25.89,
+      "kraken_loads": 8,
+      "frame_cache_len": 40
+    },
+    "realtime_incremental/quiet/n=24": {
+      "counts": {
+        "os.stat": 2119,
+        "os.lstat": 336,
+        "os.scandir": 293,
+        "os.listdir": 0,
+        "os.walk": 4,
+        "glob.glob": 169,
+        "glob.iglob": 169,
+        "builtins.open": 0,
+        "json.load": 0,
+        "pandas.read_csv": 0
+      },
+      "wall_min_ms": 58.99,
+      "wall_med_ms": 60.42,
+      "kraken_loads": 74,
+      "frame_cache_len": 480
+    },
+    "realtime_incremental/quiet/n=6": {
+      "counts": {
+        "os.stat": 553,
+        "os.lstat": 84,
+        "os.scandir": 77,
+        "os.listdir": 0,
+        "os.walk": 4,
+        "glob.glob": 43,
+        "glob.iglob": 43,
+        "builtins.open": 0,
+        "json.load": 0,
+        "pandas.read_csv": 0
+      },
+      "wall_min_ms": 30.65,
+      "wall_med_ms": 31.11,
+      "kraken_loads": 20,
+      "frame_cache_len": 120
+    }
+  }
+}

@@ -125,7 +125,6 @@ def _validate_numeric_ranges(
     chopper_minlength,
     chopper_quality,
     filtlong_minlength,
-    danger_threshold,
     max_file_age_minutes,
     min_reads_for_validation,
 ):
@@ -166,8 +165,6 @@ def _validate_numeric_ranges(
         errors.append("Chopper quality must be between 0-30")
     if filtlong_minlength is not None and filtlong_minlength < 0:
         errors.append("Filtlong minimum length must be 0 or greater")
-    if danger_threshold is not None and danger_threshold < 1:
-        errors.append("Alert Threshold must be at least 1")
     if max_file_age_minutes is not None and max_file_age_minutes != "":
         try:
             if int(max_file_age_minutes) < 0:
@@ -187,8 +184,6 @@ def build_config_from_form(
     kraken_db,
     results_dir,
     update_interval,
-    danger_threshold,
-    taxonomy,
     check_interval,
     realtime_timeout_minutes,
     min_reads_per_level,
@@ -199,7 +194,6 @@ def build_config_from_form(
     genome_cache_dir,
     cores,
     gui_port,
-    clean_temp,
     pipeline_profile,
     pipeline_source_type,
     pipeline_branch,
@@ -209,6 +203,7 @@ def build_config_from_form(
     processing_mode,
     sample_handling,
     sample_name,
+    negative_controls,
     qc_tool,
     skip_nanoplot,
     kraken2_incremental,
@@ -269,7 +264,6 @@ def build_config_from_form(
         chopper_minlength=chopper_minlength,
         chopper_quality=chopper_quality,
         filtlong_minlength=filtlong_minlength,
-        danger_threshold=danger_threshold,
         max_file_age_minutes=max_file_age_minutes,
         min_reads_for_validation=min_reads_for_validation,
     )
@@ -304,11 +298,6 @@ def build_config_from_form(
     if update_interval is not None:
         config["update_interval_seconds"] = update_interval
 
-    if danger_threshold is not None:
-        config["danger_lower_limit"] = danger_threshold
-
-    if taxonomy is not None:
-        config["kraken_taxonomy"] = taxonomy
 
     if check_interval is not None:
         config["check_intervals_seconds"] = check_interval
@@ -361,8 +350,6 @@ def build_config_from_form(
     if gui_port is not None:
         config["gui_port"] = int(gui_port)
 
-    if clean_temp is not None:
-        config["remove_temp_files"] = bool(clean_temp)
 
     if pipeline_profile is not None:
         config["pipeline_profile"] = pipeline_profile
@@ -392,6 +379,16 @@ def build_config_from_form(
 
     if sample_name is not None:
         config["sample_name"] = sample_name if sample_name.strip() else "sample"
+    # Normalised to a list of trimmed names. The dropdown yields a list, but a
+    # config edited by hand may hold a string, and is_negative_control matches
+    # exactly -- so untrimmed or scalar values would look declared and do
+    # nothing.
+    if negative_controls is not None:
+        if isinstance(negative_controls, str):
+            negative_controls = [negative_controls]
+        config["negative_control_samples"] = [
+            str(s).strip() for s in negative_controls if str(s).strip()
+        ]
 
     # Pipeline options
     if qc_tool is not None:

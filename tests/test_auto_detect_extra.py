@@ -2,22 +2,28 @@
 Tests for the previously-untested auto_detect functions.
 
 test_auto_detect.py covers detect_sample_handling / find_sample_subdirs /
-get_barcode_list / detect_file_format. This adds is_barcode_named,
-detect_kraken_taxonomy (name hints, seqid map, inspect patterns, fallback) and
+get_barcode_list / detect_file_format. This adds is_barcode_named and
 estimate_update_interval (batch vs realtime, clamping). File mtimes are
 backdated rather than slept on.
 
-Note: detect_kraken_taxonomy inspects the db's *parent* directory name for
-'gtdb'/'ncbi' hints, so tests place the db under a neutrally-named intermediate
-directory rather than directly in tmp_path (whose name echoes the test name).
+The taxonomy-detection tests here previously exercised detect_kraken_taxonomy,
+which has been replaced by two-axis detection on the database index. Their
+fixtures survive against the sidecar-file fallback that took over the signals
+the index cannot see; see tests/test_database_profile.py for the name-based
+axis. Databases are still placed under a neutrally-named intermediate
+directory, now to prove the directory name is NOT consulted.
 """
 
 import os
 
 import pytest
 
+from nanometa_live.core.taxonomy.database_indexer import (
+    DatabaseIndexBuilder,
+    _nomenclature_hints_from_files,
+)
+from nanometa_live.core.taxonomy.database_profile import Nomenclature
 from nanometa_live.core.utils.auto_detect import (
-    detect_kraken_taxonomy,
     estimate_update_interval,
     is_barcode_named,
 )
@@ -40,20 +46,18 @@ class TestIsBarcodeNamed:
         assert is_barcode_named(name) is expected
 
 
-class TestDetectKrakenTaxonomy:
-    def test_missing_db_defaults_gtdb(self, tmp_path):
-        ttype, _ = detect_kraken_taxonomy(str(tmp_path / "nope"))
-        assert ttype == "gtdb"
+class TestNomenclatureHintsFromFiles:
+    """Sidecar-file signals, migrated from the removed detect_kraken_taxonomy.
 
-    def test_name_hint_gtdb(self, tmp_path):
-        db = _dbroot(tmp_path) / "kraken2_gtdb_bac120"
-        db.mkdir()
-        assert detect_kraken_taxonomy(str(db))[0] == "gtdb"
+    These two files carry evidence the inspect dump does not, so they remain
+    the fallback when taxon names alone are inconclusive. The fixtures are
+    kept from the original tests because they are the best coverage in the
+    repo for the gzipped and accession-prefix cases.
 
-    def test_name_hint_ncbi(self, tmp_path):
-        db = _dbroot(tmp_path) / "standard_ncbi"
-        db.mkdir()
-        assert detect_kraken_taxonomy(str(db))[0] == "ncbi"
+    Two behaviours from the old detector are deliberately NOT carried over and
+    are asserted against below: guessing from the directory name, and
+    defaulting to GTDB when nothing matched.
+    """
 
     def test_seqid_map_gtdb_accessions(self, tmp_path):
         db = _dbroot(tmp_path) / "customdb"
@@ -61,60 +65,9 @@ class TestDetectKrakenTaxonomy:
         (db / "seqid2taxid.map").write_text(
             "".join(f"GB_GCA_{i:06d}.1\t{i}\n" for i in range(60))
         )
-        assert detect_kraken_taxonomy(str(db))[0] == "gtdb"
-
-    def test_inspect_ncbi_naming(self, tmp_path):
-        root = _dbroot(tmp_path)
-        db = root / "customdb"
-        db.mkdir()
-        # globbed from the db's parent directory (root)
-        (root / "db_inspect.txt").write_text(
-            "50.0\t100\t100\tS\t562\tEscherichia coli\n"
-        )
-        assert detect_kraken_taxonomy(str(db))[0] == "ncbi"
-
-    def test_unmarked_db_defaults_gtdb(self, tmp_path):
-        db = _dbroot(tmp_path) / "customdb"
-        db.mkdir()
-        ttype, reason = detect_kraken_taxonomy(str(db))
-        assert ttype == "gtdb"
-        assert "could not determine" in reason.lower()
-
-    def test_gzipped_inspect_gtdb_suffix_positive(self, tmp_path):
-        # The bioshield case: a custom/remapped DB shipping only inspect.txt.gz
-        # whose GTDB species suffixes (ambifaria_A) are the giveaway. Must be a
-        # POSITIVE detection, not the default fallthrough.
-        import gzip
-        db = _dbroot(tmp_path) / "customdb"
-        db.mkdir()
-        with gzip.open(db / "inspect.txt.gz", "wt") as fh:
-            fh.write("0.1\t100\t0\tG\t4007157\t  Burkholderia\n")
-            for sp, sfx in (("ambifaria", "A"), ("lata", "C"), ("cepacia", "F")):
-                fh.write(f"0.05\t50\t50\tS\t40071{ord(sfx)}\t    Burkholderia {sp}_{sfx}\n")
-        ttype, reason = detect_kraken_taxonomy(str(db))
-        assert ttype == "gtdb"
-        assert "could not determine" not in reason.lower()
-        assert ".gz" in reason
-
-    def test_gzipped_inspect_ncbi_taxids(self, tmp_path):
-        import gzip
-        db = _dbroot(tmp_path) / "customdb"
-        db.mkdir()
-        with gzip.open(db / "inspect.txt.gz", "wt") as fh:
-            fh.write("50.0\t100\t100\tS\t562\tEscherichia coli\n")
-            fh.write("25.0\t50\t50\tS\t1280\tStaphylococcus aureus\n")
-        assert detect_kraken_taxonomy(str(db))[0] == "ncbi"
-
-    def test_plain_inspect_in_db_dir_gtdb(self, tmp_path):
-        # inspect.txt directly in the DB dir (not the parent) is now read.
-        db = _dbroot(tmp_path) / "customdb"
-        db.mkdir()
-        (db / "inspect.txt").write_text(
-            "0.05\t50\t50\tS\t900001\t    Prevotella copri_B\n"
-            "0.05\t50\t50\tS\t900002\t    Prevotella copri_C\n"
-            "0.05\t50\t50\tS\t900003\t    Prevotella copri_D\n"
-        )
-        assert detect_kraken_taxonomy(str(db))[0] == "gtdb"
+        nom, evidence = _nomenclature_hints_from_files(db)
+        assert nom is Nomenclature.GTDB
+        assert "seqid2taxid" in evidence
 
     def test_gzipped_seqid_map_gtdb_accessions(self, tmp_path):
         import gzip
@@ -122,7 +75,89 @@ class TestDetectKrakenTaxonomy:
         db.mkdir()
         with gzip.open(db / "seqid2taxid.map.gz", "wt") as fh:
             fh.write("".join(f"GB_GCA_{i:06d}.1\t{i}\n" for i in range(60)))
-        assert detect_kraken_taxonomy(str(db))[0] == "gtdb"
+        assert _nomenclature_hints_from_files(db)[0] is Nomenclature.GTDB
+
+    def test_a_few_gtdb_accessions_are_not_enough(self, tmp_path):
+        """An NCBI database may legitimately include some GTDB-sourced rows."""
+        db = _dbroot(tmp_path) / "customdb"
+        db.mkdir()
+        (db / "seqid2taxid.map").write_text(
+            "".join(f"GB_GCA_{i:06d}.1\t{i}\n" for i in range(5))
+            + "".join(f"NC_{i:06d}.1\t{i}\n" for i in range(100))
+        )
+        assert _nomenclature_hints_from_files(db)[0] is Nomenclature.UNKNOWN
+
+    def test_library_report_gtdb(self, tmp_path):
+        db = _dbroot(tmp_path) / "customdb"
+        (db / "library").mkdir(parents=True)
+        (db / "library" / "library_report.tsv").write_text(
+            "d__Bacteria;p__Pseudomonadota;s__Escherichia coli\n"
+        )
+        nom, evidence = _nomenclature_hints_from_files(db)
+        assert nom is Nomenclature.GTDB
+        assert "library report" in evidence
+
+    def test_library_report_ncbi(self, tmp_path):
+        db = _dbroot(tmp_path) / "customdb"
+        (db / "library").mkdir(parents=True)
+        (db / "library" / "library_report.tsv").write_text(
+            "cellular organisms; Bacteria; Pseudomonadota\n"
+        )
+        assert _nomenclature_hints_from_files(db)[0] is Nomenclature.NCBI
+
+    def test_directory_name_is_no_longer_a_signal(self, tmp_path):
+        """The old detector guessed from the path; "/data/gtdb_and_ncbi/" broke it."""
+        db = _dbroot(tmp_path) / "kraken2_gtdb_bac120"
+        db.mkdir()
+        assert _nomenclature_hints_from_files(db)[0] is Nomenclature.UNKNOWN
+
+    def test_unmarked_database_stays_unknown(self, tmp_path):
+        """No more defaulting to GTDB.
+
+        UNKNOWN is honest and safe: it makes callers query both APIs and
+        generate the GTDB name variants anyway.
+        """
+        db = _dbroot(tmp_path) / "customdb"
+        db.mkdir()
+        nom, evidence = _nomenclature_hints_from_files(db)
+        assert nom is Nomenclature.UNKNOWN
+        assert "no nomenclature markers" in evidence
+
+
+class TestNomenclatureEndToEnd:
+    """Through the real build_index path, not the helper in isolation."""
+
+    def test_gzipped_inspect_with_gtdb_suffixes(self, tmp_path):
+        """A remapped database shipping only inspect.txt.gz.
+
+        Its GTDB genus suffixes are the only giveaway, and this must be a
+        positive detection rather than a fallthrough.
+        """
+        import gzip
+        db = _dbroot(tmp_path) / "customdb"
+        db.mkdir()
+        with gzip.open(db / "inspect.txt.gz", "wt") as fh:
+            fh.write("0.1\t100\t0\tG\t4007157\tBurkholderia\n")
+            for i, sp in enumerate(("ambifaria", "lata", "cepacia")):
+                fh.write(f"0.05\t50\t50\tS\t400715{i}\tBurkholderia_A {sp}\n")
+        index = DatabaseIndexBuilder().build_index(str(db))
+        assert index.profile.nomenclature is Nomenclature.GTDB
+        assert index.profile.generates_gtdb_variants is True
+
+    def test_seqid_map_rescues_an_otherwise_unreadable_database(self, tmp_path):
+        """Names give nothing; the sidecar file decides."""
+        db = _dbroot(tmp_path) / "customdb"
+        db.mkdir()
+        (db / "inspect.txt").write_text(
+            "".join(f"0.1\t10\t10\tS\t{900000 + i}\tcontig{i:05d}\n"
+                    for i in range(20))
+        )
+        (db / "seqid2taxid.map").write_text(
+            "".join(f"RS_GCF_{i:06d}.1\t{i}\n" for i in range(60))
+        )
+        index = DatabaseIndexBuilder().build_index(str(db))
+        assert index.profile.nomenclature is Nomenclature.GTDB
+
 
 
 class TestEstimateUpdateInterval:

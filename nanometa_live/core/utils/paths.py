@@ -67,12 +67,22 @@ class NanometaPaths:
     def from_config(cls, config: Mapping[str, object]) -> "NanometaPaths":
         """Build a resolver from the application config dict.
 
-        Reads ``config["data_dir"]`` (global root; falls back to
-        :data:`DEFAULT_DATA_DIR`) and ``config["project_dir"]`` (project
-        root; ``None`` when empty, which collapses the project scope back
-        onto ``data_dir``). Values are expanduser+abspath-normalised.
+        Reads ``config["data_dir"]`` (global root) and
+        ``config["project_dir"]`` (project root; ``None`` when empty, which
+        collapses the project scope back onto ``data_dir``). Values are
+        expanduser+abspath-normalised.
+
+        Precedence for the data root is **config > environment > default**.
+        The environment step matters because ``export_bundle`` falls back to
+        this resolver for the bundle root and ``nanometa-prepare export``
+        passes no explicit home: when this ignored ``NANOMETA_DATA_DIR`` and
+        went straight to :data:`DEFAULT_DATA_DIR`, a run started with
+        ``--data-dir`` exported ``~/.nanometa`` instead of the installation
+        the operator had prepared -- while ``get_watchlists_dir_from_env``
+        honoured the variable, so one bundle drew its watchlists and its root
+        from different homes.
         """
-        raw_data = config.get("data_dir") or DEFAULT_DATA_DIR
+        raw_data = config.get("data_dir") or get_data_dir_from_env()
         raw_project = config.get("project_dir") or ""
         project = cls._norm(raw_project) if str(raw_project).strip() else None
         return cls(cls._norm(raw_data), project)
@@ -201,6 +211,31 @@ def get_data_dir_from_env() -> str:
     return os.environ.get(_DATA_DIR_ENV) or os.path.expanduser(DEFAULT_DATA_DIR)
 
 
+def resolve_data_dir(explicit: str | os.PathLike[str] | None) -> str:
+    """Resolve the data root for a CLI entry point: flag > environment > default.
+
+    Mirrors :meth:`NanometaPaths.from_config`'s config > environment > default,
+    one level up: an explicit ``--data-dir`` wins, then ``NANOMETA_DATA_DIR``,
+    then ``~/.nanometa``.
+
+    The environment step is the part that was missing. Both GUI entry points
+    only *wrote* ``NANOMETA_DATA_DIR`` (from the flag) and never read it, so a
+    session started with the variable exported relocated ``nanometa-prepare``
+    -- which resolves through :func:`get_data_dir_from_env` -- while the GUI
+    silently kept writing to ``~/.nanometa``. Half the toolchain moving is
+    worse than none of it moving, because the result looks isolated and is not.
+
+    Returns an absolute path with ``~`` expanded and a leading ``//`` collapsed
+    (POSIX preserves a doubled leading slash, which then renders oddly in the
+    Storage Locations panel).
+    """
+    raw = explicit or get_data_dir_from_env() or DEFAULT_DATA_DIR
+    resolved = os.path.abspath(os.path.expanduser(str(raw)))
+    while resolved.startswith("//"):
+        resolved = resolved[1:]
+    return resolved
+
+
 def set_data_dir_env(data_dir: str | os.PathLike[str]) -> None:
     """Set the ``NANOMETA_DATA_DIR`` env var so downstream singletons see it.
 
@@ -223,6 +258,27 @@ def set_project_dir_env(project_dir: str | os.PathLike[str]) -> None:
     meet at the same path even when constructed before a config is loaded.
     """
     os.environ[_PROJECT_DIR_ENV] = str(project_dir)
+
+
+def get_watchlists_dir_from_env() -> str:
+    """Resolve the operator watchlist directory from the environment.
+
+    Project-local (``<project_dir>/.nanometa/watchlists``) when
+    ``NANOMETA_PROJECT_DIR`` is set, else ``<data_dir>/watchlists``.
+    Mirrors :pyattr:`NanometaPaths.watchlists`.
+
+    This is the single answer to "where do uploaded watchlists live". The
+    watchlist loader, the upload callback, and the bundle exporter all read
+    it; when they each hard-coded ``~/.nanometa/watchlists`` instead, a run
+    started with ``--data-dir`` or ``--project-dir`` put the GUI's uploads
+    somewhere the exporter never looked, and the bundle silently shipped
+    without them."""
+    project = get_project_dir_from_env()
+    if project:
+        return os.path.join(
+            os.path.abspath(os.path.expanduser(project)), ".nanometa", "watchlists"
+        )
+    return os.path.join(get_data_dir_from_env(), "watchlists")
 
 
 def get_mappings_dir_from_env() -> str:

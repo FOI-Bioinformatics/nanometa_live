@@ -25,7 +25,12 @@ def _parse(argv):
 def test_parse_arguments_defaults():
     args = _parse([])
     assert args.host == "127.0.0.1"
-    assert args.port == 8050
+    # None, not 8050. main() resolves the port as flag > gui_port > 8050, and
+    # that needs "the operator said nothing" to be distinguishable from "the
+    # operator asked for 8050". While argparse pre-filled 8050, main assigned
+    # it over config["gui_port"] unconditionally, so the Configuration tab's
+    # port field was saved, reloaded and then ignored on every launch.
+    assert args.port is None
     assert args.debug is False
     assert args.config is None
     assert args.data_dir is None

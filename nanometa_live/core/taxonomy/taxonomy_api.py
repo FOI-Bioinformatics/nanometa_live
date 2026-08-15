@@ -29,6 +29,8 @@ import urllib3
 
 from nanometa_live.core.utils.offline_cache import get_cache as get_offline_cache
 
+from nanometa_live.core.taxonomy.pseudo_taxid import PSEUDO_TAXID_BASE as _PSEUDO_TAXID_BASE
+
 logger = logging.getLogger(__name__)
 
 
@@ -270,11 +272,11 @@ class TaxonomyAPIClient(ABC):
     # WHY a host failed rather than reporting a silent partial count.
     _circuit_last_reason: Dict[str, str] = {}
 
-    # NCBI taxids at/above this synthetic band are pseudo-taxids minted by
-    # the watchlist for name-only/custom entries (see watchlist_manager
-    # _PSEUDO_TAXID_BASE). They are NOT real NCBI ids; sending one to NCBI
-    # esummary returns HTTP 400, so by-taxid lookups must skip them.
-    _PSEUDO_TAXID_MIN: int = 2_000_000_000
+    # Pseudo-taxids minted for name-only/custom watchlist entries are NOT
+    # real NCBI ids; sending one to esummary returns HTTP 400, which would
+    # trip the shared circuit breaker for every other lookup in the run.
+    # See core.taxonomy.pseudo_taxid.
+    _PSEUDO_TAXID_MIN: int = _PSEUDO_TAXID_BASE
 
     @classmethod
     def reset_circuit_breaker(cls) -> None:
@@ -882,24 +884,38 @@ def get_taxonomy_cache() -> TaxonomyCache:
     return _taxonomy_cache
 
 
-def get_ncbi_client(api_key: Optional[str] = None, offline_mode: bool = False) -> NCBIClient:
-    """Get the NCBI client instance."""
+def get_ncbi_client(
+    api_key: Optional[str] = None, offline_mode: Optional[bool] = None
+) -> NCBIClient:
+    """Get the NCBI client instance.
+
+    ``offline_mode=None`` means "no opinion": the shared client keeps whatever
+    mode it already has. Only an explicit True/False changes it.
+
+    The default used to be ``False``, which made "I just want the client"
+    indistinguishable from "put this process back online" -- and since the
+    factory mutates the singleton, a single no-argument call anywhere disarmed
+    offline mode for every later user. ``genome_manager._resolve_species_name``
+    does exactly that, and it runs during genome import on a field machine.
+    """
     global _ncbi_client
     if _ncbi_client is None:
         _ncbi_client = NCBIClient(cache=get_taxonomy_cache(), api_key=api_key)
-    # Update offline mode if changed
-    if _ncbi_client.offline_mode != offline_mode:
+    if offline_mode is not None and _ncbi_client.offline_mode != offline_mode:
         _ncbi_client.offline_mode = offline_mode
     return _ncbi_client
 
 
-def get_gtdb_client(offline_mode: bool = False) -> GTDBClient:
-    """Get the GTDB client instance."""
+def get_gtdb_client(offline_mode: Optional[bool] = None) -> GTDBClient:
+    """Get the GTDB client instance.
+
+    ``offline_mode=None`` leaves the shared client's mode untouched; see
+    :func:`get_ncbi_client` for why the default is not ``False``.
+    """
     global _gtdb_client
     if _gtdb_client is None:
         _gtdb_client = GTDBClient(cache=get_taxonomy_cache())
-    # Update offline mode if changed
-    if _gtdb_client.offline_mode != offline_mode:
+    if offline_mode is not None and _gtdb_client.offline_mode != offline_mode:
         _gtdb_client.offline_mode = offline_mode
     return _gtdb_client
 

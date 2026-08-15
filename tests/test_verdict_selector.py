@@ -186,3 +186,163 @@ class TestDescriptorShape:
             assert isinstance(d, VerdictDescriptor)
             assert d.icon and d.icon_color and d.title and d.bg_color
             assert d.border_color
+
+
+class TestNothingWatched:
+    """The case where no watchlist is active at all.
+
+    Found on 2026-07-28 by opening the dashboard against a real results tree
+    with ``--main_dir`` and no configured watchlist. The banner rendered a
+    green shield and the word ALL CLEAR while the Organisms tab, one click
+    away, listed Francisella tularensis -- an HHS Tier 1 select agent -- as
+    the most abundant organism at 54.2% of all reads (34,103 of them).
+
+    ``select_verdict`` has no branch for ``n_watched == 0``: an empty
+    ``dangerous`` list falls through to ALL CLEAR regardless of whether it is
+    empty because 116 organisms were screened and none exceeded threshold, or
+    because nothing was screened at all. Those are opposite situations and the
+    banner cannot currently tell them apart. The subtitle does read "0 of 0",
+    but it is the fine print under a green all-clear headline.
+
+    Every existing test in this file passed n_watched as 5, 7 or 9, which is
+    why the case was never noticed.
+
+    Fixed 2026-07-28: select_verdict now returns a distinct NOT_SCREENED state
+    (amber, "No watchlist active") before the ALL CLEAR return.
+    """
+
+    def test_zero_watched_is_not_reported_as_all_clear(self):
+        d = verdict(dangerous=[], n_watched=0)
+        assert d.state != "ALL_CLEAR", (
+            "with no watchlist loaded the dashboard announces ALL CLEAR, which "
+            "asserts a negative screening result that was never performed"
+        )
+
+    def test_a_populated_watchlist_with_no_hits_is_still_all_clear(self):
+        """The genuine all-clear must keep working -- this is the contrast."""
+        d = verdict(dangerous=[], n_watched=116)
+        assert d.state == "ALL_CLEAR"
+        assert "116" in d.subtitle
+
+
+class TestAllClearRequiresEnoughReadsToMeanIt:
+    """ALL CLEAR must mean something was screened, not that a report existed.
+
+    select_verdict took no read-depth input, and ``kraken_has_data`` is set
+    from ``not kraken_df.empty`` (dashboard_tab.py) -- the report having ROWS,
+    not reads. So a sample whose QC produced nothing rendered
+
+        ALL CLEAR - 0 of 116 watched pathogens above alert threshold
+
+    identically to a sample with 34,000 reads and no hits. That was the end of
+    the chain in tests/test_manifest_failed_sample.py: an unreadable FASTQ,
+    absorbed by error isolation, reported as success, listed in the manifest,
+    offered in the selector -- and declared clear.
+
+    Fixed 2026-07-29 by passing the depth in and adding INSUFFICIENT READS.
+
+    The floor is DEFAULT_LOW_READ_FLOOR (50), anchored to the existing
+    ``min_reads_for_validation`` default: if a detection needs 50 reads to be
+    worth confirming, an absence measured over fewer is not worth reporting as
+    clear. The message additionally names the operator's own highest alert
+    threshold when the sample is shallower than it, because that case is
+    decidable rather than a judgement -- even if every read were one organism,
+    it could not reach that threshold.
+    """
+
+    def test_zero_reads_is_not_an_all_clear(self):
+        d = verdict(dangerous=[], n_watched=116, total_reads=0)
+        assert d.state == "INSUFFICIENT_READS"
+        assert "No reads were analysed" in d.subtitle
+
+    def test_a_shallow_sample_is_not_an_all_clear(self):
+        d = verdict(dangerous=[], n_watched=116, total_reads=3)
+        assert d.state == "INSUFFICIENT_READS"
+
+    def test_the_message_states_the_actual_depth(self):
+        """"Too few" is only actionable if the operator can see how few."""
+        d = verdict(dangerous=[], n_watched=116, total_reads=3)
+        assert "3 reads" in d.subtitle, (
+            f"the operator cannot judge the result without the number: "
+            f"{d.subtitle!r}"
+        )
+
+    def test_it_names_the_threshold_that_could_not_be_reached(self):
+        d = verdict(dangerous=[], n_watched=116, total_reads=3,
+                    highest_alert_threshold=25)
+        assert "25" in d.subtitle and "cannot reach" in d.subtitle, (
+            f"when the depth is below the highest alert threshold that is a "
+            f"decidable fact and worth stating: {d.subtitle!r}"
+        )
+
+    def test_it_is_not_styled_as_a_clear_result(self):
+        """Wording alone is not enough; a green banner reads as reassurance."""
+        d = verdict(dangerous=[], n_watched=116, total_reads=3)
+        assert d.bg_color != "#d4edda", "styled the same green as ALL CLEAR"
+
+    def test_a_deep_sample_still_reads_as_clear(self):
+        d = verdict(dangerous=[], n_watched=116, total_reads=34141)
+        assert d.state == "ALL_CLEAR"
+        assert "34,141 reads" in d.subtitle, (
+            "the genuine all-clear should state the depth it is based on, so "
+            "it cannot be confused with a shallow one"
+        )
+
+    def test_unknown_depth_keeps_the_previous_behaviour(self):
+        """None means "not determined", which must not be read as zero."""
+        d = verdict(dangerous=[], n_watched=116, total_reads=None)
+        assert d.state == "ALL_CLEAR"
+
+    def test_a_detection_still_wins_over_shallow_depth(self):
+        """A hit is a hit; low depth must not downgrade a real detection."""
+        d = verdict(dangerous=[{"threat_level": "critical"}], n_watched=116,
+                    total_reads=3)
+        assert d.state == "ACTION_REQUIRED"
+
+
+class TestTheDepthGateIsAggregateScoped:
+    """What the INSUFFICIENT READS fix does and does not cover.
+
+    The verdict banner is computed over ALL samples: dashboard_tab.py loads
+    ``load_kraken_data(main_dir, "All Samples")`` and its callback does not
+    take ``selected-sample`` as an input. The metric tiles ARE per-sample.
+
+    So the depth gate fires when the WHOLE RUN is empty or shallow. It does
+    not fire when one sample among several fails -- the more likely field
+    case, one bad barcode out of 24. There the operator selecting the failed
+    sample sees a banner reading ALL CLEAR (accurate for the run) above tiles
+    reading 0 sequences analysed (accurate for the sample).
+
+    That is deliberately NOT "fixed" by making the banner per-sample. The
+    banner is a safety verdict over everything analysed: scoping it to the
+    selection would hide a detection sitting in a sample the operator is not
+    currently looking at, which is a worse failure than the confusion it would
+    resolve.
+
+    These tests pin the scope so the gate is not later mistaken for per-sample
+    coverage.
+    """
+
+    def test_the_gate_fires_on_an_empty_run(self):
+        d = verdict(dangerous=[], n_watched=116, total_reads=0)
+        assert d.state == "INSUFFICIENT_READS"
+
+    def test_the_gate_does_not_fire_when_the_aggregate_is_deep(self):
+        """One failed sample among many leaves the aggregate healthy.
+
+        The banner stays ALL CLEAR, which is correct for the run. The
+        operator learns about the failed sample from the per-sample tiles,
+        not from here.
+        """
+        d = verdict(dangerous=[], n_watched=116, total_reads=34141)
+        assert d.state == "ALL_CLEAR", (
+            "the aggregate verdict should not be downgraded because one "
+            "constituent sample was empty; that would suppress the run-level "
+            "result the banner exists to give"
+        )
+
+    def test_a_detection_anywhere_still_reaches_the_banner(self):
+        """The reason the banner stays aggregate-scoped."""
+        d = verdict(dangerous=[{"threat_level": "critical"}], n_watched=116,
+                    total_reads=34141)
+        assert d.state == "ACTION_REQUIRED"

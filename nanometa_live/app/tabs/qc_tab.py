@@ -56,6 +56,27 @@ from nanometa_live.app.tabs.qc_tab_helpers import (  # noqa: E402
 )
 
 
+def _fastp_files_for_sample(fastp_dir: str, selected_sample):
+    """FASTP reports belonging to ``selected_sample``, or all of them.
+
+    The QC cards take ``selected-sample`` as an Input and label themselves
+    with it, but globbed the whole directory and summed everything -- so they
+    reported the all-samples total under a single sample's name. Worst on a
+    sample that produced nothing: it was credited with the other barcodes'
+    bases while every other tile correctly showed zero.
+
+    ``None`` and "All Samples" mean the aggregate view, which is legitimate;
+    anything else is scoped.
+    """
+    if not selected_sample or selected_sample == "All Samples":
+        return sorted(glob.glob(os.path.join(fastp_dir, "*.fastp.json")))
+
+    # Match "<sample>.fastp.json" exactly rather than by prefix, so barcode1
+    # does not pick up barcode10's report.
+    exact = os.path.join(fastp_dir, f"{selected_sample}.fastp.json")
+    return [exact] if os.path.isfile(exact) else []
+
+
 def register_qc_callbacks(app: Dash):
     """
     Register callbacks for the QC tab.
@@ -576,7 +597,7 @@ def register_qc_callbacks(app: Dash):
 
             # Try FASTP first
             if os.path.exists(fastp_dir):
-                fastp_files = glob.glob(os.path.join(fastp_dir, "*.fastp.json"))
+                fastp_files = _fastp_files_for_sample(fastp_dir, selected_sample)
                 if fastp_files:
                     source = "fastp"
                     total_q20_bases = 0
@@ -687,7 +708,7 @@ def register_qc_callbacks(app: Dash):
 
             # Try FASTP first
             if os.path.exists(fastp_dir):
-                fastp_files = glob.glob(os.path.join(fastp_dir, "*.fastp.json"))
+                fastp_files = _fastp_files_for_sample(fastp_dir, selected_sample)
                 if fastp_files:
                     source = "fastp"
                     summaries = []

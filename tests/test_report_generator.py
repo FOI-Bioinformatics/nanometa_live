@@ -159,6 +159,62 @@ class TestScreenWatchlist:
         assert rows[0]["reads"] == 500
 
 
+class TestScreenWatchlistPerSample:
+    """The archived report has to say WHICH barcode a hit came from; an
+    aggregate-only screen tells the operator a pathogen is in the run but not
+    where, which is not actionable."""
+
+    def _entries(self):
+        return {1392: WatchlistEntry(
+            taxid=1392, name="Bacillus anthracis",
+            threat_level=ThreatLevel.CRITICAL, enabled=True,
+        )}
+
+    def _sample_frame(self, reads):
+        df = _kraken_df()
+        df.loc[df["name"] == "Bacillus anthracis", "reads"] = reads
+        df.loc[df["name"] == "Bacillus anthracis", "cumul_reads"] = reads
+        return df
+
+    def test_detected_rows_carry_a_sample_breakdown(self, generator):
+        frames = {
+            "barcode01": self._sample_frame(400),
+            "barcode02": self._sample_frame(100),
+        }
+        with patch(_MGR_PATH, return_value=_mock_manager(self._entries())):
+            rows = generator._screen_watchlist(_kraken_df(), frames)
+        breakdown = rows[0]["samples"]
+        # Sorted by read support, highest first.
+        assert [s["sample"] for s in breakdown] == ["barcode01", "barcode02"]
+        assert [s["reads"] for s in breakdown] == [400, 100]
+
+    def test_samples_without_the_organism_are_omitted(self, generator):
+        clean = _kraken_df()
+        clean = clean[clean["name"] != "Bacillus anthracis"]
+        frames = {"barcode01": self._sample_frame(400), "barcode02": clean}
+        with patch(_MGR_PATH, return_value=_mock_manager(self._entries())):
+            rows = generator._screen_watchlist(_kraken_df(), frames)
+        assert [s["sample"] for s in rows[0]["samples"]] == ["barcode01"]
+
+    def test_undetected_entry_has_no_breakdown(self, generator):
+        entries = {99999: WatchlistEntry(
+            taxid=99999, name="Yersinia pestis",
+            threat_level=ThreatLevel.HIGH, enabled=True,
+        )}
+        with patch(_MGR_PATH, return_value=_mock_manager(entries)):
+            rows = generator._screen_watchlist(
+                _kraken_df(), {"barcode01": _kraken_df()}
+            )
+        assert rows[0]["samples"] == []
+
+    def test_aggregate_only_call_still_works(self, generator):
+        """Callers that pass no per-sample frames keep the old behaviour."""
+        with patch(_MGR_PATH, return_value=_mock_manager(self._entries())):
+            rows = generator._screen_watchlist(_kraken_df())
+        assert rows[0]["detected"] is True
+        assert rows[0]["samples"] == []
+
+
 class TestReportSurfacesThreat:
     """End-to-end: a detected watchlist pathogen must reach the rendered
     report and the machine-readable summary -- the user-visible payoff of the
@@ -271,3 +327,92 @@ class TestExtractOrganisms:
         orgs = generator._extract_organisms(df)
         # 500 / (900 + 100) total reads = 50%
         assert orgs[0]["abundance"] == 50.0
+
+
+class TestDecisionBannerCannotClaimAnUnearnedNegative:
+    """The banner must not announce a finding that was never produced.
+
+    Found 2026-07-29 by generating a report from a real results tree with no
+    watchlist configured. The banner read
+
+        NO WATCHED ORGANISMS DETECTED
+
+    in the green "safe" style, while Francisella tularensis -- an HHS Tier 1
+    select agent -- appeared in the report's own organism table at 34,096
+    reads. Nothing had been screened, so there was no negative result to
+    report.
+
+    This is the same defect fixed on the dashboard in round 2
+    (select_verdict -> NOT_SCREENED). It matters more here: the report is the
+    artifact handed to someone else, and it outlives the session that made it.
+
+    The template branch is report.html: `{% elif not data.watched_results %}`.
+    """
+
+    def _render(self, generator, watched_results):
+        """Render the banner region with a given screened set."""
+        from jinja2 import Environment, FileSystemLoader
+        import pathlib
+
+        template_dir = (
+            pathlib.Path(generator.__class__.__module__.replace(".", "/")).parent
+        )
+        import nanometa_live.core.export.report_generator as rg
+
+        tdir = pathlib.Path(rg.__file__).parent / "templates"
+        env = Environment(loader=FileSystemLoader(str(tdir)), autoescape=True)
+        env.filters["format_number"] = lambda v: f"{v:,}" if isinstance(v, (int, float)) else str(v)
+        env.filters["format_pct"] = lambda v: f"{v:.1f}%" if isinstance(v, (int, float)) else str(v)
+        src = (tdir / "report.html").read_text()
+        # Render only the banner block, so this test does not depend on the
+        # rest of the report's data contract.
+        start = src.index("{% if critical_threats or high_threats %}")
+        end = src.index("{% endif %}", start) + len("{% endif %}")
+        block = (
+            "{% set detected_threats = data.watched_results | selectattr('detected') | list %}"
+            "{% set critical_threats = detected_threats | selectattr('threat_level', 'equalto', 'critical') | list %}"
+            "{% set high_threats = detected_threats | selectattr('threat_level', 'equalto', 'high') | list %}"
+            + src[start:end]
+        )
+        return env.from_string(block).render(data={"watched_results": watched_results})
+
+    def test_nothing_screened_does_not_claim_a_negative(self, generator):
+        out = self._render(generator, [])
+        assert "NOT SCREENED" in out, (
+            f"with an empty watchlist the banner should say screening did not "
+            f"happen; got: {out.strip()[:200]}"
+        )
+        assert "NO WATCHED ORGANISMS DETECTED" not in out, (
+            "the banner still announces a negative finding that was never produced"
+        )
+
+    def test_nothing_screened_is_not_styled_safe(self, generator):
+        """Wording alone is not enough: a green banner reads as reassurance."""
+        out = self._render(generator, [])
+        assert "banner-safe" not in out, (
+            "the not-screened banner uses the safe (green) style, which reads "
+            "as an all-clear regardless of its wording"
+        )
+
+    def test_a_genuine_negative_still_reads_as_clear(self, generator):
+        """The real all-clear must survive, and say what was screened."""
+        screened = [
+            {"detected": False, "threat_level": "critical", "name": "Bacillus anthracis"},
+            {"detected": False, "threat_level": "high", "name": "Yersinia pestis"},
+        ]
+        out = self._render(generator, screened)
+        assert "NO WATCHED ORGANISMS DETECTED" in out
+        assert "banner-safe" in out
+        assert "2 organisms screened" in out, (
+            f"a genuine all-clear should state how many organisms were "
+            f"screened, so it cannot be confused with the unscreened case: "
+            f"{out.strip()[:200]}"
+        )
+
+    def test_a_detection_still_raises_action_required(self, generator):
+        detected = [
+            {"detected": True, "threat_level": "critical", "name": "Francisella tularensis"},
+        ]
+        out = self._render(generator, detected)
+        assert "ACTION REQUIRED" in out
+        assert "banner-action" in out

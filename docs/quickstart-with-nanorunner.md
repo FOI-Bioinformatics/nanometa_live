@@ -26,7 +26,7 @@ conda activate nanorunner
 pip install git+https://github.com/FOI-Bioinformatics/nanorunner.git@v3.0.0
 
 # Nanometa Live (and Nextflow, used by the nanometanf backend)
-conda create -n nf-core -c bioconda -c conda-forge nextflow nf-core nf-test python=3.10
+conda create -n nf-core -c bioconda -c conda-forge "nextflow>=26.04.0" nf-core nf-test "python>=3.11"
 conda activate nf-core
 pip install git+https://github.com/FOI-Bioinformatics/nanometa_live.git
 ```

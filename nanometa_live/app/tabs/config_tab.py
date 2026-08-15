@@ -9,6 +9,7 @@ import logging
 import os
 import json
 import threading
+from typing import List
 from datetime import datetime
 
 import dash
@@ -61,6 +62,32 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         app: Dash application
         backend_manager: Backend manager instance
     """
+
+    @app.callback(
+        Output("negative-controls-input", "options"),
+        Input("available-samples", "data"),
+        Input("negative-controls-input", "value"),
+        prevent_initial_call=False,
+    )
+    def populate_negative_control_options(available_samples, selected):
+        """Offer the detected samples, plus whatever is already selected.
+
+        Selected values are unioned in on purpose. A control is usually known
+        before the run produces anything, so an operator declaring one at
+        setup time has no sample list to pick from yet; and a name saved from
+        an earlier run must not silently vanish from the control just because
+        this run has not produced that barcode. A dcc.Dropdown drops any value
+        with no matching option, so omitting them would erase the declaration
+        without saying so.
+        """
+        names: List[str] = []
+        for source in (available_samples or [], selected or []):
+            if isinstance(source, str):
+                source = [source]
+            for name in source:
+                if name and name != "All Samples" and name not in names:
+                    names.append(str(name))
+        return [{"label": n, "value": n} for n in sorted(names)]
 
     # Dismiss any lingering dbc tooltip/popover portals when the operator
     # switches tabs. dbc renders these into a detached portal node; when the
@@ -588,8 +615,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("kraken-db-input", "value"),
             Output("results-dir-input", "value"),
             Output("update-interval-input", "value"),
-            Output("danger-threshold-input", "value"),
-            Output("kraken-taxonomy-input", "value"),
             Output("check-interval-input", "value"),
             Output("realtime-timeout-minutes-input", "value"),
             Output("min-reads-per-level-input", "value"),
@@ -602,7 +627,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("genome-cache-dir-input", "value"),
             Output("cores-input", "value"),
             Output("gui-port-input", "value"),
-            Output("clean-temp-input", "value"),
             Output("pipeline-profile-input", "value"),
             Output("pipeline-source-type-input", "value"),
             Output("pipeline-branch-input", "value"),
@@ -610,6 +634,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("processing-mode-input", "value"),
             Output("sample-handling-input", "value"),
             Output("sample-name-input", "value"),
+            Output("negative-controls-input", "value"),
             Output("qc-tool-input", "value"),
             Output("skip-nanoplot-input", "value"),
             Output("kraken2-incremental-input", "value"),
@@ -654,8 +679,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         # folder, and a changed Run name re-derives on the next Apply.
         results_dir = config.get("results_dir_override", "")
         update_interval = config.get("update_interval_seconds", 10)
-        danger_threshold = config.get("danger_lower_limit", 100)
-        taxonomy = config.get("kraken_taxonomy", "gtdb")
         check_interval = config.get("check_intervals_seconds", 15)
         # None in YAML means "run indefinitely"; show empty string to blank the numeric input
         realtime_timeout_raw = config.get("realtime_timeout_minutes", 60)
@@ -688,11 +711,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         cores = config.get("pipeline_cores", config.get("snakemake_cores", 1))  # Backward compatibility
         gui_port = config.get("gui_port", 8050)
 
-        clean_temp = config.get("remove_temp_files", True)
         # Ensure it's a boolean regardless of stored format
-        if isinstance(clean_temp, str):
-            clean_temp = clean_temp == "yes" or clean_temp.lower() in ["true", "yes", "y", "1"]
-        clean_temp = bool(clean_temp)
 
         # Pipeline profile
         pipeline_profile = config.get("pipeline_profile", "conda")
@@ -727,6 +746,9 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         processing_mode = config.get("processing_mode", "batch")
         sample_handling = config.get("sample_handling", "by_barcode")
         sample_name = config.get("sample_name", "sample")
+        negative_controls = config.get("negative_control_samples") or []
+        if isinstance(negative_controls, str):
+            negative_controls = [negative_controls]
 
         # Pipeline options
         qc_tool = config.get("qc_tool", "chopper")
@@ -758,8 +780,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             kraken_db,
             results_dir,
             update_interval,
-            danger_threshold,
-            taxonomy,
             check_interval,
             realtime_timeout_minutes,
             min_reads_per_level,
@@ -772,7 +792,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             genome_cache_dir,
             cores,
             gui_port,
-            clean_temp,
             pipeline_profile,
             pipeline_source_type,
             pipeline_branch,
@@ -780,6 +799,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             processing_mode,
             sample_handling,
             sample_name,
+            negative_controls,
             qc_tool,
             skip_nanoplot,
             kraken2_incremental,
@@ -1487,8 +1507,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("kraken-db-input", "value"),
             Input("results-dir-input", "value"),
             Input("update-interval-input", "value"),
-            Input("danger-threshold-input", "value"),
-            Input("kraken-taxonomy-input", "value"),
             Input("check-interval-input", "value"),
             Input("realtime-timeout-minutes-input", "value"),
             Input("min-reads-per-level-input", "value"),
@@ -1501,7 +1519,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("genome-cache-dir-input", "value"),
             Input("cores-input", "value"),
             Input("gui-port-input", "value"),
-            Input("clean-temp-input", "value"),
             Input("qc-tool-input", "value"),
             Input("skip-nanoplot-input", "value"),
             Input("kraken2-incremental-input", "value"),
@@ -1523,6 +1540,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("processing-mode-input", "value"),
             Input("sample-handling-input", "value"),
             Input("sample-name-input", "value"),
+            Input("negative-controls-input", "value"),
             Input("max-file-age-input", "value"),
             Input("min-reads-for-validation-input", "value"),
         ],
@@ -1535,15 +1553,15 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     )
     def detect_form_changes(
         analysis_name, nanopore_dir, kraken_db, results_dir, update_interval,
-        danger_threshold, taxonomy, check_interval, realtime_timeout_minutes,
+        check_interval, realtime_timeout_minutes,
         min_reads_per_level, memory_mapping, blast_validation, validation_method,
         e_value_cutoff, minimap2_preset, minimap2_min_mapq,
-        genome_cache_dir, cores, gui_port, clean_temp,
+        genome_cache_dir, cores, gui_port,
         qc_tool, skip_nanoplot, kraken2_incremental, enable_krona, enable_nanopore_stats,
         chopper_minlength, chopper_quality, filtlong_minlength,
         validation_identity, kraken2_confidence, kraken2_hitgroups,
         pipeline_profile, pipeline_source_type, pipeline_branch, pipeline_local_path,
-        processing_mode, sample_handling, sample_name,
+        processing_mode, sample_handling, sample_name, negative_controls,
         max_file_age_minutes, min_reads_for_validation,
         saved_snapshot, currently_modified, form_initialized
     ):
@@ -1564,8 +1582,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "kraken_db": kraken_db or "",
             "results_dir_override": (results_dir or "").strip(),
             "update_interval_seconds": update_interval,
-            "danger_lower_limit": danger_threshold,
-            "kraken_taxonomy": taxonomy or "",
             "check_intervals_seconds": check_interval,
             "realtime_timeout_minutes": (
                 int(realtime_timeout_minutes)
@@ -1581,7 +1597,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "genome_cache_dir": genome_cache_dir,
             "pipeline_cores": cores,
             "gui_port": gui_port,
-            "remove_temp_files": clean_temp,
             "pipeline_profile": pipeline_profile,
             "pipeline_source": _pipeline_source_from_form(
                 pipeline_source_type, pipeline_branch, pipeline_local_path
@@ -1589,6 +1604,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "processing_mode": processing_mode,
             "sample_handling": sample_handling,
             "sample_name": sample_name if (sample_name or "").strip() else "sample",
+            "negative_control_samples": list(negative_controls or []),
             "qc_tool": qc_tool,
             "skip_nanoplot": skip_nanoplot,
             "kraken2_enable_incremental": kraken2_incremental,

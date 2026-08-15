@@ -22,7 +22,60 @@ _sample_cache_lock = threading.Lock()
 _sample_cache: Dict[str, Tuple[Tuple[Tuple[str, float], ...], List[str]]] = {}
 
 # Output subdirectories whose mtime we monitor for cache invalidation.
-_WATCHED_SUBDIRS = ("kraken2", "fastp", "seqkit", "nanoplot", "validation")
+#
+# "canonical" is watched because the cached result may have come from
+# canonical/_manifest.json rather than from a directory scan; without it, a
+# manifest rewritten while the output directories are quiet would not
+# invalidate the cache.
+_WATCHED_SUBDIRS = (
+    "kraken2", "fastp", "seqkit", "nanoplot", "validation", "canonical",
+)
+
+
+def get_failed_samples(main_dir: str) -> set:
+    """Samples the pipeline recorded as attempted but producing no output.
+
+    nanometanf writes ``failed_samples`` into canonical/_manifest.json: the
+    samples it ran that emitted no QC output, usually a tool failure absorbed
+    by conf/error_isolation.config. This is the authoritative record, as
+    against the GUI's own inference from files on disk.
+
+    ``null`` in the manifest means the pipeline could not determine the
+    answer, which is NOT "nothing failed" -- so it yields an empty set and
+    the caller marks nothing on that basis, rather than claiming a clean run.
+    An empty list is a determined "none failed" and yields the same empty
+    set; the two agree on what the caller should do, and only differ in what
+    they justify claiming, which is not this function's decision to make.
+    """
+    try:
+        manifest = load_manifest(main_dir)
+    except (OSError, ValueError):
+        return set()
+    if not isinstance(manifest, dict):
+        return set()
+    failed = manifest.get("failed_samples")
+    if not isinstance(failed, list):
+        return set()
+    return {str(s) for s in failed if s}
+
+
+def _samples_from_manifest(main_dir: str) -> Optional[List[str]]:
+    """Sample list from the canonical manifest, or None when unusable.
+
+    Returns None both when no manifest exists and when it lists no samples,
+    so the caller falls through to the directory scan in either case.
+    """
+    manifest = load_manifest(main_dir)
+    if manifest is None:
+        return None
+    manifest_samples = manifest.get("samples", [])
+    if not manifest_samples:
+        return None
+    logging.debug(
+        "Using manifest-based sample detection: %d samples",
+        len(manifest_samples),
+    )
+    return ["All Samples"] + sorted(manifest_samples)
 
 
 def _get_dir_mtimes(main_dir: str) -> Tuple[Tuple[str, float], ...]:
@@ -374,20 +427,15 @@ def get_available_samples(main_dir: str) -> List[str]:
     # Auto-resolve to analysis directory if needed
     main_dir = resolve_analysis_directory(main_dir)
 
-    # Try manifest-based detection first (canonical format)
-    manifest = load_manifest(main_dir)
-    if manifest is not None:
-        manifest_samples = manifest.get("samples", [])
-        if manifest_samples:
-            logging.debug(
-                "Using manifest-based sample detection: %d samples",
-                len(manifest_samples),
-            )
-            return ["All Samples"] + sorted(manifest_samples)
-
     # Mtime-based cache: check whether any watched output directory has
     # changed since the last scan.  This reduces ~384 globs to ~5
     # os.stat() calls on cache hits.
+    #
+    # The cache is consulted before the canonical manifest on purpose. The
+    # manifest check re-reads and re-parses _manifest.json on every call, so
+    # placing it first meant a run that has a manifest never reached the
+    # cache and paid a json.load per call -- and get_available_samples is
+    # called several times per poll.
     current_mtimes = _get_dir_mtimes(main_dir)
     with _sample_cache_lock:
         cached = _sample_cache.get(main_dir)
@@ -396,6 +444,12 @@ def get_available_samples(main_dir: str) -> List[str]:
             if stored_mtimes == current_mtimes:
                 logging.debug("Sample detection cache hit for %s", main_dir)
                 return stored_result
+
+    manifest_result = _samples_from_manifest(main_dir)
+    if manifest_result is not None:
+        with _sample_cache_lock:
+            _sample_cache[main_dir] = (current_mtimes, manifest_result)
+        return manifest_result
 
     all_samples: Set[str] = set()
 

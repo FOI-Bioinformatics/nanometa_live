@@ -198,6 +198,42 @@ def _essential_settings_card():
                 ], md=4, id="sample-name-col")
             ], className="mb-4"),
 
+            # Negative controls. A multi-select rather than free text because
+            # is_negative_control matches the sample name exactly: a typo or a
+            # stray space looks declared and silently does nothing. Options are
+            # the detected samples plus whatever is already saved, so a control
+            # can be declared before any data exists and a name that is not
+            # currently present is never dropped.
+            dbc.Row([
+                dbc.Col([
+                    dbc.Label([
+                        "Negative Controls ",
+                        html.I(className="bi bi-info-circle text-muted ms-1",
+                               id="negative-controls-info")
+                    ], html_for="negative-controls-input"),
+                    dcc.Dropdown(
+                        id="negative-controls-input",
+                        options=[],
+                        value=[],
+                        multi=True,
+                        placeholder="Select the barcodes that are negative controls",
+                    ),
+                    dbc.Tooltip(
+                        "Samples that are negative controls. A watched organism "
+                        "found in one is reported alongside the detection, with "
+                        "its read count and share of the positive samples, so "
+                        "carryover and barcode crosstalk are visible. Controls "
+                        "are never listed as triggering samples and never "
+                        "suppress a detection.",
+                        target="negative-controls-info"
+                    ),
+                    dbc.FormText(
+                        "Under by_barcode input the name is the barcode "
+                        "directory (barcode16), not the FASTQ file name."
+                    ),
+                ], md=12)
+            ], className="mb-4"),
+
             # Kraken2 Database
             dbc.Row([
                 dbc.Col([
@@ -670,7 +706,6 @@ def _database_settings_item():
             ], md=12),
         ]),
         # Hidden input to maintain backward compatibility
-        dbc.Input(id="kraken-taxonomy-input", type="hidden", value="gtdb"),
     ], title="Database Settings")
 
 
@@ -1044,26 +1079,14 @@ def _display_settings_item():
                     target="update-interval-info"
                 )
             ], md=6),
-            dbc.Col([
-                dbc.Label([
-                    "Alert Threshold (reads) ",
-                    html.I(className="bi bi-info-circle text-muted ms-1", id="alert-threshold-info")
-                ], html_for="danger-threshold-input"),
-                dbc.Input(
-                    id="danger-threshold-input",
-                    type="number",
-                    min=1,
-                    step=10,
-                    value=100
-                ),
-                dbc.FormText("Minimum reads before an organism triggers a dashboard alert"),
-                dbc.Tooltip(
-                    "When an organism reaches this many classified reads, "
-                    "it will appear in the dashboard alerts panel. "
-                    "Lower values are more sensitive but may produce false alerts.",
-                    target="alert-threshold-info"
-                )
-            ], md=6)
+            # "Alert Threshold (reads)" (danger_lower_limit) was removed on
+            # 2026-08-14. It had no consumer anywhere in the codebase, while
+            # its tooltip promised "Lower values are more sensitive but may
+            # produce false alerts" -- an explicit, false claim about detection
+            # sensitivity on a biothreat tool. Alerting is driven by each
+            # watchlist entry's own alert_threshold, which superseded this
+            # global and left the control stranded. Edit the threshold on the
+            # entry, in the Watchlist & Preparation tab.
         ])
     ], title="Display Settings")
 
@@ -1099,14 +1122,13 @@ def _performance_item():
                     "running server keeps the port it started on."
                 )
             ], md=4),
-            dbc.Col([
-                dbc.Switch(
-                    id="clean-temp-input",
-                    label="Clean temp files",
-                    value=True,
-                    className="mt-4"
-                ),
-                dbc.FormText("Remove after processing")
-            ], md=4)
+            # "Clean temp files" (remove_temp_files) removed 2026-08-14.
+            # The switch promised "Remove after processing" and defaulted to
+            # on, while nothing anywhere acted on the value -- it was only
+            # boolean-normalised in two places. Wiring it to Nextflow's
+            # `cleanup` would have started deleting work directories for every
+            # existing installation and broken -resume, so the honest fix was
+            # to stop promising it. Delete a run's work/ directory by hand, or
+            # set `cleanup` in the pipeline config deliberately.
         ])
     ], title="Performance")

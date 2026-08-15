@@ -35,6 +35,43 @@ class ThreatLevel(Enum):
     UNKNOWN = "unknown"  # Not characterized
 
 
+#: Reads an organism must reach before it raises an alert, when the watchlist
+#: entry does not state a threshold itself. Derived from threat level so a
+#: critical pathogen is flagged sooner than a common one.
+#:
+#: This lives here, next to ThreatLevel, because it was previously defined
+#: twice: WatchlistEntry.from_dict used this table while the loader's
+#: WatchlistPathogenEntry used a flat 10. The two load the same YAML at
+#: different moments, so an entry's threshold changed depending on when it
+#: was read -- and for CRITICAL the flat value was twice as high, i.e. half
+#: as sensitive, in the category that can least afford it.
+DEFAULT_ALERT_THRESHOLDS = {
+    ThreatLevel.CRITICAL: 5,
+    ThreatLevel.HIGH: 10,
+    ThreatLevel.MODERATE: 50,
+    ThreatLevel.LOW: 100,
+}
+
+#: Used when the threat level is UNKNOWN or unparseable. Deliberately the
+#: HIGH value rather than the LOW one: an uncharacterised organism should not
+#: be the hardest thing on the list to trigger an alert.
+FALLBACK_ALERT_THRESHOLD = 10
+
+
+def default_alert_threshold(threat_level) -> int:
+    """Reads required before an alert, for an entry that names no threshold.
+
+    Accepts a ThreatLevel or its string value so both the manager and the
+    loader can call it without agreeing on a representation first.
+    """
+    if not isinstance(threat_level, ThreatLevel):
+        try:
+            threat_level = ThreatLevel(str(threat_level).lower())
+        except ValueError:
+            return FALLBACK_ALERT_THRESHOLD
+    return DEFAULT_ALERT_THRESHOLDS.get(threat_level, FALLBACK_ALERT_THRESHOLD)
+
+
 class BiosaftyLevel(Enum):
     """Biosafety level classification."""
 

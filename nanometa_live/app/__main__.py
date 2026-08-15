@@ -75,6 +75,108 @@ def parse_arguments():
 logger = logging.getLogger(__name__)
 
 
+def _build_visualization_config(args, data_dir: str, project_dir: str) -> dict:
+    """Build the config for visualization mode, honouring --config.
+
+    This used to be built from scratch inside _run_visualization_mode, which
+    silently discarded the entire YAML -- watchlist, kraken_db, thresholds,
+    negative-control list. The operator got an unscreened dashboard reading
+    NOT SCREENED while believing screening was armed, with nothing on screen
+    or in the log to say otherwise.
+    """
+    config = {}
+    if getattr(args, "config", None):
+        try:
+            config = ConfigLoader(os.path.join(data_dir, "configs")).load_config(
+                args.config
+            )
+            logger.info("Loaded configuration from %s", args.config)
+        except Exception as exc:
+            # Deliberately fatal, unlike full mode's fall-back-to-defaults.
+            # Starting anyway would reproduce the defect this guards against:
+            # an app that looks configured and is not. The operator asked for
+            # this config; if it cannot be honoured, do not pretend.
+            logger.error(
+                "Failed to load configuration from %s: %s", args.config, exc
+            )
+            sys.exit(1)
+
+    # --main_dir is the explicit instruction and overrides whatever results
+    # directory the config carries -- a loaded config routinely still points
+    # at a previous run, and silently serving that instead would be the same
+    # class of misdirection one layer down.
+    main_dir = os.path.abspath(args.main_dir)
+    config.update({
+        "data_dir": data_dir,
+        # Per-analysis state (session, watchlist, mappings) lives under
+        # <project_dir>/.nanometa/; default to the working directory or
+        # --project. See NanometaPaths.
+        "project_dir": project_dir,
+        "main_dir": main_dir,
+        "results_output_directory": main_dir,
+        "visualization_only": True,
+    })
+    return config
+
+
+def _run_visualization_mode(args) -> None:
+    """Serve an existing results directory without running a pipeline.
+
+    Split out of main() so the entry point reads as the two modes it
+    actually has, rather than one long branch plus a delegation.
+    """
+    # Set up minimal logging
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+    else:
+        logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+    # Simple visualization mode - parse existing data and display
+    logger.info("Starting Nanometa Live in visualization mode")
+    logger.info("Data directory: %s", args.main_dir)
+    logger.info("Server: http://localhost:%s", args.port)
+    logger.info("No pipeline execution - displaying existing data only")
+
+    # Verify directory exists
+    if not os.path.exists(args.main_dir):
+        logger.error("Directory not found: %s", args.main_dir)
+        sys.exit(1)
+
+    # Create minimal data directory. Precedence is flag > environment >
+    # default: this entry point used to only *write* NANOMETA_DATA_DIR, so
+    # a run started with the variable set relocated `nanometa-prepare`
+    # (which reads it) while the GUI silently stayed on ~/.nanometa.
+    from nanometa_live.core.utils.paths import (
+        resolve_data_dir, set_data_dir_env, set_project_dir_env,
+    )
+
+    data_dir = resolve_data_dir(args.data_dir)
+    os.makedirs(data_dir, exist_ok=True)
+
+    # Set NANOMETA_DATA_DIR before any singleton (offline cache,
+    # background-callback Diskcache) reads the legacy default. The
+    # full-mode entry point in nanometa_live.py does the same thing.
+    set_data_dir_env(data_dir)
+
+    project_dir = os.path.abspath(
+        os.path.expanduser(args.project)
+        if getattr(args, "project", None)
+        else os.getcwd()
+    )
+    set_project_dir_env(project_dir)
+
+    config = _build_visualization_config(args, data_dir, project_dir)
+
+    # Initialize backend manager (won't start any processes)
+    backend_manager = BackendManager(data_dir)
+
+    # Create app
+    app = create_app(config, data_dir, backend_manager)
+
+    # Start server
+    app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
+
+
 def main():
     """Main entry point for app module."""
     # Raise the per-process file descriptor soft limit toward the hard
@@ -94,62 +196,7 @@ def main():
 
     # If --main_dir is provided, run in visualization-only mode
     if args.main_dir:
-        # Set up minimal logging
-        if args.debug:
-            logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
-        else:
-            logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-
-        # Simple visualization mode - parse existing data and display
-        logger.info("Starting Nanometa Live in visualization mode")
-        logger.info("Data directory: %s", args.main_dir)
-        logger.info("Server: http://localhost:%s", args.port)
-        logger.info("No pipeline execution - displaying existing data only")
-
-        # Verify directory exists
-        if not os.path.exists(args.main_dir):
-            logger.error("Directory not found: %s", args.main_dir)
-            sys.exit(1)
-
-        # Create minimal data directory
-        data_dir = args.data_dir if args.data_dir else os.path.expanduser("~/.nanometa")
-        os.makedirs(data_dir, exist_ok=True)
-
-        # Set NANOMETA_DATA_DIR before any singleton (offline cache,
-        # background-callback Diskcache) reads the legacy default. The
-        # full-mode entry point in nanometa_live.py does the same thing.
-        from nanometa_live.core.utils.paths import (
-            set_data_dir_env, set_project_dir_env,
-        )
-        set_data_dir_env(data_dir)
-
-        project_dir = os.path.abspath(
-            os.path.expanduser(args.project)
-            if getattr(args, "project", None)
-            else os.getcwd()
-        )
-        set_project_dir_env(project_dir)
-
-        # Create config pointing to the main_dir
-        config = {
-            "data_dir": data_dir,
-            # Per-analysis state (session, watchlist, mappings) lives under
-            # <project_dir>/.nanometa/; default to the working directory or
-            # --project. See NanometaPaths.
-            "project_dir": project_dir,
-            "main_dir": args.main_dir,
-            "visualization_only": True,
-        }
-
-        # Initialize backend manager (won't start any processes)
-        backend_manager = BackendManager(data_dir)
-
-        # Create app
-        app = create_app(config, data_dir, backend_manager)
-
-        # Start server
-        app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
-
+        _run_visualization_mode(args)
     else:
         # Full mode - use the main nanometa_live entry point
         nanometa_main()

@@ -25,67 +25,17 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from nanometa_live.core.utils.read_extractor import ReadExtractor
+from nanometa_live.core.workflow.nextflow_manager import NextflowManager
+from nanometa_live.core.workflow.on_demand_helpers import (
+    _DEFAULT_VALIDATION_TIMEOUT_MINUTES,
+    _genome_file_looks_valid,
+    _is_int_str,
+    _pick_result_for_method,
+    _validation_timeout_seconds,
+)
 
 
 logger = logging.getLogger(__name__)
-
-# Default on-demand validation timeout (minutes) when config does not set one.
-_DEFAULT_VALIDATION_TIMEOUT_MINUTES = 30
-
-
-def _is_int_str(value: Any) -> bool:
-    """True if ``value`` is a string (or value) that parses as an int."""
-    try:
-        int(value)
-        return True
-    except (TypeError, ValueError):
-        return False
-
-
-def _genome_file_looks_valid(path: Path) -> bool:
-    """Cheap sanity check that ``path`` is a non-empty FASTA file.
-
-    has_genome() only tests existence; a zero-byte or truncated download
-    passes it but fails opaquely once Nextflow tries to align against it.
-    """
-    try:
-        if not path.is_file() or path.stat().st_size == 0:
-            return False
-        with open(path, "r", encoding="utf-8", errors="ignore") as fh:
-            first = fh.readline().lstrip()
-        return first.startswith(">")
-    except OSError:
-        return False
-
-
-def _validation_timeout_seconds(config: Optional[Dict[str, Any]]) -> int:
-    """Resolve the subprocess timeout (seconds) from config, floored at 60s."""
-    minutes = (config or {}).get(
-        "validation_timeout_minutes", _DEFAULT_VALIDATION_TIMEOUT_MINUTES
-    )
-    try:
-        minutes = float(minutes)
-    except (TypeError, ValueError):
-        minutes = _DEFAULT_VALIDATION_TIMEOUT_MINUTES
-    return max(60, int(minutes * 60))
-
-
-def _pick_result_for_method(results: list, method: str):
-    """Return the parsed ValidationResult matching the requested method.
-
-    ``ValidationParser.get_validation_results`` filters by (sample, taxid) but
-    not by method, so for a pair that already carried a result of the other
-    method, ``results[0]`` may be the wrong one. Pick the result whose
-    ``validation_method`` matches the request; for ``"both"`` prefer the
-    read-centric BLAST summary. Falls back to ``results[0]``.
-    """
-    order = ["blast", "minimap2"] if method == "both" else [method]
-    for m in order:
-        for r in results:
-            if getattr(r, "validation_method", None) == m:
-                return r
-    return results[0]
-
 
 class ValidationStatus(Enum):
     """Status of an on-demand validation job."""
@@ -434,6 +384,28 @@ class OnDemandValidator:
             logger.warning("No pipeline source configured for nanometanf delegation")
             return None
 
+        # Validation reads the ORIGINAL FASTQ files; the results directory is
+        # not a substitute. The command below used to fall back to it when
+        # input_dir was unset, which pointed --reads_dir at a directory with
+        # no FASTQs -- the pipeline then found nothing and, before its own
+        # guards existed, reported success having validated nothing. Refuse
+        # here instead, where the message can reach the operator.
+        if not self.input_dir:
+            logger.error(
+                "On-demand validation needs the original FASTQ directory, but "
+                "no input directory is configured. Set the Nanopore sequence "
+                "data folder in the Configuration tab and try again."
+            )
+            return None
+        if not self.input_dir.exists():
+            logger.error(
+                "On-demand validation input directory does not exist: %s. "
+                "The run's FASTQ files must still be readable to validate "
+                "against them.",
+                self.input_dir,
+            )
+            return None
+
         # Ensure genome is available
         if not self.has_genome(taxid):
             if progress_callback:
@@ -486,7 +458,7 @@ class OnDemandValidator:
             "-resume",
             "--validation_only",
             "--kraken2_output_dir", str(self.results_dir / "kraken2"),
-            "--reads_dir", str(self.input_dir) if self.input_dir else str(self.results_dir),
+            "--reads_dir", str(self.input_dir),
             "--run_validation",
             "--validation_method", method,
             "--pathogen_genomes", str(genomes_json_path),
@@ -499,6 +471,11 @@ class OnDemandValidator:
         # I/O can need more than the historical hardcoded 30 minutes.
         timeout_seconds = _validation_timeout_seconds(config)
 
+        # Every offline guarantee lives in this env (NXF_OFFLINE, the
+        # plugin path, the container cache dirs); launching without it
+        # reached the registries on an air-gapped machine.
+        env = NextflowManager._build_nextflow_env(config)
+
         try:
             logger.info(f"Running nanometanf validation: {' '.join(cmd)}")
             result = subprocess.run(
@@ -506,6 +483,7 @@ class OnDemandValidator:
                 capture_output=True,
                 text=True,
                 timeout=timeout_seconds,
+                env=env,
             )
 
             if result.returncode != 0:

@@ -16,12 +16,24 @@ import logging
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
+from nanometa_live.core.taxonomy.database_profile import (
+    DatabaseProfile,
+    Nomenclature,
+)
+from nanometa_live.core.taxonomy.taxonomy_signals import (
+    _BINOMIAL_MAJORITY,
+    _GTDB_GENUS_SUFFIX_RE,
+    _GTDB_RANK_PREFIXES,
+    _NCBI_REFERENCE_TAXA,
+    _NOMENCLATURE_SAMPLE_SIZE,
+    _names_agree,
+    _nomenclature_hints_from_files,
+)
 from nanometa_live.core.taxonomy.taxid_mapping import (
     DatabaseTaxonomyIndex,
     DatabaseTaxonomyNode,
-    DatabaseTaxonomyType,
 )
 from nanometa_live.core.watchlist.validation.name_normalizer import (
     get_name_normalizer,
@@ -179,7 +191,7 @@ class DatabaseIndexBuilder:
                     self._add_node_to_index(index, node)
 
             # Detect database type
-            index.database_type = self._detect_taxonomy_type(index)
+            index.profile = self._detect_profile(index)
             index.total_nodes = len(index.by_taxid)
             index.species_count = len([n for n in index.by_taxid.values() if n.rank == "S"])
             index.built_at = _utcnow()
@@ -257,7 +269,7 @@ class DatabaseIndexBuilder:
                     self._add_node_to_index(index, node)
 
             # Detect database type
-            index.database_type = self._detect_taxonomy_type(index)
+            index.profile = self._detect_profile(index)
             index.total_nodes = len(index.by_taxid)
             index.species_count = len([n for n in index.by_taxid.values() if n.rank == "S"])
             index.built_at = _utcnow()
@@ -346,7 +358,7 @@ class DatabaseIndexBuilder:
                             continue
 
             # Detect database type
-            index.database_type = self._detect_taxonomy_type(index)
+            index.profile = self._detect_profile(index)
             index.total_nodes = len(index.by_taxid)
             index.species_count = len([n for n in index.by_taxid.values() if n.rank == "S"])
             index.built_at = _utcnow()
@@ -460,90 +472,131 @@ class DatabaseIndexBuilder:
             if node.taxid not in index.by_name_gtdb[node.name_gtdb_style]:
                 index.by_name_gtdb[node.name_gtdb_style].append(node.taxid)
 
-    def _detect_taxonomy_type(
+    def _detect_profile(
         self,
-        index: DatabaseTaxonomyIndex
-    ) -> DatabaseTaxonomyType:
+        index: DatabaseTaxonomyIndex,
+    ) -> DatabaseProfile:
+        """Answer both taxonomy questions about this database.
+
+        The two axes are independent and are detected independently: a
+        database can use NCBI-style binomial names while having remapped its
+        taxids, which is what most "mixed" databases actually are.
+
+        Taxon names decide the nomenclature whenever they can. Only when they
+        cannot does this fall back to the sidecar files, which carry signals
+        the inspect dump does not contain.
         """
-        Detect whether database uses NCBI or custom taxonomy.
+        taxids_are_ncbi, taxid_evidence = self._detect_taxids_are_ncbi(index)
+        nomenclature, name_evidence = self._detect_nomenclature(index)
 
-        A database is classified as NCBI only when ALL checked reference taxa
-        match their expected NCBI organisms. If any mismatch is found, the
-        database uses custom/arbitrary taxids (e.g., GTDB-based databases).
+        if nomenclature is Nomenclature.UNKNOWN and index.database_path:
+            hinted, hint_evidence = _nomenclature_hints_from_files(
+                Path(index.database_path)
+            )
+            if hinted is not Nomenclature.UNKNOWN:
+                nomenclature = hinted
+                name_evidence = hint_evidence
 
-        Detection approach:
-        1. Check if well-known NCBI taxids map to expected organisms
-        2. Fall back to naming pattern analysis if no reference taxa found
+        return DatabaseProfile(
+            taxids_are_ncbi=taxids_are_ncbi,
+            nomenclature=nomenclature,
+            detected_by=f"{taxid_evidence}; {name_evidence}",
+        )
+
+    def _detect_taxids_are_ncbi(
+        self,
+        index: DatabaseTaxonomyIndex,
+    ) -> Tuple[bool, str]:
+        """Q1: do this database's taxids mean what NCBI says they mean?
+
+        Probing well-known taxids is the reliable test, because a database
+        that assigns its own integers reuses these numbers for unrelated
+        organisms. The rule is deliberately strict -- ALL probed taxa must
+        match -- and the default when none are present is False, because a
+        false exact-taxid match names the wrong organism on a pathogen
+        dashboard while a missed one merely falls through to name matching.
+
+        Returns ``(taxids_are_ncbi, evidence)``.
         """
-        # Check if well-known NCBI taxids map to expected organisms
-        # This is the most reliable check - custom databases reuse these taxids
-        ncbi_reference_taxa = {
-            562: "Escherichia coli",
-            632: "Yersinia pestis",
-            1392: "Bacillus anthracis",
-            287: "Pseudomonas aeruginosa",
-            1280: "Staphylococcus aureus",
-        }
-
         matches = 0
         checked = 0
 
-        for ncbi_taxid, expected_name in ncbi_reference_taxa.items():
-            if ncbi_taxid in index.by_taxid:
-                checked += 1
-                actual_name = index.by_taxid[ncbi_taxid].name.lower()
-                expected_lower = expected_name.lower()
-                # Check if the genus matches at least
-                expected_genus = expected_lower.split()[0]
-                if expected_genus in actual_name or expected_lower in actual_name:
-                    matches += 1
+        for ncbi_taxid, expected_name in _NCBI_REFERENCE_TAXA.items():
+            if ncbi_taxid not in index.by_taxid:
+                continue
+            checked += 1
+            if _names_agree(index.by_taxid[ncbi_taxid].name, expected_name):
+                matches += 1
 
-        # NCBI only if ALL checked taxa match
-        if checked > 0 and matches == checked:
-            logger.info(
-                f"Detected NCBI database: {matches}/{checked} reference taxa match"
+        if checked == 0:
+            return False, "no reference taxa present"
+        evidence = f"{matches}/{checked} reference taxa match"
+        if matches == checked:
+            logger.info("Detected NCBI-compatible taxids: %s", evidence)
+            return True, evidence
+        logger.info("Detected remapped taxids: %s", evidence)
+        return False, evidence
+
+    def _detect_nomenclature(
+        self,
+        index: DatabaseTaxonomyIndex,
+    ) -> Tuple[Nomenclature, str]:
+        """Q2: which naming convention do this database's names follow?
+
+        GTDB is recognised by two unambiguous markers, either of which is
+        conclusive on its own because neither occurs in NCBI names: the
+        ``d__``..``s__`` rank prefixes, and the alphabetic polyphyly suffix on
+        a genus (``Bacillus_A``). A single occurrence is enough -- requiring a
+        majority would miss databases that carry only a handful.
+
+        Sampling is over species nodes rather than an insertion-order head of
+        ``by_taxid``: the suffixed genera are rare in absolute terms and a
+        head sample systematically missed them.
+
+        Returns ``(nomenclature, evidence)``.
+        """
+        nodes = index.get_species() or list(index.by_taxid.values())
+        if not nodes:
+            return Nomenclature.UNKNOWN, "database has no taxa"
+
+        sample = nodes[:_NOMENCLATURE_SAMPLE_SIZE]
+        prefixed = 0
+        suffixed = 0
+        binomial = 0
+
+        for node in sample:
+            name = node.name.strip()
+            if not name:
+                continue
+            if name.startswith(_GTDB_RANK_PREFIXES):
+                prefixed += 1
+                continue
+            genus = name.split(" ", 1)[0].split("_", 1)[0]
+            if _GTDB_GENUS_SUFFIX_RE.match(name.split(" ", 1)[0]):
+                suffixed += 1
+                continue
+            if " " in name and genus[:1].isupper():
+                binomial += 1
+
+        if prefixed:
+            return (
+                Nomenclature.GTDB,
+                f"{prefixed}/{len(sample)} sampled names carry GTDB rank prefixes",
             )
-            return DatabaseTaxonomyType.NCBI
-        elif checked > 0:
-            # Any mismatch means custom taxids
-            logger.info(
-                f"Detected custom database: {matches}/{checked} reference taxa match "
-                f"(custom/arbitrary taxids detected)"
+        if suffixed:
+            return (
+                Nomenclature.GTDB,
+                f"{suffixed}/{len(sample)} sampled names carry a GTDB genus suffix",
             )
-            return DatabaseTaxonomyType.CUSTOM
-
-        # Fall back to naming pattern analysis if no reference taxa found
-        custom_indicators = 0
-        ncbi_indicators = 0
-
-        sample_size = min(200, len(index.by_taxid))
-        sample_nodes = list(index.by_taxid.values())[:sample_size]
-
-        for node in sample_nodes:
-            name = node.name
-
-            # Check for GTDB-style prefix patterns (indicates custom taxonomy)
-            if any(name.startswith(p) for p in ["d__", "p__", "c__", "o__", "f__", "g__", "s__"]):
-                custom_indicators += 3
-            elif "_" in name and " " not in name:
-                custom_indicators += 1
-
-            # Check for NCBI patterns (binomial nomenclature with spaces)
-            if " " in name and not any(name.startswith(p) for p in ["d__", "p__", "c__", "o__", "f__", "g__", "s__"]):
-                ncbi_indicators += 1
-
-        total = custom_indicators + ncbi_indicators
-        if total == 0:
-            return DatabaseTaxonomyType.UNKNOWN
-
-        custom_ratio = custom_indicators / total
-
-        if custom_ratio > 0.6:
-            return DatabaseTaxonomyType.CUSTOM
-        elif custom_ratio < 0.3:
-            return DatabaseTaxonomyType.NCBI
-        else:
-            return DatabaseTaxonomyType.MIXED
+        if binomial and binomial / len(sample) >= _BINOMIAL_MAJORITY:
+            return (
+                Nomenclature.NCBI,
+                f"{binomial}/{len(sample)} sampled names are binomial",
+            )
+        return (
+            Nomenclature.UNKNOWN,
+            f"no clear convention in {len(sample)} sampled names",
+        )
 
     def _rank_to_code(self, rank: str) -> str:
         """Convert full rank name to single letter code."""

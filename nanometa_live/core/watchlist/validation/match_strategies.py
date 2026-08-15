@@ -27,6 +27,7 @@ from nanometa_live.core.taxonomy.taxid_mapping import (
     DatabaseTaxonomyIndex,
     DatabaseTaxonomyNode,
 )
+from nanometa_live.core.taxonomy.ranks import is_species_rank
 from nanometa_live.core.watchlist.validation.name_normalizer import (
     GENUS_RECLASSIFICATIONS,
     KNOWN_RECLASSIFICATIONS,
@@ -160,7 +161,7 @@ class ExactNameStrategy(MatchStrategy):
         # Prefer species-rank matches
         for taxid in taxids:
             node = index.by_taxid.get(taxid)
-            if node and node.rank == "S":
+            if node and is_species_rank(node.rank):
                 return MatchResult(
                     match_type=MatchType.EXACT_NAME,
                     matched_node=node,
@@ -199,7 +200,12 @@ class VariantMatchStrategy(MatchStrategy):
         # Track if query is for a species (has species epithet)
         query_is_species = bool(query.species_epithet)
 
-        for variant in query.variants:
+        # The GTDB polyphyly forms (78 per name) are only worth trying when
+        # the database might actually contain them. On an NCBI database they
+        # are provably absent, so generating and probing them is pure cost.
+        for variant in query.all_variants(
+            include_gtdb=index.profile.generates_gtdb_variants
+        ):
             # Skip canonical (already tried in ExactNameStrategy)
             if variant == query.canonical:
                 continue
@@ -220,7 +226,7 @@ class VariantMatchStrategy(MatchStrategy):
             # Prefer species-rank matches
             for taxid in taxids:
                 node = index.by_taxid.get(taxid)
-                if node and node.rank == "S":
+                if node and is_species_rank(node.rank):
                     return MatchResult(
                         match_type=MatchType.VARIANT,
                         matched_node=node,
@@ -270,7 +276,9 @@ class ReclassificationStrategy(MatchStrategy):
             for new_name in reclassified_names:
                 # Try to find the reclassified species
                 new_normalized = normalizer.normalize(new_name)
-                for variant in new_normalized.variants:
+                for variant in new_normalized.all_variants(
+                    include_gtdb=index.profile.generates_gtdb_variants
+                ):
                     taxids = index.by_name.get(variant, [])
                     if taxids:
                         node = index.by_taxid.get(taxids[0])
@@ -300,7 +308,9 @@ class ReclassificationStrategy(MatchStrategy):
                 # Try the reclassified genus with same species epithet
                 new_name = f"{new_genus} {query.species_epithet}"
                 new_normalized = normalizer.normalize(new_name)
-                for variant in new_normalized.variants:
+                for variant in new_normalized.all_variants(
+                    include_gtdb=index.profile.generates_gtdb_variants
+                ):
                     taxids = index.by_name.get(variant, [])
                     if taxids:
                         node = index.by_taxid.get(taxids[0])
@@ -598,13 +608,14 @@ class CompositeMatchStrategy:
         Returns:
             MatchResult (may be NO_MATCH if nothing found)
         """
-        from nanometa_live.core.taxonomy.taxid_mapping import DatabaseTaxonomyType
-
         # Normalize the query
         normalized = self._normalizer.normalize(name)
 
-        # For custom databases, skip taxid-based matching since taxids are incompatible
-        skip_taxid_match = index.database_type == DatabaseTaxonomyType.CUSTOM
+        # A taxid comparison only means something when the database's taxids
+        # are NCBI's. Anything else -- GTDB, an in-house build, or a database
+        # we could not verify -- assigns its own integers, so taxid 562 in the
+        # report is not necessarily Escherichia coli.
+        skip_taxid_match = not index.profile.taxids_are_ncbi
 
         # Try each strategy with primary name
         for strategy in self.strategies:

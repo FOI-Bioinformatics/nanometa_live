@@ -71,13 +71,20 @@ class ConfigLoader:
             # derived run folder is never mistaken for an operator override.
             "results_dir_override": "",
             "species_of_interest": [],
+            # Samples to treat as negative controls: a detection in one of
+            # these is contamination or index hopping, not a finding about
+            # the subject. Declared explicitly because the sample NAME often
+            # cannot say so -- under by_barcode input the sample is
+            # "barcode16" even when the FASTQ was "negative_barcode16.fastq.gz".
+            # The name-pattern fallback in core/utils/attribution.py only
+            # covers names that survive with a marker in them.
+            "negative_control_samples": [],
             "update_interval_seconds": 10,
             # Slower dashboard poll used when no run is active (complete,
             # standby, or viewing existing results). The faster
             # update_interval_seconds applies while a run is running.
             "idle_update_interval_seconds": 60,
             "gui_port": 8050,
-            "danger_lower_limit": 100,
             "taxonomic_hierarchy_letters": ["D", "P", "C", "O", "F", "G", "S"],
             "default_hierarchy_letters": ["D", "C", "G", "S"],
             "default_reads_per_level": 10,
@@ -87,7 +94,6 @@ class ConfigLoader:
             "blast_cores": 1,
             "check_intervals_seconds": 15,
             "kraken_db": "",
-            "kraken_taxonomy": "gtdb",
             # Using strict boolean values
             "kraken_memory_mapping": True,
             # Validation settings
@@ -99,7 +105,6 @@ class ConfigLoader:
             # plots plus mapping confidence. 'blast' is more thorough but 5-10x slower
             # per pair; 'both' is available for highest confidence at 2x compute.
             "validation_method": "minimap2",  # 'blast', 'minimap2', or 'both'
-            "min_perc_identity": 90,
             "e_val_cutoff": 0.01,
             "validation_hit_rate_threshold": 0.5,
             "validation_identity_threshold": 90.0,
@@ -128,7 +133,6 @@ class ConfigLoader:
             "external_kraken2_db": "",
             "local_package_management": None,
             "conda_frontend": "mamba",
-            "remove_temp_files": True,
             "main_dir": "",
             # QC and analysis tools
             "qc_tool": "chopper",

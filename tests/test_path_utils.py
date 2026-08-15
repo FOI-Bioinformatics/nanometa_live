@@ -107,7 +107,7 @@ class TestReportMissingPaths:
     def test_sentinels_and_empty_excluded(self, tmp_path):
         config = {
             "pipeline_source": "remote:dev",
-            "kraken_taxonomy": "https://example.com/tax",
+            "kraken_db": "https://example.com/db.tar.gz",
             "data_dir": "",
             "main_dir": str(tmp_path / "absent"),
         }

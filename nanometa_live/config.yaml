@@ -44,14 +44,6 @@ update_interval_seconds: 10
 # Default: "8050"
 gui_port: "8050"
 
-## DANGER CUTOFF ##
-# Description: Threshold for highlighting species based on their abundance.
-# Can be modified in the GUI as well.
-# Data type: Integer
-# Guidance: Set lower for sensitive analyses; higher for broader overview.
-# Default: 100
-danger_lower_limit: 100
-
 ########## Taxonomic Analysis Settings #######################################
 
 ## TAXONOMY LEVELS ##
@@ -132,7 +124,6 @@ sample_name: "sample"
 # Supported Taxonomies: "gtdb" and "ncbi"
 # Example Path: "/path/to/kraken2/database"
 kraken_db: "/Volumes/Orico/kraken_db/k2_pluspfp_08_GB_20251015"
-kraken_taxonomy: "ncbi"
 
 
 ## KRAKEN 2 HIGH RAM REQUIREMENTS ##
@@ -154,73 +145,61 @@ external_kraken2_info:
     description: "Refeq archaea, bacteria, viral, plasmid, human1, UniVec_Core"
     database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_standard_20231009.tar.gz"
     inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/standard_20231009/inspect.txt"
-    kraken_taxonomy: "ncbi"
 
   Standard-8:
     description: "Standard with DB capped at 8 GB"
     database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_standard_08gb_20231009.tar.gz"
     inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/standard_08gb_20231009/inspect.txt"
-    kraken_taxonomy: "ncbi"
 
   Standard-16:
     description: "Standard with DB capped at 16 GB"
     database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_standard_16gb_20231009.tar.gz"
     inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/standard_16gb_20231009/inspect.txt"
-    kraken_taxonomy: "ncbi"
 
   PlusPF:
     description: "Standard plus Refeq protozoa & fungi"
     database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspf_20231009.tar.gz"
     inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/pluspf_20231009/inspect.txt"
-    kraken_taxonomy: "ncbi"
 
   PlusPF-8:
     description: "PlusPF with DB capped at 8 GB"
     database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspf_08gb_20231009.tar.gz"
     inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/pluspf_08gb_20231009/inspect.txt"
-    kraken_taxonomy: "ncbi"
 
   PlusPF-16:
     description: "PlusPF with DB capped at 16 GB"
     database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspf_16gb_20231009.tar.gz"
     inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/pluspf_16gb_20231009/inspect.txt"
-    kraken_taxonomy: "ncbi"
 
   PlusPFP:
     description: "Standard plus Refeq protozoa, fungi & plant"
     database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspfp_20231009.tar.gz"
     inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/pluspfp_20231009/inspect.txt"
-    kraken_taxonomy: "ncbi"
 
   PlusPFP-8:
     description: "PlusPFP with DB capped at 8 GB"
     database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspfp_08gb_20231009.tar.gz"
     inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/pluspfp_08gb_20231009/inspect.txt"
-    kraken_taxonomy: "ncbi"
 
   PlusPFP-16:
     description: "PlusPFP with DB capped at 16 GB"
     database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspfp_16gb_20231009.tar.gz"
     inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/pluspfp_16gb_20231009/inspect.txt"
-    kraken_taxonomy: "ncbi"
 
   nt Database:
     description: "Very large collection, inclusive of GenBank, RefSeq, TPA and PDB"
     database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_nt_20230502.tar.gz"
     inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/nt_20230502/inspect.txt"
-    kraken_taxonomy: "ncbi"
 
   Viral:
     description: "Refeq viral"
     database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_viral_20231009.tar.gz"
     inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/viral_20231009/inspect.txt"
-    kraken_taxonomy: "ncbi"
 
   MinusB:
     description: "Refeq archaea, viral, plasmid, human, UniVec_Core"
     database_url: "https://genome-idx.s3.amazonaws.com/kraken/k2_minusb_20231009.tar.gz"
     inspect_url: "https://genome-idx.s3.amazonaws.com/kraken/minusb_20231009/inspect.txt"
-    kraken_taxonomy: "ncbi"
 
 ########## Quality and Validation Settings ###################################
 
@@ -236,7 +215,6 @@ blast_validation: True
 # Note: Adjust these values based on the stringency required for your analysis.
 # Typical Identity Cutoff: 90-95% for stringent analysis.
 # Typical E-value Cutoff: 0.01 or lower for high confidence.
-min_perc_identity: 90
 e_val_cutoff: 0.01
 
 ########## Advanced/Optional Settings ########################################
@@ -264,7 +242,6 @@ qc_tool: "chopper"
 # Description: Option to remove temporary files created during workflow execution.
 # Note: Keeping temporary files can be useful for debugging but may consume significant disk space.
 # Options: "true" (remove files), "false" (keep files)
-remove_temp_files: True
 
 ## PROJECT MAIN DIRECTORY ##
 # Description: The primary directory for the project, automatically set during project creation.

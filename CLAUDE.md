@@ -61,6 +61,22 @@ python -m nanometa_live.app --config config.yaml
 DASH_DEBUG=true python -m nanometa_live.app --main_dir /path/to/results
 ```
 
+### Packaging
+
+Metadata lives in `pyproject.toml` (PEP 621); there is no `setup.py`. Version
+and dependencies stay dynamic (`nanometa_live.__version__` and
+`requirements.txt`) so each has one place to edit. Console scripts:
+`nanometa-live`, `nanometa-prepare`, `nanometa-report`.
+
+`nanometa_live_env.yml` includes Nextflow (`>=26.04.0`) — without it the
+environment yields a working dashboard and a pipeline that fails the moment
+Start Analysis is pressed. `nanometa-prepare doctor` is the config-free
+post-install check (Python, Nextflow + floor, conda, container runtimes, data
+dirs); `nanometa-prepare check --config` is the run-specific one. Every CLI
+subcommand except `verify` calls `NanometaPaths.ensure_dirs()` before
+dispatch, so a never-launched install no longer reports CRITICAL failures
+whose real cause is "the GUI was never started".
+
 ### Adding a new tab
 
 Layout in `app/layouts/`, callbacks in `app/tabs/`, wire both in `app/app.py`.
@@ -145,11 +161,57 @@ which returns `(classified_reads, unclassified_reads, rate)` from
 the per-rank assignment column collapses to 0 when every read is parked at
 root level (the degenerate single-read input case caught by the audit).
 
+**Cache-scope invariants (do not regress).** Three rules keep per-poll cost
+from growing with the barcode count. The 2026-07-25 scaling pass measured a
+*quiet* 24-sample realtime poll — one where nothing changed — at 74,462
+`stat()` calls and 772 ms; it is now 2,119 calls and 59 ms, and the scaling
+exponent dropped from O(N^1.65) to O(N^0.91). Regression-covered by
+`tests/test_loader_cache_transparency.py` and the `per-poll-cost` CI job.
+
+- **A per-sample cache entry must be fingerprinted against that sample's own
+  files.** `_sample_fingerprint_paths` (`classification_loaders.py`) and
+  `_seqkit_fingerprint_paths` (`qc_loaders.py`) return the sample-scoped path
+  list; only an aggregate ("All Samples") load may pass the whole directory.
+  Passing the shared directory for a per-sample key costs a full recursive
+  walk on *every* lookup — N lookups over a tree of O(N x batches) files is
+  quadratic — and makes one sample's new batch invalidate all the others.
+- **The freshness epoch is the once-per-poll authority.** `check_data_freshness`
+  bumps `_freshness_epoch` when the tree changes; `_check_mtime_cache` returns
+  a cached entry with no filesystem call when the entry was stored in the
+  current epoch. A poll issues roughly 3N + 2 `load_kraken_data` calls, so
+  without this each one repeated the same fingerprint work. Epoch 0 means
+  `check_data_freshness` has never run (CLI, report generation, tests), and
+  those callers stay on the unconditional path check so they can never be
+  served stale data.
+- **A `stale` mtime verdict must not fall through to the TTL cache.**
+  `_mtime_cache_state` returns `hit` / `stale` / `absent` precisely so callers
+  can tell "no entry yet" (TTL is a fair fallback) from "the files
+  demonstrably changed" (TTL is by definition older than that change). The
+  earlier code collapsed both into `None` and consulted the TTL cache either
+  way, so a report that advanced was ignored for up to `CACHE_TTL_SECONDS`
+  (30 s) even though the loader had already detected it. Note this makes a
+  genuine full-refresh poll *slower* than the pre-fix measurement, because
+  the pre-fix run was skipping the re-parse it should have done.
+
+`sample_detector.get_available_samples` consults its mtime cache *before* the
+canonical manifest for the same reason — the manifest check re-parses
+`_manifest.json` on every call, and the function runs several times per poll.
+`canonical/` is in `_WATCHED_SUBDIRS` so a rewritten manifest still
+invalidates the cache.
+
 **Loader hot-path invariants (do not regress).** The Kraken2 loaders run on
 every poll, so per-element pandas access is the dominant cost on a large
 report. The 2026-06-05 perf pass (cProfile, 6 samples × ~3100 taxa) took the
 per-poll loader work from ~2 s to <0.1 s; keep these contracts:
 
+- **Report discovery is sorted.** `_find_kraken_reports` sorts at its existing
+  realpath-dedup step. `glob.glob` returns filesystem enumeration order, and
+  the accumulation order sets the row order of the aggregated frame — so what
+  an operator saw in "All Samples" depended on the filesystem rather than the
+  data. It was stable on APFS and not on the CI runner:
+  `test_aggregation_preserves_first_occurrence` passed on the Python 3.11 job
+  and failed on 3.12 in the same run, same code, two containers. One sort over
+  a short file list; no extra filesystem work.
 - **No per-row `df.iloc[idx][col]` in a parse loop.** `_parse_kraken2_report`
   builds `parent_taxid` by iterating `df["name"].tolist()` / `df["taxid"].tolist()`,
   not `df.iloc`. Each `df.iloc[idx]` materialises a cross-section Series
@@ -195,6 +257,37 @@ per-poll loader work from ~2 s to <0.1 s; keep these contracts:
 
 All five were behaviour-preserving (loader output is byte-identical, verified
 by sha256 over the full frame incl. `parent_taxid`).
+
+**Species includes subspecies.** `core/taxonomy/ranks.py` owns `SPECIES_RANKS`
+(`S`, `S1`, `S2`, `S3`) and is the single definition; before it there were
+three disagreeing rules — `== "S"` in the verdict and attribution paths,
+`{"S","S1","S2"}` in the Organisms tab's watchlist matching, and a
+`normalize_ranks` table that mapped `S1/S2/S3 -> S` and **was never called**.
+The consequence was that a subspecies watchlist entry was watchable on the
+Organisms tab and could never reach the verdict banner.
+
+The distinction is clinical: a Bioshield report resolves *F. tularensis* into
+holarctica (Type B, the LVS lineage), tularensis (Type A, markedly more
+virulent), novicida and mediasiatica, all at `S1`.
+
+**Reads are not double counted by including them, but summing across ranks
+would be.** Kraken2's `reads` is what was assigned directly at a node and
+`cumul_reads` is that node plus descendants: on that report the species row is
+3,406 direct / 9,602 cumulative and its four children sum to 6,196, which the
+cumulative figure already contains. Per-taxon consumers (watchlist matching,
+attribution, organism cards) treat each row as an independent taxid and are
+safe. `report_generator._top_organisms` stays species-only on purpose — listing
+a species beside its own subspecies in a "most abundant" ranking reads as
+double counting even where the arithmetic is right.
+
+The Taxonomy tab offers `S1` as a selectable level plus a "Subspecies Focus"
+preset (`G, S, S1`); the Organisms tab's rank filter offers it too. Both are
+OFF by default, because the species node's value already contains its children
+— adding the level splits that flow rather than adding to it, which is right
+for a Sankey and misleading in a flat list. The Sankey and Sunburst needed no
+change: both resolve parents by walking the taxid parent chain rather than
+assuming rank order, so an `S1` node hangs off its species correctly. Only the
+UI was hiding the level.
 
 **Sunburst node cap (visualization invariant).** `create_sunburst_data`
 (`app/tabs/classification_helpers.py`) takes `max_taxa_per_level` and keeps the
@@ -259,8 +352,14 @@ pipeline_source: "remote:dev"   # or "/Users/.../nanometanf"
 # Validation
 blast_validation: true
 min_reads_for_validation: 50
-min_perc_identity: 90
+validation_identity_threshold: 90   # the only identity key; see below
 e_val_cutoff: 0.01
+
+# Samples that are negative controls. A watched organism found in one is
+# reported alongside the detection with its read count and share of the
+# positives; it is never listed as a triggering sample and never suppresses
+# a detection. Under by_barcode input the name is the barcode directory.
+negative_control_samples: []
 
 update_interval_seconds: 30
 ```
@@ -272,6 +371,15 @@ update_interval_seconds: 30
 - `nanopore_output_directory` -> `--input` (samplesheet) or `--nanopore_output_dir`
 - `kraken_db` -> `--kraken2_db`
 - `processing_mode: realtime` -> `--realtime_mode`
+- `validation_identity_threshold` -> `--blast_perc_identity` AND
+  `--validation_identity_threshold`. **One key, both params.** The legacy
+  `min_perc_identity` was read first as a back-compat shim whose comment
+  claimed "New configs only carry the latter" — but `create_default_config`
+  wrote it into every config and no widget could change it, so the shim was
+  the only path and the GUI slider was decorative. Retired 2026-08-08 from the
+  defaults, the shipped config.yaml, the validator and the mapping. The
+  dangerous direction was downward: lowering the slider to catch a divergent
+  strain left BLAST filtering at 90 and said nothing.
 
 ### Path lifecycle
 
@@ -318,6 +426,30 @@ fallbacks must match `create_default_config` — a divergent default (e.g.
 `validation_method`, `sample_handling`) only surfaces when a key is absent, a
 latent trap since `load_config` merges defaults on read.
 
+**A control must do something.** The 2026-08 pass found three that did not,
+and treated them on their merits rather than uniformly:
+
+- **Removed** `danger_lower_limit` ("Alert Threshold (reads)"). No consumer
+  anywhere, while its tooltip promised "Lower values are more sensitive" —
+  an explicit false claim about detection sensitivity. Alerting is driven by
+  each watchlist entry's own `alert_threshold`, which superseded this global.
+- **Removed** `remove_temp_files` ("Clean temp files"). No consumer; it was
+  only boolean-coerced in two places. Wiring it to Nextflow's `cleanup` would
+  have started deleting work directories for every existing install and broken
+  `-resume`, so promising less was the honest fix. The defensive coercion of
+  an inherited key stays, since old configs still carry it.
+- **Wired** `default_reads_per_level` and `gui_port`, which had obvious
+  consumers. The first now seeds the Taxonomy tab's min-reads control (the
+  12+-barcode aggregate heuristic takes `max(configured, 5N)`, so a configured
+  floor is a floor). The second: `--port` now defaults to `None` so main can
+  resolve flag > `gui_port` > 8050 — it used to assign argparse's 8050 over
+  the config unconditionally, so the port field was saved, reloaded and
+  ignored on every launch.
+
+Before adding a form field, decide what reads it. Before removing one, check
+whether the functionality exists elsewhere (as with the per-entry
+`alert_threshold`) or whether wiring it would be destructive.
+
 **Form-draft autosave.** Switching tabs re-fires `refresh-form-trigger`
 (`trigger_initial_form_load` on `tabs.active_tab` change), so
 `initialize_form_from_config` re-runs and would discard unsaved edits. To keep
@@ -337,8 +469,26 @@ session-scoped convenience, not a saved config.
 Sources searched in priority order:
 
 1. Project: `{project_dir}/watchlists/*.yaml`
-2. User: `~/.nanometa/watchlists/*.yaml` (custom uploads persist here)
+2. User: `NanometaPaths.watchlists` (custom uploads persist here) —
+   `<data_dir>/watchlists`, or `<project_dir>/.nanometa/watchlists` when a
+   project is set
 3. Built-in: `core/config/data/watchlists/*.yaml`
+
+**One watchlist directory, resolved in one place.** The user tier resolves
+through `get_watchlists_dir_from_env()` (`core/utils/paths.py`), exposed as
+`WatchlistLoader.user_watchlist_dir`. The loader's search path, the GUI upload
+callback (`watchlist_tab.handle_upload`), and `BundleManager.export_bundle`
+all read it. When all three hard-coded `~/.nanometa/watchlists` instead, a run
+started with `--data-dir`/`--project-dir` wrote uploads somewhere the exporter
+never looked and the bundle silently shipped without them. `import_watchlist`
+refuses a destination filename that already exists or that shadows a built-in
+stem (a watchlist is keyed by file stem, so either collision replaces a list
+invisibly); pass `overwrite=True` to force. An uploaded entry with neither
+`taxid_ncbi` nor `db_taxid` gets a synthetic key from `_stable_pseudo_taxid`
+and can never match a Kraken2 report — `find_entries_without_taxid` surfaces
+those at upload time. `build_watchlist_yaml` is the inverse (session entries →
+v2.0 YAML) behind the Watchlist tab's Download-as-YAML control; it never emits
+a synthetic key as `taxid_ncbi`.
 
 Format examples live in `core/config/data/watchlists/` — see any built-in YAML
 for the v2.0 schema (pathogens with `taxid_ncbi`, `threat_level`, `bsl_level`,
@@ -363,10 +513,117 @@ host is short-circuited for the remainder of the process and
 subsequent calls return `None` immediately. Default HTTP timeout is
 5 s. The breaker is in-memory only — a transient outage does not
 persist a disabled flag. The Verify Taxonomy IDs callback in
-`watchlist_tab.py` reads `config["kraken_taxonomy"]` and skips the
-API that does not match the active database, so an NCBI run does not
-stall on a degraded GTDB endpoint. Operators can still tick both
-checkboxes for explicit cross-validation.
+`watchlist_tab.py` skips the API that cannot resolve the loaded
+database's names, so an NCBI run does not stall on a degraded GTDB
+endpoint. It reads the *detected* nomenclature via
+`_apis_for_database` → `load_profile_for_db`, not a config key; an
+undetectable database queries both, since a guess there is what
+would strand the run. Operators can still tick both checkboxes for
+explicit cross-validation.
+
+### One database profile, two axes
+
+`core/taxonomy/database_profile.py` holds everything the app knows
+about a loaded Kraken2 database's taxonomy, in two independent
+fields, both detected from the database itself:
+
+- `taxids_are_ncbi` (bool) — may a raw taxid comparison be trusted?
+  Gates `ExactTaxidStrategy`, the `db_is_ncbi` shortcuts in both
+  `check_organisms` paths, and the confidence scorer's
+  `taxid_verified` weight. **Defaults to False**, because trusting an
+  unverified taxid names the *wrong organism*, while distrusting a
+  good one only skips a shortcut — name matching still runs.
+- `nomenclature` (`ncbi` | `gtdb` | `unknown`) — which service can
+  resolve these names? Drives the Verify API choice, the genome
+  `kingdom="Bacteria"` hint, and whether the GTDB genus-suffix
+  variants are generated. **UNKNOWN narrows nothing**: query both,
+  generate variants anyway.
+
+This replaced four disagreeing axes — the `kraken_taxonomy` config
+key, `DatabaseTaxonomyType`, `TaxonomyType`, and the watchlist YAML's
+`taxonomy_mode`. `MIXED` was never read by anything precisely because
+one axis was trying to answer both questions; the pair can express it
+(`taxids_are_ncbi=False, nomenclature=ncbi`).
+
+Detection lives in `database_indexer._detect_taxids_are_ncbi` (probes
+19 well-known taxids, ALL must match) and `_detect_nomenclature`
+(a GTDB rank prefix or a single `Genus_A` polyphyly suffix is
+conclusive; samples up to 5000 species nodes, *not* an
+insertion-order head). `_nomenclature_hints_from_files` is the
+fallback for signals the inspect dump lacks. Deliberately not
+detected: the directory name, and any default-to-GTDB.
+
+The profile rides `{db_hash}_index.json` (cache version 2.0; a v1
+file is discarded and rebuilt, since it holds no name evidence to
+migrate from) and is copied onto `{db_hash}_mappings.json`, which is
+kept rather than rebuilt because it carries operator verifications.
+That copy is load-bearing: background workers load the mappings file
+standalone against an empty index singleton. An operator override
+lives in a *sibling* `{db_hash}_profile_override.json` so it survives
+the index rebuild.
+
+**GTDB variant gating.** GTDB splits polyphyletic genera and suffixes
+the parts alphabetically (`Bacillus_A`), and which suffix a genus got
+is not derivable, so matching an NCBI name to its GTDB counterpart
+means trying all 26 — 78 strings per name. These are no longer built
+eagerly: `NormalizedName.variants` keeps ~5 cheap forms and the GTDB
+set is a lazy `gtdb_genus_variants` property, appended only via
+`all_variants(include_gtdb=profile.generates_gtdb_variants)`. The
+three `match_strategies` call sites gate on that. UNKNOWN counts as
+"generate": a misdetected GTDB database must still match its
+organisms, and a false positive costs only CPU, whereas a false
+negative is a missed detection. Measured saving on an NCBI database
+(13 of the 14 shipped): 156k fewer string builds per 2000 names.
+Regression-covered in `tests/test_database_profile.py`.
+
+**flextaxd / hybrid databases are the normal case.** The in-house field
+databases (Bioshield and similar) are built with flextaxd: an NCBI
+backbone with finer-resolution clades grafted in, then minimized to fit
+a field laptop's RAM. Three consequences the code must respect:
+
+- **The taxid space is hybrid.** Backbone taxa keep real NCBI taxids
+  (9606, 2697049); grafted nodes get new ids from a high block
+  (4,000,000+ in Bioshield, cleanly separated by a ~300k gap). Nothing
+  is renumbered, so `taxids_are_ncbi` is correctly True and the
+  exact-taxid shortcut is safe *and valuable* — on a real run it
+  rescued four detections whose names have legitimately diverged
+  (ICTV renamed SARS-CoV-2 to *Betacoronavirus pandemicum*, *Candida
+  auris* to *Candidozyma auris*). **Do not add name verification to
+  `ExactTaxidStrategy`** — it would break exactly those.
+- **Pathogens live in the grafted region under GTDB names.**
+  *Bacillus anthracis* is `Bacillus_A anthracis` at 4005020, not NCBI
+  1392. So detection depends on the GTDB genus-suffix variants, which
+  is why `nomenclature` detection and variant gating are load-bearing
+  here rather than cosmetic.
+- **Minimization prunes organisms.** A watchlist entry may not exist
+  in the database at all, and an ALL CLEAR for it is not a negative
+  result — it is no result. `core/taxonomy/coverage.py`
+  (`analyse_coverage`) classifies every watchlist entry as detectable
+  / genus-only / ambiguous / absent and the Preparation tab reports it
+  after a scan. Measured on a real Bioshield build against the shipped
+  watchlists: 108/116 detectable, 3 genus-only, 4 shared nodes, 5
+  absent. Entries that name a family (`Adenoviridae`) are not flagged
+  as genus-only — a broad match is what they asked for, and crying
+  wolf trains operators to skip the report.
+
+`_build_db_taxid_index` returns **all** watchlist keys that resolve to
+a database node, not one, because last-writer-wins silently dropped
+the rest and made the survivor arbitrary. The first is the match; the
+others become `ambiguous_with` on the alert and are rendered by the
+verdict banner as "X or Y". This matters clinically: GTDB treats
+*Burkholderia mallei* as a lineage within *pseudomallei*, so a
+melioidosis case would otherwise be announced as glanders. It is an
+upstream taxonomy limitation, unresolved in the flextaxd workflow as
+of 2026-07, so the app reports it rather than pretending to resolve
+it.
+
+**One pseudo-taxid definition.** `core/taxonomy/pseudo_taxid.py` owns
+`PSEUDO_TAXID_BASE`, `is_real_ncbi_taxid` and `stable_pseudo_taxid`.
+The constant previously existed in four modules independently. Entries
+with no NCBI identity are keyed in this reserved band so an
+NCBI-by-taxid call can refuse them — esummary returns HTTP 400 for a
+nonexistent taxid, which would trip the shared per-host circuit
+breaker for every other organism in the run.
 
 ### Database registry: bundled + operator-managed
 
@@ -478,6 +735,43 @@ Three concerns:
    Kraken2 DB excluded by size — transferred separately. `import_bundle` rewrites
    relative paths to absolute and warns on platform mismatch.
 
+   The pre-copy checks (manifest version, recorded `export_warnings`,
+   per-file checksums, DB hash, tool/Nextflow versions, build platform) live
+   in `_verify_extracted_bundle`, shared by `import_bundle` and the
+   non-mutating `verify_bundle` / `nanometa-prepare verify --bundle <path>`.
+   Add a new check there, not in the import path, or the dry run stops
+   matching what the import will do. Blockers are forcible unless marked
+   `fatal`; `stop_on_blocker` reproduces the import's short-circuit ordering.
+   `_load_container_images` returns a report (not a count) so the import can
+   distinguish "the bundle is short of images" (build machine) from "this
+   machine has no working Docker" (field machine) — the two need opposite
+   remedies and the old single message named the wrong one.
+
+   **An import must not report success over a problem it found.** Three rules,
+   all added 2026-08-14 after an air-gapped rig run:
+   - A supplied `--db` that is not a usable database sets `kraken_db_invalid`
+     and warns, naming the missing files. The pre-existing `kraken_db_unset`
+     fires only on an EMPTY path, so a typo, an unmounted drive or a moved
+     directory imported in silence though it fails the run identically. The
+     two keep separate flags: importing first and pointing the database later
+     is a supported flow and must not start reporting an invalid path. Export
+     checks the same thing through the same `check_kraken_db`, because the
+     `db_hash` it records is derived from that path and a hash over nothing
+     makes the import's compatibility check meaningless.
+   - A failure writing the rebased config sets `success = False` and
+     `config_write_failed`. It used to append a warning and leave `success`
+     True, shipping an installation whose config still held `${KRAKEN_DB}` and
+     `./pipeline_source`.
+   - Blocker messages state the condition, not the consequence. They opened
+     with "Import aborted:", which is false in `verify_bundle` (a dry run) and
+     in a forced import that completes — both observed in the rig.
+
+   **Note the config-rebase block is skipped entirely when the bundle carries
+   no `config.yaml`**, including the `offline_mode` assignment, without
+   comment. `_make_minimal_bundle` in the tests takes `extra_files` so a test
+   can build a bundle that reaches it; the default minimal bundle does not,
+   which is why the first version of those tests passed against unfixed code.
+
 2. **Subprocess env injection** (`NextflowManager._build_nextflow_env`). When
    `config['offline_mode']` is true:
    ```
@@ -502,7 +796,11 @@ Three concerns:
      `_BUNDLED_PIPELINE_CONTAINERS_DIRNAME` so the images land under
      `<home>/pipeline_containers/`; it then `docker load`s any `.tar` and, when
      `.img`/`.sif` are present, sets `result["singularity_cache_path"]` and
-     writes `nxf_singularity_cachedir` into the imported config.
+     writes `nxf_singularity_cachedir` into the imported config. The same name
+     must also appear in the post-copy `_copied_roots` prefix tuple — those
+     images are the largest files in the bundle and therefore what an
+     interrupted copy truncates first, yet they were the one thing the
+     re-verify skipped.
    - **Env injection points Nextflow at them.** `_build_nextflow_env` sets
      `NXF_SINGULARITY_CACHEDIR` and `NXF_SINGULARITY_LIBRARYDIR` from
      `config['nxf_singularity_cachedir']` (symmetric with the conda-cache
@@ -555,6 +853,38 @@ Conda envs built by Nextflow embed absolute build-machine paths and per-arch bin
 requires either shipping without pre-warmed envs or a separate `conda-pack` workflow
 (not currently automated).
 
+### What the air-gapped rig proved (2026-08-14)
+
+An Ubuntu 24.04 + apptainer 1.5.3 container, `--privileged`, on a Docker named
+volume, verified air-gapped (loopback only, no DNS, no outbound TCP) before any
+result was trusted. Rebuild recipe in the `offline-audit-rig` memory. Verified
+end to end, not by unit test:
+
+- **Container reuse, the assertion that matters.** With `NXF_OFFLINE=true` and
+  `NXF_SINGULARITY_CACHEDIR` pointing at the imported `pipeline_containers/`,
+  Nextflow logged `SingularityCache - Singularity found local library for
+  image=…; path=…` and made **zero pull attempts** with zero network errors.
+  The `_singularity_cache_name` convention holds against Nextflow 26.04.6.
+- The bundle built on an **arm64** host pulled **amd64** images
+  (`target_platform: linux/amd64` honoured), recorded
+  `observed_architectures: ['amd64']` from real SIF headers, and
+  `verify_bundle` on the arm64 rig correctly **refused** the import.
+- Import restored 25 images, rebased `pipeline_source` absolute with `main.nf`
+  present, set `offline_mode: True`, and wired the singularity cachedir.
+- The GUI served air-gapped: HTTP 200, **no external URLs**, and both icon
+  fonts resolved (130,396 / 176,032 bytes).
+
+**Not proven, and not to be reported as such:** amd64 execution (the rig is
+arm64 — the run failed exactly there with "the image's architecture (amd64)
+could not run on the host's (arm64)", which is this restriction confirmed
+rather than worked around), setuid apptainer, a real field kernel/distro, a
+pipeline run to completion, and conda-profile bundles with pre-warmed envs.
+
+The export unions singularity URLs with docker fallbacks (~30% of nf-core
+modules ship only a `community.wave.seqera.io` tag), so a singularity bundle
+holds ~25 images, not the 14 that `unique_container_refs(entries,
+"singularity")` alone reports. Sizing a bundle from that call under-counts.
+
 ### Backend hardening
 
 Three guards run on every pipeline launch and shape what an operator sees when
@@ -590,9 +920,72 @@ again. The 2-second `should_skip_update("...")` debouncer or the
 `get_trigger_type(ctx) == "interval"` guard keeps the new Input from
 multiplying work — the backstop fires at most once per tick.
 
+**A verdict must never claim a result it did not earn.** Three of the defects
+found in the 2026-07 campaign were one defect: the system rendering "we did not
+check" identically to "we checked and it is fine". The verdict banner said ALL
+CLEAR with no watchlist loaded while *F. tularensis* sat at 54.2% of reads; the
+exported report said NO WATCHED ORGANISMS DETECTED in the same situation; and a
+sample whose reads were unreadable was offered like a healthy one. For a
+biothreat tool those are opposite statements — a missing measurement versus a
+negative result an operator may act on.
+
+Three guards now enforce the distinction; keep them:
+
+- `select_verdict` returns **NOT_SCREENED** when `n_watched == 0` and
+  **INSUFFICIENT_READS** when `total_reads < low_read_floor` (default 50,
+  anchored to `min_reads_for_validation`). Both are amber, not green: wording
+  alone is insufficient when a green banner reads as reassurance on its own.
+  The genuine ALL CLEAR states its own depth so it cannot be confused with a
+  shallow one.
+- `select_verdict` takes `total_reads`; `total_reads=None` means "not
+  determined" and preserves the old behaviour. Never treat unknown depth as
+  zero — that turns every caller that cannot compute it into a false
+  INSUFFICIENT READS. A detection always wins over shallow depth.
+- The report template (`core/export/templates/report.html`) has the matching
+  `{% elif not data.watched_results %}` branch, and since 2026-08-08 the
+  sibling depth branch as well. Only NOT_SCREENED had been ported; a one-read
+  run with 35 organisms loaded still rendered the green "NO WATCHED ORGANISMS
+  DETECTED", in the artifact that leaves the building. `_collect_data` supplies
+  `total_reads` and `low_read_floor` for it.
+
+The same distinction has since been carried to two more surfaces, because a
+guard on one screen is not a guard on the tool:
+
+- **The Organisms panel** qualifies its "Not Detected (N)" list below the
+  floor (`not_detected_caveat` in `main_tab_helpers.py`). The caveat renders
+  ABOVE the collapsed list — inside it, it would be invisible in the default
+  view being misread. Nothing is hidden; the list still renders in full.
+- **An alarm states its own depth** (`_shallow_depth_clause`). A detection
+  always outranks depth and every depth from one read up still returns
+  ACTION_REQUIRED — but a real negative control carrying 6 reads out of 11
+  read identically to the same run's 34,096-read detection until the banner
+  started saying "on only 11 reads total".
+
+All three anchor `low_read_floor` to `min_reads_for_validation`, so the
+dashboard, the Organisms panel and the exported report cannot drift apart on
+what counts as too shallow.
+
+The banner is **aggregate-scoped on purpose** — it loads `"All Samples"` and
+takes no `selected-sample` input. Do not make it follow the selection: that
+would hide a detection in a sample the operator is not currently viewing. A
+single sample that produced nothing is flagged in the selector instead, by
+comparing `available-samples` against `sample-file-mapping` (see below).
+
+**`_manifest.json` predicts output files; it does not verify them.**
+`bin/write_manifest.py` derives `<sample>.classification.json` and
+`<sample>.qc_stats.json` from the sample list and active tools, because
+MANIFEST_WRITER runs in its own work directory and cannot see the publishDir.
+So a sample whose QC failed — CHOPPER exit 1 on an unreadable FASTQ, absorbed
+by `conf/error_isolation.config` — is listed exactly like a healthy one, and
+`sample_detector._samples_from_manifest` returns that list verbatim. The GUI
+compensates: the sample selector marks samples present in `available-samples`
+but absent from `sample-file-mapping`, which is built from files on disk.
+Marked rather than hidden — hiding loses the fact that the barcode was
+attempted.
+
 **Verdict-banner decision logic is a pure function.** The safety-critical
-clinical verdict (ACTION REQUIRED / MONITORING / ALL CLEAR / SCREENING /
-STANDBY) is decided by `select_verdict()` in
+clinical verdict (ACTION REQUIRED / MONITORING / ALL CLEAR / INSUFFICIENT READS
+/ NOT SCREENED / SCREENING / STANDBY) is decided by `select_verdict()` in
 `app/tabs/dashboard_helpers.py`, which returns a `VerdictDescriptor` from the
 input booleans and the watchlist hit list — no file I/O, no component build.
 The `update_verdict_banner` callback only gathers inputs (Kraken load,
@@ -605,6 +998,61 @@ is unit-tested in `tests/test_verdict_selector.py`; keep new states in the pure
 function so they stay testable without a running app. This mirrors the broader
 `*_tab.py` → `*_helpers.py` split (pure logic in helpers, thin callback wiring
 in the tab module) used across the dashboard, main, qc, and validation tabs.
+
+**Per-sample attribution has one resolver: `core/utils/attribution.py`.** A
+watchlist detection carries two taxids — `taxid` (the NCBI taxid on the
+watchlist entry) and `detected_taxid` (the Kraken2 report taxid it matched) —
+while `_load_per_sample_organisms` keys its dict by the *report* taxid. On an
+NCBI database the two coincide, so looking a detection up by the wrong one
+fails only on GTDB/custom databases, and it fails silently: a detection with no
+resolved samples renders identically to one that legitimately spans none.
+Never index `taxid_to_samples` directly; call `samples_for_detection(detection,
+taxid_to_samples)` (tries `detected_taxid`, then `taxid`). Both watchlist match
+paths emit `detected_taxid` — `check_organisms_with_mapping` always did,
+`check_organisms` since the 2026-07-25 pass. `build_pathogen_attribution` pairs
+each detection with its own samples and applies the entry's `alert_threshold`
+per sample: the verdict is decided on the aggregate, so without that gate ten
+barcodes at 50 reads each are all named for a pathogen with a threshold of 100.
+Samples that clear only the discovery floor render as "aggregate across N
+samples". When attribution is attempted and resolves nothing, the verdict
+banner says so explicitly (`attribution_failed`) rather than omitting the line.
+**Attribution counts `cumul_reads`, not the per-rank `reads` column.** Both
+`_species_df_to_organisms` and the `PER_SAMPLE_DISCOVERY_FLOOR` filter above it
+use it, and they must use the SAME column — gating on one and displaying the
+other let a sample sit on both sides of the threshold. Measured on a real
+Bioshield run: `barcode11` reads=29,721 / cumul=34,096 (the difference sitting
+at *F. tularensis holarctica*), so the dashboard attributed 29,721 to a
+detection the Organisms tab reported as 34,096; and `barcode16` reads=4 /
+cumul=6, which put the run's negative control below a floor of 5 so its
+contamination appeared nowhere at all. Both sites fall back to `reads` when the
+column is absent. Regression-covered in `tests/test_attribution_read_column.py`.
+
+**Negative controls.** `is_negative_control` reads the config's
+`negative_control_samples` list first, then falls back to name patterns:
+`NTC` / `neg_ctrl` / `blank`, and "negative" beside a *sample identifier*
+(`negative_barcode16`, `neg_01`). The identifier rule is what distinguishes a
+control from `negative_strand_test`, where "negative" describes a molecule
+rather than naming a sample. Note the fallback cannot help under `by_barcode`
+input, where the sample is `barcode16` and the prefix never leaves the FASTQ
+filename — declaring it is the only route, which is why there is now a
+multi-select for it in the Configuration tab (Essential Settings). Its options
+are the detected samples UNIONED with the saved values: a `dcc.Dropdown` drops
+any value with no matching option, so without the union a control declared
+before the run produced data would be erased silently.
+
+A control that carries a detection is **reported, never acted on**.
+`build_pathogen_attribution` fills `negative_control_samples` /
+`_reads` / `_fraction`, and the banner appends "— also in negative control
+barcode16 (6 reads, 0.02% of positives)". Two limits, both test-pinned: it
+states the observation and never the cause (crosstalk, carryover and a
+genuinely contaminated control are indistinguishable from here), and it never
+weakens the detection — controls are excluded from the triggering-sample list
+but a detection carried only by a control still resolves, as "(negative
+control only)". Regression-covered in `tests/test_attribution.py`,
+`tests/test_negative_control_naming.py`,
+`tests/test_negative_control_reporting.py`,
+`tests/test_negative_controls_form_field.py` and
+`tests/test_verdict_banner_callback.py`.
 
 **Pathogen Report modal references are built dynamically.** The report's
 external links come from `build_reference_links()` in `dashboard_helpers.py`,
@@ -629,7 +1077,13 @@ name. Iterating it wrong silently empties the threat screen (a false negative
 in the archived artifact); regression-covered in `tests/test_report_generator.py`.
 Classification counts delegate to `get_classification_stats`; organism abundance
 uses species (`S`) rank only with Kraken2's `%` column (never `reads.sum()` —
-double-counts genus and over-states). Raw files copied are `_RAW_SUBDIRS`
+double-counts genus and over-states). Subspecies get their OWN table rather than joining the organism ranking:
+`_extract_organisms(df, ranks=...)` is called twice per sample, once for `S`
+and once for `S1/S2/S3`. Mixing them would rank a species against its own
+children — *F. tularensis* at 99.87% beside *F. t. holarctica* at 30.9% —
+which invites the reader to add rows that already contain each other. The
+section is omitted entirely when the database resolves nothing below species.
+Raw files copied are `_RAW_SUBDIRS`
 (kraken2/fastp/seqkit/taxpasta/validation/on_demand_validation/pipeline_info),
 AppleDouble-filtered, skipped above `export_max_raw_bytes` (default 5 GiB).
 Plotly is inlined for offline self-containment; `offline_mode` suppresses the
@@ -647,14 +1101,44 @@ Linux-native path (Docker volume or `/root/.nextflow`); short-term workaround is
 
 ## Testing
 
+**CI runs on `dev`, and did not until 2026-07-29.** The nanometanf nf-test
+workflow fired only on pushes to `master` and on pull requests, while all
+development happens on `dev`, so no job had run for weeks. The first run after
+enabling it failed 20 of 155 tests. Three defects that shipped in that window
+were exactly what the suite exists to catch. A suite that does not run is not a
+safety net.
+
+**Test fixtures must be tracked, and a guard asserts it.** `.gitignore` carried
+a blanket `test_*`, which matches at any depth and silently excluded thirteen
+fixtures under `tests/fixtures/validation/`,
+`modules/local/validation_cumulative_aggregator/tests/fixtures/` and
+`tests/realtime_test_data/`. Every affected test passed locally, where the files
+exist, and failed on a fresh clone — which is what CI is. This pattern had
+already bitten twice before (`testing*` hid `docs/development/TESTING.md`; two
+per-directory whitelists had been added by someone who hit it earlier).
+`tests/lib/fixtures_are_tracked.py` now runs in CI before the suite and fails if
+any `$projectDir` path an nf-test references is untracked. It also **refuses to
+pass when it finds nothing to check** — its first version matched the runner's
+`/home/runner/work/...` checkout with an absolute-path skip, reported
+"0 fixture paths", and exited 0.
+
+**A test for a guard must state its own precondition.** `conf/test.config` sets
+`save_output_fastqs` and `save_reads_assignment` to true, so a test asserting
+that validation *refuses* without them could never fire the guard under
+`--profile test` — which is what CI runs. It asserted a failure that could not
+happen. Set the triggering state explicitly rather than inheriting a default a
+profile may override. For the same reason, verify new nf-tests under
+`--profile test,conda` locally, not `conda` alone.
+
+
 ```bash
 pytest                                              # full suite, parallel (pytest-xdist)
 pytest -n 0                                         # serial, for pdb/print debugging
 pytest --cov=nanometa_live --cov-report=term-missing   # with the coverage gate
 ```
 
-2321 tests as of 2026-06-07, ~63% line coverage. `pytest.ini` enforces a
-`fail_under = 62` floor on coverage runs only (the default `pytest` dev loop
+2873 tests as of 2026-07-25, ~68% line coverage. `pytest.ini` enforces a
+`fail_under = 67` floor on coverage runs only (the default `pytest` dev loop
 does not load coverage); the floor ratchets up as coverage rises — keep it ~1
 point below the measured total, never lower it. Also
 `filterwarnings = error::DeprecationWarning:nanometa_live` (our own deprecations

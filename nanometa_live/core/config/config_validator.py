@@ -64,15 +64,6 @@ def _validate_boolean_parameters(config: Dict[str, Any]) -> None:
     else:
         config["blast_validation"] = True  # Default value
 
-    # Ensure remove_temp_files is a boolean
-    if "remove_temp_files" in config:
-        if isinstance(config["remove_temp_files"], str):
-            # Handle legacy format
-            config["remove_temp_files"] = config["remove_temp_files"] == "yes" or \
-                config["remove_temp_files"].lower() in ["true", "yes", "y", "1"]
-        config["remove_temp_files"] = bool(config["remove_temp_files"])
-    else:
-        config["remove_temp_files"] = True  # Default value
 
 
 def _validate_basic_settings(config: Dict[str, Any]) -> None:
@@ -175,13 +166,6 @@ def _validate_taxonomy_settings(config: Dict[str, Any]) -> None:
     Args:
         config: Configuration dictionary to validate
     """
-    # Kraken taxonomy
-    if "kraken_taxonomy" not in config or config["kraken_taxonomy"] not in [
-        "gtdb",
-        "ncbi",
-    ]:
-        config["kraken_taxonomy"] = "gtdb"
-
     # External Kraken database
     if "external_kraken2_db" not in config:
         config["external_kraken2_db"] = ""
@@ -216,14 +200,8 @@ def _validate_validation_settings(config: Dict[str, Any]) -> None:
     Args:
         config: Configuration dictionary to validate
     """
-    # Minimum percent identity
-    if (
-        "min_perc_identity" not in config
-        or not isinstance(config["min_perc_identity"], (int, float))
-        or config["min_perc_identity"] < 50
-        or config["min_perc_identity"] > 100
-    ):
-        config["min_perc_identity"] = 90
+    # Percent identity lives in validation_identity_threshold; the legacy
+    # min_perc_identity key was retired because it silently shadowed it.
 
     # E-value cutoff
     if (
@@ -351,10 +329,3 @@ def _validate_gui_settings(config: Dict[str, Any]) -> None:
     if "gui_port" not in config:
         config["gui_port"] = 8050
 
-    # Danger threshold
-    if (
-        "danger_lower_limit" not in config
-        or not isinstance(config["danger_lower_limit"], int)
-        or config["danger_lower_limit"] < 1
-    ):
-        config["danger_lower_limit"] = 100

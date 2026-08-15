@@ -249,9 +249,44 @@
   <div class="decision-banner banner-review">
     REVIEW RECOMMENDED - {{ detected_threats | length }} watched organism{{ "s" if detected_threats | length != 1 else "" }} detected
   </div>
+  {% elif not data.watched_results %}
+  {#
+    Nothing was screened, so there is no negative result to report. Saying
+    "NO WATCHED ORGANISMS DETECTED" here announces a finding that was never
+    produced. Observed 2026-07-29 on a real results tree: the report carried
+    that green banner while Francisella tularensis -- an HHS Tier 1 select
+    agent -- appeared in the report's own organism table at 34,096 reads.
+
+    Mirrors the dashboard fix (dashboard_helpers.select_verdict -> NOT_SCREENED).
+    The report matters more: it is the artifact handed to someone else, and it
+    outlives the session that produced it.
+  #}
+  <div class="decision-banner banner-review">
+    NOT SCREENED - no watchlist was active, so no organisms were checked
+  </div>
+  {% elif data.total_reads is not none and data.low_read_floor
+          and data.total_reads < data.low_read_floor %}
+  {#
+    An absence measured over almost no reads is not evidence of absence.
+    The dashboard gained this guard alongside NOT SCREENED on 2026-07-29
+    (dashboard_helpers.select_verdict -> INSUFFICIENT_READS); only the
+    NOT SCREENED half was ported here, so a one-read run still rendered the
+    green all-clear in the artifact that leaves the building.
+
+    Note the ordering: a detection is reported above regardless of depth, and
+    NOT SCREENED is checked first because nothing was examined at all. Depth
+    only decides whether a genuine negative has been earned.
+
+    ``total_reads is none`` means the depth could not be determined, which is
+    not the same as zero -- treating it as zero would make every caller that
+    cannot compute it emit a false INSUFFICIENT READS.
+  #}
+  <div class="decision-banner banner-review">
+    INSUFFICIENT READS - only {{ "{:,}".format(data.total_reads) }} read{{ "s" if data.total_reads != 1 else "" }} analysed, too few for a reliable negative across {{ data.watched_results | length }} watched organism{{ "s" if data.watched_results | length != 1 else "" }}
+  </div>
   {% else %}
   <div class="decision-banner banner-safe">
-    NO WATCHED ORGANISMS DETECTED
+    NO WATCHED ORGANISMS DETECTED - {{ data.watched_results | length }} organism{{ "s" if data.watched_results | length != 1 else "" }} screened
   </div>
   {% endif %}
 
@@ -294,6 +329,7 @@
             <th>Status</th>
             <th>Reads</th>
             <th>Abundance</th>
+            <th>Detected in</th>
           </tr>
         </thead>
         <tbody>
@@ -310,6 +346,16 @@
             </td>
             <td>{{ w.reads | format_number }}</td>
             <td>{{ w.abundance | format_pct }}</td>
+            <td>
+              {% if w.samples %}
+                {% for s in w.samples %}<div>{{ s.sample }}
+                  <span style="color:#6c757d">({{ s.reads | format_number }} reads)</span></div>{% endfor %}
+              {% elif w.detected %}
+                <span style="color:#6c757d">Not attributable to a single sample</span>
+              {% else %}
+                &mdash;
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -481,6 +527,38 @@
         </table>
         {% else %}
         <p style="color: #6c757d;">No organisms detected at species level.</p>
+        {% endif %}
+
+        {#
+          Subspecies in their own table, never merged into the one above.
+          Ranking a species against its own children reads as double counting
+          -- F. tularensis at 99.87% beside F. t. holarctica at 64% -- even
+          though each percentage is correct on its own. The section is omitted
+          entirely on databases that do not resolve below species.
+        #}
+        {% if sdata.subspecies %}
+        <h3>Subspecies and strains</h3>
+        <p style="color: #6c757d; font-size: 0.9em;">
+          Listed separately because these are subdivisions of the species
+          above, not additions to it: their reads are already counted in the
+          parent species row.
+        </p>
+        <table>
+          <thead>
+            <tr><th>Subspecies / strain</th><th>Rank</th><th>Tax ID</th><th>Reads</th><th>Abundance</th></tr>
+          </thead>
+          <tbody>
+            {% for sub in sdata.subspecies %}
+            <tr>
+              <td><em>{{ sub.name }}</em></td>
+              <td>{{ sub.rank }}</td>
+              <td>{{ sub.taxid }}</td>
+              <td>{{ sub.reads | format_number }}</td>
+              <td>{{ sub.abundance | format_pct }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
         {% endif %}
       </div>
     </details>

@@ -123,6 +123,44 @@ class TestDetectionMeta:
         assert "Reported" in rendered
 
 
+class TestDetectionMetaSampleBreakdown:
+    """The card that opens this modal is computed over All Samples while the
+    modal's read count follows the selected sample. Without a breakdown the
+    operator sees two numbers that disagree and no explanation."""
+
+    def _breakdown(self, n):
+        return [
+            {"sample": f"barcode{i:02d}", "reads": 100 * (n - i),
+             "abundance": 1.0}
+            for i in range(n)
+        ]
+
+    def test_names_each_sample_with_reads(self):
+        rendered = _render(build_detection_meta(
+            detected_at="t", sample_breakdown=self._breakdown(2),
+        ))
+        assert "Detected in" in rendered
+        assert "barcode00" in rendered
+        assert "barcode01" in rendered
+
+    def test_reports_the_cross_sample_total(self):
+        rendered = _render(build_detection_meta(
+            detected_at="t", sample_breakdown=self._breakdown(2),
+        ))
+        # 200 + 100 reads across two samples.
+        assert "300 reads in 2 samples" in rendered
+
+    def test_beyond_five_samples_summarised(self):
+        rendered = _render(build_detection_meta(
+            detected_at="t", sample_breakdown=self._breakdown(8),
+        ))
+        assert "+3 more" in rendered
+
+    def test_no_row_without_a_breakdown(self):
+        rendered = _render(build_detection_meta(detected_at="t"))
+        assert "Detected in" not in rendered
+
+
 class TestReportCallback:
     """Wiring-level tests for handle_view_report and the Validation jump.
 

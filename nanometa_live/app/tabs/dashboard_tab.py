@@ -54,6 +54,7 @@ from nanometa_live.app.components.pathogen_alert import (
     HighRiskPathogenAlert,
     WatchedSpeciesAlert,
 )
+from nanometa_live.core.taxonomy.ranks import species_rank_mask
 from nanometa_live.app.tabs.dashboard_helpers import (
     _species_df_to_organisms,
     _load_per_sample_organisms,
@@ -64,6 +65,7 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     _verdict_banner_style,
     select_verdict,
     _classify_dangerous,
+    build_pathogen_attribution,
     _get_idle_alerts,
     _get_error_alerts,
     _calculate_overall_status,
@@ -242,6 +244,10 @@ def register_dashboard_callbacks(app: Dash):
         kraken_has_data = False
         dangerous: List[Dict[str, Any]] = []
         n_watched = 0
+        # None (not 0) means "depth unknown", which must not be treated as
+        # "zero reads" -- the verdict keeps its previous behaviour then.
+        total_reads: Optional[int] = None
+        highest_alert_threshold: Optional[int] = None
         # Only touch disk when there is a configured, ready results directory
         # and we are not already short-circuiting on "starting" -- mirrors the
         # original control flow so no Kraken load runs in those states.
@@ -250,11 +256,29 @@ def register_dashboard_callbacks(app: Dash):
                 kraken_df = load_kraken_data(main_dir, "All Samples")
                 if not kraken_df.empty:
                     species_df = kraken_df[
-                        (kraken_df["rank"] == "S") & (kraken_df["reads"] >= 5)
+                        species_rank_mask(kraken_df) & (kraken_df["reads"] >= 5)
                     ]
                     detected_organisms = _species_df_to_organisms(species_df)
                     watched_species = _get_active_watchlist_entries(config)
                     n_watched = len(watched_species)
+                    # Depth actually screened. A negative measured over almost
+                    # no reads is not a negative, and the verdict cannot tell
+                    # without being told: kraken_has_data only means the report
+                    # had rows.
+                    classified, unclassified, _rate = get_classification_stats(
+                        kraken_df
+                    )
+                    total_reads = classified + unclassified
+                    # Self-calibrating to the operator's own watchlist: if the
+                    # sample is shallower than the highest threshold in play,
+                    # that organism could not have been called even if every
+                    # read were it.
+                    thresholds = [
+                        int(w.get("alert_threshold") or 0)
+                        for w in watched_species
+                        if isinstance(w, dict)
+                    ]
+                    highest_alert_threshold = max(thresholds) if thresholds else None
                     dangerous = _check_pathogens_with_mapping(
                         detected_organisms, config
                     )
@@ -275,6 +299,8 @@ def register_dashboard_callbacks(app: Dash):
             dangerous=dangerous,
             n_watched=n_watched,
             validation_has_results=validation_has_results,
+            total_reads=total_reads,
+            highest_alert_threshold=highest_alert_threshold,
         )
 
         # Per-sample attribution for the ACTION REQUIRED subhead (closes
@@ -282,9 +308,10 @@ def register_dashboard_callbacks(app: Dash):
         # IO is shared via the loader cache + per-key parse lock, so this adds
         # minimal cost on top of the main aggregation above. Only ACTION
         # REQUIRED needs it -- the operator must know which barcode is hot.
-        triggering_samples: Optional[List[str]] = None
         total_real_samples: Optional[int] = None
         triggering_pathogens: Optional[List[str]] = None
+        triggering_attribution = None
+        attribution_failed = False
         if descriptor.needs_attribution:
             critical, high_risk = _classify_dangerous(dangerous)
             # Name the pathogens above threshold (critical first), deduped.
@@ -297,11 +324,17 @@ def register_dashboard_callbacks(app: Dash):
                 if nm and nm not in seen_names:
                     seen_names.add(nm)
                     annotation = d.get("annotation")
-                    pathogen_names.append(
-                        f"{nm} ({annotation})" if annotation else nm
-                    )
+                    label = f"{nm} ({annotation})" if annotation else nm
+                    # The database cannot separate these organisms, so the
+                    # banner must not name one as though it could. On a
+                    # biothreat panel the two can be different diseases --
+                    # GTDB merges Burkholderia mallei into pseudomallei, so
+                    # melioidosis would otherwise be announced as glanders.
+                    ambiguous = [a for a in (d.get("ambiguous_with") or []) if a]
+                    if ambiguous:
+                        label += " or " + " or ".join(ambiguous)
+                    pathogen_names.append(label)
             triggering_pathogens = pathogen_names or None
-            collected: List[str] = []
             total_count = 0
             try:
                 resolved_samples = _resolve_samples(
@@ -311,28 +344,24 @@ def register_dashboard_callbacks(app: Dash):
                     [s for s in resolved_samples if s != "All Samples"]
                 )
                 taxid_to_samples = _load_per_sample_organisms(
-                    main_dir, resolved_samples
+                    main_dir, resolved_samples, config
                 )
-                # Union the samples that triggered any critical or high-risk
-                # pathogen, preserving descending-by-reads order via a stable
-                # accumulator.
-                seen = set()
-                for d in critical + high_risk:
-                    taxid = d.get("taxid") or d.get("kraken_taxid")
-                    if taxid is None:
-                        continue
-                    for entry in taxid_to_samples.get(int(taxid), []):
-                        name = entry.get("sample")
-                        if name and name not in seen:
-                            seen.add(name)
-                            collected.append(name)
+                # Keep each pathogen paired with its own samples: two
+                # organisms in two different barcodes must not collapse into
+                # one undifferentiated list.
+                triggering_attribution = build_pathogen_attribution(
+                    critical + high_risk, taxid_to_samples
+                )
+                attribution_failed = not all(
+                    a.resolved for a in triggering_attribution
+                )
             except Exception as exc:
                 logger.warning(
                     "Verdict-banner attribution unavailable: %s",
                     exc,
                     exc_info=True,
                 )
-            triggering_samples = collected or None
+                attribution_failed = True
             total_real_samples = total_count or None
 
         return (
@@ -345,9 +374,10 @@ def register_dashboard_callbacks(app: Dash):
                 last_updated_str=last_updated_str,
                 auto_stop_remaining_s=auto_stop_remaining_s,
                 icon_extra_class=descriptor.icon_extra_class,
-                triggering_samples=triggering_samples,
                 total_sample_count=total_real_samples,
                 triggering_pathogens=triggering_pathogens,
+                triggering_attribution=triggering_attribution,
+                attribution_failed=attribution_failed,
             ),
             _verdict_banner_style(descriptor.bg_color, descriptor.border_color),
             time_elapsed, run_state, run_state_color
@@ -643,14 +673,16 @@ def register_dashboard_callbacks(app: Dash):
 
             # Extract species-level detections (vectorized)
             species_df = kraken_df[
-                (kraken_df["rank"] == "S") &
+                species_rank_mask(kraken_df) &
                 (kraken_df["reads"] >= 5)
             ]
             detected_organisms = _species_df_to_organisms(species_df)
 
             # Build per-sample attribution: taxid -> [{sample, reads, abundance, is_nc}]
             resolved_samples = _resolve_samples(main_dir, available_samples)
-            taxid_to_samples = _load_per_sample_organisms(main_dir, resolved_samples)
+            taxid_to_samples = _load_per_sample_organisms(
+                main_dir, resolved_samples, config
+            )
 
             # Get only ENABLED watchlist entries for alerting
             watched_species = _get_active_watchlist_entries(config)

@@ -50,6 +50,7 @@ from nanometa_live.core.taxonomy.taxid_mapping import (
     DatabaseTaxonomyNode,
     DatabaseTaxonomyType,
 )
+from nanometa_live.core.taxonomy.database_profile import DatabaseProfile
 from nanometa_live.core.watchlist.validation.match_strategies import (
     MatchType,
 )
@@ -71,7 +72,7 @@ def _make_index_with_species(name, taxid=99999):
     index.by_name_gtdb = {}
     index.by_prefix = {}
     index._species_cache = None
-    index.database_type = DatabaseTaxonomyType.CUSTOM
+    index.profile = DatabaseProfile(taxids_are_ncbi=False)
     index.database_path = ""
     index.database_hash = ""
     return index
@@ -126,7 +127,7 @@ def test_ncbi_database_detection():
         )
         index.by_taxid[taxid] = node
         index.by_name[canonical] = [taxid]
-    index.database_type = DatabaseTaxonomyType.NCBI
+    index.profile = DatabaseProfile(taxids_are_ncbi=True)
     assert index.database_type == DatabaseTaxonomyType.NCBI
 
 
@@ -182,7 +183,7 @@ def test_gtdb_suffix_variant():
 def test_exact_taxid_skipped_on_custom_db():
     """ExactTaxidStrategy should be skipped for CUSTOM databases."""
     index = _make_index_with_species("Some GTDB organism", taxid=562)
-    index.database_type = DatabaseTaxonomyType.CUSTOM
+    index.profile = DatabaseProfile(taxids_are_ncbi=False)
     composite = CompositeMatchStrategy()
     result = composite.match("Escherichia coli", 562, index)
     if result.match_type != MatchType.NO_MATCH:
@@ -203,7 +204,7 @@ def test_parent_taxon_is_last_resort():
     index.by_name_gtdb = {}
     index.by_prefix = {}
     index._species_cache = None
-    index.database_type = DatabaseTaxonomyType.CUSTOM
+    index.profile = DatabaseProfile(taxids_are_ncbi=False)
     index.database_path = ""
     index.database_hash = ""
 

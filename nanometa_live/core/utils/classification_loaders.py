@@ -27,6 +27,7 @@ from nanometa_live.core.utils.loader_utils import (
     _get_cache_key,
     _is_cache_valid,
     _check_mtime_cache,
+    _mtime_cache_state,
     _store_mtime_cache,
     _get_parse_lock,
 )
@@ -495,19 +496,29 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
     # in main_tab.py, classification_tab.py). The cache stores its own copy
     # at write time, so the cached object is safe.
     mtime_key = f"kraken:{cache_key}"
+    # Scope the invalidation fingerprint to this sample's own files. See
+    # _sample_fingerprint_paths for why the whole directory is the wrong
+    # scope for a per-sample cache entry.
+    fingerprint_paths = _sample_fingerprint_paths(kraken_dir, sample)
+    mtime_state = "absent"
     if os.path.isdir(kraken_dir):
-        mtime_cached = _check_mtime_cache(mtime_key, [kraken_dir])
-        if mtime_cached is not None:
+        mtime_state, mtime_cached = _mtime_cache_state(mtime_key, fingerprint_paths)
+        if mtime_state == "hit":
             logging.debug(f"Mtime cache hit for Kraken data: {cache_key}")
             return mtime_cached
 
-    # Fall back to TTL-based cache
-    with _cache_lock:
-        if cache_key in _kraken_cache:
-            cache_time, cached_df = _kraken_cache[cache_key]
-            if _is_cache_valid(cache_time):
-                logging.debug(f"Using cached Kraken data for {cache_key}")
-                return cached_df
+    # Fall back to TTL-based cache -- but only when the mtime check could not
+    # answer. A "stale" verdict means the files have demonstrably changed, and
+    # the TTL entry is by definition older than that change; returning it
+    # would pin the dashboard to data up to CACHE_TTL_SECONDS out of date even
+    # though the loader had already detected the update.
+    if mtime_state != "stale":
+        with _cache_lock:
+            if cache_key in _kraken_cache:
+                cache_time, cached_df = _kraken_cache[cache_key]
+                if _is_cache_valid(cache_time):
+                    logging.debug(f"Using cached Kraken data for {cache_key}")
+                    return cached_df
 
     # Serialize the parse path: concurrent callbacks that all miss above
     # would otherwise each start their own full re-parse. Holding a
@@ -518,18 +529,23 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
         # Re-check mtime and TTL cache after acquiring the lock. The first
         # waiter to win the lock parses; subsequent waiters find the
         # result already cached and return without re-parsing.
+        recheck_state = "absent"
         if os.path.isdir(kraken_dir):
-            mtime_cached = _check_mtime_cache(mtime_key, [kraken_dir])
-            if mtime_cached is not None:
+            recheck_state, mtime_cached = _mtime_cache_state(
+                mtime_key, fingerprint_paths
+            )
+            if recheck_state == "hit":
                 return mtime_cached
-        with _cache_lock:
-            if cache_key in _kraken_cache:
-                cache_time, cached_df = _kraken_cache[cache_key]
-                if _is_cache_valid(cache_time):
-                    return cached_df
+        if recheck_state != "stale":
+            with _cache_lock:
+                if cache_key in _kraken_cache:
+                    cache_time, cached_df = _kraken_cache[cache_key]
+                    if _is_cache_valid(cache_time):
+                        return cached_df
 
         return _parse_kraken_data_uncached(
-            main_dir, sample, cache_key, kraken_dir, mtime_key
+            main_dir, sample, cache_key, kraken_dir, mtime_key,
+            fingerprint_paths,
         )
 
 
@@ -627,7 +643,7 @@ def _discover_all_sample_reports(kraken_dir: str) -> List[str]:
     if not kreport_files:
         kreport_files = _scan_subdirs_for_pattern(kraken_dir, "*.cumulative.kraken2.report.txt")
     if kreport_files:
-        kreport_files = list(dict.fromkeys(os.path.realpath(f) for f in kreport_files))
+        kreport_files = sorted(dict.fromkeys(os.path.realpath(f) for f in kreport_files))
         logging.debug(f"Found {len(kreport_files)} cumulative Kraken2 reports")
         return kreport_files
 
@@ -645,7 +661,12 @@ def _discover_all_sample_reports(kraken_dir: str) -> List[str]:
         for f in glob.glob(os.path.join(kraken_dir, "*.kraken2.report.txt")):
             if _is_standard_report(os.path.basename(f)):
                 standard.append(f)
-    standard = list(dict.fromkeys(os.path.realpath(f) for f in standard))
+    # Sorted, not merely deduplicated: glob returns filesystem enumeration
+    # order, so without this the order in which reports are accumulated --
+    # and therefore the row order of the aggregated frame an operator sees --
+    # depended on the filesystem. It happened to be stable on APFS and was
+    # not on an ext4/overlay CI runner.
+    standard = sorted(dict.fromkeys(os.path.realpath(f) for f in standard))
     if standard:
         return standard
 
@@ -759,6 +780,41 @@ def _discover_sample_reports(kraken_dir: str, sample: str) -> List[str]:
     return [max(candidate_batches, key=_extract_batch_num)]
 
 
+def _sample_fingerprint_paths(kraken_dir: str, sample: Optional[str]) -> List[str]:
+    """Return the paths whose state determines one cached Kraken2 result.
+
+    The mtime cache is keyed per sample, so its invalidation fingerprint must
+    also be scoped per sample. Fingerprinting the whole ``kraken2/`` tree for
+    a per-sample entry has two costs that both scale with the sample count:
+
+    * Every per-sample lookup walks the entire tree, so N lookups over a tree
+      of O(N x batches) files is quadratic work per poll.
+    * One sample's new batch changes the shared fingerprint, so every other
+      sample's entry is invalidated too and re-parses needlessly.
+
+    For an aggregate load the whole directory genuinely is the input, so it
+    is returned unchanged.
+
+    Missing paths are harmless: ``_get_path_fingerprint`` skips them, and a
+    file appearing later advances the fingerprint through its file count.
+    """
+    if sample is None or sample == "All Samples":
+        return [kraken_dir]
+
+    paths = [
+        # Nested per-sample directory: cumulative report, batch_reports/ and
+        # the stats/ markers of the incremental layout all live here.
+        os.path.join(kraken_dir, sample),
+        os.path.join(kraken_dir, f"{sample}.cumulative.kraken2.report.txt"),
+        os.path.join(kraken_dir, f"{sample}.kraken2.report.txt"),
+    ]
+    # Legacy flat batch snapshots sit directly in kraken2/.
+    paths.extend(
+        glob.glob(os.path.join(kraken_dir, f"{sample}_batch*.kraken2.report.txt"))
+    )
+    return paths
+
+
 def _aggregate_to_result_df(agg: Dict[int, List], ordered_taxids: List[int]) -> pd.DataFrame:
     """Build the result DataFrame from the per-taxid accumulation dict.
 
@@ -782,11 +838,20 @@ def _aggregate_to_result_df(agg: Dict[int, List], ordered_taxids: List[int]) -> 
 
 
 def _cache_and_return(result_df: pd.DataFrame, cache_key: str, mtime_key: str,
-                      kraken_dir: str) -> pd.DataFrame:
-    """Store result_df in the TTL and mtime caches under the lock, then return it."""
+                      kraken_dir: str,
+                      fingerprint_paths: Optional[List[str]] = None) -> pd.DataFrame:
+    """Store result_df in the TTL and mtime caches under the lock, then return it.
+
+    ``fingerprint_paths`` must be the same sample-scoped path list used for the
+    matching ``_check_mtime_cache`` lookup, or the entry can never be hit.
+    """
     with _cache_lock:
         _kraken_cache[cache_key] = (time.time(), result_df.copy())
-    _store_mtime_cache(mtime_key, [kraken_dir], result_df.copy())
+    _store_mtime_cache(
+        mtime_key,
+        fingerprint_paths if fingerprint_paths is not None else [kraken_dir],
+        result_df.copy(),
+    )
     return result_df
 
 
@@ -796,13 +861,17 @@ def _parse_kraken_data_uncached(
     cache_key: str,
     kraken_dir: str,
     mtime_key: str,
+    fingerprint_paths: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """Parse Kraken2 reports without consulting any cache.
 
     Caller must hold the parse lock for ``cache_key`` and have already
-    re-checked the mtime and TTL caches. The function is internal; outside
-    callers should use ``load_kraken_data``.
+    re-checked the mtime and TTL caches. ``fingerprint_paths`` must match the
+    scope the caller used for its own cache lookup. The function is internal;
+    outside callers should use ``load_kraken_data``.
     """
+    if fingerprint_paths is None:
+        fingerprint_paths = _sample_fingerprint_paths(kraken_dir, sample)
     if not os.path.exists(kraken_dir):
         # DEBUG, not WARNING: a missing kraken2/ subdir is the normal state for
         # a freshly-configured results folder before the pipeline has run.
@@ -835,7 +904,7 @@ def _parse_kraken_data_uncached(
         if not has_data:
             return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
         result_df = _aggregate_to_result_df(agg, ordered_taxids)
-        return _cache_and_return(result_df, cache_key, mtime_key, kraken_dir)
+        return _cache_and_return(result_df, cache_key, mtime_key, kraken_dir, fingerprint_paths)
 
     # Specific sample - may have multiple batch files to combine.
     sample_files = _discover_sample_reports(kraken_dir, sample)
@@ -871,7 +940,7 @@ def _parse_kraken_data_uncached(
         return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
     if len(parsed_frames) == 1:
         # Single file: return its DataFrame directly (no aggregation needed).
-        return _cache_and_return(parsed_frames[0], cache_key, mtime_key, kraken_dir)
+        return _cache_and_return(parsed_frames[0], cache_key, mtime_key, kraken_dir, fingerprint_paths)
 
     agg: Dict[int, List] = {}
     ordered_taxids: List[int] = []
@@ -879,7 +948,7 @@ def _parse_kraken_data_uncached(
     for df in parsed_frames:
         _accumulate_kraken_df(df, agg, ordered_taxids, seen_taxids)
     result_df = _aggregate_to_result_df(agg, ordered_taxids)
-    return _cache_and_return(result_df, cache_key, mtime_key, kraken_dir)
+    return _cache_and_return(result_df, cache_key, mtime_key, kraken_dir, fingerprint_paths)
 
 
 def load_kraken_latest_batch(main_dir: str, sample_name: str) -> pd.DataFrame:

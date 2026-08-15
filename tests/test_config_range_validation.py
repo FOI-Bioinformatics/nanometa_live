@@ -91,8 +91,10 @@ class TestRangeValidation:
     def test_filtlong_minlength_negative_rejected(self):
         assert "minimum length" in _message(_invoke(filtlong_minlength=-5)).lower()
 
-    def test_alert_threshold_below_one_rejected(self):
-        assert "Alert Threshold" in _message(_invoke(danger_threshold=0))
+    # The "Alert Threshold" (danger_lower_limit) control was removed on
+    # 2026-08-14: it had no consumer anywhere while its tooltip promised
+    # detection-sensitivity control. Alerting uses each watchlist entry's own
+    # alert_threshold. Its range test went with it.
 
     def test_max_file_age_negative_rejected(self):
         assert "file age" in _message(_invoke(max_file_age_minutes=-1)).lower()
@@ -110,8 +112,7 @@ class TestRangeValidation:
             chopper_quality=10,
             chopper_minlength=1000,
             filtlong_minlength=1000,
-            danger_threshold=100,
         ))
         for needle in ("MAPQ", "identity must", "confidence must",
-                       "quality must", "minimum length", "Alert Threshold"):
+                       "quality must", "minimum length"):
             assert needle not in msg

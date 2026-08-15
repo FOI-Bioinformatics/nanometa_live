@@ -1,9 +1,10 @@
 """
-Taxonomy Matcher for Nanometa Live.
+Name matching across NCBI and GTDB spellings of the same organism.
 
-This module provides multi-taxonomy support, handling both NCBI and GTDB
-taxonomy systems. Primary matching is done by normalized species name,
-with taxid as a secondary identifier for NCBI databases.
+Matching is by normalized species name only. Whether a taxid comparison is
+meaningful is a property of the loaded database, answered by
+``core.taxonomy.database_profile.DatabaseProfile``, and the callers resolve
+it against an index before reaching this module.
 
 GTDB characteristics:
 - Names contain underscores (e.g., "Bacillus_anthracis")
@@ -17,139 +18,29 @@ NCBI characteristics:
 """
 
 import logging
-import re
-from enum import Enum
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from nanometa_live.core.watchlist.validation.name_normalizer import GTDB_RANK_PREFIXES
 
 logger = logging.getLogger(__name__)
 
 
-class TaxonomyType(Enum):
-    """Taxonomy system type."""
-    NCBI = "ncbi"
-    GTDB = "gtdb"
-    UNKNOWN = "unknown"
-    MIXED = "mixed"  # Some databases combine both
-
-
 class TaxonomyMatcher:
-    """
-    Multi-taxonomy matching system for pathogen detection.
+    """Name-based matching of a detected organism to a watchlist entry.
 
-    This class provides name normalization and matching across both
-    NCBI and GTDB taxonomy systems. Primary matching is by normalized
-    scientific name, with taxid fallback for NCBI.
+    Stateless, and deliberately so. It used to carry a taxonomy-type field
+    whose only effect was an exact-taxid comparison -- work both callers
+    already do, against a properly indexed dict, *before* reaching here.
+    Removing it leaves the matcher doing the one thing it is actually good
+    at: deciding whether two names refer to the same organism, across NCBI
+    and GTDB spellings.
+
+    Scores run from 1.0 (exact normalized name) down through alternative
+    names, GTDB variants and genus-only agreement.
 
     Usage:
-        matcher = TaxonomyMatcher()
-
-        # Auto-detect taxonomy from Kraken2 report
-        taxonomy = matcher.detect_taxonomy_from_report(report_path)
-
-        # Match organisms
-        score = matcher.match_organism(detected, watchlist_entry)
+        score = TaxonomyMatcher().match_organism(detected, entry_name, ...)
     """
-
-    def __init__(self, taxonomy_type: TaxonomyType = TaxonomyType.UNKNOWN):
-        """
-        Initialize the taxonomy matcher.
-
-        Args:
-            taxonomy_type: The taxonomy system to use. Use UNKNOWN for auto-detect.
-        """
-        self._taxonomy_type = taxonomy_type
-        self._detected_from_report = False
-
-    @property
-    def taxonomy_type(self) -> TaxonomyType:
-        """Get the current taxonomy type."""
-        return self._taxonomy_type
-
-    @taxonomy_type.setter
-    def taxonomy_type(self, value: TaxonomyType) -> None:
-        """Set the taxonomy type."""
-        self._taxonomy_type = value
-
-    def detect_taxonomy_from_report(self, report_path: str) -> TaxonomyType:
-        """
-        Detect taxonomy system from a Kraken2 report file.
-
-        Analyzes the naming patterns in the report to determine whether
-        the database uses NCBI or GTDB taxonomy.
-
-        Args:
-            report_path: Path to a Kraken2 report file
-
-        Returns:
-            Detected TaxonomyType
-        """
-        path = Path(report_path)
-        if not path.exists():
-            logger.warning(f"Report file not found: {report_path}")
-            return TaxonomyType.UNKNOWN
-
-        gtdb_indicators = 0
-        ncbi_indicators = 0
-        lines_checked = 0
-        max_lines = 100  # Check first 100 lines for efficiency
-
-        try:
-            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                for line in f:
-                    if lines_checked >= max_lines:
-                        break
-
-                    parts = line.strip().split('\t')
-                    if len(parts) < 6:
-                        continue
-
-                    # Column 5 (0-indexed) contains the taxonomic name
-                    name = parts[5].strip() if len(parts) > 5 else ""
-
-                    if not name:
-                        continue
-
-                    lines_checked += 1
-
-                    # Check for GTDB indicators
-                    if self._has_gtdb_prefix(name):
-                        gtdb_indicators += 2
-                    elif '_' in name and ' ' not in name:
-                        # Underscores without spaces suggest GTDB
-                        gtdb_indicators += 1
-
-                    # Check for NCBI indicators
-                    if ' ' in name and '_' not in name:
-                        ncbi_indicators += 1
-
-                    # Strong GTDB indicator: rank prefix pattern
-                    if re.match(r'^[a-z]__', name):
-                        gtdb_indicators += 3
-
-        except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError) as e:
-            logger.exception(f"Error reading report file: {e}")
-            return TaxonomyType.UNKNOWN
-
-        # Determine taxonomy type
-        if gtdb_indicators > ncbi_indicators * 2:
-            detected = TaxonomyType.GTDB
-        elif ncbi_indicators > gtdb_indicators * 2:
-            detected = TaxonomyType.NCBI
-        elif gtdb_indicators > 0 and ncbi_indicators > 0:
-            detected = TaxonomyType.MIXED
-        else:
-            detected = TaxonomyType.UNKNOWN
-
-        self._taxonomy_type = detected
-        self._detected_from_report = True
-
-        logger.info(f"Detected taxonomy type: {detected.value} "
-                   f"(GTDB indicators: {gtdb_indicators}, NCBI indicators: {ncbi_indicators})")
-
-        return detected
 
     def _has_gtdb_prefix(self, name: str) -> bool:
         """Check if name has a GTDB rank prefix."""
@@ -224,34 +115,25 @@ class TaxonomyMatcher:
         entry_name: str,
         entry_alt_names: Optional[List[str]] = None,
         entry_taxid: Optional[int] = None,
-        entry_db_taxid: Optional[int] = None,
     ) -> float:
         """
         Calculate match score between detected organism and watchlist entry.
+
+        Names only. Taxid equality is resolved by the caller against an index
+        before it gets here -- both callers build a database-taxid map and
+        try the direct NCBI key first, so repeating either comparison inside
+        this per-entry loop would be redundant work at O(entries) cost.
 
         Args:
             detected: Dict with 'taxid', 'name' keys from Kraken2 output
             entry_name: Watchlist entry primary name
             entry_alt_names: Alternative names for matching (e.g., GTDB variants)
-            entry_taxid: NCBI taxid of watchlist entry (for NCBI databases)
+            entry_taxid: Accepted for call-site compatibility; unused.
 
         Returns:
             Match score from 0.0 (no match) to 1.0 (exact match)
         """
         detected_name = detected.get("name", "")
-        detected_taxid = detected.get("taxid")
-
-        # Explicit database taxid match -- works for ANY database type, because
-        # the detected taxid is the report's own DB taxid. Lets a GTDB/custom
-        # entry match exactly without relying on name normalization.
-        if entry_db_taxid and detected_taxid and int(entry_db_taxid) == int(detected_taxid):
-            return 1.0
-
-        # Exact taxid match (only for NCBI, where entry NCBI taxid == DB taxid)
-        if (self._taxonomy_type == TaxonomyType.NCBI and
-            entry_taxid and detected_taxid and
-            int(entry_taxid) == int(detected_taxid)):
-            return 1.0
 
         # Name-based matching
         detected_normalized = self.normalize_name(detected_name)
@@ -295,59 +177,6 @@ class TaxonomyMatcher:
             return 0.6
 
         return 0.0
-
-    def find_match(
-        self,
-        detected: Dict[str, Any],
-        watchlist_entries: List[Dict[str, Any]],
-        threshold: float = 0.7
-    ) -> Optional[Tuple[Dict[str, Any], float]]:
-        """
-        Find the best matching watchlist entry for a detected organism.
-
-        Args:
-            detected: Dict with 'taxid', 'name' from detection
-            watchlist_entries: List of watchlist entry dicts
-            threshold: Minimum score to consider a match
-
-        Returns:
-            Tuple of (matching entry, score) or None if no match
-        """
-        best_match = None
-        best_score = 0.0
-
-        for entry in watchlist_entries:
-            score = self.match_organism(
-                detected=detected,
-                entry_name=entry.get("name", ""),
-                entry_alt_names=entry.get("names_alt", []),
-                entry_taxid=entry.get("taxid") or entry.get("taxid_ncbi"),
-                # Explicit GTDB/custom DB taxid -> exact match for any DB type.
-                entry_db_taxid=entry.get("db_taxid"),
-            )
-
-            if score > best_score:
-                best_score = score
-                best_match = entry
-
-        if best_score >= threshold:
-            return (best_match, best_score)
-
-        return None
-
-    def get_taxonomy_indicator(self) -> str:
-        """
-        Get a human-readable indicator for the current taxonomy.
-
-        Returns:
-            String like "NCBI" or "GTDB" for display
-        """
-        return {
-            TaxonomyType.NCBI: "NCBI",
-            TaxonomyType.GTDB: "GTDB",
-            TaxonomyType.MIXED: "Mixed",
-            TaxonomyType.UNKNOWN: "Auto",
-        }.get(self._taxonomy_type, "Unknown")
 
 
 # Module-level singleton

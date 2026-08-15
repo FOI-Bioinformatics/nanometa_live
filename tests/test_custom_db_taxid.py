@@ -18,7 +18,6 @@ from nanometa_live.core.watchlist.watchlist_manager import (
     _PSEUDO_TAXID_BASE,
 )
 from nanometa_live.core.watchlist.watchlist_loader import WatchlistLoader
-from nanometa_live.core.watchlist.taxonomy_matcher import TaxonomyMatcher
 
 pytestmark = pytest.mark.unit
 
@@ -76,41 +75,102 @@ class TestCustomDbTaxidParsing:
         assert entries[0].db_taxid == 86661
 
 
-class TestMatcherUsesDbTaxid:
-    def test_explicit_db_taxid_matches_any_db_type(self):
-        m = TaxonomyMatcher()
-        # Detected taxid is the report's DB (GTDB) taxid; name is GTDB-mangled.
-        score = m.match_organism(
-            {"taxid": 45127, "name": "s__Staphylococcus aureus"},
-            "Staphylococcus aureus",
-            entry_db_taxid=45127,
-        )
-        assert score == 1.0
+class TestDbTaxidReachesDetection:
+    """An explicit db_taxid must match on the path production actually runs.
 
-    def test_db_taxid_mismatch_falls_through_to_name(self):
-        m = TaxonomyMatcher()
-        # Wrong db_taxid but the name still matches exactly -> name match wins.
-        score = m.match_organism(
-            {"taxid": 99999, "name": "Staphylococcus aureus"},
-            "Staphylococcus aureus",
-            entry_db_taxid=45127,
-        )
-        assert score == 1.0  # via exact name match, not taxid
+    These assertions used to target TaxonomyMatcher.match_organism via
+    find_match -- but find_match had no production callers, and neither
+    check_organisms nor check_organisms_with_mapping passed entry_db_taxid.
+    The field was therefore honoured when building pipeline parameters and
+    when writing the exported report, but silently ignored by live detection.
+    The same guarantees are asserted here against the reachable entry points.
+    """
 
-    def test_no_match_when_both_differ(self):
-        m = TaxonomyMatcher()
-        score = m.match_organism(
-            {"taxid": 99999, "name": "Totally unrelated"},
-            "Staphylococcus aureus",
-            entry_db_taxid=45127,
-        )
-        assert score == 0.0
+    ENTRY = {
+        "name": "Staphylococcus aureus",
+        "taxid_ncbi": 1280,
+        "db_taxid": 45127,
+        "alert_threshold": 1,
+        "threat_level": "high",
+    }
 
-    def test_find_match_passes_db_taxid(self):
-        m = TaxonomyMatcher()
-        result = m.find_match(
-            {"taxid": 45127, "name": "gtdb_mangled"},
-            [{"name": "Staphylococcus aureus", "taxid": 1280, "db_taxid": 45127}],
-            threshold=0.8,
+    def _manager(self):
+        from nanometa_live.core.watchlist.watchlist_manager import (
+            WatchlistManager, WatchlistSource,
         )
-        assert result is not None and result[1] == 1.0
+        m = WatchlistManager()
+        m._add_entry_from_dict(dict(self.ENTRY), WatchlistSource.USER)
+        # _add_entry_from_dict honours the persisted disabled-taxid set; these
+        # tests are about matching, not enablement.
+        for entry in m._entries.values():
+            entry.enabled = True
+        m._loaded = True
+        return m
+
+    def test_db_taxid_matches_when_the_name_does_not(self):
+        """The case the feature exists for.
+
+        A GTDB report names the organism differently, so name matching
+        cannot help; only the operator-declared database taxid can.
+        """
+        alerts = self._manager().check_organisms(
+            [{"taxid": 45127, "name": "s__Staphylococcus_A aureus", "reads": 500}]
+        )
+        assert len(alerts) == 1
+        assert alerts[0]["name"] == "Staphylococcus aureus"
+        assert alerts[0]["detected_taxid"] == 45127
+
+    def test_unrelated_db_taxid_does_not_match(self):
+        alerts = self._manager().check_organisms(
+            [{"taxid": 99999, "name": "Totally unrelated", "reads": 500}]
+        )
+        assert alerts == []
+
+    def test_name_still_matches_without_a_db_taxid_hit(self):
+        alerts = self._manager().check_organisms(
+            [{"taxid": 99999, "name": "Staphylococcus aureus", "reads": 500}]
+        )
+        assert len(alerts) == 1
+
+    def test_operator_db_taxid_beats_a_generated_mapping(self):
+        """Precedence matches parameter_mapping.build_species_list.
+
+        A generated mapping is a guess from name similarity; an operator-set
+        db_taxid is an explicit statement, so it wins.
+        """
+        from nanometa_live.core.taxonomy.taxid_mapping import (
+            MappingConfidence, TaxidMapping, TaxidMappingCollection,
+        )
+        collection = TaxidMappingCollection(database_path="/tmp/db")
+        collection.mappings[1280] = TaxidMapping(
+            ncbi_taxid=1280, canonical_name="Staphylococcus aureus",
+            db_taxid=777, confidence=MappingConfidence.FUZZY, match_score=0.8,
+        )
+        manager = self._manager()
+        index = manager._build_db_taxid_index(
+            manager.get_active_entries(), collection
+        )
+        assert index[45127] == [1280]  # operator value present
+        assert index[777] == [1280]    # generated value also retained
+
+    def test_mapping_reverse_hit_scores_without_error(self):
+        """Regression: this branch dereferenced an undefined name.
+
+        check_organisms_with_mapping looked up a mapping's score through a
+        local that no longer existed, so any detection resolved via the
+        reverse db_taxid map raised NameError. Nothing covered it.
+        """
+        from nanometa_live.core.taxonomy.taxid_mapping import (
+            MappingConfidence, TaxidMapping, TaxidMappingCollection,
+        )
+        collection = TaxidMappingCollection(database_path="/tmp/db")
+        collection.mappings[1280] = TaxidMapping(
+            ncbi_taxid=1280, canonical_name="Staphylococcus aureus",
+            db_taxid=45127, confidence=MappingConfidence.EXACT, match_score=0.95,
+        )
+        alerts = self._manager().check_organisms_with_mapping(
+            [{"taxid": 45127, "name": "unrecognisable", "reads": 500}],
+            collection,
+        )
+        assert len(alerts) == 1
+        assert alerts[0]["match_method"] == "taxid_mapping"

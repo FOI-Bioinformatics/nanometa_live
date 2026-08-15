@@ -93,3 +93,23 @@ def test_name_match_without_taxid_alerts(manager):
 
 def test_empty_detection_list_returns_empty(manager):
     assert manager.check_organisms([]) == []
+
+
+def test_alert_carries_the_detected_taxid(manager):
+    """The report taxid must survive into the alert, or per-sample
+    attribution is unrecoverable on a GTDB / custom database where it
+    differs from the watchlist entry's NCBI taxid. The mapping-aware
+    check_organisms_with_mapping already emitted it; this fallback path
+    did not."""
+    alerts = manager.check_organisms([_detect(99901, "Testus criticus", 100)])
+    assert alerts[0]["detected_taxid"] == 99901
+
+
+def test_detected_taxid_is_the_report_taxid_on_a_name_match(manager):
+    """A name-based match keeps the entry's NCBI taxid in `taxid` and the
+    Kraken2 report taxid in `detected_taxid` -- the two differ exactly in
+    the case attribution kept missing."""
+    alerts = manager.check_organisms([_detect(77777, "Testus criticus", 100)])
+    assert alerts, "name match should still alert"
+    assert alerts[0]["taxid"] == 99901
+    assert alerts[0]["detected_taxid"] == 77777

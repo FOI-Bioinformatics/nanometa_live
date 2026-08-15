@@ -1,0 +1,64 @@
+name: External link check
+
+# The database picker and the shipped config offer the operator a list of
+# Kraken2 databases to download. If one of those URLs rots, the failure lands
+# on a user part-way through setting up an analysis, and nothing in the test
+# suite would notice -- the URLs are data, not code.
+#
+# Runs weekly rather than per-push: the URLs change on the upstream mirror's
+# schedule, not ours, and a link check that runs on every commit only adds a
+# network dependency to every PR. Also runnable on demand.
+#
+# All 52 URLs resolved when this was added on 2026-07-28.
+
+on:
+  schedule:
+    # Mondays, 06:00 UTC.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  urls:
+    name: Kraken2 database URLs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check every advertised database URL resolves
+        run: |
+          set -uo pipefail
+
+          # Both files advertise downloadable databases to the operator:
+          # kraken2_databases.yaml drives the picker, config.yaml carries the
+          # external_kraken2_info defaults.
+          FILES="nanometa_live/kraken2_databases.yaml nanometa_live/config.yaml"
+
+          urls=$(grep -hoE 'https?://[^ "'"'"']+' $FILES | sort -u)
+          total=$(echo "$urls" | wc -l | tr -d ' ')
+          echo "Checking $total unique URLs"
+
+          failed=0
+          for u in $urls; do
+            # HEAD only: these are multi-GB archives and must not be fetched.
+            # Retry once, since a single transient 5xx is not link rot.
+            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+                     --max-time 30 --retry 1 --retry-delay 5 -I "$u" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "  ok   $u"
+            else
+              echo "  FAIL $code  $u"
+              failed=$((failed + 1))
+            fi
+          done
+
+          echo
+          if [ "$failed" -gt 0 ]; then
+            echo "$failed of $total advertised database URLs are unreachable."
+            echo "An operator selecting one of these in the GUI would see the"
+            echo "download fail part-way through setup."
+            exit 1
+          fi
+          echo "All $total URLs resolved."

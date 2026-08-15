@@ -26,6 +26,16 @@ from nanometa_live.core.utils.qc_loaders import (
     load_seqkit_stats,
 )
 from nanometa_live.core.utils.alert_engine import get_alert_engine
+from nanometa_live.core.taxonomy.ranks import species_rank_mask
+from nanometa_live.core.utils.attribution import (  # noqa: F401  (re-exported)
+    PER_SAMPLE_DISCOVERY_FLOOR,
+    PathogenAttribution,
+    build_pathogen_attribution,
+    format_attribution_text,
+    is_negative_control,
+    resolve_attribution_taxids,
+    samples_for_detection,
+)
 from nanometa_live.core.utils.pathogen_database import check_for_dangerous_pathogens
 from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
 from nanometa_live.app.utils.callback_helpers import (
@@ -80,6 +90,72 @@ def _count_input_files(nanopore_dir: str) -> int:
     return count
 
 
+_ATTRIBUTION_STYLE = {
+    "fontSize": "13px",
+    "fontWeight": "500",
+    "opacity": "0.85",
+}
+
+
+def _attribution_children(
+    sub_color: str,
+    *,
+    triggering_samples: Optional[List[str]] = None,
+    total_sample_count: Optional[int] = None,
+    triggering_attribution: Optional[List["PathogenAttribution"]] = None,
+    attribution_failed: bool = False,
+) -> List[Any]:
+    """Build the "Triggered by" subhead lines for the verdict banner.
+
+    Prefers the pathogen-to-sample pairing when the caller has it; falls back
+    to the flat sample list. When attribution was attempted and did not
+    resolve, an explicit note is rendered -- an unattributed positive must not
+    look like a positive in one unnamed sample.
+    """
+    children: List[Any] = []
+
+    def _line(text: str, extra_style: Optional[Dict[str, str]] = None) -> html.P:
+        style = {"color": sub_color, **_ATTRIBUTION_STYLE, **(extra_style or {})}
+        return html.P(
+            text,
+            className="dashboard-verdict-attribution mb-0 mt-1",
+            style=style,
+        )
+
+    text = (
+        format_attribution_text(triggering_attribution)
+        if triggering_attribution else None
+    )
+    if text:
+        children.append(_line(text))
+    elif triggering_samples:
+        shown = triggering_samples[:3]
+        overflow = max(0, len(triggering_samples) - len(shown))
+        names = ", ".join(shown)
+        if overflow > 0:
+            flat = f"Triggered by: {names} (+{overflow} more"
+            if total_sample_count:
+                flat += f" of {total_sample_count} samples"
+            flat += ")"
+        else:
+            n_total = total_sample_count or len(triggering_samples)
+            flat = (
+                f"Triggered by: {names} ({len(triggering_samples)} of "
+                f"{n_total} samples)"
+            )
+        children.append(_line(flat))
+
+    if attribution_failed:
+        children.append(
+            _line(
+                "Sample attribution unavailable — see the Organisms tab for "
+                "per-sample counts.",
+                {"fontStyle": "italic"},
+            )
+        )
+    return children
+
+
 def _make_banner_content(
     icon_name: str,
     icon_color: str,
@@ -95,6 +171,8 @@ def _make_banner_content(
     total_sample_count: Optional[int] = None,
     auto_stop_remaining_s: Optional[int] = None,
     triggering_pathogens: Optional[List[str]] = None,
+    triggering_attribution: Optional[List[PathogenAttribution]] = None,
+    attribution_failed: bool = False,
 ) -> dbc.Row:
     """
     Build the inner content for the Zone 1 clinical verdict banner.
@@ -183,34 +261,15 @@ def _make_banner_content(
                 style={"color": sub_color, "fontSize": "14px", "fontWeight": "600"},
             )
         )
-    if triggering_samples:
-        # Top 3 named inline; tail summarized as "(+N more)"
-        shown = triggering_samples[:3]
-        overflow = max(0, len(triggering_samples) - len(shown))
-        names = ", ".join(shown)
-        if overflow > 0:
-            attribution = f"Triggered by: {names} (+{overflow} more"
-            if total_sample_count:
-                attribution += f" of {total_sample_count} samples"
-            attribution += ")"
-        else:
-            n_total = total_sample_count or len(triggering_samples)
-            attribution = (
-                f"Triggered by: {names} ({len(triggering_samples)} of "
-                f"{n_total} samples)"
-            )
-        verdict_text_children.append(
-            html.P(
-                attribution,
-                className="dashboard-verdict-attribution mb-0 mt-1",
-                style={
-                    "color": sub_color,
-                    "fontSize": "13px",
-                    "fontWeight": "500",
-                    "opacity": "0.85",
-                },
-            )
+    verdict_text_children.extend(
+        _attribution_children(
+            sub_color,
+            triggering_samples=triggering_samples,
+            total_sample_count=total_sample_count,
+            triggering_attribution=triggering_attribution,
+            attribution_failed=attribution_failed,
         )
+    )
 
     return dbc.Row([
         dbc.Col([
@@ -354,6 +413,7 @@ def build_detection_meta(
     lineage: Optional[List[str]] = None,
     gtdb_taxonomy: Optional[str] = None,
     on_watchlist: bool = True,
+    sample_breakdown: Optional[List[Dict[str, Any]]] = None,
 ) -> Any:
     """Compact detection-metadata block for the report modal.
 
@@ -373,6 +433,26 @@ def build_detection_meta(
         items.append(_meta_row("Taxonomy ID", txt, badge="success"))
     elif on_watchlist:
         items.append(_meta_row("Taxonomy ID", "Not yet validated", badge="secondary"))
+    # Per-sample breakdown. The card that opens this modal is computed over
+    # All Samples while the modal's read count follows the selected sample, so
+    # without this the two can disagree with no explanation.
+    if sample_breakdown:
+        shown = sample_breakdown[:5]
+        parts = [
+            f"{s['sample']} ({int(s.get('reads', 0)):,} reads)" for s in shown
+        ]
+        overflow = len(sample_breakdown) - len(shown)
+        if overflow > 0:
+            parts.append(f"+{overflow} more")
+        total = sum(int(s.get("reads", 0)) for s in sample_breakdown)
+        items.append(_meta_row("Detected in", ", ".join(parts)))
+        items.append(
+            _meta_row(
+                "Across samples",
+                f"{total:,} reads in {len(sample_breakdown)} sample"
+                f"{'s' if len(sample_breakdown) != 1 else ''}",
+            )
+        )
     if lineage:
         items.append(_meta_row("Lineage", " > ".join(lineage)))
     elif gtdb_taxonomy:
@@ -454,6 +534,32 @@ def _lookup_organism_reads(taxid: Any, config: Dict[str, Any],
     return out
 
 
+def _lookup_sample_breakdown(taxid: Any,
+                             config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Per-sample read counts for ``taxid``, highest first.
+
+    The pathogen card is computed over All Samples while the modal's headline
+    read count follows the selected sample; the breakdown makes the difference
+    legible instead of leaving the operator with two numbers that disagree.
+    Returns [] on any failure -- this is supplementary detail, never a reason
+    for the modal not to open.
+    """
+    try:
+        main_dir = (config.get("results_output_directory", "")
+                    or config.get("main_dir", "")) if config else ""
+        if not main_dir or not taxid:
+            return []
+        from nanometa_live.core.utils.sample_detector import get_available_samples
+        samples = [s for s in get_available_samples(main_dir) if s != "All Samples"]
+        if not samples:
+            return []
+        taxid_to_samples = _load_per_sample_organisms(main_dir, samples, config)
+        return taxid_to_samples.get(int(taxid), [])
+    except Exception as e:
+        logger.debug("Per-sample breakdown for taxid %s: %s", taxid, e)
+        return []
+
+
 def _resolve_report_pathogen(taxid: Any):
     """Resolve ``taxid`` to a pathogen record, NCBI taxid, and watchlist entry.
 
@@ -504,7 +610,8 @@ def _resolve_report_pathogen(taxid: Any):
     return pathogen, ncbi_taxid, wl_entry
 
 
-def _unwatched_payload(taxid, ncbi_taxid, reads, detected_at) -> List[Any]:
+def _unwatched_payload(taxid, ncbi_taxid, reads, detected_at,
+                       sample_breakdown=None) -> List[Any]:
     """Modal payload for an organism that is not on any active watchlist."""
     display_name = reads["name"] or f"TaxID: {taxid}"
     return [
@@ -517,12 +624,14 @@ def _unwatched_payload(taxid, ncbi_taxid, reads, detected_at) -> List[Any]:
         html.Div([
             html.I(className="bi bi-info-circle me-2"), "Not on watchlist",
         ], className="alert alert-secondary text-center py-2"),
-        build_detection_meta(detected_at=detected_at, on_watchlist=False),
+        build_detection_meta(detected_at=detected_at, on_watchlist=False,
+                             sample_breakdown=sample_breakdown),
         {"taxid": taxid, "ncbi_taxid": ncbi_taxid},
     ]
 
 
-def _pathogen_payload(pathogen, taxid, ncbi_taxid, wl_entry, reads, detected_at) -> List[Any]:
+def _pathogen_payload(pathogen, taxid, ncbi_taxid, wl_entry, reads, detected_at,
+                      sample_breakdown=None) -> List[Any]:
     """Modal payload for a watchlist/known pathogen, with threat styling."""
     threat_level = pathogen.threat_level
     if hasattr(threat_level, 'value'):
@@ -560,6 +669,7 @@ def _pathogen_payload(pathogen, taxid, ncbi_taxid, wl_entry, reads, detected_at)
         lineage=getattr(wl_entry, "lineage", None),
         gtdb_taxonomy=getattr(wl_entry, "gtdb_taxonomy", None),
         on_watchlist=wl_entry is not None,
+        sample_breakdown=sample_breakdown,
     )
     annotation = (getattr(wl_entry, "annotation", "")
                   or getattr(pathogen, "annotation", "") or "")
@@ -579,11 +689,14 @@ def _build_report_payload_inner(taxid: Any, config: Dict[str, Any],
                                 selected_sample: Optional[str]) -> List[Any]:
     """Inner builder for :func:`build_report_payload` (may raise)."""
     reads = _lookup_organism_reads(taxid, config, selected_sample)
+    breakdown = _lookup_sample_breakdown(taxid, config)
     pathogen, ncbi_taxid, wl_entry = _resolve_report_pathogen(taxid)
     detected_at = datetime.now().strftime("%Y-%m-%d %H:%M")
     if not pathogen:
-        return _unwatched_payload(taxid, ncbi_taxid, reads, detected_at)
-    return _pathogen_payload(pathogen, taxid, ncbi_taxid, wl_entry, reads, detected_at)
+        return _unwatched_payload(taxid, ncbi_taxid, reads, detected_at,
+                                  breakdown)
+    return _pathogen_payload(pathogen, taxid, ncbi_taxid, wl_entry, reads,
+                             detected_at, breakdown)
 
 
 # ----------------------------------------------------------------------------
@@ -642,6 +755,95 @@ def _standby_descriptor() -> VerdictDescriptor:
     )
 
 
+def _not_screened_descriptor() -> VerdictDescriptor:
+    """NOT SCREENED: results exist but no watchlist is active.
+
+    Distinct from ALL CLEAR on purpose. An empty hit list means one of two
+    opposite things -- every watched organism was screened and none crossed its
+    threshold, or nothing was screened at all -- and rendering both as a green
+    all-clear asserts a negative result that was never produced. Amber rather
+    than green: the run is fine, the screening is simply absent.
+    """
+    return VerdictDescriptor(
+        state="NOT_SCREENED",
+        icon="shield-slash", icon_color="#fd7e14",
+        title="NOT SCREENED",
+        subtitle="No watchlist active - results are not screened for pathogens",
+        sub_color="#664d03", bg_color="#fff3cd", border_color="#fd7e14",
+    )
+
+
+#: Read count below which a negative screening result carries little weight.
+#: Anchored to ``min_reads_for_validation`` (default 50), the depth the
+#: pipeline already treats as the floor for confirming an organism: if a
+#: detection needs 50 reads to be worth validating, an absence measured over
+#: fewer than 50 is not worth reporting as a clear result either.
+DEFAULT_LOW_READ_FLOOR = 50
+
+
+def _insufficient_reads_descriptor(
+    total_reads: int, n_watched: int, highest_threshold: Optional[int] = None
+) -> VerdictDescriptor:
+    """A negative measured over too few reads is not a negative.
+
+    Distinct from ALL CLEAR because the operator needs to know the result is
+    thin, and distinct from NOT SCREENED because screening did run -- there was
+    simply almost nothing to screen. Amber, not green: the run is fine, the
+    evidence is not.
+
+    The subtitle states the actual depth, because "too few" is only actionable
+    if the operator can see how few and judge it against their own sample.
+    """
+    if total_reads <= 0:
+        detail = (
+            f"No reads were analysed, so the {n_watched} watched "
+            f"organism{'s' if n_watched != 1 else ''} could not be screened"
+        )
+    else:
+        detail = (
+            f"Only {total_reads:,} read{'s' if total_reads != 1 else ''} "
+            f"analysed - too few for a reliable negative across "
+            f"{n_watched} watched organism{'s' if n_watched != 1 else ''}"
+        )
+        if highest_threshold and total_reads < highest_threshold:
+            # Mathematically decisive, and worth saying: even if every read in
+            # the sample were one organism, it could not reach that organism's
+            # alert threshold.
+            detail += (
+                f"; the highest alert threshold is {highest_threshold}, "
+                f"which this depth cannot reach"
+            )
+
+    return VerdictDescriptor(
+        state="INSUFFICIENT_READS",
+        icon="exclamation-circle", icon_color="#fd7e14",
+        title="INSUFFICIENT READS",
+        subtitle=detail,
+        sub_color="#664d03", bg_color="#fff3cd", border_color="#fd7e14",
+    )
+
+
+def _all_clear_descriptor(
+    n_watched: int, total_reads: Optional[int] = None
+) -> VerdictDescriptor:
+    """ALL CLEAR: organisms were screened at adequate depth and none was found.
+
+    States the depth it is based on, so a negative over 34,000 reads cannot be
+    confused at a glance with one over 60. The shallow and zero-read cases are
+    handled by :func:`_insufficient_reads_descriptor` before reaching here.
+    """
+    depth = f" across {total_reads:,} reads" if total_reads else ""
+    return VerdictDescriptor(
+        state="ALL_CLEAR",
+        icon="shield-check", icon_color="#28a745",
+        title="ALL CLEAR",
+        subtitle=(
+            f"0 of {n_watched} watched pathogens above alert threshold{depth}"
+        ),
+        sub_color="#155724", bg_color="#d4edda", border_color="#28a745",
+    )
+
+
 def _classify_dangerous(dangerous: List[Dict[str, Any]]) -> Tuple[list, list]:
     """Split watchlist hits into (critical, high_risk) buckets.
 
@@ -654,19 +856,83 @@ def _classify_dangerous(dangerous: List[Dict[str, Any]]) -> Tuple[list, list]:
     return critical, high_risk
 
 
+def _shallow_depth_clause(
+    total_reads: Optional[int], low_read_floor: int
+) -> str:
+    """" — on only N reads total" when a detection rests on almost nothing.
+
+    A detection always outranks depth, so this never changes the verdict; it
+    only says what the verdict is standing on. ALL CLEAR already states its
+    depth for exactly this reason ("so a negative over 34,000 reads cannot be
+    confused at a glance with one over 60") and the detection path had no
+    equivalent.
+
+    The case that prompted it: a real negative control carrying 6 Francisella
+    tularensis reads out of 11 total read as ACTION REQUIRED in wording
+    identical to the same run's genuine 34,096-read detection.
+
+    ``total_reads=None`` means undetermined and adds nothing -- an unknown
+    depth must not be presented as a shallow one.
+    """
+    if total_reads is None or total_reads >= low_read_floor:
+        return ""
+    return f" — on only {total_reads:,} read{'s' if total_reads != 1 else ''} total"
+
+
 def _action_required_subtitle(n_found: int, n_watched: int,
-                              validation_has_results: bool) -> str:
+                              validation_has_results: bool,
+                              depth_clause: str = "") -> str:
     """Subtitle for ACTION REQUIRED.
 
     n_found counts only entries above each pathogen's alert_threshold; the
     Organisms tab lists every watchlist hit without that gate, so the two
     counters legitimately differ. The wording makes the threshold gate
-    explicit and flags when confirmatory validation has not yet run.
+    explicit, states the depth when it is too low to stand on its own, and
+    flags when confirmatory validation has not yet run.
     """
     sub = f"{n_found} of {n_watched} watched pathogens above alert threshold"
+    sub += depth_clause
     if not validation_has_results:
         sub += " — pending confirmatory validation"
     return sub
+
+
+def _detection_descriptor(
+    dangerous: List[Dict[str, Any]],
+    n_watched: int,
+    validation_has_results: bool,
+    total_reads: Optional[int],
+    low_read_floor: int,
+) -> VerdictDescriptor:
+    """The verdict for a run that found something on the watchlist.
+
+    A detection outranks shallow depth and always will -- suppressing an alarm
+    because the run was thin is the one thing this must not do. But the banner
+    should say what it is standing on: a real negative control carrying 6
+    Francisella tularensis reads out of 11 total read exactly like the same
+    run's genuine 34,096-read detection.
+    """
+    depth_clause = _shallow_depth_clause(total_reads, low_read_floor)
+    critical, high_risk = _classify_dangerous(dangerous)
+    if critical or high_risk:
+        return VerdictDescriptor(
+            state="ACTION_REQUIRED",
+            icon="exclamation-octagon-fill", icon_color="#8b0000",
+            title="ACTION REQUIRED",
+            subtitle=_action_required_subtitle(
+                len(dangerous), n_watched, validation_has_results,
+                depth_clause),
+            sub_color="#721c24", bg_color="#f8d7da",
+            border_color="#8b0000",
+            show_icon_mobile=True, needs_attribution=True,
+        )
+    return VerdictDescriptor(
+        state="MONITORING",
+        icon="eye-fill", icon_color="#fd7e14",
+        title="MONITORING",
+        subtitle="Moderate-risk species found" + depth_clause,
+        sub_color="#664d03", bg_color="#fff3cd", border_color="#fd7e14",
+    )
 
 
 def select_verdict(
@@ -679,6 +945,9 @@ def select_verdict(
     dangerous: List[Dict[str, Any]],
     n_watched: int,
     validation_has_results: bool,
+    total_reads: Optional[int] = None,
+    low_read_floor: int = DEFAULT_LOW_READ_FLOOR,
+    highest_alert_threshold: Optional[int] = None,
 ) -> VerdictDescriptor:
     """Pure decision: pick the verdict banner state from the analysis inputs.
 
@@ -701,31 +970,25 @@ def select_verdict(
 
     if main_dir_available and kraken_has_data:
         if dangerous:
-            critical, high_risk = _classify_dangerous(dangerous)
-            if critical or high_risk:
-                return VerdictDescriptor(
-                    state="ACTION_REQUIRED",
-                    icon="exclamation-octagon-fill", icon_color="#8b0000",
-                    title="ACTION REQUIRED",
-                    subtitle=_action_required_subtitle(
-                        len(dangerous), n_watched, validation_has_results),
-                    sub_color="#721c24", bg_color="#f8d7da",
-                    border_color="#8b0000",
-                    show_icon_mobile=True, needs_attribution=True,
-                )
-            return VerdictDescriptor(
-                state="MONITORING",
-                icon="eye-fill", icon_color="#fd7e14",
-                title="MONITORING", subtitle="Moderate-risk species found",
-                sub_color="#664d03", bg_color="#fff3cd", border_color="#fd7e14",
+            return _detection_descriptor(
+                dangerous, n_watched, validation_has_results,
+                total_reads, low_read_floor,
             )
-        return VerdictDescriptor(
-            state="ALL_CLEAR",
-            icon="shield-check", icon_color="#28a745",
-            title="ALL CLEAR",
-            subtitle=f"0 of {n_watched} watched pathogens above alert threshold",
-            sub_color="#155724", bg_color="#d4edda", border_color="#28a745",
-        )
+        # No hits. Whether that is reassuring depends entirely on whether
+        # anything was screened -- see _not_screened_descriptor.
+        if not n_watched:
+            return _not_screened_descriptor()
+
+        # An absence measured over almost no reads is not evidence of absence.
+        # Only applied when the caller supplies a depth: passing None keeps the
+        # previous behaviour for callers that cannot determine it, rather than
+        # silently treating "unknown" as "zero".
+        if total_reads is not None and total_reads < low_read_floor:
+            return _insufficient_reads_descriptor(
+                total_reads, n_watched, highest_alert_threshold
+            )
+
+        return _all_clear_descriptor(n_watched, total_reads)
 
     # Results directory present but no rows yet, pipeline still producing them.
     if main_dir_available and pipeline_running:
@@ -1167,7 +1430,8 @@ def _generate_alerts(
     overall_status: Dict[str, Any],
     main_dir: str,
     config: Dict[str, Any],
-    samples_data: List[Dict[str, Any]]
+    samples_data: List[Dict[str, Any]],
+    taxid_to_samples: Optional[Dict[int, List[Dict[str, Any]]]] = None
 ) -> List[Dict[str, Any]]:
     """
     Generate alerts using the AlertEngine.
@@ -1177,6 +1441,10 @@ def _generate_alerts(
         main_dir: Main data directory
         config: Application configuration
         samples_data: List of sample information
+        taxid_to_samples: Optional pre-built per-taxid attribution. Built here
+            from ``samples_data`` when omitted so pathogen alerts name their
+            samples; the per-sample loads share the loader cache with the
+            other callbacks on the same tick.
 
     Returns:
         List of alert dictionaries
@@ -1257,12 +1525,22 @@ def _generate_alerts(
         if not kraken_df.empty:
             # Filter to species level with meaningful read counts (vectorized)
             species_df = kraken_df[
-                (kraken_df["rank"] == "S") &
+                species_rank_mask(kraken_df) &
                 (kraken_df["reads"] >= 5)
             ]
             detected_organisms = _species_df_to_organisms(species_df)
     except Exception as e:
         logger.error(f"Error loading organisms for pathogen check: {e}")
+
+    if taxid_to_samples is None:
+        sample_names = [s["name"] for s in samples if s.get("name")]
+        try:
+            taxid_to_samples = _load_per_sample_organisms(
+                main_dir, sample_names, config
+            )
+        except Exception as e:
+            logger.debug(f"Per-sample attribution unavailable for alerts: {e}")
+            taxid_to_samples = {}
 
     # Generate alerts using alert engine (now includes pathogen detection)
     alerts = alert_engine.generate_alerts(
@@ -1270,7 +1548,8 @@ def _generate_alerts(
         samples,
         qc_stats,
         detected_organisms=detected_organisms,
-        watched_species=species_of_interest
+        watched_species=species_of_interest,
+        taxid_to_samples=taxid_to_samples
     )
 
     return alerts
@@ -1381,12 +1660,11 @@ def _create_pathogen_alert_panel(
             action = detection.get("action_required", "Follow biosafety protocols")
             taxid = detection.get("taxid")
 
-            # Resolve per-sample attribution: prefer the Kraken2 db taxid used during
-            # detection, fall back to the NCBI taxid stored on the watchlist entry.
-            kraken_taxid = detection.get("detected_taxid") or taxid
-            samples_for_detection = taxid_to_samples.get(kraken_taxid, [])
-            if not samples_for_detection and kraken_taxid != taxid:
-                samples_for_detection = taxid_to_samples.get(taxid, [])
+            # Resolve per-sample attribution: prefer the Kraken2 db taxid used
+            # during detection, fall back to the NCBI taxid stored on the
+            # watchlist entry. Shared with the verdict banner so the two
+            # cannot drift.
+            detection_samples = samples_for_detection(detection, taxid_to_samples)
 
             # Cross-sample validation summary for this watchlist hit. Returns
             # None when no sample in the detection has a validation entry --
@@ -1395,7 +1673,7 @@ def _create_pathogen_alert_panel(
             # validation has run for OTHER taxids), suppressing the badge
             # entirely otherwise.
             validation = _summarise_validation_for_taxid(
-                samples_for_detection, taxid, validation_lookup
+                detection_samples, taxid, validation_lookup
             )
             if validation is None and validation_lookup:
                 # Validation has run elsewhere but produced no result for
@@ -1406,7 +1684,7 @@ def _create_pathogen_alert_panel(
                     "identity": 0.0,
                     "method": "",
                     "n_validated": 0,
-                    "n_samples": len(samples_for_detection),
+                    "n_samples": len(detection_samples),
                 }
 
             if threat_level == "critical":
@@ -1420,7 +1698,7 @@ def _create_pathogen_alert_panel(
                         confidence="HIGH" if reads >= 100 else "MODERATE",
                         taxid=taxid,
                         recommendation=action,
-                        samples=samples_for_detection,
+                        samples=detection_samples,
                         validation=validation,
                     )
                 )
@@ -1434,7 +1712,7 @@ def _create_pathogen_alert_panel(
                         abundance_pct=abundance,
                         taxid=taxid,
                         recommendation=action,
-                        samples=samples_for_detection,
+                        samples=detection_samples,
                         validation=validation,
                     )
                 )
@@ -1447,7 +1725,7 @@ def _create_pathogen_alert_panel(
                         read_count=reads,
                         abundance_pct=abundance,
                         taxid=taxid,
-                        samples=samples_for_detection,
+                        samples=detection_samples,
                         validation=validation,
                     )
                 )
@@ -1513,29 +1791,56 @@ def _species_df_to_organisms(species_df: pd.DataFrame) -> List[Dict[str, Any]]:
     else:
         abundance_col = pd.Series([0.0] * len(species_df))
 
+    # cumul_reads, not the per-rank reads column. At species rank the
+    # difference is everything assigned to subspecies below -- the same
+    # organism. This reported the per-rank count while the Organisms tab uses
+    # cumul_reads "for consistency with the organism cards", so a real run
+    # showed 29,721 reads here and 34,096 there for one detection, the 4,375
+    # difference sitting at F. tularensis holarctica.
+    #
+    # It also decided visibility: the filter in _load_per_sample_organisms
+    # compares against PER_SAMPLE_DISCOVERY_FLOOR, and that run's negative
+    # control had 4 direct against 6 cumulative, so it fell below a floor of
+    # 5 and never appeared at all.
+    #
+    # Falls back where the column is absent so partial frames still work.
+    reads_col = (
+        species_df['cumul_reads'] if 'cumul_reads' in species_df.columns
+        else species_df['reads']
+    )
+
     result_df = pd.DataFrame({
         'taxid': species_df['taxid'].fillna(0).astype(int),
         'name': species_df['name'].fillna('Unknown'),
-        'reads': species_df['reads'].fillna(0).astype(int),
+        'reads': reads_col.fillna(0).astype(int),
         'abundance': abundance_col
     })
     return result_df.to_dict('records')
 
 def _load_per_sample_organisms(
     main_dir: str,
-    available_samples: List[str]
+    available_samples: List[str],
+    config: Optional[Dict[str, Any]] = None,
 ) -> Dict[int, List[Dict[str, Any]]]:
     """
     Load species-level organisms from each sample and return a per-taxid attribution dict.
 
     Keyed by the Kraken2 database taxid (as it appears in reports), each value is a
-    list of sample-level dicts sorted descending by reads. A sample is flagged as
-    negative control when its name contains "negative" (case-insensitive) — the
-    codebase has no explicit manifest NC flag at this stage.
+    list of sample-level dicts sorted descending by reads. Negative controls are
+    identified by ``is_negative_control`` — the config's
+    ``negative_control_samples`` list when the operator declared one, otherwise
+    the documented name patterns.
+
+    The ``reads >= PER_SAMPLE_DISCOVERY_FLOOR`` filter is a discovery floor
+    only: it decides whether a taxon is present in a sample at all, not
+    whether that sample is above any pathogen's alert threshold. That second
+    gate lives in ``build_pathogen_attribution``, which knows the per-entry
+    threshold.
 
     Args:
         main_dir: Results output directory
         available_samples: All sample names including "All Samples"
+        config: Application configuration dict (for declared negative controls)
 
     Returns:
         Dict[int, List[{sample, reads, abundance, is_negative_control}]]
@@ -1547,13 +1852,21 @@ def _load_per_sample_organisms(
     taxid_to_samples: Dict[int, List[Dict[str, Any]]] = {}
 
     for sample in real_samples:
-        is_nc = "negative" in sample.lower()
+        is_nc = is_negative_control(sample, config)
         try:
             kraken_df = load_kraken_data(main_dir, sample)
             if kraken_df.empty:
                 continue
+            # Gate on the same column the organisms are reported with, or the
+            # floor and the displayed count disagree: a real negative control
+            # had 4 direct reads against 6 cumulative and was dropped by a
+            # floor of 5, so its contamination never reached the display.
+            floor_col = (
+                "cumul_reads" if "cumul_reads" in kraken_df.columns else "reads"
+            )
             species_df = kraken_df[
-                (kraken_df["rank"] == "S") & (kraken_df["reads"] >= 5)
+                species_rank_mask(kraken_df)
+                & (kraken_df[floor_col] >= PER_SAMPLE_DISCOVERY_FLOOR)
             ]
             if species_df.empty:
                 continue

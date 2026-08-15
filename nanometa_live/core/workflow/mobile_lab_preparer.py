@@ -299,11 +299,10 @@ class MobileLabPreparer:
                 )
             return
 
-        # On a GTDB database every organism is bacteria/archaea, so hint the
-        # kingdom and skip the per-taxid NCBI lookup entirely.
-        kingdom_hint = ("Bacteria"
-                        if str(self.config.get("kraken_taxonomy", "")).lower() == "gtdb"
-                        else None)
+        from nanometa_live.core.taxonomy.database_profile import (
+            kingdom_hint_for_database,
+        )
+        kingdom_hint = kingdom_hint_for_database(self.config)
 
         total = len(entries)
         downloaded = 0

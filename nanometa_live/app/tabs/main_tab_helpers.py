@@ -12,10 +12,16 @@ main_tab.py re-exports these names for backward compatibility.
 import logging
 
 import pandas as pd
+
+from nanometa_live.core.taxonomy.ranks import is_species_rank
 from dash import html
 import dash_bootstrap_components as dbc
 
-from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
+from nanometa_live.app.tabs.dashboard_helpers import DEFAULT_LOW_READ_FLOOR
+from nanometa_live.core.watchlist.watchlist_manager import (
+    WatchlistManager,
+    get_watchlist_manager,
+)
 
 
 def render_validation_results_card(result):
@@ -117,24 +123,36 @@ def filter_detected_species(kraken_df, watchlist: list) -> list:
     Filters out higher taxonomic ranks (class, order, family, etc.) to avoid
     false positives from parent taxa.
     """
-    if kraken_df is None or kraken_df.empty or not watchlist:
+    if kraken_df is None or kraken_df.empty:
         return []
 
     # Get WatchlistManager and active entries
     manager = get_watchlist_manager()
     active_entries = manager.get_active_entries()
 
+    # Guard on BOTH sources, matching get_all_watchlist_with_detection. The
+    # two are required to agree -- this function drives the alert banner and
+    # that one drives the cards -- and guarding on the legacy `watchlist`
+    # argument alone made them disagree: with an empty store but a populated
+    # manager, the cards showed detections while the banner stayed silent.
+    if not active_entries and not watchlist:
+        return []
+
     # Get taxid mapping collection for proper db_taxid -> ncbi_taxid lookup
     from nanometa_live.core.taxonomy.taxid_mapping import get_mapping_collection
     mapping_collection = get_mapping_collection()
 
-    # Build reverse mapping: Kraken2 db_taxid -> NCBI taxid
-    # This is critical for GTDB databases where taxids are different
-    db_to_ncbi = {}
-    if mapping_collection:
-        for ncbi_taxid, mapping in mapping_collection.mappings.items():
-            if mapping.db_taxid:
-                db_to_ncbi[mapping.db_taxid] = ncbi_taxid
+    # Reverse mapping: Kraken2 db_taxid -> watchlist key. Critical for GTDB
+    # and flextaxd databases, where the report's taxid is not the NCBI one.
+    # Shared with the detection path so the two cannot drift; the helper
+    # returns every entry that resolves to a node, of which this only needs
+    # one -- membership in all_ncbi_taxids is what the mask tests.
+    db_to_ncbi = {
+        node: keys[0]
+        for node, keys in WatchlistManager._build_db_taxid_index(
+            active_entries, mapping_collection
+        ).items()
+    }
 
     # Collect NCBI taxids from active watchlist entries
     ncbi_taxids = {e.taxid for e in active_entries.values() if e.taxid}
@@ -153,10 +171,10 @@ def filter_detected_species(kraken_df, watchlist: list) -> list:
     kraken_df['name_lower'] = kraken_df['name'].fillna('').str.lower().str.strip()
     kraken_df['rank_clean'] = kraken_df['rank'].fillna('').str.strip()
 
-    # Filter to species-level only (S = species, S1/S2 = subspecies)
-    # Exclude higher ranks like C (class), O (order), F (family), G (genus)
-    species_ranks = {'S', 'S1', 'S2'}
-    species_mask = kraken_df['rank_clean'].isin(species_ranks)
+    # Species and the subspecies ranks below it, from the shared definition --
+    # this list was {'S','S1','S2'} while every other consumer used == "S",
+    # so a subspecies was watchable here and invisible to the verdict banner.
+    species_mask = kraken_df['rank_clean'].map(is_species_rank)
     species_df = kraken_df[species_mask]
 
     if species_df.empty:
@@ -223,15 +241,28 @@ def get_all_watchlist_with_detection(kraken_df, watchlist: list) -> list:
     from nanometa_live.core.taxonomy.taxid_mapping import get_mapping_collection
     mapping_collection = get_mapping_collection()
 
-    # Build mapping: NCBI taxid -> Kraken2 db_taxid
+    # NCBI taxid -> Kraken2 db_taxid. Keyed by the watchlist entry, so
+    # several entries sharing one database node each keep their own row --
+    # that is why this direction is built rather than inverting the shared
+    # index, which is many-to-one.
     ncbi_to_db = {}
     if mapping_collection:
         for ncbi_taxid, mapping in mapping_collection.mappings.items():
             if mapping.db_taxid:
                 ncbi_to_db[ncbi_taxid] = mapping.db_taxid
+    for key, entry in active_entries.items():
+        db_taxid = getattr(entry, "db_taxid", None)
+        if db_taxid:
+            ncbi_to_db[key] = int(db_taxid)
 
-    # Also build reverse mapping for lookups
-    db_to_ncbi = {v: k for k, v in ncbi_to_db.items()}
+    # And the reverse, for the kraken_lookup alias below. Many-to-one, so
+    # the shared index supplies the primary claimant for each node.
+    db_to_ncbi = {
+        node: keys[0]
+        for node, keys in WatchlistManager._build_db_taxid_index(
+            active_entries, mapping_collection
+        ).items()
+    }
 
     # Prepare kraken data for matching (if available)
     # Two lookups: taxid-keyed and name-keyed. The name-keyed path
@@ -485,3 +516,34 @@ def create_species_alert_banner(detected_species: list) -> html.Div:
             className="text-muted",
         ),
     ], color="warning", className="mb-3")
+
+
+def not_detected_caveat(
+    total_reads,
+    n_not_detected: int,
+    low_read_floor: int = DEFAULT_LOW_READ_FLOOR,
+):
+    """Why this panel's "Not Detected" list is not yet a negative result.
+
+    Returns the caveat text, or None when the negative has been earned.
+
+    The Dashboard banner already gates on depth (select_verdict ->
+    INSUFFICIENT_READS): below the floor, an absence measured over almost no
+    reads is not evidence of absence. The Organisms panel split purely on
+    ``detected`` and inherited none of that, so a one-read run rendered
+    "Not Detected (35)" identically to a properly-powered negative -- and this
+    panel is read, screenshotted and exported on its own, without the banner.
+
+    ``total_reads=None`` means the depth could not be determined and is
+    deliberately not treated as zero; that would put a false shallow-depth
+    warning on every caller that cannot compute a total.
+    """
+    if not n_not_detected:
+        return None
+    if total_reads is None or total_reads >= low_read_floor:
+        return None
+    return (
+        f"Only {total_reads:,} read{'s' if total_reads != 1 else ''} analysed "
+        f"- too few to rule these organisms out. Screening is inconclusive "
+        f"at this depth, not negative."
+    )
