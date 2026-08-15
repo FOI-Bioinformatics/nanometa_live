@@ -1077,7 +1077,13 @@ name. Iterating it wrong silently empties the threat screen (a false negative
 in the archived artifact); regression-covered in `tests/test_report_generator.py`.
 Classification counts delegate to `get_classification_stats`; organism abundance
 uses species (`S`) rank only with Kraken2's `%` column (never `reads.sum()` —
-double-counts genus and over-states). Raw files copied are `_RAW_SUBDIRS`
+double-counts genus and over-states). Subspecies get their OWN table rather than joining the organism ranking:
+`_extract_organisms(df, ranks=...)` is called twice per sample, once for `S`
+and once for `S1/S2/S3`. Mixing them would rank a species against its own
+children — *F. tularensis* at 99.87% beside *F. t. holarctica* at 30.9% —
+which invites the reader to add rows that already contain each other. The
+section is omitted entirely when the database resolves nothing below species.
+Raw files copied are `_RAW_SUBDIRS`
 (kraken2/fastp/seqkit/taxpasta/validation/on_demand_validation/pipeline_info),
 AppleDouble-filtered, skipped above `export_max_raw_bytes` (default 5 GiB).
 Plotly is inlined for offline self-containment; `offline_mode` suppresses the

@@ -148,24 +148,7 @@ class ReportGenerator:
                 for r in export_report_links(self.results_dir)
             ]
 
-        # Per-sample data
-        per_sample = {}
-        for sample in samples:
-            if sample is None:
-                continue
-            sample_kraken = sample_frames[sample]
-            sample_qc = get_qc_stats(self.results_dir, sample)
-            s_classified, s_unclassified = self._get_classification_counts(sample_kraken)
-
-            # Top organisms
-            organisms = self._extract_organisms(sample_kraken)
-
-            per_sample[sample] = {
-                "classified": s_classified,
-                "unclassified": s_unclassified,
-                "qc": sample_qc,
-                "organisms": organisms[:20],
-            }
+        per_sample = self._per_sample_data(samples, sample_frames)
 
         return {
             # Timezone-aware local timestamp (carries the UTC offset) so an
@@ -216,19 +199,57 @@ class ReportGenerator:
         classified, unclassified, _rate = get_classification_stats(df)
         return classified, unclassified
 
-    def _extract_organisms(self, df: pd.DataFrame, max_n: int = 20) -> List[Dict[str, Any]]:
-        """Extract the top species-level organisms.
+    def _per_sample_data(self, samples, sample_frames) -> Dict[str, Any]:
+        """Per-sample classification counts, QC, organisms and subspecies.
 
-        Species rank (``S``) only: the previous S+G filter double-counted,
-        since a genus row's reads already include its species' reads. Abundance
-        is read from Kraken2's own ``%`` column (the authoritative per-clade
-        fraction of total reads) -- the prior reads/sum(reads) used the per-rank
-        ``reads`` column as denominator, which over-states abundance and can
-        push the listed values past 100%.
+        Subspecies are collected into their OWN list rather than merged into
+        ``organisms``: ranking a species against its own children reads as
+        double counting even though each row's percentage is correct alone.
+        The list is empty on databases that do not resolve below species, and
+        the template omits the section entirely in that case.
+        """
+        per_sample: Dict[str, Any] = {}
+        for sample in samples:
+            if sample is None:
+                continue
+            sample_kraken = sample_frames[sample]
+            sample_qc = get_qc_stats(self.results_dir, sample)
+            s_classified, s_unclassified = self._get_classification_counts(
+                sample_kraken
+            )
+            per_sample[sample] = {
+                "classified": s_classified,
+                "unclassified": s_unclassified,
+                "qc": sample_qc,
+                "organisms": self._extract_organisms(sample_kraken)[:20],
+                "subspecies": self._extract_organisms(
+                    sample_kraken, ranks=("S1", "S2", "S3"),
+                )[:20],
+            }
+        return per_sample
+
+    def _extract_organisms(
+        self, df: pd.DataFrame, max_n: int = 20, ranks: tuple = ("S",),
+    ) -> List[Dict[str, Any]]:
+        """Extract the top organisms at the given rank(s).
+
+        Species rank (``S``) only by default: the previous S+G filter
+        double-counted, since a genus row's reads already include its species'
+        reads. Abundance is read from Kraken2's own ``%`` column (the
+        authoritative per-clade fraction of total reads) -- the prior
+        reads/sum(reads) used the per-rank ``reads`` column as denominator,
+        which over-states abundance and can push the listed values past 100%.
+
+        ``ranks`` exists so subspecies can be listed in their OWN table.
+        Mixing them into this one would rank a species against its own
+        children -- F. tularensis at 99.87% beside F. t. holarctica at 64% --
+        which reads as double counting even though each row's percentage is
+        correct on its own.
         """
         if df.empty or "rank" not in df.columns:
             return []
-        species = df[df["rank"].astype(str).str.strip() == "S"].copy()
+        wanted = {str(r).strip() for r in ranks}
+        species = df[df["rank"].astype(str).str.strip().isin(wanted)].copy()
         if species.empty:
             return []
         species = species.sort_values("reads", ascending=False).head(max_n)

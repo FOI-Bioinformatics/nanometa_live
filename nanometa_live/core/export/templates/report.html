@@ -528,6 +528,38 @@
         {% else %}
         <p style="color: #6c757d;">No organisms detected at species level.</p>
         {% endif %}
+
+        {#
+          Subspecies in their own table, never merged into the one above.
+          Ranking a species against its own children reads as double counting
+          -- F. tularensis at 99.87% beside F. t. holarctica at 64% -- even
+          though each percentage is correct on its own. The section is omitted
+          entirely on databases that do not resolve below species.
+        #}
+        {% if sdata.subspecies %}
+        <h3>Subspecies and strains</h3>
+        <p style="color: #6c757d; font-size: 0.9em;">
+          Listed separately because these are subdivisions of the species
+          above, not additions to it: their reads are already counted in the
+          parent species row.
+        </p>
+        <table>
+          <thead>
+            <tr><th>Subspecies / strain</th><th>Rank</th><th>Tax ID</th><th>Reads</th><th>Abundance</th></tr>
+          </thead>
+          <tbody>
+            {% for sub in sdata.subspecies %}
+            <tr>
+              <td><em>{{ sub.name }}</em></td>
+              <td>{{ sub.rank }}</td>
+              <td>{{ sub.taxid }}</td>
+              <td>{{ sub.reads | format_number }}</td>
+              <td>{{ sub.abundance | format_pct }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
       </div>
     </details>
   </div>
