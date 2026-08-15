@@ -81,8 +81,8 @@ nanopore_output_directory: "/path/to/input"
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `default_hierarchy_letters` | list | ["D","C","G","S"] | Default taxonomy levels shown |
-| `taxonomic_hierarchy_letters` | list | ["D","P","C","O","F","G","S"] | All available taxonomy levels |
+| `default_hierarchy_letters` | list | ["D","C","G","S"] | Default taxonomy levels shown in the Taxonomy tab. Add `"S1"` to show subspecies by default; it is omitted because a species row already contains its subspecies, so the level splits an existing flow rather than adding to it. |
+| `taxonomic_hierarchy_letters` | list | ["D","P","C","O","F","G","S"] | All available taxonomy levels. `S1` (subspecies / strain) is selectable in the Taxonomy tab regardless of this list. |
 | `default_reads_per_level` | int | 10 | Seeds the Taxonomy tab's minimum-reads filter. On an All-Samples view of 12+ barcodes the floor rises to `max(this, 5 x N)`, since a 1-read per-sample hit becomes N reads in the aggregate. |
 | `enable_krona_plots` | bool | false | Generate Krona interactive HTML plots |
 | `enable_nanopore_stats_mqc` | bool | false | Include NanoPlot stats in MultiQC |

@@ -111,6 +111,8 @@ Detected organisms and classification results:
 - **Summary card**: total organisms, DNA sequences (cumulative across all batches), classification rate
 - **Watchlist matches**: organisms matching active watchlist entries are highlighted
 - **On-demand validation**: validate unexpected organisms with BLAST
+- **Rank filter**: Species, Subspecies, Genus, Family. Subspecies is off by
+  default -- see [Subspecies and strains](#subspecies-and-strains)
 
 ### Quality Control tab
 
@@ -128,6 +130,8 @@ Interactive taxonomic visualizations:
 - **Sankey Diagram**: Flow visualization of taxonomic hierarchy
 - **Sunburst Chart**: Radial hierarchical view
 - Filters for minimum reads, domains, and taxonomy levels
+- **Subspecies / strain** is available as a level, and as the "Subspecies
+  Focus" preset -- see [Subspecies and strains](#subspecies-and-strains)
 
 ### Validation tab
 
@@ -159,6 +163,60 @@ Pre-run setup, in the lower section of the Watchlist & Preparation tab:
 - Reference genome downloads for watchlist pathogens
 - BLAST database preparation
 - Genome management status
+
+## Subspecies and strains
+
+Some Kraken2 databases resolve below species. A flextaxd field build, for
+example, splits *Francisella tularensis* into four subspecies:
+
+| Rank | Organism | Reads |
+|------|----------|-------|
+| S  | *Francisella tularensis* | 9,602 |
+| S1 | *F. t.* holarctica | 6,184 |
+| S1 | *F. t.* novicida | 6 |
+| S1 | *F. t.* tularensis | 4 |
+| S1 | *F. t.* mediasiatica | 2 |
+
+The distinction can matter clinically -- subspecies *tularensis* (Type A) is
+markedly more virulent than *holarctica* (Type B), which is the lineage the
+LVS vaccine strain derives from.
+
+### Where subspecies appear
+
+| Where | How to see them |
+|-------|-----------------|
+| Dashboard verdict and alerts | Automatic, if a watchlist entry names the subspecies |
+| Organisms tab | Tick **Subspecies** in the rank filter, then Apply Filters |
+| Taxonomy tab | Add **Subspecies / strain** to the levels, or pick the **Subspecies Focus** preset |
+| Exported report | Automatic -- a separate "Subspecies and strains" table per sample |
+
+### Why they are off by default
+
+A species row's read count **already includes its subspecies**. In the table
+above, 9,602 is not 9,602 *plus* the four rows beneath it: 3,406 reads were
+assigned at species level and 6,196 to the subspecies, and 3,406 + 6,196 =
+9,602.
+
+So switching subspecies on does not add organisms to a list -- it splits rows
+that are already there. In the Sankey that is exactly right, and you see the
+flow divide. In a flat list it is easy to misread as two separate findings,
+which is why you have to ask for it.
+
+For the same reason the exported report keeps subspecies in their **own**
+table rather than mixing them into the organism ranking. Ranking a species
+against its own children invites adding percentages that already contain each
+other.
+
+### Watching a subspecies
+
+Add the subspecies to a watchlist by name (`Francisella tularensis
+tularensis`) or by its taxid in the database. It is then screened like any
+other entry and can raise the verdict banner on its own.
+
+Set its `alert_threshold` deliberately. Subspecies counts are a subset of the
+species count and are often much smaller -- Type A above has 4 reads where the
+species has 9,602 -- so a threshold copied from the parent species may never
+trigger.
 
 ## Processing modes
 

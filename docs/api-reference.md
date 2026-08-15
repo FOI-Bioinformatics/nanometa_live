@@ -245,6 +245,38 @@ loader.save(config, "/path/to/new_config.yaml")
 
 ---
 
+## Taxonomic Ranks
+
+### `nanometa_live.core.taxonomy.ranks`
+
+Single definition of which Kraken2 rank codes count as a species-level
+organism. Before this module three rules disagreed, and a subspecies watchlist
+entry was visible on one tab while never reaching the verdict banner.
+
+```python
+from nanometa_live.core.taxonomy.ranks import (
+    SPECIES_RANKS, is_species_rank, species_rank_mask,
+)
+
+SPECIES_RANKS                      # frozenset({"S", "S1", "S2", "S3"})
+is_species_rank("S1")              # True  -- subspecies count
+is_species_rank("G")               # False -- genus does not
+is_species_rank(" S1 ")            # True  -- tolerates padding and NaN
+
+species_df = df[species_rank_mask(df)]   # boolean mask over a report frame
+```
+
+**Reads are not double counted by including subspecies, but summing across
+ranks would be.** Kraken2's `reads` column is what was assigned directly at a
+node; `cumul_reads` is that node plus its descendants. For a species with
+children, `species.reads + sum(children.reads) == species.cumul_reads`.
+
+Per-taxon consumers (watchlist matching, per-sample attribution, organism
+cards) key by taxid and are safe. Do not sum a species row together with its
+own children -- that counts the same reads twice, which is why the exported
+report lists subspecies in a separate table rather than in the organism
+ranking.
+
 ## Parsers
 
 ### `nanometa_live.core.parsers.blast_validation_parser`
