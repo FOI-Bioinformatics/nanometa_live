@@ -179,6 +179,20 @@ class BackendManager:
         except (OSError, ProcessLookupError):
             return False
 
+    def _lock_target_dir(self) -> str:
+        """The directory the exclusive run lock must guard.
+
+        This is the pipeline's real output directory
+        (``results_output_directory``, matching parameter_mapping's outdir
+        precedence), falling back to ``main_dir`` and then the data dir only
+        when it is unset.
+        """
+        return (
+            self.config.get("results_output_directory")
+            or self.config.get("main_dir")
+            or self.data_dir
+        )
+
     def _acquire_lock(self, results_dir: str) -> Tuple[bool, str]:
         """
         Acquire exclusive lock on results directory to prevent multi-user collisions.
@@ -591,8 +605,14 @@ class BackendManager:
         if not success:
             return False, message
 
-        # Acquire exclusive lock on results directory to prevent multi-user collisions
-        results_dir = self.config.get("main_dir", self.data_dir)
+        # Acquire an exclusive lock on the directory the pipeline actually
+        # writes to. Locking main_dir was useless for its stated purpose:
+        # setup_project generates a fresh, uniquely timestamped main_dir on
+        # every launch, so two operators pointing different instances at the
+        # SAME results_output_directory each locked their own never-colliding
+        # path and both pipelines wrote the same output tree concurrently.
+        results_dir = self._lock_target_dir()
+        os.makedirs(results_dir, exist_ok=True)
         lock_success, lock_message = self._acquire_lock(results_dir)
         if not lock_success:
             return False, lock_message

@@ -179,3 +179,56 @@ def test_get_status_sets_completed_boolean(manager):
 
     manager.status["pipeline_status"] = "stopped"
     assert manager.get_status()["completed"] is False
+
+
+# --------------------------------------------------------------------------- #
+# Lock target resolution (audit 2026-08-16, finding W2)
+# --------------------------------------------------------------------------- #
+
+class TestLockTargetsTheRealOutputDirectory:
+    """The exclusive lock must guard the directory the pipeline writes to.
+
+    start() locked ``main_dir`` -- but setup_project generates a fresh,
+    uniquely timestamped main_dir on every launch, so two operators pointing
+    different instances at the SAME ``results_output_directory`` each locked
+    their own never-colliding path and both pipelines ran concurrently into
+    the same kraken2/validation tree with no warning.
+    """
+
+    def test_lock_target_prefers_results_output_directory(self, tmp_path):
+        m = BackendManager(str(tmp_path / "data"))
+        out = tmp_path / "shared_results"
+        m.config = {
+            "results_output_directory": str(out),
+            "main_dir": str(tmp_path / "internal_a"),
+        }
+        assert m._lock_target_dir() == str(out)
+
+    def test_lock_target_falls_back_to_main_dir_then_data_dir(self, tmp_path):
+        m = BackendManager(str(tmp_path / "data"))
+        m.config = {"main_dir": str(tmp_path / "internal")}
+        assert m._lock_target_dir() == str(tmp_path / "internal")
+        m.config = {}
+        assert m._lock_target_dir() == m.data_dir
+
+    def test_two_instances_sharing_an_outdir_collide(self, tmp_path):
+        out = tmp_path / "shared_results"
+        out.mkdir()
+        m1 = BackendManager(str(tmp_path / "d1"))
+        m2 = BackendManager(str(tmp_path / "d2"))
+        m1.config = {
+            "results_output_directory": str(out),
+            "main_dir": str(tmp_path / "internal_a"),
+        }
+        m2.config = {
+            "results_output_directory": str(out),
+            "main_dir": str(tmp_path / "internal_b"),
+        }
+
+        assert m1._acquire_lock(m1._lock_target_dir())[0] is True
+        ok, msg = m2._acquire_lock(m2._lock_target_dir())
+        assert ok is False, (
+            "two instances with different main_dirs but the same output "
+            "directory did not collide on the lock"
+        )
+        m1._release_lock()
