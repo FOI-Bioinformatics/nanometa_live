@@ -95,10 +95,14 @@ class TestParameterMappingPassthrough:
         params = create_nextflow_params(realtime_config)
         assert params["realtime_timeout_minutes"] == 1440
 
-    def test_none_is_not_forwarded(self, realtime_config):
-        # parameter_mapping guards with `if realtime_timeout:` so None/0 drop out.
-        # None means "run indefinitely", which is nanometanf's default when the
-        # param is absent.
+    def test_none_is_forwarded_as_null(self, realtime_config):
+        # The old comment here claimed nanometanf defaults to indefinite when
+        # the param is absent -- it does not: its default is 60 minutes, so
+        # OMITTING the key silently reinstated a one-hour cutoff on a run the
+        # operator configured to watch forever. An explicit None must reach
+        # the params file as JSON null, which nanometanf documents and
+        # handles as "run indefinitely" (audit 2026-08-16, finding L8).
         realtime_config["realtime_timeout_minutes"] = None
         params = create_nextflow_params(realtime_config)
-        assert "realtime_timeout_minutes" not in params
+        assert "realtime_timeout_minutes" in params
+        assert params["realtime_timeout_minutes"] is None

@@ -790,10 +790,19 @@ def _apply_realtime_input_params(params: Dict[str, Any], config: Dict[str, Any],
     # reports via KRAKEN2_REPORT_GENERATOR.
     params["kraken2_enable_incremental"] = config.get("kraken2_enable_incremental", True)
 
-    # Timeout to prevent indefinite running. Default None (indefinite) for true
-    # realtime monitoring; settable via config for testing/demo.
-    realtime_timeout = config.get("realtime_timeout_minutes")
-    if realtime_timeout:
+    # Timeout to prevent indefinite running. An explicit null means "run
+    # indefinitely" and must be passed through as JSON null: nanometanf's own
+    # default is 60, so OMITTING the key silently reinstates a one-hour
+    # cutoff on a run the operator configured to watch forever, and reads
+    # arriving after the lull are never screened. nanometanf documents null
+    # as indefinite and its realtime monitoring handles it explicitly. When
+    # the key is absent entirely, the documented default (60) is written out
+    # so the params file and the config agree.
+    realtime_timeout = config.get("realtime_timeout_minutes", 60)
+    if realtime_timeout is None:
+        params["realtime_timeout_minutes"] = None
+        logging.info("Realtime timeout disabled: monitoring runs indefinitely")
+    else:
         params["realtime_timeout_minutes"] = int(realtime_timeout)
         logging.info(f"Realtime timeout set to {realtime_timeout} minutes")
 
