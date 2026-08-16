@@ -645,6 +645,53 @@ def _resolve_kraken2_memory_mapping(config: Dict[str, Any]) -> bool:
     return True
 
 
+def _validation_params(config: Dict[str, Any], run_validation_enabled: bool,
+                       blast_validation_enabled: bool) -> Dict[str, Any]:
+    """Validation-subworkflow parameters, with launch-time coercions.
+
+    One threshold, one key: this read ``min_perc_identity`` first as a
+    back-compat shim whose comment claimed "New configs only carry the
+    latter" -- but create_default_config wrote min_perc_identity into every
+    config and no widget could change it, so the legacy key was always
+    present and always won. Lowering the GUI control to catch a divergent
+    strain left BLAST filtering at 90 and said nothing. nf-schema types
+    blast_perc_identity as integer; a typed decimal (92.5) passed local
+    validation and failed at launch.
+
+    ``min_reads_for_validation`` (default 50) is a CUMULATIVE reporting
+    threshold applied in the GUI/aggregation layer and is deliberately NOT
+    forwarded to nanometanf's per-batch pre-extraction gate
+    (``min_batch_reads_for_validation``): gating per batch on a cumulative
+    value would skip an organism that accumulates slowly (e.g. 8 reads/batch
+    x 18 batches = 144) but never crosses the floor within a single batch,
+    producing a false negative. The pipeline's per-batch gate stays at its
+    safe default of 1, results-identical to extracting every taxid.
+    """
+    return {
+        "run_validation": run_validation_enabled,
+        "validation_method": config.get("validation_method", "blast"),
+        "blast_evalue": _coerce_blast_evalue(config.get("e_val_cutoff", 1e-10)),
+        "blast_perc_identity": int(round(float(
+            config.get("validation_identity_threshold", 90)
+        ))),
+        "validation_hit_rate_threshold": config.get("validation_hit_rate_threshold", 0.5),
+        "validation_identity_threshold": config.get("validation_identity_threshold", 90.0),
+        "minimap2_preset": _coerce_minimap2_preset(config.get("minimap2_preset")),
+        # Fallback must match create_default_config (30). A divergent default
+        # (10) silently filtered more permissively for any config missing
+        # the key -- programmatic configs and files predating the field.
+        "minimap2_min_mapq": config.get("minimap2_min_mapq", 30),
+        # Consensus sequence generation (amplicon-focused). Off unless the
+        # operator enables it; only meaningful when validation runs.
+        "generate_consensus": (
+            config.get("generate_consensus", False) and run_validation_enabled
+        ),
+        "consensus_min_depth": config.get("consensus_min_depth", 10),
+        # Legacy parameter (deprecated; nanometanf maps to run_validation)
+        "blast_validation": blast_validation_enabled,
+    }
+
+
 def _build_base_params(config: Dict[str, Any], main_dir: str, kraken_db: str,
                        analysis_name: str, run_validation_enabled: bool,
                        blast_validation_enabled: bool,
@@ -664,45 +711,7 @@ def _build_base_params(config: Dict[str, Any], main_dir: str, kraken_db: str,
         "save_output_fastqs": run_validation_enabled,
 
         # Validation parameters - nanometanf VALIDATION subworkflow
-        "run_validation": run_validation_enabled,
-        "validation_method": config.get("validation_method", "blast"),
-        "blast_evalue": _coerce_blast_evalue(config.get("e_val_cutoff", 1e-10)),
-        # One threshold, one key. This read ``min_perc_identity`` first as a
-        # back-compat shim whose comment claimed "New configs only carry the
-        # latter" -- but create_default_config wrote min_perc_identity into
-        # every config and no widget could change it, so the legacy key was
-        # always present and always won. Lowering the GUI control to catch a
-        # divergent strain left BLAST filtering at 90 and said nothing.
-        # nf-schema types blast_perc_identity as integer; a typed decimal
-        # (92.5) passed local validation and failed at launch.
-        "blast_perc_identity": int(round(float(
-            config.get("validation_identity_threshold", 90)
-        ))),
-        "validation_hit_rate_threshold": config.get("validation_hit_rate_threshold", 0.5),
-        "validation_identity_threshold": config.get("validation_identity_threshold", 90.0),
-        "minimap2_preset": _coerce_minimap2_preset(config.get("minimap2_preset")),
-        # Fallback must match create_default_config (30). A divergent default
-        # (10) silently filtered more permissively for any config missing
-        # the key -- programmatic configs and files predating the field.
-        "minimap2_min_mapq": config.get("minimap2_min_mapq", 30),
-        # Consensus sequence generation (amplicon-focused). Off unless the
-        # operator enables it; only meaningful when validation runs (it reuses
-        # the extracted reads + reference genome).
-        "generate_consensus": config.get("generate_consensus", False) and run_validation_enabled,
-        "consensus_min_depth": config.get("consensus_min_depth", 10),
-        # NOTE: ``min_reads_for_validation`` (default 50) is a CUMULATIVE reporting
-        # threshold applied in the GUI/aggregation layer -- an organism needs this
-        # many reads across the whole run to be treated as validated. It is
-        # deliberately NOT forwarded to nanometanf's per-batch pre-extraction gate
-        # (``min_batch_reads_for_validation``): gating per batch on a cumulative
-        # value would skip an organism that accumulates slowly (e.g. 8 reads/batch
-        # x 18 batches = 144) but never crosses the floor within a single batch,
-        # producing a false negative. The pipeline's per-batch gate stays at its
-        # safe default of 1 (skip only zero-read taxids), which is results-identical
-        # to extracting every taxid every batch.
-
-        # Legacy parameter (deprecated, nanometanf maps to run_validation internally)
-        "blast_validation": blast_validation_enabled,
+        **_validation_params(config, run_validation_enabled, blast_validation_enabled),
 
         # QC settings
         "qc_tool": config.get("qc_tool", "chopper"),

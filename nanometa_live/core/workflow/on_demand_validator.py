@@ -690,30 +690,7 @@ class OnDemandValidator:
             progress_callback=progress_callback,
         )
         if nf_result is not None:
-            job.status = ValidationStatus.COMPLETED
-            job.status_message = "Validated via nanometanf"
-            job.progress_percent = 100
-            job.completed_at = datetime.now()
-            job.total_reads = nf_result.total_classified_reads
-            job.extracted_reads = nf_result.extracted_reads
-            job.validated_reads = nf_result.validated_reads
-            job.validation_rate = nf_result.validation_rate
-            job.avg_identity = nf_result.avg_identity
-            job.blast_results = nf_result.blast_output_file
-            if self.has_genome(taxid):
-                job.genome_path = self.genomes_dir / f"{taxid}.fasta"
-
-            # Persist so the result survives a page reload/app restart.
-            # _save_results was previously dead code -- validate_organism
-            # returned nf_result straight into a dcc.Store and never wrote
-            # to disk, while reload_on_demand_results (main_tab.py) globs
-            # on-demand_validation/*_validation.json to repopulate
-            # "already validated" state on load. Underlying BLAST/minimap2
-            # files were always on disk (the regular Validation tab reads
-            # those directly and was unaffected), but the on-demand modal's
-            # own completion record vanished on any refresh.
-            self._save_results(job, method=method)
-
+            self._complete_and_persist_job(job, nf_result, taxid, method)
             return nf_result
 
         # nanometanf delegation returned None -- the pipeline run
@@ -728,6 +705,32 @@ class OnDemandValidator:
         job.status = ValidationStatus.FAILED
         job.error_message = error
         return self._create_failed_result(taxid, name, sample, error)
+
+    def _complete_and_persist_job(self, job, nf_result, taxid: int, method: str) -> None:
+        """Mark a job completed from a successful nanometanf result and persist it.
+
+        Persistence matters: _save_results was previously dead code --
+        validate_organism returned nf_result straight into a dcc.Store and
+        never wrote to disk, while reload_on_demand_results (main_tab.py)
+        globs on-demand_validation/*_validation.json to repopulate "already
+        validated" state on load. Underlying BLAST/minimap2 files were always
+        on disk (the regular Validation tab reads those directly and was
+        unaffected), but the on-demand modal's own completion record vanished
+        on any refresh or restart.
+        """
+        job.status = ValidationStatus.COMPLETED
+        job.status_message = "Validated via nanometanf"
+        job.progress_percent = 100
+        job.completed_at = datetime.now()
+        job.total_reads = nf_result.total_classified_reads
+        job.extracted_reads = nf_result.extracted_reads
+        job.validated_reads = nf_result.validated_reads
+        job.validation_rate = nf_result.validation_rate
+        job.avg_identity = nf_result.avg_identity
+        job.blast_results = nf_result.blast_output_file
+        if self.has_genome(taxid):
+            job.genome_path = self.genomes_dir / f"{taxid}.fasta"
+        self._save_results(job, method=method)
 
     def _create_failed_result(self, taxid: int, name: str, sample: str, error: str) -> ValidationResult:
         """Create a failed validation result."""
