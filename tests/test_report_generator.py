@@ -416,3 +416,77 @@ class TestDecisionBannerCannotClaimAnUnearnedNegative:
         out = self._render(generator, detected)
         assert "ACTION REQUIRED" in out
         assert "banner-action" in out
+
+
+class TestChartJsonCannotBreakOutOfScript:
+    """The inlined chart JSON must not be able to terminate its <script>.
+
+    ``json.dumps`` does not escape "/", and the template embeds the charts
+    dict with ``| safe`` inside a <script> element -- so a string reaching
+    the chart payload (a sample or organism name; watchlist YAML upload is
+    an external-input path) containing the literal "</script>" closed the
+    element at the HTML-parser level and any following markup executed in
+    the reader's browser. The report is designed to leave the machine.
+    Audit 2026-08-16, finding W4.
+    """
+
+    def test_script_close_tag_in_chart_payload_is_escaped(
+        self, generator, tmp_path, monkeypatch
+    ):
+        hostile = {
+            "donut": '{"title": "a</script><script>alert(1)</script>"}'
+        }
+        monkeypatch.setattr(generator, "_build_charts", lambda data: hostile)
+
+        out = tmp_path / "export"
+        report = generator.generate(str(out), include_raw=False)
+        html = report.read_text()
+
+        assert "</script><script>alert(1)" not in html, (
+            "a chart string terminated the script element; following "
+            "markup executes in the reader's browser"
+        )
+        # The payload survives, JSON-escaped so the HTML parser cannot
+        # see a close tag.
+        assert "<\\/script>" in html
+
+
+class TestScreenWatchlistEntryIsolation:
+    """One malformed watchlist entry must cost only that entry.
+
+    The whole per-entry loop sat in a single try/except, so an exception on
+    entry N dropped entries N+1..end and returned a partial (often empty)
+    list -- rendering the false "NOT SCREENED" banner while a true positive
+    later in iteration order was silently unscreened. Audit 2026-08-16,
+    finding W3.
+    """
+
+    class _ExplodingEntry:
+        """Attribute access raises, as a corrupt/malformed entry would."""
+        name = "Broken entry"
+        taxid = 632
+        db_taxid = None
+
+        @property
+        def threat_level(self):
+            raise ValueError("corrupt entry")
+
+    def test_bad_entry_does_not_blank_the_screen(self, generator):
+        good = WatchlistEntry(
+            taxid=1392, name="Bacillus anthracis",
+            threat_level=ThreatLevel.HIGH, enabled=True,
+        )
+        bad = self._ExplodingEntry()
+
+        # The bad entry iterates FIRST, so without per-entry isolation the
+        # good entry is never screened.
+        entries = {632: bad, 1392: good}
+        with patch(_MGR_PATH, return_value=_mock_manager(entries)):
+            results = generator._screen_watchlist(_kraken_df(), {})
+
+        names = [r["name"] for r in results]
+        assert "Bacillus anthracis" in names, (
+            "a malformed sibling entry unscreened every entry after it"
+        )
+        detected = [r for r in results if r["detected"]]
+        assert detected and detected[0]["reads"] == 500

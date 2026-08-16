@@ -363,29 +363,44 @@ class ReportGenerator:
             read_col = "cumul_reads" if "cumul_reads" in kraken_df.columns else "reads"
 
             for entry in active_entries.values():
-                threat = entry.threat_level
-                threat_level = threat.value if hasattr(threat, "value") else str(threat)
+                # Per-entry isolation: one malformed entry (missing field,
+                # bad type, a pandas error on its rows) must cost only that
+                # entry, not abort the loop. With the whole loop in one try,
+                # a single bad entry blanked the screen for every organism
+                # and the report rendered a false "NOT SCREENED" -- while a
+                # true positive later in iteration order was dropped.
+                try:
+                    threat = entry.threat_level
+                    threat_level = (
+                        threat.value if hasattr(threat, "value") else str(threat)
+                    )
 
-                match_id = getattr(entry, "db_taxid", None) or entry.taxid
-                matched = self._match_entry_rows(kraken_df, match_id, entry.name)
+                    match_id = getattr(entry, "db_taxid", None) or entry.taxid
+                    matched = self._match_entry_rows(kraken_df, match_id, entry.name)
 
-                reads = int(matched[read_col].sum()) if not matched.empty else 0
-                abundance = (reads / total * 100) if total > 0 else 0
-                per_sample = (
-                    self._attribute_entry_to_samples(
-                        sample_frames, match_id, entry.name
-                    ) if reads > 0 else []
-                )
+                    reads = int(matched[read_col].sum()) if not matched.empty else 0
+                    abundance = (reads / total * 100) if total > 0 else 0
+                    per_sample = (
+                        self._attribute_entry_to_samples(
+                            sample_frames, match_id, entry.name
+                        ) if reads > 0 else []
+                    )
 
-                results.append({
-                    "name": entry.name,
-                    "taxid": entry.taxid,
-                    "threat_level": threat_level,
-                    "reads": reads,
-                    "abundance": round(abundance, 3),
-                    "detected": reads > 0,
-                    "samples": per_sample,
-                })
+                    results.append({
+                        "name": entry.name,
+                        "taxid": entry.taxid,
+                        "threat_level": threat_level,
+                        "reads": reads,
+                        "abundance": round(abundance, 3),
+                        "detected": reads > 0,
+                        "samples": per_sample,
+                    })
+                except Exception:
+                    logger.exception(
+                        "Could not screen watchlist entry %r; the remaining "
+                        "entries are still screened",
+                        getattr(entry, "name", entry),
+                    )
 
         except Exception as e:
             logger.exception("Could not screen watchlist: %s", e)
@@ -493,8 +508,16 @@ class ReportGenerator:
         plotly_js = self._get_plotly_js()
         use_cdn = (not plotly_js) and not self.config.get("offline_mode")
 
-        # Serialize charts dict to JSON for embedding in template script
-        charts_json = json.dumps(charts)
+        # Serialize charts dict to JSON for embedding in template script.
+        # The template embeds this with ``| safe`` inside a <script> element,
+        # and json.dumps does not escape "/": a string in the chart payload
+        # containing the literal "</script>" (a sample or organism name --
+        # watchlist YAML upload is an external-input path) terminates the
+        # script element at the HTML-parser level and any following markup
+        # executes in the reader's browser. Escaping "</" as "<\/" is a
+        # JSON-transparent HTML-breakout guard: identical data, no parseable
+        # close tag.
+        charts_json = json.dumps(charts).replace("</", "<\\/")
 
         return template.render(
             data=data,
