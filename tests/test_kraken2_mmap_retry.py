@@ -75,8 +75,16 @@ def _retry_block(text: str, process_name: str) -> str:
     return match.group(1) if match else ""
 
 
-class TestModulesConfigRetryDirectives:
-    """The three Kraken2 classifier processes each need narrow retry rules."""
+class TestErrorIsolationRetryPolicy:
+    """SIGSEGV (exit 139) must still trigger a retry for every Kraken2 process.
+
+    The retry SCHEDULING was consolidated into conf/error_isolation.config
+    (the single source of errorStrategy -- it loads last, so directives in
+    modules.config were dead; 2026-08-16 audit). The policy there ignores
+    exits 1/2 and retries everything else with a bounded maxRetries, so 139
+    lands in the retry branch. modules.config keeps the attempt-gated
+    ext.args that drops --memory-mapping on the second attempt.
+    """
 
     PROCESSES = (
         "KRAKEN2_KRAKEN2",
@@ -84,29 +92,58 @@ class TestModulesConfigRetryDirectives:
         "KRAKEN2_OPTIMIZED",
     )
 
+    @pytest.fixture(scope="class")
+    def error_isolation_text(self) -> str:
+        path = _nanometanf_path("conf/error_isolation.config")
+        if path is None:
+            pytest.skip("nanometanf checkout not found; skipping")
+        return path.read_text()
+
     @pytest.mark.parametrize("process_name", PROCESSES)
-    def test_retry_only_on_exit_139(
-        self, modules_config_text: str, process_name: str
+    def test_exit_139_falls_into_the_retry_branch(
+        self, error_isolation_text: str, process_name: str
     ):
-        body = _retry_block(modules_config_text, process_name)
+        body = _retry_block(error_isolation_text, process_name)
         assert body, (
             f"Missing withName: '{process_name}' block in "
-            "nanometanf/conf/modules.config"
+            "nanometanf/conf/error_isolation.config -- the single source "
+            "of errorStrategy for Kraken2 processes"
         )
-        # The errorStrategy must mention 139 specifically -- a wider
-        # retry rule would mask OOM (137) and SIGTERM (143).
-        assert "139" in body, (
-            f"{process_name} block is present but does not mention exit "
-            "139. Add `errorStrategy = { task.exitStatus == 139 && "
-            "task.attempt == 1 ? 'retry' : 'finish' }` to auto-retry "
-            "the kraken2 mmap segfault on network filesystems."
+        assert "'retry'" in body or '"retry"' in body, (
+            f"{process_name} errorStrategy has no retry branch; the kraken2 "
+            "mmap segfault on network filesystems would be fatal"
         )
-        # Retry must be capped at exactly one extra attempt so a
-        # persistent segfault (e.g. corrupt hash.k2d) does not spin.
-        assert "maxRetries = 1" in body, (
-            f"{process_name} block has the errorStrategy directive but "
-            "no `maxRetries = 1`. A retry loop without a cap can mask "
-            "deterministic failures."
+        # 139 must NOT be in the ignore set: an ignored segfault silently
+        # drops the batch instead of retrying without --memory-mapping.
+        ignore_sets = re.findall(r"exitStatus\s+in\s+\[([0-9,\s]+)\]", body)
+        for s in ignore_sets:
+            assert "139" not in s, (
+                f"{process_name} ignores exit 139; the mmap segfault would "
+                "silently drop the batch instead of retrying"
+            )
+
+    @pytest.mark.parametrize("process_name", PROCESSES)
+    def test_retry_is_bounded(
+        self, error_isolation_text: str, process_name: str
+    ):
+        body = _retry_block(error_isolation_text, process_name)
+        assert body
+        m = re.search(r"maxRetries\s*=\s*(\d+)", body)
+        assert m, (
+            f"{process_name} retry has no maxRetries cap; a persistent "
+            "segfault (corrupt hash.k2d) would spin"
+        )
+        assert int(m.group(1)) <= 3
+
+    def test_modules_config_drops_mmap_on_second_attempt(
+        self, modules_config_text: str
+    ):
+        """The retry is only useful if attempt 2 stops using mmap."""
+        body = _retry_block(modules_config_text, "KRAKEN2_KRAKEN2")
+        assert body
+        assert "task.attempt == 1" in body and "--memory-mapping" in body, (
+            "KRAKEN2_KRAKEN2 ext.args no longer gates --memory-mapping on "
+            "task.attempt; a retry would loop on the same SIGSEGV"
         )
 
 
