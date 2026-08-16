@@ -11,16 +11,18 @@ import os
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
 
+from nanometa_live.core.utils.attribution import is_negative_control
 from nanometa_live.core.utils.classification_loaders import load_kraken_data
 from nanometa_live.core.utils.qc_loaders import get_qc_stats
 from nanometa_live.core.utils.sample_detector import (
     get_available_samples,
+    get_sample_file_mapping,
     resolve_analysis_directory,
 )
 from nanometa_live.app.tabs.dashboard_helpers import DEFAULT_LOW_READ_FLOOR
@@ -94,9 +96,28 @@ class ReportGenerator:
         if not selected_samples:
             selected_samples = [None]  # Aggregated view only
 
-        # Collect data. Pass include_raw so report links are only emitted when
-        # the report files are actually bundled under raw/ (else they'd dangle).
-        report_data = self._collect_data(selected_samples, include_raw=include_raw)
+        # Raw files are copied BEFORE the Pipeline Reports links below are
+        # built, and the links are derived from what actually landed under
+        # raw/ rather than from a bare include_raw bool. Previously the
+        # links were built first (in _collect_data) and the copy ran
+        # afterward: a size-cap skip or a partial subdir failure left
+        # "Pipeline Reports" hrefs pointing at a raw/ tree that was never
+        # created (or missing that one subdir), with nothing in the HTML to
+        # explain the 404s. See _copy_raw_files_verbose / raw_skip_reason.
+        raw_files_included: List[str] = []
+        raw_skip_reason: Optional[str] = None
+        if include_raw:
+            raw_files_included, raw_skip_reason = self._copy_raw_files_verbose(
+                str(output_path)
+            )
+
+        report_data = self._collect_data(
+            selected_samples,
+            include_raw=include_raw,
+            copied_raw_subdirs=raw_files_included,
+            raw_skip_reason=raw_skip_reason,
+        )
+        report_data["raw_files_included"] = raw_files_included
 
         # Build HTML
         html_content = self._build_html_report(report_data)
@@ -104,17 +125,18 @@ class ReportGenerator:
         report_file.write_text(html_content, encoding="utf-8")
         logger.info("Report written to %s", report_file)
 
-        # Copy raw files
-        report_data["raw_files_included"] = (
-            self._copy_raw_files(str(output_path)) if include_raw else []
-        )
-
         # Write metadata
         self._write_metadata(str(output_path), report_data)
 
         return report_file
 
-    def _collect_data(self, samples: List[Optional[str]], include_raw: bool = True) -> Dict[str, Any]:
+    def _collect_data(
+        self,
+        samples: List[Optional[str]],
+        include_raw: bool = True,
+        copied_raw_subdirs: Optional[List[str]] = None,
+        raw_skip_reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Collect all data needed for the report."""
         # Aggregated data. get_qc_stats already abstracts fastp/seqkit (the two
         # are mutually exclusive), so a separate fastp-only summary is dropped.
@@ -138,14 +160,19 @@ class ReportGenerator:
         # Alerts (pathogen + QC) from the post-run watchlist screen and QC stats.
         alerts = self._collect_alerts(qc_stats=qc_all, watched_results=watched_results)
 
-        # Pipeline reports (MultiQC, Nextflow) -- linked only when raw files are
-        # bundled, since the links point at the copied files under raw/.
+        # Pipeline reports (MultiQC, Nextflow) -- linked only for subdirs that
+        # were ACTUALLY copied under raw/ (copied_raw_subdirs), not merely
+        # "include_raw was requested". A report whose top-level subdir (e.g.
+        # multiqc/, pipeline_info/) was skipped by the size cap or failed to
+        # copy would otherwise get a link that 404s with no explanation.
         pipeline_reports = []
         if include_raw:
             from nanometa_live.core.utils.reports_loader import export_report_links
+            copied_set = set(copied_raw_subdirs or [])
             pipeline_reports = [
                 {"label": r["label"], "href": f"raw/{r['relpath']}"}
                 for r in export_report_links(self.results_dir)
+                if r["relpath"].split("/", 1)[0] in copied_set
             ]
 
         per_sample = self._per_sample_data(samples, sample_frames)
@@ -174,6 +201,7 @@ class ReportGenerator:
             "alerts": alerts,
             "per_sample": per_sample,
             "pipeline_reports": pipeline_reports,
+            "raw_skip_reason": raw_skip_reason,
         }
 
     def _low_read_floor(self) -> int:
@@ -208,6 +236,18 @@ class ReportGenerator:
         The list is empty on databases that do not resolve below species, and
         the template omits the section entirely in that case.
         """
+        # ``_manifest.json`` PREDICTS output files from the sample list and
+        # active tools; it does not verify them (bin/write_manifest.py runs
+        # in its own work dir and cannot see the publishDir). A sample whose
+        # QC/Kraken2 stage failed -- absorbed by conf/error_isolation.config
+        # -- is listed exactly like a healthy one. The dashboard's sample
+        # selector compensates by comparing available-samples against the
+        # on-disk file mapping; the export had no equivalent, so a failed
+        # barcode rendered as an ordinary "clean" sample (0 reads, 0
+        # organisms) in the archived artifact with nothing to distinguish it
+        # from a genuine negative.
+        file_mapping = get_sample_file_mapping(self.results_dir)
+
         per_sample: Dict[str, Any] = {}
         for sample in samples:
             if sample is None:
@@ -225,6 +265,7 @@ class ReportGenerator:
                 "subspecies": self._extract_organisms(
                     sample_kraken, ranks=("S1", "S2", "S3"),
                 )[:20],
+                "attempted_no_output": not file_mapping.get(sample),
             }
         return per_sample
 
@@ -304,7 +345,14 @@ class ReportGenerator:
         match_id: Optional[int],
         entry_name: Optional[str],
     ) -> List[Dict[str, Any]]:
-        """Per-sample read counts for one watchlist entry, highest first."""
+        """Per-sample read counts for one watchlist entry, highest first.
+
+        Each row carries ``is_negative_control`` so ``_screen_watchlist`` can
+        split declared controls out of the triggering-sample list without a
+        second pass over the frames -- see the "Negative controls" contract
+        in CLAUDE.md, mirrored here from ``core.utils.attribution`` (the same
+        resolver the dashboard's verdict banner uses).
+        """
         rows: List[Dict[str, Any]] = []
         for sample, df in (sample_frames or {}).items():
             if df is None or df.empty:
@@ -322,6 +370,7 @@ class ReportGenerator:
                 "sample": sample,
                 "reads": reads,
                 "abundance": round((reads / total * 100) if total > 0 else 0, 3),
+                "is_negative_control": is_negative_control(sample, self.config),
             })
         rows.sort(key=lambda r: r["reads"], reverse=True)
         return rows
@@ -386,6 +435,26 @@ class ReportGenerator:
                         ) if reads > 0 else []
                     )
 
+                    # Negative controls are reported alongside a detection,
+                    # never acted on: they are split out of the triggering
+                    # list here, but a control-carried-only hit still shows
+                    # as "detected" -- a contaminated control never makes a
+                    # real aggregate positive disappear. Mirrors the
+                    # dashboard's build_pathogen_attribution.
+                    triggering_samples = [
+                        s for s in per_sample if not s.get("is_negative_control")
+                    ]
+                    negative_control_rows = [
+                        s for s in per_sample if s.get("is_negative_control")
+                    ]
+                    nc_reads = sum(s["reads"] for s in negative_control_rows)
+                    positive_reads = sum(s["reads"] for s in triggering_samples)
+                    nc_fraction = (
+                        (nc_reads / positive_reads * 100)
+                        if (negative_control_rows and positive_reads)
+                        else None
+                    )
+
                     results.append({
                         "name": entry.name,
                         "taxid": entry.taxid,
@@ -394,6 +463,12 @@ class ReportGenerator:
                         "abundance": round(abundance, 3),
                         "detected": reads > 0,
                         "samples": per_sample,
+                        "triggering_samples": triggering_samples,
+                        "negative_control_rows": negative_control_rows,
+                        "negative_control_fraction": nc_fraction,
+                        "control_only": bool(
+                            negative_control_rows and not triggering_samples
+                        ),
                     })
                 except Exception:
                     logger.exception(
@@ -666,33 +741,50 @@ class ReportGenerator:
                     pass
         return total
 
-    def _copy_raw_files(self, output_dir: str) -> List[str]:
-        """Copy raw result subdirs into ``output_dir/raw/``.
+    def _raw_copy_plan(self) -> Tuple[List[str], Optional[str]]:
+        """``_RAW_SUBDIRS`` present on disk, and a reason when the whole copy
+        must be skipped for exceeding the size cap.
 
-        Returns the list of subdirs actually copied. AppleDouble/.DS_Store
-        sidecars are excluded, and the copy is skipped (with a clear log line)
-        when the total payload exceeds the configured ceiling -- this runs in a
-        blocking callback, so silently copying gigabytes would freeze the UI.
+        Split out of ``_copy_raw_files`` so ``generate()`` can learn about a
+        cap-triggered skip (for the HTML note and metadata.json) without
+        duplicating the size-cap arithmetic.
         """
-        raw_dir = os.path.join(output_dir, "raw")
         present = [
             s for s in _RAW_SUBDIRS
             if os.path.isdir(os.path.join(self.results_dir, s))
         ]
 
         cap = self.config.get("export_max_raw_bytes", _DEFAULT_MAX_RAW_BYTES)
-        if cap:
+        if cap and present:
             total = sum(self._dir_size(os.path.join(self.results_dir, s)) for s in present)
             if total > cap:
-                logger.warning(
-                    "Raw export skipped: payload %.1f GiB exceeds the %.1f GiB "
-                    "cap (set export_max_raw_bytes to override). The HTML report "
-                    "and metadata are still written.",
-                    total / 1024 ** 3, cap / 1024 ** 3,
+                reason = (
+                    f"Raw files omitted: the payload ({total / 1024 ** 3:.1f} GiB) "
+                    f"exceeds the {cap / 1024 ** 3:.1f} GiB export cap "
+                    "(set export_max_raw_bytes to override). The HTML report "
+                    "and metadata below are otherwise complete; only the raw/ "
+                    "directory and its Pipeline Reports links are affected."
                 )
-                return []
+                logger.warning(reason)
+                return [], reason
+        return present, None
 
+    def _copy_raw_files_verbose(self, output_dir: str) -> Tuple[List[str], Optional[str]]:
+        """Copy raw result subdirs into ``output_dir/raw/``.
+
+        Returns ``(copied, skip_reason)``. ``skip_reason`` is set when the
+        whole copy was skipped by the size cap, or when one or more (but not
+        all) subdirs failed to copy -- the caller surfaces this in the HTML
+        and metadata.json instead of leaving a dangling ``raw/`` link with no
+        explanation for the 404. AppleDouble/.DS_Store sidecars are excluded.
+        """
+        present, skip_reason = self._raw_copy_plan()
+        if skip_reason:
+            return [], skip_reason
+
+        raw_dir = os.path.join(output_dir, "raw")
         copied: List[str] = []
+        failed: List[str] = []
         for subdir in present:
             src = os.path.join(self.results_dir, subdir)
             dst = os.path.join(raw_dir, subdir)
@@ -702,7 +794,27 @@ class ReportGenerator:
                 logger.info("Copied %s to %s", src, dst)
             except (FileNotFoundError, PermissionError, OSError, shutil.Error) as e:
                 logger.exception("Could not copy %s: %s", src, e)
-        return copied
+                failed.append(subdir)
+
+        partial_reason = None
+        if failed:
+            partial_reason = (
+                "Raw files partially omitted: " + ", ".join(failed) +
+                " could not be copied (see application log for details). "
+                "Other raw subdirs and their Pipeline Reports links are "
+                "unaffected."
+            )
+            logger.warning(partial_reason)
+        return copied, partial_reason
+
+    def _copy_raw_files(self, output_dir: str) -> List[str]:
+        """Copy raw result subdirs into ``output_dir/raw/``.
+
+        Returns the list of subdirs actually copied. Thin wrapper over
+        ``_copy_raw_files_verbose`` for callers (and existing tests) that
+        only need the copied list, not the skip reason.
+        """
+        return self._copy_raw_files_verbose(output_dir)[0]
 
     def _write_metadata(self, output_dir: str, data: Dict[str, Any]):
         """Write summary.json and metadata.json."""
@@ -741,6 +853,10 @@ class ReportGenerator:
             "watchlist_entries": len(data.get("watched_results", [])),
             "alerts": data.get("alerts", []),
             "raw_files_included": data.get("raw_files_included", []),
+            # Explicit record of a size-cap or partial-copy skip so a reader
+            # of this sidecar (not just the HTML) can tell "raw/ is missing
+            # on purpose, here's why" apart from "the export is broken".
+            "raw_skip_reason": data.get("raw_skip_reason"),
         }
 
         metadata_path = os.path.join(output_dir, "metadata.json")

@@ -1905,6 +1905,7 @@ def _make_config_bundle(
     min_versions=None,
     tamper_after=None,
     pipeline_container_files=None,
+    operator_container_files=None,
     export_warnings=None,
     pull_image_count=None,
 ):
@@ -1920,6 +1921,15 @@ def _make_config_bundle(
         pcdir.mkdir()
         for name in pipeline_container_files:
             (pcdir / name).write_bytes(b"IMAGE\x00" + name.encode())
+
+    if operator_container_files:
+        # Operator-managed BLAST validation containers, staged under
+        # "containers/" at the bundle root (distinct from the pipeline's
+        # own pulled images under pipeline_containers/).
+        ocdir = staging / "containers"
+        ocdir.mkdir()
+        for name in operator_container_files:
+            (ocdir / name).write_bytes(b"IMAGE\x00" + name.encode())
 
     cfg = {"kraken_db": kraken_db}
     if with_pipeline:
@@ -2569,6 +2579,109 @@ class TestContainerRuntimeUnavailableAtImport:
         assert result.get("incomplete_image_set") is True
         assert not result.get("container_runtime_unavailable")
         assert any("re-export" in w.lower() for w in result["warnings"])
+
+
+class TestOperatorContainerLoadFailuresSurfaced:
+    """The ``containers/`` block (operator-managed BLAST validation
+    containers) previously checked only ``op_report["loaded"] > 0`` for a log
+    line -- no warning, no flag -- while the ``pipeline_containers/`` block 19
+    lines below handled the identical failure with docker_broken /
+    incomplete_image_set / explicit warnings (2026-08-14 fix). This mirrors
+    that handling for the operator-container path so importing a bundle with
+    BLAST containers onto a field machine where Docker is not running cannot
+    report success:True with no mention of the containers. Audit 2026-08-16,
+    finding W8.
+    """
+
+    def test_docker_missing_warns_and_flags_runtime(self, tmp_path):
+        bundle = _make_config_bundle(
+            tmp_path, operator_container_files=["blast.tar"])
+        with patch(
+            "nanometa_live.core.workflow.bundle_manager.shutil.which",
+            return_value=None,
+        ), patch(
+            "nanometa_live.core.workflow.bundle_manager.subprocess.run",
+            side_effect=FileNotFoundError("docker"),
+        ):
+            result, _ = _do_import(tmp_path, bundle, kraken_db_path="x")
+
+        assert result["success"] is True  # re-checkable later, not fatal
+        assert result.get("container_runtime_unavailable") is True
+        joined = " ".join(result["warnings"]).lower()
+        assert "container" in joined
+        assert "docker" in joined
+
+    def test_daemon_down_warns(self, tmp_path):
+        bundle = _make_config_bundle(
+            tmp_path, operator_container_files=["blast.tar"])
+        import subprocess as _sp
+        with patch(
+            "nanometa_live.core.workflow.bundle_manager.shutil.which",
+            return_value="/usr/bin/docker",
+        ), patch(
+            "nanometa_live.core.workflow.bundle_manager._docker_daemon_ok",
+            return_value=False,
+        ), patch(
+            "nanometa_live.core.workflow.bundle_manager.subprocess.run",
+            side_effect=_sp.CalledProcessError(1, "docker load"),
+        ):
+            result, _ = _do_import(tmp_path, bundle, kraken_db_path="x")
+
+        assert result.get("container_runtime_unavailable") is True
+        joined = " ".join(result["warnings"]).lower()
+        assert "daemon did not respond" in joined
+
+    def test_partial_load_warns_with_working_docker(self, tmp_path):
+        """Docker works but one of two archives fails to load -- a bundle
+        problem, not a runtime problem, so container_runtime_unavailable must
+        stay unset while the shortfall is still surfaced."""
+        bundle = _make_config_bundle(
+            tmp_path,
+            operator_container_files=["good.tar", "bad.tar"])
+        import subprocess as _sp
+        calls = {"n": 0}
+
+        def flaky(cmd, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return MagicMock(returncode=0)
+            raise _sp.CalledProcessError(1, "docker load")
+
+        with patch(
+            "nanometa_live.core.workflow.bundle_manager.shutil.which",
+            return_value="/usr/bin/docker",
+        ), patch(
+            "nanometa_live.core.workflow.bundle_manager._docker_daemon_ok",
+            return_value=True,
+        ), patch(
+            "nanometa_live.core.workflow.bundle_manager.subprocess.run",
+            side_effect=flaky,
+        ):
+            result, _ = _do_import(tmp_path, bundle, kraken_db_path="x")
+
+        assert not result.get("container_runtime_unavailable")
+        joined = " ".join(result["warnings"]).lower()
+        assert "container" in joined
+        assert "1" in joined and "2" in joined
+
+    def test_successful_load_stays_quiet(self, tmp_path):
+        bundle = _make_config_bundle(
+            tmp_path, operator_container_files=["good.tar"])
+        with patch(
+            "nanometa_live.core.workflow.bundle_manager.shutil.which",
+            return_value="/usr/bin/docker",
+        ), patch(
+            "nanometa_live.core.workflow.bundle_manager._docker_daemon_ok",
+            return_value=True,
+        ), patch(
+            "nanometa_live.core.workflow.bundle_manager.subprocess.run",
+            return_value=MagicMock(returncode=0),
+        ):
+            result, _ = _do_import(tmp_path, bundle, kraken_db_path="x")
+
+        assert not result.get("container_runtime_unavailable")
+        joined = " ".join(result["warnings"]).lower()
+        assert "container" not in joined
 
 
 class TestExportWarningsSurfacedAtImport:

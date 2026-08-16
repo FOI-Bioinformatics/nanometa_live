@@ -13,12 +13,16 @@ container registry and fails -- while the main pipeline, launched through
 ``NextflowManager``, works. Clicking "validate" is a normal operator action, so
 this is a live path, not a corner.
 
-The test drives the real method with a stubbed ``subprocess.run`` and asserts on
-the environment it was handed.
+The launcher moved from ``subprocess.run`` to ``subprocess.Popen`` +
+``communicate()`` in the 2026-08-16 audit remediation (finding W6), so a
+timed-out validation can kill Nextflow's whole process group instead of
+orphaning its already-launched task/container processes. The test drives the
+real method with a stubbed ``subprocess.Popen`` and asserts on the
+environment it was handed.
 """
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -46,18 +50,14 @@ def offline_config(tmp_path):
     }
 
 
-class _Completed:
-    returncode = 1  # fail fast; we only care about the env handed to Popen
-    stdout = ""
-    stderr = "stubbed"
-
-
 def _run_validation(validator, config):
-    """Drive the launcher far enough to reach subprocess.run."""
+    """Drive the launcher far enough to reach subprocess.Popen."""
+    mock_proc = MagicMock(pid=1234, returncode=1)  # fail fast; only the env matters
+    mock_proc.communicate.return_value = ("", "stubbed")
     with patch(
-        "nanometa_live.core.workflow.on_demand_validator.subprocess.run",
-        return_value=_Completed(),
-    ) as mock_run:
+        "nanometa_live.core.workflow.on_demand_validator.subprocess.Popen",
+        return_value=mock_proc,
+    ) as mock_popen:
         validator.validate_via_nanometanf(
             taxid=263,
             name="Francisella tularensis",
@@ -65,7 +65,7 @@ def _run_validation(validator, config):
             method="blast",
             config=config,
         )
-    return mock_run
+    return mock_popen
 
 
 class TestOnDemandValidationOfflineEnv:
@@ -85,13 +85,13 @@ class TestOnDemandValidationOfflineEnv:
         (validator.genomes_dir / "263.fasta").write_text(
             ">NC_000000.1 Francisella tularensis\nACGTACGTACGTACGTACGT\n"
         )
-        mock_run = _run_validation(validator, offline_config)
+        mock_popen = _run_validation(validator, offline_config)
 
-        assert mock_run.called, (
-            "validate_via_nanometanf did not reach subprocess.run; the test "
+        assert mock_popen.called, (
+            "validate_via_nanometanf did not reach subprocess.Popen; the test "
             "needs updating to match the current preconditions."
         )
-        env = mock_run.call_args.kwargs.get("env")
+        env = mock_popen.call_args.kwargs.get("env")
         assert env is not None, (
             "nextflow was launched with no env=, so it inherited the bare app "
             "environment: no NXF_OFFLINE, no plugin path, no container cache. "
@@ -108,4 +108,10 @@ class TestOnDemandValidationOfflineEnv:
         assert "NXF_SINGULARITY_CACHEDIR" in env, (
             "Without the singularity cachedir Nextflow re-pulls images it was "
             "shipped, which cannot work with no network."
+        )
+        assert mock_popen.call_args.kwargs.get("start_new_session") is True, (
+            "start_new_session=True is required so a timeout can kill the "
+            "whole process group (finding W6) -- without it Nextflow's "
+            "already-launched task/container processes survive a timeout as "
+            "orphans."
         )

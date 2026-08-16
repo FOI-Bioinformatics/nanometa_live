@@ -7,8 +7,11 @@ validate_via_nanometanf subprocess path is out of scope (slow integration).
 All paths use a tmp cache_dir so the real ~/.nanometa is never touched.
 """
 
+import signal
+import subprocess
+import threading
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -174,3 +177,136 @@ class TestGenomeManagerOfflinePropagation:
             genome_manager=injected,
         )
         assert validator.genome_manager is injected
+
+
+class TestPathogenGenomesLock:
+    """W11: two on-demand validation requests in flight at once (two browser
+    tabs/operators -- the background callback's ``running=`` guard only
+    disables the button for the triggering session) must not lose one
+    another's taxid to a read-modify-write race on pathogen_genomes.json."""
+
+    def test_concurrent_merges_preserve_every_taxid(self, validator):
+        taxids = list(range(1000, 1030))
+        for t in taxids:
+            (validator.genomes_dir / f"{t}.fasta").write_text(">x\nACGT\n")
+
+        def _add(t):
+            validator._add_taxid_to_pathogen_genomes(
+                t, validator.genomes_dir / f"{t}.fasta"
+            )
+
+        threads = [threading.Thread(target=_add, args=(t,)) for t in taxids]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+
+        mapping = validator._load_pathogen_genomes()
+        assert set(mapping.keys()) == {str(t) for t in taxids}
+
+    def test_merge_preserves_prior_taxids(self, validator):
+        (validator.genomes_dir / "1.fasta").write_text(">x\nACGT\n")
+        (validator.genomes_dir / "2.fasta").write_text(">x\nACGT\n")
+        validator._add_taxid_to_pathogen_genomes(1, validator.genomes_dir / "1.fasta")
+        path, mapping = validator._add_taxid_to_pathogen_genomes(
+            2, validator.genomes_dir / "2.fasta"
+        )
+        assert path is not None
+        assert set(mapping.keys()) == {"1", "2"}
+
+    def test_write_failure_returns_none_path_and_empty_mapping(self, validator, monkeypatch):
+        def _boom(mapping):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(validator, "_save_pathogen_genomes", _boom)
+        path, mapping = validator._add_taxid_to_pathogen_genomes(
+            1, validator.genomes_dir / "1.fasta"
+        )
+        assert path is None
+        assert mapping == {}
+
+
+class TestValidateViaNanometanfProcessGroupIsolation:
+    """W6: a timed-out on-demand validation subprocess must not orphan
+    Nextflow's already-launched task/container processes. start_new_session
+    puts the whole tree in one process group; on TimeoutExpired the group
+    must be killed (SIGTERM escalating to SIGKILL), mirroring
+    NextflowManager.stop()."""
+
+    def _validator(self, tmp_path):
+        v = OnDemandValidator(
+            results_dir=str(tmp_path / "results"),
+            input_dir=str(tmp_path / "input"),
+            cache_dir=str(tmp_path / "cache"),
+            genome_manager=MagicMock(),
+        )
+        (tmp_path / "input").mkdir(parents=True, exist_ok=True)
+        (v.genomes_dir / "1392.fasta").write_text(">x\nACGT\n")
+        return v
+
+    def _config(self):
+        return {"pipeline_source": "remote:dev", "pipeline_profile": "conda"}
+
+    def test_popen_uses_start_new_session(self, tmp_path):
+        v = self._validator(tmp_path)
+        mock_proc = MagicMock(pid=4321, returncode=0)
+        mock_proc.communicate.return_value = ("", "")
+        with patch(
+            "nanometa_live.core.workflow.on_demand_validator.subprocess.Popen",
+            return_value=mock_proc,
+        ) as mock_popen, patch(
+            "nanometa_live.core.parsers.blast_validation_parser.ValidationParser.get_validation_results",
+            return_value=[],
+        ):
+            v.validate_via_nanometanf(
+                1392, "B. anthracis", "barcode01", config=self._config()
+            )
+        _, kwargs = mock_popen.call_args
+        assert kwargs.get("start_new_session") is True
+
+    def test_timeout_kills_process_group_with_sigterm(self, tmp_path):
+        v = self._validator(tmp_path)
+        mock_proc = MagicMock(pid=4321)
+        mock_proc.communicate.side_effect = [
+            subprocess.TimeoutExpired(cmd="nextflow", timeout=60),
+            ("", ""),  # grace-period wait succeeds -- group died on SIGTERM
+        ]
+        with patch(
+            "nanometa_live.core.workflow.on_demand_validator.subprocess.Popen",
+            return_value=mock_proc,
+        ), patch(
+            "nanometa_live.core.workflow.on_demand_validator.os.getpgid",
+            return_value=4321,
+        ), patch(
+            "nanometa_live.core.workflow.on_demand_validator.os.killpg",
+        ) as mock_killpg:
+            result = v.validate_via_nanometanf(
+                1392, "B. anthracis", "barcode01", config=self._config()
+            )
+        assert result is None
+        mock_killpg.assert_called_once_with(4321, signal.SIGTERM)
+        mock_proc.kill.assert_not_called()
+
+    def test_timeout_escalates_to_sigkill_if_group_survives_grace_period(self, tmp_path):
+        v = self._validator(tmp_path)
+        mock_proc = MagicMock(pid=4321)
+        mock_proc.communicate.side_effect = [
+            subprocess.TimeoutExpired(cmd="nextflow", timeout=60),
+            subprocess.TimeoutExpired(cmd="nextflow", timeout=30),
+            ("", ""),
+        ]
+        with patch(
+            "nanometa_live.core.workflow.on_demand_validator.subprocess.Popen",
+            return_value=mock_proc,
+        ), patch(
+            "nanometa_live.core.workflow.on_demand_validator.os.getpgid",
+            return_value=4321,
+        ), patch(
+            "nanometa_live.core.workflow.on_demand_validator.os.killpg",
+        ) as mock_killpg:
+            result = v.validate_via_nanometanf(
+                1392, "B. anthracis", "barcode01", config=self._config()
+            )
+        assert result is None
+        calls = [c.args[1] for c in mock_killpg.call_args_list]
+        assert calls == [signal.SIGTERM, signal.SIGKILL]

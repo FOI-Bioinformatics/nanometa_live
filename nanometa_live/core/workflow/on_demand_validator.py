@@ -17,12 +17,20 @@ Workflow:
 
 import json
 import logging
+import os
+import signal
 import subprocess
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # Windows: file locking not available
 
 from nanometa_live.core.utils.read_extractor import ReadExtractor
 from nanometa_live.core.workflow.nextflow_manager import NextflowManager
@@ -328,6 +336,59 @@ class OnDemandValidator:
         tmp.replace(path)
         return path
 
+    @contextmanager
+    def _locked_pathogen_genomes_file(self):
+        """Hold an exclusive, blocking file lock across a pathogen_genomes.json
+        read-modify-write.
+
+        Two on-demand validation requests in flight at once (e.g. two browser
+        tabs/operators -- the background callback's ``running=`` guard only
+        disables the button for the triggering session, not server-wide) both
+        call ``_load_pathogen_genomes`` -> mutate -> ``_save_pathogen_genomes``
+        with no serialization between them. That is a classic lost-update
+        race: B's save can land between A's load and A's save and silently
+        drop A's own taxid addition, even though A's already-launched Nextflow
+        subprocess still expects to find it. The lock is scoped to a small
+        dedicated ``.lock`` file (not the JSON itself) so a reader elsewhere
+        that just opens ``pathogen_genomes.json`` directly is unaffected.
+        """
+        lock_path = self.validation_dir / (self.PATHOGEN_GENOMES_FILENAME + ".lock")
+        self.validation_dir.mkdir(parents=True, exist_ok=True)
+        lock_fd = open(lock_path, "w")
+        try:
+            if fcntl:
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+            yield
+        finally:
+            if fcntl:
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+            lock_fd.close()
+
+    def _add_taxid_to_pathogen_genomes(
+        self, taxid: int, genome_fasta: Path
+    ) -> Tuple[Optional[Path], Dict[str, str]]:
+        """Merge one taxid into the cumulative pathogen_genomes.json under an
+        exclusive lock (see ``_locked_pathogen_genomes_file``).
+
+        Returns ``(mapping_file_path, mapping)`` on success. On a write
+        failure returns ``(None, {})`` -- the caller must treat that as fatal
+        for this validation request rather than proceeding with a taxid list
+        that was never actually persisted.
+        """
+        try:
+            with self._locked_pathogen_genomes_file():
+                mapping = self._load_pathogen_genomes()
+                # Drop any non-numeric keys a corrupted prior file may carry
+                # so sorted(key=int) below and Nextflow's taxid filter never
+                # choke; this also heals the on-disk file when re-saved.
+                mapping = {k: v for k, v in mapping.items() if _is_int_str(k)}
+                mapping[str(taxid)] = str(genome_fasta)
+                path = self._save_pathogen_genomes(mapping)
+                return path, mapping
+        except (PermissionError, OSError, TypeError, ValueError) as e:
+            logger.exception(f"Failed to write pathogen genomes JSON: {e}")
+            return None, {}
+
     def validate_via_nanometanf(
         self,
         taxid: int,
@@ -427,17 +488,14 @@ class OnDemandValidator:
 
         # Append the new taxid to the cumulative pathogen_genomes mapping.
         # Preserves prior taxids so Nextflow's resume cache reuses their
-        # work; only the new (sample, taxid) pair runs end-to-end.
-        mapping = self._load_pathogen_genomes()
-        # Drop any non-numeric keys a corrupted prior file may carry so the
-        # sorted(key=int) below and Nextflow's taxid filter never choke; this
-        # also heals the on-disk file when it is re-saved.
-        mapping = {k: v for k, v in mapping.items() if _is_int_str(k)}
-        mapping[str(taxid)] = str(genome_fasta)
-        try:
-            genomes_json_path = self._save_pathogen_genomes(mapping)
-        except (PermissionError, OSError, TypeError, ValueError) as e:
-            logger.exception(f"Failed to write pathogen genomes JSON: {e}")
+        # work; only the new (sample, taxid) pair runs end-to-end. Locked
+        # (see _add_taxid_to_pathogen_genomes) so a concurrent on-demand
+        # request from another tab/operator cannot lose this addition to a
+        # read-modify-write race.
+        genomes_json_path, mapping = self._add_taxid_to_pathogen_genomes(
+            taxid, genome_fasta
+        )
+        if genomes_json_path is None:
             return None
 
         # Comma-separated list of every taxid currently mapped. Nextflow
@@ -478,16 +536,50 @@ class OnDemandValidator:
 
         try:
             logger.info(f"Running nanometanf validation: {' '.join(cmd)}")
-            result = subprocess.run(
+            # start_new_session=True puts nextflow and everything it spawns
+            # (task scripts, Docker/singularity containers) in its own
+            # process group, mirroring NextflowManager._run_workflow's main
+            # pipeline launch. Without it, subprocess.run's own timeout
+            # handling only killed the top-level `nextflow` PID on
+            # TimeoutExpired -- its already-launched work kept running as an
+            # orphan, invisibly consuming CPU/RAM/disk on the field laptop
+            # while the GUI reported a clean timeout.
+            proc = subprocess.Popen(
                 cmd,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=timeout_seconds,
                 env=env,
+                start_new_session=True,
             )
+            try:
+                stdout, stderr = proc.communicate(timeout=timeout_seconds)
+                returncode = proc.returncode
+            except subprocess.TimeoutExpired:
+                # Escalate SIGTERM -> SIGKILL across the whole process group,
+                # mirroring NextflowManager.stop().
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
+                    proc.terminate()
+                try:
+                    proc.communicate(timeout=30)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        proc.kill()
+                    proc.communicate()
+                logger.error(
+                    "nanometanf validation timed out after %d minute(s); "
+                    "raise 'validation_timeout_minutes' in config for large "
+                    "genomes",
+                    timeout_seconds // 60,
+                )
+                return None
 
-            if result.returncode != 0:
-                logger.error(f"nanometanf validation failed: {result.stderr}")
+            if returncode != 0:
+                logger.error(f"nanometanf validation failed: {stderr}")
                 return None
 
             if progress_callback:
@@ -601,6 +693,27 @@ class OnDemandValidator:
             job.status = ValidationStatus.COMPLETED
             job.status_message = "Validated via nanometanf"
             job.progress_percent = 100
+            job.completed_at = datetime.now()
+            job.total_reads = nf_result.total_classified_reads
+            job.extracted_reads = nf_result.extracted_reads
+            job.validated_reads = nf_result.validated_reads
+            job.validation_rate = nf_result.validation_rate
+            job.avg_identity = nf_result.avg_identity
+            job.blast_results = nf_result.blast_output_file
+            if self.has_genome(taxid):
+                job.genome_path = self.genomes_dir / f"{taxid}.fasta"
+
+            # Persist so the result survives a page reload/app restart.
+            # _save_results was previously dead code -- validate_organism
+            # returned nf_result straight into a dcc.Store and never wrote
+            # to disk, while reload_on_demand_results (main_tab.py) globs
+            # on-demand_validation/*_validation.json to repopulate
+            # "already validated" state on load. Underlying BLAST/minimap2
+            # files were always on disk (the regular Validation tab reads
+            # those directly and was unaffected), but the on-demand modal's
+            # own completion record vanished on any refresh.
+            self._save_results(job, method=method)
+
             return nf_result
 
         # nanometanf delegation returned None -- the pipeline run
@@ -633,9 +746,13 @@ class OnDemandValidator:
             error_message=error
         )
 
-    def _save_results(self, job: ValidationJob) -> None:
-        """Save validation results to JSON file."""
+    def _save_results(self, job: ValidationJob, method: str = "blast") -> None:
+        """Save validation results to JSON file (atomic write-then-rename,
+        matching ``_save_pathogen_genomes``, so a crash mid-write cannot
+        leave a truncated file that ``reload_on_demand_results`` then fails
+        to parse)."""
         output_file = self.validation_dir / f"{job.sample}_{job.taxid}_validation.json"
+        self.validation_dir.mkdir(parents=True, exist_ok=True)
 
         # Compute percent_validated as a percentage (0-100)
         percent_validated = job.validation_rate  # already stored as percentage
@@ -662,7 +779,7 @@ class OnDemandValidator:
             "validated_reads": job.validated_reads,
             "percent_validated": percent_validated,
             "percent_identity_mean": job.avg_identity,
-            "validation_method": "blast",
+            "validation_method": method,
             "validation_status": validation_status,
             "hit_rate": percent_validated / 100.0 if percent_validated else 0.0,
             "timestamp": job.completed_at.isoformat() if job.completed_at else datetime.now().isoformat(),
