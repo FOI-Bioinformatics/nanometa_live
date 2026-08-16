@@ -22,7 +22,7 @@ from typing import List
 import dash
 from dash import Dash, Input, Output, State, ctx, no_update, html
 from nanometa_live.app.utils.debounce import (
-    interval_tick_is_redundant, mark_rendered,
+    interval_tick_is_redundant_store, fp_to_store,
 )
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
@@ -124,6 +124,10 @@ def register_main_callbacks(app: Dash):
             Output("watched-organisms-section", "style"),
             Output("watched-organisms-cards", "children"),
             Output("watched-organisms-count", "children"),
+            # Rendered-fingerprint memo. Must be a Store, not a module global:
+            # this callback is background=True and its worker process is spawned
+            # fresh per invocation, so an in-process memo is empty every time.
+            Output("main-results-rendered-fp", "data"),
         ],
         [
             Input("results-fingerprint", "data"),
@@ -145,6 +149,7 @@ def register_main_callbacks(app: Dash):
             # ticks fire faster than the loader's read latency (per_file
             # mode emits one fingerprint advance per chunk file).
             State("dashboard-overall-status-cache", "data"),
+            State("main-results-rendered-fp", "data"),
         ],
         prevent_initial_call=True,
         # Audit item #3 (docs/audit/threading-2026-05-10.md): heavy kraken
@@ -160,7 +165,7 @@ def register_main_callbacks(app: Dash):
     def update_main_results(
         _fingerprint, apply_clicks, selected_sample, watchlist_store,
         _n_intervals, top_count, min_abundance, tax_ranks, config, status,
-        overall_status_cache,
+        overall_status_cache, rendered_fp,
     ):
         """
         Update the main results tab with organism summary, cards, table,
@@ -183,9 +188,9 @@ def register_main_callbacks(app: Dash):
         # so the Organisms view does not re-read Kraken2 every poll on a quiet
         # outdir. User actions (Apply, sample, watchlist, filters) are not
         # "interval" triggers, so they always render.
-        if interval_tick_is_redundant(ctx, "main_results", _fingerprint):
+        if interval_tick_is_redundant_store(ctx, rendered_fp, _fingerprint):
             raise PreventUpdate
-        mark_rendered("main_results", _fingerprint)
+        rendered = fp_to_store(_fingerprint)
 
         # Default empty returns
         empty_summary = EmptyStateMessage(
@@ -213,7 +218,8 @@ def register_main_callbacks(app: Dash):
         main_dir = validate_config_and_get_main_dir(config)
         if not main_dir:
             return (empty_summary, empty_cards, empty_table, empty_count,
-                    empty_count, no_alert, hidden_style, empty_watched, watched_count)
+                    empty_count, no_alert, hidden_style, empty_watched,
+                    watched_count, rendered)
 
         # Set filter defaults
         top_count = top_count or 10
@@ -240,7 +246,8 @@ def register_main_callbacks(app: Dash):
             if kraken_df.empty:
                 logging.debug("Main Results: No Kraken2 data found")
                 return (empty_summary, empty_cards, empty_table, empty_count,
-                        empty_count, no_alert, hidden_style, empty_watched, watched_count)
+                        empty_count, no_alert, hidden_style, empty_watched,
+                        watched_count, rendered)
 
             logging.debug(f"Main Results: Loaded {len(kraken_df)} rows from Kraken2 data")
 
@@ -554,6 +561,7 @@ def register_main_callbacks(app: Dash):
                 watched_style,
                 watched_cards if all_watchlist_species else empty_watched,
                 watched_count_str,
+                rendered,
             )
 
         except Exception as e:
@@ -566,7 +574,8 @@ def register_main_callbacks(app: Dash):
                 color="danger",
                 className="text-center"
             )
-            return (error_alert, error_alert, [], "0", "0", None, hidden_style, empty_watched, "0")
+            return (error_alert, error_alert, [], "0", "0", None, hidden_style,
+                    empty_watched, "0", rendered)
 
     # Sync watchlist from config to main tab store
     @app.callback(
@@ -575,7 +584,18 @@ def register_main_callbacks(app: Dash):
             Output("notification-trigger", "data", allow_duplicate=True),
         ],
         Input("app-config", "data"),
-        prevent_initial_call=True,
+        # "initial_duplicate", not True: the store MUST be hydrated on page load.
+        # With prevent_initial_call=True this only ran once something wrote
+        # app-config, and on the documented visualization launch
+        # (--main_dir /path/to/results, no kraken_db) nothing ever does --
+        # initialize_taxid_mappings short-circuits without a database. The store
+        # stayed [], so the Organisms tab showed "No Watched Organisms" for the
+        # whole session while the verdict banner, which reads the singleton
+        # directly in the main process, could show ACTION REQUIRED. Two surfaces
+        # disagreeing about a detection, with Organisms on the reassuring side.
+        # The value is required (rather than plain False) because this callback
+        # has an allow_duplicate output.
+        prevent_initial_call="initial_duplicate",
     )
     def sync_watchlist(config):
         """Sync watchlist entries from WatchlistManager to main tab store.

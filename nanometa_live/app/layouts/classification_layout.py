@@ -21,6 +21,13 @@ def create_classification_layout() -> html.Div:
         html.Div containing the classification visualization components
     """
     return html.Div([dbc.Container([
+        # Set by scale_min_reads_default whenever it programmatically raises the
+        # minimum-sequences floor for an aggregated multi-barcode view. The plot
+        # callback reads the filter input as State (manual edits wait for
+        # Apply), so it needs this explicit signal to redraw at the new floor
+        # instead of the value it captured before the rescale landed.
+        dcc.Store(id='classification-autoscale-applied', data=None),
+
         # Header row with title, view toggle, and color scheme
         dbc.Row([
             # Title + view selector

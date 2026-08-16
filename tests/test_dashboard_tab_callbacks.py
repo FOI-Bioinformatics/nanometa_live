@@ -159,7 +159,11 @@ def test_overall_status_cache_populated(dash_app, populated_dir):
 # --------------------------------------------------------------------------- #
 
 def test_handle_sample_selection(dash_app):
-    fn = get_callback_fn(dash_app, "selected-sample", input_contains="dashboard-sample-table")
+    # Writes the header dropdown, not the selected-sample Store: the Dashboard
+    # tiles and the Pathogen Report modal read sample-selector.value, so
+    # writing the Store directly left the two views disagreeing.
+    fn = get_callback_fn(dash_app, "sample-selector.value",
+                         input_contains="dashboard-sample-table")
     assert fn([{"sample": "barcode01"}]) == "barcode01"
     assert fn([]) is no_update
     assert fn([{"no_sample_key": 1}]) is no_update   # KeyError path

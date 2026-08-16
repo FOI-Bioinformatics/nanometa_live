@@ -71,14 +71,42 @@ def _empty_readiness_state(message: str) -> Dict[str, Any]:
     }
 
 
-# Best-effort per-process skip so an idle update-interval tick does not re-run
-# ReadinessChecker's subprocess probes (docker info, nextflow -version) when the
-# readiness-relevant config is unchanged. Belt-and-braces with the prev-state
-# equality compare below, which robustly suppresses Store rewrites even across
-# DiskcacheManager worker processes (it reads the published Store as State).
+# Skip window for an idle update-interval tick, so it does not re-run
+# ReadinessChecker's subprocess probes (docker info ~5 s, nextflow -version
+# ~10 s) when the readiness-relevant config is unchanged.
+#
+# The state MUST live in a Store, not in this module. This callback is
+# background=True, and DiskcacheManager starts a NEW OS process per invocation
+# (app.py forces the "spawn" start method), so a module-level dict is
+# re-initialised on every single call and the TTL never once fired -- the
+# probes ran on every tick for the life of the session. The Store is written
+# by the worker and read back as State on the next call, which is the only
+# channel that survives the process boundary.
 _READINESS_TTL = 60.0
-_readiness_lock = threading.Lock()
-_readiness_last: Dict[str, Any] = {"fingerprint": None, "ts": 0.0}
+
+
+def _probe_window_is_fresh(stamp: Optional[Dict[str, Any]],
+                           fingerprint: str,
+                           now: float) -> bool:
+    """True when the last probe run covers *fingerprint* and is within the TTL.
+
+    ``stamp`` is the ``readiness-probe-stamp`` Store value, written on every
+    recompute (unlike ``readiness-state``, which is deliberately left alone
+    when the result is unchanged so the checklist does not re-open under the
+    operator). Keeping the timestamp on its own Store means an unchanged result
+    still refreshes the TTL window; folding it into readiness-state would have
+    made the window unrenewable, and the probes would resume every tick after
+    the first expiry.
+    """
+    if not isinstance(stamp, dict):
+        return False
+    if stamp.get("fingerprint") != fingerprint:
+        return False
+    try:
+        ts = float(stamp.get("ts") or 0.0)
+    except (TypeError, ValueError):
+        return False
+    return (now - ts) < _READINESS_TTL
 
 
 def _readiness_fingerprint(
@@ -138,17 +166,19 @@ def register_readiness(app, backend_manager):
     # Input so the operator's "Check Everything" forces an immediate recompute.
     @app.callback(
         Output("readiness-state", "data"),
+        Output("readiness-probe-stamp", "data"),
         Input("update-interval", "n_intervals"),
         Input("app-config", "data"),
         Input("check-readiness-btn", "n_clicks"),
         Input("genome-download-complete", "data"),
         State("readiness-state", "data"),
         State("watchlist-entries-snapshot", "data"),
+        State("readiness-probe-stamp", "data"),
         background=True,
         manager=background_callback_manager,
     )
     def update_readiness_state(n_intervals, config, n_clicks, genome_change,
-                               prev_state, watchlist_entries):
+                               prev_state, watchlist_entries, probe_stamp):
         """Compute readiness and publish it to the shared Store, deduplicated.
 
         Idle update-interval ticks must not re-run the checker's subprocess
@@ -175,16 +205,17 @@ def register_readiness(app, backend_manager):
 
         if not config:
             new = _empty_readiness_state("No configuration loaded")
-            return no_update if _readiness_unchanged(prev_state, new) else new
+            return (
+                no_update if _readiness_unchanged(prev_state, new) else new,
+                no_update,
+            )
 
         fingerprint = _readiness_fingerprint(config, watchlist_entries)
         now = time.time()
-        if not forced:
-            with _readiness_lock:
-                fresh = (_readiness_last["fingerprint"] == fingerprint
-                         and (now - _readiness_last["ts"]) < _READINESS_TTL)
-            if fresh:
-                return no_update
+        if not forced and _probe_window_is_fresh(probe_stamp, fingerprint, now):
+            # Same readiness-relevant config, probed recently: skip the whole
+            # recompute, including the docker/nextflow subprocess probes.
+            return no_update, no_update
 
         try:
             # Pass the watchlist snapshot: this callback runs in a background
@@ -199,13 +230,17 @@ def register_readiness(app, backend_manager):
             logging.error(f"Readiness check failed: {e}")
             new = _empty_readiness_state(str(e))
 
-        with _readiness_lock:
-            _readiness_last["fingerprint"] = fingerprint
-            _readiness_last["ts"] = now
+        # Always refresh the probe window, even when the report itself is
+        # unchanged and readiness-state is left alone below. No renderer reads
+        # this Store, so writing it cannot disturb the operator's checklist.
+        stamp = {"fingerprint": fingerprint, "ts": now}
 
         if forced:
-            return new
-        return no_update if _readiness_unchanged(prev_state, new) else new
+            return new, stamp
+        return (
+            no_update if _readiness_unchanged(prev_state, new) else new,
+            stamp,
+        )
 
     @app.callback(
         Output("readiness-badge", "children"),

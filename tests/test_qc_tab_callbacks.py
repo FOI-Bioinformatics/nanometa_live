@@ -79,10 +79,12 @@ def test_export_modal_toggles(qc_app):
 def test_update_qc_stats_empty_returns_defaults(qc_app):
     fn = get_callback_fn(qc_app, "qc-reads-pre-filtering")
     with ctx_trigger("selected-sample"):
-        result = fn(None, "All Samples", 0, {}, {})
+        result = fn(None, "All Samples", 0, {}, {}, None)
     assert isinstance(result, (list, tuple))
-    assert len(result) == 10               # ten stat tiles
-    joined = " ".join(result)
+    # Ten stat tiles plus the Store-backed interval-backstop memo (this
+    # callback is background=True, so the memo cannot be a module global).
+    assert len(result) == 11
+    joined = " ".join(result[:10])
     assert "passed filtering: 0" in joined
     assert "Files processed: 0" in joined
 
@@ -112,10 +114,11 @@ def test_update_per_sample_table_empty_returns_list(qc_app):
 def test_update_qc_stats_populated(qc_app, populated_config):
     fn = get_callback_fn(qc_app, "qc-reads-pre-filtering")
     with ctx_trigger("results-fingerprint"):
-        result = fn("fp1", "All Samples", 0, populated_config, {"running": True})
-    assert len(result) == 10
+        result = fn("fp1", "All Samples", 0, populated_config,
+                    {"running": True}, None)
+    assert len(result) == 11
     # classification stats should reflect real data, not the all-zero defaults
-    joined = " ".join(result)
+    joined = " ".join(result[:10])
     assert "Files processed: 0" not in joined or "Classified reads: 0 (0%)" not in joined
 
 

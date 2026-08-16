@@ -43,7 +43,7 @@ BIG = ["All Samples"] + [f"barcode{i:02d}" for i in range(1, 25)]
 class TestTheConfiguredFloorIsUsed:
     @pytest.mark.parametrize("configured", [5, 25, 100])
     def test_the_starting_value_comes_from_config(self, scale_fn, configured):
-        value, _placeholder = scale_fn(
+        value, _placeholder, _signal = scale_fn(
             SMALL, "All Samples", None,
             {"default_reads_per_level": configured},
         )
@@ -54,12 +54,12 @@ class TestTheConfiguredFloorIsUsed:
         )
 
     def test_absent_config_keeps_the_historical_default(self, scale_fn):
-        value, _ = scale_fn(SMALL, "All Samples", None, {})
+        value, _, _signal = scale_fn(SMALL, "All Samples", None, {})
 
         assert value == 10
 
     def test_no_config_at_all_does_not_break(self, scale_fn):
-        value, _ = scale_fn(SMALL, "All Samples", None, None)
+        value, _, _signal = scale_fn(SMALL, "All Samples", None, None)
 
         assert value == 10
 
@@ -67,7 +67,7 @@ class TestTheConfiguredFloorIsUsed:
 class TestOperatorInputStillWins:
     def test_a_typed_value_is_not_overwritten(self, scale_fn):
         """The heuristic only ever replaced an untouched default."""
-        value, _ = scale_fn(
+        value, _, _signal = scale_fn(
             BIG, "All Samples", 37, {"default_reads_per_level": 25},
         )
 
@@ -77,7 +77,7 @@ class TestOperatorInputStillWins:
 class TestAggregateScalingSurvives:
     def test_the_floor_still_rises_on_a_large_aggregate(self, scale_fn):
         """24 barcodes: a 1-read per-sample hit becomes 24 in aggregate."""
-        value, placeholder = scale_fn(
+        value, placeholder, _signal = scale_fn(
             BIG, "All Samples", None, {"default_reads_per_level": 10},
         )
 
@@ -88,7 +88,7 @@ class TestAggregateScalingSurvives:
         self, scale_fn
     ):
         """max(configured, 5N) -- the operator's floor is a floor."""
-        value, _ = scale_fn(
+        value, _, _signal = scale_fn(
             BIG, "All Samples", None, {"default_reads_per_level": 500},
         )
 
@@ -97,7 +97,7 @@ class TestAggregateScalingSurvives:
         )
 
     def test_a_single_sample_view_uses_the_configured_floor(self, scale_fn):
-        value, _ = scale_fn(
+        value, _, _signal = scale_fn(
             BIG, "barcode03", None, {"default_reads_per_level": 25},
         )
 

@@ -133,6 +133,40 @@ def interval_tick_is_redundant(ctx, callback_id: str, fingerprint) -> bool:
     )
 
 
+def interval_tick_is_redundant_store(ctx, rendered_fp, fingerprint) -> bool:
+    """Cross-process variant of :func:`interval_tick_is_redundant`.
+
+    Same predicate -- "an interval tick whose data fingerprint is unchanged
+    since this callback last rendered" -- but the memo is supplied by the
+    caller (from a ``dcc.Store`` read as ``State``) rather than read from this
+    module's in-process dict.
+
+    Required for ``background=True`` callbacks. DiskcacheManager starts a NEW
+    OS process for every invocation and app.py forces the "spawn" start method,
+    so ``_render_fp`` is empty on entry every single time: the in-process guard
+    always reported "not redundant" and the backstop tick did the full rebuild
+    it exists to avoid. The Store round-trips through the browser, which is the
+    only channel that survives the process boundary.
+
+    Pair with :func:`fp_to_store`, whose value the callback must return into the
+    companion Store on every render path.
+    """
+    return (
+        get_trigger_type(ctx) == "interval"
+        and rendered_fp is not None
+        and rendered_fp == _fp_value(fingerprint)
+    )
+
+
+def fp_to_store(fingerprint) -> object:
+    """The value to write into a callback's rendered-fingerprint Store.
+
+    Companion to :func:`interval_tick_is_redundant_store`; extracts the same
+    content hash the predicate compares, so the two cannot drift.
+    """
+    return _fp_value(fingerprint)
+
+
 def mark_rendered(callback_id: str, fingerprint) -> None:
     """Record the fingerprint a callback just rendered (see
     :func:`interval_render_is_redundant`). Call on every render path, not only

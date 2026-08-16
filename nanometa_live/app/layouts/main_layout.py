@@ -565,6 +565,14 @@ def create_main_layout():
     return html.Div([
         # Hidden store for species watchlist (synced with config)
         dcc.Store(id="main-watchlist-store", data=[], storage_type="session"),
+        # Results fingerprint update_main_results last rendered. The callback is
+        # background=True, and DiskcacheManager spawns a fresh worker process
+        # per invocation, so its interval-backstop memo cannot live in a module
+        # global -- it reset on every call and the guard never fired, making the
+        # backstop tick re-parse the whole Kraken2 tree every poll. Not
+        # session-persisted: a reload should re-render rather than trust a memo
+        # for output it is no longer showing.
+        dcc.Store(id="main-results-rendered-fp", data=None),
 
         # On-demand validation stores
         dcc.Store(id="on-demand-validation-target", data=None),  # {taxid, name} of organism being validated

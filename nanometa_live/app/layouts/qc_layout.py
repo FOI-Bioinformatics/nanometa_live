@@ -586,6 +586,13 @@ def create_qc_layout():
         # Download component for QC report export
         dcc.Download(id="download-qc-report"),
 
+        # Results fingerprint update_qc_stats last rendered. That callback is
+        # background=True and DiskcacheManager spawns a fresh worker process per
+        # invocation, so its interval-backstop memo cannot live in a module
+        # global -- it reset on every call, so the guard never fired and every
+        # poll re-walked the whole fastp/seqkit tree.
+        dcc.Store(id="qc-stats-rendered-fp", data=None),
+
         # STAGE STRIP - Pipeline overview: Raw -> Quality-filtered -> Classified
         dcc.Loading(
             id="loading-stage-strip",

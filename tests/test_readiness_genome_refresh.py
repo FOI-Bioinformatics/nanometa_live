@@ -66,8 +66,9 @@ class TestCallbackForcing:
              patch("nanometa_live.app.callbacks.readiness._serialize_report",
                    return_value={"ok": 1}), \
              ctx_with("genome-download-complete"):
-            # (n_intervals, config, n_clicks, genome_change, prev_state, watchlist)
-            out = fn(5, {"kraken_db": "/dbA"}, None, 3, None, [])
+            # (n_intervals, config, n_clicks, genome_change, prev_state,
+            #  watchlist, probe_stamp)
+            out, _stamp = fn(5, {"kraken_db": "/dbA"}, None, 3, None, [], None)
         checker.check_readiness.assert_called_once()
         _, kwargs = checker.check_readiness.call_args
         assert kwargs.get("reload_genomes") is True
@@ -82,7 +83,7 @@ class TestCallbackForcing:
                    return_value={"ok": 1}), \
              ctx_with("update-interval"):
             # distinct config so the fingerprint is not fresh and it recomputes
-            fn(9, {"kraken_db": "/dbB-idle"}, None, None, None, [])
+            fn(9, {"kraken_db": "/dbB-idle"}, None, None, None, [], None)
         if checker.check_readiness.called:
             _, kwargs = checker.check_readiness.call_args
             assert kwargs.get("reload_genomes") is False

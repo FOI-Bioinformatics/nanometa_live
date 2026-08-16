@@ -63,7 +63,8 @@ def test_auto_navigate_switches_from_setup_tab(prog_app):
     # From a Setup tab (e.g. configuration), completion pulls the operator to
     # the Dashboard so they see results.
     fn = get_callback_fn(prog_app, "previous-running-state")
-    tab, prev, toast = fn({"running": False}, True, "config-tab", {"analysis_name": "Run1"})
+    tab, prev, toast, _flag = fn({"running": False}, True, "config-tab",
+                                 {"analysis_name": "Run1"}, False)
     assert tab == "dashboard-tab"
     assert prev is False
     assert toast["title"] == "Analysis Complete"
@@ -73,7 +74,7 @@ def test_auto_navigate_switches_from_setup_tab(prog_app):
 def test_auto_navigate_stays_on_results_tab(prog_app):
     # Operator feedback: do NOT yank focus off a results tab mid-investigation.
     fn = get_callback_fn(prog_app, "previous-running-state")
-    tab, prev, toast = fn({"running": False}, True, "validation-tab", {})
+    tab, prev, toast, _flag = fn({"running": False}, True, "validation-tab", {}, False)
     assert tab is no_update
     assert prev is False
     assert toast["title"] == "Analysis Complete"
@@ -81,7 +82,7 @@ def test_auto_navigate_stays_on_results_tab(prog_app):
 
 def test_auto_navigate_already_on_dashboard_only_toasts(prog_app):
     fn = get_callback_fn(prog_app, "previous-running-state")
-    tab, prev, toast = fn({"running": False}, True, "dashboard-tab", {})
+    tab, prev, toast, _flag = fn({"running": False}, True, "dashboard-tab", {}, False)
     assert tab is no_update
     assert prev is False
     assert toast["title"] == "Analysis Complete"
@@ -90,9 +91,11 @@ def test_auto_navigate_already_on_dashboard_only_toasts(prog_app):
 def test_auto_navigate_no_transition_is_noupdate(prog_app):
     fn = get_callback_fn(prog_app, "previous-running-state")
     # was not running, still not running -> nothing changes
-    assert fn({"running": False}, False, "qc-tab", {}) == (no_update, no_update, no_update)
+    assert fn({"running": False}, False, "qc-tab", {}, False) == (
+        no_update, no_update, no_update, no_update)
 
 
 def test_auto_navigate_none_status(prog_app):
     fn = get_callback_fn(prog_app, "previous-running-state")
-    assert fn(None, True, "qc-tab", {}) == (no_update, False, no_update)
+    assert fn(None, True, "qc-tab", {}, False) == (
+        no_update, False, no_update, no_update)

@@ -582,7 +582,7 @@ def register_dashboard_callbacks(app: Dash):
             return _get_error_alerts(str(e))
 
     @app.callback(
-        Output("selected-sample", "data", allow_duplicate=True),
+        Output("sample-selector", "value", allow_duplicate=True),
         Input("dashboard-sample-table", "selectedRows"),
         prevent_initial_call=True
     )
@@ -590,8 +590,17 @@ def register_dashboard_callbacks(app: Dash):
         """
         Handle sample selection from the dashboard AG Grid table.
 
-        When a user clicks a sample row, update the selected sample
-        so other tabs can show sample-specific data.
+        Writes the header dropdown, NOT the ``selected-sample`` store. The grid
+        promises "Click a row to filter all tabs to this sample", and the store
+        drives most tabs -- but the Dashboard's own metric tiles and the
+        Pathogen Report modal read ``sample-selector.value``, and
+        update_sample_selector_options never re-asserts that value once the
+        option is still valid. Writing the store directly therefore left the
+        visible dropdown reading "All Samples (Aggregated)" while the other
+        tabs showed one barcode, with no path back to agreement.
+
+        Routing through the dropdown keeps ``update_selected_sample`` the
+        single writer of ``selected-sample``, so the two can no longer diverge.
 
         Args:
             selected_rows: List of selected row data dicts from AG Grid

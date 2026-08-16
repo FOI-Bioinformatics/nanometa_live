@@ -194,14 +194,15 @@ class TestSwitchToResultsTab:
 class TestAutoNavigateOnCompletion:
     def test_completion_navigates_to_dashboard(self, app_backend):
         fn = _fn(app_backend[0], "previous-running-state.data")
-        tab, prev, toast = fn({"running": False}, True, "config-tab", {"analysis_name": "Run"})
+        tab, prev, toast, _flag = fn({"running": False}, True, "config-tab",
+                                     {"analysis_name": "Run"}, False)
         assert tab == "dashboard-tab"
         assert prev is False
         assert toast["title"] == "Analysis Complete"
 
     def test_still_running_just_tracks_state(self, app_backend):
         fn = _fn(app_backend[0], "previous-running-state.data")
-        tab, prev, toast = fn({"running": True}, False, "dashboard-tab", {})
+        tab, prev, toast, _flag = fn({"running": True}, False, "dashboard-tab", {}, False)
         assert tab is no_update
         assert prev is True
 
@@ -213,25 +214,28 @@ class TestAutoNavigateOnCompletion:
 class TestHandleStopConfirmation:
     def test_modal_closed_is_noop(self, app_backend):
         fn = _fn(app_backend[0], "stop-confirm-modal.is_open", input_contains="confirm-stop-analysis")
-        assert fn(1, 0, False) == (no_update, no_update)
+        assert fn(1, 0, False) == (no_update, no_update, no_update)
 
     def test_confirm_stops_backend(self, app_backend):
         app, backend = app_backend
         backend.stop.return_value = (True, "stopped")
         fn = _fn(app, "stop-confirm-modal.is_open", input_contains="confirm-stop-analysis")
         with _ctx("confirm-stop-analysis"):
-            is_open, notif = fn(1, 0, True)
+            is_open, notif, stopped_flag = fn(1, 0, True)
         assert is_open is False
         assert notif["title"] == "Analysis Stopped"
+        # The abort marker so the completion toast does not claim a finished run.
+        assert stopped_flag is True
         backend.stop.assert_called_once()
 
     def test_cancel_closes_without_stop(self, app_backend):
         app, backend = app_backend
         fn = _fn(app, "stop-confirm-modal.is_open", input_contains="confirm-stop-analysis")
         with _ctx("cancel-stop-analysis"):
-            is_open, notif = fn(0, 1, True)
+            is_open, notif, stopped_flag = fn(0, 1, True)
         assert is_open is False
         assert notif is no_update
+        assert stopped_flag is no_update
         backend.stop.assert_not_called()
 
 

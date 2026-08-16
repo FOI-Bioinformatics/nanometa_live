@@ -38,6 +38,7 @@ from nanometa_live.app.utils.callback_helpers import (
 )
 from nanometa_live.app.utils.debounce import (
     should_skip_update, interval_tick_is_redundant,
+    interval_tick_is_redundant_store, fp_to_store,
     mark_rendered,
 )
 
@@ -50,6 +51,7 @@ from nanometa_live.app.tabs.qc_tab_helpers import (  # noqa: E402
     _build_stage_strip,
     _build_stage_strip_empty,
     _get_empty_qc_figures,
+    _kreport_sample_name,
     compute_qc_stat_lines,
     build_qc_figures,
     aggregate_fastp_read_stats,
@@ -164,11 +166,26 @@ def register_qc_callbacks(app: Dash):
                                 "Bp": bases
                             })
 
-            # Last resort: use Kraken2 reports
+            # Last resort: use Kraken2 reports.
+            #
+            # The plain "*.kraken2.report.txt" glob also matches the per-batch
+            # reports ("<sample>_batch3.kraken2.report.txt"), which are
+            # cumulative snapshots of the same reads. Summing them alongside
+            # the end-of-run report double-counts the cumulative charts and
+            # invents phantom samples, because the name derivation below only
+            # strips the report suffix and not "_batchN". _is_standard_report
+            # is the central four-clause exclusion rule the loaders use for
+            # exactly this; going through it keeps the two from drifting.
             if not sample_data and os.path.exists(kraken_dir):
+                from nanometa_live.core.utils.classification_loaders import (
+                    _is_standard_report,
+                )
                 kreport_files = glob.glob(os.path.join(kraken_dir, "*.cumulative.kraken2.report.txt"))
                 if not kreport_files:
-                    kreport_files = glob.glob(os.path.join(kraken_dir, "*.kraken2.report.txt"))
+                    kreport_files = [
+                        f for f in glob.glob(os.path.join(kraken_dir, "*.kraken2.report.txt"))
+                        if _is_standard_report(os.path.basename(f))
+                    ]
 
                 for kreport_file in kreport_files:
                     try:
@@ -186,7 +203,7 @@ def register_qc_callbacks(app: Dash):
 
                         if total_reads > 0:
                             mtime = os.path.getmtime(kreport_file)
-                            sample_name = os.path.basename(kreport_file).replace(".cumulative.kraken2.report.txt", "").replace(".kraken2.report.txt", "")
+                            sample_name = _kreport_sample_name(kreport_file)
 
                             sample_data.append({
                                 "Sample": sample_name,
@@ -227,6 +244,9 @@ def register_qc_callbacks(app: Dash):
             Output("qc-unclassified-reads", "children"),
             Output("qc-processed-files", "children"),
             Output("qc-waiting-files", "children"),
+            # Rendered-fingerprint memo -- see the State below and
+            # interval_tick_is_redundant_store.
+            Output("qc-stats-rendered-fp", "data"),
         ],
         [
             Input("results-fingerprint", "data"),
@@ -236,6 +256,11 @@ def register_qc_callbacks(app: Dash):
         [
             State("app-config", "data"),
             State("backend-status", "data"),
+            # The interval-backstop memo has to round-trip through a Store:
+            # this callback is background=True and DiskcacheManager spawns a
+            # fresh process per invocation, so a module-level memo is empty on
+            # entry every time and the guard never fired.
+            State("qc-stats-rendered-fp", "data"),
         ],
         # Audit item #3 (docs/audit/threading-2026-05-10.md): the QC summary
         # aggregation walks fastp / seqkit output for every sample and was
@@ -245,11 +270,12 @@ def register_qc_callbacks(app: Dash):
         background=True,
         manager=background_callback_manager,
     )
-    def update_qc_stats(_fingerprint, selected_sample, _n_intervals, config, status):
+    def update_qc_stats(_fingerprint, selected_sample, _n_intervals, config,
+                        status, rendered_fp):
         """Update the QC statistics based on the latest data."""
-        if interval_tick_is_redundant(ctx, "qc_stats", _fingerprint):
+        if interval_tick_is_redundant_store(ctx, rendered_fp, _fingerprint):
             raise PreventUpdate
-        mark_rendered("qc_stats", _fingerprint)
+        rendered = fp_to_store(_fingerprint)
 
         # Default values for when no data is available
         default_values = [
@@ -268,7 +294,7 @@ def register_qc_callbacks(app: Dash):
         # Check if we have valid config and main_dir
         main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
         if not main_dir or not os.path.isdir(main_dir):
-            return default_values
+            return [*default_values, rendered]
 
         try:
             # Load necessary files from nanometanf structure
@@ -376,7 +402,7 @@ def register_qc_callbacks(app: Dash):
 
             # Percentage math + stat-tile string formatting is a pure function
             # extracted to qc_tab_helpers.compute_qc_stat_lines.
-            return compute_qc_stat_lines(
+            return [*compute_qc_stat_lines(
                 tot_reads_pre_filt=tot_reads_pre_filt,
                 tot_passed_reads=tot_passed_reads,
                 tot_removed_reads=tot_removed_reads,
@@ -388,7 +414,7 @@ def register_qc_callbacks(app: Dash):
                 processed_files=processed_files,
                 waiting_files=waiting_files,
                 chopper_estimated=chopper_estimated,
-            )
+            ), rendered]
 
         except Exception as e:
             logging.error(f"Error updating QC stats: {e}")
@@ -404,6 +430,7 @@ def register_qc_callbacks(app: Dash):
                 "Unclassified reads: 0 (0%)",
                 "Files processed: 0",
                 "Files awaiting processing: 0",
+                rendered,
             ]
 
     @app.callback(

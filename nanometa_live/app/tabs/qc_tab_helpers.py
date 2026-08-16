@@ -7,9 +7,33 @@ mode heuristic from plain inputs (counts, config) with no Dash ``app`` capture,
 so they are unit-testable in isolation. qc_tab.py re-exports these names.
 """
 
+import os
+import re
+
 from dash import html
 import pandas as pd
 import plotly.express as px
+
+
+# Trailing per-batch marker on a Kraken2 report basename, e.g.
+# "barcode01_batch3.kraken2.report.txt" -> sample "barcode01".
+_BATCH_SUFFIX_RE = re.compile(r"_batch\d+$")
+
+
+def _kreport_sample_name(path: str) -> str:
+    """Sample name for a Kraken2 report path.
+
+    Strips the report suffix (cumulative or plain) and any trailing ``_batchN``
+    marker. Without the batch strip, ``barcode01`` and ``barcode01_batch2``
+    became two different "samples" in the QC charts -- phantom bars for reads
+    that were already counted under the real barcode.
+    """
+    base = os.path.basename(path)
+    for suffix in (".cumulative.kraken2.report.txt", ".kraken2.report.txt"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    return _BATCH_SUFFIX_RE.sub("", base)
 
 
 def aggregate_fastp_read_stats(summaries: list) -> dict:
