@@ -365,3 +365,66 @@ class TestOrganismsTabAgreesWithItsBanner:
 
         rows = mth.get_all_watchlist_with_detection(self._kraken(), [])
         assert {r["name"] for r in rows if r["detected"]} == {n for n, _ in shigella}
+
+
+class TestSharedNodeReachesTheAlertWithoutMapping:
+    """check_organisms (the no-mapping fallback) must disclose ambiguity too.
+
+    The verdict banner falls back to plain check_organisms whenever no taxid
+    mapping collection is available -- a normal condition (mapping not yet
+    generated, generation failed, non-hybrid database). That path read only
+    the FIRST watchlist key on a shared node and never populated
+    ``ambiguous_with``, so a melioidosis detection sharing a node with
+    glanders was announced as one organism at full confidence.
+    Audit 2026-08-16, finding L6.
+    """
+
+    def _manager_with_shared_db_taxid(self):
+        from nanometa_live.core.watchlist.watchlist_manager import (
+            WatchlistManager, WatchlistSource,
+        )
+        m = WatchlistManager()
+        for d in (
+            {"name": "Burkholderia mallei", "taxid_ncbi": 13373,
+             "db_taxid": 4003703,
+             "threat_level": "critical", "alert_threshold": 1},
+            {"name": "Burkholderia pseudomallei", "taxid_ncbi": 28450,
+             "db_taxid": 4003703,
+             "threat_level": "critical", "alert_threshold": 1},
+        ):
+            m._add_entry_from_dict(d, WatchlistSource.USER)
+        for e in m._entries.values():
+            e.enabled = True
+        m._loaded = True
+        return m
+
+    def test_fallback_alert_names_the_other_organism(self):
+        alerts = self._manager_with_shared_db_taxid().check_organisms(
+            [{"taxid": 4003703, "name": "Burkholderia mallei", "reads": 900}],
+        )
+        assert len(alerts) == 1
+        assert alerts[0].get("ambiguous_with"), (
+            "the no-mapping fallback announced a shared-node detection as a "
+            "single organism with no disclosure"
+        )
+        assert "Burkholderia" in alerts[0]["ambiguous_with"][0]
+
+    def test_unshared_db_taxid_carries_no_ambiguity(self):
+        from nanometa_live.core.watchlist.watchlist_manager import (
+            WatchlistManager, WatchlistSource,
+        )
+        m = WatchlistManager()
+        m._add_entry_from_dict(
+            {"name": "Bacillus anthracis", "taxid_ncbi": 1392,
+             "db_taxid": 4005020,
+             "threat_level": "critical", "alert_threshold": 1},
+            WatchlistSource.USER,
+        )
+        for e in m._entries.values():
+            e.enabled = True
+        m._loaded = True
+        alerts = m.check_organisms(
+            [{"taxid": 4005020, "name": "Bacillus_A anthracis", "reads": 900}],
+        )
+        assert len(alerts) == 1
+        assert alerts[0].get("ambiguous_with") == []

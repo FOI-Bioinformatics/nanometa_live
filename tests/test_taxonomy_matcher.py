@@ -160,3 +160,47 @@ class TestSingleton:
         reset_taxonomy_matcher()
         second = get_taxonomy_matcher()
         assert first is not second
+
+
+class TestSubstringOutranksGenusFallback:
+    """The same-genus fallback (0.3) must not shadow a substring match.
+
+    ``match_organism`` returned the 0.3 same-genus score before the
+    substring branch (0.7/0.6) was ever tried, so a GTDB polyphyly-suffixed
+    report name -- watchlist "Escherichia coli" vs detected
+    "Escherichia coli_D" -- scored 0.3 and fell below the 0.7 detection
+    threshold: a silent miss for exactly the names GTDB databases produce.
+    Audit 2026-08-16, finding L7.
+    """
+
+    def test_gtdb_suffixed_species_clears_detection_threshold(self):
+        from nanometa_live.core.watchlist.taxonomy_matcher import TaxonomyMatcher
+
+        m = TaxonomyMatcher()
+        score = m.match_organism(
+            {"taxid": 4005020, "name": "Escherichia coli_D"},
+            "Escherichia coli",
+        )
+        assert score >= 0.7, (
+            f"substring match shadowed by the same-genus fallback: {score}"
+        )
+
+    def test_descriptive_suffix_clears_threshold(self):
+        from nanometa_live.core.watchlist.taxonomy_matcher import TaxonomyMatcher
+
+        m = TaxonomyMatcher()
+        score = m.match_organism(
+            {"taxid": 777, "name": "Coxiella burnetii-like organism"},
+            "Coxiella burnetii",
+        )
+        assert score >= 0.7
+
+    def test_genuinely_different_species_still_scores_genus_only(self):
+        from nanometa_live.core.watchlist.taxonomy_matcher import TaxonomyMatcher
+
+        m = TaxonomyMatcher()
+        score = m.match_organism(
+            {"taxid": 1428, "name": "Bacillus thuringiensis"},
+            "Bacillus anthracis",
+        )
+        assert score == pytest.approx(0.3)

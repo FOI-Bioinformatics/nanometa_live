@@ -233,6 +233,14 @@ class WatchlistEntry:
         alert_threshold = data.get(
             "alert_threshold", default_alert_threshold(threat_level)
         )
+        # A hand-edited YAML can carry ``alert_threshold: null`` or a
+        # non-numeric string; an unguarded int() raised out of the per-entry
+        # loading loop and silently truncated the rest of the file. Fall back
+        # to the threat-level default rather than dropping the entry.
+        try:
+            alert_threshold = int(alert_threshold)
+        except (ValueError, TypeError):
+            alert_threshold = default_alert_threshold(threat_level)
 
         # Handle taxid - support both 'taxid' and 'taxid_ncbi' keys
         taxid = data.get("taxid") or data.get("taxid_ncbi") or 0
@@ -265,7 +273,7 @@ class WatchlistEntry:
             name=data.get("name", "Unknown"),
             common_name=data.get("common_name"),
             threat_level=threat_level,
-            alert_threshold=int(alert_threshold),
+            alert_threshold=alert_threshold,
             bsl_level=bsl_level,
             category=data.get("category", "Custom"),
             notes=data.get("notes", ""),
@@ -636,11 +644,23 @@ class WatchlistManager:
                 # the file is still honoured.
                 entry_data = dict(p_data)
                 entry_data["enabled"] = entry_data.get("enabled", True)
-                self._add_entry_from_dict(
-                    entry_data,
-                    WatchlistSource.IMPORTED,
-                    watchlist_id=watchlist_id
-                )
+                # Per-entry isolation: one malformed entry must cost that
+                # entry alone. Raising out of this loop dropped every entry
+                # after the bad one AND skipped the enabled-marking below --
+                # the UI then reported the watchlist off while the entries
+                # loaded before the failure were live.
+                try:
+                    self._add_entry_from_dict(
+                        entry_data,
+                        WatchlistSource.IMPORTED,
+                        watchlist_id=watchlist_id
+                    )
+                except Exception:
+                    logger.exception(
+                        "Skipping malformed watchlist entry %r in %s; the "
+                        "remaining entries are still loaded",
+                        p_data.get("name", p_data), file_path,
+                    )
 
             self._enabled_watchlists.add(watchlist_id)
             logger.info(f"Loaded {len(pathogens)} entries from custom file: {file_path}")
@@ -985,6 +1005,16 @@ class WatchlistManager:
                     "threshold": entry.alert_threshold,
                     "match_score": best_score,
                     "detected_name": name,
+                    # Same disclosure as check_organisms_with_mapping: a
+                    # detection on a database node shared by several entries
+                    # (GTDB folds B. mallei into pseudomallei) genuinely
+                    # cannot say which organism it is, and this fallback
+                    # path is the NORMAL one whenever no mapping collection
+                    # exists -- announcing one name at full confidence there
+                    # is a false identification on a biothreat panel.
+                    "ambiguous_with": self._other_entries_on_node(
+                        taxid, db_to_ncbi, active_entries, entry
+                    ),
                 })
 
         # Sort by threat level (critical first)
