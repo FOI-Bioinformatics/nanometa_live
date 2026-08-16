@@ -210,3 +210,80 @@ class TestLatestBatchEqualsCumulative:
         assert row["reads_latest"] == 400
         assert row["classified_cumul"] == row["classified_latest"] == 300
         assert row["classified_rate_latest_num"] == row["classified_rate_cumul_num"]
+
+
+def _write_nanostats(path, reads, total_bases, quality, n50):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"Mean read length: {total_bases / reads:,.1f}\n"
+        f"Mean read quality: {quality}\n"
+        f"Median read length: 1000\n"
+        f"Median read quality: {quality}\n"
+        f"Number of reads: {reads:,}\n"
+        f"Read length N50: {n50:,}\n"
+        f"Total bases: {total_bases:,}\n"
+    )
+    _backdate_mtime(path)
+
+
+class TestZeroReadSampleDoesNotBorrowAggregateStats:
+    """A zero-read barcode must not display the whole run's statistics.
+
+    When a sample's own NanoPlot/seqkit stats showed 0 reads, the summary
+    substituted the ALL-SAMPLES aggregate with no gate on the sample count.
+    Intended for single-sample mode (where the aggregate IS the sample), it
+    fired identically under by_barcode: a failed barcode -- or a negative
+    control -- showed the run's combined reads/bases/N50 as its own QC row.
+    Audit 2026-08-16, finding L11.
+    """
+
+    def test_zero_read_barcode_keeps_its_own_zeros_in_multi_sample_mode(
+        self, tmp_path
+    ):
+        kraken_dir = tmp_path / "kraken2"
+        _write_empty_fastp(tmp_path / "fastp", "barcode01")
+        _write_empty_fastp(tmp_path / "fastp", "barcode02")
+        _write_kraken_report(
+            kraken_dir / "barcode01.kraken2.report.txt",
+            classified=900, unclassified=100,
+        )
+        _write_kraken_report(
+            kraken_dir / "barcode02.kraken2.report.txt",
+            classified=2, unclassified=0,
+        )
+        # NanoPlot stats exist only for barcode01.
+        _write_nanostats(
+            tmp_path / "nanoplot" / "barcode01" / "NanoStats.txt",
+            reads=1000, total_bases=5_000_000, quality=12.5, n50=8000,
+        )
+
+        df = get_sample_statistics_summary(str(tmp_path))
+        row2 = df[df["sample"] == "barcode02"].iloc[0]
+
+        assert row2["n50"] in (0, "N/A"), (
+            "a barcode with no QC stats displayed the whole run's N50 as "
+            "its own"
+        )
+        assert row2["base_pairs"] != 5_000_000
+        assert row2["mean_quality"] in (0, "N/A")
+        # Read total still falls back to this sample's own Kraken2 count.
+        assert row2["reads_cumul"] == 2
+
+    def test_single_sample_mode_still_uses_the_aggregate(self, tmp_path):
+        kraken_dir = tmp_path / "kraken2"
+        _write_empty_fastp(tmp_path / "fastp", "sample1")
+        _write_kraken_report(
+            kraken_dir / "sample1.kraken2.report.txt",
+            classified=900, unclassified=100,
+        )
+        # Aggregate-level NanoPlot output only (single-sample runs publish
+        # to the nanoplot/ root, not a per-sample subdir).
+        _write_nanostats(
+            tmp_path / "nanoplot" / "NanoStats.txt",
+            reads=1000, total_bases=5_000_000, quality=12.5, n50=8000,
+        )
+
+        df = get_sample_statistics_summary(str(tmp_path))
+        row = df[df["sample"] == "sample1"].iloc[0]
+        assert row["n50"] == 8000
+        assert row["base_pairs"] == 5_000_000
