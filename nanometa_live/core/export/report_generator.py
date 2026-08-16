@@ -14,9 +14,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
-import plotly.graph_objects as go
-import plotly.io as pio
 
+from nanometa_live.core.export.report_charts import build_charts
 from nanometa_live.core.utils.attribution import is_negative_control
 from nanometa_live.core.utils.classification_loaders import load_kraken_data
 from nanometa_live.core.utils.qc_loaders import get_qc_stats
@@ -412,75 +411,91 @@ class ReportGenerator:
             read_col = "cumul_reads" if "cumul_reads" in kraken_df.columns else "reads"
 
             for entry in active_entries.values():
-                # Per-entry isolation: one malformed entry (missing field,
-                # bad type, a pandas error on its rows) must cost only that
-                # entry, not abort the loop. With the whole loop in one try,
-                # a single bad entry blanked the screen for every organism
-                # and the report rendered a false "NOT SCREENED" -- while a
-                # true positive later in iteration order was dropped.
-                try:
-                    threat = entry.threat_level
-                    threat_level = (
-                        threat.value if hasattr(threat, "value") else str(threat)
-                    )
-
-                    match_id = getattr(entry, "db_taxid", None) or entry.taxid
-                    matched = self._match_entry_rows(kraken_df, match_id, entry.name)
-
-                    reads = int(matched[read_col].sum()) if not matched.empty else 0
-                    abundance = (reads / total * 100) if total > 0 else 0
-                    per_sample = (
-                        self._attribute_entry_to_samples(
-                            sample_frames, match_id, entry.name
-                        ) if reads > 0 else []
-                    )
-
-                    # Negative controls are reported alongside a detection,
-                    # never acted on: they are split out of the triggering
-                    # list here, but a control-carried-only hit still shows
-                    # as "detected" -- a contaminated control never makes a
-                    # real aggregate positive disappear. Mirrors the
-                    # dashboard's build_pathogen_attribution.
-                    triggering_samples = [
-                        s for s in per_sample if not s.get("is_negative_control")
-                    ]
-                    negative_control_rows = [
-                        s for s in per_sample if s.get("is_negative_control")
-                    ]
-                    nc_reads = sum(s["reads"] for s in negative_control_rows)
-                    positive_reads = sum(s["reads"] for s in triggering_samples)
-                    nc_fraction = (
-                        (nc_reads / positive_reads * 100)
-                        if (negative_control_rows and positive_reads)
-                        else None
-                    )
-
-                    results.append({
-                        "name": entry.name,
-                        "taxid": entry.taxid,
-                        "threat_level": threat_level,
-                        "reads": reads,
-                        "abundance": round(abundance, 3),
-                        "detected": reads > 0,
-                        "samples": per_sample,
-                        "triggering_samples": triggering_samples,
-                        "negative_control_rows": negative_control_rows,
-                        "negative_control_fraction": nc_fraction,
-                        "control_only": bool(
-                            negative_control_rows and not triggering_samples
-                        ),
-                    })
-                except Exception:
-                    logger.exception(
-                        "Could not screen watchlist entry %r; the remaining "
-                        "entries are still screened",
-                        getattr(entry, "name", entry),
-                    )
+                row = self._screen_watchlist_entry(
+                    entry, kraken_df, sample_frames, read_col, total,
+                )
+                if row is not None:
+                    results.append(row)
 
         except Exception as e:
             logger.exception("Could not screen watchlist: %s", e)
 
         return results
+
+    def _screen_watchlist_entry(
+        self,
+        entry: Any,
+        kraken_df: pd.DataFrame,
+        sample_frames: Optional[Dict[str, pd.DataFrame]],
+        read_col: str,
+        total: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Screen ONE watchlist entry against ``kraken_df``; return its report
+        row, or ``None`` on failure.
+
+        Isolated per entry on purpose: one malformed entry (missing field,
+        bad type, a pandas error on its rows) must cost only that entry, not
+        abort ``_screen_watchlist``'s loop. With the whole loop in one try, a
+        single bad entry blanked the screen for every organism and the
+        report rendered a false "NOT SCREENED" -- while a true positive
+        later in iteration order was dropped.
+        """
+        try:
+            threat = entry.threat_level
+            threat_level = threat.value if hasattr(threat, "value") else str(threat)
+
+            match_id = getattr(entry, "db_taxid", None) or entry.taxid
+            matched = self._match_entry_rows(kraken_df, match_id, entry.name)
+
+            reads = int(matched[read_col].sum()) if not matched.empty else 0
+            abundance = (reads / total * 100) if total > 0 else 0
+            per_sample = (
+                self._attribute_entry_to_samples(
+                    sample_frames, match_id, entry.name
+                ) if reads > 0 else []
+            )
+
+            # Negative controls are reported alongside a detection, never
+            # acted on: they are split out of the triggering list here, but
+            # a control-carried-only hit still shows as "detected" -- a
+            # contaminated control never makes a real aggregate positive
+            # disappear. Mirrors the dashboard's build_pathogen_attribution.
+            triggering_samples = [
+                s for s in per_sample if not s.get("is_negative_control")
+            ]
+            negative_control_rows = [
+                s for s in per_sample if s.get("is_negative_control")
+            ]
+            nc_reads = sum(s["reads"] for s in negative_control_rows)
+            positive_reads = sum(s["reads"] for s in triggering_samples)
+            nc_fraction = (
+                (nc_reads / positive_reads * 100)
+                if (negative_control_rows and positive_reads)
+                else None
+            )
+
+            return {
+                "name": entry.name,
+                "taxid": entry.taxid,
+                "threat_level": threat_level,
+                "reads": reads,
+                "abundance": round(abundance, 3),
+                "detected": reads > 0,
+                "samples": per_sample,
+                "triggering_samples": triggering_samples,
+                "negative_control_rows": negative_control_rows,
+                "negative_control_fraction": nc_fraction,
+                "control_only": bool(
+                    negative_control_rows and not triggering_samples
+                ),
+            }
+        except Exception:
+            logger.exception(
+                "Could not screen watchlist entry %r; the remaining "
+                "entries are still screened",
+                getattr(entry, "name", entry),
+            )
+            return None
 
     def _collect_alerts(self, qc_stats=None, watched_results=None) -> List[Dict[str, Any]]:
         """Generate the report's alerts from the post-run state.
@@ -604,128 +619,16 @@ class ReportGenerator:
         )
 
     def _build_charts(self, data: Dict[str, Any]) -> Dict[str, str]:
-        """Build all Plotly charts and serialize to JSON."""
-        charts = {}
+        """Build all Plotly charts and serialize to JSON.
 
-        # Classification donut (aggregated)
-        charts["classification_donut"] = self._fig_to_json(
-            self._create_classification_donut(
-                data["classified_total"],
-                data["unclassified_total"],
-                title="Overall Classification"
-            )
-        )
-
-        # Per-sample donuts
-        for sample, sdata in data.get("per_sample", {}).items():
-            key = f"donut_{sample}"
-            charts[key] = self._fig_to_json(
-                self._create_classification_donut(
-                    sdata["classified"],
-                    sdata["unclassified"],
-                    title=sample,
-                    compact=True,
-                )
-            )
-
-            # Organism abundance bar chart
-            if sdata.get("organisms"):
-                bar_key = f"organisms_{sample}"
-                charts[bar_key] = self._fig_to_json(
-                    self._create_organism_bar(sdata["organisms"], title=sample)
-                )
-
-        return charts
-
-    def _create_classification_donut(
-        self, classified: int, unclassified: int,
-        title: str = "", compact: bool = False
-    ) -> go.Figure:
-        """Create classification donut chart for the report."""
-        total = classified + unclassified
-        if total == 0:
-            fig = go.Figure()
-            fig.add_annotation(text="No data", x=0.5, y=0.5, showarrow=False)
-            fig.update_layout(height=200, margin=dict(l=10, r=10, t=30, b=10))
-            return fig
-
-        rate = classified / total * 100
-        if rate >= 80:
-            rate_color = "#28a745"
-        elif rate >= 60:
-            rate_color = "#ffc107"
-        else:
-            rate_color = "#dc3545"
-
-        fig = go.Figure(go.Pie(
-            labels=["Classified", "Unclassified"],
-            values=[classified, unclassified],
-            hole=0.6,
-            marker=dict(
-                colors=["#007bff", "#dee2e6"],
-                line=dict(color="#ffffff", width=2)
-            ),
-            textinfo="percent",
-            textposition="outside",
-            hovertemplate="<b>%{label}</b><br>Count: %{value:,}<br>%{percent}<extra></extra>",
-        ))
-
-        fig.add_annotation(
-            text=f"<b>{rate:.0f}%</b><br><span style='font-size:10px'>classified</span>",
-            x=0.5, y=0.5, showarrow=False,
-            font=dict(size=20, color=rate_color),
-        )
-
-        height = 220 if compact else 300
-        fig.update_layout(
-            title=dict(text=title, x=0.5, font=dict(size=14)),
-            height=height,
-            margin=dict(l=20, r=20, t=40, b=20),
-            paper_bgcolor="white",
-            plot_bgcolor="white",
-            showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=-0.15, x=0.5, xanchor="center"),
-        )
-        return fig
-
-    def _create_organism_bar(
-        self, organisms: List[Dict[str, Any]], title: str = ""
-    ) -> go.Figure:
-        """Create horizontal bar chart of organism abundance."""
-        if not organisms:
-            fig = go.Figure()
-            fig.add_annotation(text="No organisms detected", x=0.5, y=0.5, showarrow=False)
-            return fig
-
-        names = [o["name"][:40] for o in reversed(organisms)]
-        reads = [o["reads"] for o in reversed(organisms)]
-        abundances = [o["abundance"] for o in reversed(organisms)]
-
-        fig = go.Figure(go.Bar(
-            y=names,
-            x=reads,
-            orientation="h",
-            marker=dict(color="#007bff", line=dict(color="#343a40", width=0.5)),
-            hovertemplate="<b>%{y}</b><br>Reads: %{x:,}<br>Abundance: %{customdata:.2f}%<extra></extra>",
-            customdata=abundances,
-        ))
-
-        height = max(250, len(organisms) * 25 + 80)
-        fig.update_layout(
-            title=dict(text=f"Top Organisms - {title}", x=0.5, font=dict(size=14)),
-            xaxis=dict(title="Read Count"),
-            yaxis=dict(title=""),
-            height=height,
-            margin=dict(l=200, r=30, t=40, b=40),
-            paper_bgcolor="white",
-            plot_bgcolor="white",
-        )
-        return fig
-
-    @staticmethod
-    def _fig_to_json(fig: go.Figure) -> str:
-        """Serialize a Plotly figure to JSON for template embedding."""
-        return pio.to_json(fig, validate=False)
+        Delegates to ``report_charts.build_charts`` -- a pure function with
+        no instance state -- split out during the 2026-08-16 code-size
+        remediation. Kept as an instance method (rather than calling the
+        module function directly from ``_build_html_report``) so existing
+        callers can still monkeypatch it per-instance, as
+        ``TestChartJsonCannotBreakOutOfScript`` does.
+        """
+        return build_charts(data)
 
     @staticmethod
     def _dir_size(path: str) -> int:

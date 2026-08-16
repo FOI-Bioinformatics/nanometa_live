@@ -20,19 +20,12 @@ import logging
 import os
 import signal
 import subprocess
-from contextlib import contextmanager
-from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-try:
-    import fcntl
-except ImportError:
-    fcntl = None  # Windows: file locking not available
-
 from nanometa_live.core.utils.read_extractor import ReadExtractor
+from nanometa_live.core.workflow import pathogen_genomes_store
 from nanometa_live.core.workflow.nextflow_manager import NextflowManager
 from nanometa_live.core.workflow.on_demand_helpers import (
     _DEFAULT_VALIDATION_TIMEOUT_MINUTES,
@@ -41,65 +34,20 @@ from nanometa_live.core.workflow.on_demand_helpers import (
     _pick_result_for_method,
     _validation_timeout_seconds,
 )
+from nanometa_live.core.workflow.validation_models import (
+    ValidationJob,
+    ValidationResult,
+    ValidationStatus,
+)
 
+__all__ = [
+    "OnDemandValidator",
+    "ValidationJob",
+    "ValidationResult",
+    "ValidationStatus",
+]
 
 logger = logging.getLogger(__name__)
-
-class ValidationStatus(Enum):
-    """Status of an on-demand validation job."""
-    PENDING = "pending"
-    DOWNLOADING_GENOME = "downloading_genome"
-    BUILDING_BLAST_DB = "building_blast_db"
-    EXTRACTING_READS = "extracting_reads"
-    RUNNING_BLAST = "running_blast"
-    COMPLETED = "completed"
-    FAILED = "failed"
-
-
-@dataclass
-class ValidationJob:
-    """Represents an on-demand validation job."""
-    taxid: int
-    name: str
-    sample: str
-    status: ValidationStatus = ValidationStatus.PENDING
-    progress_percent: int = 0
-    status_message: str = ""
-    created_at: datetime = field(default_factory=datetime.now)
-    completed_at: Optional[datetime] = None
-
-    # Results
-    total_reads: int = 0
-    extracted_reads: int = 0
-    validated_reads: int = 0
-    validation_rate: float = 0.0
-    avg_identity: float = 0.0
-
-    # Paths
-    genome_path: Optional[Path] = None
-    blast_db_path: Optional[Path] = None
-    extracted_fasta: Optional[Path] = None
-    blast_results: Optional[Path] = None
-
-    error_message: Optional[str] = None
-
-
-@dataclass
-class ValidationResult:
-    """Result of BLAST validation."""
-    taxid: int
-    name: str
-    sample: str
-    total_classified_reads: int
-    extracted_reads: int
-    validated_reads: int
-    validation_rate: float
-    avg_identity: float
-    min_identity: float
-    max_identity: float
-    success: bool
-    error_message: Optional[str] = None
-    blast_output_file: Optional[Path] = None
 
 
 class OnDemandValidator:
@@ -304,65 +252,33 @@ class OnDemandValidator:
     # ``self.validation_dir`` keeps it next to the validation outputs
     # nanometanf writes; the same path is read back across calls so
     # each on-demand request appends its taxid to a stable file rather
-    # than starting fresh.
-    PATHOGEN_GENOMES_FILENAME = "pathogen_genomes.json"
+    # than starting fresh. Store logic lives in ``pathogen_genomes_store``
+    # (2026-08-16 code-size remediation); these stay thin instance methods
+    # (rather than callers using the module directly) so a test/caller that
+    # overrides one on this instance -- e.g. monkeypatching
+    # ``_save_pathogen_genomes`` to simulate a write failure -- is honoured
+    # by ``_add_taxid_to_pathogen_genomes`` below.
+    PATHOGEN_GENOMES_FILENAME = pathogen_genomes_store.PATHOGEN_GENOMES_FILENAME
 
     def _load_pathogen_genomes(self) -> Dict[str, str]:
         """Read the cumulative pathogen_genomes mapping (taxid -> genome
-        FASTA path) if it exists. Returns empty dict on first call or
-        when the file is missing/corrupt."""
-        path = self.validation_dir / self.PATHOGEN_GENOMES_FILENAME
-        if not path.exists():
-            return {}
-        try:
-            import json as _json
-            with open(path) as f:
-                data = _json.load(f)
-            if not isinstance(data, dict):
-                return {}
-            return {str(k): str(v) for k, v in data.items()}
-        except (json.JSONDecodeError, OSError, ValueError) as e:
-            logger.warning(f"pathogen_genomes.json unreadable, starting fresh: {e}")
-            return {}
+        FASTA path); see ``pathogen_genomes_store.load_pathogen_genomes``."""
+        return pathogen_genomes_store.load_pathogen_genomes(self.validation_dir)
 
     def _save_pathogen_genomes(self, mapping: Dict[str, str]) -> Path:
-        """Atomically rewrite the cumulative pathogen_genomes mapping."""
-        import json as _json
-        path = self.validation_dir / self.PATHOGEN_GENOMES_FILENAME
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".json.tmp")
-        with open(tmp, "w") as f:
-            _json.dump(mapping, f, indent=2, sort_keys=True)
-        tmp.replace(path)
-        return path
+        """Atomically rewrite the cumulative pathogen_genomes mapping; see
+        ``pathogen_genomes_store.save_pathogen_genomes``."""
+        return pathogen_genomes_store.save_pathogen_genomes(
+            self.validation_dir, mapping
+        )
 
-    @contextmanager
     def _locked_pathogen_genomes_file(self):
-        """Hold an exclusive, blocking file lock across a pathogen_genomes.json
-        read-modify-write.
-
-        Two on-demand validation requests in flight at once (e.g. two browser
-        tabs/operators -- the background callback's ``running=`` guard only
-        disables the button for the triggering session, not server-wide) both
-        call ``_load_pathogen_genomes`` -> mutate -> ``_save_pathogen_genomes``
-        with no serialization between them. That is a classic lost-update
-        race: B's save can land between A's load and A's save and silently
-        drop A's own taxid addition, even though A's already-launched Nextflow
-        subprocess still expects to find it. The lock is scoped to a small
-        dedicated ``.lock`` file (not the JSON itself) so a reader elsewhere
-        that just opens ``pathogen_genomes.json`` directly is unaffected.
-        """
-        lock_path = self.validation_dir / (self.PATHOGEN_GENOMES_FILENAME + ".lock")
-        self.validation_dir.mkdir(parents=True, exist_ok=True)
-        lock_fd = open(lock_path, "w")
-        try:
-            if fcntl:
-                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
-            yield
-        finally:
-            if fcntl:
-                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-            lock_fd.close()
+        """Exclusive, blocking file lock across a pathogen_genomes.json
+        read-modify-write; see
+        ``pathogen_genomes_store.locked_pathogen_genomes_file`` for why."""
+        return pathogen_genomes_store.locked_pathogen_genomes_file(
+            self.validation_dir
+        )
 
     def _add_taxid_to_pathogen_genomes(
         self, taxid: int, genome_fasta: Path
