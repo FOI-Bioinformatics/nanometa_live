@@ -715,6 +715,13 @@ def _load_seqkit_incremental(
 
     rows: List[Dict[str, Any]] = []
     for sample_name in sample_dirs:
+        # The flat merged TSV is authoritative for a sample once it exists:
+        # SEQKIT_MERGE_STATS refreshes it on the same cadence that publishes
+        # the per-batch files, so the two coexist for the whole run. Summing
+        # batch_stats for a sample the flat file already covers made the
+        # All-Samples concat count merged samples twice.
+        if os.path.isfile(os.path.join(seqkit_dir, f"{sample_name}.tsv")):
+            continue
         batch_stats_dir = os.path.join(
             seqkit_dir, sample_name, "batch_stats"
         )

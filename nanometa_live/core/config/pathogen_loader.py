@@ -214,7 +214,7 @@ def _validate_pathogen_entry(entry: Dict[str, Any], index: int) -> List[str]:
     # Optional fields with type validation
     if "threat_level" in entry:
         valid_levels = ["critical", "high", "high_risk", "moderate", "medium", "low", "info", "unknown"]
-        if entry["threat_level"].lower() not in valid_levels:
+        if str(entry["threat_level"]).lower() not in valid_levels:
             errors.append(
                 f"Entry {index}: 'threat_level' must be one of {valid_levels}"
             )

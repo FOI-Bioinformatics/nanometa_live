@@ -781,3 +781,41 @@ class TestMixedReadinessAggregate:
         assert 1639 in taxids, "incremental-tier sample dropped from aggregate"
         root = df[df["taxid"] == 1]
         assert int(root.iloc[0]["cumul_reads"]) == 70
+
+
+class TestNaNCumulReadsFallsBackToReads:
+    """A row whose cumul_reads alone fails numeric coercion must stay usable.
+
+    The NaN survived the reads/taxid dropna and then compared False against
+    every threshold, so the row silently vanished from per-sample attribution
+    and the discovery floor while remaining in the frame (audit 2026-08-16,
+    finding L15).
+    """
+
+    def test_bad_cumul_value_falls_back_to_reads(self, tmp_path):
+        report = tmp_path / "glitch.kraken2.report.txt"
+        report.write_text(
+            "50.00\t100\t0\tR\t1\troot\n"
+            "50.00\tBAD\t100\tS\t562\t  Escherichia coli\n"
+        )
+        _backdate_mtime(report)
+        df = _parse_kraken2_report(str(report))
+        assert df is not None
+        row = df[df["taxid"] == 562].iloc[0]
+        assert not pd.isna(row["cumul_reads"])
+        assert int(row["cumul_reads"]) == 100
+
+
+class TestBatchDedupPrefersSamplePrefixedName:
+    """The sample-prefixed tie-break was dead code via a chained comparison.
+
+    `'batch_reports' in fp == 'batch_reports' in existing` parsed as
+    `(... in fp) and (fp == 'batch_reports') and (...)`, never true for a
+    real path (audit 2026-08-16, finding L16).
+    """
+
+    def test_prefixed_name_wins_over_generic_in_same_dir(self):
+        generic = "/r/kraken2/s1/batch_reports/batch_0.kraken2.report.txt"
+        prefixed = "/r/kraken2/s1/batch_reports/s1_batch0.kraken2.report.txt"
+        result = _deduplicate_batch_files([generic, prefixed])
+        assert result == [prefixed]

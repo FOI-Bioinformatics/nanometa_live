@@ -468,7 +468,9 @@ class WatchlistManager:
 
     def __init__(self):
         """Initialize the watchlist manager."""
-        self._lock = threading.Lock()
+        # Reentrant: readers now snapshot under the lock, and a mutator that
+        # calls a locked reader must not deadlock.
+        self._lock = threading.RLock()
         self._entries: Dict[int, WatchlistEntry] = {}
         self._name_index: Dict[str, int] = {}  # name.lower() -> taxid
         self._enabled_categories: Set[str] = set()
@@ -819,8 +821,17 @@ class WatchlistManager:
         return self._entries.copy()
 
     def get_active_entries(self) -> Dict[int, WatchlistEntry]:
-        """Get only enabled watchlist entries."""
-        return {k: v for k, v in self._entries.items() if v.enabled}
+        """Get only enabled watchlist entries.
+
+        Snapshotted under the lock: mutators (load_config rebuilds
+        ``_entries`` key by key) hold ``self._lock``, and iterating the live
+        dict without it can raise "dictionary changed size during iteration"
+        mid-poll or -- worse -- miss an entry not yet re-added, a transient
+        false negative on that screening pass. The returned dict is a copy,
+        so callers can iterate it freely.
+        """
+        with self._lock:
+            return {k: v for k, v in self._entries.items() if v.enabled}
 
     def get_entry_by_taxid(self, taxid: int) -> Optional[WatchlistEntry]:
         """Get a specific entry by taxonomy ID."""
@@ -842,7 +853,11 @@ class WatchlistManager:
 
     def get_entries_by_threat_level(self, level: ThreatLevel) -> List[WatchlistEntry]:
         """Get all entries of a specific threat level."""
-        return [e for e in self._entries.values() if e.threat_level == level and e.enabled]
+        with self._lock:
+            return [
+                e for e in self._entries.values()
+                if e.threat_level == level and e.enabled
+            ]
 
     def get_critical_entries(self) -> List[WatchlistEntry]:
         """Get all critical threat level entries."""
@@ -1847,7 +1862,13 @@ class WatchlistManager:
                     # and scores 1.0: it is an explicit statement, not a guess.
                     mapping = mapping_collection.mappings.get(ncbi_taxid)
                     if mapping:
-                        best_score = mapping.match_score or 0.9
+                        # `or` would promote a genuine 0.0 score to 0.9, turning a
+                        # no-confidence mapping into a strong match; only an
+                        # ABSENT score takes the default.
+                        best_score = (
+                            mapping.match_score
+                            if mapping.match_score is not None else 0.9
+                        )
                     elif getattr(entry, "db_taxid", None) == detected_taxid:
                         best_score = 1.0
                     else:

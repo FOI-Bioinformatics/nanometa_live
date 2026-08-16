@@ -110,3 +110,48 @@ class TestBlastTabularFallback:
         out = load_blast_validation_data(str(tmp_path), WATCHLIST)
         assert out[562]["status"] == "no_data"
         assert out[562]["validated_reads"] == 0
+
+
+class TestOnDiskBlastSupplementsAggregate:
+    """The tiers must supplement per taxid, not short-circuit whole.
+
+    load_blast_validation_data returned the first non-empty tier outright, so
+    an aggregate covering only taxid A hid the on-disk blast.tsv for taxid B
+    -- the Organisms tab's BLAST badge rendered no_data over a genuine
+    confirmation. The disk glob also only matched the legacy bare-number
+    naming, never nanometanf's `_taxid{tid}` files. Audit 2026-08-16,
+    finding L14.
+    """
+
+    def _disk_blast(self, results_dir, sample, taxid, reads):
+        bdir = results_dir / "validation" / "blast"
+        bdir.mkdir(parents=True, exist_ok=True)
+        rows = "".join(
+            f"read{i}\tref1\t97.0\t150\t2\t0\t1\t150\t1\t150\t1e-50\t300\n"
+            for i in range(reads)
+        )
+        (bdir / f"{sample}_taxid{taxid}.blast.tsv").write_text(rows)
+
+    def test_disk_blast_for_uncovered_taxid_surfaces(self, results_dir):
+        # Aggregate covers 562 only; 632 exists solely as an on-disk blast.tsv.
+        self._disk_blast(results_dir, "barcode01", 632, reads=7)
+        watchlist = [
+            {"taxid": 562, "name": "Escherichia coli"},
+            {"taxid": 632, "name": "Yersinia pestis"},
+        ]
+
+        out = load_blast_validation_data(str(results_dir), watchlist)
+
+        assert 562 in out          # aggregate tier still wins for its taxids
+        assert out[562]["validated_reads"] == 850
+        assert 632 in out, (
+            "on-disk blast.tsv hidden by the non-empty aggregate short-circuit"
+        )
+        assert out[632]["validated_reads"] == 7
+
+    def test_taxid_prefixed_filename_is_matched(self, tmp_path):
+        # No aggregate at all: only the current-pipeline naming on disk.
+        self._disk_blast(tmp_path, "barcode01", 562, reads=3)
+        out = load_blast_validation_data(str(tmp_path), WATCHLIST)
+        assert 562 in out
+        assert out[562]["validated_reads"] == 3

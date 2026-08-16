@@ -316,13 +316,16 @@ def detect_samples_from_blast(blast_dir: str) -> Set[str]:
         logging.debug(f"BLAST directory not found: {blast_dir}")
         return samples
 
-    # BLAST files may have format: sample_taxid.txt or sample.txt
-    blast_files = glob.glob(os.path.join(blast_dir, "*.txt"))
+    # nanometanf publishes sample_taxid<tid>.blast.tsv; the bare .txt form is
+    # the legacy layout. The old *.txt-only glob never matched a current
+    # pipeline file, so a sample whose only output so far was validation data
+    # went undetected.
+    blast_files = glob.glob(os.path.join(blast_dir, "*.blast.tsv"))
+    blast_files.extend(glob.glob(os.path.join(blast_dir, "*.txt")))
 
     for file_path in blast_files:
         filename = os.path.basename(file_path)
-        # Remove .txt extension
-        base = filename.replace('.txt', '')
+        base = filename.replace('.blast.tsv', '').replace('.txt', '')
 
         # If format is sample_taxid, extract just sample part
         if '_' in base:
@@ -553,7 +556,8 @@ def get_sample_file_mapping(main_dir: str) -> Dict[str, Dict[str, List[str]]]:
         blast_dir = os.path.join(main_dir, "validation", "blast")
         if not os.path.exists(blast_dir):
             blast_dir = os.path.join(main_dir, "blast")
-        blast_files = glob.glob(os.path.join(blast_dir, f"{sample}_*.txt"))
+        blast_files = glob.glob(os.path.join(blast_dir, f"{sample}_*.blast.tsv"))
+        blast_files.extend(glob.glob(os.path.join(blast_dir, f"{sample}_*.txt")))
         if blast_files:
             sample_files['blast'] = sorted(blast_files)
 

@@ -254,3 +254,82 @@ class TestPathogenGenomesLocation:
             BackendManager.archive_existing_results(str(tmp_path))
         # The launch input must still be present after the archive sweep.
         assert os.path.exists(path)
+
+
+class TestValidationParamCoercions:
+    """Launch-time coercions for values nf-schema or blastn would reject
+    (audit 2026-08-16, finding L27)."""
+
+    def test_blast_perc_identity_is_an_integer(self, tmp_path):
+        from nanometa_live.core.config.parameter_mapping import create_nextflow_params
+
+        cfg = _minimal_config(tmp_path)
+        cfg["validation_identity_threshold"] = 92.5
+        params = create_nextflow_params(cfg)
+        assert params["blast_perc_identity"] == 92 or params["blast_perc_identity"] == 93
+        assert isinstance(params["blast_perc_identity"], int)
+
+    def test_invalid_minimap2_preset_is_coerced(self, tmp_path):
+        from nanometa_live.core.config.parameter_mapping import create_nextflow_params
+
+        cfg = _minimal_config(tmp_path)
+        cfg["minimap2_preset"] = "sr"
+        params = create_nextflow_params(cfg)
+        assert params["minimap2_preset"] == "map-ont"
+
+    def test_valid_minimap2_preset_passes_through(self, tmp_path):
+        from nanometa_live.core.config.parameter_mapping import create_nextflow_params
+
+        cfg = _minimal_config(tmp_path)
+        cfg["minimap2_preset"] = "map-pb"
+        params = create_nextflow_params(cfg)
+        assert params["minimap2_preset"] == "map-pb"
+
+    def test_nonpositive_evalue_falls_back(self, tmp_path):
+        from nanometa_live.core.config.parameter_mapping import create_nextflow_params
+
+        cfg = _minimal_config(tmp_path)
+        cfg["e_val_cutoff"] = 0
+        params = create_nextflow_params(cfg)
+        assert params["blast_evalue"] > 0
+
+
+class TestGenerateConsensusStringCoercion:
+    """generate_consensus: "false" (string) must not flip to on
+    (audit 2026-08-16, finding L27)."""
+
+    def test_string_false_is_false(self):
+        from nanometa_live.core.config.config_loader import ConfigLoader
+
+        loader = ConfigLoader.__new__(ConfigLoader)
+        cfg = {"generate_consensus": "false"}
+        loader._standardize_boolean_params(cfg)
+        assert cfg["generate_consensus"] is False
+
+    def test_string_true_is_true(self):
+        from nanometa_live.core.config.config_loader import ConfigLoader
+
+        loader = ConfigLoader.__new__(ConfigLoader)
+        cfg = {"generate_consensus": "true"}
+        loader._standardize_boolean_params(cfg)
+        assert cfg["generate_consensus"] is True
+
+
+def _minimal_config(tmp_path):
+    """A minimal batch-mode config create_nextflow_params accepts."""
+    nanopore_dir = tmp_path / "input"
+    nanopore_dir.mkdir(exist_ok=True)
+    (nanopore_dir / "sample1.fastq.gz").write_bytes(b"@seq\nACGT\n+\n!!!!\n")
+    results_dir = tmp_path / "results"
+    results_dir.mkdir(exist_ok=True)
+    return {
+        "nanopore_output_directory": str(nanopore_dir),
+        "results_output_directory": str(results_dir),
+        "kraken_db": str(tmp_path / "kraken2_db"),
+        "processing_mode": "batch",
+        "sample_handling": "single_sample",
+        "sample_name": "test_sample",
+        "analysis_name": "TestRun",
+        "check_intervals_seconds": 15,
+        "blast_validation": False,
+    }

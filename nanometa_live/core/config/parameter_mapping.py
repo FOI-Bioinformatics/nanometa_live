@@ -73,6 +73,38 @@ def validate_sample_handling_layout(sample_handling: str, input_dir: str) -> Non
         )
 
 
+# nanometanf's schema enum for minimap2_preset. The GUI briefly offered "sr"
+# (recommended for amplicons) which nf-schema rejects at launch; unknown
+# values are coerced to the nanopore default with a warning so a saved
+# config remains launchable.
+_VALID_MINIMAP2_PRESETS = ("map-ont", "map-pb", "map-hifi")
+
+
+def _coerce_minimap2_preset(value: Any) -> str:
+    preset = str(value or "map-ont")
+    if preset not in _VALID_MINIMAP2_PRESETS:
+        logging.warning(
+            "minimap2_preset %r is not accepted by nanometanf %s; using map-ont",
+            preset, _VALID_MINIMAP2_PRESETS,
+        )
+        return "map-ont"
+    return preset
+
+
+def _coerce_blast_evalue(value: Any, default: float = 1e-10) -> float:
+    """A zero/negative e-value only fails deep inside blastn after QC and
+    Kraken2 already ran; reject it at mapping time instead."""
+    try:
+        evalue = float(value)
+    except (TypeError, ValueError):
+        logging.warning("e_val_cutoff %r is not numeric; using %g", value, default)
+        return default
+    if evalue <= 0:
+        logging.warning("e_val_cutoff %g is not positive; using %g", evalue, default)
+        return default
+    return evalue
+
+
 def format_duration(seconds: int) -> str:
     """
     Convert seconds to Nextflow duration string.
@@ -634,18 +666,25 @@ def _build_base_params(config: Dict[str, Any], main_dir: str, kraken_db: str,
         # Validation parameters - nanometanf VALIDATION subworkflow
         "run_validation": run_validation_enabled,
         "validation_method": config.get("validation_method", "blast"),
-        "blast_evalue": config.get("e_val_cutoff", 1e-10),
+        "blast_evalue": _coerce_blast_evalue(config.get("e_val_cutoff", 1e-10)),
         # One threshold, one key. This read ``min_perc_identity`` first as a
         # back-compat shim whose comment claimed "New configs only carry the
         # latter" -- but create_default_config wrote min_perc_identity into
         # every config and no widget could change it, so the legacy key was
         # always present and always won. Lowering the GUI control to catch a
         # divergent strain left BLAST filtering at 90 and said nothing.
-        "blast_perc_identity": config.get("validation_identity_threshold", 90),
+        # nf-schema types blast_perc_identity as integer; a typed decimal
+        # (92.5) passed local validation and failed at launch.
+        "blast_perc_identity": int(round(float(
+            config.get("validation_identity_threshold", 90)
+        ))),
         "validation_hit_rate_threshold": config.get("validation_hit_rate_threshold", 0.5),
         "validation_identity_threshold": config.get("validation_identity_threshold", 90.0),
-        "minimap2_preset": config.get("minimap2_preset", "map-ont"),
-        "minimap2_min_mapq": config.get("minimap2_min_mapq", 10),
+        "minimap2_preset": _coerce_minimap2_preset(config.get("minimap2_preset")),
+        # Fallback must match create_default_config (30). A divergent default
+        # (10) silently filtered more permissively for any config missing
+        # the key -- programmatic configs and files predating the field.
+        "minimap2_min_mapq": config.get("minimap2_min_mapq", 30),
         # Consensus sequence generation (amplicon-focused). Off unless the
         # operator enables it; only meaningful when validation runs (it reuses
         # the extracted reads + reference genome).

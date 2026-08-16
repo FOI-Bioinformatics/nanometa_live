@@ -288,6 +288,20 @@ class ValidationParser:
                 if parent_agg.exists():
                     return True
 
+        # Method subdirectories. get_validation_results scans these
+        # unconditionally, so this presence check must see them too: early in
+        # a realtime run validation_dir can resolve to validation/ while the
+        # only data on disk is minimap2/ per-pair stats, and a non-recursive
+        # glob reported "no validation data" over genuine coverage results.
+        for method_dir in (
+            self.results_dir / "validation" / "blast",
+            self.results_dir / "validation" / "minimap2",
+        ):
+            if method_dir.is_dir():
+                for pattern in ('*.json', '*.blast.tsv', '*.paf'):
+                    if list(method_dir.glob(pattern)):
+                        return True
+
         # Also check the on_demand_validation/ directory
         on_demand_dir = self.results_dir / "on_demand_validation"
         if on_demand_dir.is_dir():
@@ -759,9 +773,16 @@ class ValidationParser:
         on_demand_dir = self.results_dir / "on_demand_validation"
         if on_demand_dir.is_dir():
             def _supersede(od_r):
-                key = (od_r.sample_id, od_r.taxid, od_r.validation_method)
+                # Key on the method CLASS, not the raw string: a pipeline
+                # entry stored as "both" and an on-demand re-check defaulting
+                # to "blast" are the same method to every consumer, but the
+                # raw-string key never matched, so the stale result sat
+                # beside the fresh one instead of being replaced.
+                key = (od_r.sample_id, od_r.taxid,
+                       _method_class(od_r.validation_method))
                 for i, r in enumerate(results):
-                    if (r.sample_id, r.taxid, r.validation_method) == key:
+                    if (r.sample_id, r.taxid,
+                            _method_class(getattr(r, "validation_method", "blast"))) == key:
                         results[i] = od_r
                         return
                 results.append(od_r)

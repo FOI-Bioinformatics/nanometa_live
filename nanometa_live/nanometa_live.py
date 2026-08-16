@@ -200,7 +200,13 @@ def main():
     # used to assign args.port unconditionally, and since argparse defaulted
     # it to 8050 the Configuration tab's port field was overwritten on every
     # launch -- saved, reloaded, and silently ignored.
-    port = args.port if args.port is not None else config.get("gui_port") or 8050
+    # int() guard: the shipped config carries gui_port as a quoted string,
+    # and app.run would crash on a non-int port.
+    try:
+        port = int(args.port if args.port is not None else config.get("gui_port") or 8050)
+    except (TypeError, ValueError):
+        logging.warning("Invalid gui_port %r; using 8050", config.get("gui_port"))
+        port = 8050
     config["gui_port"] = port
     if args.main_dir:
         config["results_output_directory"] = os.path.abspath(args.main_dir)

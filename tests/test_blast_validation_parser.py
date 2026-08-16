@@ -712,3 +712,52 @@ class TestFingerprintTracksMethodDirRewrites:
 
         fp2 = parser._validation_dir_fingerprint()
         assert fp2 > fp1
+
+
+class TestSupersedeMatchesByMethodClass:
+    """An on-demand re-check must replace a pipeline "both" entry in place.
+
+    _supersede keyed on the raw validation_method string, so a pipeline
+    aggregate entry stored as "both" and the operator's on-demand re-check
+    (method "blast") never matched -- the stale result sat beside the fresh
+    one. Audit 2026-08-16, finding L26.
+    """
+
+    def test_on_demand_blast_replaces_pipeline_both_entry(self, tmp_path):
+        vdir = tmp_path / "validation"
+        vdir.mkdir(parents=True)
+        # Pipeline aggregate: one "both" entry for (barcode01, 562).
+        (vdir / "validation_results.json").write_text(json.dumps(_aggregate({
+            "barcode01": {
+                "562": {
+                    "species": "Escherichia coli",
+                    "validation_method": "both",
+                    "kraken_reads": 100, "blast_hits": 10, "hit_rate": 0.1,
+                    "avg_identity": 91.0,
+                },
+            }
+        }, method="both")))
+        # On-demand re-check for the same pair, method blast, better outcome.
+        od = tmp_path / "on_demand_validation"
+        od.mkdir()
+        (od / "validation_results.json").write_text(json.dumps(_aggregate({
+            "barcode01": {
+                "562": {
+                    "species": "Escherichia coli",
+                    "validation_method": "blast",
+                    "kraken_reads": 100, "blast_hits": 95, "hit_rate": 0.95,
+                    "avg_identity": 99.0,
+                },
+            }
+        })))
+
+        results = ValidationParser(str(tmp_path)).get_validation_results()
+        blast_class = [
+            r for r in results
+            if r.taxid == 562 and r.validation_method != "minimap2"
+        ]
+        assert len(blast_class) == 1, (
+            "the stale pipeline entry sat beside the on-demand re-check "
+            f"instead of being replaced: {[(r.validation_method, r.validated_reads) for r in blast_class]}"
+        )
+        assert blast_class[0].validated_reads == 95

@@ -332,6 +332,12 @@ class AlertEngine:
             )
 
             for detection in dangerous_detections:
+              # Per-detection isolation: a formatting error on one detection
+              # (a non-numeric reads/abundance field) must cost that alert
+              # alone. With the try/except only at the loop's outer level, a
+              # CRITICAL pathogen ordered after the failing one was silently
+              # dropped from the Alerts panel.
+              try:
                 threat_level = detection.get("threat_level", "moderate")
                 pathogen_name = detection.get("name", "Unknown organism")
                 common_name = detection.get("common_name", "")
@@ -410,6 +416,12 @@ class AlertEngine:
                         recommendation="No action required - documented for reference",
                         samples=sample_names
                     ))
+              except (KeyError, AttributeError, ValueError, TypeError):
+                logger.exception(
+                    "Could not render alert for detection %r; the remaining "
+                    "detections are still processed",
+                    detection.get("name", detection),
+                )
 
             # Log summary if pathogens detected
             if dangerous_detections:

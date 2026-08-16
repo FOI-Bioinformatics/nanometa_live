@@ -100,10 +100,15 @@ def load_blast_validation_data(
     main_dir = resolve_analysis_directory(main_dir)
 
     # Try canonical validation first (waterfall pattern)
+    # Tiers SUPPLEMENT each other per taxid rather than short-circuiting:
+    # returning the first non-empty tier whole is the "aggregate wins hides
+    # BLAST" bug class -- a stale or minimap2-only aggregate hid genuine
+    # on-disk blast.tsv results from the Organisms tab's BLAST badge.
+    results = {}
+
     canonical_data = load_canonical_validation(main_dir)
     if canonical_data is not None:
         logging.debug("Using canonical validation results")
-        results = {}
         filter_sample = None if (sample is None or sample == "All Samples") else sample
 
         for sample_id, taxid_entries in canonical_data.get("results", {}).items():
@@ -132,10 +137,8 @@ def load_blast_validation_data(
 
                 results[tid] = result_entry
 
-        if results:
-            return results
-
-    # First check for nanometanf aggregate validation JSON (includes both BLAST and minimap2)
+    # Check the nanometanf aggregate validation JSON (both BLAST and minimap2)
+    # for taxids the canonical data did not cover.
     aggregate_paths = [
         os.path.join(main_dir, "validation", "validation_results.json"),
         os.path.join(main_dir, "blast_validation", "validation_results.json"),
@@ -146,7 +149,6 @@ def load_blast_validation_data(
             with open(agg_path, 'r') as f:
                 agg_data = json.load(f)
 
-            results = {}
             filter_sample = None if (sample is None or sample == "All Samples") else sample
 
             for sample_id, taxid_entries in agg_data.get('results', {}).items():
@@ -154,6 +156,8 @@ def load_blast_validation_data(
                     continue
                 for tid_str, entry in taxid_entries.items():
                     tid = int(tid_str)
+                    if tid in results:
+                        continue
                     # Check if this taxid is in the watchlist
                     watchlist_match = None
                     for s in watchlist:
@@ -190,8 +194,10 @@ def load_blast_validation_data(
                     results[tid] = result_entry
 
             if results:
-                logging.info(f"Loaded validation data from aggregate JSON: {len(results)} entries")
-                return results
+                logging.info(
+                    f"Loaded validation data from aggregate JSON: {len(results)} entries"
+                )
+            break
         except (FileNotFoundError, OSError):
             continue  # File was deleted or inaccessible
         except json.JSONDecodeError as e:
@@ -209,13 +215,11 @@ def load_blast_validation_data(
         blast_dir = os.path.join(main_dir, "blast")
     if not os.path.exists(blast_dir):
         logging.debug("BLAST validation directory not found")
-        return {}
+        return results
 
     # OPTIMIZATION: Load Kraken data ONCE outside the loop (was loading per-species)
     # This provides ~50x speedup for typical watchlists with 50+ species
     kraken_df = load_kraken_data(main_dir, sample)
-
-    results = {}
 
     for species in watchlist:
         taxid = species.get('taxid')
@@ -231,16 +235,22 @@ def load_blast_validation_data(
             logging.warning(f"Invalid taxid: {taxid}")
             continue
 
-        # Find BLAST result files for this taxid
+        if taxid in results:
+            continue
+
+        # Find BLAST result files for this taxid. nanometanf names them with
+        # a "taxid" prefix (barcode01_taxid562.blast.tsv); the bare-number
+        # form is the legacy layout. The old glob matched only the legacy
+        # form, so this tier never found a current pipeline file.
         blast_files = []
 
         if sample is None or sample == "All Samples":
-            # Look for all files matching this taxid (nanometanf *.blast.tsv)
-            blast_files.extend(
-                glob.glob(os.path.join(blast_dir, f"*_{taxid}.blast.tsv"))
-            )
+            for pattern in (f"*_taxid{taxid}.blast.tsv", f"*_{taxid}.blast.tsv"):
+                blast_files.extend(glob.glob(os.path.join(blast_dir, pattern)))
         else:
-            # Look for the sample-specific file (nanometanf *.blast.tsv)
+            blast_files.append(
+                os.path.join(blast_dir, f"{sample}_taxid{taxid}.blast.tsv")
+            )
             blast_files.append(
                 os.path.join(blast_dir, f"{sample}_{taxid}.blast.tsv")
             )

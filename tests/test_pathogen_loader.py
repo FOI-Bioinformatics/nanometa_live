@@ -175,3 +175,16 @@ class TestLoadBuiltinPathogens:
         pathogens = load_builtin_pathogens()
         assert pathogens
         assert all(isinstance(k, int) for k in pathogens)
+
+
+class TestNonStringThreatLevel:
+    """threat_level: 3 (unquoted int) must be a validation error, not an
+    AttributeError that empties the pathogen database (audit 2026-08-16, L21)."""
+
+    def test_integer_threat_level_is_a_validation_error(self):
+        from nanometa_live.core.config.pathogen_loader import _validate_pathogen_entry
+
+        errors = _validate_pathogen_entry(
+            {"name": "X", "taxid": 1, "threat_level": 3}, 0
+        )
+        assert any("threat_level" in e for e in errors)

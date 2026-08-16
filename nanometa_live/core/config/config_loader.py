@@ -280,6 +280,16 @@ class ConfigLoader:
             # Ensure final type is boolean
             config["blast_validation"] = bool(config["blast_validation"])
 
+        # Convert generate_consensus to boolean. A hand-edited YAML carrying
+        # the STRING "false" is truthy in Python, so the operator's explicit
+        # off silently flipped to on whenever validation was enabled.
+        if "generate_consensus" in config:
+            if isinstance(config["generate_consensus"], str):
+                config["generate_consensus"] = (
+                    config["generate_consensus"].lower() in ["true", "yes", "y", "1"]
+                )
+            config["generate_consensus"] = bool(config["generate_consensus"])
+
         # Convert remove_temp_files to boolean
         if "remove_temp_files" in config:
             if isinstance(config["remove_temp_files"], str):
@@ -321,8 +331,20 @@ class ConfigLoader:
         config_path = os.path.join(self.config_dir, filename)
 
         try:
-            with open(config_path, "w") as f:
-                self.yaml.dump(save_config, f)
+            # Atomic write (temp file + os.replace), matching the rest of the
+            # codebase's shared-state writes. A direct open("w") truncates the
+            # existing file first, so a crash or power loss mid-dump left a
+            # corrupt config.yaml -- notably the bundle import's final rebased
+            # config and last-session.yaml, where the broad catch-and-default
+            # fallback would then silently reset kraken_db and the
+            # negative-control declarations.
+            import io
+
+            from nanometa_live.core.utils.atomic_write import atomic_write_text
+
+            buf = io.StringIO()
+            self.yaml.dump(save_config, buf)
+            atomic_write_text(config_path, buf.getvalue())
             return config_path
         except (FileNotFoundError, PermissionError, OSError) as e:
             logging.error(f"Failed to write configuration to {config_path}: {e}")

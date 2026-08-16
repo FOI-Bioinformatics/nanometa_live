@@ -264,6 +264,15 @@ def _parse_kraken2_report_uncached(filepath: str, check_stability: bool = True) 
             dropped = initial_len - len(df)
             logging.debug(f"Dropped {dropped} rows with invalid data from {filepath}")
 
+        # A row whose cumul_reads alone failed coercion survives the drop
+        # above with NaN -- which is always False in comparisons, so the row
+        # silently vanished from every cumul_reads-gated consumer (per-sample
+        # attribution, the discovery floor) and poisoned multi-batch sums.
+        # Fall back to the per-rank count: an undercount that keeps the row
+        # visible beats a row that exists in the frame but matches nothing.
+        if "cumul_reads" in df.columns and df["cumul_reads"].isna().any():
+            df["cumul_reads"] = df["cumul_reads"].fillna(df["reads"])
+
         # Ensure taxid is integer
         df["taxid"] = df["taxid"].astype(int)
 
@@ -426,9 +435,12 @@ def _deduplicate_batch_files(filepaths: List[str]) -> List[str]:
             existing = seen_batches[batch_key]
             if 'batch_reports' in fp and 'batch_reports' not in existing:
                 seen_batches[batch_key] = fp
-            # Prefer sample-prefixed naming over generic batch_ naming
+            # Prefer sample-prefixed naming over generic batch_ naming.
+            # Parenthesised equality on purpose: the bare form chained as
+            # `(... in fp) and (fp == 'batch_reports') and ...`, whose middle
+            # clause is never true for a real path, so this branch was dead.
             elif (sample_from_name and match.group(1)
-                  and 'batch_reports' in fp == 'batch_reports' in existing):
+                  and (('batch_reports' in fp) == ('batch_reports' in existing))):
                 existing_match = batch_id_pattern.search(os.path.basename(existing))
                 if existing_match and not existing_match.group(1):
                     seen_batches[batch_key] = fp

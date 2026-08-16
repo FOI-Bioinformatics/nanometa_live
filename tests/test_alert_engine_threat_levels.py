@@ -269,20 +269,27 @@ class TestExceptionFallback:
                 engine._check_dangerous_pathogens([{"taxid": 263, "reads": 9}])
 
     def test_alerts_appended_before_the_failure_are_retained(self):
-        """A failure partway through must not discard the criticals already found."""
+        """A malformed detection must cost only itself, in either direction.
+
+        The loop now isolates each detection (audit 2026-08-16, finding L17):
+        a bad record neither erases criticals found before it nor aborts the
+        detections after it, and no misleading whole-database failure alert
+        is raised for a single malformed record.
+        """
         engine = AlertEngine()
         good = _detection("critical")
         bad = _detection("critical", reads=None)  # reads=None breaks the f-string
+        good_after = _detection("high")
 
-        with patch(PATCH_TARGET, return_value=[good, bad]):
+        with patch(PATCH_TARGET, return_value=[bad, good, good_after]):
             alerts = engine._check_dangerous_pathogens([{"taxid": 263, "reads": 42}])
 
         messages = [a.message for a in alerts]
         assert any("CRITICAL PATHOGEN" in m for m in messages), (
-            "the critical alert produced before the malformed detection was "
-            "dropped; one bad record must not erase a confirmed select-agent hit"
+            "a malformed detection erased a confirmed select-agent hit"
         )
-        assert "Unable to check pathogen database" in messages
+        assert any("HIGH RISK" in m for m in messages)
+        assert "Unable to check pathogen database" not in messages
 
 
 class TestPathogenLogDeduplication:

@@ -139,3 +139,54 @@ class TestGenerateMappingsGuard:
         )
         with pytest.raises(RuntimeError, match="not loaded or is empty"):
             mapper.generate_mappings([{"name": "Escherichia coli", "taxid": 562}])
+
+
+class TestOperatorOverrideReachesTheMatchingIndex:
+    """The profile override must apply to the index that drives matching.
+
+    save_override/load_override existed, but only load_profile_for_db (the
+    API-selection path) consulted them: TaxidMapper.load_database -- whose
+    index profile gates ExactTaxidStrategy and GTDB variant generation --
+    always used the raw detected profile, so the documented per-database
+    correction mechanism was silently half-applied. Audit 2026-08-16,
+    finding L12.
+    """
+
+    def test_override_file_wins_over_detected_profile(self, tmp_path):
+        from nanometa_live.core.taxonomy.database_profile import (
+            Nomenclature,
+            save_override,
+        )
+
+        cache_dir = tmp_path / "mappings"
+        cache_dir.mkdir()
+        # The database directory must exist: get_database_hash returns ""
+        # for a missing path, and load_database skips the override lookup
+        # on an empty hash.
+        (tmp_path / "dummy_db").mkdir()
+        database_path = str(tmp_path / "dummy_db")
+        db_hash = get_database_hash(database_path)
+        assert db_hash
+
+        # Operator says: taxids ARE NCBI, names are GTDB.
+        save_override(
+            db_hash,
+            cache_dir,
+            DatabaseProfile(
+                taxids_are_ncbi=True, nomenclature=Nomenclature.GTDB
+            ),
+        )
+
+        mapper = TaxidMapper(cache_dir=str(cache_dir))
+        detected = _make_populated_index(database_path)
+        detected.profile = DatabaseProfile(taxids_are_ncbi=False)
+        with patch.object(
+            mapper._index_builder, "build_index", return_value=detected
+        ):
+            assert mapper.load_database(database_path) is True
+
+        assert mapper._index.profile.taxids_are_ncbi is True, (
+            "the operator override never reached the matching index"
+        )
+        assert mapper._index.profile.nomenclature == Nomenclature.GTDB
+        assert "override" in (mapper._index.profile.detected_by or "")
