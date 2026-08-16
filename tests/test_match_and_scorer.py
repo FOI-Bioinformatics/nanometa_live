@@ -103,3 +103,65 @@ class TestConfidenceScorer:
         mr = MatchResult(MatchType.EXACT_NAME, self._node(index), 1.0, {})
         score = ConfidenceScorer().calculate_score(mr)
         assert isinstance(score.status, ValidationStatus)
+
+
+# Synthetic database whose only F. tularensis subspecies node is at S1, with a
+# slightly divergent spelling so exact/variant matching misses and the query
+# falls through to the fuzzy/substring strategies.
+INSPECT_SUBSPECIES = (
+    "100.00\t1000\t0\tR\t1\troot\n"
+    "90.00\t900\t0\tD\t2\tBacteria\n"
+    "50.00\t500\t100\tS\t263\tFrancisella tularensis\n"
+    "30.00\t300\t300\tS1\t119857\tFrancisella tularensis holarctica LVS\n"
+)
+
+
+@pytest.fixture
+def subspecies_index(tmp_path):
+    f = tmp_path / "inspect_subsp.txt"
+    f.write_text(INSPECT_SUBSPECIES)
+    return DatabaseIndexBuilder().build_from_inspect(str(f), str(tmp_path))
+
+
+class TestSubspeciesNodesAreMatchable:
+    """Fuzzy and substring matching must be able to land on S1-S3 nodes.
+
+    Three sites hardcoded ``node.rank != "S"`` instead of the shared
+    ``is_species_rank`` helper, so a subspecies entry whose exact/variant
+    name missed fell through to strategies that structurally excluded the
+    correct node -- and the operator-facing alternatives list never offered
+    it either. Audit 2026-08-16, finding L4.
+    """
+
+    def test_substring_strategy_reaches_s1_node(self, subspecies_index, norm):
+        from nanometa_live.core.watchlist.validation.match_strategies import (
+            SubstringMatchStrategy,
+        )
+        q = norm.normalize("Francisella tularensis holarctica")
+        result = SubstringMatchStrategy().match(q, None, subspecies_index)
+        assert result is not None, (
+            "the S1 node was structurally excluded from substring matching"
+        )
+        assert result.matched_taxid == 119857
+
+    def test_fuzzy_strategy_reaches_s1_node(self, subspecies_index, norm):
+        from nanometa_live.core.watchlist.validation.match_strategies import (
+            FuzzyMatchStrategy,
+        )
+        q = norm.normalize("Francisella tularensis holarctica LV")
+        result = FuzzyMatchStrategy().match(q, None, subspecies_index)
+        assert result is not None, (
+            "the S1 node was structurally excluded from fuzzy matching"
+        )
+        assert result.matched_taxid == 119857
+
+    def test_find_alternatives_offers_s1_node(self, subspecies_index):
+        from nanometa_live.core.watchlist.validation.match_strategies import (
+            CompositeMatchStrategy,
+        )
+        alts = CompositeMatchStrategy().find_alternatives(
+            "Francisella tularensis holarctica", subspecies_index
+        )
+        assert any(node.taxid == 119857 for node, _score in alts), (
+            "the review-suggestions list never offers subspecies nodes"
+        )

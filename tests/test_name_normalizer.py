@@ -96,3 +96,47 @@ class TestFormatDetection:
 class TestSingleton:
     def test_get_name_normalizer_is_singleton(self):
         assert get_name_normalizer() is get_name_normalizer()
+
+
+class TestSubspeciesVariants:
+    """A subspecies-qualified name must generate trinomial variants and rank
+    them ahead of the species-only form.
+
+    The subspecies epithet was parsed into ``NormalizedName.subspecies`` and
+    then never used: every variant was genus+species only, so on a database
+    that names its S1 node without the literal "subsp." token, both
+    *F. tularensis* subsp. *tularensis* (Type A) and subsp. *holarctica*
+    (Type B) resolved to the parent species node -- collapsing the clinical
+    distinction the subspecies feature exists for. Audit 2026-08-16,
+    finding L5.
+    """
+
+    def test_trinomial_variants_are_generated(self, n):
+        r = n.normalize("Francisella tularensis subsp. holarctica")
+        assert r.subspecies == "holarctica"
+        assert "francisella tularensis holarctica" in r.variants
+        assert "francisella_tularensis_holarctica" in r.variants
+        assert "s__francisella_tularensis_holarctica" in r.variants
+
+    def test_trinomial_outranks_species_only(self, n):
+        """Variants are tried in order and the first hit wins, so the
+        subspecies form must come before the parent-species form."""
+        r = n.normalize("Francisella tularensis subsp. holarctica")
+        trinomial_idx = r.variants.index("francisella tularensis holarctica")
+        species_idx = r.variants.index("francisella tularensis")
+        assert trinomial_idx < species_idx, (
+            "the parent species outranks the subspecies form, so a "
+            "subspecies entry resolves to the species node even when the "
+            "correct S1 node exists"
+        )
+
+    def test_species_only_form_still_present_as_fallback(self, n):
+        r = n.normalize("Francisella tularensis subsp. holarctica")
+        assert "francisella tularensis" in r.variants
+
+    def test_names_without_subspecies_are_unchanged(self, n):
+        r = n.normalize("Bacillus anthracis")
+        assert r.subspecies is None
+        assert r.variants[0] == "bacillus anthracis"
+        # Species-only stays the highest-priority non-canonical variant.
+        assert not any(" subsp" in v for v in r.variants)
