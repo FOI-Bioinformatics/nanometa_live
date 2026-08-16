@@ -550,19 +550,14 @@ def _main_on_demand_validation_modal():
     ], id="on-demand-validation-modal", is_open=False, size="lg", backdrop="static")
 
 
-def create_main_layout():
-    """
-    Create the layout for the main results tab.
+def _main_tab_stores():
+    """The Organisms tab's dcc.Store components.
 
-    MODERNIZED: Visual organism cards, watched species section with alerts,
-    plain language, operator-friendly design.
-    Follows progressive disclosure: alert banner -> summary -> watched species
-    -> other organisms -> detailed table (optional).
-
-    Returns:
-        A dash component representing the main results tab layout
+    Extracted so create_main_layout stays a readable list of sections (and
+    under the code-size gate); these carry enough rationale to be worth their
+    own block.
     """
-    return html.Div([
+    return [
         # Hidden store for species watchlist (synced with config)
         dcc.Store(id="main-watchlist-store", data=[], storage_type="session"),
         # Results fingerprint update_main_results last rendered. The callback is
@@ -577,6 +572,23 @@ def create_main_layout():
         # On-demand validation stores
         dcc.Store(id="on-demand-validation-target", data=None),  # {taxid, name} of organism being validated
         dcc.Store(id="on-demand-validation-results", data={}),  # {taxid: validation_result}
+    ]
+
+
+def create_main_layout():
+    """
+    Create the layout for the main results tab.
+
+    MODERNIZED: Visual organism cards, watched species section with alerts,
+    plain language, operator-friendly design.
+    Follows progressive disclosure: alert banner -> summary -> watched species
+    -> other organisms -> detailed table (optional).
+
+    Returns:
+        A dash component representing the main results tab layout
+    """
+    return html.Div([
+        *_main_tab_stores(),
 
         # Alert Banner for watched species (dynamic - populated by callback)
         html.Div(id="watched-species-alert-container", className="mb-3"),
