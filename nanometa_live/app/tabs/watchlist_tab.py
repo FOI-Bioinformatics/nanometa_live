@@ -1456,11 +1456,16 @@ def register_watchlist_callbacks(app: Dash) -> None:
                     dbc.Alert(f"Import failed: {message}", color="danger", duration=8000),
                 )
 
-            # Load into active session
+            # Load into active session. The destination name must come from
+            # the same sanitizer import_watchlist used -- deriving it from
+            # the raw browser filename made the two disagree for any name
+            # the sanitizer changed, so the file was imported but never
+            # activated while the alert still claimed success (finding W1).
             manager = get_watchlist_manager()
-            watchlist_id = Path(filename).stem
+            dest_name = loader.sanitize_upload_name(filename)
+            watchlist_id = Path(dest_name).stem
             dest_dir = loader.user_watchlist_dir
-            dest_file = dest_dir / filename
+            dest_file = dest_dir / dest_name
             if dest_file.exists():
                 manager._load_custom_yaml_file(str(dest_file))
 

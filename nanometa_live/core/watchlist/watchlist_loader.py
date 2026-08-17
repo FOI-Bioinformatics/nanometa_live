@@ -414,6 +414,29 @@ class WatchlistLoader:
                 missing.append(str(p.get("name") or f"entry {i + 1}"))
         return missing
 
+    @staticmethod
+    def sanitize_upload_name(file_name: str) -> Optional[str]:
+        """Reduce an untrusted upload name to a bare, usable filename.
+
+        ``file_name`` carries the browser-supplied dcc.Upload name, so
+        "../evil.yaml" would otherwise write outside the watchlists
+        directory, and an absolute path would ignore the destination
+        entirely. Reducing rather than refusing keeps a well-meaning upload
+        working -- the file is still imported, just not where the string
+        asked. Returns None when nothing usable remains.
+
+        This is the single sanitizer for upload names: ``import_watchlist``
+        and the GUI upload callback must both use it, or they disagree
+        about where the file landed (2026-08-17 audit, finding W1: the
+        callback re-derived the destination from the raw name, so a
+        sanitizer-changed upload was imported but never activated in the
+        session, with a success alert either way).
+        """
+        name = Path(file_name).name if file_name else ""
+        if not name or name in (".", ".."):
+            return None
+        return name
+
     def import_watchlist(
         self,
         source_path: Path,
@@ -451,14 +474,8 @@ class WatchlistLoader:
         # Create directory if needed
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        # Reduce to a bare filename before joining. ``file_name`` carries the
-        # browser-supplied dcc.Upload name, so "../evil.yaml" would otherwise
-        # write outside the watchlists directory, and an absolute path would
-        # ignore dest_dir entirely. Reducing rather than refusing keeps a
-        # well-meaning upload working -- the file is still imported, just not
-        # where the string asked.
-        dest_name = Path(file_name or source_path.name).name
-        if not dest_name or dest_name in (".", ".."):
+        dest_name = self.sanitize_upload_name(file_name or source_path.name)
+        if dest_name is None:
             return False, (
                 f"'{file_name}' is not a usable watchlist file name."
             )

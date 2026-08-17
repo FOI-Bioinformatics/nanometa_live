@@ -770,14 +770,30 @@ class WatchlistManager:
             pseudo_taxid = _stable_pseudo_taxid(entry.name)
 
             if pseudo_taxid in self._entries:
-                # MERGE: Entry already exists
+                # MERGE: Entry already exists. Mirror the taxid-keyed merge
+                # branch above -- this branch used to drop the incoming
+                # entry's names_alt, db_taxid and enabled state, so a
+                # name-only organism behaved differently from the same
+                # organism with a taxid (2026-08-17 audit, finding W8).
                 existing = self._entries[pseudo_taxid]
                 if watchlist_id:
                     existing.watchlist_ids.add(watchlist_id)
                 if _threat_severity(entry.threat_level) > _threat_severity(existing.threat_level):
                     existing.threat_level = entry.threat_level
                 existing.alert_threshold = min(existing.alert_threshold, entry.alert_threshold)
-                # Preserve existing enabled state (don't force enable on merge)
+
+                for alt_name in entry.names_alt:
+                    if alt_name not in existing.names_alt:
+                        existing.names_alt.append(alt_name)
+                        self._name_index[alt_name.lower()] = pseudo_taxid
+
+                if entry.db_taxid and not existing.db_taxid:
+                    existing.db_taxid = entry.db_taxid
+
+                # If incoming entry is enabled (e.g. from enable_watchlist),
+                # also enable existing entry for consistent UX
+                if entry.enabled:
+                    existing.enabled = True
                 return
 
             entry.taxid = pseudo_taxid
