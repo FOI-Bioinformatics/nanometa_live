@@ -159,12 +159,17 @@ def _validate_numeric_ranges(
         errors.append("Validation identity must be between 0-100%")
     if kraken2_confidence is not None and not (0 <= kraken2_confidence <= 1):
         errors.append("Kraken2 confidence must be between 0.0-1.0")
-    if chopper_minlength is not None and chopper_minlength < 0:
-        errors.append("Chopper minimum length must be 0 or greater")
+    # Floor is 1, not 0: nanometanf's schema sets minimum: 1 on both length
+    # filters, so a 0 saved here fails nf-schema at launch. 1 disables the
+    # filter in practice (no nanopore read is shorter).
+    if chopper_minlength is not None and chopper_minlength < 1:
+        errors.append("Chopper minimum length must be 1 or greater "
+                      "(the pipeline rejects 0; 1 disables the filter)")
     if chopper_quality is not None and not (0 <= chopper_quality <= 30):
         errors.append("Chopper quality must be between 0-30")
-    if filtlong_minlength is not None and filtlong_minlength < 0:
-        errors.append("Filtlong minimum length must be 0 or greater")
+    if filtlong_minlength is not None and filtlong_minlength < 1:
+        errors.append("Filtlong minimum length must be 1 or greater "
+                      "(the pipeline rejects 0; 1 disables the filter)")
     if max_file_age_minutes is not None and max_file_age_minutes != "":
         try:
             if int(max_file_age_minutes) < 0:
@@ -217,6 +222,8 @@ def build_config_from_form(
     kraken2_hitgroups,
     max_file_age_minutes,
     min_reads_for_validation,
+    enable_assembly,
+    assembler,
 ):
     """Validate Configuration-form inputs and build the updated config dict.
 
@@ -424,6 +431,12 @@ def build_config_from_form(
     if min_reads_for_validation is not None:
         config["min_reads_for_validation"] = int(min_reads_for_validation)
 
+    # Assembly (experimental nanometanf step; Reports tab renders the stats).
+    if enable_assembly is not None:
+        config["enable_assembly"] = bool(enable_assembly)
+    if assembler is not None:
+        config["assembler"] = assembler if assembler in ("flye", "miniasm") else "flye"
+
     # Note: Species watchlist is now managed via the Watchlist & Preparation tab
     # and WatchlistManager, not through this config form
 
@@ -485,7 +498,7 @@ def config_form_dirty(snapshot, *, form):
     bool_keys = {
         "kraken_memory_mapping", "blast_validation", "remove_temp_files",
         "skip_nanoplot", "kraken2_enable_incremental", "enable_krona_plots",
-        "enable_nanopore_stats_mqc",
+        "enable_nanopore_stats_mqc", "enable_assembly",
     }
     for key, current_val in form.items():
         snapshot_val = snapshot.get(key)

@@ -651,6 +651,9 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             # Newly exposed settings (2026-05-31)
             Output("max-file-age-input", "value"),
             Output("min-reads-for-validation-input", "value"),
+            # Assembly (2026-08-17)
+            Output("enable-assembly-input", "value"),
+            Output("assembler-input", "value"),
             Output("config-form-initialized", "data"),
         ],
         Input("refresh-form-trigger", "data"),
@@ -669,7 +672,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         # operator's in-progress changes survive a tab switch.
         config = {**(config or {}), **(draft or {})}
         if not config:
-            return [no_update] * 42
+            return [no_update] * 41  # must match the Output list length
 
         # Extract values from config
         analysis_name = config.get("analysis_name", "")
@@ -778,6 +781,12 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         max_file_age_minutes = config.get("max_file_age_minutes", 1000000)
         min_reads_for_validation = config.get("min_reads_for_validation", 50)
 
+        # Assembly (2026-08-17).
+        enable_assembly = bool(config.get("enable_assembly", False))
+        assembler = config.get("assembler", "flye")
+        if assembler not in ("flye", "miniasm"):
+            assembler = "flye"
+
         return [
             analysis_name,
             nanopore_dir,
@@ -817,6 +826,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             kraken2_hitgroups,
             max_file_age_minutes,
             min_reads_for_validation,
+            enable_assembly,
+            assembler,
             True,  # Mark form as initialized (suppresses first "Modified" badge)
         ]
 
@@ -1547,6 +1558,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("negative-controls-input", "value"),
             Input("max-file-age-input", "value"),
             Input("min-reads-for-validation-input", "value"),
+            Input("enable-assembly-input", "value"),
+            Input("assembler-input", "value"),
         ],
         [
             State("saved-config-snapshot", "data"),
@@ -1567,6 +1580,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         pipeline_profile, pipeline_source_type, pipeline_branch, pipeline_local_path,
         processing_mode, sample_handling, sample_name, negative_controls,
         max_file_age_minutes, min_reads_for_validation,
+        enable_assembly, assembler,
         saved_snapshot, currently_modified, form_initialized
     ):
         """Flag the form as modified when any saved field differs from the
@@ -1625,6 +1639,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 if max_file_age_minutes not in (None, "") else max_file_age_minutes
             ),
             "min_reads_for_validation": min_reads_for_validation,
+            "enable_assembly": enable_assembly,
+            "assembler": assembler if assembler in ("flye", "miniasm") else "flye",
         }
         dirty = config_form_dirty(saved_snapshot, form=form)
         # Persist the in-progress edits as a session draft when the form differs

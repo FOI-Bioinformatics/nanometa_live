@@ -779,7 +779,8 @@ def register_qc_callbacks(app: Dash):
                 mean_length_before=mean_length_before,
                 n50=n50,
                 gc_content=gc_content,
-                source=source
+                source=source,
+                amplicon_mode=_is_amplicon_mode(config),
             )
 
         except Exception as e:

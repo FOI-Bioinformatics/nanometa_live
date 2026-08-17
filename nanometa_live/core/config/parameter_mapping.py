@@ -92,6 +92,27 @@ def _coerce_minimap2_preset(value: Any) -> str:
     return preset
 
 
+def _coerce_min_length(value: Any, key: str, default: int = 1000) -> int:
+    """Clamp a QC minimum-length filter to nanometanf's schema floor of 1.
+
+    Older configs (and a since-corrected GUI tooltip) used 0 to mean
+    "disable"; nf-schema sets ``minimum: 1`` on both length filters, so a 0
+    fails validation at launch. 1 is the working "off" value -- no nanopore
+    read is shorter.
+    """
+    try:
+        length = int(value)
+    except (TypeError, ValueError):
+        return default
+    if length < 1:
+        logging.warning(
+            "%s=%r is below nanometanf's schema minimum of 1; using 1 "
+            "(disables the length filter)", key, value,
+        )
+        return 1
+    return length
+
+
 def _coerce_blast_evalue(value: Any, default: float = 1e-10) -> float:
     """A zero/negative e-value only fails deep inside blastn after QC and
     Kraken2 already ran; reject it at mapping time instead."""
@@ -719,13 +740,23 @@ def _build_base_params(config: Dict[str, Any], main_dir: str, kraken_db: str,
         "skip_fastp": False,
         "skip_nanoplot": config.get("skip_nanoplot", False),
 
+        # Assembly (experimental nanometanf step). The assembler value is
+        # schema-validated upstream (enum flye/miniasm), so coerce unknowns
+        # rather than failing the launch.
+        "enable_assembly": bool(config.get("enable_assembly", False)),
+        "assembler": (config.get("assembler")
+                      if config.get("assembler") in ("flye", "miniasm")
+                      else "flye"),
+
         # Read-filter overrides surfaced by the Configuration tab's Advanced
         # Settings -> Read Filtering and Validation card. Defaults match
         # nanometanf's pipeline-side defaults. See
         # docs/audit-2026-04-29-short-amplicons.md for rationale.
-        "chopper_minlength": config.get("chopper_minlength", 1000),
+        "chopper_minlength": _coerce_min_length(
+            config.get("chopper_minlength"), "chopper_minlength"),
         "chopper_quality": config.get("chopper_quality", 10),
-        "filtlong_min_length": config.get("filtlong_min_length", 1000),
+        "filtlong_min_length": _coerce_min_length(
+            config.get("filtlong_min_length"), "filtlong_min_length"),
         "kraken2_confidence": config.get("kraken2_confidence", 0.0),
         "kraken2_minimum_hit_groups": config.get(
             "kraken2_minimum_hit_groups", 0

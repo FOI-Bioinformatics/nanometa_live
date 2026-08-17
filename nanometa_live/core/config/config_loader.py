@@ -137,6 +137,9 @@ class ConfigLoader:
             # QC and analysis tools
             "qc_tool": "chopper",
             "skip_nanoplot": False,
+            # Assembly (experimental nanometanf step; off by default)
+            "enable_assembly": False,
+            "assembler": "flye",
             # Kraken2 realtime incremental classification
             "kraken2_enable_incremental": True,
             # Visualization options

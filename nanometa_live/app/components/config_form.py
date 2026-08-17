@@ -836,6 +836,54 @@ def _processing_settings_item():
                     target="memory-mapping-info"
                 )
             ], md=6)
+        ], className="mb-3"),
+        dbc.Row([
+            dbc.Col([
+                html.Div([
+                    dbc.Switch(
+                        id="enable-assembly-input",
+                        label="Assemble reads into contigs",
+                        value=False,
+                        className="mt-3"
+                    ),
+                    html.I(className="bi bi-info-circle text-muted ms-1",
+                           id="enable-assembly-info"),
+                    dbc.Badge("Experimental", color="warning", className="ms-2",
+                              style={"fontSize": "0.65rem"}),
+                ], className="d-flex align-items-center"),
+                dbc.FormText("Adds a metagenome assembly step; results appear "
+                             "on the Reports tab"),
+                dbc.Tooltip(
+                    "Runs the pipeline's experimental assembly step on the "
+                    "filtered reads. Flye runs in metagenome mode, so mixed "
+                    "communities assemble per organism. Adds substantial "
+                    "runtime and memory; contigs and assembly statistics are "
+                    "written to the results directory.",
+                    target="enable-assembly-info"
+                )
+            ], md=6),
+            dbc.Col([
+                dbc.Label([
+                    "Assembler ",
+                    html.I(className="bi bi-info-circle text-muted ms-1",
+                           id="assembler-info"),
+                ], html_for="assembler-input"),
+                dbc.Select(
+                    id="assembler-input",
+                    options=[
+                        {"label": "Flye (metagenome mode, with statistics)", "value": "flye"},
+                        {"label": "Miniasm (fast draft, no statistics)", "value": "miniasm"},
+                    ],
+                    value="flye"
+                ),
+                dbc.FormText("Only used when assembly is enabled"),
+                dbc.Tooltip(
+                    "Flye produces polished contigs and the assembly "
+                    "statistics the Reports tab displays. Miniasm is faster "
+                    "but emits draft contigs without statistics.",
+                    target="assembler-info"
+                )
+            ], md=6)
         ])
     ], title="Processing Settings")
 
@@ -874,18 +922,18 @@ def _read_filtering_item():
                 dbc.Input(
                     id="chopper-minlength-input",
                     type="number",
-                    min=0,
+                    min=1,
                     max=50000,
                     step=50,
                     value=1000,
                 ),
-                dbc.FormText("Reads shorter than this are dropped (set to 100 for V3-V4 amplicons; 0 disables)"),
+                dbc.FormText("Reads shorter than this are dropped (set to 100 for V3-V4 amplicons; 1 disables)"),
                 dbc.Tooltip(
                     "Chopper's --minlength filter. Default 1000 is "
                     "tuned for whole-genome ONT reads. For V3-V4 "
                     "(~460 bp) set to 100; for ITS/16S amplicons "
-                    "use 250-500. Set to 0 to disable length "
-                    "filtering entirely.",
+                    "use 250-500. Set to 1 to disable length "
+                    "filtering (the pipeline rejects 0).",
                     target="chopper-minlength-info",
                 ),
             ], md=4),
@@ -921,7 +969,7 @@ def _read_filtering_item():
                 dbc.Input(
                     id="filtlong-minlength-input",
                     type="number",
-                    min=0,
+                    min=1,
                     max=50000,
                     step=50,
                     value=1000,

@@ -908,7 +908,8 @@ def ReadStatisticsCard(
     mean_length_before: Optional[float] = None,
     n50: Optional[int] = None,
     gc_content: Optional[float] = None,
-    source: str = "unknown"
+    source: str = "unknown",
+    amplicon_mode: bool = False,
 ) -> html.Div:
     """
     Create a read statistics card showing length, N50, and GC content.
@@ -922,13 +923,17 @@ def ReadStatisticsCard(
         n50: N50 statistic (Seqkit/Chopper only)
         gc_content: GC content percentage (0-100)
         source: Data source ("fastp" or "seqkit")
+        amplicon_mode: When True, use N50 bands tuned for short-amplicon
+            protocols. The whole-genome bands mark every amplicon run red
+            even when the N50 equals the amplicon length by design.
 
     Returns:
         Read statistics card component
 
     Color thresholds:
         GC Content: 40-60% (normal), 35-40% or 60-65% (warning), <35% or >65% (unusual)
-        N50: >= 2000 bp (good), 1000-2000 bp (warning), < 1000 bp (poor)
+        N50 (whole-genome): >= 2000 bp (good), 1000-2000 bp (warning), < 1000 bp (poor)
+        N50 (amplicon): >= 200 bp (good), 100-200 bp (warning), < 100 bp (poor)
     """
     # Color configuration
     color_config = {
@@ -949,12 +954,13 @@ def ReadStatisticsCard(
         return color_config["success"]
 
     def get_n50_color(value: Optional[int]) -> dict:
-        """Get color for N50."""
+        """Get color for N50 (bands depend on protocol; see docstring)."""
         if value is None:
             return color_config["info"]
-        if value < 1000:
+        danger_below, warning_below = (100, 200) if amplicon_mode else (1000, 2000)
+        if value < danger_below:
             return color_config["danger"]
-        elif value < 2000:
+        elif value < warning_below:
             return color_config["warning"]
         return color_config["success"]
 
