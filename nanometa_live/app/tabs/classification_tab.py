@@ -47,6 +47,7 @@ def register_classification_callbacks(app: Dash):
     @app.callback(
         Output("classification-filter-input", "value"),
         Output("classification-filter-input", "placeholder"),
+        Output("classification-autoscale-applied", "data"),
         Input("available-samples", "data"),
         Input("selected-sample", "data"),
         State("classification-filter-input", "value"),
@@ -97,9 +98,21 @@ def register_classification_callbacks(app: Dash):
         # like an operator edit and block the aggregate scaling below.
         untouched = current_value in (None, 10, configured)
         if is_aggregate and n >= 12 and untouched:
-            return floor, placeholder
+            # Announce the programmatic rewrite so update_classification_plot
+            # re-renders with the new floor. That callback reads the input as
+            # State (deliberately -- the Apply button owns manual edits), and
+            # both callbacks share the selected-sample trigger, so on a sample
+            # switch the plot captured the PRE-scaling value: the box read 120
+            # while the Sankey was still drawn at 10, which is exactly the
+            # taxonomic noise chain this scaling exists to suppress. Nothing
+            # reconciled them afterwards on a quiet outdir.
+            return floor, placeholder, {"floor": floor, "sample": selected_sample}
         # Only update the placeholder hint, leave value as-is.
-        return current_value if current_value is not None else configured, placeholder
+        return (
+            current_value if current_value is not None else configured,
+            placeholder,
+            no_update,
+        )
 
     @app.callback(
         Output("classification-levels-input", "value"),
@@ -146,6 +159,10 @@ def register_classification_callbacks(app: Dash):
             Input("classification-color-scheme", "value"),  # Color scheme selection
             Input("classification-max-taxa", "value"),  # Max taxa per level filter
             Input("classification-chart-height", "value"),  # Chart height control
+            # Programmatic min-reads rescale (see scale_min_reads_default). The
+            # filter input itself stays a State so manual edits still wait for
+            # Apply; only the auto-scaled floor forces a re-render.
+            Input("classification-autoscale-applied", "data"),
             Input("update-interval", "n_intervals"),  # Polling backstop
         ],
         [
@@ -165,6 +182,7 @@ def register_classification_callbacks(app: Dash):
         color_scheme,     # Color scheme selection
         max_taxa_value,   # Max taxa per level filter
         chart_height,     # Chart height control
+        _autoscale,       # Programmatic min-reads rescale
         _n_intervals,     # Polling backstop
         filter_value,     # State
         domains,          # State

@@ -166,15 +166,22 @@ class TaxonomyMatcher:
             if (entry_parts[0] == detected_parts[0] and
                 entry_parts[1] == detected_parts[1]):
                 return 0.85
-            # Same genus
-            if entry_parts[0] == detected_parts[0]:
-                return 0.3
 
-        # Check for substring match (species name in detected name)
+        # Check for substring match (species name in detected name). Tried
+        # BEFORE the same-genus fallback: a GTDB polyphyly-suffixed report
+        # name ("Escherichia coli_D") shares the genus with the watchlist
+        # binomial, and returning 0.3 there shadowed the 0.7 substring score
+        # that clears the detection threshold -- a silent miss for exactly
+        # the names GTDB databases produce.
         if entry_normalized in detected_normalized:
             return 0.7
         if detected_normalized in entry_normalized:
             return 0.6
+
+        # Same genus, different species: the weakest signal, so it comes last.
+        if (len(entry_parts) >= 2 and len(detected_parts) >= 2
+                and entry_parts[0] == detected_parts[0]):
+            return 0.3
 
         return 0.0
 

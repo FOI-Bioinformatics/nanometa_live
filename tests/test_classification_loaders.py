@@ -681,3 +681,141 @@ class TestDescribeKrakenScanLocations:
         assert scan["kraken_dir"] == ""
         assert scan["exists"] is False
         assert isinstance(scan["patterns"], list)
+
+
+class TestMixedReadinessAggregate:
+    """The "All Samples" aggregate must include every sample even when samples
+    sit at different report tiers (audit 2026-08-16, finding L1).
+
+    In a realtime multi-barcode run, barcodes reach the cumulative report at
+    staggered times. The report tier (cumulative > standard > batch) must be
+    resolved per sample and the results unioned; a directory-wide tier choice
+    silently drops every sample still on a lower tier from the aggregate that
+    feeds the verdict banner.
+    """
+
+    def test_cumulative_and_standard_samples_both_included(self, tmp_path):
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+
+        cumul = kraken_dir / "sample1.cumulative.kraken2.report.txt"
+        cumul.write_text("100.00\t500\t500\tS\t562\t  Escherichia coli\n")
+        _backdate_mtime(cumul)
+
+        # sample2 is still mid-run: only a standard report exists.
+        standard = kraken_dir / "sample2.kraken2.report.txt"
+        standard.write_text("100.00\t9999\t9999\tS\t1639\t  Listeria monocytogenes\n")
+        _backdate_mtime(standard)
+
+        df = load_kraken_data(str(tmp_path), sample=None)
+        taxids = set(df["taxid"].astype(int).tolist())
+        assert 562 in taxids, "cumulative-tier sample missing from aggregate"
+        assert 1639 in taxids, (
+            "standard-tier sample dropped from aggregate because another "
+            "sample already has a cumulative report"
+        )
+
+    def test_per_sample_tier_priority_preserved(self, tmp_path):
+        """A sample with BOTH cumulative and standard must contribute only the
+        cumulative counts (no double counting), while a standard-only sibling
+        still appears."""
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+
+        cumul = kraken_dir / "sample1.cumulative.kraken2.report.txt"
+        cumul.write_text("100.00\t500\t500\tS\t562\t  Escherichia coli\n")
+        _backdate_mtime(cumul)
+        stale_standard = kraken_dir / "sample1.kraken2.report.txt"
+        stale_standard.write_text("100.00\t100\t100\tS\t562\t  Escherichia coli\n")
+        _backdate_mtime(stale_standard)
+
+        standard = kraken_dir / "sample2.kraken2.report.txt"
+        standard.write_text("100.00\t50\t50\tS\t1639\t  Listeria monocytogenes\n")
+        _backdate_mtime(standard)
+
+        df = load_kraken_data(str(tmp_path), sample=None)
+        ecoli = df[df["taxid"] == 562]
+        assert int(ecoli.iloc[0]["reads"]) == 500, (
+            "sample1 must contribute its cumulative report only, "
+            "not cumulative + stale standard"
+        )
+        assert 1639 in set(df["taxid"].astype(int).tolist())
+
+    def test_standard_and_batch_samples_both_included(self, tmp_path):
+        """A sample that has only legacy batch snapshots must still appear in
+        the aggregate beside a sample with a standard report."""
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+
+        standard = kraken_dir / "sample1.kraken2.report.txt"
+        standard.write_text("100.00\t500\t500\tS\t562\t  Escherichia coli\n")
+        _backdate_mtime(standard)
+
+        # sample2: flat legacy snapshots only; the latest (200) must be used.
+        _build_legacy_batch_layout(kraken_dir, "sample2", snapshot_reads=[100, 200])
+
+        df = load_kraken_data(str(tmp_path), sample=None)
+        taxids = set(df["taxid"].astype(int).tolist())
+        assert 562 in taxids
+        root = df[df["taxid"] == 1]
+        assert not root.empty, "batch-tier sample dropped from aggregate"
+        assert int(root.iloc[0]["cumul_reads"]) == 200
+
+    def test_cumulative_and_incremental_batch_samples_both_included(self, tmp_path):
+        """A sample still on incremental batch deltas appears (summed) beside a
+        finished cumulative sample."""
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+
+        cumul = kraken_dir / "sample1.cumulative.kraken2.report.txt"
+        cumul.write_text("100.00\t500\t500\tS\t562\t  Escherichia coli\n")
+        _backdate_mtime(cumul)
+
+        # barcode02: incremental deltas only (batch_0 E. coli 40, batch_1
+        # L. monocytogenes 30 per _build_incremental_layout's species cycle).
+        _build_incremental_layout(kraken_dir, "barcode02", batch_reads=[40, 30])
+
+        df = load_kraken_data(str(tmp_path), sample=None)
+        taxids = set(df["taxid"].astype(int).tolist())
+        assert 562 in taxids
+        assert 1639 in taxids, "incremental-tier sample dropped from aggregate"
+        root = df[df["taxid"] == 1]
+        assert int(root.iloc[0]["cumul_reads"]) == 70
+
+
+class TestNaNCumulReadsFallsBackToReads:
+    """A row whose cumul_reads alone fails numeric coercion must stay usable.
+
+    The NaN survived the reads/taxid dropna and then compared False against
+    every threshold, so the row silently vanished from per-sample attribution
+    and the discovery floor while remaining in the frame (audit 2026-08-16,
+    finding L15).
+    """
+
+    def test_bad_cumul_value_falls_back_to_reads(self, tmp_path):
+        report = tmp_path / "glitch.kraken2.report.txt"
+        report.write_text(
+            "50.00\t100\t0\tR\t1\troot\n"
+            "50.00\tBAD\t100\tS\t562\t  Escherichia coli\n"
+        )
+        _backdate_mtime(report)
+        df = _parse_kraken2_report(str(report))
+        assert df is not None
+        row = df[df["taxid"] == 562].iloc[0]
+        assert not pd.isna(row["cumul_reads"])
+        assert int(row["cumul_reads"]) == 100
+
+
+class TestBatchDedupPrefersSamplePrefixedName:
+    """The sample-prefixed tie-break was dead code via a chained comparison.
+
+    `'batch_reports' in fp == 'batch_reports' in existing` parsed as
+    `(... in fp) and (fp == 'batch_reports') and (...)`, never true for a
+    real path (audit 2026-08-16, finding L16).
+    """
+
+    def test_prefixed_name_wins_over_generic_in_same_dir(self):
+        generic = "/r/kraken2/s1/batch_reports/batch_0.kraken2.report.txt"
+        prefixed = "/r/kraken2/s1/batch_reports/s1_batch0.kraken2.report.txt"
+        result = _deduplicate_batch_files([generic, prefixed])
+        assert result == [prefixed]

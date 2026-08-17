@@ -264,6 +264,15 @@ def _parse_kraken2_report_uncached(filepath: str, check_stability: bool = True) 
             dropped = initial_len - len(df)
             logging.debug(f"Dropped {dropped} rows with invalid data from {filepath}")
 
+        # A row whose cumul_reads alone failed coercion survives the drop
+        # above with NaN -- which is always False in comparisons, so the row
+        # silently vanished from every cumul_reads-gated consumer (per-sample
+        # attribution, the discovery floor) and poisoned multi-batch sums.
+        # Fall back to the per-rank count: an undercount that keeps the row
+        # visible beats a row that exists in the frame but matches nothing.
+        if "cumul_reads" in df.columns and df["cumul_reads"].isna().any():
+            df["cumul_reads"] = df["cumul_reads"].fillna(df["reads"])
+
         # Ensure taxid is integer
         df["taxid"] = df["taxid"].astype(int)
 
@@ -426,9 +435,12 @@ def _deduplicate_batch_files(filepaths: List[str]) -> List[str]:
             existing = seen_batches[batch_key]
             if 'batch_reports' in fp and 'batch_reports' not in existing:
                 seen_batches[batch_key] = fp
-            # Prefer sample-prefixed naming over generic batch_ naming
+            # Prefer sample-prefixed naming over generic batch_ naming.
+            # Parenthesised equality on purpose: the bare form chained as
+            # `(... in fp) and (fp == 'batch_reports') and ...`, whose middle
+            # clause is never true for a real path, so this branch was dead.
             elif (sample_from_name and match.group(1)
-                  and 'batch_reports' in fp == 'batch_reports' in existing):
+                  and (('batch_reports' in fp) == ('batch_reports' in existing))):
                 existing_match = batch_id_pattern.search(os.path.basename(existing))
                 if existing_match and not existing_match.group(1):
                     seen_batches[batch_key] = fp
@@ -590,6 +602,31 @@ def _accumulate_kraken_df(
                 seen_taxids.add(taxid)
 
 
+_BATCH_NUM_RE = re.compile(r'batch[_\-]?(\d+)', re.IGNORECASE)
+_BATCH_SUFFIX_RE = re.compile(r'[._]batch[_\-]?\d+$', re.IGNORECASE)
+
+
+def _report_sample_key(fp: str) -> str:
+    """Derive the sample name a Kraken2 report file belongs to.
+
+    Strips the report suffixes and any embedded ``_batchN`` marker; for the
+    v1.5 nested layout (``<sample>/batch_reports/batch_N...``) the containing
+    per-sample directory names the sample.
+    """
+    basename = os.path.basename(fp)
+    stem = re.sub(
+        r'\.(cumulative\.kraken2\.report|kraken2\.report)\.txt$', '', basename,
+    )
+    stripped = _BATCH_SUFFIX_RE.sub('', stem)
+    if stripped and stripped != stem:
+        return stripped
+    parts = fp.replace('\\', '/').split('/')
+    for i, part in enumerate(parts):
+        if part in ('batch_reports', 'reports', 'batches') and i > 0:
+            return parts[i - 1]
+    return stem
+
+
 def _select_legacy_batch_per_sample(candidate_batches: List[str]) -> List[str]:
     """Keep the highest-numbered batch per sample for legacy snapshot layouts.
 
@@ -597,33 +634,13 @@ def _select_legacy_batch_per_sample(candidate_batches: List[str]) -> List[str]:
     latest matters. (Incremental deltas are handled by the caller, which keeps
     every batch for per-taxid summing.)
     """
-    batch_num_re = re.compile(r'batch[_\-]?(\d+)', re.IGNORECASE)
-    batch_suffix_re = re.compile(r'[._]batch[_\-]?\d+$', re.IGNORECASE)
-
-    def _batch_sample(fp: str) -> str:
-        basename = os.path.basename(fp)
-        stem = re.sub(
-            r'\.(cumulative\.kraken2\.report|kraken2\.report)\.txt$', '', basename,
-        )
-        # Strip batch_N suffix if embedded in the filename.
-        stripped = batch_suffix_re.sub('', stem)
-        if stripped and stripped != stem:
-            return stripped
-        # Fall back to the containing per-sample directory (v1.5 nested layout
-        # publishes batch_N.kraken2.report.txt under <sample>/batch_reports/).
-        parts = fp.replace('\\', '/').split('/')
-        for i, part in enumerate(parts):
-            if part in ('batch_reports', 'reports', 'batches') and i > 0:
-                return parts[i - 1]
-        return stem
-
     def _batch_num(fp: str) -> int:
-        m = batch_num_re.search(os.path.basename(fp))
+        m = _BATCH_NUM_RE.search(os.path.basename(fp))
         return int(m.group(1)) if m else -1
 
     by_sample: Dict[str, str] = {}
     for fp in candidate_batches:
-        sample_key = _batch_sample(fp)
+        sample_key = _report_sample_key(fp)
         current = by_sample.get(sample_key)
         if current is None or _batch_num(fp) > _batch_num(current):
             by_sample[sample_key] = fp
@@ -633,64 +650,73 @@ def _select_legacy_batch_per_sample(candidate_batches: List[str]) -> List[str]:
 def _discover_all_sample_reports(kraken_dir: str) -> List[str]:
     """Find Kraken2 reports to aggregate across all samples.
 
-    Priority: cumulative reports, then standard reports, then batch files
-    (incremental deltas kept whole; legacy snapshots reduced to the latest per
-    sample). Top-level globs first, v1.5 nested subdirs as a fallback. Returns
-    a realpath-deduplicated list (possibly empty).
+    The report tier (cumulative, then standard, then batch files) is resolved
+    PER SAMPLE and the per-sample selections are unioned. In a realtime
+    multi-barcode run the barcodes reach the cumulative report at staggered
+    times, so a directory-wide tier choice would silently drop every sample
+    still on a lower tier from the aggregate the verdict banner reads
+    (audit 2026-08-16, finding L1). Within one sample the priority matches
+    ``_discover_sample_reports``: cumulative wins, then standard, then batch
+    files (incremental deltas kept whole; legacy snapshots reduced to the
+    latest). Returns a sorted, realpath-deduplicated list (possibly empty).
     """
-    # 1. Cumulative reports (preferred for realtime), top-level then nested.
-    kreport_files = glob.glob(os.path.join(kraken_dir, "*.cumulative.kraken2.report.txt"))
-    if not kreport_files:
-        kreport_files = _scan_subdirs_for_pattern(kraken_dir, "*.cumulative.kraken2.report.txt")
-    if kreport_files:
-        kreport_files = sorted(dict.fromkeys(os.path.realpath(f) for f in kreport_files))
-        logging.debug(f"Found {len(kreport_files)} cumulative Kraken2 reports")
-        return kreport_files
+    # Gather candidates at every tier: top-level globs plus the v1.5 nested
+    # per-sample subdirectories.
+    cumulative = glob.glob(os.path.join(kraken_dir, "*.cumulative.kraken2.report.txt"))
+    cumulative.extend(
+        _scan_subdirs_for_pattern(kraken_dir, "*.cumulative.kraken2.report.txt")
+    )
 
-    # 2. Standard (non-batch, non-cumulative) reports: top-level, then nested,
-    # then a defensive flat-root re-scan for per_file/single_sample layouts.
     standard: List[str] = []
     for f in glob.glob(os.path.join(kraken_dir, "*.kraken2.report.txt")):
         if _is_standard_report(os.path.basename(f)):
             standard.append(f)
-    if not standard:
-        for f in _scan_subdirs_for_pattern(kraken_dir, "*.kraken2.report.txt"):
-            if _is_standard_report(os.path.basename(f)):
-                standard.append(f)
-    if not standard:
-        for f in glob.glob(os.path.join(kraken_dir, "*.kraken2.report.txt")):
-            if _is_standard_report(os.path.basename(f)):
-                standard.append(f)
-    # Sorted, not merely deduplicated: glob returns filesystem enumeration
-    # order, so without this the order in which reports are accumulated --
-    # and therefore the row order of the aggregated frame an operator sees --
-    # depended on the filesystem. It happened to be stable on APFS and was
-    # not on an ext4/overlay CI runner.
-    standard = sorted(dict.fromkeys(os.path.realpath(f) for f in standard))
-    if standard:
-        return standard
+    for f in _scan_subdirs_for_pattern(kraken_dir, "*.kraken2.report.txt"):
+        if _is_standard_report(os.path.basename(f)):
+            standard.append(f)
 
-    # 3. Batch files as last resort, dispatching on the upstream layout.
-    logging.debug("No standard reports found, looking for batch files")
     candidate_batches = glob.glob(os.path.join(kraken_dir, "*_batch*.kraken2.report.txt"))
     candidate_batches.extend(
         _scan_subdirs_for_pattern(kraken_dir, "*.kraken2.report.txt", subdir="batch_reports")
     )
     candidate_batches = _deduplicate_batch_files(candidate_batches)
-    if not candidate_batches:
-        return []
-    if _is_incremental_layout(kraken_dir):
-        logging.debug(
-            "Incremental Kraken2 layout detected: summing %d batch reports "
-            "across all samples", len(candidate_batches),
-        )
-        return candidate_batches
-    kreport_files = _select_legacy_batch_per_sample(candidate_batches)
-    logging.debug(
-        f"Selected {len(kreport_files)} latest-per-sample batch Kraken2 "
-        f"reports from {len(candidate_batches)} candidates"
+
+    cumulative_by_sample: Dict[str, List[str]] = {}
+    for f in cumulative:
+        cumulative_by_sample.setdefault(_report_sample_key(f), []).append(f)
+    standard_by_sample: Dict[str, List[str]] = {}
+    for f in standard:
+        standard_by_sample.setdefault(_report_sample_key(f), []).append(f)
+    batches_by_sample: Dict[str, List[str]] = {}
+    for f in candidate_batches:
+        batches_by_sample.setdefault(_report_sample_key(f), []).append(f)
+
+    selected: List[str] = []
+    all_samples = (
+        set(cumulative_by_sample) | set(standard_by_sample) | set(batches_by_sample)
     )
-    return kreport_files
+    for sample_key in all_samples:
+        if sample_key in cumulative_by_sample:
+            selected.extend(cumulative_by_sample[sample_key])
+        elif sample_key in standard_by_sample:
+            selected.extend(standard_by_sample[sample_key])
+        else:
+            batch_files = batches_by_sample[sample_key]
+            if _is_incremental_layout(kraken_dir, sample_key):
+                logging.debug(
+                    "Incremental Kraken2 layout for %s: summing %d batch reports",
+                    sample_key, len(batch_files),
+                )
+                selected.extend(batch_files)
+            else:
+                selected.extend(_select_legacy_batch_per_sample(batch_files))
+
+    # Sorted, not merely deduplicated: glob returns filesystem enumeration
+    # order, so without this the order in which reports are accumulated --
+    # and therefore the row order of the aggregated frame an operator sees --
+    # depended on the filesystem. It happened to be stable on APFS and was
+    # not on an ext4/overlay CI runner.
+    return sorted(dict.fromkeys(os.path.realpath(f) for f in selected))
 
 
 def _dedup_reports_by_sample_batch(kreport_files: List[str]) -> List[str]:

@@ -59,6 +59,19 @@ _NCBI_REFERENCE_TAXA: Dict[int, str] = {
     4565: "Triticum aestivum",
 }
 
+# Accepted CURRENT names for probe taxa that taxonomy authorities have
+# renamed since the reference names above were recorded. A database carrying
+# the new name on the ORIGINAL taxid is evidence FOR NCBI taxids, not against:
+# ICTV renamed SARS-CoV-2 to Betacoronavirus pandemicum and real flextaxd
+# builds carry that name on 2697049, which used to fail the all-must-match
+# probe and disable the exact-taxid shortcut database-wide. Only names listed
+# here are tolerated -- an unknown mismatch on a probe taxid stays fatal,
+# because that is what an actually renumbered taxid space looks like. Extend
+# this table when an authority renames a probe taxon.
+_KNOWN_TAXID_RENAMES: Dict[int, Tuple[str, ...]] = {
+    2697049: ("Betacoronavirus pandemicum",),
+}
+
 # GTDB writes a rank prefix on every name; none of these occur in NCBI names,
 # so a single occurrence is conclusive.
 _GTDB_RANK_PREFIXES: Tuple[str, ...] = (

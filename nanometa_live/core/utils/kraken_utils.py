@@ -96,7 +96,7 @@ def download_kraken_database(
 
         logging.info(f"Extracting Kraken2 database to {extract_dir}")
         with tarfile.open(temp_path, "r:gz") as tar:
-            tar.extractall(path=extract_dir)
+            tar.extractall(path=extract_dir, filter="data")
 
         # Remove the temporary file
         os.unlink(temp_path)
@@ -160,10 +160,17 @@ def check_kraken_db(db_path: str) -> Tuple[bool, List[str]]:
     if not db_path or not os.path.isdir(db_path):
         return False, list(KRAKEN_REQUIRED_FILES)
 
-    missing = [
-        name for name in KRAKEN_REQUIRED_FILES
-        if not os.path.isfile(os.path.join(db_path, name))
-    ]
+    # A required file must also be non-empty: an interrupted copy leaves a
+    # 0-byte hash.k2d that passes an existence check and fails only when
+    # Kraken2 tries to load it mid-run.
+    def _present(name: str) -> bool:
+        p = os.path.join(db_path, name)
+        try:
+            return os.path.isfile(p) and os.path.getsize(p) > 0
+        except OSError:
+            return False
+
+    missing = [name for name in KRAKEN_REQUIRED_FILES if not _present(name)]
     return (not missing), missing
 
 

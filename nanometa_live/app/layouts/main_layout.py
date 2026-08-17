@@ -550,6 +550,31 @@ def _main_on_demand_validation_modal():
     ], id="on-demand-validation-modal", is_open=False, size="lg", backdrop="static")
 
 
+def _main_tab_stores():
+    """The Organisms tab's dcc.Store components.
+
+    Extracted so create_main_layout stays a readable list of sections (and
+    under the code-size gate); these carry enough rationale to be worth their
+    own block.
+    """
+    return [
+        # Hidden store for species watchlist (synced with config)
+        dcc.Store(id="main-watchlist-store", data=[], storage_type="session"),
+        # Results fingerprint update_main_results last rendered. The callback is
+        # background=True, and DiskcacheManager spawns a fresh worker process
+        # per invocation, so its interval-backstop memo cannot live in a module
+        # global -- it reset on every call and the guard never fired, making the
+        # backstop tick re-parse the whole Kraken2 tree every poll. Not
+        # session-persisted: a reload should re-render rather than trust a memo
+        # for output it is no longer showing.
+        dcc.Store(id="main-results-rendered-fp", data=None),
+
+        # On-demand validation stores
+        dcc.Store(id="on-demand-validation-target", data=None),  # {taxid, name} of organism being validated
+        dcc.Store(id="on-demand-validation-results", data={}),  # {taxid: validation_result}
+    ]
+
+
 def create_main_layout():
     """
     Create the layout for the main results tab.
@@ -563,12 +588,7 @@ def create_main_layout():
         A dash component representing the main results tab layout
     """
     return html.Div([
-        # Hidden store for species watchlist (synced with config)
-        dcc.Store(id="main-watchlist-store", data=[], storage_type="session"),
-
-        # On-demand validation stores
-        dcc.Store(id="on-demand-validation-target", data=None),  # {taxid, name} of organism being validated
-        dcc.Store(id="on-demand-validation-results", data={}),  # {taxid: validation_result}
+        *_main_tab_stores(),
 
         # Alert Banner for watched species (dynamic - populated by callback)
         html.Div(id="watched-species-alert-container", className="mb-3"),

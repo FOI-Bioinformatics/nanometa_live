@@ -252,7 +252,7 @@ params). Defaults shown apply when the param is omitted.
 | `kraken2_memory_gb` | `12` | `12-32` (DB-dependent) | `32-90` (DB-dependent) | `32-90` |
 | `max_classification_forks` | `2` | `4-8` | `8-16` | `16-32` |
 | `max_concurrent_batches` | `2` | `4` | `4-8` | `4-8` |
-| `update_interval_seconds` | `30` | `30` | `15` | `15` |
+| `update_interval_seconds` | `10` (default) | `10` | `10` | `10` |
 | `pipeline_cores` | `4` | `8` | `16` | `32` |
 
 ### `kraken2_memory_gb` rule of thumb
@@ -291,12 +291,13 @@ only when pipeline progress is clearly bottlenecked on Kraken2.
 
 ### When to adjust `update_interval_seconds`
 
-The dashboard refreshes every `update_interval_seconds` seconds
-(default 30). On 24-barcode runs the loader sees fresh batch reports
-on most ticks, which is fine. Lower to 15 only when you have a fast
-host and want sub-30-second pathogen alerts; raise to 60 if the
-dashboard feels sluggish (often a sign you should also tune the
-knobs above).
+The dashboard refreshes every `update_interval_seconds` seconds while
+a run is active (default 10) and backs off to
+`idle_update_interval_seconds` (default 60) when nothing is running.
+Downstream callbacks are gated on a results fingerprint, so a tick
+that finds nothing new is near-zero cost. Raise the active interval
+if the dashboard feels sluggish on a slow host (often a sign you
+should also tune the knobs above).
 
 ### Verifying your tuning
 

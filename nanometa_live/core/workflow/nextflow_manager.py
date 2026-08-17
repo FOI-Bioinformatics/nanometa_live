@@ -636,6 +636,16 @@ class NextflowManager:
                 logging.info("Stopping Nextflow pipeline...")
                 self._user_stopped = True
 
+                # No live process to signal: either Stop raced the start
+                # window (self.process not yet assigned by the launch thread)
+                # or the process already exited on its own (crash, OOM kill)
+                # before the status poll reconciled. Falling through with
+                # ``message`` unbound raised UnboundLocalError here, which is
+                # not in the except tuple below -- self.running was already
+                # False, so a Stop retry short-circuited on "not running"
+                # while the caller's status stayed running forever.
+                message = "Pipeline was not running; state reconciled"
+
                 if self.process and self.process.poll() is None:
                     # Terminate the entire process group (Nextflow + child processes
                     # such as Docker, Kraken2, etc.) so nothing is left running.

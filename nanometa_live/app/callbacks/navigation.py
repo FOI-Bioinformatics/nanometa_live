@@ -190,7 +190,12 @@ def register_navigation(app, backend_manager):
         Output("app-config", "data", allow_duplicate=True),
         Output("open-results-modal", "is_open", allow_duplicate=True),
         Output("toast-message", "data", allow_duplicate=True),
-        Output("selected-sample", "data", allow_duplicate=True),
+        # Reset the DROPDOWN, not the selected-sample store. sample-selector has
+        # persistence_type="session", so writing only the store left the visible
+        # dropdown holding a barcode from the previous run while every tab
+        # rendered the aggregate. update_selected_sample mirrors this into the
+        # store, keeping it the single writer there.
+        Output("sample-selector", "value", allow_duplicate=True),
         Input({"type": "open-results-run", "path": ALL}, "n_clicks"),
         State("app-config", "data"),
         prevent_initial_call=True,
@@ -238,7 +243,8 @@ def register_navigation(app, backend_manager):
         Output("app-config", "data", allow_duplicate=True),
         Output("folder-browser-modal", "is_open", allow_duplicate=True),
         Output("toast-message", "data", allow_duplicate=True),
-        Output("selected-sample", "data", allow_duplicate=True),
+        # See select_run_to_view: reset the dropdown, not the store.
+        Output("sample-selector", "value", allow_duplicate=True),
         Input("confirm-directory-select", "n_clicks"),
         State("current-browse-path", "data"),
         State("browse-target-field", "data"),

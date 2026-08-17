@@ -396,3 +396,55 @@ class TestExtractErrorFromLog:
         path = self._log(manager, "line one\nthe final boring line\n")
         msg = manager._extract_error_from_log(path)
         assert msg == "the final boring line"
+
+
+class TestStopWithoutLiveProcess:
+    """stop() must reconcile state instead of raising when there is no live
+    process to signal.
+
+    ``message`` was only assigned inside ``if self.process and
+    self.process.poll() is None:``, and the fall-through ``return True,
+    message`` raised ``UnboundLocalError`` -- not in the except tuple, so it
+    propagated into the Stop callback. ``self.running`` had already been set
+    False, so a retry short-circuited on "not running" while
+    BackendManager.status stayed running forever: the GUI could no longer
+    stop (or reconcile) the pipeline. Audit 2026-08-16, finding W1.
+    """
+
+    def test_stop_with_no_process_object(self, tmp_path):
+        m = NextflowManager(str(tmp_path))
+        m.running = True
+        m.process = None
+
+        ok, message = m.stop()
+
+        assert ok is True
+        assert message
+        assert m.running is False
+        assert m.status["running"] is False
+
+    def test_stop_with_already_exited_process(self, tmp_path):
+        import subprocess as sp
+
+        m = NextflowManager(str(tmp_path))
+        m.running = True
+        proc = sp.Popen(["true"])
+        proc.wait()
+        m.process = proc
+
+        ok, message = m.stop()
+
+        assert ok is True
+        assert message
+        assert m.running is False
+        assert m.status["running"] is False
+
+    def test_stop_is_idempotent_after_reconcile(self, tmp_path):
+        m = NextflowManager(str(tmp_path))
+        m.running = True
+        m.process = None
+        m.stop()
+
+        ok, message = m.stop()
+        assert ok is False
+        assert "not running" in message.lower()

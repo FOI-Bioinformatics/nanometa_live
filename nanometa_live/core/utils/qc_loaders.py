@@ -715,6 +715,13 @@ def _load_seqkit_incremental(
 
     rows: List[Dict[str, Any]] = []
     for sample_name in sample_dirs:
+        # The flat merged TSV is authoritative for a sample once it exists:
+        # SEQKIT_MERGE_STATS refreshes it on the same cadence that publishes
+        # the per-batch files, so the two coexist for the whole run. Summing
+        # batch_stats for a sample the flat file already covers made the
+        # All-Samples concat count merged samples twice.
+        if os.path.isfile(os.path.join(seqkit_dir, f"{sample_name}.tsv")):
+            continue
         batch_stats_dir = os.path.join(
             seqkit_dir, sample_name, "batch_stats"
         )
@@ -930,6 +937,7 @@ def get_sample_statistics_summary(main_dir: str) -> pd.DataFrame:
 
     samples = get_available_samples(main_dir)
     summary_data = []
+    real_sample_count = sum(1 for s in samples if s != "All Samples")
 
     # Aggregate NanoPlot/seqkit fallback, resolved lazily and at most once.
     # This used to be called from inside the per-sample loop, where each call
@@ -972,7 +980,16 @@ def get_sample_statistics_summary(main_dir: str) -> pd.DataFrame:
         else:
             # Fall back to NanoPlot stats (used when chopper is the QC tool)
             nanoplot_stats = load_nanoplot_stats(main_dir, sample)
-            if nanoplot_stats.get('number_of_reads', 0) == 0:
+            # Single-sample mode only: NanoPlot output is not per-sample
+            # there, so the aggregate IS this sample's stats. With more
+            # than one sample the substitution showed the whole run's
+            # combined reads/bases/N50 as one zero-read barcode's own row
+            # -- a failed barcode, or a negative control, rendered with the
+            # run totals (audit 2026-08-16, finding L11).
+            if (
+                nanoplot_stats.get('number_of_reads', 0) == 0
+                and real_sample_count == 1
+            ):
                 nanoplot_stats = aggregate_nanoplot_stats()
 
             if nanoplot_stats.get('number_of_reads', 0) > 0:

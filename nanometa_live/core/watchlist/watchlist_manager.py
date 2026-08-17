@@ -233,6 +233,14 @@ class WatchlistEntry:
         alert_threshold = data.get(
             "alert_threshold", default_alert_threshold(threat_level)
         )
+        # A hand-edited YAML can carry ``alert_threshold: null`` or a
+        # non-numeric string; an unguarded int() raised out of the per-entry
+        # loading loop and silently truncated the rest of the file. Fall back
+        # to the threat-level default rather than dropping the entry.
+        try:
+            alert_threshold = int(alert_threshold)
+        except (ValueError, TypeError):
+            alert_threshold = default_alert_threshold(threat_level)
 
         # Handle taxid - support both 'taxid' and 'taxid_ncbi' keys
         taxid = data.get("taxid") or data.get("taxid_ncbi") or 0
@@ -265,7 +273,7 @@ class WatchlistEntry:
             name=data.get("name", "Unknown"),
             common_name=data.get("common_name"),
             threat_level=threat_level,
-            alert_threshold=int(alert_threshold),
+            alert_threshold=alert_threshold,
             bsl_level=bsl_level,
             category=data.get("category", "Custom"),
             notes=data.get("notes", ""),
@@ -460,7 +468,9 @@ class WatchlistManager:
 
     def __init__(self):
         """Initialize the watchlist manager."""
-        self._lock = threading.Lock()
+        # Reentrant: readers now snapshot under the lock, and a mutator that
+        # calls a locked reader must not deadlock.
+        self._lock = threading.RLock()
         self._entries: Dict[int, WatchlistEntry] = {}
         self._name_index: Dict[str, int] = {}  # name.lower() -> taxid
         self._enabled_categories: Set[str] = set()
@@ -636,11 +646,23 @@ class WatchlistManager:
                 # the file is still honoured.
                 entry_data = dict(p_data)
                 entry_data["enabled"] = entry_data.get("enabled", True)
-                self._add_entry_from_dict(
-                    entry_data,
-                    WatchlistSource.IMPORTED,
-                    watchlist_id=watchlist_id
-                )
+                # Per-entry isolation: one malformed entry must cost that
+                # entry alone. Raising out of this loop dropped every entry
+                # after the bad one AND skipped the enabled-marking below --
+                # the UI then reported the watchlist off while the entries
+                # loaded before the failure were live.
+                try:
+                    self._add_entry_from_dict(
+                        entry_data,
+                        WatchlistSource.IMPORTED,
+                        watchlist_id=watchlist_id
+                    )
+                except Exception:
+                    logger.exception(
+                        "Skipping malformed watchlist entry %r in %s; the "
+                        "remaining entries are still loaded",
+                        p_data.get("name", p_data), file_path,
+                    )
 
             self._enabled_watchlists.add(watchlist_id)
             logger.info(f"Loaded {len(pathogens)} entries from custom file: {file_path}")
@@ -799,8 +821,17 @@ class WatchlistManager:
         return self._entries.copy()
 
     def get_active_entries(self) -> Dict[int, WatchlistEntry]:
-        """Get only enabled watchlist entries."""
-        return {k: v for k, v in self._entries.items() if v.enabled}
+        """Get only enabled watchlist entries.
+
+        Snapshotted under the lock: mutators (load_config rebuilds
+        ``_entries`` key by key) hold ``self._lock``, and iterating the live
+        dict without it can raise "dictionary changed size during iteration"
+        mid-poll or -- worse -- miss an entry not yet re-added, a transient
+        false negative on that screening pass. The returned dict is a copy,
+        so callers can iterate it freely.
+        """
+        with self._lock:
+            return {k: v for k, v in self._entries.items() if v.enabled}
 
     def get_entry_by_taxid(self, taxid: int) -> Optional[WatchlistEntry]:
         """Get a specific entry by taxonomy ID."""
@@ -822,7 +853,11 @@ class WatchlistManager:
 
     def get_entries_by_threat_level(self, level: ThreatLevel) -> List[WatchlistEntry]:
         """Get all entries of a specific threat level."""
-        return [e for e in self._entries.values() if e.threat_level == level and e.enabled]
+        with self._lock:
+            return [
+                e for e in self._entries.values()
+                if e.threat_level == level and e.enabled
+            ]
 
     def get_critical_entries(self) -> List[WatchlistEntry]:
         """Get all critical threat level entries."""
@@ -985,6 +1020,16 @@ class WatchlistManager:
                     "threshold": entry.alert_threshold,
                     "match_score": best_score,
                     "detected_name": name,
+                    # Same disclosure as check_organisms_with_mapping: a
+                    # detection on a database node shared by several entries
+                    # (GTDB folds B. mallei into pseudomallei) genuinely
+                    # cannot say which organism it is, and this fallback
+                    # path is the NORMAL one whenever no mapping collection
+                    # exists -- announcing one name at full confidence there
+                    # is a false identification on a biothreat panel.
+                    "ambiguous_with": self._other_entries_on_node(
+                        taxid, db_to_ncbi, active_entries, entry
+                    ),
                 })
 
         # Sort by threat level (critical first)
@@ -1817,7 +1862,13 @@ class WatchlistManager:
                     # and scores 1.0: it is an explicit statement, not a guess.
                     mapping = mapping_collection.mappings.get(ncbi_taxid)
                     if mapping:
-                        best_score = mapping.match_score or 0.9
+                        # `or` would promote a genuine 0.0 score to 0.9, turning a
+                        # no-confidence mapping into a strong match; only an
+                        # ABSENT score takes the default.
+                        best_score = (
+                            mapping.match_score
+                            if mapping.match_score is not None else 0.9
+                        )
                     elif getattr(entry, "db_taxid", None) == detected_taxid:
                         best_score = 1.0
                     else:

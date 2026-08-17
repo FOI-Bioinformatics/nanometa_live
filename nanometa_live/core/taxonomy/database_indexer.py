@@ -26,6 +26,7 @@ from nanometa_live.core.taxonomy.taxonomy_signals import (
     _BINOMIAL_MAJORITY,
     _GTDB_GENUS_SUFFIX_RE,
     _GTDB_RANK_PREFIXES,
+    _KNOWN_TAXID_RENAMES,
     _NCBI_REFERENCE_TAXA,
     _NOMENCLATURE_SAMPLE_SIZE,
     _names_agree,
@@ -521,16 +522,28 @@ class DatabaseIndexBuilder:
         matches = 0
         checked = 0
 
+        renames_seen = []
         for ncbi_taxid, expected_name in _NCBI_REFERENCE_TAXA.items():
             if ncbi_taxid not in index.by_taxid:
                 continue
             checked += 1
-            if _names_agree(index.by_taxid[ncbi_taxid].name, expected_name):
+            actual_name = index.by_taxid[ncbi_taxid].name
+            if _names_agree(actual_name, expected_name):
                 matches += 1
+                continue
+            # A documented rename on the original taxid is evidence FOR NCBI
+            # taxids (the number still means the same organism under its
+            # current name); anything else stays fatal.
+            renamed_forms = _KNOWN_TAXID_RENAMES.get(ncbi_taxid, ())
+            if any(_names_agree(actual_name, r) for r in renamed_forms):
+                matches += 1
+                renames_seen.append(ncbi_taxid)
 
         if checked == 0:
             return False, "no reference taxa present"
         evidence = f"{matches}/{checked} reference taxa match"
+        if renames_seen:
+            evidence += f" (incl. known renames: {renames_seen})"
         if matches == checked:
             logger.info("Detected NCBI-compatible taxids: %s", evidence)
             return True, evidence

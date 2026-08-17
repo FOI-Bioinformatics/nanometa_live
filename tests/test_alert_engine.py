@@ -380,3 +380,41 @@ class TestGetAlertEngineSingleton:
         first = instances[0]
         for inst in instances[1:]:
             assert inst is first
+
+
+class TestDetectionRenderingIsolation:
+    """One malformed detection must cost one alert, not the rest of the list.
+
+    The try/except wrapped the whole rendering loop, so a formatting error on
+    detection N (a non-numeric reads field breaking the :, format spec)
+    silently dropped detections N+1..end from the Alerts panel -- including a
+    CRITICAL pathogen ordered after the failing one. Audit 2026-08-16,
+    finding L17.
+    """
+
+    def test_bad_detection_does_not_drop_later_critical(self, monkeypatch):
+        from nanometa_live.core.utils import alert_engine as ae
+
+        detections = [
+            {  # reads is a string: f"{reads:,}" raises ValueError
+                "name": "Broken detection", "threat_level": "high",
+                "reads": "not-a-number", "abundance": 1.0, "taxid": 1,
+            },
+            {
+                "name": "Bacillus anthracis", "threat_level": "critical",
+                "reads": 900, "abundance": 42.0, "taxid": 1392,
+                "action_required": "Notify", "category": "A",
+            },
+        ]
+        monkeypatch.setattr(
+            ae, "check_for_dangerous_pathogens", lambda *a, **k: detections
+        )
+
+        engine = ae.AlertEngine()
+        alerts = engine._check_dangerous_pathogens([{"taxid": 1, "name": "x"}])
+
+        messages = " ".join(a.message for a in alerts)
+        assert "Bacillus anthracis" in messages, (
+            "a malformed detection earlier in the list silently dropped a "
+            "CRITICAL pathogen from the Alerts panel"
+        )

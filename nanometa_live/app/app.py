@@ -399,7 +399,23 @@ def create_app(
         dcc.Store(id='watchlist-validation-results', data=None),
         dcc.Store(id='theme-preference', data='auto'),  # auto, light, dark
         dcc.Store(id='previous-running-state', data=False),  # For detecting analysis completion
+        # Raised by handle_stop_confirmation on a successful operator stop and
+        # consumed by auto_navigate_on_completion, which otherwise cannot tell
+        # an abort from a natural finish (both are a running -> not-running
+        # transition) and announced a truncated run as "Results are up to date".
+        # A dedicated Store, not a backend-status field: the next status poll
+        # overwrites backend-status wholesale from BackendManager.get_status().
+        dcc.Store(id='user-stop-requested', data=False),
         dcc.Store(id='readiness-state', data={"ready": False, "checks": []}),
+        # {fingerprint, ts} of the last ReadinessChecker run. update_readiness_state
+        # is a background callback, and DiskcacheManager spawns a fresh process
+        # per invocation, so its TTL state cannot live in a module global -- it
+        # would reset every call and the docker/nextflow probes would run on
+        # every poll. Deliberately separate from readiness-state, which is left
+        # unwritten when the result is unchanged so the checklist does not
+        # re-open under the operator; this Store has no renderer and so can be
+        # written every recompute, which is what keeps the TTL window renewable.
+        dcc.Store(id='readiness-probe-stamp', data=None),
 
         # Per-list "show all" toggles for the BLAST + minimap2 result-
         # card containers. Default False renders only the top 30; the

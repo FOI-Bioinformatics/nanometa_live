@@ -1,10 +1,9 @@
 """Round-trip tests for the realtime_timeout_minutes config key.
 
-Covers the four layers the key touches:
+Covers the two live layers the key touches:
 - ConfigLoader.create_default_config() ensures a default value
-- config_validator coerces invalid values back to the default, keeps None
-- create_nextflow_params forwards the value to Nextflow
-- Validator accepts None (= run indefinitely) without overwriting
+- create_nextflow_params forwards the value to Nextflow, with an explicit
+  None reaching the params file as JSON null (= run indefinitely)
 
 Follows up on audit item F12 (nanometanf default landed in 2026-04-21). The
 GUI-side field was the remaining gap; these tests pin the integration so a
@@ -16,7 +15,6 @@ from __future__ import annotations
 import pytest
 
 from nanometa_live.core.config.config_loader import ConfigLoader
-from nanometa_live.core.config.config_validator import validate_config
 from nanometa_live.core.config.parameter_mapping import create_nextflow_params
 
 
@@ -44,44 +42,11 @@ class TestDefaultIncludesKey:
         assert defaults["realtime_timeout_minutes"] == 60
 
 
-class TestValidator:
-    # validate_config raises on a completely empty dict, so seed each case with
-    # a minimal-but-valid baseline and only vary realtime_timeout_minutes.
-    @staticmethod
-    def _run(extra):
-        base = {"analysis_name": "TestRun"}
-        base.update(extra)
-        return validate_config(base)
-
-    def test_validator_adds_default_when_missing(self):
-        validated = self._run({})
-        assert validated["realtime_timeout_minutes"] == 60
-
-    def test_validator_preserves_none(self):
-        validated = self._run({"realtime_timeout_minutes": None})
-        assert validated["realtime_timeout_minutes"] is None
-
-    def test_validator_preserves_valid_values(self):
-        for value in (1, 30, 60, 1440, 10080):
-            validated = self._run({"realtime_timeout_minutes": value})
-            assert validated["realtime_timeout_minutes"] == value
-
-    def test_validator_rejects_out_of_range_below(self):
-        validated = self._run({"realtime_timeout_minutes": 0})
-        assert validated["realtime_timeout_minutes"] == 60
-
-    def test_validator_rejects_out_of_range_above(self):
-        validated = self._run({"realtime_timeout_minutes": 10081})
-        assert validated["realtime_timeout_minutes"] == 60
-
-    def test_validator_rejects_non_integer(self):
-        validated = self._run({"realtime_timeout_minutes": "sixty"})
-        assert validated["realtime_timeout_minutes"] == 60
-
-    def test_validator_rejects_bool(self):
-        # True is an int subclass; make sure we guard against it.
-        validated = self._run({"realtime_timeout_minutes": True})
-        assert validated["realtime_timeout_minutes"] == 60
+# The former TestValidator class exercised core/config/config_validator.py,
+# which was dead code in the live app (never called outside its own tests)
+# with already-drifted defaults; it was deleted in the 2026-08-16 audit
+# remediation. The live null-means-indefinite contract is pinned by
+# TestParameterMappingPassthrough below and by create_default_config.
 
 
 class TestParameterMappingPassthrough:
@@ -95,10 +60,14 @@ class TestParameterMappingPassthrough:
         params = create_nextflow_params(realtime_config)
         assert params["realtime_timeout_minutes"] == 1440
 
-    def test_none_is_not_forwarded(self, realtime_config):
-        # parameter_mapping guards with `if realtime_timeout:` so None/0 drop out.
-        # None means "run indefinitely", which is nanometanf's default when the
-        # param is absent.
+    def test_none_is_forwarded_as_null(self, realtime_config):
+        # The old comment here claimed nanometanf defaults to indefinite when
+        # the param is absent -- it does not: its default is 60 minutes, so
+        # OMITTING the key silently reinstated a one-hour cutoff on a run the
+        # operator configured to watch forever. An explicit None must reach
+        # the params file as JSON null, which nanometanf documents and
+        # handles as "run indefinitely" (audit 2026-08-16, finding L8).
         realtime_config["realtime_timeout_minutes"] = None
         params = create_nextflow_params(realtime_config)
-        assert "realtime_timeout_minutes" not in params
+        assert "realtime_timeout_minutes" in params
+        assert params["realtime_timeout_minutes"] is None

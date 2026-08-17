@@ -153,18 +153,20 @@ def test_freshness_row_renders_pills_for_multiplex(main_app):
 # update_main_results (empty-data path)
 # --------------------------------------------------------------------------- #
 
-def test_update_main_results_empty_returns_nine_outputs(main_app):
+def test_update_main_results_empty_returns_ten_outputs(main_app):
     fn = get_callback_fn(main_app, "organism-cards-container")
     with ctx_with("apply-organism-filters"):
         result = fn(
             None, 1, None, [], 0,    # fingerprint, apply, sample, watchlist, n_intervals
             10, 0, ["S"],            # top_count, min_abundance, tax_ranks
             {}, {}, {},              # config, status, overall_status_cache
+            None,                    # rendered_fp (Store-backed backstop memo)
         )
-    # 9 outputs: summary, cards, table, total-count, results-count,
-    # watched-alert, watched-section-style, watched-cards, watched-count
+    # 10 outputs: summary, cards, table, total-count, results-count,
+    # watched-alert, watched-section-style, watched-cards, watched-count,
+    # rendered-fingerprint memo
     assert isinstance(result, tuple)
-    assert len(result) == 9
+    assert len(result) == 10
     # empty data -> zero organism count
     assert result[3] == "0"
 
@@ -177,9 +179,9 @@ def test_update_main_results_populated_builds_organisms(main_app, populated_conf
         result = fn(
             "fp1", 1, None, [], 0,
             50, 0, ["S"],
-            populated_config, {"running": True}, {},
+            populated_config, {"running": True}, {}, None,
         )
-    assert len(result) == 9
+    assert len(result) == 10
     # total-organisms-count (index 3) must reflect detected species
     total = result[3]
     # badge text is a count string; non-zero for a populated dataset

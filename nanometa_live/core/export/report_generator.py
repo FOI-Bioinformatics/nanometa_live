@@ -11,16 +11,17 @@ import os
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
-import plotly.graph_objects as go
-import plotly.io as pio
 
+from nanometa_live.core.export.report_charts import build_charts
+from nanometa_live.core.utils.attribution import is_negative_control
 from nanometa_live.core.utils.classification_loaders import load_kraken_data
 from nanometa_live.core.utils.qc_loaders import get_qc_stats
 from nanometa_live.core.utils.sample_detector import (
     get_available_samples,
+    get_sample_file_mapping,
     resolve_analysis_directory,
 )
 from nanometa_live.app.tabs.dashboard_helpers import DEFAULT_LOW_READ_FLOOR
@@ -94,9 +95,28 @@ class ReportGenerator:
         if not selected_samples:
             selected_samples = [None]  # Aggregated view only
 
-        # Collect data. Pass include_raw so report links are only emitted when
-        # the report files are actually bundled under raw/ (else they'd dangle).
-        report_data = self._collect_data(selected_samples, include_raw=include_raw)
+        # Raw files are copied BEFORE the Pipeline Reports links below are
+        # built, and the links are derived from what actually landed under
+        # raw/ rather than from a bare include_raw bool. Previously the
+        # links were built first (in _collect_data) and the copy ran
+        # afterward: a size-cap skip or a partial subdir failure left
+        # "Pipeline Reports" hrefs pointing at a raw/ tree that was never
+        # created (or missing that one subdir), with nothing in the HTML to
+        # explain the 404s. See _copy_raw_files_verbose / raw_skip_reason.
+        raw_files_included: List[str] = []
+        raw_skip_reason: Optional[str] = None
+        if include_raw:
+            raw_files_included, raw_skip_reason = self._copy_raw_files_verbose(
+                str(output_path)
+            )
+
+        report_data = self._collect_data(
+            selected_samples,
+            include_raw=include_raw,
+            copied_raw_subdirs=raw_files_included,
+            raw_skip_reason=raw_skip_reason,
+        )
+        report_data["raw_files_included"] = raw_files_included
 
         # Build HTML
         html_content = self._build_html_report(report_data)
@@ -104,17 +124,18 @@ class ReportGenerator:
         report_file.write_text(html_content, encoding="utf-8")
         logger.info("Report written to %s", report_file)
 
-        # Copy raw files
-        report_data["raw_files_included"] = (
-            self._copy_raw_files(str(output_path)) if include_raw else []
-        )
-
         # Write metadata
         self._write_metadata(str(output_path), report_data)
 
         return report_file
 
-    def _collect_data(self, samples: List[Optional[str]], include_raw: bool = True) -> Dict[str, Any]:
+    def _collect_data(
+        self,
+        samples: List[Optional[str]],
+        include_raw: bool = True,
+        copied_raw_subdirs: Optional[List[str]] = None,
+        raw_skip_reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Collect all data needed for the report."""
         # Aggregated data. get_qc_stats already abstracts fastp/seqkit (the two
         # are mutually exclusive), so a separate fastp-only summary is dropped.
@@ -138,14 +159,19 @@ class ReportGenerator:
         # Alerts (pathogen + QC) from the post-run watchlist screen and QC stats.
         alerts = self._collect_alerts(qc_stats=qc_all, watched_results=watched_results)
 
-        # Pipeline reports (MultiQC, Nextflow) -- linked only when raw files are
-        # bundled, since the links point at the copied files under raw/.
+        # Pipeline reports (MultiQC, Nextflow) -- linked only for subdirs that
+        # were ACTUALLY copied under raw/ (copied_raw_subdirs), not merely
+        # "include_raw was requested". A report whose top-level subdir (e.g.
+        # multiqc/, pipeline_info/) was skipped by the size cap or failed to
+        # copy would otherwise get a link that 404s with no explanation.
         pipeline_reports = []
         if include_raw:
             from nanometa_live.core.utils.reports_loader import export_report_links
+            copied_set = set(copied_raw_subdirs or [])
             pipeline_reports = [
                 {"label": r["label"], "href": f"raw/{r['relpath']}"}
                 for r in export_report_links(self.results_dir)
+                if r["relpath"].split("/", 1)[0] in copied_set
             ]
 
         per_sample = self._per_sample_data(samples, sample_frames)
@@ -174,6 +200,7 @@ class ReportGenerator:
             "alerts": alerts,
             "per_sample": per_sample,
             "pipeline_reports": pipeline_reports,
+            "raw_skip_reason": raw_skip_reason,
         }
 
     def _low_read_floor(self) -> int:
@@ -208,6 +235,18 @@ class ReportGenerator:
         The list is empty on databases that do not resolve below species, and
         the template omits the section entirely in that case.
         """
+        # ``_manifest.json`` PREDICTS output files from the sample list and
+        # active tools; it does not verify them (bin/write_manifest.py runs
+        # in its own work dir and cannot see the publishDir). A sample whose
+        # QC/Kraken2 stage failed -- absorbed by conf/error_isolation.config
+        # -- is listed exactly like a healthy one. The dashboard's sample
+        # selector compensates by comparing available-samples against the
+        # on-disk file mapping; the export had no equivalent, so a failed
+        # barcode rendered as an ordinary "clean" sample (0 reads, 0
+        # organisms) in the archived artifact with nothing to distinguish it
+        # from a genuine negative.
+        file_mapping = get_sample_file_mapping(self.results_dir)
+
         per_sample: Dict[str, Any] = {}
         for sample in samples:
             if sample is None:
@@ -225,6 +264,7 @@ class ReportGenerator:
                 "subspecies": self._extract_organisms(
                     sample_kraken, ranks=("S1", "S2", "S3"),
                 )[:20],
+                "attempted_no_output": not file_mapping.get(sample),
             }
         return per_sample
 
@@ -304,7 +344,14 @@ class ReportGenerator:
         match_id: Optional[int],
         entry_name: Optional[str],
     ) -> List[Dict[str, Any]]:
-        """Per-sample read counts for one watchlist entry, highest first."""
+        """Per-sample read counts for one watchlist entry, highest first.
+
+        Each row carries ``is_negative_control`` so ``_screen_watchlist`` can
+        split declared controls out of the triggering-sample list without a
+        second pass over the frames -- see the "Negative controls" contract
+        in CLAUDE.md, mirrored here from ``core.utils.attribution`` (the same
+        resolver the dashboard's verdict banner uses).
+        """
         rows: List[Dict[str, Any]] = []
         for sample, df in (sample_frames or {}).items():
             if df is None or df.empty:
@@ -322,6 +369,7 @@ class ReportGenerator:
                 "sample": sample,
                 "reads": reads,
                 "abundance": round((reads / total * 100) if total > 0 else 0, 3),
+                "is_negative_control": is_negative_control(sample, self.config),
             })
         rows.sort(key=lambda r: r["reads"], reverse=True)
         return rows
@@ -363,34 +411,91 @@ class ReportGenerator:
             read_col = "cumul_reads" if "cumul_reads" in kraken_df.columns else "reads"
 
             for entry in active_entries.values():
-                threat = entry.threat_level
-                threat_level = threat.value if hasattr(threat, "value") else str(threat)
-
-                match_id = getattr(entry, "db_taxid", None) or entry.taxid
-                matched = self._match_entry_rows(kraken_df, match_id, entry.name)
-
-                reads = int(matched[read_col].sum()) if not matched.empty else 0
-                abundance = (reads / total * 100) if total > 0 else 0
-                per_sample = (
-                    self._attribute_entry_to_samples(
-                        sample_frames, match_id, entry.name
-                    ) if reads > 0 else []
+                row = self._screen_watchlist_entry(
+                    entry, kraken_df, sample_frames, read_col, total,
                 )
-
-                results.append({
-                    "name": entry.name,
-                    "taxid": entry.taxid,
-                    "threat_level": threat_level,
-                    "reads": reads,
-                    "abundance": round(abundance, 3),
-                    "detected": reads > 0,
-                    "samples": per_sample,
-                })
+                if row is not None:
+                    results.append(row)
 
         except Exception as e:
             logger.exception("Could not screen watchlist: %s", e)
 
         return results
+
+    def _screen_watchlist_entry(
+        self,
+        entry: Any,
+        kraken_df: pd.DataFrame,
+        sample_frames: Optional[Dict[str, pd.DataFrame]],
+        read_col: str,
+        total: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Screen ONE watchlist entry against ``kraken_df``; return its report
+        row, or ``None`` on failure.
+
+        Isolated per entry on purpose: one malformed entry (missing field,
+        bad type, a pandas error on its rows) must cost only that entry, not
+        abort ``_screen_watchlist``'s loop. With the whole loop in one try, a
+        single bad entry blanked the screen for every organism and the
+        report rendered a false "NOT SCREENED" -- while a true positive
+        later in iteration order was dropped.
+        """
+        try:
+            threat = entry.threat_level
+            threat_level = threat.value if hasattr(threat, "value") else str(threat)
+
+            match_id = getattr(entry, "db_taxid", None) or entry.taxid
+            matched = self._match_entry_rows(kraken_df, match_id, entry.name)
+
+            reads = int(matched[read_col].sum()) if not matched.empty else 0
+            abundance = (reads / total * 100) if total > 0 else 0
+            per_sample = (
+                self._attribute_entry_to_samples(
+                    sample_frames, match_id, entry.name
+                ) if reads > 0 else []
+            )
+
+            # Negative controls are reported alongside a detection, never
+            # acted on: they are split out of the triggering list here, but
+            # a control-carried-only hit still shows as "detected" -- a
+            # contaminated control never makes a real aggregate positive
+            # disappear. Mirrors the dashboard's build_pathogen_attribution.
+            triggering_samples = [
+                s for s in per_sample if not s.get("is_negative_control")
+            ]
+            negative_control_rows = [
+                s for s in per_sample if s.get("is_negative_control")
+            ]
+            nc_reads = sum(s["reads"] for s in negative_control_rows)
+            positive_reads = sum(s["reads"] for s in triggering_samples)
+            nc_fraction = (
+                (nc_reads / positive_reads * 100)
+                if (negative_control_rows and positive_reads)
+                else None
+            )
+
+            return {
+                "name": entry.name,
+                "taxid": entry.taxid,
+                "threat_level": threat_level,
+                "reads": reads,
+                "abundance": round(abundance, 3),
+                "detected": reads > 0,
+                "samples": per_sample,
+                "triggering_samples": triggering_samples,
+                "negative_control_rows": negative_control_rows,
+                "negative_control_fraction": nc_fraction,
+                "control_only": bool(
+                    negative_control_rows and not triggering_samples
+                ),
+            }
+        except Exception:
+            logger.exception(
+                "Could not screen watchlist entry %r; the remaining "
+                "entries are still screened",
+                getattr(entry, "name", entry),
+            )
+            return None
 
     def _collect_alerts(self, qc_stats=None, watched_results=None) -> List[Dict[str, Any]]:
         """Generate the report's alerts from the post-run state.
@@ -493,8 +598,16 @@ class ReportGenerator:
         plotly_js = self._get_plotly_js()
         use_cdn = (not plotly_js) and not self.config.get("offline_mode")
 
-        # Serialize charts dict to JSON for embedding in template script
-        charts_json = json.dumps(charts)
+        # Serialize charts dict to JSON for embedding in template script.
+        # The template embeds this with ``| safe`` inside a <script> element,
+        # and json.dumps does not escape "/": a string in the chart payload
+        # containing the literal "</script>" (a sample or organism name --
+        # watchlist YAML upload is an external-input path) terminates the
+        # script element at the HTML-parser level and any following markup
+        # executes in the reader's browser. Escaping "</" as "<\/" is a
+        # JSON-transparent HTML-breakout guard: identical data, no parseable
+        # close tag.
+        charts_json = json.dumps(charts).replace("</", "<\\/")
 
         return template.render(
             data=data,
@@ -506,128 +619,16 @@ class ReportGenerator:
         )
 
     def _build_charts(self, data: Dict[str, Any]) -> Dict[str, str]:
-        """Build all Plotly charts and serialize to JSON."""
-        charts = {}
+        """Build all Plotly charts and serialize to JSON.
 
-        # Classification donut (aggregated)
-        charts["classification_donut"] = self._fig_to_json(
-            self._create_classification_donut(
-                data["classified_total"],
-                data["unclassified_total"],
-                title="Overall Classification"
-            )
-        )
-
-        # Per-sample donuts
-        for sample, sdata in data.get("per_sample", {}).items():
-            key = f"donut_{sample}"
-            charts[key] = self._fig_to_json(
-                self._create_classification_donut(
-                    sdata["classified"],
-                    sdata["unclassified"],
-                    title=sample,
-                    compact=True,
-                )
-            )
-
-            # Organism abundance bar chart
-            if sdata.get("organisms"):
-                bar_key = f"organisms_{sample}"
-                charts[bar_key] = self._fig_to_json(
-                    self._create_organism_bar(sdata["organisms"], title=sample)
-                )
-
-        return charts
-
-    def _create_classification_donut(
-        self, classified: int, unclassified: int,
-        title: str = "", compact: bool = False
-    ) -> go.Figure:
-        """Create classification donut chart for the report."""
-        total = classified + unclassified
-        if total == 0:
-            fig = go.Figure()
-            fig.add_annotation(text="No data", x=0.5, y=0.5, showarrow=False)
-            fig.update_layout(height=200, margin=dict(l=10, r=10, t=30, b=10))
-            return fig
-
-        rate = classified / total * 100
-        if rate >= 80:
-            rate_color = "#28a745"
-        elif rate >= 60:
-            rate_color = "#ffc107"
-        else:
-            rate_color = "#dc3545"
-
-        fig = go.Figure(go.Pie(
-            labels=["Classified", "Unclassified"],
-            values=[classified, unclassified],
-            hole=0.6,
-            marker=dict(
-                colors=["#007bff", "#dee2e6"],
-                line=dict(color="#ffffff", width=2)
-            ),
-            textinfo="percent",
-            textposition="outside",
-            hovertemplate="<b>%{label}</b><br>Count: %{value:,}<br>%{percent}<extra></extra>",
-        ))
-
-        fig.add_annotation(
-            text=f"<b>{rate:.0f}%</b><br><span style='font-size:10px'>classified</span>",
-            x=0.5, y=0.5, showarrow=False,
-            font=dict(size=20, color=rate_color),
-        )
-
-        height = 220 if compact else 300
-        fig.update_layout(
-            title=dict(text=title, x=0.5, font=dict(size=14)),
-            height=height,
-            margin=dict(l=20, r=20, t=40, b=20),
-            paper_bgcolor="white",
-            plot_bgcolor="white",
-            showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=-0.15, x=0.5, xanchor="center"),
-        )
-        return fig
-
-    def _create_organism_bar(
-        self, organisms: List[Dict[str, Any]], title: str = ""
-    ) -> go.Figure:
-        """Create horizontal bar chart of organism abundance."""
-        if not organisms:
-            fig = go.Figure()
-            fig.add_annotation(text="No organisms detected", x=0.5, y=0.5, showarrow=False)
-            return fig
-
-        names = [o["name"][:40] for o in reversed(organisms)]
-        reads = [o["reads"] for o in reversed(organisms)]
-        abundances = [o["abundance"] for o in reversed(organisms)]
-
-        fig = go.Figure(go.Bar(
-            y=names,
-            x=reads,
-            orientation="h",
-            marker=dict(color="#007bff", line=dict(color="#343a40", width=0.5)),
-            hovertemplate="<b>%{y}</b><br>Reads: %{x:,}<br>Abundance: %{customdata:.2f}%<extra></extra>",
-            customdata=abundances,
-        ))
-
-        height = max(250, len(organisms) * 25 + 80)
-        fig.update_layout(
-            title=dict(text=f"Top Organisms - {title}", x=0.5, font=dict(size=14)),
-            xaxis=dict(title="Read Count"),
-            yaxis=dict(title=""),
-            height=height,
-            margin=dict(l=200, r=30, t=40, b=40),
-            paper_bgcolor="white",
-            plot_bgcolor="white",
-        )
-        return fig
-
-    @staticmethod
-    def _fig_to_json(fig: go.Figure) -> str:
-        """Serialize a Plotly figure to JSON for template embedding."""
-        return pio.to_json(fig, validate=False)
+        Delegates to ``report_charts.build_charts`` -- a pure function with
+        no instance state -- split out during the 2026-08-16 code-size
+        remediation. Kept as an instance method (rather than calling the
+        module function directly from ``_build_html_report``) so existing
+        callers can still monkeypatch it per-instance, as
+        ``TestChartJsonCannotBreakOutOfScript`` does.
+        """
+        return build_charts(data)
 
     @staticmethod
     def _dir_size(path: str) -> int:
@@ -643,33 +644,50 @@ class ReportGenerator:
                     pass
         return total
 
-    def _copy_raw_files(self, output_dir: str) -> List[str]:
-        """Copy raw result subdirs into ``output_dir/raw/``.
+    def _raw_copy_plan(self) -> Tuple[List[str], Optional[str]]:
+        """``_RAW_SUBDIRS`` present on disk, and a reason when the whole copy
+        must be skipped for exceeding the size cap.
 
-        Returns the list of subdirs actually copied. AppleDouble/.DS_Store
-        sidecars are excluded, and the copy is skipped (with a clear log line)
-        when the total payload exceeds the configured ceiling -- this runs in a
-        blocking callback, so silently copying gigabytes would freeze the UI.
+        Split out of ``_copy_raw_files`` so ``generate()`` can learn about a
+        cap-triggered skip (for the HTML note and metadata.json) without
+        duplicating the size-cap arithmetic.
         """
-        raw_dir = os.path.join(output_dir, "raw")
         present = [
             s for s in _RAW_SUBDIRS
             if os.path.isdir(os.path.join(self.results_dir, s))
         ]
 
         cap = self.config.get("export_max_raw_bytes", _DEFAULT_MAX_RAW_BYTES)
-        if cap:
+        if cap and present:
             total = sum(self._dir_size(os.path.join(self.results_dir, s)) for s in present)
             if total > cap:
-                logger.warning(
-                    "Raw export skipped: payload %.1f GiB exceeds the %.1f GiB "
-                    "cap (set export_max_raw_bytes to override). The HTML report "
-                    "and metadata are still written.",
-                    total / 1024 ** 3, cap / 1024 ** 3,
+                reason = (
+                    f"Raw files omitted: the payload ({total / 1024 ** 3:.1f} GiB) "
+                    f"exceeds the {cap / 1024 ** 3:.1f} GiB export cap "
+                    "(set export_max_raw_bytes to override). The HTML report "
+                    "and metadata below are otherwise complete; only the raw/ "
+                    "directory and its Pipeline Reports links are affected."
                 )
-                return []
+                logger.warning(reason)
+                return [], reason
+        return present, None
 
+    def _copy_raw_files_verbose(self, output_dir: str) -> Tuple[List[str], Optional[str]]:
+        """Copy raw result subdirs into ``output_dir/raw/``.
+
+        Returns ``(copied, skip_reason)``. ``skip_reason`` is set when the
+        whole copy was skipped by the size cap, or when one or more (but not
+        all) subdirs failed to copy -- the caller surfaces this in the HTML
+        and metadata.json instead of leaving a dangling ``raw/`` link with no
+        explanation for the 404. AppleDouble/.DS_Store sidecars are excluded.
+        """
+        present, skip_reason = self._raw_copy_plan()
+        if skip_reason:
+            return [], skip_reason
+
+        raw_dir = os.path.join(output_dir, "raw")
         copied: List[str] = []
+        failed: List[str] = []
         for subdir in present:
             src = os.path.join(self.results_dir, subdir)
             dst = os.path.join(raw_dir, subdir)
@@ -679,7 +697,27 @@ class ReportGenerator:
                 logger.info("Copied %s to %s", src, dst)
             except (FileNotFoundError, PermissionError, OSError, shutil.Error) as e:
                 logger.exception("Could not copy %s: %s", src, e)
-        return copied
+                failed.append(subdir)
+
+        partial_reason = None
+        if failed:
+            partial_reason = (
+                "Raw files partially omitted: " + ", ".join(failed) +
+                " could not be copied (see application log for details). "
+                "Other raw subdirs and their Pipeline Reports links are "
+                "unaffected."
+            )
+            logger.warning(partial_reason)
+        return copied, partial_reason
+
+    def _copy_raw_files(self, output_dir: str) -> List[str]:
+        """Copy raw result subdirs into ``output_dir/raw/``.
+
+        Returns the list of subdirs actually copied. Thin wrapper over
+        ``_copy_raw_files_verbose`` for callers (and existing tests) that
+        only need the copied list, not the skip reason.
+        """
+        return self._copy_raw_files_verbose(output_dir)[0]
 
     def _write_metadata(self, output_dir: str, data: Dict[str, Any]):
         """Write summary.json and metadata.json."""
@@ -718,6 +756,10 @@ class ReportGenerator:
             "watchlist_entries": len(data.get("watched_results", [])),
             "alerts": data.get("alerts", []),
             "raw_files_included": data.get("raw_files_included", []),
+            # Explicit record of a size-cap or partial-copy skip so a reader
+            # of this sidecar (not just the HTML) can tell "raw/ is missing
+            # on purpose, here's why" apart from "the export is broken".
+            "raw_skip_reason": data.get("raw_skip_reason"),
         }
 
         metadata_path = os.path.join(output_dir, "metadata.json")

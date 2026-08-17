@@ -73,7 +73,7 @@ class TestGetPathFingerprint:
 
 class TestGetDirLatestMtime:
     def test_missing_dir_returns_zero(self, tmp_path):
-        assert _get_dir_latest_mtime(str(tmp_path / "nope")) == 0.0
+        assert _get_dir_latest_mtime(str(tmp_path / "nope")) == (0.0, 0)
 
     def test_returns_latest_nested_mtime(self, tmp_path):
         sub = tmp_path / "kraken2" / "s"
@@ -83,8 +83,34 @@ class TestGetDirLatestMtime:
         _backdate(old_file, seconds=100)
         new_file = sub / "new.txt"
         new_file.write_text("y" * 20)
-        latest = _get_dir_latest_mtime(str(tmp_path / "kraken2"))
+        latest, n_files = _get_dir_latest_mtime(str(tmp_path / "kraken2"))
         assert latest == pytest.approx(os.path.getmtime(new_file))
+        assert n_files == 2
+
+    def test_files_past_the_stat_cap_are_still_counted(self, tmp_path, monkeypatch):
+        """A file added past the cap must still change the return value, or
+        the freshness epoch plateaus and every mtime-cache entry is served
+        stale indefinitely (audit 2026-08-16, finding L25)."""
+        from nanometa_live.core.utils import loader_utils as lu
+
+        sub = tmp_path / "kraken2"
+        sub.mkdir()
+        for i in range(4):
+            f = sub / f"f{i}.txt"
+            f.write_text("x")
+            _backdate(f, seconds=100)
+        monkeypatch.setattr(lu, "_MAX_FINGERPRINT_FILES", 2)
+
+        before = lu._get_dir_latest_mtime(str(sub))
+        (sub / "f_new.txt").write_text("y")
+        _backdate(sub / "f_new.txt", seconds=100)
+        after = lu._get_dir_latest_mtime(str(sub))
+
+        assert after != before, (
+            "a new file past the stat cap did not change the fingerprint "
+            "input; the freshness epoch would never advance"
+        )
+        assert after[1] == before[1] + 1
 
 
 class TestCheckDataFreshness:

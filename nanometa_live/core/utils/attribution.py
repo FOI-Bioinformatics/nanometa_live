@@ -40,6 +40,10 @@ _NC_SAMPLE_WORDS = frozenset({
 })
 #: A bare sample identifier: barcode16, bc12, s3, 01.
 _NC_SAMPLE_ID_RE = re.compile(r"^(?:barcode|bc|sample|smpl|rep|run|s|r)?\d+$")
+#: A control word fused with a numeric suffix: NTC1, blank2, NC03, neg1. The
+#: tokenizer cannot split these (no separator), so they are re-checked with
+#: the trailing digits stripped.
+_NC_FUSED_RE = re.compile(r"^([a-z]+?)(\d+)$")
 def is_negative_control(
     sample: str, config: Optional[Dict[str, Any]] = None
 ) -> bool:
@@ -88,6 +92,21 @@ def is_negative_control(
             return True
     if "template" in token_set and token_set & {"no", "non"}:
         return True
+    # Undelimited numeric suffixes: NTC1 / blank2 / NC03 / neg1. A lab that
+    # numbers its controls without a separator produced single tokens the
+    # sets above cannot match, so those controls were treated as clinical
+    # samples in attribution. The fused digits are themselves the sample
+    # identifier, so a lone negative-token base ("neg1") is a control by the
+    # same identifier rule as the delimited form.
+    for t in tokens:
+        m = _NC_FUSED_RE.match(t)
+        if not m:
+            continue
+        base = m.group(1)
+        if base in _NC_EXACT_TOKENS:
+            return True
+        if base in _NC_NEGATIVE_TOKENS and len(tokens) == 1:
+            return True
     return False
 
 

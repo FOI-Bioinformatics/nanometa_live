@@ -91,3 +91,64 @@ class TestStatistics:
         stats = manager.get_statistics()
         assert isinstance(stats, dict)
         assert stats  # non-empty
+
+
+class TestMalformedEntryDoesNotTruncateWatchlist:
+    """One malformed field in a custom watchlist must cost one entry at most.
+
+    ``int(alert_threshold)`` was unguarded, so ``alert_threshold: null`` (or
+    a non-numeric string) raised TypeError out of the per-entry loop into the
+    per-FILE except: entries before the bad one stayed loaded, entries after
+    were silently dropped, and the watchlist was never marked enabled -- the
+    UI reported it off while some organisms were live. Audit 2026-08-16,
+    finding L10.
+    """
+
+    def test_null_alert_threshold_falls_back_to_threat_default(self):
+        from nanometa_live.core.watchlist.watchlist_manager import WatchlistEntry
+
+        e = WatchlistEntry.from_dict({
+            "name": "Bacillus anthracis", "taxid_ncbi": 1392,
+            "threat_level": "critical", "alert_threshold": None,
+        })
+        assert isinstance(e.alert_threshold, int)
+        assert e.alert_threshold > 0
+
+    def test_non_numeric_alert_threshold_falls_back(self):
+        from nanometa_live.core.watchlist.watchlist_manager import WatchlistEntry
+
+        e = WatchlistEntry.from_dict({
+            "name": "Yersinia pestis", "taxid_ncbi": 632,
+            "threat_level": "high", "alert_threshold": "not a number",
+        })
+        assert isinstance(e.alert_threshold, int)
+        assert e.alert_threshold > 0
+
+    def test_bad_entry_mid_file_does_not_drop_the_rest(self, tmp_path):
+        from nanometa_live.core.watchlist.watchlist_manager import WatchlistManager
+
+        f = tmp_path / "custom.yaml"
+        f.write_text(
+            "pathogens:\n"
+            "  - name: Bacillus anthracis\n"
+            "    taxid_ncbi: 1392\n"
+            "    threat_level: critical\n"
+            "  - name: Broken entry\n"
+            "    taxid_ncbi: 99999\n"
+            "    watchlist_ids: 5\n"          # set(5) raises TypeError
+            "  - name: Yersinia pestis\n"
+            "    taxid_ncbi: 632\n"
+            "    threat_level: high\n"
+        )
+
+        m = WatchlistManager()
+        m._load_custom_yaml_file(str(f))
+
+        names = {e.name for e in m._entries.values()}
+        assert "Yersinia pestis" in names, (
+            "a malformed entry mid-file silently dropped every entry after it"
+        )
+        assert "custom" in m._enabled_watchlists, (
+            "the watchlist was left unmarked as enabled, so the UI reports "
+            "it off while some of its organisms are live"
+        )

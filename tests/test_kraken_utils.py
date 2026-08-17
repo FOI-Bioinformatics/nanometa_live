@@ -170,3 +170,26 @@ class TestExtractClassificationStats:
         stats = extract_classification_stats(df)
         assert stats["total_reads"] == 0
         assert stats["classification_rate"] == 0
+
+
+class TestZeroByteDatabaseFiles:
+    """A 0-byte required file must fail validation (audit 2026-08-16, L23).
+
+    An interrupted copy leaves a truncated hash.k2d that passed the
+    existence-only check and failed only when Kraken2 tried to load it
+    mid-run.
+    """
+
+    def test_empty_required_file_is_reported_missing(self, tmp_path):
+        from nanometa_live.core.utils.kraken_utils import (
+            KRAKEN_REQUIRED_FILES, check_kraken_db,
+        )
+        for name in KRAKEN_REQUIRED_FILES:
+            (tmp_path / name).write_bytes(b"x")
+        ok, missing = check_kraken_db(str(tmp_path))
+        assert ok is True
+
+        (tmp_path / "hash.k2d").write_bytes(b"")
+        ok, missing = check_kraken_db(str(tmp_path))
+        assert ok is False
+        assert "hash.k2d" in missing

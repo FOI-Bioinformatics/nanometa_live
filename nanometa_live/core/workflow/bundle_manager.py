@@ -1525,7 +1525,9 @@ class BundleManager:
                 except (ImportError, AttributeError, OSError, json.JSONDecodeError) as e:
                     result["warnings"].append(f"Failed to load taxonomy snapshot: {e}")
 
-            # Load container images if present
+            # Load container images if present (operator-managed BLAST
+            # validation containers, distinct from the pipeline's own pulled
+            # images under pipeline_containers/ below).
             containers_dir = home / "containers"
             if containers_dir.exists() and any(containers_dir.iterdir()):
                 op_report = self._load_container_images(containers_dir)
@@ -1533,6 +1535,48 @@ class BundleManager:
                     logger.info(
                         f"Loaded {op_report['loaded']} container images from bundle"
                     )
+                # Surface a load failure instead of reporting success over
+                # it. Mirrors the pipeline_containers/ handling below (the
+                # 2026-08-14 fix) -- this simpler operator-container path
+                # was missed by that pass and previously only logged on
+                # success, so importing a bundle with BLAST validation
+                # containers onto a field machine where Docker is not
+                # running reported success:True with no mention of the
+                # containers, and validation then failed opaquely at run
+                # time with no link back to the import step that caused it.
+                op_docker_broken = (
+                    op_report["tar_count"] > 0
+                    and op_report["tar_loaded"] == 0
+                    and not op_report["docker_usable"]
+                )
+                if op_docker_broken:
+                    result["container_runtime_unavailable"] = True
+                    if not op_report["docker_available"]:
+                        cause = (
+                            "the 'docker' command was not found on this machine"
+                        )
+                    else:
+                        cause = (
+                            "the Docker daemon did not respond ('docker info' failed)"
+                        )
+                    msg = (
+                        f"The bundle ships {op_report['tar_count']} operator "
+                        "container image archive(s) under containers/ (e.g. "
+                        f"BLAST validation containers) but none could be "
+                        f"loaded: {cause}. Install Docker (or start the "
+                        "Docker daemon) on this machine and re-run the import."
+                    )
+                    logger.warning(msg)
+                    result["warnings"].append(msg)
+                elif op_report["tar_count"] > op_report["tar_loaded"]:
+                    msg = (
+                        f"Only {op_report['tar_loaded']} of "
+                        f"{op_report['tar_count']} operator container "
+                        "image(s) under containers/ could be loaded: "
+                        f"{'; '.join(op_report['failures']) or 'see log for details'}."
+                    )
+                    logger.warning(msg)
+                    result["warnings"].append(msg)
 
             # Restore pipeline-pulled container images shipped in
             # ``pipeline_containers/``. The export side pulls every module

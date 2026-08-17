@@ -889,6 +889,18 @@ class TaxidMapper:
                 f"unreadable taxonomy files (e.g. inspect.txt, taxo.k2d)."
             )
 
+        # Operator override: the sibling {db_hash}_profile_override.json must
+        # win over the detected profile HERE, not only in load_profile_for_db.
+        # This index's profile gates ExactTaxidStrategy and GTDB variant
+        # generation -- the paths that drive matching -- so an override that
+        # only the API-selection path respected was silently half-applied.
+        from nanometa_live.core.taxonomy.database_profile import apply_override
+
+        if db_hash:
+            self._index.profile = apply_override(
+                self._index.profile, db_hash, self._cache_dir
+            )
+
         # Update global index
         set_database_index(self._index)
 

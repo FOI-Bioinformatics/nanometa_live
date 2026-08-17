@@ -77,11 +77,20 @@ class TestParseBlastTabular:
         assert result.percent_validated == pytest.approx(100.0)
         assert result.status == ValidationStatus.CONFIRMED
 
-    def test_zero_total_reads_uses_presence(self, parser, tmp_path):
+    def test_zero_total_reads_never_claims_full_validation(self, parser, tmp_path):
+        """An unknown Kraken2 denominator must not be reported as 100%
+        validated: that fallback turned any nonzero hit count into a
+        CONFIRMED detection (audit 2026-08-16, finding L3). Hits with an
+        unquantified supporting fraction are UNCERTAIN."""
         f = tmp_path / "b.blast.txt"
         _write_blast(f, ROWS_12)
         result = parser.parse_blast_tabular(f, "barcode01", 562, total_reads=0)
-        assert result.percent_validated == pytest.approx(100.0)
+        assert result.percent_validated == pytest.approx(0.0)
+        assert result.validated_reads == 2
+        assert result.status == ValidationStatus.UNCERTAIN
+        assert result.status not in (
+            ValidationStatus.CONFIRMED, ValidationStatus.PARTIAL
+        )
 
     def test_15_column_format_is_autodetected(self, parser, tmp_path):
         rows15 = [r + (200, 5000, 95) for r in ROWS_12]  # + qlen slen qcovs
@@ -569,3 +578,186 @@ class TestAggregateWinsHidesBlast:
         blast = next(r for r in results if r.validation_method != "minimap2"
                      and r.taxid == 263)
         assert blast.species == "Francisella tularensis"
+
+
+class TestDiskFallbackDenominator:
+    """The disk-fallback blast.tsv scan must not fabricate a 100% validation.
+
+    The fallback parsed ``blast.tsv`` with no ``total_reads``, and the
+    zero-total branch reported any nonzero hit count as 100% validated --
+    so 2-3 stray hits against thousands of Kraken2-assigned reads rendered
+    CONFIRMED and sorted to the top of the Validation tab. The denominator
+    is backfilled from a sibling result for the same (sample, taxid) --
+    typically the aggregate's minimap2 entry, whose ``total_reads`` carries
+    ``kraken_reads`` -- and when no sibling knows it, the result is
+    UNCERTAIN, never CONFIRMED. Audit 2026-08-16, finding L3.
+    """
+
+    def _build(self, root: Path, kraken_reads: int = 5000) -> None:
+        vdir = root / "validation"
+        (vdir / "blast").mkdir(parents=True)
+        (vdir / "minimap2").mkdir(parents=True)
+        # Aggregate knows the pair only via minimap2, with the Kraken2 total.
+        (vdir / "validation_results.json").write_text(json.dumps(_aggregate({
+            "barcode05": {
+                "263": {
+                    "species": "Francisella tularensis",
+                    "validation_method": "minimap2",
+                    "kraken_reads": kraken_reads,
+                    "mapped_reads": 10,
+                    "hit_rate": 0.002,
+                    "avg_mapq": 50.0,
+                },
+            }
+        }, method="minimap2")))
+        # 3 HSPs / 2 unique reads on disk, identity mean >= 90.
+        _write_blast(vdir / "blast" / "barcode05_taxid263.blast.tsv",
+                     ROWS_15, cols=15)
+
+    def test_total_reads_backfilled_from_sibling_entry(self, tmp_path):
+        self._build(tmp_path)
+        results = ValidationParser(str(tmp_path)).get_validation_results()
+        blast = [
+            r for r in results
+            if r.taxid == 263 and r.validation_method != "minimap2"
+        ]
+        assert blast, "on-disk blast.tsv did not surface"
+        r = blast[0]
+        assert r.total_reads == 5000, (
+            "the Kraken2 denominator from the sibling aggregate entry was "
+            "not backfilled; percent_validated is unquantified"
+        )
+        assert r.percent_validated < 1.0
+        assert r.status not in (
+            ValidationStatus.CONFIRMED, ValidationStatus.PARTIAL
+        ), (
+            f"2 unique hits out of 5000 assigned reads reported as {r.status}"
+        )
+
+    def test_no_sibling_denominator_is_uncertain_not_confirmed(self, tmp_path):
+        vdir = tmp_path / "validation"
+        (vdir / "blast").mkdir(parents=True)
+        _write_blast(vdir / "blast" / "barcode05_taxid263.blast.tsv",
+                     ROWS_15, cols=15)
+        results = ValidationParser(str(tmp_path)).get_validation_results()
+        assert len(results) == 1
+        assert results[0].status == ValidationStatus.UNCERTAIN
+
+
+class TestFingerprintTracksMethodDirRewrites:
+    """In-place rewrites of per-pair method files must advance the cache
+    fingerprint.
+
+    The fingerprint stats only validation_dir's immediate entries plus the
+    aggregate JSON. In a minimap2-only layout validation_dir resolves to
+    ``validation/`` and an in-place rewrite of ``minimap2/x_stats.json``
+    (what the realtime cumulative aggregator does every batch) changes no
+    directory mtime -- and with the aggregate now written once at end of
+    session (nanometanf N6), nothing else advanced the fingerprint, so the
+    Validation tab served stale cached results for the whole run.
+    """
+
+    def test_minimap2_stats_rewrite_advances_fingerprint(self, tmp_path):
+        import os
+
+        vdir = tmp_path / "validation" / "minimap2"
+        vdir.mkdir(parents=True)
+        stats = vdir / "barcode01_taxid263.minimap2_stats.json"
+        stats.write_text('{"mapped_reads": 1}')
+        old = time.time() - 100
+        for p in (tmp_path / "validation", vdir, stats):
+            os.utime(p, (old, old))
+
+        parser = ValidationParser(str(tmp_path))
+        fp1 = parser._validation_dir_fingerprint()
+
+        # Rewrite the stats file IN PLACE; the containing dir mtime is
+        # pinned back so only the file itself is newer.
+        newer = time.time()
+        stats.write_text('{"mapped_reads": 5}')
+        os.utime(stats, (newer, newer))
+        os.utime(vdir, (old, old))
+        os.utime(tmp_path / "validation", (old, old))
+
+        fp2 = parser._validation_dir_fingerprint()
+        assert fp2 is not None and fp1 is not None
+        assert fp2 > fp1, (
+            "an in-place per-pair rewrite did not advance the fingerprint; "
+            "the Validation tab serves stale cached results"
+        )
+
+    def test_blast_tsv_rewrite_advances_fingerprint_from_parent_dir(self, tmp_path):
+        import os
+
+        blast = tmp_path / "validation" / "blast"
+        mm2 = tmp_path / "validation" / "minimap2"
+        blast.mkdir(parents=True)
+        mm2.mkdir(parents=True)
+        tsv = mm2 / "barcode01_taxid263.minimap2_stats.json"
+        tsv.write_text('{"mapped_reads": 1}')
+        old = time.time() - 100
+        for p in (tmp_path / "validation", blast, mm2, tsv):
+            os.utime(p, (old, old))
+
+        # validation_dir resolves to validation/blast here; the minimap2
+        # sibling must still be covered.
+        parser = ValidationParser(str(tmp_path))
+        assert parser.validation_dir.name == "blast"
+        fp1 = parser._validation_dir_fingerprint()
+
+        newer = time.time()
+        tsv.write_text('{"mapped_reads": 9}')
+        os.utime(tsv, (newer, newer))
+        os.utime(mm2, (old, old))
+
+        fp2 = parser._validation_dir_fingerprint()
+        assert fp2 > fp1
+
+
+class TestSupersedeMatchesByMethodClass:
+    """An on-demand re-check must replace a pipeline "both" entry in place.
+
+    _supersede keyed on the raw validation_method string, so a pipeline
+    aggregate entry stored as "both" and the operator's on-demand re-check
+    (method "blast") never matched -- the stale result sat beside the fresh
+    one. Audit 2026-08-16, finding L26.
+    """
+
+    def test_on_demand_blast_replaces_pipeline_both_entry(self, tmp_path):
+        vdir = tmp_path / "validation"
+        vdir.mkdir(parents=True)
+        # Pipeline aggregate: one "both" entry for (barcode01, 562).
+        (vdir / "validation_results.json").write_text(json.dumps(_aggregate({
+            "barcode01": {
+                "562": {
+                    "species": "Escherichia coli",
+                    "validation_method": "both",
+                    "kraken_reads": 100, "blast_hits": 10, "hit_rate": 0.1,
+                    "avg_identity": 91.0,
+                },
+            }
+        }, method="both")))
+        # On-demand re-check for the same pair, method blast, better outcome.
+        od = tmp_path / "on_demand_validation"
+        od.mkdir()
+        (od / "validation_results.json").write_text(json.dumps(_aggregate({
+            "barcode01": {
+                "562": {
+                    "species": "Escherichia coli",
+                    "validation_method": "blast",
+                    "kraken_reads": 100, "blast_hits": 95, "hit_rate": 0.95,
+                    "avg_identity": 99.0,
+                },
+            }
+        })))
+
+        results = ValidationParser(str(tmp_path)).get_validation_results()
+        blast_class = [
+            r for r in results
+            if r.taxid == 562 and r.validation_method != "minimap2"
+        ]
+        assert len(blast_class) == 1, (
+            "the stale pipeline entry sat beside the on-demand re-check "
+            f"instead of being replaced: {[(r.validation_method, r.validated_reads) for r in blast_class]}"
+        )
+        assert blast_class[0].validated_reads == 95

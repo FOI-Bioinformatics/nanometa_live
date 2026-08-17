@@ -431,3 +431,48 @@ def test_generates_validation_taxon_names_json(tmp_path):
     assert data["263"] == "Francisella tularensis"
     assert data["1392"] == "Bacillus anthracis"
     assert "99" not in data  # entries without a name are omitted
+
+
+class TestRealtimeTimeoutNullMeansIndefinite:
+    """``realtime_timeout_minutes: null`` must reach nanometanf as JSON null.
+
+    The mapper used ``if realtime_timeout:`` -- false for None -- so the key
+    was omitted from the params file and nanometanf's OWN default (60) took
+    over: an unattended overnight run silently stopped watching after a
+    one-hour FASTQ lull, and reads arriving later were never screened.
+    nanometanf documents null as "run indefinitely" and its realtime
+    monitoring explicitly handles it (audit 2026-08-16, finding L8).
+    """
+
+    def _realtime_config(self, base):
+        cfg = dict(base)
+        cfg["processing_mode"] = "realtime"
+        return cfg
+
+    def test_null_timeout_is_passed_through_as_none(self, base_config):
+        cfg = self._realtime_config(base_config)
+        cfg["realtime_timeout_minutes"] = None
+
+        params = create_nextflow_params(cfg)
+
+        assert "realtime_timeout_minutes" in params, (
+            "omitting the key reinstates nanometanf's 60-minute default "
+            "on a run the operator configured to watch indefinitely"
+        )
+        assert params["realtime_timeout_minutes"] is None
+
+    def test_numeric_timeout_is_passed_as_int(self, base_config):
+        cfg = self._realtime_config(base_config)
+        cfg["realtime_timeout_minutes"] = "90"
+
+        params = create_nextflow_params(cfg)
+        assert params["realtime_timeout_minutes"] == 90
+
+    def test_absent_key_defaults_to_config_default(self, base_config):
+        """A config without the key keeps the documented 60-minute default
+        explicitly, so the params file and the config agree."""
+        cfg = self._realtime_config(base_config)
+        cfg.pop("realtime_timeout_minutes", None)
+
+        params = create_nextflow_params(cfg)
+        assert params["realtime_timeout_minutes"] == 60

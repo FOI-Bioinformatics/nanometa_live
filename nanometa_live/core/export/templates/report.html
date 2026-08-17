@@ -347,9 +347,18 @@
             <td>{{ w.reads | format_number }}</td>
             <td>{{ w.abundance | format_pct }}</td>
             <td>
-              {% if w.samples %}
-                {% for s in w.samples %}<div>{{ s.sample }}
+              {% if w.control_only %}
+                <div style="color:#6c757d"><em>(negative control only)</em></div>
+                {% for s in w.negative_control_rows %}<div style="color:#6c757d">{{ s.sample }} (negative control, {{ s.reads | format_number }} reads)</div>{% endfor %}
+              {% elif w.triggering_samples %}
+                {% for s in w.triggering_samples %}<div>{{ s.sample }}
                   <span style="color:#6c757d">({{ s.reads | format_number }} reads)</span></div>{% endfor %}
+                {% if w.negative_control_rows %}
+                <div style="color:#6c757d; font-size:12px;">
+                  &mdash; also in negative control{{ "s" if w.negative_control_rows | length != 1 else "" }}
+                  {%- for s in w.negative_control_rows %} {{ s.sample }} ({{ s.reads | format_number }} reads{% if w.negative_control_fraction is not none %}, {{ w.negative_control_fraction | format_pct }} of positives{% endif %}){% if not loop.last %},{% endif %}{% endfor %}
+                </div>
+                {% endif %}
               {% elif w.detected %}
                 <span style="color:#6c757d">Not attributable to a single sample</span>
               {% else %}
@@ -447,6 +456,19 @@
   </div>
   {% endif %}
 
+  <!-- RAW FILES OMITTED -->
+  {% if data.raw_skip_reason %}
+  {#
+    Links under raw/ are built AFTER the copy runs, from the subdirs that
+    actually landed on disk -- so a size-cap or partial-copy skip can never
+    leave a dangling raw/ link with nothing here to explain the 404. This
+    note is the visible half of that fix.
+  #}
+  <div class="decision-banner banner-review" style="text-align:left;">
+    {{ data.raw_skip_reason }}
+  </div>
+  {% endif %}
+
   <!-- PIPELINE REPORTS -->
   {% if data.pipeline_reports %}
   <h2>Pipeline Reports</h2>
@@ -486,8 +508,29 @@
         &mdash;
         {{ (sdata.classified + sdata.unclassified) | format_number }} reads,
         {{ sdata.organisms | length }} organisms
+        {% if sdata.attempted_no_output %}
+        <span class="badge badge-moderate" style="margin-left:8px;">NO OUTPUT FOUND</span>
+        {% endif %}
       </summary>
       <div class="sample-content">
+        {#
+          _manifest.json predicts this sample was attempted from the input
+          list and active tools; it does not verify any file was actually
+          produced. A stage failure absorbed by nanometanf's error isolation
+          renders identically to a genuine negative (0 reads) unless flagged
+          here -- placed above the fold, not inside the collapsed detail,
+          for the same reason the Organisms panel's not_detected_caveat is
+          rendered outside its collapsed list.
+        #}
+        {% if sdata.attempted_no_output %}
+        <p style="color:#856404; background:#fff3cd; border:1px solid #ffc107; border-radius:4px; padding:8px 12px;">
+          <strong>No output files found for this sample.</strong>
+          It was attempted but produced no Kraken2/QC/validation output on
+          disk -- likely a failed pipeline stage, not a genuine zero-read
+          result. The figures below reflect the absence of data, not a
+          confirmed negative.
+        </p>
+        {% endif %}
         <!-- QC summary for this sample -->
         {% if sdata.qc and sdata.qc.get("total_reads", 0) > 0 %}
         <h3>Quality Metrics</h3>

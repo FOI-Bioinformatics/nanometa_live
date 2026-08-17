@@ -54,8 +54,8 @@ from nanometa_live.app.components.pathogen_alert import (
     HighRiskPathogenAlert,
     WatchedSpeciesAlert,
 )
-from nanometa_live.core.taxonomy.ranks import species_rank_mask
 from nanometa_live.app.tabs.dashboard_helpers import (
+    _species_discovery_df,
     _species_df_to_organisms,
     _load_per_sample_organisms,
     _get_active_watchlist_entries,
@@ -255,9 +255,7 @@ def register_dashboard_callbacks(app: Dash):
             try:
                 kraken_df = load_kraken_data(main_dir, "All Samples")
                 if not kraken_df.empty:
-                    species_df = kraken_df[
-                        species_rank_mask(kraken_df) & (kraken_df["reads"] >= 5)
-                    ]
+                    species_df = _species_discovery_df(kraken_df)
                     detected_organisms = _species_df_to_organisms(species_df)
                     watched_species = _get_active_watchlist_entries(config)
                     n_watched = len(watched_species)
@@ -584,7 +582,7 @@ def register_dashboard_callbacks(app: Dash):
             return _get_error_alerts(str(e))
 
     @app.callback(
-        Output("selected-sample", "data", allow_duplicate=True),
+        Output("sample-selector", "value", allow_duplicate=True),
         Input("dashboard-sample-table", "selectedRows"),
         prevent_initial_call=True
     )
@@ -592,8 +590,17 @@ def register_dashboard_callbacks(app: Dash):
         """
         Handle sample selection from the dashboard AG Grid table.
 
-        When a user clicks a sample row, update the selected sample
-        so other tabs can show sample-specific data.
+        Writes the header dropdown, NOT the ``selected-sample`` store. The grid
+        promises "Click a row to filter all tabs to this sample", and the store
+        drives most tabs -- but the Dashboard's own metric tiles and the
+        Pathogen Report modal read ``sample-selector.value``, and
+        update_sample_selector_options never re-asserts that value once the
+        option is still valid. Writing the store directly therefore left the
+        visible dropdown reading "All Samples (Aggregated)" while the other
+        tabs showed one barcode, with no path back to agreement.
+
+        Routing through the dropdown keeps ``update_selected_sample`` the
+        single writer of ``selected-sample``, so the two can no longer diverge.
 
         Args:
             selected_rows: List of selected row data dicts from AG Grid
@@ -672,10 +679,7 @@ def register_dashboard_callbacks(app: Dash):
                 return html.Div(), {"display": "none"}
 
             # Extract species-level detections (vectorized)
-            species_df = kraken_df[
-                species_rank_mask(kraken_df) &
-                (kraken_df["reads"] >= 5)
-            ]
+            species_df = _species_discovery_df(kraken_df)
             detected_organisms = _species_df_to_organisms(species_df)
 
             # Build per-sample attribution: taxid -> [{sample, reads, abundance, is_nc}]

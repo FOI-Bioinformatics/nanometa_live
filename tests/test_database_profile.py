@@ -379,3 +379,36 @@ class TestNameAgreement:
     def test_disagrees(self, actual, expected):
         from nanometa_live.core.taxonomy.database_indexer import _names_agree
         assert _names_agree(actual, expected) is False
+
+
+class TestKnownRenamesDoNotDisqualifyTheDatabase:
+    """A legitimately renamed taxon must not flip taxids_are_ncbi off.
+
+    ICTV renamed SARS-CoV-2 (2697049) to Betacoronavirus pandemicum, and real
+    flextaxd/Bioshield builds carry the new name on the ORIGINAL taxid. The
+    all-must-match probe read that as "taxid remapped" and disabled the
+    exact-taxid shortcut database-wide -- for exactly the database family the
+    shortcut was preserved for (it rescued four detections on a real run).
+    Only names in the explicit known-renames table are tolerated; an unknown
+    mismatch stays fatal (see test_one_mismatch_is_enough_to_reject).
+    Audit 2026-08-16, finding L9.
+    """
+
+    def test_renamed_sars_cov_2_still_counts_as_a_match(self):
+        nodes = list(NCBI_REFERENCE_NODES) + [
+            (2697049, "Betacoronavirus pandemicum", "S"),
+        ]
+        builder = DatabaseIndexBuilder()
+        ok, evidence = builder._detect_taxids_are_ncbi(_index(nodes))
+        assert ok is True, (
+            "a documented ICTV rename disqualified the whole database's "
+            f"taxid authority: {evidence}"
+        )
+
+    def test_unknown_name_on_that_taxid_still_rejects(self):
+        nodes = list(NCBI_REFERENCE_NODES) + [
+            (2697049, "Prochlorococcus marinus", "S"),
+        ]
+        builder = DatabaseIndexBuilder()
+        ok, _ = builder._detect_taxids_are_ncbi(_index(nodes))
+        assert ok is False

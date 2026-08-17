@@ -376,7 +376,7 @@ class FuzzyMatchStrategy(MatchStrategy):
         # Score only candidates, not all species
         for taxid in candidates:
             node = index.get_by_taxid(taxid)
-            if not node or node.rank != "S":
+            if not node or not is_species_rank(node.rank):
                 continue
 
             similarity = self._calculate_similarity(
@@ -510,7 +510,7 @@ class SubstringMatchStrategy(MatchStrategy):
         # Score only candidates, not all species
         for taxid in candidates:
             node = index.get_by_taxid(taxid)
-            if not node or node.rank != "S":
+            if not node or not is_species_rank(node.rank):
                 continue
 
             target_words = set(node.name_normalized.split())
@@ -738,7 +738,7 @@ class CompositeMatchStrategy:
         # Process only the candidates (not all species)
         for taxid in candidates:
             node = index.get_by_taxid(taxid)
-            if not node or node.rank != "S":  # Only species level
+            if not node or not is_species_rank(node.rank):  # Species incl. S1-S3
                 continue
 
             node_name_lower = node.name_normalized.lower()

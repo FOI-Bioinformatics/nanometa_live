@@ -40,7 +40,7 @@ Author: Nanometa Live Development Team
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 import pandas as pd
@@ -144,6 +144,15 @@ class ValidationResult:
             return ValidationStatus.PARTIAL
         if self.percent_validated > 0:
             return ValidationStatus.LOW_CONFIDENCE
+        # Hits exist but the supporting fraction could not be quantified
+        # (unknown Kraken2 denominator, so percent_validated stayed 0).
+        # "Checked, support unquantified" must not render as "no data" --
+        # and it must never have rendered as CONFIRMED, which is what the
+        # old 100%-on-unknown-total fallback produced: 3 stray hits against
+        # 5,000 assigned reads sorted to the top of the Validation tab as a
+        # confirmed detection.
+        if self.validated_reads > 0:
+            return ValidationStatus.UNCERTAIN
         return ValidationStatus.NO_DATA
 
     @property
@@ -237,6 +246,30 @@ class ValidationParser:
                             latest = m
                 except OSError:
                     continue
+            # Fold in the per-pair method files as well. In realtime mode the
+            # cumulative aggregator rewrites validation/{blast,minimap2}
+            # files IN PLACE every batch: the file mtime advances but no
+            # directory mtime does, so a fingerprint over directory entries
+            # alone goes stale -- and since nanometanf defers the aggregate
+            # JSON to end of session by default, these files are the only
+            # mid-run freshness signal. Both dirs are flat and small (one
+            # file per (sample, taxid)), so this stays cheap.
+            for method_dir in (
+                self.results_dir / "validation" / "blast",
+                self.results_dir / "validation" / "minimap2",
+            ):
+                if not method_dir.is_dir():
+                    continue
+                try:
+                    for p in method_dir.iterdir():
+                        try:
+                            m = p.stat().st_mtime
+                            if m > latest:
+                                latest = m
+                        except OSError:
+                            continue
+                except OSError:
+                    continue
             return latest
         except OSError:
             return None
@@ -254,6 +287,20 @@ class ValidationParser:
                 parent_agg = self.validation_dir.parent / 'validation_results.json'
                 if parent_agg.exists():
                     return True
+
+        # Method subdirectories. get_validation_results scans these
+        # unconditionally, so this presence check must see them too: early in
+        # a realtime run validation_dir can resolve to validation/ while the
+        # only data on disk is minimap2/ per-pair stats, and a non-recursive
+        # glob reported "no validation data" over genuine coverage results.
+        for method_dir in (
+            self.results_dir / "validation" / "blast",
+            self.results_dir / "validation" / "minimap2",
+        ):
+            if method_dir.is_dir():
+                for pattern in ('*.json', '*.blast.tsv', '*.paf'):
+                    if list(method_dir.glob(pattern)):
+                        return True
 
         # Also check the on_demand_validation/ directory
         on_demand_dir = self.results_dir / "on_demand_validation"
@@ -374,8 +421,12 @@ class ValidationParser:
             if total_reads > 0:
                 result.percent_validated = min(100.0, (unique_reads / total_reads) * 100)
             else:
-                # If no total provided, use validated count as total
-                result.percent_validated = 100.0 if unique_reads > 0 else 0.0
+                # Unknown denominator: leave the percentage at 0 so
+                # determine_status reports UNCERTAIN rather than CONFIRMED.
+                # Claiming 100% here turned any nonzero hit count into a
+                # confirmed detection regardless of how many reads Kraken2
+                # actually assigned (audit 2026-08-16, finding L3).
+                result.percent_validated = 0.0
 
             # Identity statistics
             result.percent_identity_mean = float(df['pident'].mean())
@@ -658,6 +709,16 @@ class ValidationParser:
                 seen_keys.add(key)
 
         # Per-(sample, taxid) BLAST tabular files (nanometanf *.blast.tsv).
+        # Backfill the Kraken2 denominator from a sibling result for the same
+        # pair (typically the aggregate's minimap2 entry, whose total_reads is
+        # kraken_reads). A blast.tsv alone carries no total, and parsing it
+        # with total_reads=0 leaves the supporting fraction unquantified --
+        # the same pattern as the species-name backfill below.
+        total_reads_by_pair: Dict[Tuple[str, int], int] = {}
+        for r in results:
+            if r.total_reads > 0:
+                total_reads_by_pair.setdefault((r.sample_id, r.taxid), r.total_reads)
+
         for blast_file in self.validation_dir.glob('*.blast.tsv'):
             # Try to extract sample and taxid from filename
             # Expected format: sample_taxid.blast.tsv
@@ -692,7 +753,10 @@ class ValidationParser:
 
                 # Parse tabular file
                 result = self.parse_blast_tabular(
-                    blast_file, file_sample, file_taxid
+                    blast_file, file_sample, file_taxid,
+                    total_reads=total_reads_by_pair.get(
+                        (file_sample, file_taxid), 0
+                    ),
                 )
                 results.append(result)
                 seen_keys.add(key)
@@ -709,9 +773,16 @@ class ValidationParser:
         on_demand_dir = self.results_dir / "on_demand_validation"
         if on_demand_dir.is_dir():
             def _supersede(od_r):
-                key = (od_r.sample_id, od_r.taxid, od_r.validation_method)
+                # Key on the method CLASS, not the raw string: a pipeline
+                # entry stored as "both" and an on-demand re-check defaulting
+                # to "blast" are the same method to every consumer, but the
+                # raw-string key never matched, so the stale result sat
+                # beside the fresh one instead of being replaced.
+                key = (od_r.sample_id, od_r.taxid,
+                       _method_class(od_r.validation_method))
                 for i, r in enumerate(results):
-                    if (r.sample_id, r.taxid, r.validation_method) == key:
+                    if (r.sample_id, r.taxid,
+                            _method_class(getattr(r, "validation_method", "blast"))) == key:
                         results[i] = od_r
                         return
                 results.append(od_r)

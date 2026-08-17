@@ -211,8 +211,8 @@ def clear_data_cache():
         _file_mtimes.clear()
 
 
-def _get_dir_latest_mtime(directory: str) -> float:
-    """Return the most recent mtime among files in a directory (recursive).
+def _get_dir_latest_mtime(directory: str) -> Tuple[float, int]:
+    """Return (latest mtime, file count) among files in a directory (recursive).
 
     Walks the entire tree, stat'ing the first ``_MAX_FINGERPRINT_FILES`` files
     for their mtime. The recursive walk is required so the freshness
@@ -222,26 +222,30 @@ def _get_dir_latest_mtime(directory: str) -> float:
     fingerprint would otherwise lock in a constant value, leaving fingerprint-
     gated callbacks permanently stale.
 
-    Mirrors the bounded-walk behaviour of ``_get_path_fingerprint`` so the two
-    helpers stay paired.
+    Files past the stat cap are still COUNTED (no stat, so it stays cheap) --
+    genuinely mirroring ``_get_path_fingerprint``. The earlier hard return at
+    the cap abandoned the walk entirely, so on a tree exceeding the cap in one
+    watched subdir a new file could fail to bump the freshness epoch, and
+    every per-key mtime-cache entry then took the epoch fast-path forever:
+    indefinite staleness, not a one-poll delay.
     """
     latest = 0.0
     files_seen = 0
     try:
         for root, _dirs, files in os.walk(directory):
             for name in files:
-                if files_seen >= _MAX_FINGERPRINT_FILES:
-                    return latest
+                files_seen += 1
+                if files_seen > _MAX_FINGERPRINT_FILES:
+                    continue
                 try:
                     mt = os.stat(os.path.join(root, name)).st_mtime
                 except OSError:
                     continue
                 if mt > latest:
                     latest = mt
-                files_seen += 1
     except OSError:
         pass
-    return latest
+    return latest, files_seen
 
 
 def _get_path_fingerprint(paths: List[str]) -> Tuple[float, int, int]:
@@ -414,8 +418,8 @@ def check_data_freshness(main_dir: str) -> str:
     parts = []
     for subdir in ("kraken2", "fastp", "seqkit", "validation"):
         dirpath = os.path.join(main_dir, subdir)
-        mt = _get_dir_latest_mtime(dirpath)
-        parts.append(f"{subdir}:{mt}")
+        mt, n_files = _get_dir_latest_mtime(dirpath)
+        parts.append(f"{subdir}:{mt}:{n_files}")
 
     raw = "|".join(parts)
     fingerprint = hashlib.md5(raw.encode()).hexdigest()

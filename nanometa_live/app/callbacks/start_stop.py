@@ -6,6 +6,7 @@ import os
 import logging
 import threading
 import time
+from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
 import dash
@@ -144,7 +145,13 @@ def register_start_stop(app, backend_manager):
             optimistic_status.update({
                 "running": True,
                 "starting": True,
-                "start_time": time.time(),
+                # ISO-8601, matching BackendManager.start (which writes
+                # datetime.now().isoformat()). Every reader parses this with
+                # datetime.fromisoformat / Date.parse -- _format_time_elapsed,
+                # toggle_waiting_banner, and the clientside elapsed-time
+                # callback -- so a float epoch made all three fail closed and
+                # blanked the elapsed-time display until the next status poll.
+                "start_time": datetime.now().isoformat(),
                 "pipeline_status": "starting",
             })
         else:
@@ -302,7 +309,9 @@ def register_start_stop(app, backend_manager):
             optimistic_status.update({
                 "running": True,
                 "starting": True,
-                "start_time": time.time(),
+                # ISO-8601 -- see start_or_prompt_stop for why a float epoch
+                # is wrong here.
+                "start_time": datetime.now().isoformat(),
                 "pipeline_status": "starting",
             })
         else:
@@ -326,6 +335,7 @@ def register_start_stop(app, backend_manager):
         [
             Output("stop-confirm-modal", "is_open"),
             Output("notification-trigger", "data", allow_duplicate=True),
+            Output("user-stop-requested", "data", allow_duplicate=True),
         ],
         [
             Input("confirm-stop-analysis", "n_clicks"),
@@ -335,9 +345,17 @@ def register_start_stop(app, backend_manager):
         prevent_initial_call=True,
     )
     def handle_stop_confirmation(confirm_clicks, cancel_clicks, is_open):
-        """Handle stop confirmation modal buttons."""
+        """Handle stop confirmation modal buttons.
+
+        A successful stop also raises the ``user-stop-requested`` flag. The
+        running -> not-running transition is otherwise indistinguishable from a
+        natural finish, and auto_navigate_on_completion announced an operator
+        abort as "has finished. Results are up to date." The flag rides a
+        dedicated Store rather than backend-status because the next status poll
+        overwrites backend-status wholesale from BackendManager.get_status().
+        """
         if not is_open:
-            return no_update, no_update
+            return no_update, no_update, no_update
 
         triggered = dash.ctx.triggered_id
         if triggered == "confirm-stop-analysis" and confirm_clicks:
@@ -347,11 +365,11 @@ def register_start_stop(app, backend_manager):
                 "title": "Analysis Stopped" if success else "Error",
                 "message": message,
                 "color": color,
-            }
+            }, (True if success else no_update)
         elif triggered == "cancel-stop-analysis" and cancel_clicks:
-            return False, no_update
+            return False, no_update, no_update
 
-        return no_update, no_update
+        return no_update, no_update, no_update
 
     @app.callback(
         Output("tabs", "active_tab"),

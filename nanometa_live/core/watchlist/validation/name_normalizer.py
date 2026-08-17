@@ -146,12 +146,33 @@ class NormalizedName:
         """Generate name variants for matching."""
         variants = [self.canonical]
 
-        # Species-only form (genus + species_epithet, no strain/serovar)
-        # This is the most important variant for matching
+        # Subspecies trinomial forms (genus + species + subspecies epithet,
+        # WITHOUT the "subsp." token). Databases commonly name their S1 nodes
+        # this way, and variants are tried in order with the first hit
+        # winning, so these must outrank the species-only form -- otherwise a
+        # subspecies entry resolves to the parent species node and two
+        # subspecies of the same species collapse onto one match.
+        if self.genus and self.species_epithet and self.subspecies:
+            genus = self.genus.lower()
+            epithet = self.species_epithet.lower()
+            subsp = self.subspecies.lower()
+            trinomial = f"{genus} {epithet} {subsp}"
+            if trinomial != self.canonical:
+                variants.append(trinomial)
+            variants.append(f"{genus}_{epithet}_{subsp}")
+            variants.append(f"s__{genus}_{epithet}_{subsp}")
+
+        # Species-only form (genus + species_epithet, no strain/serovar).
+        # The highest-priority variant for a binomial name; for a
+        # subspecies-qualified name it is the FALLBACK after the trinomial
+        # forms above, so it is appended rather than inserted.
         if self.genus and self.species_epithet:
             species_only = f"{self.genus.lower()} {self.species_epithet.lower()}"
             if species_only != self.canonical:
-                variants.insert(1, species_only)  # High priority after canonical
+                if self.subspecies:
+                    variants.append(species_only)
+                else:
+                    variants.insert(1, species_only)  # High priority after canonical
             # Also add underscore form for species-only
             variants.append(f"{self.genus.lower()}_{self.species_epithet.lower()}")
 

@@ -57,7 +57,7 @@ def test_help_section_sunburst_vs_sankey(cls_app):
 
 def test_min_reads_default_single_sample_keeps_default(cls_app):
     fn = get_callback_fn(cls_app, "classification-filter-input")
-    value, placeholder = fn(["barcode01"], "barcode01", None)
+    value, placeholder, _signal = fn(["barcode01"], "barcode01", None)
     assert value == 10
     assert "10 default" in placeholder
 
@@ -65,7 +65,7 @@ def test_min_reads_default_single_sample_keeps_default(cls_app):
 def test_min_reads_default_scales_for_aggregate_multiplex(cls_app):
     fn = get_callback_fn(cls_app, "classification-filter-input")
     samples = [f"barcode{i:02d}" for i in range(1, 25)]  # 24 barcodes
-    value, placeholder = fn(samples, "All Samples", 10)
+    value, placeholder, _signal = fn(samples, "All Samples", 10)
     assert value == 120          # max(10, 5 * 24)
     assert "recommended" in placeholder
     assert "24 samples" in placeholder
@@ -74,7 +74,7 @@ def test_min_reads_default_scales_for_aggregate_multiplex(cls_app):
 def test_min_reads_default_preserves_custom_value(cls_app):
     fn = get_callback_fn(cls_app, "classification-filter-input")
     samples = [f"barcode{i:02d}" for i in range(1, 25)]
-    value, _ = fn(samples, "All Samples", 50)  # operator typed 50 -> keep it
+    value, _, _signal = fn(samples, "All Samples", 50)  # operator typed 50 -> keep it
     assert value == 50
 
 

@@ -88,3 +88,25 @@ class TestTheExplicitListStillWins:
         cfg = {"negative_control_samples": ["barcode99"]}
 
         assert is_negative_control("negative_barcode16", cfg)
+
+
+class TestUndelimitedNumericSuffixes:
+    """NTC1 / blank2 / NC03 / neg1 are controls (audit 2026-08-16, L18).
+
+    The tokenizer splits on non-alphanumerics, so a fused name like NTC1
+    became the single token "ntc1", matching neither the exact-token set nor
+    the negative-token rules -- a lab numbering its controls without a
+    separator had them treated as clinical samples in attribution.
+    """
+
+    @pytest.mark.parametrize("name", [
+        "NTC1", "ntc2", "NC03", "blank1", "Blank2", "negctrl3", "neg1",
+    ])
+    def test_fused_control_names_are_controls(self, name):
+        assert is_negative_control(name) is True
+
+    @pytest.mark.parametrize("name", [
+        "barcode16", "s1", "sample12", "negative_strand_test", "n1",
+    ])
+    def test_fused_rule_adds_no_false_positives(self, name):
+        assert is_negative_control(name) is False

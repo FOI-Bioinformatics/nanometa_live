@@ -108,9 +108,11 @@ snapshot carries `enabled` per entry (set in `hydrate_watchlist_entries_snapshot
 so the checks can filter to the active set.
 
 **Update cadence and session writes.** A single global
-`dcc.Interval(id='update-interval')` drives all polling, default 30 s
-(configurable via `update_interval_seconds`; the value is re-applied
-at runtime by `callbacks.py:75`). Heavy I/O (kraken2/fastp/seqkit/
+`dcc.Interval(id='update-interval')` drives all polling: 10 s while a
+run is active (`update_interval_seconds`), backing off to 60 s when
+nothing is running (`idle_update_interval_seconds`). The adaptive
+switch lives in `app/callbacks/interval_offline.py:update_interval`,
+keyed on `backend-status`. Heavy I/O (kraken2/fastp/seqkit/
 blast scans) is gated on the `results-fingerprint` store rather than
 on raw interval ticks; ~13 callbacks share a uniform 2 s
 `should_skip_update()` debounce so an interval tick that finds
@@ -139,7 +141,10 @@ collision modal renders a red mismatch banner in that case. Companion helpers:
 
 ### Kraken2 Reports
 
-Loader priority order (cumulative beats per-batch):
+Loader priority order (cumulative beats per-batch), resolved PER SAMPLE and
+unioned in the "All Samples" aggregate — a directory-wide tier choice silently
+dropped every barcode still on a lower tier from the frame the verdict banner
+reads (audit 2026-08-16, finding L1):
 
 1. `*.cumulative.kraken2.report.txt` (real-time cumulative)
 2. `*.kraken2.report.txt`
@@ -682,9 +687,15 @@ later empty batch reset a confirmed organism to 0). Layout:
 
 - **Cumulative (canonical flat):** `validation/{minimap2,blast}/<sample>_taxid<tid>.{paf,blast.tsv,*_stats.json}`
   — kept current each batch by nanometanf's `validation_cumulative_aggregator`
-  module (merges the prior cumulative + the new batch, recomputes stats; coverage
-  breadth is recomputed since it is not additive, `total_reads` is accumulated
-  since it is not in the alignment files). The GUI reads these by default.
+  module (each aggregation receives the complete batch set seen so far —
+  scan/state, no publish-dir read-back — so a concurrent batch cannot erase an
+  earlier one; coverage breadth is recomputed since it is not additive,
+  `total_reads` summed over the batch stats). The GUI reads these by default.
+  The aggregate `validation/validation_results.json` is different: with the
+  default `validation_aggregate_interval = 0` it is written ONCE at session
+  end. The GUI stays live mid-run through the per-pair files above (the
+  ValidationParser always scans them, and its cache fingerprint tracks their
+  in-place rewrites).
 - **Per-batch (preserved):** `validation/{minimap2,blast}/batch/<sample>_taxid<tid>_<batch_id>.*`
   — every batch retained for drill-down. `batch_id` is the realtime batch index.
 
@@ -975,13 +986,17 @@ comparing `available-samples` against `sample-file-mapping` (see below).
 `bin/write_manifest.py` derives `<sample>.classification.json` and
 `<sample>.qc_stats.json` from the sample list and active tools, because
 MANIFEST_WRITER runs in its own work directory and cannot see the publishDir.
-So a sample whose QC failed — CHOPPER exit 1 on an unreadable FASTQ, absorbed
-by `conf/error_isolation.config` — is listed exactly like a healthy one, and
-`sample_detector._samples_from_manifest` returns that list verbatim. The GUI
-compensates: the sample selector marks samples present in `available-samples`
-but absent from `sample-file-mapping`, which is built from files on disk.
-Marked rather than hidden — hiding loses the fact that the barcode was
-attempted.
+Since the 2026-08-16 audit, `failed_samples` is derived from QC output
+INTERSECTED with classification reports (when classification ran), so a
+sample whose QC or whole-sample Kraken2 failed under
+`conf/error_isolation.config` IS named as failed. What the manifest still
+cannot see is a PARTIAL failure — batches 1–5 classify, batch 6 dies — and
+`sample_detector._samples_from_manifest` returns the sample list verbatim.
+The GUI compensates: the sample selector marks samples present in
+`available-samples` but absent from `sample-file-mapping`, which is built
+from files on disk. Marked rather than hidden — hiding loses the fact that
+the barcode was attempted. The exported report carries the same
+attempted-but-no-output marking.
 
 **Verdict-banner decision logic is a pure function.** The safety-critical
 clinical verdict (ACTION REQUIRED / MONITORING / ALL CLEAR / INSUFFICIENT READS
@@ -1029,7 +1044,8 @@ column is absent. Regression-covered in `tests/test_attribution_read_column.py`.
 
 **Negative controls.** `is_negative_control` reads the config's
 `negative_control_samples` list first, then falls back to name patterns:
-`NTC` / `neg_ctrl` / `blank`, and "negative" beside a *sample identifier*
+`NTC` / `neg_ctrl` / `blank`, fused numeric suffixes (`NTC1`, `blank2`,
+`neg1`), and "negative" beside a *sample identifier*
 (`negative_barcode16`, `neg_01`). The identifier rule is what distinguishes a
 control from `negative_strand_test`, where "negative" describes a molecule
 rather than naming a sample. Note the fallback cannot help under `by_barcode`
@@ -1137,7 +1153,7 @@ pytest -n 0                                         # serial, for pdb/print debu
 pytest --cov=nanometa_live --cov-report=term-missing   # with the coverage gate
 ```
 
-2873 tests as of 2026-07-25, ~68% line coverage. `pytest.ini` enforces a
+3638 tests as of 2026-08-17 (~108 skipped by default). `pytest.ini` enforces a
 `fail_under = 67` floor on coverage runs only (the default `pytest` dev loop
 does not load coverage); the floor ratchets up as coverage rises — keep it ~1
 point below the measured total, never lower it. Also

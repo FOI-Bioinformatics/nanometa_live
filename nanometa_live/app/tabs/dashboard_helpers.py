@@ -1524,10 +1524,7 @@ def _generate_alerts(
         kraken_df = load_kraken_data(main_dir, "All Samples")
         if not kraken_df.empty:
             # Filter to species level with meaningful read counts (vectorized)
-            species_df = kraken_df[
-                species_rank_mask(kraken_df) &
-                (kraken_df["reads"] >= 5)
-            ]
+            species_df = _species_discovery_df(kraken_df)
             detected_organisms = _species_df_to_organisms(species_df)
     except Exception as e:
         logger.error(f"Error loading organisms for pathogen check: {e}")
@@ -1769,6 +1766,24 @@ def _create_pathogen_alert_panel(
         return html.Div(), {"display": "none"}
 
 
+def _species_discovery_df(
+    kraken_df: pd.DataFrame, floor: int = PER_SAMPLE_DISCOVERY_FLOOR
+) -> pd.DataFrame:
+    """Species-level rows at or above the discovery floor.
+
+    Gates on ``cumul_reads`` when present (falling back to ``reads``) -- the
+    SAME column ``_species_df_to_organisms`` reports. Gating on the per-rank
+    ``reads`` column while displaying ``cumul_reads`` let a species whose
+    reads sit on its subspecies children (0-4 direct against thousands
+    cumulative on a subspecies-resolving database) be dropped before watchlist
+    matching ever saw it, so the verdict banner rendered ALL CLEAR over a
+    real detection. All discovery-floor consumers must filter through this
+    helper so the gate and the displayed count cannot disagree.
+    """
+    floor_col = "cumul_reads" if "cumul_reads" in kraken_df.columns else "reads"
+    return kraken_df[species_rank_mask(kraken_df) & (kraken_df[floor_col] >= floor)]
+
+
 def _species_df_to_organisms(species_df: pd.DataFrame) -> List[Dict[str, Any]]:
     """
     Convert species DataFrame to list of organism dicts (vectorized).
@@ -1861,13 +1876,7 @@ def _load_per_sample_organisms(
             # floor and the displayed count disagree: a real negative control
             # had 4 direct reads against 6 cumulative and was dropped by a
             # floor of 5, so its contamination never reached the display.
-            floor_col = (
-                "cumul_reads" if "cumul_reads" in kraken_df.columns else "reads"
-            )
-            species_df = kraken_df[
-                species_rank_mask(kraken_df)
-                & (kraken_df[floor_col] >= PER_SAMPLE_DISCOVERY_FLOOR)
-            ]
+            species_df = _species_discovery_df(kraken_df)
             if species_df.empty:
                 continue
             for org in _species_df_to_organisms(species_df):

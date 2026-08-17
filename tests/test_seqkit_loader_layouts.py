@@ -77,3 +77,40 @@ class TestSeqkitMissing:
         _write_seqkit_tsv(tmp_path / "seqkit" / "barcode01.tsv")
         df = load_seqkit_stats(str(tmp_path), sample="barcode99")
         assert df.empty
+
+
+class TestIncrementalDoesNotDoubleCountMergedSamples:
+    """A sample with BOTH a flat merged TSV and batch_stats/ must count once.
+
+    SEQKIT_STATS keeps publishing per-batch files while SEQKIT_MERGE_STATS
+    refreshes the flat TSV on the same cadence -- the two coexist for the
+    whole run. The incremental aggregator summed batch_stats for every sample
+    directory regardless, so the All-Samples concat counted merged samples
+    twice. Audit 2026-08-16, finding L13.
+    """
+
+    def test_all_samples_counts_a_merged_sample_once(self, tmp_path):
+        import os
+        import time
+
+        # barcode01: merged flat TSV (authoritative) AND per-batch files.
+        _write_seqkit_tsv(tmp_path / "seqkit" / "barcode01.tsv")
+        _write_seqkit_tsv(
+            tmp_path / "seqkit" / "barcode01" / "batch_stats" / "batch_0.tsv"
+        )
+        # barcode02: incremental only (mid-run, not merged yet).
+        _write_seqkit_tsv(
+            tmp_path / "seqkit" / "barcode02" / "batch_stats" / "batch_0.tsv"
+        )
+        # Batch files pass through the loader's file-stability check.
+        old = time.time() - 30
+        for p in (tmp_path / "seqkit").rglob("*.tsv"):
+            os.utime(p, (old, old))
+
+        df = load_seqkit_stats(str(tmp_path), sample=None)
+        counts = df.groupby("sample")["num_seqs"].sum().to_dict()
+        assert counts.get("barcode01") == 100, (
+            f"merged sample double-counted: {counts}"
+        )
+        assert counts.get("barcode02") == 100
+        assert len(df[df["sample"] == "barcode01"]) == 1

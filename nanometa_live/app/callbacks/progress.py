@@ -173,16 +173,19 @@ def register_progress(app, backend_manager):
             Output("tabs", "active_tab", allow_duplicate=True),
             Output("previous-running-state", "data"),
             Output("toast-message", "data", allow_duplicate=True),
+            Output("user-stop-requested", "data", allow_duplicate=True),
         ],
         Input("backend-status", "data"),
         [
             State("previous-running-state", "data"),
             State("tabs", "active_tab"),
             State("app-config", "data"),
+            State("user-stop-requested", "data"),
         ],
         prevent_initial_call=True,
     )
-    def auto_navigate_on_completion(status, prev_running, current_tab, config):
+    def auto_navigate_on_completion(status, prev_running, current_tab, config,
+                                    user_stopped):
         """
         Navigate to the Dashboard when analysis completes -- but only if the
         operator is on a Setup tab.
@@ -192,9 +195,16 @@ def register_progress(app, backend_manager):
         Validation) they may be mid-investigation, so we leave their tab
         untouched and only show the completion toast. Switching focus out from
         under them was a reported annoyance.
+
+        The transition alone cannot say WHY the run ended. ``user-stop-requested``
+        is raised by handle_stop_confirmation on a successful operator stop, so
+        an abort is announced as stopped rather than as "has finished. Results
+        are up to date." -- which claimed a complete dataset for a truncated
+        one. The flag is consumed here (reset to False) and also cleared when a
+        new run starts, so it can never carry over onto a later natural finish.
         """
         if not status:
-            return no_update, False, no_update
+            return no_update, False, no_update, no_update
 
         is_running = bool(status.get("running", False))
 
@@ -205,29 +215,44 @@ def register_progress(app, backend_manager):
         # Use explicit bool() to guard against truthy non-boolean values in the store
         if bool(prev_running) and not is_running:
             analysis_name = config.get("analysis_name", "Analysis") if config else "Analysis"
+            stopped_by_operator = bool(user_stopped)
+            if stopped_by_operator:
+                title = "Analysis Stopped"
+                ended = f"{analysis_name} was stopped before it finished"
+                caveat = " Results are partial."
+            else:
+                title = "Analysis Complete"
+                ended = f"{analysis_name} has finished"
+                caveat = " Results are up to date."
+            # Consume the flag whichever branch we take below.
+            clear_flag = False if stopped_by_operator else no_update
             # Stay put when already viewing results; only pull the operator to
             # the Dashboard from a Setup tab (config/watchlist/deployment).
             if current_tab in RESULTS_TABS:
                 toast_msg = {
-                    "type": "success",
-                    "title": "Analysis Complete",
-                    "message": f"{analysis_name} has finished. Results are up to date.",
+                    "type": "warning" if stopped_by_operator else "success",
+                    "title": title,
+                    "message": f"{ended}.{caveat}",
                 }
-                return no_update, new_prev_state, toast_msg
+                return no_update, new_prev_state, toast_msg, clear_flag
             toast_msg = {
-                "type": "success",
-                "title": "Analysis Complete",
-                "message": f"{analysis_name} has finished. Viewing results on Dashboard.",
+                "type": "warning" if stopped_by_operator else "success",
+                "title": title,
+                "message": f"{ended}.{caveat} Viewing results on Dashboard.",
             }
-            return "dashboard-tab", new_prev_state, toast_msg
+            return "dashboard-tab", new_prev_state, toast_msg, clear_flag
+
+        # A new run has started: drop any stale abort flag so this run's own
+        # ending is classified on its own evidence.
+        clear_flag = False if (is_running and user_stopped) else no_update
 
         # No navigation needed. Only write the tracker store when the
         # running flag actually changed (e.g. transition into running);
         # writing an unchanged value on every backend-status poll would
         # mark the store dirty and re-fire downstream subscribers each tick.
         if new_prev_state == bool(prev_running):
-            return no_update, no_update, no_update
-        return no_update, new_prev_state, no_update
+            return no_update, no_update, no_update, clear_flag
+        return no_update, new_prev_state, no_update, clear_flag
 
     # ========================================================================
     # Welcome Modal (first-run onboarding)
