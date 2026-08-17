@@ -237,18 +237,14 @@ def register_startup(app, backend_manager):
                         },
                         "statistics": coll_dict.get("statistics", {}),
                     }
-                    # Same shape as the Scan Database writer (profile-based
-                    # label + evidence) -- the two writers used to disagree,
-                    # so the same database read "custom" after a restart and
-                    # "GTDB -- 12/12 reference taxa match" after a scan
-                    # (2026-08-17 reaudit, G7).
-                    db_info = {
-                        "type": collection.profile.display_label,
-                        "detected_by": collection.profile.detected_by,
-                        "overridden": collection.profile.overridden,
-                        "hash": collection.database_hash,
-                        "path": collection.database_path,
-                    }
+                    # Shared builder keeps this writer's key set identical to
+                    # the Scan Database and override-editor writers (G7).
+                    from nanometa_live.app.utils.db_info import build_db_info
+                    db_info = build_db_info(
+                        collection.profile,
+                        db_hash=collection.database_hash,
+                        path=collection.database_path,
+                    )
                     rescan_time = collection.updated_at.isoformat()
 
             # Record the db path we initialised from so the next tick

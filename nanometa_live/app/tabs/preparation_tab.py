@@ -206,6 +206,48 @@ def _export_preflight(directory, config, pre_warm):
     return None
 
 
+def _refresh_live_profile(kraken_db: str, db_hash: str, mappings_dir: Path):
+    """Recompute the effective profile after an override save/clear and push
+    it to every live consumer.
+
+    Rebuilds from the DETECTED profile on disk (never from the singleton,
+    whose profile may already be a previous override) and updates: the
+    matching index singleton (strategy gating / GTDB variants), the mapping
+    collection singleton (what ``check_organisms`` reads for the taxid
+    shortcut), and the on-disk ``{db_hash}_mappings.json`` copy so background
+    workers that load it standalone see the same profile.
+    ``load_profile_for_db`` consumers (Verify Taxonomy IDs, genome kingdom
+    hint) read the override file from disk on every call and need no push.
+    """
+    from nanometa_live.core.taxonomy.database_profile import (
+        apply_override, load_detected_profile,
+    )
+    from nanometa_live.core.taxonomy.taxid_mapping import (
+        get_mapping_cache_path, get_mapping_collection, get_taxid_mapper,
+        set_database_index, set_mapping_collection,
+    )
+
+    new_profile = apply_override(
+        load_detected_profile(kraken_db), db_hash, mappings_dir)
+
+    mapper = get_taxid_mapper()
+    if mapper._index is not None:
+        mapper._index.profile = new_profile
+        set_database_index(mapper._index)
+
+    collection = get_mapping_collection()
+    if collection is not None:
+        collection.profile = new_profile
+        set_mapping_collection(collection)
+        try:
+            collection.save(str(get_mapping_cache_path(kraken_db)))
+        except OSError as exc:
+            logger.warning(
+                "Could not persist profile onto the mappings cache: %s", exc)
+
+    return new_profile
+
+
 def register_preparation_callbacks(app):
     """Register all preparation tab callbacks."""
 
@@ -1214,17 +1256,15 @@ def register_preparation_callbacks(app):
                 logger.warning("Rescan produced no collection data")
 
             profile = mapper._index.profile if mapper._index else None
-            db_info = {
-                "path": kraken_db,
-                "type": profile.display_label if profile else "unknown",
-                # The evidence behind the label, so an operator deciding
-                # whether to override can see WHY it was detected that way
-                # rather than guessing.
-                "detected_by": profile.detected_by if profile else "",
-                "overridden": bool(profile.overridden) if profile else False,
-                "hash": collection.database_hash if collection else "",
-                "stats": mapper.get_statistics(),
-            }
+            # Shared builder (app/utils/db_info.py): the store's key set must
+            # match the startup and override-editor writers (G7).
+            from nanometa_live.app.utils.db_info import build_db_info
+            db_info = build_db_info(
+                profile,
+                db_hash=collection.database_hash if collection else "",
+                path=kraken_db,
+                stats=mapper.get_statistics(),
+            )
 
             now = datetime.now().isoformat()
             new_refresh = (current_refresh or 0) + 1
@@ -1364,6 +1404,96 @@ def register_preparation_callbacks(app):
         coverage_div = html.Div(warn_lines) if warn_lines else ""
 
         return db_type_text, count_text, scan_text, coverage_div
+
+    # --- Taxonomy profile override editor (G6) ---
+
+    @app.callback(
+        Output("taxmap-override-taxids", "value"),
+        Output("taxmap-override-nomenclature", "value"),
+        Input("taxmap-database-info", "data"),
+        prevent_initial_call=True,
+    )
+    def seed_override_controls(db_info):
+        """Seed the override selects from the live profile so the editor
+        opens on the current values instead of stale defaults."""
+        if not db_info:
+            raise PreventUpdate
+        return (
+            "true" if db_info.get("taxids_are_ncbi") else "false",
+            db_info.get("nomenclature") or "unknown",
+        )
+
+    @app.callback(
+        Output("taxmap-override-status", "children"),
+        Output("taxmap-database-info", "data", allow_duplicate=True),
+        Input("taxmap-override-save", "n_clicks"),
+        Input("taxmap-override-clear", "n_clicks"),
+        State("taxmap-override-taxids", "value"),
+        State("taxmap-override-nomenclature", "value"),
+        State("app-config", "data"),
+        State("taxmap-database-info", "data"),
+        prevent_initial_call=True,
+    )
+    def handle_profile_override(save_clicks, clear_clicks, taxids_value,
+                                nomenclature_value, config, db_info):
+        """Write or remove the operator profile override, then refresh every
+        live consumer so detection sees the new profile without a restart.
+
+        A REGULAR callback on purpose: the singleton updates must land in
+        the main app process (a background worker's singletons die with the
+        worker -- see CLAUDE.md on DiskcacheManager isolation).
+        """
+        from nanometa_live.core.taxonomy.database_profile import (
+            DatabaseProfile, Nomenclature, apply_override, clear_override,
+            save_override,
+        )
+        from nanometa_live.core.taxonomy.taxid_mapping import get_database_hash
+        from nanometa_live.core.utils.paths import get_mappings_dir_from_env
+
+        if not ctx.triggered_id:
+            raise PreventUpdate
+
+        kraken_db = (config or {}).get("kraken_db", "")
+        # Guard the empty path explicitly: Path("") is ".", which exists, so
+        # get_database_hash("") silently hashes the working directory.
+        db_hash = get_database_hash(kraken_db) if kraken_db else ""
+        if not db_hash:
+            return ("Set a Kraken2 database path in Configuration first.",
+                    no_update)
+        mappings_dir = Path(get_mappings_dir_from_env())
+
+        if ctx.triggered_id == "taxmap-override-save":
+            try:
+                nomenclature = Nomenclature(nomenclature_value or "unknown")
+            except ValueError:
+                nomenclature = Nomenclature.UNKNOWN
+            save_override(db_hash, mappings_dir, DatabaseProfile(
+                taxids_are_ncbi=(taxids_value == "true"),
+                nomenclature=nomenclature,
+            ))
+        else:
+            clear_override(db_hash, mappings_dir)
+
+        new_profile = _refresh_live_profile(kraken_db, db_hash, mappings_dir)
+
+        if ctx.triggered_id == "taxmap-override-save":
+            status = f"Override applied: {new_profile.display_label}."
+        else:
+            status = (f"Override cleared -- detection says: "
+                      f"{new_profile.display_label}.")
+
+        # Preserve stats/coverage from the previous store value; this writer
+        # cannot recompute them and blanking them would erase the G10 panel.
+        from nanometa_live.app.utils.db_info import build_db_info
+        prior = db_info or {}
+        new_db_info = build_db_info(
+            new_profile,
+            db_hash=db_hash,
+            path=kraken_db,
+            stats=prior.get("stats"),
+            coverage=prior.get("coverage"),
+        )
+        return status, new_db_info
 
     # =========================================================================
     # Genome Downloads (moved from watchlist_tab.py)

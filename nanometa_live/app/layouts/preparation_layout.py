@@ -587,8 +587,75 @@ def _create_rescan_db_card() -> dbc.Card:
                 # (2026-08-17 reaudit, G10).
                 html.Div(id="taxmap-coverage-warnings", className="mt-2"),
             ]),
+            html.Hr(className="my-3"),
+            _profile_override_block(),
         ]),
     ], className="mb-4")
+
+
+def _profile_override_block() -> html.Div:
+    """Operator override for the detected taxonomy profile (G6).
+
+    The override file always existed ({db_hash}_profile_override.json,
+    surviving index rebuilds); this is its first GUI writer.
+    """
+    return html.Div([
+                html.Div([
+                    html.I(className="bi bi-sliders me-2"),
+                    html.Span("Taxonomy profile override",
+                              className="small fw-semibold"),
+                ], className="mb-1"),
+                html.P(
+                    "Detection is automatic; set this only when the detected "
+                    "profile above is wrong for your database build. The "
+                    "override persists across scans until cleared.",
+                    className="text-muted small mb-2",
+                ),
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Label("Taxonomy IDs", className="small mb-1",
+                                  html_for="taxmap-override-taxids"),
+                        dbc.Select(
+                            id="taxmap-override-taxids",
+                            options=[
+                                {"label": "NCBI-compatible (trust raw taxids)",
+                                 "value": "true"},
+                                {"label": "Database-local (match by name only)",
+                                 "value": "false"},
+                            ],
+                            value="false",
+                            size="sm",
+                        ),
+                    ], md=4),
+                    dbc.Col([
+                        dbc.Label("Organism names", className="small mb-1",
+                                  html_for="taxmap-override-nomenclature"),
+                        dbc.Select(
+                            id="taxmap-override-nomenclature",
+                            options=[
+                                {"label": "NCBI nomenclature", "value": "ncbi"},
+                                {"label": "GTDB nomenclature", "value": "gtdb"},
+                                {"label": "Unknown (query both)",
+                                 "value": "unknown"},
+                            ],
+                            value="unknown",
+                            size="sm",
+                        ),
+                    ], md=4),
+                    dbc.Col([
+                        dbc.Button("Apply Override", id="taxmap-override-save",
+                                   color="warning", outline=True, size="sm",
+                                   n_clicks=0, className="me-2 mt-4"),
+                        dbc.Button("Clear", id="taxmap-override-clear",
+                                   color="secondary", outline=True, size="sm",
+                                   n_clicks=0, className="mt-4",
+                                   title="Remove the override and return to "
+                                         "automatic detection"),
+                    ], md=4),
+                ], className="g-2"),
+                html.Small(id="taxmap-override-status",
+                           className="text-muted d-block mt-2"),
+            ], id="taxmap-override-block")
 
 
 def _create_genome_downloads_card() -> dbc.Card:

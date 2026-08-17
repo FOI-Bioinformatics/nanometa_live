@@ -202,6 +202,37 @@ def apply_override(
     )
 
 
+def load_detected_profile(database_path: str) -> DatabaseProfile:
+    """Read the DETECTED profile from the index cache, ignoring any override.
+
+    The override editor needs this as the base for :func:`apply_override`:
+    the live singleton's profile may already BE the override, and using it as
+    the "detected" side would nest override evidence inside override evidence
+    on every save.
+    """
+    from nanometa_live.core.taxonomy.taxid_mapping import get_database_hash
+    from nanometa_live.core.utils.paths import get_mappings_dir_from_env
+
+    if not database_path:
+        return DatabaseProfile()
+
+    db_hash = get_database_hash(database_path)
+    if not db_hash:
+        return DatabaseProfile()
+
+    mappings_dir = Path(get_mappings_dir_from_env())
+    index_path = mappings_dir / f"{db_hash}_index.json"
+    detected = DatabaseProfile()
+    if index_path.exists():
+        try:
+            with open(index_path) as fh:
+                data = json.load(fh)
+            detected = DatabaseProfile.from_dict(data.get("profile"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.debug("Could not read profile from %s: %s", index_path, exc)
+    return detected
+
+
 def load_profile_for_db(database_path: str) -> DatabaseProfile:
     """Read a database's profile without deserialising its node list.
 
@@ -225,17 +256,8 @@ def load_profile_for_db(database_path: str) -> DatabaseProfile:
         return DatabaseProfile()
 
     mappings_dir = Path(get_mappings_dir_from_env())
-    index_path = mappings_dir / f"{db_hash}_index.json"
-    detected = DatabaseProfile()
-    if index_path.exists():
-        try:
-            with open(index_path) as fh:
-                data = json.load(fh)
-            detected = DatabaseProfile.from_dict(data.get("profile"))
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.debug("Could not read profile from %s: %s", index_path, exc)
-
-    return apply_override(detected, db_hash, mappings_dir)
+    return apply_override(
+        load_detected_profile(database_path), db_hash, mappings_dir)
 
 
 def kingdom_hint_for_database(config) -> "Optional[str]":
