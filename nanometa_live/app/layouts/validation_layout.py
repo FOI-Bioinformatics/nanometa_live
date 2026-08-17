@@ -293,6 +293,14 @@ def _create_blast_tab() -> dbc.Tab:
                                             "getRowId": {
                                                 "function": "params.data.species + '||' + params.data.sample_id"
                                             },
+                                            # Inert selection: silences AG
+                                            # Grid #132 on rowData updates
+                                            # (see main_layout for detail).
+                                            "rowSelection": {
+                                                "mode": "singleRow",
+                                                "checkboxes": False,
+                                                "enableClickSelection": False,
+                                            },
                                         },
                                     )
                                 ]
@@ -357,6 +365,15 @@ def _create_blast_tab() -> dbc.Tab:
                                 columnDefs=[],
                                 rowData=[],
                                 defaultColDef={"sortable": True, "filter": True, "resizable": True},
+                                dashGridOptions={
+                                    # Inert selection: silences AG Grid #132
+                                    # on rowData updates (see main_layout).
+                                    "rowSelection": {
+                                        "mode": "singleRow",
+                                        "checkboxes": False,
+                                        "enableClickSelection": False,
+                                    },
+                                },
                                 style={"height": "200px"},
                                 className="mb-3",
                             ),
@@ -372,6 +389,13 @@ def _create_blast_tab() -> dbc.Tab:
                                     "pagination": True,
                                     "paginationPageSize": 50,
                                     "paginationPageSizeSelector": [25, 50, 100],
+                                    # Inert selection: silences AG Grid #132
+                                    # on rowData updates (see main_layout).
+                                    "rowSelection": {
+                                        "mode": "singleRow",
+                                        "checkboxes": False,
+                                        "enableClickSelection": False,
+                                    },
                                 },
                                 style={"height": "400px"},
                             ),

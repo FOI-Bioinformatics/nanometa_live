@@ -349,7 +349,19 @@ def create_dashboard_layout():
                                     "pagination": True,
                                     "paginationPageSize": 25,
                                     "paginationPageSizeSelector": [10, 25, 50, 100],
-                                    "rowSelection": {"mode": "singleRow"},
+                                    # Click-to-select is the whole feature
+                                    # here ("Click a row to filter all tabs
+                                    # to this sample"). AG Grid 33's object
+                                    # API defaults enableClickSelection to
+                                    # False and checkboxes to True, so the
+                                    # bare {"mode": "singleRow"} silently
+                                    # stopped selecting on click after the
+                                    # v33 upgrade.
+                                    "rowSelection": {
+                                        "mode": "singleRow",
+                                        "checkboxes": False,
+                                        "enableClickSelection": True,
+                                    },
                                     "tooltipShowDelay": 500,
                                     "getRowId": {"function": "params.data.sample"},
                                 },

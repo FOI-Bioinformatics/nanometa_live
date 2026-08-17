@@ -280,6 +280,13 @@ def _qc_per_sample_table():
                             "headerHeight": 32,
                             "groupHeaderHeight": 38,
                             "getRowId": {"function": "params.data.sample"},
+                            # Inert selection: silences AG Grid #132 on
+                            # rowData updates (see main_layout for detail).
+                            "rowSelection": {
+                                "mode": "singleRow",
+                                "checkboxes": False,
+                                "enableClickSelection": False,
+                            },
                         },
                         className="ag-theme-alpine qc-sample-breakdown-grid",
                         style={"width": "100%"},
