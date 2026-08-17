@@ -952,6 +952,32 @@ class WatchlistManager:
                 keys.insert(0, key)
         return db_to_ncbi
 
+
+    @staticmethod
+    def _dedupe_alerts_by_entry(alerts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """One detection per watchlist entry, keeping the dominant node.
+
+        A species report row and its subspecies/strain rows all resolve to
+        the same watchlist entry, and the species row's cumulative count
+        already CONTAINS its descendants -- so emitting one alert per
+        matched row both multiplied the "N of M watched pathogens" count
+        (a real LVS run announced 12 pathogens for one organism) and
+        double-counted reads anywhere the alerts are summed (2026-08-17
+        reaudit). The kept row is the one with the most reads: for
+        ancestor/descendant matches that is the ancestor, whose count
+        contains the others. Distinct entries are never merged.
+        """
+        best: Dict[Any, Dict[str, Any]] = {}
+        order: List[Any] = []
+        for alert in alerts:
+            key = alert.get("taxid") or alert.get("name")
+            if key not in best:
+                best[key] = alert
+                order.append(key)
+            elif alert.get("reads", 0) > best[key].get("reads", 0):
+                best[key] = alert
+        return [best[k] for k in order]
+
     def check_organisms(
         self,
         detected_organisms: List[Dict[str, Any]]
@@ -1048,7 +1074,9 @@ class WatchlistManager:
                     ),
                 })
 
-        # Sort by threat level (critical first)
+        # One alert per watchlist entry (dominant node wins), then sort by
+        # threat level (critical first).
+        alerts = self._dedupe_alerts_by_entry(alerts)
         threat_order = {"critical": 0, "high": 1, "moderate": 2, "low": 3}
         alerts.sort(key=lambda x: threat_order.get(x.get("threat_level", "low"), 4))
 
@@ -1949,7 +1977,9 @@ class WatchlistManager:
                     ),
                 })
 
-        # Sort by threat level (critical first)
+        # One alert per watchlist entry (dominant node wins), then sort by
+        # threat level (critical first).
+        alerts = self._dedupe_alerts_by_entry(alerts)
         threat_order = {"critical": 0, "high": 1, "moderate": 2, "low": 3}
         alerts.sort(key=lambda x: threat_order.get(x.get("threat_level", "low"), 4))
 

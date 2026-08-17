@@ -208,6 +208,54 @@ class TestReadinessMappingStaleness:
         ) == 0
 
 
+class TestOneDetectionPerWatchlistEntry:
+    """Reaudit finding from the real LVS run: the species row plus 11
+    subspecies/strain rows each produced their own detection for the SAME
+    entry, so the banner announced "12 of 35 watched pathogens" for one
+    organism and the reads double-counted (the species row's cumulative
+    count already contains its descendants)."""
+
+    @staticmethod
+    def _organisms():
+        # Species node + two strain nodes, all resolving to entry 263.
+        return [
+            {"taxid": 263, "name": "Francisella tularensis",
+             "reads": 34103, "abundance": 99.0},
+            {"taxid": 119857, "name": "Francisella tularensis subsp. holarctica",
+             "reads": 1056, "abundance": 3.0},
+            {"taxid": 264, "name": "Francisella tularensis subsp. novicida",
+             "reads": 3245, "abundance": 9.0},
+        ]
+
+    def test_check_organisms_dedupes_to_dominant_node(self):
+        from nanometa_live.core.watchlist.watchlist_manager import (
+            WatchlistManager,
+        )
+
+        m = WatchlistManager()
+        m.enable_watchlist("cdc_bioterrorism")
+        hits = m.check_organisms(self._organisms())
+        entry_hits = [h for h in hits if h.get("taxid") == 263]
+        assert len(entry_hits) == 1, (
+            f"one watchlist entry must yield one detection, got "
+            f"{len(entry_hits)}"
+        )
+        assert entry_hits[0]["reads"] == 34103
+        assert entry_hits[0]["detected_taxid"] == 263
+
+    def test_check_organisms_with_mapping_dedupes_too(self):
+        from nanometa_live.core.watchlist.watchlist_manager import (
+            WatchlistManager,
+        )
+
+        m = WatchlistManager()
+        m.enable_watchlist("cdc_bioterrorism")
+        hits = m.check_organisms_with_mapping(self._organisms())
+        entry_hits = [h for h in hits if h.get("taxid") == 263]
+        assert len(entry_hits) == 1
+        assert entry_hits[0]["reads"] == 34103
+
+
 class TestInDatabaseColumnShowsDeclaration:
     """G1 (UI): operator-set db_taxid renders as such, never 'Not Scanned'."""
 
