@@ -67,6 +67,16 @@ def register_status(app, backend_manager):
         if not main_dir:
             raise PreventUpdate
 
+        # Keep the Flask /reports/<key> route pointed at the directory the
+        # operator is viewing. It used to be set only by the Reports-tab
+        # callback, so after a run switch the route kept serving the
+        # PREVIOUS run's MultiQC/execution HTML until that tab was
+        # revisited (2026-08-17 audit, finding C8). This callback already
+        # runs every poll with the resolved outdir; the refresh is one
+        # lock-protected assignment.
+        from nanometa_live.core.utils.reports_loader import set_reports_dir
+        set_reports_dir(main_dir)
+
         try:
             fp = check_data_freshness(main_dir)
         except Exception as e:

@@ -227,6 +227,118 @@ class TestOnDemandStoreSync:
         assert store is no_update
 
 
+class TestReportsRouteFollowsRun:
+    """C8: the /reports serve route must track the viewed outdir every
+    poll, not only when the Reports tab is visited."""
+
+    def test_fingerprint_callback_updates_reports_dir(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from dash_test_utils import get_callback_fn, make_callback_app
+        from nanometa_live.app.callbacks.status import register_status
+        from nanometa_live.core.utils import reports_loader
+
+        app = make_callback_app(lambda a: register_status(a, MagicMock()))
+        fn = get_callback_fn(
+            app, "results-fingerprint.data", input_contains="app-config"
+        )
+        reports_loader.set_reports_dir(None)
+        fn(1, {"main_dir": str(tmp_path)}, None)
+        assert reports_loader._get_reports_dir() == str(tmp_path)
+
+
+class TestThroughputBufferScopedToRun:
+    """C9: a tick buffer from run A must not produce a rate against run B."""
+
+    def _fn(self):
+        from dash_test_utils import get_callback_fn, make_callback_app
+        from nanometa_live.app.tabs.dashboard_tab import (
+            register_dashboard_callbacks,
+        )
+
+        app = make_callback_app(register_dashboard_callbacks)
+        return get_callback_fn(app, "throughput-buffer.data")
+
+    def test_buffer_resets_on_outdir_switch(self):
+        fn = self._fn()
+        stale = {
+            "dir": "/runA",
+            "ticks": [{"ts": 1.0, "reads": 100000, "files": 10}],
+        }
+        _tile, _cls, buffer = fn(
+            None, 1, stale, {"running": False},
+            {"total_reads": 5}, {"main_dir": "/runB"},
+        )
+        assert buffer["dir"] == "/runB"
+        assert len(buffer["ticks"]) == 1, (
+            "run A's ticks must be dropped, not diffed against run B"
+        )
+
+    def test_buffer_persists_within_one_outdir(self):
+        fn = self._fn()
+        first = fn(
+            None, 1, {}, {"running": True},
+            {"total_reads": 100}, {"main_dir": "/runA"},
+        )[2]
+        second = fn(
+            None, 2, first, {"running": True},
+            {"total_reads": 200}, {"main_dir": "/runA"},
+        )[2]
+        assert len(second["ticks"]) == 2
+
+
+class TestWatchlistFingerprint:
+    """C10: the run record notes which organism set screened the results."""
+
+    @staticmethod
+    def _manager_with(taxids):
+        from unittest.mock import MagicMock
+
+        manager = MagicMock()
+        manager.get_active_entries.return_value = {t: object() for t in taxids}
+        return manager
+
+    def test_recorded_and_compared(self, tmp_path):
+        from unittest.mock import patch
+
+        with patch(
+            "nanometa_live.core.watchlist.watchlist_manager"
+            ".get_watchlist_manager",
+            return_value=self._manager_with([632, 1392]),
+        ):
+            BackendManager.write_run_metadata(str(tmp_path), {"kraken_db": "x"})
+            assert BackendManager.watchlist_matches(str(tmp_path)) is True
+
+        with patch(
+            "nanometa_live.core.watchlist.watchlist_manager"
+            ".get_watchlist_manager",
+            return_value=self._manager_with([632]),
+        ):
+            assert BackendManager.watchlist_matches(str(tmp_path)) is False
+
+    def test_old_metadata_without_fingerprint_is_neutral(self, tmp_path):
+        (tmp_path / ".nanometa.run.json").write_text(
+            json.dumps({"fingerprint": "abc"})
+        )
+        assert BackendManager.watchlist_matches(str(tmp_path)) is None
+
+    def test_modal_carries_the_watchlist_caution(self):
+        from nanometa_live.app.components.collision_modal import (
+            render_collision_body,
+        )
+
+        body = str(render_collision_body(
+            "/out", ["kraken2"], input_match=True, has_metadata=True,
+            watchlist_match=False,
+        ))
+        assert "Different watchlist" in body
+        clean = str(render_collision_body(
+            "/out", ["kraken2"], input_match=True, has_metadata=True,
+            watchlist_match=True,
+        ))
+        assert "Different watchlist" not in clean
+
+
 class TestMissingDirSkipsTtl:
     def test_removed_kraken_dir_is_stale_not_absent(self, tmp_path):
         """C3: after kraken2/ vanishes, the TTL cache must not answer."""

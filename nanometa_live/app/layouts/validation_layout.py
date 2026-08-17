@@ -287,6 +287,9 @@ def _create_blast_tab() -> dbc.Tab:
                                         dashGridOptions={
                                             "pagination": True,
                                             "paginationPageSize": 25,
+                                            # Selector must include the page
+                                            # size (AG Grid warnings #94/#95).
+                                            "paginationPageSizeSelector": [10, 25, 50, 100],
                                             "getRowId": {
                                                 "function": "params.data.species + '||' + params.data.sample_id"
                                             },
@@ -365,7 +368,11 @@ def _create_blast_tab() -> dbc.Tab:
                                 columnDefs=[],
                                 rowData=[],
                                 defaultColDef={"sortable": True, "filter": True, "resizable": True},
-                                dashGridOptions={"pagination": True, "paginationPageSize": 50},
+                                dashGridOptions={
+                                    "pagination": True,
+                                    "paginationPageSize": 50,
+                                    "paginationPageSizeSelector": [25, 50, 100],
+                                },
                                 style={"height": "400px"},
                             ),
                             dcc.Download(id="download-perread-tsv"),

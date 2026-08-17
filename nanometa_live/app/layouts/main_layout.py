@@ -271,7 +271,14 @@ def _main_detailed_table():
                     dashGridOptions={
                         "pagination": True,
                         "paginationPageSize": 25,
-                        "getRowId": {"function": "params.data.taxid"},
+                        # The selector must include the configured page size
+                        # (AG Grid error #94/#95 console warnings otherwise).
+                        "paginationPageSizeSelector": [10, 25, 50, 100],
+                        # getRowId must return a string (error #25); taxid is
+                        # an integer in rowData. Plain concatenation, because
+                        # dash-ag-grid's expression parser does not resolve
+                        # the String() global (it yields undefined row ids).
+                        "getRowId": {"function": "params.data.taxid + ''"},
                     },
                 )
             ])

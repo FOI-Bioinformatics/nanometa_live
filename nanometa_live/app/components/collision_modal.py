@@ -86,6 +86,7 @@ def render_collision_body(
     found: List[str],
     input_match: object = None,
     has_metadata: bool = True,
+    watchlist_match: object = None,
 ) -> html.Div:
     """Return the body children for the modal given the detection result.
 
@@ -102,6 +103,12 @@ def render_collision_body(
     no ``.nanometa.run.json`` -- i.e. data this app did not create. Resuming
     over foreign data is meaningless and risks clobbering it, so the caller
     hides the Resume button and this function shows a distinct red warning.
+
+    ``watchlist_match`` compares the currently enabled watchlist to the one
+    recorded by the prior run: False adds an amber caution that the same
+    data would be screened against a different organism set (finding C10);
+    True or None (no record) adds nothing. It never blocks -- the data is
+    still the same data.
     """
     if not found:
         # Should not normally render; defensive fallback.
@@ -142,6 +149,22 @@ def render_collision_body(
             className="mb-3",
         )
 
+    watchlist_banner = None
+    if has_metadata and watchlist_match is False:
+        watchlist_banner = dbc.Alert(
+            [
+                html.I(className="bi bi-eye-fill me-2"),
+                html.Strong("Different watchlist than the previous run."),
+                " ",
+                "The existing results were screened against a different "
+                "organism set, so verdicts rendered from mixed results "
+                "will not be comparable. Archive first for a clean "
+                "screen, or continue knowingly.",
+            ],
+            color="warning",
+            className="mb-3",
+        )
+
     subdir_chips = [
         dbc.Badge(
             name + "/",
@@ -155,6 +178,8 @@ def render_collision_body(
     body_children = []
     if mismatch_banner is not None:
         body_children.append(mismatch_banner)
+    if watchlist_banner is not None:
+        body_children.append(watchlist_banner)
     body_children.extend([
             html.P(
                 [

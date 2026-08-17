@@ -376,63 +376,72 @@ class WatchlistLoader:
         elif not pathogens:
             errors.append("No pathogens defined")
         else:
-            # Validate pathogen entries
             for i, p in enumerate(pathogens):
-                if not isinstance(p, dict):
-                    errors.append(f"Pathogen {i+1}: must be a dictionary")
-                    continue
-
-                if "name" not in p:
-                    errors.append(f"Pathogen {i+1}: missing 'name' field")
-
-                if "threat_level" in p:
-                    valid_levels = ["critical", "high", "moderate", "low"]
-                    if p["threat_level"] not in valid_levels:
-                        errors.append(f"Pathogen {i+1}: invalid threat_level '{p['threat_level']}'")
-
-                if "bsl_level" in p:
-                    if not isinstance(p["bsl_level"], int) or p["bsl_level"] not in [1, 2, 3, 4]:
-                        errors.append(f"Pathogen {i+1}: bsl_level must be 1, 2, 3, or 4")
-
-                # Type checks (finding W3). Without these the errors were
-                # "defused" later by from_dict's try/excepts, which silently
-                # changed the entry's behaviour: a non-numeric taxid became a
-                # pseudo-taxid entry that can never match a report, and a
-                # non-numeric alert_threshold fell back to the default.
-                for taxid_key in ("taxid_ncbi", "db_taxid"):
-                    value = p.get(taxid_key)
-                    if value is None:
-                        continue
-                    try:
-                        if int(value) <= 0:
-                            raise ValueError
-                    except (TypeError, ValueError):
-                        errors.append(
-                            f"Pathogen {i+1}: {taxid_key} must be a "
-                            f"positive integer, got '{value}'"
-                        )
-
-                if "alert_threshold" in p:
-                    try:
-                        if int(p["alert_threshold"]) < 1:
-                            raise ValueError
-                    except (TypeError, ValueError):
-                        errors.append(
-                            f"Pathogen {i+1}: alert_threshold must be a "
-                            f"positive integer, got '{p['alert_threshold']}'"
-                        )
-
-                if "names_alt" in p:
-                    names_alt = p["names_alt"]
-                    if not isinstance(names_alt, list) or not all(
-                        isinstance(n, str) for n in names_alt
-                    ):
-                        errors.append(
-                            f"Pathogen {i+1}: names_alt must be a list "
-                            f"of names"
-                        )
+                errors.extend(self._validate_pathogen_entry(i, p))
 
         return len(errors) == 0, errors
+
+    @staticmethod
+    def _validate_pathogen_entry(i: int, p: object) -> List[str]:
+        """Schema and type errors for one pathogen entry (1-based index i+1).
+
+        The type checks are finding W3 (2026-08-17 audit): without them the
+        errors were "defused" later by from_dict's try/excepts, which
+        silently changed the entry's behaviour -- a non-numeric taxid became
+        a pseudo-taxid entry that can never match a report, and a
+        non-numeric alert_threshold fell back to the default.
+        """
+        errors: List[str] = []
+        if not isinstance(p, dict):
+            return [f"Pathogen {i+1}: must be a dictionary"]
+
+        if "name" not in p:
+            errors.append(f"Pathogen {i+1}: missing 'name' field")
+
+        if "threat_level" in p:
+            valid_levels = ["critical", "high", "moderate", "low"]
+            if p["threat_level"] not in valid_levels:
+                errors.append(
+                    f"Pathogen {i+1}: invalid threat_level "
+                    f"'{p['threat_level']}'"
+                )
+
+        if "bsl_level" in p:
+            if not isinstance(p["bsl_level"], int) or p["bsl_level"] not in [1, 2, 3, 4]:
+                errors.append(f"Pathogen {i+1}: bsl_level must be 1, 2, 3, or 4")
+
+        for taxid_key in ("taxid_ncbi", "db_taxid"):
+            value = p.get(taxid_key)
+            if value is None:
+                continue
+            try:
+                if int(value) <= 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors.append(
+                    f"Pathogen {i+1}: {taxid_key} must be a "
+                    f"positive integer, got '{value}'"
+                )
+
+        if "alert_threshold" in p:
+            try:
+                if int(p["alert_threshold"]) < 1:
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors.append(
+                    f"Pathogen {i+1}: alert_threshold must be a "
+                    f"positive integer, got '{p['alert_threshold']}'"
+                )
+
+        if "names_alt" in p:
+            names_alt = p["names_alt"]
+            if not isinstance(names_alt, list) or not all(
+                isinstance(n, str) for n in names_alt
+            ):
+                errors.append(
+                    f"Pathogen {i+1}: names_alt must be a list of names"
+                )
+        return errors
 
     @staticmethod
     def find_entries_without_taxid(file_path: Path) -> List[str]:

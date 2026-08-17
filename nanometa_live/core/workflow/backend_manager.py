@@ -486,6 +486,47 @@ class BackendManager:
         return hashlib.sha256(payload).hexdigest()
 
     @staticmethod
+    def compute_watchlist_fingerprint() -> str:
+        """Stable hash of the currently enabled watchlist entry set.
+
+        Keyed on the sorted taxids of the active entries. Recorded
+        separately from the input fingerprint: the input hash decides
+        whether resuming mixes unrelated DATA, while this one only warns
+        that the same data would be SCREENED differently (2026-08-17
+        audit, finding C10 -- resuming with a different watchlist looked
+        identical to resuming with the same one). Empty string when no
+        entries are enabled or the manager is unavailable.
+        """
+        try:
+            from nanometa_live.core.watchlist.watchlist_manager import (
+                get_watchlist_manager,
+            )
+            taxids = sorted(get_watchlist_manager().get_active_entries().keys())
+        except Exception as e:
+            logging.debug(f"Watchlist fingerprint unavailable: {e}")
+            return ""
+        if not taxids:
+            return ""
+        payload = ",".join(str(t) for t in taxids).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    @staticmethod
+    def watchlist_matches(outdir: str) -> Optional[bool]:
+        """Compare the active watchlist to the prior run's recorded set.
+
+        Returns None when the prior metadata carries no watchlist
+        fingerprint (pre-C10 runs) so callers stay silent rather than
+        crying wolf over old run records.
+        """
+        prior = BackendManager.read_run_metadata(outdir)
+        if not prior or "watchlist_fingerprint" not in prior:
+            return None
+        return (
+            prior["watchlist_fingerprint"]
+            == BackendManager.compute_watchlist_fingerprint()
+        )
+
+    @staticmethod
     def read_run_metadata(outdir: str) -> Optional[Dict[str, Any]]:
         """Return the persisted run metadata for ``outdir`` or None.
 
@@ -516,6 +557,9 @@ class BackendManager:
             return
         payload = {
             "fingerprint": BackendManager.compute_input_fingerprint(config),
+            "watchlist_fingerprint": (
+                BackendManager.compute_watchlist_fingerprint()
+            ),
             "written_at": datetime.now().isoformat(timespec="seconds"),
             "inputs": {
                 key: config.get(key, "")

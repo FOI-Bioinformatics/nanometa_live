@@ -121,7 +121,6 @@
     "nanometa_live/app/tabs/watchlist_tab.py::register_watchlist_callbacks",
     "nanometa_live/app/tabs/watchlist_tab.py::register_watchlist_callbacks.add_custom_species",
     "nanometa_live/app/tabs/watchlist_tab.py::register_watchlist_callbacks.handle_edit_modal",
-    "nanometa_live/app/tabs/watchlist_tab.py::register_watchlist_callbacks.handle_upload",
     "nanometa_live/app/tabs/watchlist_tab.py::register_watchlist_callbacks.update_pathogens_table",
     "nanometa_live/app/tabs/watchlist_tab.py::register_watchlist_callbacks.validate_entries",
     "nanometa_live/app/utils/plotly_theme.py::get_nanometa_template",

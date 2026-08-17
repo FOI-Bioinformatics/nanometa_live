@@ -457,7 +457,13 @@ def check_data_freshness(main_dir: str) -> str:
 
     main_dir = resolve_analysis_directory(main_dir)
 
-    parts = []
+    # The directory itself is part of the payload: the epoch bump below
+    # compares against the LAST fingerprint regardless of which directory
+    # produced it, so two directories that hash identically (two empty
+    # outdirs, or one emptied by Archive) would otherwise fail to bump the
+    # epoch on a switch -- and every mtime-cache entry stamped with the
+    # current epoch keeps answering without a filesystem check.
+    parts = [main_dir]
     for subdir in RESULTS_WATCHED_SUBDIRS:
         dirpath = os.path.join(main_dir, subdir)
         mt, n_files = _get_dir_latest_mtime(dirpath)
