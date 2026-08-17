@@ -249,13 +249,20 @@ def register_preparation_callbacks(app):
             name = check.get("name", "")
             if passed:
                 icon = html.I(className="bi bi-check-circle-fill text-success me-2")
+                # A passed check must not wear its failure severity: a green
+                # tick beside a red CRITICAL chip ("Container Runtime --
+                # docker running") reads as a failure at a glance
+                # (2026-08-17 audit, finding R1). The severity only matters
+                # when the check failed.
+                badge_label, badge_color = "PASS", "success"
             else:
                 icon = html.I(className=_SEVERITY_ICON.get(severity, "bi bi-dash-circle text-muted me-2"))
+                badge_label = (severity or "").upper()
+                badge_color = _SEVERITY_BADGE.get(severity, "secondary")
 
             row_children = [
                 icon,
-                dbc.Badge((severity or "").upper(),
-                          color=_SEVERITY_BADGE.get(severity, "secondary"),
+                dbc.Badge(badge_label, color=badge_color,
                           className="me-2", style={"width": "70px"}),
                 html.Span(name, className="fw-semibold me-2"),
                 html.Span(check.get("message", ""), className="text-muted"),

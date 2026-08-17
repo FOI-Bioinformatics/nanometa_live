@@ -570,16 +570,21 @@ def register_watchlist_callbacks(app: Dash) -> None:
             except Exception as e:
                 logger.debug(f"Could not load mapping collection: {e}")
 
-        # Empty-state guard: if the taxonomy index has not been built
+        # Index-missing banner: if the taxonomy index has not been built
         # (taxmap-collection store empty AND the global collection has no
-        # entries either), every row would otherwise render as
-        # "Not Found" -- which misleads the operator into thinking the
-        # species are absent from the database rather than the index
-        # being absent. Render a single empty-state card pointing at
-        # the Watchlist & Preparation tab control instead.
+        # entries either), the "In Database" column cannot be answered
+        # yet. Say so in a banner ABOVE the table -- but still render the
+        # table: the rows fall back to a neutral "Not Scanned" badge for
+        # that one column, and every other control (search, toggles,
+        # edit, genome status) works without the index. The earlier
+        # version returned the banner INSTEAD of the table, so enabling a
+        # watchlist before configuring a database hid all of its entries
+        # (2026-08-17 audit, finding W9; screening itself never needed
+        # the index, so the hidden entries were being screened all along).
         index_appears_empty = not mapping_dict
+        index_banner = None
         if index_appears_empty:
-            empty_state = dbc.Card(
+            index_banner = dbc.Card(
                 dbc.CardBody(
                     [
                         html.Div(
@@ -594,12 +599,14 @@ def register_watchlist_callbacks(app: Dash) -> None:
                         ),
                         html.P(
                             [
-                                "The watchlist cannot be checked against the "
-                                "Kraken2 database until the taxonomy index "
-                                "has been built. Click ",
+                                "The 'In Database' column cannot be checked "
+                                "against the Kraken2 database until the "
+                                "taxonomy index has been built. Click ",
                                 html.Strong("Scan Database"),
                                 " in the 'Verify Watchlist Against Database' "
-                                "card on this tab to (re)build the index.",
+                                "card on this tab to (re)build the index. "
+                                "Enabled organisms are still screened by "
+                                "name in the meantime.",
                             ],
                             className="mb-0 text-muted small",
                         ),
@@ -608,11 +615,6 @@ def register_watchlist_callbacks(app: Dash) -> None:
                 color="warning",
                 outline=True,
                 className="mb-3",
-            )
-            return (
-                [empty_state],
-                str(len(entries)),
-                {"display": "inline-block"},
             )
 
         # Get genome status for all entries
@@ -657,13 +659,10 @@ def register_watchlist_callbacks(app: Dash) -> None:
             except Exception as e:
                 logger.error(f"Failed to create row for taxid {taxid} ({entry.get('name', 'Unknown')}): {e}")
 
-        # The "no mapping data" guidance note that used to live here was
-        # superseded by the empty-state card above (returned early when
-        # mapping_dict is empty); reaching this point implies at least one
-        # mapped entry, so a 'click Rescan' hint would be confusing.
         count = len(entries)
+        children = ([index_banner] if index_banner is not None else []) + rows
         return (
-            rows,
+            children,
             str(count),
             {"display": "inline-block"},  # Show badge when there are pathogens
         )

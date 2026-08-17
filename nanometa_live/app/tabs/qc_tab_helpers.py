@@ -292,19 +292,28 @@ def _build_stage_strip(raw_reads, filtered_reads, classified_reads, unclassified
             subtitle=f"({filter_tool})",
             slot_class="stage-strip-slot",
         )
-        if filtered_reads and raw_reads > 0:
-            removed_pct = max(0.0, (raw_reads - filtered_reads) / raw_reads * 100)
+        if filtered_reads and raw_reads >= filtered_reads:
+            removed_pct = (raw_reads - filtered_reads) / raw_reads * 100
             filter_delta_text = f"{removed_pct:.1f}% removed"
         else:
+            # Covers both "no filtered count yet" and raw < filtered --
+            # the latter means the two sources disagree (raw is the QC
+            # tool's pre-filter count, filtered is the Kraken2 total),
+            # and clamping it to "0.0% removed" reported an impossible
+            # measurement as a reassuring one (2026-08-17 audit, Q1).
             filter_delta_text = "N/A"
         filter_delta_cls = "stage-strip-delta stage-strip-delta--muted"
 
     # --- Filtered slot ---
+    # Subtitle names the actual source: the count is the Kraken2 total
+    # (reads that passed filtering and entered classification), not a
+    # number reported by the QC tool -- labelling it with the QC tool's
+    # name misattributed it (finding Q1).
     filtered_str = f"{filtered_reads:,}" if filtered_reads is not None else "—"
     filtered_slot = _build_stage_strip_slot(
         heading="QUALITY-FILTERED",
         count_text=filtered_str,
-        subtitle=f"({filter_tool})",
+        subtitle="(entered classification)",
         slot_class="stage-strip-slot stage-strip-slot--filtered",
     )
 

@@ -166,15 +166,21 @@ class MockDataGenerator:
         for i in range(1, num_samples + 1):
             sample_name = f"barcode{i:02d}"
 
-            # Generate Kraken2 report
+            # Generate Kraken2 report. The same read total feeds the FASTP
+            # JSON below, so QC and classification describe one coherent
+            # run (finding T1: independent random totals produced datasets
+            # with more filtered reads than raw reads).
+            sample_total_reads = random.randint(*total_reads_range)
             kraken_file = self._generate_kraken2_report(
                 sample_name,
-                random.randint(*total_reads_range)
+                sample_total_reads,
             )
             created_files[f"kraken_{sample_name}"] = kraken_file
 
             # Generate FASTP JSON (comprehensive QC)
-            fastp_file = self._generate_fastp_json(sample_name)
+            fastp_file = self._generate_fastp_json(
+                sample_name, passed_reads_target=sample_total_reads
+            )
             created_files[f"fastp_{sample_name}"] = fastp_file
 
             # Generate QC text summary (legacy)
@@ -261,37 +267,58 @@ class MockDataGenerator:
                 for g in genus_entries:
                     ancestor_reads[g["taxid"]] = ancestor_reads.get(g["taxid"], 0)
 
-        # Build hierarchical rows: domain down to species
-        # Collect unique ancestors, ordered by rank
-        rank_order = {"D": 0, "P": 1, "C": 2, "O": 3, "F": 4, "G": 5}
-        seen_ancestors = {}
-        for org_info, _ in species_rows:
-            for anc in org_info.get("lineage", []):
-                if anc["taxid"] not in seen_ancestors:
-                    seen_ancestors[anc["taxid"]] = anc
+        # Build the taxonomy tree and emit it DEPTH-FIRST with two-space
+        # indentation per level, exactly as Kraken2 does. The loader derives
+        # parent_taxid from that indentation with a stack walk, so a report
+        # written as flat rank-sorted blocks (the previous version) parses
+        # with parent_taxid=0 on every row -- which collapses the Sankey /
+        # Sunburst views and made this generator useless for testing any
+        # hierarchy-dependent code path (2026-08-17 audit, finding T1).
+        tree: Dict[int, Dict] = {}  # taxid -> node
 
-        sorted_ancestors = sorted(seen_ancestors.values(), key=lambda a: rank_order.get(a["rank"], 99))
-
-        for anc in sorted_ancestors:
-            cumul = ancestor_reads.get(anc["taxid"], 0)
-            rows.append({
-                "%": round((cumul / total_reads) * 100, 4),
-                "cumul_reads": cumul,
-                "reads": 0,  # No reads directly assigned to intermediate ranks
-                "rank": anc["rank"],
-                "taxid": anc["taxid"],
-                "name": anc["name"],
-            })
+        def _node(taxid, name, rank):
+            if taxid not in tree:
+                tree[taxid] = {
+                    "taxid": taxid, "name": name, "rank": rank,
+                    "children": [], "cumul": 0, "direct": 0,
+                }
+            return tree[taxid]
 
         for org_info, org_reads in species_rows:
+            parent = None
+            for anc in org_info.get("lineage", []):
+                node = _node(anc["taxid"], anc["name"], anc["rank"])
+                if parent is not None and node not in parent["children"]:
+                    parent["children"].append(node)
+                node["cumul"] += org_reads
+                parent = node
+            species = _node(
+                org_info["taxid"], org_info["name"], org_info["rank"]
+            )
+            species["cumul"] += org_reads
+            species["direct"] += org_reads
+            if parent is not None and species not in parent["children"]:
+                parent["children"].append(species)
+
+        roots = [
+            n for n in tree.values()
+            if not any(n in p["children"] for p in tree.values())
+        ]
+
+        def _emit(node, depth):
             rows.append({
-                "%": round((org_reads / total_reads) * 100, 4),
-                "cumul_reads": org_reads,
-                "reads": org_reads,
-                "rank": org_info["rank"],
-                "taxid": org_info["taxid"],
-                "name": org_info["name"],
+                "%": round((node["cumul"] / total_reads) * 100, 2),
+                "cumul_reads": node["cumul"],
+                "reads": node["direct"],
+                "rank": node["rank"],
+                "taxid": node["taxid"],
+                "name": "  " * depth + node["name"],
             })
+            for child in node["children"]:
+                _emit(child, depth + 1)
+
+        for root_node in roots:
+            _emit(root_node, 1)  # depth 1: children of the "root" row
 
         # Write to file (Kraken2 format)
         with open(output_file, 'w') as f:
@@ -363,11 +390,22 @@ Mean quality score: {mean_quality:.1f}
 
         return output_file
 
-    def _generate_fastp_json(self, sample_name: str) -> str:
+    def _generate_fastp_json(
+        self, sample_name: str, passed_reads_target: Optional[int] = None
+    ) -> str:
         """
         Generate FASTP JSON output for comprehensive QC data.
 
         Matches actual FASTP output format used by nanometanf pipeline.
+
+        Args:
+            passed_reads_target: When given, after_filtering.total_reads is
+                set to exactly this value (the sample's Kraken2 total), so
+                the QC and classification numbers describe the same run.
+                The previous version drew independent random totals, which
+                produced impossible datasets -- more quality-filtered reads
+                than raw reads -- and masked real cross-source bugs
+                (2026-08-17 audit, finding T1).
         """
         import json
 
@@ -394,8 +432,12 @@ Mean quality score: {mean_quality:.1f}
             q20_after = random.uniform(0.85, 0.92)
             q30_after = random.uniform(0.75, 0.85)
 
-        total_reads = random.randint(80000, 120000)
-        passed_reads = int(total_reads * pass_rate)
+        if passed_reads_target is not None:
+            passed_reads = passed_reads_target
+            total_reads = int(passed_reads / pass_rate)
+        else:
+            total_reads = random.randint(80000, 120000)
+            passed_reads = int(total_reads * pass_rate)
         failed_reads = total_reads - passed_reads
 
         # Breakdown of failure reasons
@@ -418,7 +460,13 @@ Mean quality score: {mean_quality:.1f}
                 },
                 "after_filtering": {
                     "total_reads": passed_reads,
-                    "total_bases": int(passed_reads * avg_length * random.uniform(0.95, 1.05)),
+                    "total_bases": (after_bases := int(
+                        passed_reads * avg_length * random.uniform(0.95, 1.05)
+                    )),
+                    # Real fastp records absolute q20/q30 base counts; the
+                    # Base Quality card reads these, not the rates.
+                    "q20_bases": int(after_bases * q20_after),
+                    "q30_bases": int(after_bases * q30_after),
                     "q20_rate": round(q20_after, 4),
                     "q30_rate": round(q30_after, 4),
                     "gc_content": round(random.uniform(0.40, 0.55), 4),

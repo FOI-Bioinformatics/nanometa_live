@@ -1,12 +1,16 @@
 """
-Empty-state regression for the watchlist pathogens table.
+Index-missing regression for the watchlist pathogens table.
 
 When the taxonomy index has not been built (taxmap-collection store
 empty AND the global mapping collection is empty), the table used to
 render every entry as "Not Found", misleading the operator into
-thinking the species were absent from the database. The fix turns
-that into a single empty-state card pointing at the Preparation tab's
-Scan Database control. This test pins that contract.
+thinking the species were absent from the database. The first fix
+replaced the whole table with an empty-state card -- which hid every
+entry (no search, no toggles, no edit) although only the "In Database"
+column depends on the index (2026-08-17 audit, finding W9). The
+current contract: a warning banner ABOVE the table, the rows still
+rendered, each with a neutral "Not Scanned" badge in the In Database
+column and never "Not Found".
 """
 from unittest.mock import patch
 
@@ -71,17 +75,24 @@ def test_empty_taxmap_collection_renders_empty_state_not_not_found():
     # The count badge still reflects the watchlist size...
     assert count == "2"
     assert badge_style == {"display": "inline-block"}
-    # ...but a single empty-state card stands in for the rows.
-    assert len(rows) == 1, "exactly one empty-state node, not N 'Not Found' rows"
+    # ...and the banner is followed by BOTH entry rows -- the entries must
+    # stay visible and operable without the index (finding W9).
+    assert len(rows) == 3, "one banner node followed by the two entry rows"
 
-    # The empty-state copy should name the Scan Database control on THIS tab
+    # The banner copy should name the Scan Database control on THIS tab
     # (Watchlist & Preparation is one merged tab), not tell the operator to
     # open a now-nonexistent separate Preparation tab.
-    rendered = str(rows[0])
-    assert "Taxonomy index" in rendered
-    assert "Scan Database" in rendered
-    assert "this tab" in rendered
+    banner = str(rows[0])
+    assert "Taxonomy index" in banner
+    assert "Scan Database" in banner
+    assert "this tab" in banner
     # The stale cross-tab instruction must be gone.
-    assert "Preparation tab" not in rendered
-    # And must not render the legacy "Not Found" text per row.
-    assert "Not Found" not in rendered
+    assert "Preparation tab" not in banner
+
+    # The rows render the organisms with a neutral "Not Scanned" badge --
+    # never the misleading "Not Found".
+    rendered_rows = str(rows[1:])
+    assert "Escherichia coli" in rendered_rows
+    assert "Staphylococcus aureus" in rendered_rows
+    assert "Not Scanned" in rendered_rows
+    assert "Not Found" not in rendered_rows
