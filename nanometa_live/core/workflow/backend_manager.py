@@ -414,6 +414,10 @@ class BackendManager:
         "nanoplot",
         "canonical",
         "pipeline_info",
+        # The auto-generated operator report describes the run that wrote
+        # it; leaving it behind would show run A's verdict on the Reports
+        # tab during run B.
+        "report",
     )
 
     @staticmethod
@@ -511,6 +515,18 @@ class BackendManager:
         return hashlib.sha256(payload).hexdigest()
 
     @staticmethod
+    def _enabled_watchlist_ids() -> list:
+        """Sorted enabled watchlist ids, or [] when the manager is unusable."""
+        try:
+            from nanometa_live.core.watchlist.watchlist_manager import (
+                get_watchlist_manager,
+            )
+            return get_watchlist_manager().enabled_watchlist_ids()
+        except Exception as e:
+            logging.debug(f"Enabled watchlist ids unavailable: {e}")
+            return []
+
+    @staticmethod
     def watchlist_matches(outdir: str) -> Optional[bool]:
         """Compare the active watchlist to the prior run's recorded set.
 
@@ -560,6 +576,10 @@ class BackendManager:
             "watchlist_fingerprint": (
                 BackendManager.compute_watchlist_fingerprint()
             ),
+            # The ids, not just the fingerprint above: nanometa-report reads
+            # these to reproduce the run's pathogen screen post hoc, where a
+            # hash alone cannot say WHICH lists to enable.
+            "watchlists": BackendManager._enabled_watchlist_ids(),
             "written_at": datetime.now().isoformat(timespec="seconds"),
             "inputs": {
                 key: config.get(key, "")
@@ -709,6 +729,48 @@ class BackendManager:
         logging.info(f"Backend started successfully with profile: {profile}")
         return True, f"Backend started successfully with profile: {profile}"
 
+    def _auto_generate_report(self) -> Optional[str]:
+        """Write the operator HTML report into ``<outdir>/report/`` best-effort.
+
+        Called when a run ends (completion detected by the monitor thread,
+        or an operator Stop of a realtime run). Without this, the verdict
+        and pathogen screen existed only inside the running dashboard: an
+        operator who closed the app without clicking Export Results kept
+        the raw pipeline output but no human-readable summary of what the
+        run concluded (2026-08-17 storage audit, finding R1).
+
+        Raw files are never copied here (``include_raw=False``): the report
+        lands INSIDE the results directory, so copying raw/ would duplicate
+        the whole tree into itself. The report HTML is self-contained.
+
+        Best-effort by design: a report failure must never fail a stop or
+        mask a completed run. Disable with ``auto_report: false``.
+        Returns the report path, or None when skipped or failed.
+        """
+        config = self.config or {}
+        if not config.get("auto_report", True):
+            return None
+        outdir = (
+            config.get("results_output_directory")
+            or config.get("main_dir")
+            or ""
+        )
+        if not outdir or not os.path.isdir(outdir):
+            return None
+        try:
+            from nanometa_live.core.export.report_generator import (
+                ReportGenerator,
+            )
+            report_path = ReportGenerator(outdir, config).generate(
+                output_dir=os.path.join(outdir, "report"),
+                include_raw=False,
+            )
+            logging.info(f"Run report written to {report_path}")
+            return str(report_path)
+        except Exception as e:
+            logging.warning(f"Automatic run report failed: {e}")
+            return None
+
     def stop(self) -> Tuple[bool, str]:
         """
         Stop the backend processes.
@@ -735,6 +797,10 @@ class BackendManager:
             self.status["pipeline_status"] = "stopped"
             self.status["errors"] = []  # Clear errors from user-initiated stop
             self.status["last_update"] = time.time()
+
+        # A realtime run ends via Stop, so this is its natural moment to
+        # leave a report behind; best-effort, never fails the stop.
+        self._auto_generate_report()
 
         # Clear workflow manager errors from the expected non-zero exit
         if hasattr(self.workflow_manager, 'status'):
@@ -976,7 +1042,10 @@ class BackendManager:
                             logging.exception(f"Error stopping pipeline after timeout: {e}")
                         break
 
-                # Thread-safe status update
+                # Thread-safe status update. Report generation is deferred
+                # to after the lock is released: it takes seconds, and the
+                # GUI's status polls block on this same lock.
+                run_completed = False
                 with self._status_lock:
                     # Detect pipeline termination (crash or completion)
                     if not workflow_status.get("running"):
@@ -1017,6 +1086,7 @@ class BackendManager:
                                 # Pipeline completed successfully
                                 self.status["pipeline_status"] = "completed"
                                 self.status["running"] = False
+                                run_completed = True
                                 logging.info("Pipeline completed successfully")
 
                             else:
@@ -1045,6 +1115,12 @@ class BackendManager:
 
                     # Update last update time
                     self.status["last_update"] = time.time()
+
+                if run_completed:
+                    # Outside the lock on purpose (see above). Leave the
+                    # operator report behind so the verdict survives
+                    # closing the dashboard.
+                    self._auto_generate_report()
 
                 # Sleep for a bit
                 time.sleep(5)

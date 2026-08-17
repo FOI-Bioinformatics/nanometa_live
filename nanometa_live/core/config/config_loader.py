@@ -144,6 +144,10 @@ class ConfigLoader:
             "enable_nanopore_stats_mqc": False,
             # Offline mode: when enabled, skip all network calls and use cached data only
             "offline_mode": False,
+            # Write the operator HTML report into <outdir>/report/ when a
+            # run completes or is stopped, so the verdict survives closing
+            # the dashboard. Best-effort; disable to skip.
+            "auto_report": True,
             # Processing mode settings
             "processing_mode": "batch",
             "sample_handling": "by_barcode",

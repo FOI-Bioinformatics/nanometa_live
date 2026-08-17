@@ -27,6 +27,13 @@ logger = logging.getLogger(__name__)
 # key -> (label, glob relative to results dir, mime kind). The glob picks the
 # file(s); for timestamped Nextflow outputs the newest match wins.
 REPORT_SPECS: List[Dict[str, str]] = [
+    # First: the operator report the app itself writes (automatically on run
+    # completion/stop, or via Export Results / nanometa-report). It is the
+    # human-readable verdict summary, so it leads the list.
+    {"key": "operator_report", "label": "Run Report",
+     "glob": "report/report.html", "kind": "html",
+     "desc": "Verdict, pathogen screening, validation and QC summary "
+             "written when the run ends (self-contained HTML)."},
     {"key": "multiqc", "label": "MultiQC Report",
      "glob": "multiqc/multiqc_report.html", "kind": "html",
      "desc": "Aggregated QC + classification across all samples and tools."},

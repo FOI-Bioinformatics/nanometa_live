@@ -19,6 +19,31 @@ import os
 import sys
 
 
+def _resolve_watchlist_ids(arg_value, results_dir):
+    """Watchlist ids to enable: the --watchlist argument, or the run record.
+
+    ``--watchlist none`` forces an unscreened report even when the run
+    recorded watchlists. With no argument, the ids the run recorded in
+    ``.nanometa.run.json`` are used (and announced), so the post-hoc report
+    reproduces the run's own screen.
+    """
+    if arg_value is not None:
+        if arg_value.strip().lower() == "none":
+            return []
+        return [w.strip() for w in arg_value.split(",") if w.strip()]
+
+    from nanometa_live.core.workflow.backend_manager import BackendManager
+    meta = BackendManager.read_run_metadata(results_dir) or {}
+    recorded = [w for w in (meta.get("watchlists") or []) if w]
+    if recorded:
+        print(
+            "Using the watchlists recorded by the run: "
+            + ", ".join(recorded)
+            + " (override with --watchlist, or --watchlist none)"
+        )
+    return recorded
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="nanometa-report",
@@ -33,7 +58,9 @@ def main():
                         help="Optional config.yaml (analysis_name, offline_mode, ...)")
     parser.add_argument("--watchlist", "-w", default=None,
                         help="Comma-separated built-in watchlist id(s) to enable for "
-                             "pathogen screening (e.g. cdc_bioterrorism)")
+                             "pathogen screening (e.g. cdc_bioterrorism). Default: the "
+                             "watchlists recorded in the run's .nanometa.run.json, when "
+                             "present. Pass 'none' to force an unscreened report.")
     parser.add_argument("--samples", default=None,
                         help="Comma-separated sample ids to include (default: all detected)")
     parser.add_argument("--offline", action="store_true",
@@ -62,13 +89,15 @@ def main():
 
     # Enable watchlist(s) so the pathogen-screening section populates -- the
     # report screens get_active_entries() from the WatchlistManager singleton,
-    # which is empty in a fresh process.
-    if args.watchlist:
+    # which is empty in a fresh process. When no --watchlist is given, fall
+    # back to the ids the run recorded in .nanometa.run.json, so a post-hoc
+    # report reproduces the run's own screen instead of silently rendering
+    # NOT SCREENED (2026-08-17 storage audit, finding R2).
+    watchlist_ids = _resolve_watchlist_ids(args.watchlist, results)
+    if watchlist_ids:
         from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
         wm = get_watchlist_manager()
-        for wl in (w.strip() for w in args.watchlist.split(",")):
-            if not wl:
-                continue
+        for wl in watchlist_ids:
             try:
                 wm.enable_watchlist(wl)
             except Exception as e:  # noqa: BLE001 -- surface, keep going

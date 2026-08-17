@@ -1251,6 +1251,16 @@ class WatchlistManager:
 
         return result
 
+    def enabled_watchlist_ids(self) -> List[str]:
+        """Sorted ids of the currently enabled watchlists.
+
+        Recorded into the run metadata at pipeline start so a post-hoc
+        ``nanometa-report`` can reproduce the run's pathogen screen without
+        the operator having to remember which lists were active.
+        """
+        with self._lock:
+            return sorted(self._enabled_watchlists)
+
     def enable_watchlist(self, watchlist_id: str) -> int:
         """
         Enable a watchlist by loading all its entries.

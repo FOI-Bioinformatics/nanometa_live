@@ -296,6 +296,8 @@ class TestWatchlistFingerprint:
 
         manager = MagicMock()
         manager.get_active_entries.return_value = {t: object() for t in taxids}
+        # write_run_metadata also records the enabled watchlist ids (R2).
+        manager.enabled_watchlist_ids.return_value = []
         return manager
 
     def test_recorded_and_compared(self, tmp_path):
