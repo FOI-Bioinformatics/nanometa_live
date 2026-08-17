@@ -60,6 +60,16 @@ Running the negative control both multiplexed and alone separates them. On
 2026-07-28 both runs reported exactly 6 reads of taxid 263, which places the
 reads in the input file and clears the pipeline.
 
+## Configuration the assertions assume
+
+The no-false-positive assertions assume the default
+`min_reads_for_validation` (50). A run configured with a lower floor (for
+example 1, as in exploratory validation runs) will validate the 6
+index-hopped taxid-263 reads in the negative control -- they are genuine
+*F. tularensis* molecules, so BLAST confirms them -- and those tests then
+fail against a results tree that is behaving correctly. Point
+`NANOMETA_REALDATA_DIR` only at runs made with the default validation floor.
+
 ## Baseline measured 2026-07-28 (run R1)
 
 Database `k2_pluspfp_08_GB_20251015`, batch mode, `by_barcode`, chopper

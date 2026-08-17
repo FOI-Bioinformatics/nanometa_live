@@ -417,6 +417,24 @@ Advanced
 
 ---
 
+## Storage location
+
+Keep the run directories (results output, data directory, and the
+pipeline work directory) on the machine's internal disk. External
+drives formatted as exFAT — the common factory format for USB and
+SD storage — cannot host Nextflow's cache database, and a run
+started there fails at launch with an error similar to
+`Can't open cache DB`. On macOS, exFAT volumes also accumulate
+`._*` sidecar files next to the data, which can interfere with the
+pipeline.
+
+Raw FASTQ input and the Kraken2 database can stay on an external
+drive; only the directories the pipeline writes to need a local
+filesystem. Copy finished results to external storage after the run
+completes.
+
+---
+
 ## Network access
 
 By default the dashboard listens only on the local machine

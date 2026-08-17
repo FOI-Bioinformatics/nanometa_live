@@ -9,11 +9,30 @@ seeing.
 It is deliberately gated three ways so it never runs by accident:
 
 * ``@pytest.mark.slow`` -- skipped by the default suite.
-* the SAMMLA dataset, Kraken2 DB, and nanometanf checkout must exist on disk.
+* the dataset, Kraken2 DB, and nanometanf checkout must exist on disk.
 * the opt-in env var ``NANOMETA_RUN_E2E=1`` must be set, because a real run
   takes minutes and needs Nextflow + conda.
 
-Reference setup: see the ``validation-live-test-env`` project memory.
+Paths come from environment variables (the earlier hardcoded
+``~/Desktop/snabbsekvensering`` / ``SAMMLA-demo`` trees no longer exist --
+2026-08-17 reaudit):
+
+* ``NANOMETA_E2E_KRAKEN_DB``  -- Kraken2 database directory.
+* ``NANOMETA_E2E_INPUT_DIR``  -- by_barcode input tree whose samples carry
+  F. tularensis reads (e.g. the staged Bioshield barcode11/14/16 tree).
+* ``NANOMETA_E2E_DATA_DIR``   -- data dir with a genome + BLAST DB for
+  taxid 263 under ``<dir>/genomes`` / ``<dir>/blast``. Must be on a local
+  filesystem: Nextflow's cache database cannot live on exFAT volumes.
+* ``NANOMETA_E2E_PIPELINE``   -- nanometanf checkout
+  (default ``~/Code/nanometanf``).
+
+Example invocation matching the 2026-08-17 reaudit campaign layout:
+
+  NANOMETA_RUN_E2E=1 \
+  NANOMETA_E2E_KRAKEN_DB=/Volumes/sekvens2/kraken_db/k2_pluspfp_08_GB_20251015 \
+  NANOMETA_E2E_INPUT_DIR=/tmp/nanometa_e2e/input/meta_multiplex \
+  NANOMETA_E2E_DATA_DIR=/tmp/nanometa_e2e/datadir \
+  pytest tests/test_validation_e2e.py -m slow
 """
 
 import json
@@ -23,11 +42,14 @@ from pathlib import Path
 
 import pytest
 
-HOME = Path.home()
-KRAKEN_DB = HOME / "Desktop/snabbsekvensering/bioshield/kraken_db/k2_pluspfp_08_GB_20251015"
-WATCH_DIR = HOME / "Desktop/SAMMLA-demo/watch"
-DATA_DIR = HOME / "Desktop/SAMMLA-demo/datadir"
-PIPELINE_SOURCE = Path("/Users/andreassjodin/Code/nanometanf")
+def _env_path(name: str, default: str = "") -> Path:
+    return Path(os.path.expanduser(os.environ.get(name, default) or default))
+
+
+KRAKEN_DB = _env_path("NANOMETA_E2E_KRAKEN_DB")
+WATCH_DIR = _env_path("NANOMETA_E2E_INPUT_DIR")
+DATA_DIR = _env_path("NANOMETA_E2E_DATA_DIR")
+PIPELINE_SOURCE = _env_path("NANOMETA_E2E_PIPELINE", "~/Code/nanometanf")
 
 _PATHS = [KRAKEN_DB, WATCH_DIR, DATA_DIR, PIPELINE_SOURCE]
 
@@ -38,8 +60,9 @@ pytestmark = [
         reason="set NANOMETA_RUN_E2E=1 to run the live validation end-to-end test",
     ),
     pytest.mark.skipif(
-        not all(p.exists() for p in _PATHS),
-        reason="SAMMLA live-test dataset / Kraken2 DB / nanometanf checkout not present",
+        not all(str(p) not in ("", ".") and p.exists() for p in _PATHS),
+        reason="set NANOMETA_E2E_KRAKEN_DB / _INPUT_DIR / _DATA_DIR (and have "
+               "a nanometanf checkout) to run the live end-to-end test",
     ),
 ]
 
