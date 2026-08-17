@@ -1049,60 +1049,8 @@ class BackendManager:
                 with self._status_lock:
                     # Detect pipeline termination (crash or completion)
                     if not workflow_status.get("running"):
-                        workflow_errors = workflow_status.get("errors", [])
-
-                        if len(workflow_errors) > 0:
-                            # Pipeline terminated with errors
-                            self.status["pipeline_status"] = "error"
-                            existing = set(self.status["errors"])
-                            for err in workflow_errors:
-                                if err not in existing:
-                                    self.status["errors"].append(err)
-                                    existing.add(err)
-                            self.status["running"] = False
-                            logging.error("Pipeline encountered errors, stopping")
-
-                        else:
-                            # Pipeline terminated without errors (normal completion
-                            # or undetected crash). Check if it completed
-                            # successfully by looking at process counts.
-                            processes_failed = workflow_status.get("processes_failed", 0)
-                            processes_complete = workflow_status.get("processes_complete", 0)
-
-                            if processes_failed > 0:
-                                # Pipeline had failed processes but no explicit error
-                                self.status["pipeline_status"] = "error"
-                                self.status["errors"].append(
-                                    f"Pipeline terminated with {processes_failed} "
-                                    f"failed process(es)"
-                                )
-                                self.status["running"] = False
-                                logging.error(
-                                    f"Pipeline terminated with {processes_failed} "
-                                    f"failed processes"
-                                )
-
-                            elif processes_complete > 0:
-                                # Pipeline completed successfully
-                                self.status["pipeline_status"] = "completed"
-                                self.status["running"] = False
-                                run_completed = True
-                                logging.info("Pipeline completed successfully")
-
-                            else:
-                                # Pipeline terminated unexpectedly with no
-                                # completed processes and no errors -- likely a
-                                # crash during startup or configuration
-                                self.status["pipeline_status"] = "error"
-                                self.status["errors"].append(
-                                    "Pipeline process terminated unexpectedly. "
-                                    "Check the Nextflow log for details."
-                                )
-                                self.status["running"] = False
-                                logging.error(
-                                    "Pipeline process terminated unexpectedly "
-                                    "(no completed processes, no errors reported)"
-                                )
+                        run_completed = self._apply_terminal_workflow_status(
+                            workflow_status)
 
                     # Update process information
                     self.status["processes_running"] = workflow_status.get("processes_running", 0)
@@ -1134,5 +1082,77 @@ class BackendManager:
         # Release lock when monitoring thread exits (pipeline completed or stopped)
         self._release_lock()
         logging.info("BackendManager status monitoring stopped")
+
+    def _apply_terminal_workflow_status(self, workflow_status: dict) -> bool:
+        """Classify a finished run and update ``self.status``.
+
+        Returns True when the run completed (the caller then generates the
+        operator report). Call with ``self._status_lock`` held.
+
+        **The Nextflow exit code decides, not the failed-task count.**
+        nanometanf isolates per-sample failures (``errorStrategy 'ignore'`` in
+        conf/error_isolation.config), so one barcode failing is by design:
+        every other sample runs to completion, all outputs publish, and
+        Nextflow exits 0 with "completed successfully, but with errored
+        process(es)". The trace still records that task as FAILED -- it has no
+        "ignored" status -- so counting failures alone declared a successful
+        3-barcode run failed and, worse, suppressed the auto-report that is
+        supposed to outlive the dashboard (found in the 2026-08-17 multiplex
+        assembly E2E, where the negative control had too few reads to
+        assemble). The isolated failure is still reported, as a warning naming
+        the tasks, so nothing is hidden.
+        """
+        workflow_errors = workflow_status.get("errors", [])
+        if workflow_errors:
+            self._fail_run(workflow_errors)
+            return False
+
+        processes_failed = workflow_status.get("processes_failed", 0)
+        processes_complete = workflow_status.get("processes_complete", 0)
+        exit_code = workflow_status.get("exit_code")
+        failed_tasks = workflow_status.get("failed_tasks") or []
+
+        if processes_failed > 0 and exit_code == 0:
+            named = ", ".join(failed_tasks) if failed_tasks else (
+                f"{processes_failed} task(s)")
+            self.status["pipeline_status"] = "completed"
+            self.status.setdefault("warnings", []).append(
+                f"Run completed; {named} did not produce output and was "
+                "isolated. Other samples are unaffected."
+            )
+            self.status["running"] = False
+            logging.warning(
+                "Pipeline completed with %d isolated task failure(s): %s",
+                processes_failed, named,
+            )
+            return True
+
+        if processes_failed > 0:
+            self._fail_run(
+                [f"Pipeline terminated with {processes_failed} failed process(es)"])
+            return False
+
+        if processes_complete > 0:
+            self.status["pipeline_status"] = "completed"
+            self.status["running"] = False
+            logging.info("Pipeline completed successfully")
+            return True
+
+        # No completed processes and no errors -- likely a crash during
+        # startup or configuration.
+        self._fail_run(["Pipeline process terminated unexpectedly. "
+                        "Check the Nextflow log for details."])
+        return False
+
+    def _fail_run(self, errors) -> None:
+        """Mark the run failed, appending each error once. Lock held."""
+        self.status["pipeline_status"] = "error"
+        existing = set(self.status["errors"])
+        for err in errors:
+            if err not in existing:
+                self.status["errors"].append(err)
+                existing.add(err)
+        self.status["running"] = False
+        logging.error("Pipeline failed: %s", "; ".join(errors))
 
 
