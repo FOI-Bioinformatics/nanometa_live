@@ -187,6 +187,7 @@ class ReadinessChecker:
 
         # === Input/output checks (warning) ===
         report.checks.append(self._check_input_directory(config))
+        report.checks.append(self._check_input_read_length(config))
         report.checks.append(self._check_output_directory(config))
         report.checks.append(self._check_disk_space(config))
 
@@ -475,6 +476,75 @@ class ReadinessChecker:
             "Input Directory", False, Severity.WARNING,
             f"No FASTQ files or per-sample directories found in {p.name}",
             details="This is expected if the sequencing run has not started yet"
+        )
+
+    def _check_input_read_length(self, config: Dict[str, Any]) -> CheckResult:
+        """Warn when the input reads are shorter than the QC length filter.
+
+        The filter defaults to 1000 bp and discards ALL reads of a short-
+        amplicon run: chopper exits 0 on total loss and the run completes
+        green with every panel blank, so this pre-flight sample is the only
+        warning the operator gets. Median-based: a warning fires when more
+        than half of the sampled reads would be discarded.
+        """
+        name = "Input Read Length"
+        qc_tool = str(config.get("qc_tool") or "chopper").lower()
+        if qc_tool == "fastp":
+            return CheckResult(
+                name, True, Severity.WARNING,
+                "fastp QC applies no long-read length floor",
+            )
+
+        # Effective floor: the lower of the configured chopper/filtlong
+        # values (which of the two runs depends on the pipeline QC profile;
+        # taking the min avoids false alarms at the cost of missing the
+        # mixed case where only the inactive tool was lowered).
+        floors: Dict[str, int] = {}
+        for key in ("chopper_minlength", "filtlong_min_length"):
+            try:
+                floors[key] = int(config.get(key))
+            except (TypeError, ValueError):
+                continue
+        if not floors:
+            floors = {"chopper_minlength": 1000}
+        floor_key, floor = min(floors.items(), key=lambda kv: kv[1])
+        if floor <= 1:
+            return CheckResult(
+                name, True, Severity.WARNING,
+                "Length filter is disabled (minimum length 1 bp or lower)",
+            )
+
+        input_dir = config.get("nanopore_output_directory") or config.get("nanopore_dir", "")
+        if not input_dir or not Path(input_dir).is_dir():
+            return CheckResult(
+                name, True, Severity.WARNING,
+                "No input directory to sample yet",
+                details="This is expected if the sequencing run has not started yet",
+            )
+
+        from nanometa_live.core.utils.read_length_probe import median_input_read_length
+        median, n_reads, example = median_input_read_length(input_dir)
+        if median is None:
+            return CheckResult(
+                name, True, Severity.WARNING,
+                "No input FASTQ to sample yet",
+                details="This is expected if the sequencing run has not started yet",
+            )
+        if median < floor:
+            return CheckResult(
+                name, False, Severity.WARNING,
+                f"Median input read length is ~{median} bp ({n_reads} reads "
+                f"sampled from {example}), below the length filter "
+                f"({floor_key} = {floor}). Most reads would be discarded "
+                "before classification.",
+                details="For amplicon or other short-read protocols, lower the "
+                        "filter in Configuration -> Read Filtering (e.g. "
+                        "100-300 bp).",
+            )
+        return CheckResult(
+            name, True, Severity.WARNING,
+            f"Median input read length ~{median:,} bp clears the length "
+            f"filter ({floor} bp)",
         )
 
     def _check_output_directory(self, config: Dict[str, Any]) -> CheckResult:

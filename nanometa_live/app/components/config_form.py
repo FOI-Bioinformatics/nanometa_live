@@ -490,21 +490,28 @@ def _confirmation_testing_card():
                     ], html_for="minimap2-preset-input"),
                     dbc.Select(
                         id="minimap2-preset-input",
+                        # Options must stay within nanometanf's schema enum
+                        # (map-ont / map-pb / map-hifi). An "sr" option for
+                        # short amplicons was offered here earlier but the
+                        # pipeline rejects it at launch, so the choice was
+                        # silently coerced back to map-ont -- a control that
+                        # does nothing. Nanopore amplicons keep the ONT error
+                        # profile regardless of length, so map-ont is the
+                        # correct preset for them.
                         options=[
                             {"label": "Oxford Nanopore (default)", "value": "map-ont"},
-                            {"label": "Short reads <500 bp (amplicons)", "value": "sr"},
                             {"label": "PacBio HiFi", "value": "map-hifi"},
                             {"label": "PacBio CLR", "value": "map-pb"}
                         ],
                         value="map-ont"
                     ),
-                    dbc.FormText("Select your sequencing instrument type or sr for short amplicons"),
+                    dbc.FormText("Select your sequencing instrument type "
+                                 "(also correct for short ONT amplicons)"),
                     dbc.Tooltip(
-                        "Choose the sequencing technology that produced your data. "
-                        "Use 'Short reads' (sr) for amplicons under ~500 bp where "
-                        "the long-read preset under-aligns. "
-                        "This adjusts alignment sensitivity to match the error profile "
-                        "of your instrument.",
+                        "Choose the sequencing technology that produced your "
+                        "data. Nanopore amplicons under 500 bp also use the "
+                        "Oxford Nanopore preset: read length does not change "
+                        "the error profile the aligner tunes for.",
                         target="minimap2-preset-info"
                     )
                 ], md=6),

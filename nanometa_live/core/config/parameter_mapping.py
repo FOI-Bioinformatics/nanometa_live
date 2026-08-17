@@ -73,10 +73,11 @@ def validate_sample_handling_layout(sample_handling: str, input_dir: str) -> Non
         )
 
 
-# nanometanf's schema enum for minimap2_preset. The GUI briefly offered "sr"
-# (recommended for amplicons) which nf-schema rejects at launch; unknown
-# values are coerced to the nanopore default with a warning so a saved
-# config remains launchable.
+# nanometanf's schema enum for minimap2_preset. The GUI no longer offers
+# anything outside it (an "sr" amplicon option was removed 2026-08-17: the
+# pipeline rejects it at launch, so the choice was a silent no-op), but old
+# saved configs may still carry "sr"; unknown values are coerced to the
+# nanopore default with a warning so those configs remain launchable.
 _VALID_MINIMAP2_PRESETS = ("map-ont", "map-pb", "map-hifi")
 
 

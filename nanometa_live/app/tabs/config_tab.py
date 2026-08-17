@@ -20,6 +20,7 @@ from dash import html
 
 from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.config.config_loader import ConfigLoader
+from nanometa_live.core.config.parameter_mapping import _coerce_minimap2_preset
 from nanometa_live.app.utils.github_branches import fetch_nanometanf_branches
 from nanometa_live.app.app import background_callback_manager
 
@@ -700,7 +701,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         blast_validation = bool(blast_validation)
 
         validation_method = config.get("validation_method", "minimap2")
-        minimap2_preset = config.get("minimap2_preset", "map-ont")
+        # Normalise presets nanometanf rejects (the GUI briefly offered "sr");
+        # an unmatched value would leave the Select blank rather than showing
+        # the map-ont the launch will actually use.
+        minimap2_preset = _coerce_minimap2_preset(config.get("minimap2_preset", "map-ont"))
         minimap2_min_mapq = config.get("minimap2_min_mapq", 30)
 
         e_value_cutoff = config.get("e_val_cutoff", 0.01)
