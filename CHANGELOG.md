@@ -6,6 +6,62 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-17
+
+Cumulative release covering the 2026-06 through 2026-08 development line,
+including the 2026-08-16 cross-repo audit campaign (about 40 defects fixed in
+this repository, with the matching pipeline fixes in nanometanf v1.6.1).
+
+### Added
+- Subspecies support end to end: S1-S3 ranks detectable and selectable in the
+  Taxonomy and Organisms tabs, a dedicated subspecies table in the exported
+  report, trinomial name variants in watchlist matching, and subspecies nodes
+  reachable by the fuzzy/substring strategies
+- Negative-control handling: declared controls (plus NTC/blank/fused NTC1
+  name patterns) are annotated in per-sample attribution, the verdict banner,
+  and the exported report; controls are reported, never suppressive
+- Verdict integrity guards: NOT_SCREENED and INSUFFICIENT_READS states, a
+  shallow-depth clause on detections, and dataless-sample marking, carried
+  uniformly across the dashboard, Organisms panel, and exported report
+- Realtime cumulative validation with per-batch drill-down, on-demand
+  validation persistence across reloads, and a mid-run freshness signal from
+  per-pair validation files
+- Offline deployment hardening: singularity image bundling with Nextflow
+  cache-name compatibility, import verification (checksums, architecture,
+  partial-copy detection), and an air-gap-verified end-to-end flow
+- PEP 621 packaging (pyproject.toml); code-size and per-poll-cost CI gates
+
+### Changed
+- Polling is adaptive: 10 s while a run is active, 60 s idle; heavy loaders
+  are fingerprint-gated with per-sample cache scoping (quiet 24-sample poll
+  cost reduced from O(N^1.65) to O(N^0.91))
+- The multi-user run lock guards the real output directory
+  (results_output_directory), not the internal analysis directory
+- Dead configuration surfaces removed (unused validator/manager modules,
+  inert form controls); config values are coerced to what nanometanf's
+  schema accepts at launch time
+
+### Fixed
+- The "All Samples" aggregate resolves the Kraken2 report tier per sample, so
+  a barcode still on batch reports is never dropped from the frame the
+  verdict banner reads
+- The aggregate discovery floor gates on cumulative reads (the column it
+  reports), closing a false ALL CLEAR on subspecies-resolving databases
+- A null realtime timeout reaches the pipeline as run-indefinitely instead of
+  silently reverting to a 60-minute cutoff
+- Disk-fallback BLAST results no longer claim 100% validation on an unknown
+  denominator; ambiguous shared-node detections disclose the alternatives on
+  the no-mapping path; GTDB-suffixed names clear the match threshold
+- One malformed watchlist entry, alert record, or aggregate JSON entry costs
+  only itself instead of truncating screening, alerts, or validation results
+- Background callbacks gate their redundant work through stores that survive
+  process isolation; readiness probes respect their TTL instead of running
+  docker/nextflow checks every tick
+- Stop reconciles a dead pipeline process instead of raising; an operator
+  abort is announced as stopped, not completed; exported-report chart JSON
+  cannot break out of its script element
+
+
 ## [0.8.0] - 2026-06-09
 
 ### Added
