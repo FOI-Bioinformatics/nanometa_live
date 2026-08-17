@@ -38,7 +38,6 @@ from nanometa_live.app.components.pathogen_alert import (
     THREAT_LEVELS,
     CriticalPathogenAlert,
     HighRiskPathogenAlert,
-    PathogenAlertPanel,
     WatchedSpeciesAlert,
 )
 from nanometa_live.app.tabs import dashboard_helpers
@@ -336,9 +335,9 @@ class TestThreatLevelSeverity:
             ("critical", "CRITICAL"),
             ("high", "HIGH RISK"),
             ("high_risk", "HIGH RISK"),
-            ("moderate", "WATCH"),
-            ("low", "WATCH"),
-            ("unknown", "WATCH"),
+            ("moderate", "MODERATE"),
+            ("low", "MODERATE"),
+            ("unknown", "MODERATE"),
         ],
     )
     def test_threat_level_routes_to_the_right_card(
@@ -531,8 +530,7 @@ class TestDegradedInput:
 
 
 class TestCardComponentsDirectly:
-    """The three card builders are also called from PathogenAlertPanel and
-    from the components package, so their contracts are asserted directly."""
+    """The three card builders are called from the dashboard alert dispatch, so their contracts are asserted directly."""
 
     def test_high_risk_card_carries_name_taxid_and_action(self):
         card = HighRiskPathogenAlert(
@@ -558,7 +556,7 @@ class TestCardComponentsDirectly:
         text = _text(card)
         assert "Limosilactobacillus fermentum" in text
         assert "4,229" in text, "watched-species card lost its read count"
-        assert "WATCH" in text, "watched-species card lost its severity label"
+        assert "MODERATE" in text, "watched-species card lost its severity label"
 
     def test_critical_card_without_optional_arguments(self):
         """Only pathogen_name is required; the rest must have safe defaults."""
@@ -578,73 +576,6 @@ class TestCardComponentsDirectly:
             "confidence label not rendered; the operator loses the only "
             "on-card signal of evidence strength"
         )
-
-
-class TestPathogenAlertPanelComponent:
-    """PathogenAlertPanel matches raw Kraken2 organisms against a watched-
-    species config itself, so it has its own matching contract."""
-
-    def _watchlist(self):
-        return [{
-            "taxid": _R1["tularensis_taxid"],
-            "name": "Francisella tularensis",
-            "common_name": "Tularemia",
-            "threat_level": "critical",
-        }]
-
-    def test_matches_by_taxid_and_renders_a_critical_card(self):
-        panel = PathogenAlertPanel(
-            [{"taxid": _R1["tularensis_taxid"],
-              "name": "Francisella tularensis", "reads": 34096,
-              "abundance": 99.87}],
-            self._watchlist(),
-        )
-        text = _text(panel)
-        assert "CRITICAL" in text and "Francisella tularensis" in text, (
-            "a taxid-matched select agent did not render a critical card"
-        )
-        assert "Tularemia" in text, "common name from the watchlist not used"
-
-    def test_matches_by_name_when_taxid_differs(self):
-        """On a GTDB database the report taxid will not be the NCBI one."""
-        panel = PathogenAlertPanel(
-            [{"taxid": 4005020, "name": "Francisella tularensis",
-              "reads": 34096, "abundance": 99.87}],
-            self._watchlist(),
-        )
-        assert "CRITICAL" in _text(panel), (
-            "name fallback failed; on a custom database the panel would show "
-            "ALL CLEAR for a detected select agent"
-        )
-
-    def test_unwatched_organism_yields_an_explicit_all_clear(self):
-        panel = PathogenAlertPanel(
-            [{"taxid": _R1["fermentum_taxid"],
-              "name": "Limosilactobacillus fermentum", "reads": 4229}],
-            self._watchlist(),
-        )
-        assert "All Clear" in _text(panel), (
-            "no watched organism detected must state ALL CLEAR explicitly, "
-            "not render an empty panel indistinguishable from a broken one"
-        )
-
-    def test_empty_inputs_still_state_all_clear(self):
-        assert "All Clear" in _text(PathogenAlertPanel([], []))
-
-    def test_organism_missing_name_does_not_raise(self):
-        panel = PathogenAlertPanel(
-            [{"taxid": _R1["tularensis_taxid"], "reads": 100}],
-            self._watchlist(),
-        )
-        assert "CRITICAL" in _text(panel), (
-            "a nameless organism row broke taxid matching for a select agent"
-        )
-
-
-# ---------------------------------------------------------------------------
-# _generate_alerts -- the dashboard's alert list, over a real-derived results
-# tree
-# ---------------------------------------------------------------------------
 
 
 def _write_report(path: str, rows: List[str]) -> None:

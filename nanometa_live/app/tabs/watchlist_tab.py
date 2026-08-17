@@ -96,6 +96,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
             Output("watchlist-stat-validated", "children"),
             Output("watchlist-stat-critical", "children"),
             Output("watchlist-stat-high", "children"),
+            Output("watchlist-stat-moderate", "children"),
+            Output("watchlist-stat-low", "children"),
         ],
         [
             Input("watchlist-tab-state", "data"),
@@ -118,15 +120,15 @@ def register_watchlist_callbacks(app: Dash) -> None:
         validation_status = manager.get_validation_status(enabled_only=True)
 
         by_threat = stats.get("by_threat_level", {})
-        critical = by_threat.get("critical", 0)
-        high = by_threat.get("high", 0)
 
         return (
             str(stats.get("total_entries", 0)),
             str(stats.get("active_entries", 0)),
             str(validation_status.get("validated", 0)),
-            f"Critical: {critical}",
-            f"High: {high}",
+            f"Critical: {by_threat.get('critical', 0)}",
+            f"High: {by_threat.get('high', 0)}",
+            f"Moderate: {by_threat.get('moderate', 0)}",
+            f"Low: {by_threat.get('low', 0)}",
         )
 
     # ---------------------------------------------------------------------

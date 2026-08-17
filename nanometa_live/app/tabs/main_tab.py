@@ -372,7 +372,8 @@ def register_main_callbacks(app: Dash):
                         rank="S",
                         is_watched=True,
                         blast_validation=blast_data,
-                        annotation=species.get('annotation', '')
+                        annotation=species.get('annotation', ''),
+                        threat_level=species.get('threat_level'),
                     )
                     col = dbc.Col(card, md=6, lg=4, className="mb-3")
 

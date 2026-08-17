@@ -231,7 +231,8 @@ def OrganismCard(
     blast_validation: Optional[Dict] = None,
     show_validate_button: bool = False,
     on_demand_validation: Optional[Dict] = None,
-    annotation: Optional[str] = None
+    annotation: Optional[str] = None,
+    threat_level: Optional[str] = None,
 ) -> dbc.Card:
     """
     Create a visual card for displaying organism information.
@@ -252,6 +253,10 @@ def OrganismCard(
             - status: 'validated', 'partial', 'failed', or 'no_data'
         show_validate_button: Show on-demand validation button (for unexpected organisms)
         on_demand_validation: Optional on-demand validation result data
+        threat_level: Watchlist threat level (critical/high/moderate/low).
+            Rendered as a badge on watched cards -- without it a select
+            agent and a commensal looked identical here (2026-08-17
+            reaudit). Hover shows the level's meaning.
 
     Returns:
         Organism card component
@@ -336,6 +341,11 @@ def OrganismCard(
         header_icon = html.Span("", style={"fontSize": "24px", "marginRight": "12px"})
 
     # Determine badge and text based on detection status
+    threat_badge_el = None
+    if is_watched and threat_level:
+        from nanometa_live.app.utils.threat_display import threat_badge
+        threat_badge_el = threat_badge(threat_level, className="ms-2")
+
     if is_undetected and is_watched:
         status_badge = dbc.Badge("NOT DETECTED", color="secondary", className="ms-2")
         read_count_text = html.Div([
@@ -379,6 +389,7 @@ def OrganismCard(
                         className="text-muted"
                     ),
                     status_badge,
+                    threat_badge_el if threat_badge_el is not None else "",
                     html.Small(
                         annotation,
                         className="text-info fst-italic d-block"

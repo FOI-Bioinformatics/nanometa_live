@@ -131,10 +131,10 @@
     font-weight: 600;
     text-transform: uppercase;
   }
-  .badge-critical { background: #8b0000; color: #fff; }
-  .badge-high { background: #dc3545; color: #fff; }
-  .badge-moderate { background: #fd7e14; color: #fff; }
-  .badge-low { background: #28a745; color: #fff; }
+  .badge-critical { background: #dc3545; color: #fff; }
+  .badge-high { background: #fd7e14; color: #fff; }
+  .badge-moderate { background: #ffc107; color: #664d03; }
+  .badge-low { background: #17a2b8; color: #fff; }
   .badge-unknown { background: #6c757d; color: #fff; }
   .badge-detected { background: #dc3545; color: #fff; }
   .badge-not-detected { background: #28a745; color: #fff; }
@@ -319,6 +319,18 @@
   <!-- PATHOGEN SCREENING -->
   {% if data.watched_results %}
   <h2>Pathogen Screening</h2>
+  {% if data.threat_legend %}
+  <div class="card" style="margin-bottom: 12px;">
+    <div class="card-body" style="font-size: 0.85rem;">
+      {% for t in data.threat_legend %}
+      <div style="margin-bottom: 4px;">
+        <span class="badge badge-{{ t.level }}">{{ t.label }}</span>
+        <span style="color:#555;">{{ t.meaning }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
   <div class="card">
     <div class="card-body">
       <table>
@@ -333,7 +345,7 @@
           </tr>
         </thead>
         <tbody>
-          {% for w in data.watched_results | sort(attribute="threat_level") %}
+          {% for w in data.watched_results %}
           <tr>
             <td>
               <em>{{ w.name }}</em>
@@ -343,7 +355,7 @@
               </div>
               {% endif %}
             </td>
-            <td><span class="badge badge-{{ w.threat_level }}">{{ w.threat_level }}</span></td>
+            <td><span class="badge badge-{{ w.threat_level }}" title="{{ w.threat_meaning }}">{{ w.threat_label | default(w.threat_level) }}</span></td>
             <td>
               {% if w.detected %}
               <span class="badge badge-detected">DETECTED</span>

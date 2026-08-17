@@ -17,8 +17,6 @@ from nanometa_live.app.components.pathogen_alert import (
     CriticalPathogenAlert,
     HighRiskPathogenAlert,
     WatchedSpeciesAlert,
-    PathogenAlertPanel,
-    ThreatSummaryIndicator,
 )
 from nanometa_live.app.components.modern_components import (
     QualityScoreBadge,
@@ -44,8 +42,6 @@ __all__ = [
     "CriticalPathogenAlert",
     "HighRiskPathogenAlert",
     "WatchedSpeciesAlert",
-    "PathogenAlertPanel",
-    "ThreatSummaryIndicator",
     # Modern components
     "QualityScoreBadge",
     "N50Badge",

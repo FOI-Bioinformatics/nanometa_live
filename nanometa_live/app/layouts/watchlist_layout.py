@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 
+from nanometa_live.app.utils.threat_display import threat_badge
 from nanometa_live.core.watchlist.watchlist_manager import ORGANISM_TYPES
 
 
@@ -93,18 +94,36 @@ def _create_stats_bar() -> dbc.Card:
                     ], className="d-flex align-items-baseline"),
                 ], width="auto", className="me-4"),
 
-                # Threat level badges
+                # Threat level badges. All four levels are counted -- showing
+                # only critical/high made moderate/low entries invisible in
+                # the summary (2026-08-17 reaudit). Hover explains each level.
                 dbc.Col([
                     dbc.Badge(
                         "Critical: 0",
                         id="watchlist-stat-critical",
                         color="danger",
+                        title="Select agents and BSL-3+ pathogens - immediate action on detection",
                         className="me-2"
                     ),
                     dbc.Badge(
                         "High: 0",
                         id="watchlist-stat-high",
                         color="warning",
+                        title="High-risk pathogens - prompt review on detection",
+                        className="me-2"
+                    ),
+                    dbc.Badge(
+                        "Moderate: 0",
+                        id="watchlist-stat-moderate",
+                        color="secondary",
+                        title="Common clinical or environmental pathogens - monitor in context",
+                        className="me-2"
+                    ),
+                    dbc.Badge(
+                        "Low: 0",
+                        id="watchlist-stat-low",
+                        color="secondary",
+                        title="Low-virulence or commensal organisms - logged for completeness",
                     ),
                 ], width="auto", className="me-4"),
 
@@ -336,7 +355,22 @@ def _create_pathogens_table_section() -> dbc.Card:
             html.Div([
                 dbc.Row([
                     dbc.Col(html.Small("Organism", className="fw-bold"), width=3),
-                    dbc.Col(html.Small("Risk", className="fw-bold"), width=1),
+                    dbc.Col([
+                        html.Small("Risk", className="fw-bold"),
+                        html.I(className="bi bi-info-circle text-muted ms-1",
+                               id="risk-header-info",
+                               style={"fontSize": "0.7rem", "cursor": "help"}),
+                        dbc.Tooltip(
+                            "Threat level of the organism. Critical: select "
+                            "agents and BSL-3+ pathogens - immediate action "
+                            "on detection. High risk: prompt review. "
+                            "Moderate: monitor in context. Low: logged for "
+                            "completeness. Hover any badge for the full "
+                            "meaning.",
+                            target="risk-header-info",
+                            placement="top",
+                        ),
+                    ], width=1),
                     dbc.Col([
                         html.Small("Safety", className="fw-bold"),
                         html.I(className="bi bi-info-circle text-muted ms-1",
@@ -929,13 +963,6 @@ def create_pathogen_row(
     enabled = entry.get("enabled", True)
     validated = entry.get("validated", False)
 
-    # Threat level colors
-    threat_colors = {
-        "critical": "danger",
-        "high": "warning",
-        "moderate": "info",
-        "low": "secondary",
-    }
 
     # Kraken2 mapping status badge
     mapping_config = {
@@ -997,12 +1024,9 @@ def create_pathogen_row(
                            title="NCBI Taxonomy identifier"),
             ], width=3),
 
-            # Threat level
+            # Threat level (shared source of truth; hover shows the meaning)
             dbc.Col([
-                dbc.Badge(
-                    threat_level.title(),
-                    color=threat_colors.get(threat_level, "secondary"),
-                ),
+                threat_badge(threat_level),
             ], width=1),
 
             # BSL
@@ -1123,12 +1147,6 @@ def _create_nested_pathogen_row(entry: Dict[str, Any], watchlist_id: str) -> htm
     threshold = entry.get("alert_threshold", 10)
     enabled = entry.get("enabled", True)
 
-    threat_colors = {
-        "critical": "danger",
-        "high": "warning",
-        "moderate": "info",
-        "low": "secondary",
-    }
 
     row_class = "py-1 border-bottom"
     if not enabled:
@@ -1155,11 +1173,7 @@ def _create_nested_pathogen_row(entry: Dict[str, Any], watchlist_id: str) -> htm
 
             # Threat level badge
             dbc.Col([
-                dbc.Badge(
-                    threat_level.title() if threat_level else "N/A",
-                    color=threat_colors.get(threat_level, "secondary"),
-                    className="small",
-                ),
+                threat_badge(threat_level, className="small"),
             ], width=2),
 
             # Threshold
@@ -1438,12 +1452,6 @@ def create_missing_genome_item(entry: Dict[str, Any]) -> html.Div:
     name = entry.get("name", "Unknown")
     threat_level = entry.get("threat_level", "moderate")
 
-    threat_colors = {
-        "critical": "danger",
-        "high": "warning",
-        "moderate": "info",
-        "low": "secondary",
-    }
 
     return html.Div([
         dbc.Row([
@@ -1452,11 +1460,7 @@ def create_missing_genome_item(entry: Dict[str, Any]) -> html.Div:
                 html.Small(f" (taxid: {taxid})", className="text-muted"),
             ], width=6),
             dbc.Col([
-                dbc.Badge(
-                    threat_level.title() if threat_level else "Unknown",
-                    color=threat_colors.get(threat_level, "secondary"),
-                    className="me-1",
-                ),
+                threat_badge(threat_level, className="me-1"),
             ], width=2),
             dbc.Col([
                 html.I(

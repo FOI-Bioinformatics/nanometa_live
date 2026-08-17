@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from nanometa_live.core.config.threat_levels import threat_legend
 from nanometa_live.core.export.report_charts import build_charts
 from nanometa_live.core.utils.attribution import is_negative_control
 from nanometa_live.core.utils.classification_loaders import load_kraken_data
@@ -58,6 +59,26 @@ _DEFAULT_MAX_RAW_BYTES = 5 * 1024 ** 3  # 5 GiB
 # the raw tree is ever re-used. See the macOS bind-mount note in CLAUDE.md.
 _IGNORE_SIDECARS = shutil.ignore_patterns("._*", ".DS_Store")
 
+
+
+def _order_and_label_by_threat(watched_results: List[Dict[str, Any]]) -> None:
+    """Severity-sort the screen and attach the shared label + meaning.
+
+    From the single threat-level definition. The template previously sorted
+    alphabetically, which ranked "low" above "moderate" (2026-08-17 reaudit).
+    """
+    from nanometa_live.core.config.threat_levels import (
+        threat_level_info,
+        threat_severity,
+    )
+    watched_results.sort(
+        key=lambda w: (threat_severity(w.get("threat_level")),
+                       not w.get("detected"), w.get("name", ""))
+    )
+    for w in watched_results:
+        info = threat_level_info(w.get("threat_level"))
+        w["threat_label"] = info["label"]
+        w["threat_meaning"] = info["meaning"]
 
 class ReportGenerator:
     """Generate self-contained HTML reports from nanometanf results."""
@@ -153,8 +174,9 @@ class ReportGenerator:
             for sample in samples if sample is not None
         }
 
-        # Watchlist screening
+        # Watchlist screening, severity-ordered with shared labels attached.
         watched_results = self._screen_watchlist(kraken_all, sample_frames)
+        _order_and_label_by_threat(watched_results)
 
         # Alerts (pathogen + QC) from the post-run watchlist screen and QC stats.
         alerts = self._collect_alerts(qc_stats=qc_all, watched_results=watched_results)
@@ -197,6 +219,7 @@ class ReportGenerator:
             "low_read_floor": self._low_read_floor(),
             "qc_summary": qc_all,
             "watched_results": watched_results,
+            "threat_legend": threat_legend(),
             "alerts": alerts,
             "per_sample": per_sample,
             "pipeline_reports": pipeline_reports,

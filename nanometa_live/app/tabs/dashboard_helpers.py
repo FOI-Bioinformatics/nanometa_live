@@ -636,21 +636,22 @@ def _pathogen_payload(pathogen, taxid, ncbi_taxid, wl_entry, reads, detected_at,
     threat_level = pathogen.threat_level
     if hasattr(threat_level, 'value'):
         threat_level = threat_level.value
-    threat_colors = {
-        "critical": ("danger", "#8b0000", "bi-exclamation-octagon-fill"),
-        "high": ("warning", "#dc3545", "bi-exclamation-triangle-fill"),
-        "moderate": ("info", "#fd7e14", "bi-eye-fill"),
-        "low": ("secondary", "#17a2b8", "bi-info-circle"),
-    }
-    alert_color, banner_color, banner_icon = threat_colors.get(
-        threat_level, ("secondary", "#6c757d", "bi-question-circle")
-    )
-    icon_el = html.I(className=f"bi {banner_icon} me-2", style={"fontSize": "20px"})
+    # Shared threat-level definition; the banner label uses the alias and
+    # carries the plain-language meaning as hover text so the modal explains
+    # what the level implies (2026-08-17 reaudit).
+    from nanometa_live.core.config.threat_levels import threat_level_info
+    info = threat_level_info(threat_level)
+    icon_el = html.I(className=f"bi {info['icon']} me-2", style={"fontSize": "20px"})
     threat_banner = html.Div([
         icon_el,
-        html.Strong(f"{threat_level.upper()} THREAT LEVEL", style={"fontSize": "16px"}),
-    ], className=f"alert alert-{alert_color} text-center py-2 mb-0",
-       style={"borderLeft": f"5px solid {banner_color}"})
+        html.Strong(
+            f"{info['alias']} THREAT LEVEL",
+            style={"fontSize": "16px"},
+            title=info["meaning"],
+        ),
+        html.Div(info["meaning"], className="small fw-normal mt-1"),
+    ], className=f"alert alert-{info['bootstrap']} text-center py-2 mb-0",
+       style={"borderLeft": f"5px solid {info['hex']}"})
 
     bsl_val = pathogen.bsl
     if hasattr(bsl_val, 'value'):
@@ -678,7 +679,7 @@ def _pathogen_payload(pathogen, taxid, ncbi_taxid, wl_entry, reads, detected_at,
         annotation,
         pathogen.category or "Uncategorized", bsl_text, reads["reads"],
         reads["abundance"], compute_detection_confidence(reads["reads_int"]),
-        str(ncbi_taxid), pathogen.action_required, alert_color,
+        str(ncbi_taxid), pathogen.action_required, info["bootstrap"],
         pathogen.notes or "No additional notes available.", references,
         threat_banner, detection_meta,
         {"taxid": taxid, "name": pathogen.name, "threat_level": threat_level},

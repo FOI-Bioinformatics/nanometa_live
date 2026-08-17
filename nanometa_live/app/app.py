@@ -658,7 +658,14 @@ def create_app(
                         html.P(id="pathogen-modal-annotation",
                                className="text-info fst-italic mb-2"),
                         dbc.Badge(id="pathogen-modal-category", color="secondary", className="me-2"),
-                        dbc.Badge(id="pathogen-modal-bsl", color="info"),
+                        dbc.Badge(
+                            id="pathogen-modal-bsl", color="info",
+                            title=(
+                                "Biosafety containment level required for "
+                                "handling this organism (BSL-1 = low risk, "
+                                "BSL-4 = highest risk)"
+                            ),
+                        ),
                     ], md=8),
                     dbc.Col([
                         html.Div([
