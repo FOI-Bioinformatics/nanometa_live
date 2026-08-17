@@ -525,20 +525,26 @@ class NextflowManager:
             try:
                 logging.info(f"Starting Nextflow pipeline with profile: {profile}")
 
-                # Check container runtime availability based on profile
-                if profile == "docker":
+                # Check container runtime availability based on profile.
+                # Only the first component decides the engine ("conda,server"
+                # is a supported comma-form), and "apptainer" is a synonym
+                # for singularity -- it previously fell through to the docker
+                # branch and failed with a docker-daemon message on hosts
+                # that only have apptainer (2026-08-17 reaudit).
+                engine = profile.split(",", 1)[0].strip()
+                if engine == "docker":
                     docker_check = self._check_docker_available()
                     if not docker_check[0]:
                         return False, docker_check[1]
                     logging.info(docker_check[1])
 
-                elif profile == "singularity":
+                elif engine in ("singularity", "apptainer"):
                     singularity_check = self._check_singularity_available()
                     if not singularity_check[0]:
                         return False, singularity_check[1]
                     logging.info(singularity_check[1])
 
-                elif profile == "conda":
+                elif engine == "conda":
                     conda_check = self._check_conda_available()
                     if not conda_check[0]:
                         return False, conda_check[1]

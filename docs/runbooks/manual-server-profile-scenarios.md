@@ -150,12 +150,16 @@ analysis_name:      "Scenario_C_per_file"
 
 Notes:
 
-- `pipeline_profiles_extra: ["server"]` tells the GUI's BackendManager
-  to combine `conda` with the new `server` profile from `nanometanf`.
-- `nextflow_extra_args` carries the host-sizing flags. The
-  laptop-friendly values shown above target an 8-thread machine; on a
-  40-core server use `--max_cpus 40 --max_memory 256.GB --max_classification_forks=10`,
-  on a 96-core server `--max_cpus 96 --max_memory 512.GB --max_classification_forks=24`.
+- Combine the `server` profile with conda via the comma form:
+  `pipeline_profile: "conda,server"`. The value is passed verbatim to
+  `nextflow -profile`. (An earlier revision of this runbook described
+  `pipeline_profiles_extra` and `nextflow_extra_args` config keys;
+  neither exists in the code -- 2026-08-17 reaudit.)
+- Host-sizing flags belong in the `server` profile itself
+  (`conf/server.config` in nanometanf) or a custom `-c` config file. On
+  a 40-core server use `max_cpus 40` / `max_memory 256.GB` /
+  `max_classification_forks 10`; on a 96-core server `max_cpus 96` /
+  `max_memory 512.GB` / `max_classification_forks 24`.
 - The `=` syntax on `--max_classification_forks=` is required under
   nf-schema 2.6.1 (the integer parser rejects whitespace-separated form).
 

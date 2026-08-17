@@ -1100,6 +1100,11 @@ def create_nextflow_config(config: Dict[str, Any]) -> str:
     # The legacy "docker" default was a remnant of the original nf-core
     # template and contradicted every actual deployment.
     profile = config.get("pipeline_profile", "conda")
+    # Only the first component decides the engine ("conda,server" is a
+    # supported comma-form; the extra components are plain Nextflow
+    # profiles). Without the split a comma value fell into the docker
+    # else-branch and enabled a runtime the operator never chose.
+    profile = str(profile).split(",", 1)[0].strip()
 
     # Profile-specific container runtime settings. Using explicit string
     # concatenation (rather than nested f-strings with doubled braces) to avoid

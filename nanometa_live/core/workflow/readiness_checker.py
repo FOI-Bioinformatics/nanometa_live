@@ -371,7 +371,10 @@ class ReadinessChecker:
 
     def _check_container_runtime(self, config: Dict[str, Any]) -> CheckResult:
         """Check container runtime matching the pipeline_profile setting."""
-        profile = config.get("pipeline_profile", "docker")
+        profile = config.get("pipeline_profile", "conda")
+        # First component decides the engine; "conda,server" is a supported
+        # comma-form (extra components are plain Nextflow profiles).
+        profile = str(profile).split(",", 1)[0].strip()
 
         if profile == "standard":
             return CheckResult(

@@ -691,7 +691,7 @@ class BackendManager:
 
         # Get profile from config if not explicitly passed
         if profile is None:
-            profile = self.config.get("pipeline_profile", "docker")
+            profile = self.config.get("pipeline_profile", "conda")
 
         # Start the Nextflow workflow
         cores = self.config.get("snakemake_cores", None)  # Keep param name for compatibility

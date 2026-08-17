@@ -230,7 +230,7 @@ conda_frontend: "mamba"
 # Description: Nextflow execution profile controlling how tools are run.
 # Options: "docker", "singularity", "conda"
 # Default: "docker"
-pipeline_profile: "docker"
+pipeline_profile: "conda"
 
 ## QC TOOL ##
 # Description: Quality control tool used for read filtering.
