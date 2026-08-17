@@ -390,6 +390,49 @@ Mean quality score: {mean_quality:.1f}
 
         return output_file
 
+    def _fastp_scenario_rates(self) -> Tuple[float, float, float, float, float]:
+        """Scenario-dependent (pass_rate, q20/q30 before, q20/q30 after)."""
+        if self.scenario == MockDataScenario.QUALITY_ISSUES:
+            return (
+                random.uniform(0.45, 0.65),  # Low pass rate
+                random.uniform(0.70, 0.80),
+                random.uniform(0.60, 0.70),
+                random.uniform(0.75, 0.85),
+                random.uniform(0.65, 0.75),
+            )
+        if self.scenario == MockDataScenario.NORMAL_RUN:
+            return (
+                random.uniform(0.75, 0.90),  # Good pass rate
+                random.uniform(0.90, 0.95),
+                random.uniform(0.85, 0.90),
+                random.uniform(0.95, 0.98),
+                random.uniform(0.90, 0.95),
+            )
+        return (
+            random.uniform(0.60, 0.80),  # Mixed pass rate
+            random.uniform(0.80, 0.90),
+            random.uniform(0.70, 0.80),
+            random.uniform(0.85, 0.92),
+            random.uniform(0.75, 0.85),
+        )
+
+    @staticmethod
+    def _fastp_read_counts(
+        pass_rate: float, passed_reads_target: Optional[int]
+    ) -> Tuple[int, int, int, int, int]:
+        """(total, passed, low_quality, too_short, low_complexity) reads."""
+        if passed_reads_target is not None:
+            passed_reads = passed_reads_target
+            total_reads = int(passed_reads / pass_rate)
+        else:
+            total_reads = random.randint(80000, 120000)
+            passed_reads = int(total_reads * pass_rate)
+        failed_reads = total_reads - passed_reads
+        low_quality = int(failed_reads * random.uniform(0.5, 0.7))
+        too_short = int(failed_reads * random.uniform(0.2, 0.3))
+        low_complexity = failed_reads - low_quality - too_short
+        return total_reads, passed_reads, low_quality, too_short, low_complexity
+
     def _generate_fastp_json(
         self, sample_name: str, passed_reads_target: Optional[int] = None
     ) -> str:
@@ -412,38 +455,13 @@ Mean quality score: {mean_quality:.1f}
         fastp_dir = os.path.join(self.base_dir, "fastp")
         output_file = os.path.join(fastp_dir, f"{sample_name}.fastp.json")
 
-        # Generate stats based on scenario
-        if self.scenario == MockDataScenario.QUALITY_ISSUES:
-            pass_rate = random.uniform(0.45, 0.65)  # Low
-            q20_before = random.uniform(0.70, 0.80)
-            q30_before = random.uniform(0.60, 0.70)
-            q20_after = random.uniform(0.75, 0.85)
-            q30_after = random.uniform(0.65, 0.75)
-        elif self.scenario == MockDataScenario.NORMAL_RUN:
-            pass_rate = random.uniform(0.75, 0.90)  # Good
-            q20_before = random.uniform(0.90, 0.95)
-            q30_before = random.uniform(0.85, 0.90)
-            q20_after = random.uniform(0.95, 0.98)
-            q30_after = random.uniform(0.90, 0.95)
-        else:
-            pass_rate = random.uniform(0.60, 0.80)  # Mixed
-            q20_before = random.uniform(0.80, 0.90)
-            q30_before = random.uniform(0.70, 0.80)
-            q20_after = random.uniform(0.85, 0.92)
-            q30_after = random.uniform(0.75, 0.85)
-
-        if passed_reads_target is not None:
-            passed_reads = passed_reads_target
-            total_reads = int(passed_reads / pass_rate)
-        else:
-            total_reads = random.randint(80000, 120000)
-            passed_reads = int(total_reads * pass_rate)
-        failed_reads = total_reads - passed_reads
-
-        # Breakdown of failure reasons
-        low_quality = int(failed_reads * random.uniform(0.5, 0.7))
-        too_short = int(failed_reads * random.uniform(0.2, 0.3))
-        low_complexity = failed_reads - low_quality - too_short
+        pass_rate, q20_before, q30_before, q20_after, q30_after = (
+            self._fastp_scenario_rates()
+        )
+        (total_reads, passed_reads, low_quality, too_short,
+         low_complexity) = self._fastp_read_counts(
+            pass_rate, passed_reads_target
+        )
 
         # Average read length
         avg_length = random.randint(300, 1500)
