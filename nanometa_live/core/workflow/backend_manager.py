@@ -21,6 +21,7 @@ except ImportError:
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple, IO
 
+from nanometa_live.core.utils.loader_utils import clear_all_loader_caches
 from nanometa_live.core.workflow.nextflow_manager import NextflowManager
 
 
@@ -348,22 +349,17 @@ class BackendManager:
             )
         self.workflow_manager.set_pipeline_source(pipeline_source)
 
-        # Offline guard: reject remote sources before any network attempt.
-        if _parse_bool(self.config.get("offline_mode", False)):
-            is_remote = (
-                pipeline_source.startswith("remote:")
-                or pipeline_source.startswith("https://")
-                or pipeline_source.startswith("git@")
-                or pipeline_source in ("master", "main", "dev")
-            )
-            if is_remote:
-                msg = (
-                    "Offline mode is active but pipeline_source is remote "
-                    f"('{pipeline_source}'). Set pipeline_source to a local "
-                    "path in config.yaml before starting an offline run."
-                )
-                logging.error(msg)
-                return False, msg
+        # Pre-flight the source through the one validator that knows every
+        # failure mode: offline+remote is rejected before any network call,
+        # a local path must exist and contain main.nf, and a remote branch
+        # is resolved via ls-remote so a typo fails here with a clear
+        # message instead of mid-launch. This validator existed with zero
+        # production callers while a partial inline copy of its offline
+        # branch lived here (2026-08-17 audit, finding G1).
+        ok, msg = self.workflow_manager.validate_pipeline_source(self.config)
+        if not ok:
+            logging.error(msg)
+            return False, msg
 
         # Set up Nextflow workflow
         success, message = self.workflow_manager.setup(config_path)
@@ -401,6 +397,11 @@ class BackendManager:
     # Subdirectory names that nanometanf writes into the results dir.
     # detect_existing_results scans for these so the GUI can warn the
     # operator before silently mixing data from different runs.
+    # "canonical" matters more than it looks: the loaders consult
+    # canonical/_manifest.json and canonical/classification/ BEFORE any
+    # cache or freshness check, so a canonical tree left behind by a prior
+    # run keeps serving that run's sample list and classification to the
+    # GUI for as long as it exists (2026-08-17 audit, finding C1).
     RESULT_SUBDIRS = (
         "kraken2",
         "fastp",
@@ -411,6 +412,8 @@ class BackendManager:
         "on_demand_validation",
         "logs",
         "nanoplot",
+        "canonical",
+        "pipeline_info",
     )
 
     @staticmethod
@@ -571,6 +574,11 @@ class BackendManager:
             dst = os.path.join(archive_path, name)
             os.rename(src, dst)
 
+        # The loaders cache in module globals keyed by directory path, so
+        # the just-archived data would otherwise keep answering from the
+        # TTL/mtime caches until they expire (finding C2/C3).
+        clear_all_loader_caches()
+
         logging.info(
             f"Archived {len(found)} existing result subdirs to {archive_path}"
         )
@@ -637,6 +645,11 @@ class BackendManager:
             or results_dir
         )
         BackendManager.write_run_metadata(outdir_for_meta, self.config)
+
+        # A new run begins: whatever the loader caches hold belongs to the
+        # previous run (or the previous view of this outdir). Drop it all so
+        # the first poll parses what the pipeline actually writes.
+        clear_all_loader_caches()
 
         # Mark as running with start time for elapsed time tracking (thread-safe)
         with self._status_lock:

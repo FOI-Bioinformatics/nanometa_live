@@ -846,23 +846,39 @@ def register_main_callbacks(app: Dash):
         prevent_initial_call=True,
     )
     def reload_on_demand_results(n_intervals, config, existing_results):
-        """Load existing on-demand validation results from disk on initial page load.
+        """Sync the on-demand validation store with what is on disk.
 
         On a per-file failure (malformed JSON, file-system error) we
         skip the file but record its name and surface a single warning
         toast naming the offending files. Without the toast a
         partially-corrupt on_demand_validation directory looked exactly
         like a clean empty one (audit followup F1).
-        """
-        if existing_results:
-            raise PreventUpdate
 
-        results_dir = config.get("main_dir", "") if config else ""
+        The store is re-synced on every tick rather than loaded once: the
+        earlier once-only guard (``if existing_results: PreventUpdate``)
+        froze run A's verdicts in the store for the rest of the session,
+        surviving an Archive and an Open Results switch to a different
+        run (2026-08-17 audit, finding C4). A tick with no change returns
+        no_update below, so the recurring cost is one listdir plus a few
+        small json loads. The directory is resolved exactly as the writer
+        (run_on_demand_validation) resolves it -- the reload previously
+        read ``main_dir`` while the writer wrote to
+        ``results_output_directory``, so results landed where the reload
+        never looked.
+        """
+        results_dir = (
+            config.get("results_output_directory", "")
+            or config.get("main_dir", "")
+        ) if config else ""
         if not results_dir:
             raise PreventUpdate
 
         od_dir = os.path.join(results_dir, "on_demand_validation")
         if not os.path.isdir(od_dir):
+            if existing_results:
+                # The directory the store was loaded from is gone
+                # (archived, or the operator switched runs): clear it.
+                return {}, no_update
             raise PreventUpdate
 
         results = {}
@@ -902,10 +918,10 @@ def register_main_callbacks(app: Dash):
         else:
             notification = no_update
 
-        if results:
+        if results != (existing_results or {}):
             return results, notification
-        # No new results to deliver, but still surface the warning if
-        # any files were skipped this tick.
+        # Nothing changed on disk this tick; still surface the warning if
+        # any files were skipped.
         return no_update, notification
 
     @app.callback(

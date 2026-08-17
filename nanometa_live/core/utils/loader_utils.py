@@ -20,6 +20,21 @@ from nanometa_live.core.utils.sample_detector import (
 )
 
 
+# Results subdirectories whose contents drive GUI refreshes. This is the
+# single watch list shared by check_data_freshness (the results-fingerprint
+# store) and first-batch detection (app/utils/first_batch.py); the two had
+# drifted apart, and neither watched canonical/ although the loaders read it
+# before any cache (2026-08-17 audit, finding C6).
+RESULTS_WATCHED_SUBDIRS = (
+    "kraken2",
+    "fastp",
+    "seqkit",
+    "validation",
+    "taxpasta",
+    "canonical",
+    "on_demand_validation",
+)
+
 # Cache configuration
 CACHE_TTL_SECONDS = 30  # Time-to-live for cached data
 CACHE_MAX_ENTRIES = 100  # Maximum cache entries to prevent unbounded growth
@@ -211,6 +226,31 @@ def clear_data_cache():
         _file_mtimes.clear()
 
 
+def clear_all_loader_caches():
+    """Reset every cache layer that could carry one run's data into the next.
+
+    Called when the boundary between two runs is crossed: on Archive (the
+    prior results just left the output directory) and on pipeline start.
+    Without this, the TTL cache, the per-key mtime cache, the parsed-frame
+    cache, the sample-detector cache and the alert history all survive into
+    the next run inside the same process -- the loaders are module-global
+    state, so "new run" is invisible to them unless someone says so.
+
+    Imports are local to avoid cycles: classification_loaders and
+    sample_detector both import from this module.
+    """
+    from nanometa_live.core.utils.alert_engine import get_alert_engine
+    from nanometa_live.core.utils.classification_loaders import (
+        clear_report_frame_cache,
+    )
+    from nanometa_live.core.utils.sample_detector import invalidate_sample_cache
+
+    clear_data_cache()
+    clear_report_frame_cache()
+    invalidate_sample_cache()
+    get_alert_engine().clear_alerts()
+
+
 def _get_dir_latest_mtime(directory: str) -> Tuple[float, int]:
     """Return (latest mtime, file count) among files in a directory (recursive).
 
@@ -397,14 +437,16 @@ def check_data_freshness(main_dir: str) -> str:
     """
     Return a fingerprint string representing the freshness of result data.
 
-    Scans the kraken2/, fastp/, seqkit/, and validation/ subdirectories
-    and hashes the latest file mtimes. A changed fingerprint means new
-    data is available.
+    Scans the subdirectories in ``RESULTS_WATCHED_SUBDIRS`` and hashes the
+    latest file mtimes. A changed fingerprint means new data is available.
 
     seqkit/ is the QC output directory for the chopper and filtlong
     pipelines (fastp/ is the alternative when qc_tool=fastp). Including
     it here means the fingerprint advances on every QC update regardless
-    of which tool the run used.
+    of which tool the run used. canonical/ is included because the loaders
+    consult it before their caches, so a rewritten manifest or
+    classification JSON must advance the fingerprint; on_demand_validation/
+    because operator-triggered validation results land there mid-session.
 
     This function is intended to be called once per polling interval by a
     single centralized callback, rather than having each tab poll independently.
@@ -416,7 +458,7 @@ def check_data_freshness(main_dir: str) -> str:
     main_dir = resolve_analysis_directory(main_dir)
 
     parts = []
-    for subdir in ("kraken2", "fastp", "seqkit", "validation"):
+    for subdir in RESULTS_WATCHED_SUBDIRS:
         dirpath = os.path.join(main_dir, subdir)
         mt, n_files = _get_dir_latest_mtime(dirpath)
         parts.append(f"{subdir}:{mt}:{n_files}")
