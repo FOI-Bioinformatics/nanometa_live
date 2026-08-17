@@ -478,6 +478,11 @@ class ReportGenerator:
                 "name": entry.name,
                 "taxid": entry.taxid,
                 "threat_level": threat_level,
+                # The entry's operational guidance. The report is the
+                # artifact that leaves the building, so the guidance the
+                # dashboard's pathogen modal shows must survive into it
+                # (2026-08-17 storage audit follow-up).
+                "action_required": getattr(entry, "action_required", "") or "",
                 "reads": reads,
                 "abundance": round(abundance, 3),
                 "detected": reads > 0,

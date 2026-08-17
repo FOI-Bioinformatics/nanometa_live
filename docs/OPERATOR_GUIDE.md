@@ -50,11 +50,14 @@ Technical details: Pass rate below 50%
 Meaning: everything processed, data quality acceptable.
 
 What to do:
-1. Click "Generate Report" (in alerts or top right).
-2. Select PDF or Excel format.
-3. Save to your designated location.
-4. Review results in the taxonomy tab if needed.
-5. Archive or share the report per local protocol.
+1. A self-contained HTML report is written automatically to
+   `<results directory>/report/report.html` when the run ends -- it also
+   appears on the Reports tab as "Run Report". It can be opened in any
+   browser without Nanometa Live running.
+2. To export a copy elsewhere (optionally with raw result files), use
+   Export Results on the Dashboard.
+3. Review results in the Taxonomy tab if needed.
+4. Archive or share the report per local protocol.
 
 ---
 

@@ -76,6 +76,7 @@ nanopore_output_directory: "/path/to/input"
 | `update_interval_seconds` | int | 10 | Dashboard refresh interval in seconds. Lowered from 30 in 2026-05; downstream callbacks are gated on a results fingerprint so unchanged ticks are near-zero cost. |
 | `check_intervals_seconds` | int | 15 | Backend file-check interval in seconds |
 | `gui_port` | int | 8050 | Web server port. Used when `--port` is not given; an explicit `--port` wins. Takes effect on the next launch. |
+| `auto_report` | bool | true | Write the self-contained operator HTML report to `<results dir>/report/report.html` when a run completes or is stopped, so the verdict and pathogen screen can be viewed after the dashboard is closed. Best-effort: a report failure never fails the run. The same report can be produced manually via Export Results or the `nanometa-report` CLI, which defaults to the watchlists recorded in the run's `.nanometa.run.json`. |
 
 ### Visualization
 

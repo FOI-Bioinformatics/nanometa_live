@@ -335,7 +335,14 @@
         <tbody>
           {% for w in data.watched_results | sort(attribute="threat_level") %}
           <tr>
-            <td><em>{{ w.name }}</em></td>
+            <td>
+              <em>{{ w.name }}</em>
+              {% if w.detected and w.action_required %}
+              <div style="color:#664d03; font-size:12px; margin-top:2px;">
+                <strong>Action:</strong> {{ w.action_required }}
+              </div>
+              {% endif %}
+            </td>
             <td><span class="badge badge-{{ w.threat_level }}">{{ w.threat_level }}</span></td>
             <td>
               {% if w.detected %}

@@ -109,6 +109,32 @@ class TestAutoGenerateReport:
         auto.assert_not_called()
 
 
+class TestReportCarriesActionGuidance:
+    def test_detected_entry_action_required_in_html(self, tmp_path):
+        """The per-organism action_required guidance (W5) must survive into
+        the archived report -- the artifact that leaves the building."""
+        from nanometa_live.core.watchlist.watchlist_manager import (
+            WatchlistManager,
+        )
+
+        outdir = _populated_results(tmp_path)
+        manager = WatchlistManager()
+        manager.enable_watchlist("cdc_bioterrorism")
+        with patch(
+            "nanometa_live.core.watchlist.watchlist_manager"
+            ".get_watchlist_manager",
+            return_value=manager,
+        ):
+            bm = BackendManager(data_dir=str(tmp_path / "data"))
+            bm.config = {"results_output_directory": str(outdir)}
+            report_path = bm._auto_generate_report()
+        assert report_path is not None
+        html = (outdir / "report" / "report.html").read_text()
+        # The mock dataset seeds B. anthracis / Y. pestis / C. botulinum;
+        # their cdc_bioterrorism guidance must appear beside the detection.
+        assert "Action:" in html
+
+
 class TestRunMetadataRecordsWatchlists:
     def test_ids_recorded(self, tmp_path):
         manager_mock = MagicMock()
