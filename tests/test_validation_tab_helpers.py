@@ -37,38 +37,41 @@ _PAF_LINE = "read1\t1000\t0\t1000\t+\tref1\t5000\t100\t600\t500\t500\t60\n"
 
 class TestLoadRealCoverage:
     def test_none_config(self):
-        assert _load_real_coverage("bc01_562", None, 0) is None
+        assert _load_real_coverage("bc01_562", None, 0) == (None, "no_config")
 
     def test_no_results_dir(self):
-        assert _load_real_coverage("bc01_562", {"analysis_name": "x"}, 0) is None
+        assert _load_real_coverage("bc01_562", {"analysis_name": "x"}, 0) == (None, "no_config")
 
     def test_bad_key_without_taxid(self):
-        # "noseparator" has no '_' -> rsplit yields a single part -> None.
-        assert _load_real_coverage("noseparator", {"main_dir": "/tmp"}, 0) is None
+        # "noseparator" has no '_' -> rsplit yields a single part -> no load.
+        assert _load_real_coverage("noseparator", {"main_dir": "/tmp"}, 0) == (None, "bad_key")
 
     def test_loads_from_minimap2_paf(self, tmp_path):
         paf = tmp_path / "validation" / "minimap2"
         paf.mkdir(parents=True)
         (paf / "bc01_taxid562.paf").write_text(_PAF_LINE)
-        cov = _load_real_coverage("bc01_562", {"results_output_directory": str(tmp_path)}, 0)
+        cov, state = _load_real_coverage("bc01_562", {"results_output_directory": str(tmp_path)}, 0)
         assert isinstance(cov, CoverageData)
+        assert state == "ok"
 
     def test_loads_from_on_demand_paf(self, tmp_path):
         d = tmp_path / "on_demand_validation"
         d.mkdir(parents=True)
         (d / "bc01_562_ondemand.paf").write_text(_PAF_LINE)
-        cov = _load_real_coverage("bc01_562", {"main_dir": str(tmp_path)}, 0)
+        cov, state = _load_real_coverage("bc01_562", {"main_dir": str(tmp_path)}, 0)
         assert isinstance(cov, CoverageData)
+        assert state == "ok"
 
     def test_missing_paf_returns_none(self, tmp_path):
-        assert _load_real_coverage("bc01_562", {"main_dir": str(tmp_path)}, 0) is None
+        assert _load_real_coverage("bc01_562", {"main_dir": str(tmp_path)}, 0) == (None, "no_paf")
 
-    def test_all_filtered_by_mapq_returns_none(self, tmp_path):
+    def test_all_filtered_by_mapq_reports_filtered(self, tmp_path):
         paf = tmp_path / "validation" / "minimap2"
         paf.mkdir(parents=True)
         (paf / "bc01_taxid562.paf").write_text(_PAF_LINE)  # mapq 60
-        # min_mapq above the only alignment's mapq -> no alignments pass -> None.
-        assert _load_real_coverage("bc01_562", {"results_output_directory": str(tmp_path)}, 99) is None
+        # min_mapq above the only alignment's mapq: the file exists, so the
+        # caller must be able to tell "filtered out" from "no PAF at all".
+        assert _load_real_coverage("bc01_562", {"results_output_directory": str(tmp_path)}, 99) == (None, "filtered")
 
 RESULTS = [
     {"sample_id": "bc01", "taxid": 562, "species": "E. coli",

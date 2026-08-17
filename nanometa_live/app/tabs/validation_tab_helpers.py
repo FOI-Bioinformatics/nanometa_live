@@ -11,7 +11,7 @@ validation_tab.py re-exports these names.
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from dash import html
 import dash_bootstrap_components as dbc
@@ -502,7 +502,7 @@ def _load_real_coverage(
     config: Optional[dict],
     min_mapq: int,
     batch_id: Optional[str] = None,
-) -> Optional[CoverageData]:
+) -> Tuple[Optional[CoverageData], str]:
     """Load coverage from a real PAF file.
 
     ``batch_id`` selects which PAF to read:
@@ -513,20 +513,23 @@ def _load_real_coverage(
     - a batch id -> the preserved per-batch PAF
       ``validation/minimap2/batch/<sample>_taxid<tid>_<batch_id>.paf``.
 
-    Returns None if no PAF file exists or if the file has no alignments
-    passing the min_mapq filter.
+    Returns ``(coverage, state)``. ``state`` distinguishes the None cases so
+    the caller can render an accurate message: ``"ok"``, ``"no_config"``,
+    ``"bad_key"``, ``"no_paf"`` (no file on disk), or ``"filtered"`` (a PAF
+    exists but no alignment passes ``min_mapq`` -- the fix is the on-screen
+    confidence filter, not the pipeline).
     """
     if not config:
-        return None
+        return None, "no_config"
 
     results_dir = config.get("results_output_directory") or config.get("main_dir", "")
     if not results_dir:
-        return None
+        return None, "no_config"
 
     # selected_key format: "{sample_id}_{taxid}" where taxid is numeric
     parts = selected_key.rsplit("_", 1)
     if len(parts) != 2:
-        return None
+        return None, "bad_key"
     sample_id, taxid_str = parts
 
     mm2 = Path(results_dir) / "validation" / "minimap2"
@@ -542,14 +545,14 @@ def _load_real_coverage(
         if paf_path.exists():
             cov_dict = parse_paf_coverage(paf_path, min_mapq=min_mapq)
             if cov_dict:
-                return aggregate_contig_coverage(cov_dict)
+                return aggregate_contig_coverage(cov_dict), "ok"
             logger.info(
                 "PAF file found but has no alignments passing min_mapq=%d: %s",
                 min_mapq, paf_path,
             )
-            return None
+            return None, "filtered"
 
-    return None
+    return None, "no_paf"
 
 
 def _batch_selector_state(config: Optional[dict], view_mode: Optional[str],

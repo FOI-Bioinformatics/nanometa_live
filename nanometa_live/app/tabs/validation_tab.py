@@ -766,20 +766,33 @@ def register_validation_callbacks(app: Dash):
             threshold = 10
 
         batch_id = batch_value if view_mode == "batch" and batch_value else None
-        coverage = _load_real_coverage(selected_key, config, min_mapq, batch_id=batch_id)
+        coverage, load_state = _load_real_coverage(
+            selected_key, config, min_mapq, batch_id=batch_id)
 
         if coverage is None:
-            no_paf_msg = "No PAF file found for this species/sample. Ensure minimap2 validation ran and results are in validation/minimap2/."
-            no_paf = lambda: create_empty_coverage_figure(
+            # Name the actual cause: a PAF whose every alignment fails the
+            # MAPQ filter is fixed at the on-screen control, not by re-running
+            # the pipeline -- the old blanket "No PAF file found" sent the
+            # operator to the wrong place.
+            if load_state == "filtered":
+                empty_msg = (
+                    f"Alignments exist, but none has MAPQ >= {min_mapq}. "
+                    "Lower the confidence filter above (0 shows all alignments)."
+                )
+            else:
+                empty_msg = ("No PAF file found for this species/sample. Ensure "
+                             "minimap2 validation ran and results are in "
+                             "validation/minimap2/.")
+            placeholder = lambda: create_empty_coverage_figure(
                 title="No coverage data",
-                message=no_paf_msg,
+                message=empty_msg,
             )
             # Keep the section VISIBLE: coverage-stats-container (where this
             # warning lands) and the placeholder figures live inside
             # coverage-plots-section, so hiding the section would blank the tab
             # and swallow the explanation.
-            return no_paf(), no_paf(), no_paf(), dbc.Alert(
-                no_paf_msg,
+            return placeholder(), placeholder(), placeholder(), dbc.Alert(
+                empty_msg,
                 color="warning",
                 className="text-center",
             ), visible

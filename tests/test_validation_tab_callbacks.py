@@ -275,6 +275,18 @@ class TestCoveragePlots:
         assert style == {"display": "block"}
         assert "No PAF file" in str(stats)
 
+    def test_mapq_filtered_message_names_the_filter(self, validation_app, enabled_config):
+        # PAF exists but min_mapq=99 filters every alignment. The old code
+        # reported "No PAF file found", sending the operator to check the
+        # pipeline output instead of the on-screen confidence filter.
+        depth, cum, hist, stats, style = self._fn(validation_app)(
+            "barcode01_1773", 99, 10, "cumulative", None, enabled_config)
+        s = str(stats)
+        assert style == {"display": "block"}
+        assert "MAPQ" in s
+        assert "confidence filter" in s.lower()
+        assert "No PAF file" not in s
+
     def test_negative_depth_threshold_sanitized(self, validation_app, enabled_config):
         # A negative or None threshold must not raise; it clamps internally.
         depth, cum, hist, stats, style = self._fn(validation_app)(
