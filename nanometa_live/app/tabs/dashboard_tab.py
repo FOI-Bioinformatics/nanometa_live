@@ -624,7 +624,17 @@ def register_dashboard_callbacks(app: Dash):
             Output("dashboard-pathogen-alert-container", "children"),
             Output("dashboard-pathogen-alert-container", "style")
         ],
-        Input("results-fingerprint", "data"),
+        [
+            # Mirrors the verdict banner's trigger set. With only the
+            # fingerprint as Input, enabling a watchlist on a static
+            # results dir (post-run review, the normal audit workflow)
+            # never re-ran this callback: the verdict flipped to ACTION
+            # REQUIRED while the alert cards stayed hidden forever
+            # (2026-08-17 reaudit, live E2E walkthrough).
+            Input("results-fingerprint", "data"),
+            Input("watchlist-tab-state", "data"),
+            Input("update-interval", "n_intervals"),
+        ],
         [
             State("app-config", "data"),
             State("backend-status", "data"),
@@ -634,6 +644,8 @@ def register_dashboard_callbacks(app: Dash):
     )
     def update_pathogen_alert_panel(
         _fingerprint: Dict[str, Any],
+        _watchlist_state: Dict[str, Any],
+        _n_intervals: int,
         config: Dict[str, Any],
         status: Dict[str, Any],
         available_samples: Optional[List[str]]
@@ -655,6 +667,11 @@ def register_dashboard_callbacks(app: Dash):
         Returns:
             Tuple of (alert_panel_children, container_style)
         """
+        # Interval ticks re-render only when the fingerprint moved; direct
+        # triggers (fingerprint change, watchlist toggle) always render.
+        if interval_tick_is_redundant(ctx, "dashboard_pathogen_alert", _fingerprint):
+            raise PreventUpdate
+        mark_rendered("dashboard_pathogen_alert", _fingerprint)
         if should_skip_update("dashboard_pathogen_alert", debounce_ms=2000):
             raise PreventUpdate
 

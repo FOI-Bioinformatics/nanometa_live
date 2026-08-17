@@ -256,6 +256,29 @@ class TestOneDetectionPerWatchlistEntry:
         assert entry_hits[0]["reads"] == 34103
 
 
+class TestAlertPanelTriggerSet:
+    """The alert-card panel must re-run when the watchlist changes: with
+    only results-fingerprint as Input, enabling a watchlist on a static
+    results dir flipped the verdict to ACTION REQUIRED while the cards
+    stayed hidden forever (2026-08-17 reaudit, live E2E walkthrough)."""
+
+    def test_panel_listens_to_watchlist_and_interval(self):
+        from dash_test_utils import make_callback_app
+        from nanometa_live.app.tabs.dashboard_tab import (
+            register_dashboard_callbacks,
+        )
+
+        app = make_callback_app(register_dashboard_callbacks)
+        for cb_id, spec in app.callback_map.items():
+            if "dashboard-pathogen-alert-container" in cb_id:
+                inputs = str(spec.get("inputs"))
+                assert "watchlist-tab-state" in inputs
+                assert "update-interval" in inputs
+                assert "results-fingerprint" in inputs
+                return
+        raise AssertionError("alert panel callback not found")
+
+
 class TestInDatabaseColumnShowsDeclaration:
     """G1 (UI): operator-set db_taxid renders as such, never 'Not Scanned'."""
 
