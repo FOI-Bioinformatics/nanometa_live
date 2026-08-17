@@ -822,6 +822,17 @@ class ReadinessChecker:
                 f"Pipeline source '{source}' is not a recognised remote "
                 f"form. Expected 'remote:<branch>' (e.g. 'remote:dev').",
             )
+        # A remote source cannot be fetched offline, and the launch path
+        # (backend_manager.setup) refuses it outright -- so the readiness
+        # panel must say so here rather than showing green and letting the
+        # operator find out at Start Analysis (2026-08-17 audit, finding G6).
+        if config.get("offline_mode"):
+            return CheckResult(
+                "Pipeline Source", False, Severity.CRITICAL,
+                f"Offline mode is enabled but pipeline_source is remote "
+                f"({source}). Point pipeline_source at a local nanometanf "
+                f"checkout (e.g. the bundle's pipeline_source directory).",
+            )
         # Remote source (well-formed): first run will fetch the pipeline
         # from GitHub. Surfaced as INFO rather than silently skipped.
         return CheckResult(

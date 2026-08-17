@@ -345,9 +345,11 @@ def _verify(args):
                 f"{plat.get('machine', '?')}"
             )
         print(f"  Files:          {len(manifest.get('checksums', {}))}")
-        mode = manifest.get("containerization", {}).get("mode")
-        if mode:
-            print(f"  Containerization: {mode}")
+        # The manifest records the engine under "engine" (see export_bundle);
+        # this line previously read a nonexistent "mode" key and never printed.
+        engine = manifest.get("containerization", {}).get("engine")
+        if engine:
+            print(f"  Containerization: {engine}")
         print()
 
     mismatches = result.get("checksum_mismatches") or []
@@ -580,7 +582,10 @@ def _import_bundle(args):
     print()
 
     bm = BundleManager()
-    result = bm.import_bundle(bundle_path, args.db, args.home)
+    result = bm.import_bundle(
+        bundle_path, args.db, args.home,
+        force=getattr(args, "force", False),
+    )
 
     if result["success"]:
         print(f"{_GREEN}Bundle imported.{_RESET}")
@@ -763,6 +768,15 @@ def main():
     import_p.add_argument(
         "--db", required=True,
         help="Path to local Kraken2 database",
+    )
+    import_p.add_argument(
+        "--force", action="store_true",
+        help=(
+            "Proceed past non-fatal verification blockers (checksum "
+            "mismatches, unsupported manifest version). The escape hatch "
+            "that `verify` refers to; without it a failed verification "
+            "aborts the import."
+        ),
     )
     import_p.set_defaults(func=_import_bundle)
 
