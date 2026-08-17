@@ -448,7 +448,13 @@ class MobileLabPreparer:
                     taxid = e.get("taxid")
                     if not taxid:
                         continue
-                    kraken_taxid = mc.get_db_taxid(taxid) if mc else None
+                    # Operator db_taxid wins outright, mirroring
+                    # parameter_mapping.build_species_list -- prep and the
+                    # launch-time species list must agree on the node
+                    # (2026-08-17 reaudit, G2).
+                    kraken_taxid = e.get("db_taxid") or (
+                        mc.get_db_taxid(taxid) if mc else None
+                    )
                     result.append({
                         "taxid": taxid,
                         "name": e.get("name", ""),
@@ -465,8 +471,8 @@ class MobileLabPreparer:
 
             result = []
             for e in entries:
-                kraken_taxid = None
-                if mc and e.taxid:
+                kraken_taxid = getattr(e, "db_taxid", None)
+                if not kraken_taxid and mc and e.taxid:
                     kraken_taxid = mc.get_db_taxid(e.taxid)
                 result.append({
                     "taxid": e.taxid,

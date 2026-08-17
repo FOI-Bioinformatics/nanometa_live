@@ -581,6 +581,11 @@ def _create_rescan_db_card() -> dbc.Card:
                 html.Div([html.I(className="bi bi-database me-2"), html.Span(id="taxmap-current-db-type", children="No database scanned yet", className="small text-muted")], className="mb-1"),
                 html.Div([html.I(className="bi bi-check2-circle me-2"), html.Span(id="taxmap-current-mapping-count", children="0 organisms matched", className="small text-muted")], className="mb-1"),
                 html.Div([html.I(className="bi bi-clock-history me-2"), html.Span(id="taxmap-last-scan-time", children="Last scan: Never", className="small text-muted")]),
+                # Coverage verdict for the watchlist against THIS database
+                # build: absent / genus-only / shared-node entries. Computed
+                # on every scan but previously never rendered anywhere
+                # (2026-08-17 reaudit, G10).
+                html.Div(id="taxmap-coverage-warnings", className="mt-2"),
             ]),
         ]),
     ], className="mb-4")

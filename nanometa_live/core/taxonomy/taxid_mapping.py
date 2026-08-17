@@ -949,11 +949,19 @@ class TaxidMapper:
                 "force_rebuild=True."
             )
 
-        # Create or update collection
-        if self._collection is None or not preserve_manual:
+        # Create or update collection. Preservation is scoped to the SAME
+        # database: a collection carried over from a different db_hash holds
+        # mappings into a different taxid space, so it is rebuilt regardless
+        # of preserve_manual.
+        current_hash = get_database_hash(self._database_path or "")
+        if (
+            self._collection is None
+            or not preserve_manual
+            or self._collection.database_hash != current_hash
+        ):
             self._collection = TaxidMappingCollection(
                 database_path=self._database_path or "",
-                database_hash=get_database_hash(self._database_path or ""),
+                database_hash=current_hash,
                 profile=self._index.profile
             )
 
@@ -978,6 +986,43 @@ class TaxidMapper:
                 if existing.manually_verified:
                     logger.debug(f"Preserving manual mapping for {name}")
                     continue
+
+            # An operator-declared db_taxid IS the mapping: live detection
+            # already resolves the entry to that node (check_organisms puts
+            # it first), so the collection must say the same thing or three
+            # UIs (In Database column, coverage report, rescan status) call
+            # the entry undetectable while detection matches it (2026-08-17
+            # reaudit, G1). The declaration is validated against the loaded
+            # index; a node absent from this build is recorded as such
+            # rather than silently trusted.
+            declared = entry.get("db_taxid")
+            if declared:
+                declared = int(declared)
+                node = self._index.by_taxid.get(declared)
+                self._collection.mappings[ncbi_taxid] = (TaxidMapping(
+                    ncbi_taxid=ncbi_taxid,
+                    canonical_name=name,
+                    db_taxid=declared if node else None,
+                    db_name=(node.name if node else ""),
+                    confidence=(
+                        MappingConfidence.MANUAL if node
+                        else MappingConfidence.UNMAPPED
+                    ),
+                    match_score=1.0 if node else 0.0,
+                    match_method=(
+                        "operator_db_taxid" if node
+                        else "operator_db_taxid_absent"
+                    ),
+                    manually_verified=bool(node),
+                ))
+                if not node:
+                    logger.warning(
+                        "Watchlist entry %r declares db_taxid %s, which does "
+                        "not exist in this database build; the entry cannot "
+                        "match any report from it.",
+                        name, declared,
+                    )
+                continue
 
             # Run matching
             match_result = self._match_strategy.match(name, ncbi_taxid, self._index, alt_names=alt_names)

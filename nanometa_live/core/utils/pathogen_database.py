@@ -139,6 +139,26 @@ def get_pathogen_by_name(name: str) -> Optional[PathogenEntry]:
     return _get_database().get_pathogen_by_name(name)
 
 
+def _database_taxids_are_ncbi() -> bool:
+    """Whether a raw NCBI-taxid comparison against this database means anything.
+
+    Mirrors WatchlistManager._database_taxids_are_ncbi: False whenever it
+    cannot be established. This path (the Alerts panel and the dashboard's
+    exception fallback) previously compared report taxids straight against
+    the NCBI-keyed pathogen database with no profile consult, so on a
+    remapped-taxid database a colliding taxid raised an alert for the wrong
+    organism (2026-08-17 reaudit, G3).
+    """
+    try:
+        from nanometa_live.core.taxonomy.taxid_mapping import (
+            get_mapping_collection,
+        )
+        collection = get_mapping_collection()
+        return bool(collection and collection.profile.taxids_are_ncbi)
+    except (ImportError, AttributeError):
+        return False
+
+
 def check_for_dangerous_pathogens(
     detected_organisms: List[Dict[str, Any]],
     custom_watchlist: Optional[List[Dict[str, Any]]] = None,
@@ -191,14 +211,18 @@ def check_for_dangerous_pathogens(
             if name:
                 custom_lookup[name] = item
 
+    db_is_ncbi = _database_taxids_are_ncbi()
+
     for organism in detected_organisms:
         taxid = organism.get("taxid")
         name = organism.get("name", "").lower().strip()
         reads = organism.get("reads", 0)
 
-        # Check against dangerous pathogen database
+        # Check against dangerous pathogen database. The direct taxid
+        # shortcut is only meaningful when the database's taxid space is
+        # NCBI; otherwise name matching decides (G3).
         pathogen_entry: Optional[PathogenEntry] = None
-        if taxid and taxid in dangerous_db:
+        if db_is_ncbi and taxid and taxid in dangerous_db:
             pathogen_entry = dangerous_db[taxid]
         elif name:
             # Name-based lookup. Match when the detected name EQUALS the pathogen
@@ -219,7 +243,10 @@ def check_for_dangerous_pathogens(
 
         # Check against custom watchlist - this takes priority over built-in database
         # because user can enable/disable specific pathogens
-        custom_entry = custom_lookup.get(taxid) or custom_lookup.get(name)
+        custom_entry = (
+            (custom_lookup.get(taxid) if db_is_ncbi else None)
+            or custom_lookup.get(name)
+        )
 
         # If pathogen is in custom watchlist, respect its enabled status
         # If custom watchlist exists but pathogen is disabled, skip alerting
@@ -237,7 +264,8 @@ def check_for_dangerous_pathogens(
 
             if reads >= pathogen_entry.alert_threshold:
                 alerts.append({
-                    "taxid": taxid,
+                    "taxid": pathogen_entry.taxid,
+                    "detected_taxid": taxid,
                     "name": pathogen_entry.name,
                     "common_name": pathogen_entry.common_name,
                     "reads": reads,
@@ -256,7 +284,8 @@ def check_for_dangerous_pathogens(
             alert_threshold = custom_entry.get("alert_threshold", 10)
             if reads >= alert_threshold:
                 alerts.append({
-                    "taxid": taxid,
+                    "taxid": custom_entry.get("taxid") or taxid,
+                    "detected_taxid": taxid,
                     "name": organism.get("name", "Unknown"),
                     "common_name": custom_entry.get("common_name"),
                     "reads": reads,

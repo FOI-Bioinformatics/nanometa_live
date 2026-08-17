@@ -200,6 +200,28 @@ def register_startup(app, backend_manager):
             if cache_path.exists():
                 collection = TaxidMappingCollection.load(str(cache_path))
                 if collection:
+                    # Apply the operator's profile override before the
+                    # collection becomes live: detection reads the
+                    # collection's profile (taxids_are_ncbi), and skipping
+                    # the override here meant it only took effect after a
+                    # Scan Database in the session (2026-08-17 reaudit, G5).
+                    from pathlib import Path as _Path
+
+                    from nanometa_live.core.taxonomy.database_profile import (
+                        apply_override,
+                    )
+                    from nanometa_live.core.taxonomy.taxid_mapping import (
+                        get_database_hash,
+                    )
+                    from nanometa_live.core.utils.paths import (
+                        get_mappings_dir_from_env,
+                    )
+                    db_hash = get_database_hash(kraken_db)
+                    if db_hash:
+                        collection.profile = apply_override(
+                            collection.profile, db_hash,
+                            _Path(get_mappings_dir_from_env()),
+                        )
                     set_mapping_collection(collection)
                     logging.info(
                         f"Loaded cached taxid mappings: {collection.total_entries} entries, "
@@ -215,8 +237,15 @@ def register_startup(app, backend_manager):
                         },
                         "statistics": coll_dict.get("statistics", {}),
                     }
+                    # Same shape as the Scan Database writer (profile-based
+                    # label + evidence) -- the two writers used to disagree,
+                    # so the same database read "custom" after a restart and
+                    # "GTDB -- 12/12 reference taxa match" after a scan
+                    # (2026-08-17 reaudit, G7).
                     db_info = {
-                        "type": collection.database_type.value,
+                        "type": collection.profile.display_label,
+                        "detected_by": collection.profile.detected_by,
+                        "overridden": collection.profile.overridden,
                         "hash": collection.database_hash,
                         "path": collection.database_path,
                     }

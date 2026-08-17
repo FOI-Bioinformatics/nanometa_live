@@ -563,6 +563,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
                             "db_taxid": mapping_data.get("db_taxid"),
                             "match_score": mapping_data.get("match_score", 0),
                             "db_name": mapping_data.get("db_name", ""),
+                            "match_method": mapping_data.get("match_method", ""),
                         }
                     except (ValueError, TypeError):
                         pass
@@ -576,6 +577,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
                             "db_taxid": mapping_data.get("db_taxid"),
                             "match_score": mapping_data.get("match_score", 0),
                             "db_name": mapping_data.get("db_name", ""),
+                            "match_method": mapping_data.get("match_method", ""),
                         }
 
         # Fallback: try global collection if store is empty
@@ -594,6 +596,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
                                     "db_taxid": mapping.db_taxid,
                                     "match_score": mapping.match_score,
                                     "db_name": mapping.db_name,
+                                    "match_method": mapping.match_method,
                                 }
             except Exception as e:
                 logger.debug(f"Could not load mapping collection: {e}")
@@ -673,6 +676,19 @@ def register_watchlist_callbacks(app: Dash) -> None:
                 continue
 
             mapping_info = mapping_dict.get(taxid)
+
+            # An operator-declared db_taxid is a mapping in its own right --
+            # show it even before any Scan Database has run, instead of
+            # "Not Scanned" (2026-08-17 reaudit, G1). The next scan
+            # validates it against the loaded database.
+            if mapping_info is None and entry.get("db_taxid"):
+                mapping_info = {
+                    "confidence": "manual",
+                    "db_taxid": entry.get("db_taxid"),
+                    "db_name": "",
+                    "match_score": 1.0,
+                    "match_method": "operator_db_taxid",
+                }
 
             # Get genome status
             genome_info = None

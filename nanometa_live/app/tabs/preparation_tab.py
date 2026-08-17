@@ -1112,6 +1112,11 @@ def register_preparation_callbacks(app):
                 # the readiness checker) can filter to the active set without
                 # the empty WatchlistManager singleton.
                 "enabled": e.get("enabled", True),
+                # Operator-declared database taxid. Dropping it here made
+                # every snapshot consumer blind to it: the mapping rescan
+                # reported the entry "Not Found" while live detection
+                # matched it (2026-08-17 reaudit, G1/G2).
+                "db_taxid": e.get("db_taxid"),
             }
             for e in entries
         ]
@@ -1184,9 +1189,14 @@ def register_preparation_callbacks(app):
             total = len(watchlist_entries)
             logger.info(f"Processing {total} watchlist entries")
 
+            # preserve_manual keeps operator-verified and operator-declared
+            # mappings across rescans of the SAME database (the mapper
+            # rebuilds automatically when the db_hash changes). With False
+            # every Scan Database silently destroyed operator verification
+            # (2026-08-17 reaudit, G8).
             collection = mapper.generate_mappings(
                 watchlist_entries,
-                preserve_manual=False,
+                preserve_manual=True,
             )
 
             if collection:
@@ -1237,6 +1247,17 @@ def register_preparation_callbacks(app):
                 db_info["coverage"] = {
                     "summary": coverage.summary(),
                     "warnings": coverage.warnings(),
+                    # Structured lists so the status panel can render them
+                    # (G10): entry names only, JSON-serialisable.
+                    "absent": list(coverage.absent),
+                    "genus_only": [
+                        f"{entry} (genus {genus})"
+                        for entry, genus in coverage.genus_only
+                    ],
+                    "ambiguous": {
+                        str(node): [str(x) for x in entries]
+                        for node, entries in coverage.ambiguous.items()
+                    },
                 }
             except Exception as exc:
                 logger.warning("Coverage analysis failed: %s", exc)
@@ -1264,6 +1285,7 @@ def register_preparation_callbacks(app):
         Output("taxmap-current-db-type", "children"),
         Output("taxmap-current-mapping-count", "children"),
         Output("taxmap-last-scan-time", "children"),
+        Output("taxmap-coverage-warnings", "children"),
         Input("taxmap-rescan-complete", "data"),
         Input("taxmap-database-info", "data"),
         State("taxmap-collection", "data"),
@@ -1306,7 +1328,42 @@ def register_preparation_callbacks(app):
         else:
             scan_text = "Last scan: Never"
 
-        return db_type_text, count_text, scan_text
+        # Coverage warnings: name what the database CANNOT express so an
+        # ALL CLEAR is read correctly (an absent entry yields no result,
+        # not a negative one).
+        coverage = (db_info or {}).get("coverage") or {}
+        warn_lines = []
+        for label, key, css in (
+            ("Not in this database", "absent", "text-danger"),
+            ("Genus-level only", "genus_only", "text-warning"),
+        ):
+            names = coverage.get(key) or []
+            if names:
+                shown = ", ".join(str(n) for n in names[:6])
+                if len(names) > 6:
+                    shown += f", and {len(names) - 6} more"
+                warn_lines.append(html.Div(
+                    [html.I(className="bi bi-exclamation-triangle me-2"),
+                     html.Span(f"{label}: {shown}", className="small")],
+                    className=css,
+                ))
+        ambiguous = coverage.get("ambiguous") or {}
+        if ambiguous:
+            pairs = [
+                f"{node}: {', '.join(str(x) for x in entries)}"
+                for node, entries in list(ambiguous.items())[:3]
+            ]
+            warn_lines.append(html.Div(
+                [html.I(className="bi bi-shuffle me-2"),
+                 html.Span(
+                     "Shared database nodes (reported as 'X or Y'): "
+                     + "; ".join(pairs),
+                     className="small")],
+                className="text-warning",
+            ))
+        coverage_div = html.Div(warn_lines) if warn_lines else ""
+
+        return db_type_text, count_text, scan_text, coverage_div
 
     # =========================================================================
     # Genome Downloads (moved from watchlist_tab.py)

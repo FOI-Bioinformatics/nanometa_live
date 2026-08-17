@@ -978,11 +978,23 @@ def create_pathogen_row(
     confidence = "unknown"
     db_taxid = None
     db_name = ""
+    match_method = ""
     if mapping_info:
         confidence = mapping_info.get("confidence", "unknown")
         db_taxid = mapping_info.get("db_taxid")
         db_name = mapping_info.get("db_name", "")
+        match_method = mapping_info.get("match_method", "")
     config = mapping_config.get(confidence, mapping_config["unknown"])
+    # Operator-declared db_taxid states are shown as such: "Manual" here
+    # means the operator set the node, and a declared node that does not
+    # exist in this database build is a distinct warning, not a generic
+    # "Not Found" (2026-08-17 reaudit, G1).
+    if match_method == "operator_db_taxid":
+        config = {"color": "warning", "icon": "bi-pencil-fill",
+                  "label": "Operator-set"}
+    elif match_method == "operator_db_taxid_absent":
+        config = {"color": "danger", "icon": "bi-exclamation-triangle-fill",
+                  "label": "Declared, absent"}
 
     # Row styling
     row_class = "py-2 border-bottom"

@@ -138,7 +138,7 @@ class ReadinessChecker:
         # === Data checks (critical) ===
         report.checks.append(self._check_kraken_db(config))
         report.checks.append(self._check_db_index(config, home))
-        report.checks.append(self._check_taxid_mappings(config, home))
+        report.checks.append(self._check_taxid_mappings(config, home, active_watchlist))
 
         # === Pipeline execution tools (critical) ===
         # Nextflow runs locally to orchestrate the pipeline
@@ -269,7 +269,10 @@ class ReadinessChecker:
             details=f"expected at {index_file_json} or {index_file_pkl}"
         )
 
-    def _check_taxid_mappings(self, config: Dict[str, Any], home: Path) -> CheckResult:
+    def _check_taxid_mappings(
+        self, config: Dict[str, Any], home: Path,
+        active_watchlist: Optional[List[Dict[str, Any]]] = None,
+    ) -> CheckResult:
         db_path = config.get("kraken_db", "")
         if not db_path:
             return CheckResult(
@@ -292,6 +295,21 @@ class ReadinessChecker:
         from nanometa_live.core.utils.paths import get_mappings_dir_from_env
         mapping_file = Path(get_mappings_dir_from_env()) / f"{db_hash}_mappings.json"
         if mapping_file.exists():
+            # Staleness: a mapping file generated before the operator added
+            # entries passed as green, so newly added organisms were never
+            # resolved against the database (2026-08-17 reaudit, G9). Warn
+            # -- not fail -- when active entries are missing from the file;
+            # operator-declared db_taxids do not need a scan.
+            missing = self._count_unmapped_active(
+                mapping_file, active_watchlist
+            )
+            if missing:
+                return CheckResult(
+                    "Taxid Mappings", False, Severity.WARNING,
+                    f"Taxid mappings found, but {missing} active watchlist "
+                    f"entr{'y is' if missing == 1 else 'ies are'} not in "
+                    f"them - run Scan Database to refresh",
+                )
             return CheckResult(
                 "Taxid Mappings", True, Severity.CRITICAL,
                 "Taxid mappings found"
@@ -300,6 +318,35 @@ class ReadinessChecker:
             "Taxid Mappings", False, Severity.CRITICAL,
             "Taxid mappings not generated (run preparation)"
         )
+
+
+    @staticmethod
+    def _count_unmapped_active(
+        mapping_file: Path,
+        active_watchlist: Optional[List[Dict[str, Any]]],
+    ) -> int:
+        """Active entries absent from the mapping file (0 when unknowable)."""
+        if not active_watchlist:
+            return 0
+        try:
+            import json as _json
+            with open(mapping_file) as fh:
+                data = _json.load(fh)
+            mapped = {
+                int(m.get("ncbi_taxid", 0))
+                for m in (data.get("mappings") or [])
+                if m.get("ncbi_taxid")
+            }
+        except (OSError, ValueError):
+            return 0
+        missing = 0
+        for e in active_watchlist:
+            taxid = e.get("taxid") or 0
+            if e.get("db_taxid"):
+                continue  # operator-declared; no scan needed
+            if taxid and int(taxid) not in mapped:
+                missing += 1
+        return missing
 
     # -- Tool checks --
 
