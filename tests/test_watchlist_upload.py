@@ -144,7 +144,7 @@ class TestUploadCallback:
     ):
         manager = MagicMock()
         with patch.object(wt, "get_watchlist_manager", return_value=manager):
-            state, alert = upload_fn(_contents(VALID_YAML), "field.yaml")
+            state, alert, pending = upload_fn(_contents(VALID_YAML), "field.yaml")
 
         saved = user_wl_dir / "field.yaml"
         assert saved.exists(), "upload must persist to the user watchlist dir"
@@ -162,7 +162,7 @@ class TestUploadCallback:
     ):
         from dash import no_update
 
-        state, alert = upload_fn(_contents(INVALID_YAML), "bad.yaml")
+        state, alert, _pending = upload_fn(_contents(INVALID_YAML), "bad.yaml")
         assert state is no_update
         assert not (user_wl_dir / "bad.yaml").exists()
         assert "Invalid watchlist file" in _alert_text(alert)
@@ -172,7 +172,7 @@ class TestUploadCallback:
     ):
         manager = MagicMock()
         with patch.object(wt, "get_watchlist_manager", return_value=manager):
-            _, alert = upload_fn(_contents(NO_TAXID_YAML), "names.yaml")
+            _, alert, _p = upload_fn(_contents(NO_TAXID_YAML), "names.yaml")
 
         text = _alert_text(alert)
         assert "no taxonomy ID" in text
@@ -185,7 +185,7 @@ class TestUploadCallback:
     ):
         manager = MagicMock()
         with patch.object(wt, "get_watchlist_manager", return_value=manager):
-            _, alert = upload_fn(_contents(VALID_YAML), "field.yaml")
+            _, alert, _p = upload_fn(_contents(VALID_YAML), "field.yaml")
         assert alert.color == "success"
         assert "no taxonomy ID" not in _alert_text(alert)
 
@@ -197,7 +197,7 @@ class TestUploadCallback:
             upload_fn(_contents(VALID_YAML), "field.yaml")
             first = (user_wl_dir / "field.yaml").read_text()
             other = VALID_YAML.replace("Field List", "Different content")
-            state, alert = upload_fn(_contents(other), "field.yaml")
+            state, alert, pending = upload_fn(_contents(other), "field.yaml")
 
         assert state is no_update
         assert "already exists" in _alert_text(alert)
@@ -213,7 +213,7 @@ class TestUploadCallback:
         with patch.object(
             fresh_loader, "validate_file", side_effect=RuntimeError("boom")
         ):
-            _, alert = upload_fn(_contents(VALID_YAML), "field.yaml")
+            _, alert, _p = upload_fn(_contents(VALID_YAML), "field.yaml")
         after = set(Path(tempfile.gettempdir()).glob("*.yaml"))
         assert after == before
         assert "Upload failed" in _alert_text(alert)
@@ -221,6 +221,70 @@ class TestUploadCallback:
     def test_no_contents_prevents_update(self, upload_fn):
         with pytest.raises(PreventUpdate):
             upload_fn(None, None)
+
+
+@pytest.fixture
+def replace_fn():
+    app = Dash(__name__, suppress_callback_exceptions=True)
+    register_watchlist_callbacks(app)
+    return get_callback_fn(
+        app, "watchlist-upload-feedback.children",
+        input_contains="watchlist-upload-replace-btn")
+
+
+class TestReplaceFlow:
+    """W2: a collision with the operator's own file offers a confirmed
+    replacement; the confirm actually replaces; builtin stems stay refused."""
+
+    def test_collision_returns_pending_payload(
+        self, upload_fn, fresh_loader, user_wl_dir
+    ):
+        manager = MagicMock()
+        with patch.object(wt, "get_watchlist_manager", return_value=manager):
+            upload_fn(_contents(VALID_YAML), "field.yaml")
+            other = VALID_YAML.replace("Field List", "Corrected List")
+            _state, alert, pending = upload_fn(_contents(other), "field.yaml")
+        assert pending is not None
+        assert pending["filename"] == "field.yaml"
+        assert "Replace existing" in _alert_text(alert)
+
+    def test_confirmed_replace_overwrites_and_activates(
+        self, upload_fn, replace_fn, fresh_loader, user_wl_dir
+    ):
+        manager = MagicMock()
+        with patch.object(wt, "get_watchlist_manager", return_value=manager):
+            upload_fn(_contents(VALID_YAML), "field.yaml")
+            other = VALID_YAML.replace("Field List", "Corrected List")
+            _s, _a, pending = upload_fn(_contents(other), "field.yaml")
+            state, alert, cleared = replace_fn(1, pending)
+
+        saved = user_wl_dir / "field.yaml"
+        assert yaml.safe_load(saved.read_text())["metadata"]["name"] == "Corrected List"
+        assert state["last_update"] == "upload-field.yaml"
+        assert "Replaced: field.yaml" in _alert_text(alert)
+        assert cleared is None
+        # Activation runs for the replacement too (snapshot rehydration
+        # depends on the tab-state write; the manager reload on this call).
+        assert manager._load_custom_yaml_file.call_count == 2
+
+    def test_builtin_stem_is_not_offered_replacement(
+        self, upload_fn, user_wl_dir, tmp_path
+    ):
+        app_root = tmp_path / "app"
+        builtin = app_root / "core" / "config" / "data" / "watchlists"
+        builtin.mkdir(parents=True)
+        (builtin / "biothreat.yaml").write_text(VALID_YAML)
+        loader = WatchlistLoader(app_root=app_root, user_dir=user_wl_dir)
+        with patch(
+            "nanometa_live.core.watchlist.watchlist_loader.get_watchlist_loader",
+            return_value=loader,
+        ):
+            _state, alert, pending = upload_fn(
+                _contents(VALID_YAML), "biothreat.yaml"
+            )
+        assert pending is None
+        assert "built-in watchlist" in _alert_text(alert)
+        assert "Replace existing" not in _alert_text(alert)
 
 
 class TestImportWatchlistCollisions:

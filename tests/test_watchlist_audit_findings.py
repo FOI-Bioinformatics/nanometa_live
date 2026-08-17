@@ -109,6 +109,107 @@ class TestBuiltinWatchlistCopyWarns:
         assert any("disk error" in w for w in manifest["export_warnings"])
 
 
+class TestValidateFileTypes:
+    """W3: validate_file must reject type errors instead of letting
+    from_dict silently defuse them into different entry behaviour."""
+
+    @staticmethod
+    def _validate(tmp_path, pathogen_fields, top_level=None):
+        import yaml
+
+        data = {
+            "pathogens": [
+                {"name": "Yersinia pestis", "threat_level": "critical",
+                 **pathogen_fields}
+            ],
+        }
+        data.update(top_level or {})
+        path = tmp_path / "candidate.yaml"
+        path.write_text(yaml.safe_dump(data))
+        return WatchlistLoader().validate_file(path)
+
+    def test_non_numeric_alert_threshold_rejected(self, tmp_path):
+        ok, errors = self._validate(tmp_path, {"alert_threshold": "abc"})
+        assert not ok
+        assert any("alert_threshold" in e for e in errors)
+
+    def test_zero_or_negative_alert_threshold_rejected(self, tmp_path):
+        ok, errors = self._validate(tmp_path, {"alert_threshold": 0})
+        assert not ok
+        ok, errors = self._validate(tmp_path, {"alert_threshold": -5})
+        assert not ok
+
+    def test_non_numeric_taxid_rejected(self, tmp_path):
+        ok, errors = self._validate(tmp_path, {"taxid_ncbi": "not-an-int"})
+        assert not ok
+        assert any("taxid_ncbi" in e for e in errors)
+
+    def test_non_numeric_db_taxid_rejected(self, tmp_path):
+        ok, errors = self._validate(tmp_path, {"db_taxid": "4005020x"})
+        assert not ok
+
+    def test_names_alt_must_be_a_list_of_strings(self, tmp_path):
+        ok, errors = self._validate(
+            tmp_path, {"names_alt": {"alias": "Y. pestis"}}
+        )
+        assert not ok
+        assert any("names_alt" in e for e in errors)
+        ok, _ = self._validate(tmp_path, {"names_alt": ["Y. pestis"]})
+        assert ok
+
+    def test_unknown_version_rejected(self, tmp_path):
+        ok, errors = self._validate(
+            tmp_path, {}, top_level={"version": "1.0"}
+        )
+        assert not ok
+        assert any("version" in e for e in errors)
+
+    def test_valid_and_versionless_files_still_pass(self, tmp_path):
+        ok, _ = self._validate(
+            tmp_path,
+            {"taxid_ncbi": 632, "alert_threshold": 10,
+             "names_alt": ["Y. pestis"]},
+            top_level={"version": "2.0"},
+        )
+        assert ok
+        ok, _ = self._validate(tmp_path, {"taxid_ncbi": "632"})
+        assert ok, "digit strings coerce cleanly and must stay accepted"
+
+
+class TestInvalidWatchlistFilesAreNamed:
+    """W4: a malformed watchlist file must be enumerable, not just logged."""
+
+    def test_malformed_yaml_is_reported(self, tmp_path):
+        user_dir = tmp_path / "watchlists"
+        user_dir.mkdir()
+        (user_dir / "broken.yaml").write_text("pathogens: [unclosed")
+        (user_dir / "good.yaml").write_text(VALID_YAML)
+        loader = WatchlistLoader()
+        with patch.object(WatchlistLoader, "user_watchlist_dir", user_dir):
+            invalid = loader.find_invalid_watchlist_files()
+        names = [n for n, _ in invalid]
+        assert "broken.yaml" in names
+        assert "good.yaml" not in names
+
+    def test_type_error_file_is_reported(self, tmp_path):
+        user_dir = tmp_path / "watchlists"
+        user_dir.mkdir()
+        (user_dir / "typed.yaml").write_text(
+            VALID_YAML.replace("alert_threshold: 10", "alert_threshold: abc")
+        )
+        loader = WatchlistLoader()
+        with patch.object(WatchlistLoader, "user_watchlist_dir", user_dir):
+            invalid = loader.find_invalid_watchlist_files()
+        assert any(n == "typed.yaml" for n, _ in invalid)
+
+    def test_clean_install_reports_nothing(self, tmp_path):
+        user_dir = tmp_path / "watchlists"
+        user_dir.mkdir()
+        with patch.object(WatchlistLoader, "user_watchlist_dir", user_dir):
+            # Only the built-in tier remains -- shipped lists must validate.
+            assert WatchlistLoader().find_invalid_watchlist_files() == []
+
+
 class TestNameOnlyMergeParity:
     """W8: the pseudo-taxid merge branch must mirror the taxid branch."""
 

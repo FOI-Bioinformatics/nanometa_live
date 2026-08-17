@@ -453,6 +453,9 @@ def _create_collapsible_watchlist_files() -> dbc.Accordion:
                     ),
                     dcc.Download(id="watchlist-download"),
                     html.Div(id="watchlist-upload-feedback", className="mt-1 small"),
+                    # Holds a collided upload (contents + filename) while the
+                    # operator decides whether to replace the existing file.
+                    dcc.Store(id="watchlist-upload-pending", data=None),
                     # Help text for custom watchlists
                     html.Details([
                         html.Summary(
