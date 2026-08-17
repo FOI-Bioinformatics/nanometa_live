@@ -279,13 +279,12 @@ def _main_detailed_table():
                         # dash-ag-grid's expression parser does not resolve
                         # the String() global (it yields undefined row ids).
                         "getRowId": {"function": "params.data.taxid + ''"},
-                        # Inert selection config: dash-ag-grid re-applies its
-                        # selectedRows prop via api.setNodesSelected after
-                        # every rowData update, and AG Grid 33 warns (#132)
-                        # when the selection module is disabled. Enabling it
-                        # with checkboxes and click selection off keeps the
-                        # table read-only while making that internal call
-                        # legal. Same on every callback-updated grid.
+                        # Inert selection: dash-ag-grid re-applies its
+                        # selectedRows prop after every rowData update, and
+                        # AG Grid 33 warns (#132) when the selection module
+                        # is disabled. Checkboxes and click selection off
+                        # keep the table read-only while making that
+                        # internal call legal. Same on every updated grid.
                         "rowSelection": {
                             "mode": "singleRow",
                             "checkboxes": False,
