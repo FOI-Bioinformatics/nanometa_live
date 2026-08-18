@@ -58,6 +58,13 @@ class ValidationStatus(Enum):
     FAILED = "failed"            # Validation process failed
 
 
+#: Confirmed validation needs at least this many validated reads, whatever
+#: the percentages say. Mirrors the dashboard's low-read-floor doctrine:
+#: a detection resting on a handful of reads is reported, but not as a
+#: confirmation.
+MIN_READS_FOR_CONFIRMED = 10
+
+
 @dataclass
 class ValidationResult:
     """
@@ -138,8 +145,17 @@ class ValidationResult:
         # must not look identical to "not yet checked".
         if self.validated_reads == 0 and self.total_reads > 0:
             return ValidationStatus.LOW_CONFIDENCE
+        # A confirmation must rest on more than a percentage. Three reads
+        # mapping at 99% identity gave "100% validated" and sorted to the top
+        # of the tab as CONFIRMED; percentages are unstable at low n, and no
+        # breadth figure can rescue this because avg_coverage from both
+        # pipeline modules is per-READ query coverage (span/qlen, qcovs), not
+        # the fraction of the genome covered. Thin support downgrades to
+        # PARTIAL -- still evidence, never NO_DATA (2026-08-18 audit).
         if self.percent_validated >= 80 and self.percent_identity_mean >= 90:
-            return ValidationStatus.CONFIRMED
+            if self.validated_reads >= MIN_READS_FOR_CONFIRMED:
+                return ValidationStatus.CONFIRMED
+            return ValidationStatus.PARTIAL
         if self.percent_validated >= 50:
             return ValidationStatus.PARTIAL
         if self.percent_validated > 0:
@@ -789,14 +805,29 @@ class ValidationParser:
                 # to "blast" are the same method to every consumer, but the
                 # raw-string key never matched, so the stale result sat
                 # beside the fresh one instead of being replaced.
-                key = (od_r.sample_id, od_r.taxid,
-                       _method_class(od_r.validation_method))
+                od_method = getattr(od_r, "validation_method", "blast")
+                key = (od_r.sample_id, od_r.taxid, _method_class(od_method))
+                replaced = False
                 for i, r in enumerate(results):
                     if (r.sample_id, r.taxid,
                             _method_class(getattr(r, "validation_method", "blast"))) == key:
                         results[i] = od_r
-                        return
-                results.append(od_r)
+                        replaced = True
+                        break
+                if not replaced:
+                    results.append(od_r)
+                # An on-demand run recorded as "both" IS the coverage result
+                # too, so the pipeline's separate minimap2 entry for the same
+                # pair is superseded evidence. Leaving it produced two cards
+                # for one organism -- conflicting numbers under the same
+                # pattern-matching DOM id (2026-08-18 audit).
+                if od_method == "both":
+                    results[:] = [
+                        r for r in results
+                        if r is od_r
+                        or (r.sample_id, r.taxid) != (od_r.sample_id, od_r.taxid)
+                        or getattr(r, "validation_method", "") != "minimap2"
+                    ]
 
             # Aggregate JSON produced by on-demand runs
             od_aggregate = on_demand_dir / "validation_results.json"

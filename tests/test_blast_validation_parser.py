@@ -69,11 +69,31 @@ class TestParseBlastTabular:
         assert result.percent_identity_mean == pytest.approx((98.5 + 95.0 + 92.0) / 3)
         assert result.alignment_length_mean == pytest.approx((150 + 140 + 130) / 3)
 
-    def test_high_validation_is_confirmed(self, parser, tmp_path):
+    def test_high_validation_on_thin_support_is_not_confirmed(self, parser, tmp_path):
+        """100% of two reads is not a confirmation.
+
+        A confirmation needs read support as well as a percentage: at low n
+        the percentage is unstable, and three reads at 99% identity used to
+        sort to the top of the tab as CONFIRMED (2026-08-18 audit). The
+        result still shows its evidence -- PARTIAL, never NO_DATA.
+        """
         f = tmp_path / "b.blast.txt"
         _write_blast(f, ROWS_12)
-        # total_reads == unique reads -> 100% validated, identity mean >= 90.
         result = parser.parse_blast_tabular(f, "barcode01", 562, total_reads=2)
+        assert result.percent_validated == pytest.approx(100.0)
+        assert result.status == ValidationStatus.PARTIAL
+
+    def test_high_validation_with_ample_reads_is_confirmed(self, parser, tmp_path):
+        from nanometa_live.core.parsers.blast_validation_parser import (
+            MIN_READS_FOR_CONFIRMED,
+        )
+        n = MIN_READS_FOR_CONFIRMED + 5
+        f = tmp_path / "b2.blast.txt"
+        _write_blast(f, [
+            (f"read{i}", "NZ_X", 97.0, 150, 1, 0, 1, 150, 10, 160, 1e-50, 900)
+            for i in range(n)
+        ])
+        result = parser.parse_blast_tabular(f, "barcode01", 562, total_reads=n)
         assert result.percent_validated == pytest.approx(100.0)
         assert result.status == ValidationStatus.CONFIRMED
 

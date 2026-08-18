@@ -562,9 +562,19 @@ def register_validation_callbacks(app: Dash):
             Output("coverage-controls-section", "style"),
         ],
         Input("validation-data-store", "data"),
+        State("app-config", "data"),
     )
-    def update_coverage_empty_state(data):
-        """Show or hide the coverage empty-state message and controls, with context-appropriate text."""
+    def update_coverage_empty_state(data, config):
+        """Show or hide the coverage empty state, naming the actual cause.
+
+        Mirrors the BLAST side: classify on the diagnostic ``code`` the store
+        carries, not on substrings of the message. Before this, disabled /
+        never-ran / running / missing-genome / method-not-selected /
+        ran-and-found-nothing all collapsed into "No Coverage Data — run the
+        pipeline with minimap2 validation enabled", so a run that could not
+        be screened looked exactly like one screened and clean
+        (2026-08-18 audit).
+        """
         from nanometa_live.app.components.modern_components import EmptyStateMessage
 
         hidden = {"display": "none"}
@@ -577,29 +587,56 @@ def register_validation_callbacks(app: Dash):
                 icon="bi-bar-chart-line",
             ), hidden
 
+        method = str((config or {}).get("validation_method", "") or "").lower()
+
         if not data.get("results"):
-            message = data.get("message") or "No minimap2 coverage data available."
-            if "disabled" in message.lower():
-                title = "Validation Disabled"
-                icon = "bi-shield-x"
-            elif "waiting" in message.lower():
-                title = "Awaiting Results"
-                icon = "bi-hourglass-split"
-            else:
+            status = data.get("status") or {}
+            message = status.get("message") or data.get("message") \
+                or "No minimap2 coverage data available."
+            title, icon = empty_state_view(status, message)
+            # empty_state_view speaks for BLAST ("No Validation Results");
+            # say it in coverage terms when the diagnosis is method-agnostic.
+            if title == "No Validation Results":
                 title = "No Coverage Data"
                 icon = "bi-bar-chart-line"
+            if method == "blast":
+                return visible, EmptyStateMessage(
+                    title="Coverage Not Run",
+                    message=(
+                        "minimap2 coverage validation was not run for this "
+                        "analysis — the validation method is set to 'blast'. "
+                        "The BLAST tab shows the read-level results. To add "
+                        "genome coverage, set the validation method to 'both' "
+                        "(or 'minimap2') in the Configuration tab and re-run."
+                    ),
+                    icon="bi-bar-chart-line",
+                ), hidden
             return visible, EmptyStateMessage(
-                title=title,
-                message=message,
-                icon=icon,
+                title=title, message=message, icon=icon,
             ), hidden
 
         cov_results = _filter_by_method(data["results"], "minimap2")
         if cov_results:
             return hidden, [], visible
+        if method == "blast":
+            return visible, EmptyStateMessage(
+                title="Coverage Not Run",
+                message=(
+                    "minimap2 coverage validation was not run — the validation "
+                    "method is set to 'blast'. Set it to 'both' (or "
+                    "'minimap2') to add genome coverage."
+                ),
+                icon="bi-bar-chart-line",
+            ), hidden
+        # Other methods produced results but minimap2 produced none: that is
+        # a screened-and-empty state, distinct from never having run.
         return visible, EmptyStateMessage(
-            title="No Coverage Data",
-            message="No minimap2 coverage results found. Run the pipeline with minimap2 validation enabled.",
+            title="No Coverage Confirmed",
+            message=(
+                "minimap2 ran but confirmed no coverage for the detected "
+                "organisms. Other validation results are shown on the BLAST "
+                "tab."
+            ),
             icon="bi-bar-chart-line",
         ), hidden
 

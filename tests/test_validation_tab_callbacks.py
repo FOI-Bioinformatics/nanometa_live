@@ -181,12 +181,16 @@ class TestEmptyStateCallbacks:
 
     def test_coverage_disabled_state(self, validation_app):
         style, children, section = self._cov_fn(validation_app)(
-            {"results": [], "message": "Validation is disabled. Enable it in Configuration tab."})
+            {"results": [],
+             "status": {"code": "disabled",
+                        "message": "Validation is disabled. Enable it in Configuration tab."}},
+            {"validation_method": "both"})
         assert "Disabled" in self._title(children)
 
     def test_coverage_has_minimap2_results_shows_controls(self, validation_app):
         style, children, section = self._cov_fn(validation_app)(
-            {"results": [{"validation_method": "minimap2", "species": "X"}]})
+            {"results": [{"validation_method": "minimap2", "species": "X"}]},
+            {"validation_method": "both"})
         assert style == {"display": "none"}
         assert section == {"display": "block"}
 
