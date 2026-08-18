@@ -20,6 +20,7 @@ import logging
 import os
 import signal
 import subprocess
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -31,6 +32,7 @@ from nanometa_live.core.workflow.on_demand_helpers import (
     _DEFAULT_VALIDATION_TIMEOUT_MINUTES,
     _genome_file_looks_valid,
     _is_int_str,
+    _normalise_sample_filter,
     _pick_result_for_method,
     _validation_timeout_seconds,
 )
@@ -512,15 +514,25 @@ class OnDemandValidator:
 
             if returncode != 0:
                 logger.error(f"nanometanf validation failed: {stderr}")
+                self._write_failure_log(
+                    cmd, launch_dir,
+                    f"exit code: {returncode}\n"
+                    f"--- stdout ---\n{stdout or ''}\n"
+                    f"--- stderr ---\n{stderr or ''}\n"
+                )
                 return None
 
             if progress_callback:
                 progress_callback("Parsing validation results...", 90)
 
-            # Parse the output validation_results.json
+            # Parse the output validation_results.json. An aggregate-scope
+            # request ("all") must not be used as a literal sample name --
+            # see _normalise_sample_filter.
             from nanometa_live.core.parsers.blast_validation_parser import ValidationParser
             parser = ValidationParser(str(outdir))
-            results = parser.get_validation_results(sample=sample, taxid=taxid)
+            results = parser.get_validation_results(
+                sample=_normalise_sample_filter(sample), taxid=taxid
+            )
 
             if results:
                 # get_validation_results filters by (sample, taxid) but NOT by
@@ -551,14 +563,55 @@ class OnDemandValidator:
                 "'validation_timeout_minutes' in config for large genomes",
                 timeout_seconds // 60,
             )
+            self._write_failure_log(
+                cmd, launch_dir,
+                f"timed out after {timeout_seconds} seconds\n",
+            )
             return None
-        except FileNotFoundError:
+        except FileNotFoundError as e:
             logger.warning("nextflow not found in PATH")
+            self._write_failure_log(
+                cmd, launch_dir,
+                f"launch failed (nextflow not found in PATH?): {e}\n"
+                f"PATH: {env.get('PATH', '')}\n",
+            )
             return None
         except (subprocess.CalledProcessError, PermissionError, OSError,
                 ImportError, AttributeError, KeyError) as e:
             logger.exception(f"nanometanf validation error: {e}")
+            self._write_failure_log(
+                cmd, launch_dir,
+                "unexpected error:\n" + traceback.format_exc(),
+            )
             return None
+
+    def _write_failure_log(
+        self, cmd: List[str], launch_dir: Path, detail: str
+    ) -> None:
+        """Persist a failed launch's full context to ``<results>/logs/``.
+
+        The GUI error message tells the operator to check that directory --
+        this makes it true. The launcher runs in a DiskcacheManager
+        background worker whose logger output reaches no file the operator
+        (or a debugger) can find, so without this file a failed launch is
+        undiagnosable: the 2026-08-18 release check burned an hour on
+        exactly that. Best effort by design; never raises.
+        """
+        try:
+            log_dir = self.results_dir / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_path = log_dir / f"on_demand_validation_{stamp}.log"
+            log_path.write_text(
+                f"command: {' '.join(cmd)}\n"
+                f"cwd: {launch_dir}\n"
+                f"{detail}"
+            )
+            logger.error(f"Launch details written to {log_path}")
+        except OSError as write_err:  # pragma: no cover - best effort
+            logger.warning(
+                f"Could not write on-demand failure log: {write_err}"
+            )
 
     def validate_organism(
         self,

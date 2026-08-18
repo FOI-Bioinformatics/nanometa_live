@@ -36,11 +36,20 @@ PATHOGEN_GENOMES_FILENAME = "pathogen_genomes.json"
 
 def load_pathogen_genomes(validation_dir: Path) -> Dict[str, str]:
     """Read the cumulative pathogen_genomes mapping (taxid -> genome FASTA
-    path) if it exists. Returns empty dict on first call or when the file is
-    missing/corrupt."""
+    path) if it exists. On the FIRST call (no cumulative file yet) the
+    mapping is seeded from the main run's launch copy at
+    ``<results>/pipeline_input/pathogen_genomes.json``.
+
+    The seed matters because nanometanf's AGGREGATE_VALIDATION_RESULTS
+    rebuilds ``validation/validation_results.json`` over exactly the taxids
+    in the file it is handed: starting from an empty on-demand mapping made
+    the first on-demand call SHRINK the aggregate to its single taxid,
+    dropping every main-run validation from the exported raw file
+    (2026-08-18). Seed entries whose genome no longer exists are dropped --
+    the pipeline fails on a pathogen_genomes path it cannot stage."""
     path = validation_dir / PATHOGEN_GENOMES_FILENAME
     if not path.exists():
-        return {}
+        return _seed_from_pipeline_input(validation_dir)
     try:
         with open(path) as f:
             data = json.load(f)
@@ -49,6 +58,42 @@ def load_pathogen_genomes(validation_dir: Path) -> Dict[str, str]:
         return {str(k): str(v) for k, v in data.items()}
     except (json.JSONDecodeError, OSError, ValueError) as e:
         logger.warning(f"pathogen_genomes.json unreadable, starting fresh: {e}")
+        return {}
+
+
+def _seed_from_pipeline_input(validation_dir: Path) -> Dict[str, str]:
+    """Return the main run's pathogen_genomes mapping, or empty.
+
+    ``validation_dir`` is ``<results>/on_demand_validation``; the launch copy
+    the main pipeline actually validated with is
+    ``<results>/pipeline_input/pathogen_genomes.json``."""
+    seed_path = (
+        validation_dir.parent / "pipeline_input" / PATHOGEN_GENOMES_FILENAME
+    )
+    if not seed_path.exists():
+        return {}
+    try:
+        with open(seed_path) as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {}
+        mapping = {}
+        for k, v in data.items():
+            if Path(str(v)).is_file():
+                mapping[str(k)] = str(v)
+            else:
+                logger.warning(
+                    "Seed pathogen_genomes entry %s dropped: genome missing "
+                    "at %s", k, v,
+                )
+        if mapping:
+            logger.info(
+                "Seeded on-demand pathogen_genomes from the main run "
+                f"({len(mapping)} taxid(s))"
+            )
+        return mapping
+    except (json.JSONDecodeError, OSError, ValueError) as e:
+        logger.warning(f"Main-run pathogen_genomes.json unreadable: {e}")
         return {}
 
 

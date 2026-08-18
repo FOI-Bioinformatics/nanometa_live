@@ -22,6 +22,23 @@ def _is_int_str(value: Any) -> bool:
         return False
 
 
+def _normalise_sample_filter(sample: Optional[str]) -> Optional[str]:
+    """Map the GUI's aggregate-scope tokens to "no sample filter".
+
+    The Organisms tab passes ``sample="all"`` (and older callers "All
+    Samples") when a validation is requested at aggregate scope. Forwarding
+    that token into ``ValidationParser.get_validation_results(sample=...)``
+    treats it as a literal sample name that matches nothing, so a successful
+    validation run was reported to the operator as "did not return a result"
+    (2026-08-18). ``None`` means "all samples" to the parser.
+    """
+    if not sample:
+        return None
+    if sample.strip().lower() in ("all", "all samples"):
+        return None
+    return sample
+
+
 def _genome_file_looks_valid(path: Path) -> bool:
     """Cheap sanity check that ``path`` is a non-empty FASTA file.
 
@@ -60,8 +77,16 @@ def _pick_result_for_method(results: list, method: str):
     read-centric BLAST summary. Falls back to ``results[0]``.
     """
     order = ["blast", "minimap2"] if method == "both" else [method]
+    # An aggregate-scope request can match one result per sample; prefer the
+    # deepest one so the summary card reflects the sample that carries the
+    # detection rather than filesystem enumeration order.
+    ranked = sorted(
+        results,
+        key=lambda r: getattr(r, "total_reads", 0) or 0,
+        reverse=True,
+    )
     for m in order:
-        for r in results:
+        for r in ranked:
             if getattr(r, "validation_method", None) == m:
                 return r
-    return results[0]
+    return ranked[0]
