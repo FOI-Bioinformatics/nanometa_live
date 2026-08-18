@@ -534,6 +534,9 @@ class NextflowManager:
             try:
                 logging.info(f"Starting Nextflow pipeline with profile: {profile}")
 
+                # Drop the previous run's artifacts before this one starts.
+                self.reset_run_artifacts()
+
                 # Check container runtime availability based on profile.
                 # Only the first component decides the engine ("conda,server"
                 # is a supported comma-form), and "apptainer" is a synonym
@@ -890,6 +893,39 @@ class NextflowManager:
             self.status["running"] = False
             self.status["last_updated"] = time.time()
             logging.info("Nextflow workflow execution finished")
+
+    def reset_run_artifacts(self) -> None:
+        """Clear the previous run's trace and status counters.
+
+        Nextflow writes the trace to a fixed path and only replaces it once
+        the new run emits its first task. Until then the monitor thread reads
+        the PREVIOUS run's completed trace -- stable and old, so the
+        "file is being written" guard does not catch it -- and the dashboard
+        attributes that run's totals, failures included, to the run just
+        started (observed live: "46 complete, 1 failed" carried across two
+        runs for about a minute). Same family as the loader-cache and
+        output-collision bleeds: a fresh run must never present an earlier
+        run's result as its own.
+        """
+        trace_path = os.path.join(self.log_dir, "trace.txt")
+        try:
+            if os.path.exists(trace_path):
+                os.remove(trace_path)
+        except OSError as exc:
+            logging.warning("Could not clear the previous trace file: %s", exc)
+
+        self._last_trace_status = {}
+        self.status.update({
+            "processes_complete": 0,
+            "processes_running": 0,
+            "processes_failed": 0,
+            "total_processes": 0,
+            "stages": [],
+            "current_stage": None,
+            "stage_progress": {},
+            "exit_code": None,
+            "failed_tasks": [],
+        })
 
     def _monitor_status(self) -> None:
         """

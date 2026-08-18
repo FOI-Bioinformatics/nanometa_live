@@ -203,3 +203,6 @@ results/
 # Project-local Nanometa state (session, watchlist selection, taxid mappings)
 # created when the app is run from a project/working directory.
 .nanometa/
+
+# Operator-private exercise material -- never commit
+/private/
