@@ -247,8 +247,18 @@ def get_validation_species_from_watchlist(
             }
             species_list.append(species_info)
 
-            # Check if genome is downloaded (by NCBI taxid)
-            genome_path = genome_manager.get_genome_path(ncbi_taxid)
+            # Look the genome up by the taxid the READS are extracted for.
+            # The pipeline extracts and names outputs by kraken_taxid, and the
+            # genome cache is keyed the same way, so on a custom/GTDB database
+            # -- where an entry with no NCBI identity carries a synthetic
+            # pseudo-taxid -- keying this lookup on ncbi_taxid found nothing
+            # and the launch disabled validation with "no pathogen genomes
+            # downloaded", even with the genome sitting in the cache
+            # (2026-08-18 Bioshield exercise run). Fall back to the NCBI taxid
+            # for the ordinary case where a genome was cached under it.
+            genome_path = genome_manager.get_genome_path(kraken_taxid)
+            if not genome_path and kraken_taxid != ncbi_taxid:
+                genome_path = genome_manager.get_genome_path(ncbi_taxid)
             if genome_path:
                 genome_paths.append(str(genome_path))
 
