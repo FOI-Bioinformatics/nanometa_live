@@ -22,6 +22,7 @@ Tool location logic:
 
 import logging
 import os
+import platform as _platform
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -30,6 +31,38 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Mount-point prefixes where removable and network volumes appear, per OS.
+# Used by _database_on_removable_volume; deliberately a prefix table rather
+# than filesystem-type sniffing -- statvfs cannot name the fstype portably,
+# and the prefix convention covers the cases operators actually hit (USB
+# sticks and network shares auto-mounted by the desktop).
+_REMOVABLE_MOUNT_PREFIXES = {
+    "Darwin": ("/Volumes",),
+    "Linux": ("/media", "/mnt", "/run/media"),
+}
+
+
+def _database_on_removable_volume(db_path: str, system: Optional[str] = None) -> bool:
+    """True when ``db_path`` sits under a removable/network mount prefix.
+
+    Kraken2 memory-maps ``hash.k2d`` in place and classification touches it
+    in random page-sized reads; on a USB or network volume that access
+    pattern is pathological even when sequential throughput is fine
+    (measured 2026-08-18: 63 MB/s sequential, 20+ minutes of paging per
+    task). Matching is on a path-component boundary so ``/mnt2/db`` does
+    not false-positive on ``/mnt``.
+    """
+    prefixes = _REMOVABLE_MOUNT_PREFIXES.get(system or _platform.system(), ())
+    try:
+        parts = Path(db_path).resolve().parts
+    except OSError:
+        parts = Path(db_path).parts
+    for prefix in prefixes:
+        p = Path(prefix).parts
+        if parts[: len(p)] == p:
+            return True
+    return False
 
 
 class Severity(str, Enum):
@@ -137,6 +170,7 @@ class ReadinessChecker:
 
         # === Data checks (critical) ===
         report.checks.append(self._check_kraken_db(config))
+        report.checks.append(self._check_kraken_db_location(config))
         report.checks.append(self._check_db_index(config, home))
         report.checks.append(self._check_taxid_mappings(config, home, active_watchlist))
 
@@ -233,6 +267,35 @@ class ReadinessChecker:
         return CheckResult(
             "Kraken2 Database", True, Severity.CRITICAL,
             f"Valid database at {p.name}"
+        )
+
+    def _check_kraken_db_location(self, config: Dict[str, Any]) -> CheckResult:
+        """Warn when the database sits on a removable or network volume.
+
+        A WARNING, not a blocker: the run works, just slowly. Unset or
+        missing paths pass silently here -- they are the Kraken2 Database
+        check's finding, and double-reporting one problem teaches operators
+        to skim the list.
+        """
+        db_path = config.get("kraken_db", "")
+        if not db_path or not Path(db_path).is_dir():
+            return CheckResult(
+                "Database Location", True, Severity.INFO,
+                "Not applicable (no database directory)"
+            )
+        if _database_on_removable_volume(db_path):
+            return CheckResult(
+                "Database Location", False, Severity.WARNING,
+                "Database is on a removable or network volume "
+                f"({db_path}). Kraken2 memory-maps it in place, and random "
+                "page access over USB/network is very slow. Copy the "
+                "database to local disk and point kraken_db there — cached "
+                "indexes and mappings remain valid (content-derived hash).",
+                details=str(db_path)
+            )
+        return CheckResult(
+            "Database Location", True, Severity.WARNING,
+            "Database is on local storage"
         )
 
     def _check_db_index(self, config: Dict[str, Any], home: Path) -> CheckResult:

@@ -89,13 +89,20 @@ class ConfigLoader:
             "default_hierarchy_letters": ["D", "C", "G", "S"],
             "default_reads_per_level": 10,
             "pipeline_cores": 1,
-            "kraken_cores": 1,
+            # kraken_cores retired 2026-08-18: the default of 1 flowed into
+            # the generated -c config as `KRAKEN2_KRAKEN2 { cpus = 1 }`,
+            # overriding nanometanf's own CPU scaling for every operator who
+            # never touched the field. Kraken2 sizing now belongs to the
+            # pipeline (see parameter_mapping.create_nextflow_config).
             "validation_cores": 1,
             "blast_cores": 1,
             "check_intervals_seconds": 15,
             "kraken_db": "",
-            # Using strict boolean values
-            "kraken_memory_mapping": True,
+            # kraken_memory_mapping deliberately NOT defaulted: a default
+            # here made _resolve_kraken2_memory_mapping's "explicit override
+            # wins" branch unconditional (the min_perc_identity pattern).
+            # The resolver defaults to True; only a deliberate operator
+            # value belongs in the config.
             # Validation settings
             # Enabled by default: confirmation testing is cheap and gives operators
             # an immediate cross-check on detected species. It silently no-ops when

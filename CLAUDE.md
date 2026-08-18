@@ -382,6 +382,24 @@ back at Start so the viewer follows it. A hand-written config that sets only
 (observed on the 2026-08-18 release check); use `results_dir_override` for an
 explicit custom analysis folder.
 
+### Kraken2 sizing belongs to nanometanf, not the generated `-c` config
+
+`create_nextflow_config` deliberately emits NO `withName: 'KRAKEN2_KRAKEN2'`
+block: the `-c` file outranks every pipeline config layer, and the retired
+pin (`cpus = 1` from the old `kraken_cores` default, `memory = '8.GB'`) made
+every GUI-launched classification single-threaded regardless of nanometanf's
+`max(4, max_cpus/forks)` scaling (2026-08-18 audit). The GUI instead passes
+`--kraken2_memory_gb` sized from the measured `hash.k2d` (+4 GB, floor 12)
+and `kraken2_memory_mapping` resolved by `_resolve_kraken2_memory_mapping`
+(explicit config value wins, else True everywhere — ARM included; mmap is
+proven under Rosetta and nanometanf drops the flag on retry). Neither
+`kraken_cores` nor `kraken_memory_mapping` is written by
+`create_default_config` any more; a default there turns an "explicit
+override wins" resolver into dead code (the `min_perc_identity` pattern).
+The readiness checklist warns when `kraken_db` sits on a removable/network
+volume (mmap random access over USB is pathological; the content-derived
+`db_hash` makes a local copy free of re-preparation).
+
 ### Parameter mapping (non-obvious renames)
 
 `core/config/parameter_mapping.py` translates config keys to Nextflow params:

@@ -25,11 +25,12 @@ import os
 import glob
 import csv
 import json
+import math
 import platform
 import re
 import logging
 from pathlib import Path
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Optional, Tuple, List
 
 from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
 from nanometa_live.core.utils.genome_manager import get_genome_manager
@@ -661,20 +662,54 @@ def _log_pathogen_genomes_result(pathogen_genomes_path):
 
 
 def _resolve_kraken2_memory_mapping(config: Dict[str, Any]) -> bool:
-    """Pick kraken2_memory_mapping: explicit override wins, else False on ARM.
+    """Pick kraken2_memory_mapping: explicit config value wins, else True.
 
-    nanometanf's KRAKEN2 module falls back to a non-mmap load on ARM anyway;
-    emitting an explicit False silences the per-run WARN.
+    True everywhere, ARM included. This function used to default False on
+    ARM, but the branch was dead code -- ``create_default_config`` wrote
+    ``kraken_memory_mapping: True`` into every config, so the "explicit
+    override" always won (the ``min_perc_identity`` pattern). That accident
+    was also the right answer: the 2026-08-18 release check ran 51 tasks
+    with ``--memory-mapping`` under Rosetta on an ARM Mac with zero
+    SIGSEGVs, and nanometanf's KRAKEN2 processes drop the flag on retry if
+    it ever does fault. Defaulting False would cost a full private
+    database load per task (and per batch in realtime mode).
+
+    The default is gone from ``create_default_config``; only an operator
+    who deliberately sets the key reaches the override branch now.
     """
     if "kraken_memory_mapping" in config:
         return bool(config["kraken_memory_mapping"])
-    if platform.machine().lower() in {"arm64", "aarch64"}:
-        logging.info(
-            "ARM host detected (%s); defaulting kraken2_memory_mapping=False",
-            platform.machine(),
-        )
-        return False
     return True
+
+
+def _resolve_kraken2_memory_gb(config: Dict[str, Any]) -> Optional[int]:
+    """Size the Kraken2 memory request from the actual database.
+
+    nanometanf's default (12 GB) is sized for MiniKraken and its
+    modules.config says operators "MUST raise this" for bigger databases --
+    but the GUI knows the database path, so it can do that for them:
+    ``hash.k2d`` size + 4 GB headroom, floored at nanometanf's default.
+    An explicit ``kraken2_memory_gb`` in the config wins. Returns ``None``
+    (omit the param, let the pipeline default apply) when the database is
+    not measurable -- guessing here would just move the OOM.
+    """
+    explicit = config.get("kraken2_memory_gb")
+    if explicit:
+        try:
+            return int(explicit)
+        except (TypeError, ValueError):
+            logging.warning(
+                "Ignoring non-numeric kraken2_memory_gb: %r", explicit
+            )
+    db_path = config.get("kraken_db") or ""
+    if not db_path:
+        return None
+    try:
+        hash_bytes = (Path(db_path) / "hash.k2d").stat().st_size
+    except OSError:
+        return None
+    gib = hash_bytes / (1024 ** 3)
+    return max(12, math.ceil(gib) + 4)
 
 
 def _validation_params(config: Dict[str, Any], run_validation_enabled: bool,
@@ -1049,6 +1084,13 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         run_validation_enabled, blast_validation_enabled, kraken2_memory_mapping,
     )
 
+    # Size the Kraken2 memory request from the measured database rather
+    # than nanometanf's MiniKraken-sized default; omitted when the DB is
+    # not measurable. See _resolve_kraken2_memory_gb.
+    kraken2_memory_gb = _resolve_kraken2_memory_gb(config)
+    if kraken2_memory_gb is not None:
+        params["kraken2_memory_gb"] = kraken2_memory_gb
+
     # Add validation species if configured (from Watchlist or legacy config)
     if has_species and validation_taxids:
         # Convert to comma-separated string for taxids_to_validate (schema type: string)
@@ -1131,8 +1173,6 @@ def create_nextflow_config(config: Dict[str, Any]) -> str:
     Returns:
         String content suitable for writing to a Nextflow ``-c`` config file.
     """
-    max_cores = config.get("pipeline_cores") or config.get("snakemake_cores", 4)
-    kraken_cores = config.get("kraken_cores", max_cores)
     blast_cores = config.get("blast_cores", 2)
     validation_cores = config.get("validation_cores", 2)
     qc_tool = str(config.get("qc_tool", "chopper")).lower()
@@ -1186,12 +1226,14 @@ def create_nextflow_config(config: Dict[str, Any]) -> str:
             "}\n"
         )
 
+    # Deliberately NO withName block for KRAKEN2_KRAKEN2. This file is
+    # passed via ``-c``, which outranks every nanometanf config layer, so a
+    # block here silently flattens the pipeline's own sizing
+    # (cpus = max(4, max_cpus/max_classification_forks), memory from
+    # --kraken2_memory_gb, resourceLimits ceiling). The removed pin
+    # (cpus = 1 from the retired kraken_cores default, memory = 8.GB) made
+    # every GUI-launched classification single-threaded (2026-08-18 audit).
     withname_blocks = [
-        "    // Kraken2 classification (most CPU-intensive)\n"
-        "    withName: 'KRAKEN2_KRAKEN2' {\n"
-        f"        cpus = {kraken_cores}\n"
-        "        memory = '8.GB'\n"
-        "    }\n",
         "    // BLAST validation\n"
         "    withName: 'BLAST_BLASTN' {\n"
         f"        cpus = {blast_cores}\n"

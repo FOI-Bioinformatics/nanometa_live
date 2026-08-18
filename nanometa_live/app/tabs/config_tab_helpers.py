@@ -348,9 +348,11 @@ def build_config_from_form(
         config["genome_cache_dir"] = genome_cache_dir.strip()
 
     if cores is not None:
-        # Set all core counts to the same value for simplicity
+        # Set the remaining core counts to the same value for simplicity.
+        # kraken_cores is retired: Kraken2 CPU/memory sizing belongs to
+        # nanometanf's modules.config, which the generated -c config no
+        # longer overrides (2026-08-18 audit).
         config["pipeline_cores"] = cores
-        config["kraken_cores"] = cores
         config["validation_cores"] = cores
         config["blast_cores"] = cores
 
