@@ -35,6 +35,9 @@ from nanometa_live.core.workflow.on_demand_helpers import (
     _normalise_sample_filter,
     _pick_result_for_method,
     _validation_timeout_seconds,
+    resolve_launch_context,
+    supervise_validation_process,
+    write_failure_log,
 )
 from nanometa_live.core.workflow.validation_models import (
     ValidationJob,
@@ -425,22 +428,13 @@ class OnDemandValidator:
         if progress_callback:
             progress_callback("Launching nanometanf validation...", 20)
 
-        # Build nextflow command. ``-resume`` resolves through the run
-        # history in <launch dir>/.nextflow/history and the task cache under
-        # -work-dir, so BOTH must match the main pipeline's launch
-        # (NextflowManager: cwd=data_dir, -work-dir <data_dir>/work).
-        # Sharing only the outdir shares nothing -resume reads; without the
-        # two below Nextflow printed "It appears you have never run this
-        # project before -- Option `-resume` is ignored" and re-ran every
-        # previously-validated pair from scratch (2026-08-18).
-        from nanometa_live.core.utils.paths import NanometaPaths
-        launch_dir = Path(NanometaPaths.from_config(config or {}).data_dir)
-        work_dir = launch_dir / "work"
-        try:
-            work_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            logger.error(f"Cannot create Nextflow work dir {work_dir}: {e}")
+        # -resume needs the main run's launch dir + work dir; see
+        # resolve_launch_context for why sharing only the outdir shares
+        # nothing -resume reads.
+        launch_context = resolve_launch_context(config)
+        if launch_context is None:
             return None
+        launch_dir, work_dir = launch_context
 
         outdir = self.results_dir
         cmd = [
@@ -486,36 +480,19 @@ class OnDemandValidator:
                 cwd=str(launch_dir),
                 start_new_session=True,
             )
-            try:
-                stdout, stderr = proc.communicate(timeout=timeout_seconds)
-                returncode = proc.returncode
-            except subprocess.TimeoutExpired:
-                # Escalate SIGTERM -> SIGKILL across the whole process group,
-                # mirroring NextflowManager.stop().
-                try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-                except (ProcessLookupError, PermissionError):
-                    proc.terminate()
-                try:
-                    proc.communicate(timeout=30)
-                except subprocess.TimeoutExpired:
-                    try:
-                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                    except (ProcessLookupError, PermissionError):
-                        proc.kill()
-                    proc.communicate()
-                logger.error(
-                    "nanometanf validation timed out after %d minute(s); "
-                    "raise 'validation_timeout_minutes' in config for large "
-                    "genomes",
-                    timeout_seconds // 60,
+            supervised = supervise_validation_process(proc, timeout_seconds)
+            if supervised is None:
+                write_failure_log(
+                    self.results_dir, cmd, launch_dir,
+                    f"timed out after {timeout_seconds} seconds\n",
                 )
                 return None
+            returncode, stdout, stderr = supervised
 
             if returncode != 0:
                 logger.error(f"nanometanf validation failed: {stderr}")
-                self._write_failure_log(
-                    cmd, launch_dir,
+                write_failure_log(
+                    self.results_dir, cmd, launch_dir,
                     f"exit code: {returncode}\n"
                     f"--- stdout ---\n{stdout or ''}\n"
                     f"--- stderr ---\n{stderr or ''}\n"
@@ -557,21 +534,10 @@ class OnDemandValidator:
             logger.warning("No validation results found in nanometanf output")
             return None
 
-        except subprocess.TimeoutExpired:
-            logger.error(
-                "nanometanf validation timed out after %d minute(s); raise "
-                "'validation_timeout_minutes' in config for large genomes",
-                timeout_seconds // 60,
-            )
-            self._write_failure_log(
-                cmd, launch_dir,
-                f"timed out after {timeout_seconds} seconds\n",
-            )
-            return None
         except FileNotFoundError as e:
             logger.warning("nextflow not found in PATH")
-            self._write_failure_log(
-                cmd, launch_dir,
+            write_failure_log(
+                self.results_dir, cmd, launch_dir,
                 f"launch failed (nextflow not found in PATH?): {e}\n"
                 f"PATH: {env.get('PATH', '')}\n",
             )
@@ -579,39 +545,11 @@ class OnDemandValidator:
         except (subprocess.CalledProcessError, PermissionError, OSError,
                 ImportError, AttributeError, KeyError) as e:
             logger.exception(f"nanometanf validation error: {e}")
-            self._write_failure_log(
-                cmd, launch_dir,
+            write_failure_log(
+                self.results_dir, cmd, launch_dir,
                 "unexpected error:\n" + traceback.format_exc(),
             )
             return None
-
-    def _write_failure_log(
-        self, cmd: List[str], launch_dir: Path, detail: str
-    ) -> None:
-        """Persist a failed launch's full context to ``<results>/logs/``.
-
-        The GUI error message tells the operator to check that directory --
-        this makes it true. The launcher runs in a DiskcacheManager
-        background worker whose logger output reaches no file the operator
-        (or a debugger) can find, so without this file a failed launch is
-        undiagnosable: the 2026-08-18 release check burned an hour on
-        exactly that. Best effort by design; never raises.
-        """
-        try:
-            log_dir = self.results_dir / "logs"
-            log_dir.mkdir(parents=True, exist_ok=True)
-            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_path = log_dir / f"on_demand_validation_{stamp}.log"
-            log_path.write_text(
-                f"command: {' '.join(cmd)}\n"
-                f"cwd: {launch_dir}\n"
-                f"{detail}"
-            )
-            logger.error(f"Launch details written to {log_path}")
-        except OSError as write_err:  # pragma: no cover - best effort
-            logger.warning(
-                f"Could not write on-demand failure log: {write_err}"
-            )
 
     def validate_organism(
         self,

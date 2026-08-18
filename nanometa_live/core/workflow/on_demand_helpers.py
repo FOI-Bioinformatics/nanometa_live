@@ -6,8 +6,15 @@ and these carry no state -- the same split used for ``*_tab.py`` /
 their original names, so call sites are unchanged.
 """
 
+import logging
+import os
+import signal
+import subprocess
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 # Default on-demand validation timeout (minutes) when config does not set one.
 _DEFAULT_VALIDATION_TIMEOUT_MINUTES = 30
@@ -37,6 +44,93 @@ def _normalise_sample_filter(sample: Optional[str]) -> Optional[str]:
     if sample.strip().lower() in ("all", "all samples"):
         return None
     return sample
+
+
+def resolve_launch_context(
+    config: Optional[Dict[str, Any]],
+) -> Optional[Tuple[Path, Path]]:
+    """Return ``(launch_dir, work_dir)`` for an on-demand Nextflow launch.
+
+    ``-resume`` resolves through the run history in
+    ``<launch dir>/.nextflow/history`` and the task cache under
+    ``-work-dir``, so BOTH must match the main pipeline's launch
+    (``NextflowManager``: cwd=data_dir, -work-dir <data_dir>/work). Sharing
+    only the outdir shares nothing -resume reads; without these two
+    Nextflow printed "It appears you have never run this project before --
+    Option `-resume` is ignored" and re-ran every previously-validated pair
+    from scratch (2026-08-18). Returns ``None`` when the work dir cannot be
+    created.
+    """
+    from nanometa_live.core.utils.paths import NanometaPaths
+    launch_dir = Path(NanometaPaths.from_config(config or {}).data_dir)
+    work_dir = launch_dir / "work"
+    try:
+        work_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.error(f"Cannot create Nextflow work dir {work_dir}: {e}")
+        return None
+    return launch_dir, work_dir
+
+
+def supervise_validation_process(
+    proc: "subprocess.Popen", timeout_seconds: int
+) -> Optional[Tuple[int, str, str]]:
+    """Wait for the validation subprocess; on timeout, kill its whole group.
+
+    Returns ``(returncode, stdout, stderr)``, or ``None`` after a timeout
+    (the process group is escalated SIGTERM -> SIGKILL, mirroring
+    ``NextflowManager.stop()`` -- without the group kill, Nextflow's
+    already-launched task processes survive as orphans).
+    """
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_seconds)
+        return proc.returncode, stdout, stderr
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            proc.terminate()
+        try:
+            proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                proc.kill()
+            proc.communicate()
+        logger.error(
+            "nanometanf validation timed out after %d minute(s); raise "
+            "'validation_timeout_minutes' in config for large genomes",
+            timeout_seconds // 60,
+        )
+        return None
+
+
+def write_failure_log(
+    results_dir: Path, cmd: List[str], launch_dir: Path, detail: str
+) -> None:
+    """Persist a failed launch's full context to ``<results>/logs/``.
+
+    The GUI error message tells the operator to check that directory --
+    this makes it true. The launcher runs in a DiskcacheManager background
+    worker whose logger output reaches no file the operator (or a debugger)
+    can find, so without this file a failed launch is undiagnosable: the
+    2026-08-18 release check burned an hour on exactly that. Best effort by
+    design; never raises.
+    """
+    try:
+        log_dir = results_dir / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = log_dir / f"on_demand_validation_{stamp}.log"
+        log_path.write_text(
+            f"command: {' '.join(cmd)}\n"
+            f"cwd: {launch_dir}\n"
+            f"{detail}"
+        )
+        logger.error(f"Launch details written to {log_path}")
+    except OSError as write_err:  # pragma: no cover - best effort
+        logger.warning(f"Could not write on-demand failure log: {write_err}")
 
 
 def _genome_file_looks_valid(path: Path) -> bool:
