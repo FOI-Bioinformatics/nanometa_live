@@ -497,6 +497,74 @@ def _compute_summary(results):
     return counts
 
 
+def build_validation_store(config, backend_status, selected_sample, batch_id):
+    """Read the validation results tree into the store payload.
+
+    Pure of Dash: the callback supplies the store values and renders the
+    result. Returns the diagnostic empty payload whenever there is nothing
+    to show -- including a successful parse that yielded zero results, which
+    is a real state (validation ran but had no reference genomes to run
+    against) and must not be reported with wording implying it did run.
+    """
+    import os
+
+    from nanometa_live.core.parsers.blast_validation_parser import (
+        BlastValidationParser,
+    )
+
+    if not config:
+        return {"results": [], "summary": {}, "message": "No configuration loaded",
+                "selected_sample": selected_sample}
+
+    results_dir = config.get("results_output_directory") or config.get("main_dir", "")
+    results_dir_ok = bool(results_dir and os.path.isdir(results_dir))
+    empty = (config, results_dir_ok, backend_status, selected_sample)
+
+    if not config.get("blast_validation", False) or not results_dir_ok:
+        return empty_validation_payload(*empty)
+
+    parser = BlastValidationParser(results_dir)
+    if not parser.has_validation_data():
+        return empty_validation_payload(*empty)
+
+    results = parser.get_validation_results(batch_id=batch_id)
+    # The cumulative summary is run-wide; in single-batch view the per-method
+    # summary cards recompute from results, so skip it.
+    summary = {} if batch_id else parser.get_validation_summary()
+
+    # ``All Samples`` and empty sentinel values mean "no filter".
+    results_dicts = _filter_results_by_sample(
+        [r.to_dict() for r in results], selected_sample)
+    logger.info("Loaded %d validation results from %s",
+                len(results_dicts), results_dir)
+
+    if not results_dicts:
+        return empty_validation_payload(*empty)
+
+    return {"results": results_dicts, "summary": summary, "message": None,
+            "selected_sample": selected_sample}
+
+
+def empty_validation_payload(config, results_dir_ok, backend_status,
+                             selected_sample):
+    """Build the validation-store payload for a run with no results.
+
+    Carries the diagnostic status (disabled / no_species / missing_dbs /
+    running / waiting) so the panel can say WHY nothing was confirmed
+    rather than showing wording that implies validation ran and found
+    nothing.
+    """
+    from nanometa_live.app.tabs.validation_status_helpers import (
+        build_validation_status_payload,
+    )
+    status = build_validation_status_payload(
+        config, results_dir_ok, backend_status,
+        has_results=False, results_count=0,
+    )
+    return {"results": [], "summary": {}, "message": status["message"],
+            "status": status, "selected_sample": selected_sample}
+
+
 def _load_real_coverage(
     selected_key: str,
     config: Optional[dict],

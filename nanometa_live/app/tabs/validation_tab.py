@@ -67,6 +67,7 @@ from nanometa_live.app.tabs.validation_tab_helpers import (  # noqa: E402
     _load_real_coverage,
     _enumerate_batch_ids,
     _batch_selector_state,
+    build_validation_store,
 )
 from nanometa_live.app.tabs.consensus_helpers import (  # noqa: E402
     build_consensus_selector_options,
@@ -156,65 +157,15 @@ def register_validation_callbacks(app: Dash):
         ``view_mode``/``batch_value`` select cumulative vs a single batch.
         """
         batch_id = batch_value if view_mode == "batch" and batch_value else None
-        # Interval ticks are a backstop only; debounce them so a quiet
-        # outdir does not re-parse the BLAST validation directory every
-        # tick (matches the pattern on every other results-driven lead
-        # callback).
+        # Interval ticks are a backstop only; debounce them so a quiet outdir
+        # does not re-parse the validation directory every tick.
         if interval_tick_is_redundant(ctx, "load_validation_data", _fingerprint):
             raise PreventUpdate
         mark_rendered("load_validation_data", _fingerprint)
 
         try:
-            if not config:
-                return {"results": [], "summary": {}, "message": "No configuration loaded",
-                        "selected_sample": selected_sample}
-
-            results_dir = config.get("results_output_directory") or config.get("main_dir", "")
-            results_dir_ok = bool(results_dir and os.path.isdir(results_dir))
-
-            # No-results diagnostic: explain *why* (disabled / no organisms /
-            # missing databases / run in progress) instead of a bare wait
-            # message. Cheap to compute and only reached on the empty paths.
-            def _empty():
-                status = build_validation_status_payload(
-                    config, results_dir_ok, backend_status,
-                    has_results=False, results_count=0,
-                )
-                return {"results": [], "summary": {}, "message": status["message"],
-                        "status": status, "selected_sample": selected_sample}
-
-            if not config.get("blast_validation", False) or not results_dir_ok:
-                return _empty()
-
-            parser = BlastValidationParser(results_dir)
-            if not parser.has_validation_data():
-                return _empty()
-
-            results = parser.get_validation_results(batch_id=batch_id)
-            # The cumulative summary is run-wide; in single-batch view the
-            # per-method summary cards recompute from results, so skip it.
-            summary = {} if batch_id else parser.get_validation_summary()
-
-            # Apply sample filter via the pure helper. ``All Samples`` and
-            # empty sentinel values mean "no filter" -- matches the
-            # convention used by the Dashboard and Organism tabs.
-            results_dicts = [r.to_dict() for r in results]
-            filtered = _filter_results_by_sample(results_dicts, selected_sample)
-            if selected_sample and selected_sample != "All Samples":
-                logger.info(
-                    "Validation: %d/%d results match selected sample %s",
-                    len(filtered), len(results_dicts), selected_sample,
-                )
-            results_dicts = filtered
-
-            logger.info("Loaded %d validation results from %s", len(results_dicts), results_dir)
-
-            return {
-                "results": results_dicts,
-                "summary": summary,
-                "message": None,
-                "selected_sample": selected_sample,
-            }
+            return build_validation_store(
+                config, backend_status, selected_sample, batch_id)
 
         except Exception as e:
             log_callback_error("load_validation_data", e)

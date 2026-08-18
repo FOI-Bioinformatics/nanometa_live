@@ -719,6 +719,15 @@ class ValidationParser:
             if r.total_reads > 0:
                 total_reads_by_pair.setdefault((r.sample_id, r.taxid), r.total_reads)
 
+        # Per-pair BLAST stats sidecars carry the read count the hits were
+        # measured against; the TSV cannot. Without them a realtime run (no
+        # aggregate yet) gave every BLAST result total_reads=0 and a status of
+        # UNCERTAIN -- "Low Confidence" for perfectly clean evidence.
+        from nanometa_live.core.parsers.blast_stats import (
+            apply_blast_stats, collect_blast_stats,
+        )
+        blast_stats_by_pair = collect_blast_stats(self.validation_dir)
+
         for blast_file in self.validation_dir.glob('*.blast.tsv'):
             # Try to extract sample and taxid from filename
             # Expected format: sample_taxid.blast.tsv
@@ -758,6 +767,8 @@ class ValidationParser:
                         (file_sample, file_taxid), 0
                     ),
                 )
+                apply_blast_stats(
+                    result, blast_stats_by_pair.get((file_sample, file_taxid)))
                 results.append(result)
                 seen_keys.add(key)
 
