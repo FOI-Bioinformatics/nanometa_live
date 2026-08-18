@@ -423,13 +423,28 @@ class OnDemandValidator:
         if progress_callback:
             progress_callback("Launching nanometanf validation...", 20)
 
-        # Build nextflow command. Reuses the main pipeline's outdir so
-        # the work/ cache is shared with the original run (this is what
-        # makes -resume effective for the on-demand path).
+        # Build nextflow command. ``-resume`` resolves through the run
+        # history in <launch dir>/.nextflow/history and the task cache under
+        # -work-dir, so BOTH must match the main pipeline's launch
+        # (NextflowManager: cwd=data_dir, -work-dir <data_dir>/work).
+        # Sharing only the outdir shares nothing -resume reads; without the
+        # two below Nextflow printed "It appears you have never run this
+        # project before -- Option `-resume` is ignored" and re-ran every
+        # previously-validated pair from scratch (2026-08-18).
+        from nanometa_live.core.utils.paths import NanometaPaths
+        launch_dir = Path(NanometaPaths.from_config(config or {}).data_dir)
+        work_dir = launch_dir / "work"
+        try:
+            work_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.error(f"Cannot create Nextflow work dir {work_dir}: {e}")
+            return None
+
         outdir = self.results_dir
         cmd = [
             "nextflow", "run", pipeline_source,
             "-resume",
+            "-work-dir", str(work_dir),
             "--validation_only",
             "--kraken2_output_dir", str(self.results_dir / "kraken2"),
             "--reads_dir", str(self.input_dir),
@@ -466,6 +481,7 @@ class OnDemandValidator:
                 stderr=subprocess.PIPE,
                 text=True,
                 env=env,
+                cwd=str(launch_dir),
                 start_new_session=True,
             )
             try:
