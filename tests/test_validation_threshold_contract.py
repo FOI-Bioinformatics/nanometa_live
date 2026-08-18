@@ -91,6 +91,28 @@ class TestPipelineDeclaresTheSameFloors:
             "the amplicon exemption is missing: a PCR product covers a sliver "
             "of the genome by design and must remain confirmable")
 
+    def test_realtime_cumulative_aggregator_applies_the_floors(self):
+        """The aggregator is a FOURTH verdict site, and the one the original
+        contract fix missed: in realtime mode it REWRITES the flat per-pair
+        stats every batch, so its status -- not the per-batch modules' -- is
+        what the run's files and the session-end aggregate carry. On the
+        2026-08-18 realtime audit it wrote 'confirmed' for 1-read and 5-read
+        index-hop carryover of a Tier 1 select agent, with genome_breadth
+        absent entirely.
+        """
+        agg = (_NANOMETANF_PATH / "modules" / "local"
+               / "validation_cumulative_aggregator" / "main.nf").read_text()
+        assert agg.count("hits >= min_reads") >= 2, (
+            "validation_cumulative_aggregator must apply the read floor in "
+            "BOTH its minimap2 and blast status rules")
+        assert "genome_breadth >= min_breadth" in agg, (
+            "the aggregator's minimap2 status rule ignores genome breadth")
+        assert "concentrated" in agg, (
+            "the aggregator is missing the amplicon exemption")
+        assert '"genome_breadth"' in agg, (
+            "the cumulative stats JSON must carry genome_breadth -- the GUI "
+            "and the exported artifact read the realtime verdict from it")
+
 
 class TestVerdictsAgreeOnTheRealBioshieldRows:
     """The five (sample, taxid) pairs that exposed the drift.

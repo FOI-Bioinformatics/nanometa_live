@@ -20,17 +20,24 @@ from typing import Any, Mapping
 
 
 def resolve_outdir_for_fingerprint(config: Mapping[str, Any] | None) -> str:
-    """Return the path the fingerprint should scan for data freshness.
+    """Return the results path currently driving the dashboard.
 
     Returns ``results_output_directory`` if set, falling back to
-    ``main_dir``. Returns an empty string when neither is set or
-    ``config`` is falsy.
+    ``main_dir`` and then to the operator's explicit
+    ``results_dir_override``. The override fallback matters because
+    ``results_output_directory`` is a COMPUTED key, written back only when a
+    run starts: a config that has not been through Start yet carries only
+    the override, and a consumer ignoring it dead-ends -- on the 2026-08-18
+    realtime audit the Validation tab reported "Results directory not
+    found" for an entire live run whose files sat in the override
+    directory. Returns an empty string when nothing is set.
     """
     if not config:
         return ""
     return (
         config.get("results_output_directory")
         or config.get("main_dir")
+        or (config.get("results_dir_override") or "").strip()
         or ""
     )
 

@@ -297,7 +297,8 @@ def _blast_tsv_path(config: Optional[dict], selected_key: Optional[str]):
     """
     if not config or not selected_key:
         return None, None, None
-    results_dir = config.get("results_output_directory") or config.get("main_dir", "")
+    from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+    results_dir = resolve_outdir_for_fingerprint(config)
     if not results_dir:
         return None, None, None
     parts = selected_key.rsplit("_", 1)
@@ -516,7 +517,14 @@ def build_validation_store(config, backend_status, selected_sample, batch_id):
         return {"results": [], "summary": {}, "message": "No configuration loaded",
                 "selected_sample": selected_sample}
 
-    results_dir = config.get("results_output_directory") or config.get("main_dir", "")
+    # One resolution for "which results dir drives the app" -- including the
+    # results_dir_override fallback. Reading results_output_directory alone
+    # dead-ends on any config that has not been through Start yet (2026-08-18
+    # realtime audit: a full live run reported "Results directory not found").
+    from nanometa_live.app.utils.outdir_resolution import (
+        resolve_outdir_for_fingerprint,
+    )
+    results_dir = resolve_outdir_for_fingerprint(config)
     results_dir_ok = bool(results_dir and os.path.isdir(results_dir))
     empty = (config, results_dir_ok, backend_status, selected_sample)
 
@@ -590,7 +598,8 @@ def _load_real_coverage(
     if not config:
         return None, "no_config"
 
-    results_dir = config.get("results_output_directory") or config.get("main_dir", "")
+    from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+    results_dir = resolve_outdir_for_fingerprint(config)
     if not results_dir:
         return None, "no_config"
 
@@ -658,7 +667,8 @@ def _enumerate_batch_ids(config: Optional[dict]) -> List[str]:
     """
     if not config:
         return []
-    results_dir = config.get("results_output_directory") or config.get("main_dir", "")
+    from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+    results_dir = resolve_outdir_for_fingerprint(config)
     if not results_dir:
         return []
 
