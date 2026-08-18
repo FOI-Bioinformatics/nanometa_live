@@ -1447,17 +1447,24 @@ class GenomeDownloadManager:
         if output_path is None:
             output_path = self.cache_dir / "pathogen_genomes.json"
 
-        # Build mapping of taxid -> genome path
-        # Key is kraken_taxid (for pipeline filtering), lookup by ncbi_taxid (for file)
+        # Key is kraken_taxid (what the pipeline filters on). The FILE is
+        # normally cached under the NCBI taxid, but an entry with no NCBI
+        # identity carries a synthetic pseudo-taxid and its genome is cached
+        # under the database node instead -- so try the NCBI taxid first and
+        # fall back to the kraken taxid. Looking up only by the NCBI taxid
+        # returned None here, and the launch disabled validation with "no
+        # pathogen genomes downloaded" while the genome sat in the cache
+        # (2026-08-18 Bioshield exercise run).
         genome_mapping = {}
         for ncbi_taxid in taxids:
+            if taxid_mapping and ncbi_taxid in taxid_mapping:
+                key_taxid = taxid_mapping[ncbi_taxid]
+            else:
+                key_taxid = ncbi_taxid
             genome_path = self.get_genome_path(ncbi_taxid)
+            if (not genome_path or not genome_path.exists()) and key_taxid != ncbi_taxid:
+                genome_path = self.get_genome_path(key_taxid)
             if genome_path and genome_path.exists():
-                # Use kraken_taxid as key if mapping provided, otherwise use ncbi_taxid
-                if taxid_mapping and ncbi_taxid in taxid_mapping:
-                    key_taxid = taxid_mapping[ncbi_taxid]
-                else:
-                    key_taxid = ncbi_taxid
                 genome_mapping[str(key_taxid)] = str(genome_path)
 
         if not genome_mapping:
