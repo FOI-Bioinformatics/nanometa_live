@@ -64,6 +64,12 @@ class ValidationStatus(Enum):
 #: confirmation.
 MIN_READS_FOR_CONFIRMED = 10
 
+#: Minimum fraction of the reference genome a minimap2 result must cover to
+#: be CONFIRMED. Only applied when the breadth is known (a PAF was read) and
+#: the coverage is not amplicon-like. 5% matches the concentration ratio the
+#: coverage plots already use as the boundary between focused and diffuse.
+MIN_BREADTH_FOR_CONFIRMED = 0.05
+
 
 @dataclass
 class ValidationResult:
@@ -107,6 +113,14 @@ class ValidationResult:
     reference_length: int = 0
     status: ValidationStatus = ValidationStatus.NO_DATA
     timestamp: str = ""
+    #: Fraction of the REFERENCE GENOME covered, computed from the PAF.
+    #: Distinct from ``coverage_breadth``, which despite its name is the
+    #: per-read query coverage the pipeline reports (span/qlen, qcovs).
+    #: None when no PAF was available.
+    genome_breadth: Optional[float] = None
+    #: Amplicon-like coverage: a small share of the genome, deeply covered.
+    #: Such a result must not be downgraded for thin breadth.
+    coverage_concentrated: bool = False
     errors: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -153,9 +167,19 @@ class ValidationResult:
         # the fraction of the genome covered. Thin support downgrades to
         # PARTIAL -- still evidence, never NO_DATA (2026-08-18 audit).
         if self.percent_validated >= 80 and self.percent_identity_mean >= 90:
-            if self.validated_reads >= MIN_READS_FOR_CONFIRMED:
-                return ValidationStatus.CONFIRMED
-            return ValidationStatus.PARTIAL
+            if self.validated_reads < MIN_READS_FOR_CONFIRMED:
+                return ValidationStatus.PARTIAL
+            # A genome-centric verdict must consider the genome. Measured on
+            # the Bioshield run: a real detection covered 98% of the
+            # reference at 79x while index-hop carryover covered 0.07-1.2% at
+            # 1x -- yet hit rate and identity were ~identical for both.
+            # Amplicon data legitimately covers a sliver at high local depth,
+            # so concentrated coverage is exempt (same test the plots use).
+            if (self.genome_breadth is not None
+                    and self.genome_breadth < MIN_BREADTH_FOR_CONFIRMED
+                    and not self.coverage_concentrated):
+                return ValidationStatus.PARTIAL
+            return ValidationStatus.CONFIRMED
         if self.percent_validated >= 50:
             return ValidationStatus.PARTIAL
         if self.percent_validated > 0:
@@ -864,11 +888,46 @@ class ValidationParser:
                 if not getattr(r, "species", "") and r.taxid in species_by_taxid:
                     r.species = species_by_taxid[r.taxid]
 
+        # Genome breadth for every coverage result, whatever produced it.
+        # Done here rather than in the minimap2 stats reader because a
+        # completed run is served from the aggregate JSON, which carries no
+        # breadth -- enriching only the realtime path left finished runs
+        # judging coverage without looking at coverage.
+        self._attach_genome_breadth(results)
+
         logger.info(f"Retrieved {len(results)} validation results")
         if cache_this_call:
             self._results_cache = list(results)
             self._results_cache_mtime = fingerprint
         return results
+
+    def _attach_genome_breadth(self, results) -> None:
+        """Fill genome_breadth on coverage results from their PAF, and
+        re-derive the status now that the verdict can see it."""
+        from nanometa_live.core.parsers.minimap2_stats import minimap2_stats_dirs
+        from nanometa_live.core.parsers.paf_coverage_parser import paf_breadth
+
+        dirs = minimap2_stats_dirs(self.results_dir, self.validation_dir)
+        if not dirs:
+            return
+        for r in results:
+            # Coverage-class results only ("both" is one, see the dedup note
+            # in minimap2_stats.collect_minimap2_results).
+            if getattr(r, "validation_method", "") not in ("minimap2", "both"):
+                continue
+            if getattr(r, "genome_breadth", None) is not None:
+                continue
+            for d in dirs:
+                paf = d / f"{r.sample_id}_taxid{r.taxid}.paf"
+                if not paf.exists():
+                    continue
+                summary = paf_breadth(paf)
+                if summary is None:
+                    break
+                r.genome_breadth = summary.breadth
+                r.coverage_concentrated = summary.is_concentrated
+                r.status = r.determine_status()
+                break
 
     def get_validation_summary(self) -> Dict[str, Any]:
         """

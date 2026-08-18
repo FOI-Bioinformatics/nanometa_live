@@ -9,7 +9,7 @@ for visualization in the validation tab.
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -215,3 +215,96 @@ def aggregate_contig_coverage(
     )
 
 
+
+
+# --- Lightweight breadth summary (verdict path) ---------------------------
+#
+# parse_paf_coverage allocates a per-base depth array, which is right for the
+# plots but too heavy for the verdict path: that runs for every (sample,
+# taxid) on every poll. Merging intervals gives the same breadth and a local
+# depth in O(n log n) with no big allocation.
+
+#: Cached on (realpath, mtime_ns, size, min_mapq).
+_breadth_cache: Dict[tuple, "PafBreadth"] = {}
+
+
+@dataclass
+class PafBreadth:
+    """Genome-coverage summary computed without a per-base array."""
+    ref_length: int = 0
+    covered_bp: int = 0
+    aligned_bp: int = 0
+
+    @property
+    def breadth(self) -> float:
+        return self.covered_bp / self.ref_length if self.ref_length else 0.0
+
+    @property
+    def local_depth(self) -> float:
+        """Mean depth across covered positions only."""
+        return self.aligned_bp / self.covered_bp if self.covered_bp else 0.0
+
+    @property
+    def is_concentrated(self) -> bool:
+        """Amplicon-like: a small share of the genome, deeply covered.
+
+        Mirrors CoverageData's thresholds so the verdict and the plots agree
+        on what counts as focused coverage.
+        """
+        return bool(
+            self.breadth <= CoverageData._CONCENTRATION_RATIO
+            and self.local_depth >= CoverageData._CONCENTRATION_MIN_DEPTH
+            and self.covered_bp >= CoverageData._CONCENTRATION_MIN_COVERED_BP
+        )
+
+
+def paf_breadth(paf_path, min_mapq: int = 0) -> Optional["PafBreadth"]:
+    """Merged-interval coverage summary for a PAF, or None if unreadable."""
+    path = Path(paf_path)
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    key = (str(path), st.st_mtime_ns, st.st_size, min_mapq)
+    cached = _breadth_cache.get(key)
+    if cached is not None:
+        return cached
+
+    intervals: List[tuple] = []
+    ref_len = 0
+    aligned = 0
+    try:
+        with open(path) as fh:
+            for line in fh:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) < 12:
+                    continue
+                try:
+                    tlen, tstart, tend = int(parts[6]), int(parts[7]), int(parts[8])
+                    mapq = int(parts[11])
+                except ValueError:
+                    continue
+                if mapq < min_mapq or tend <= tstart or tend > tlen:
+                    continue
+                ref_len = max(ref_len, tlen)
+                intervals.append((tstart, tend))
+                aligned += tend - tstart
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not intervals:
+        return None
+
+    intervals.sort()
+    covered = 0
+    cur_start, cur_end = intervals[0]
+    for start, end in intervals[1:]:
+        if start > cur_end:
+            covered += cur_end - cur_start
+            cur_start, cur_end = start, end
+        elif end > cur_end:
+            cur_end = end
+    covered += cur_end - cur_start
+
+    result = PafBreadth(ref_length=ref_len, covered_bp=covered, aligned_bp=aligned)
+    _breadth_cache[key] = result
+    return result

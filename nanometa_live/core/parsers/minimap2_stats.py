@@ -86,6 +86,16 @@ def parse_minimap2_stats_json(filepath: Path):
         reference_accession=str(d.get("ref_name", "") or ""),
         timestamp=str(d.get("timestamp", "") or ""),
     )
+    # Real genome breadth comes from the sibling PAF; the stats file's
+    # avg_coverage is per-read query coverage and cannot answer "how much of
+    # the genome did we see".
+    paf = filepath.with_name(filepath.name.replace(".minimap2_stats.json", ".paf"))
+    from nanometa_live.core.parsers.paf_coverage_parser import paf_breadth
+    summary = paf_breadth(paf) if paf.exists() else None
+    if summary is not None:
+        result.genome_breadth = summary.breadth
+        result.coverage_concentrated = summary.is_concentrated
+
     result.status = result.determine_status()
     return result
 
