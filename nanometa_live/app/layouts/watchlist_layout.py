@@ -81,16 +81,28 @@ def _create_stats_bar() -> dbc.Card:
                 ], width="auto", className="me-4"),
 
                 # Validated count
+                # Public-taxonomy name lookups. Muted, and worded as what it
+                # is: "validated" beside the active count read as a readiness
+                # figure, when it says nothing about whether an organism is in
+                # the loaded database (2026-08-19 audit).
                 dbc.Col([
                     html.Div([
-                        html.I(className="bi bi-patch-check me-2 text-info",
+                        html.I(className="bi bi-patch-check me-2 text-muted",
                                style={"fontSize": "1.1rem"}),
                         html.Span(
                             "0",
                             id="watchlist-stat-validated",
-                            className="h4 mb-0 text-info"
+                            className="h4 mb-0 text-muted"
                         ),
-                        html.Small(" validated", className="text-muted ms-1"),
+                        html.Small(" name-checked", className="text-muted ms-1",
+                                   id="watchlist-stat-validated-label"),
+                        dbc.Tooltip(
+                            "Names looked up in public taxonomy services "
+                            "(optional, needs network). Not a measure of "
+                            "detectability -- scan the database for that.",
+                            target="watchlist-stat-validated-label",
+                            placement="bottom",
+                        ),
                     ], className="d-flex align-items-baseline"),
                 ], width="auto", className="me-4"),
 
@@ -383,18 +395,11 @@ def _create_pathogens_table_section() -> dbc.Card:
                             placement="top",
                         ),
                     ], width=1),
-                    dbc.Col([
-                        html.Small("Verified", className="fw-bold"),
-                        html.I(className="bi bi-info-circle text-muted ms-1",
-                               id="validated-header-info",
-                               style={"fontSize": "0.7rem", "cursor": "help"}),
-                        dbc.Tooltip(
-                            "Whether this organism's name and ID have been checked "
-                            "against public taxonomy databases (NCBI/GTDB)",
-                            target="validated-header-info",
-                            placement="top",
-                        ),
-                    ], width=1),
+                    # "In Database" comes FIRST because it answers the
+                    # operational question -- can this organism be detected in
+                    # the loaded Kraken2 database? The public-taxonomy check
+                    # beside it answers a different question entirely and used
+                    # to be the more prominent of the two (2026-08-19 audit).
                     dbc.Col([
                         html.Small("In Database", className="fw-bold"),
                         html.I(className="bi bi-info-circle text-muted ms-1",
@@ -402,13 +407,31 @@ def _create_pathogens_table_section() -> dbc.Card:
                                style={"fontSize": "0.7rem", "cursor": "help"}),
                         dbc.Tooltip(
                             "Whether this organism was found in the species "
-                            "identification database. If 'Not Scanned', click "
-                            "'Scan Database' in the 'Verify Watchlist Against "
-                            "Database' card on this tab.",
+                            "identification database -- this is what decides "
+                            "if it can be detected in a run. If 'Not Scanned', "
+                            "click 'Scan Database' in the 'Verify Watchlist "
+                            "Against Database' card on this tab.",
                             target="dbmatch-header-info",
                             placement="top",
                         ),
                     ], width=2),
+                    dbc.Col([
+                        html.Small("Name check", className="fw-bold text-muted"),
+                        html.I(className="bi bi-info-circle text-muted ms-1",
+                               id="validated-header-info",
+                               style={"fontSize": "0.7rem", "cursor": "help"}),
+                        dbc.Tooltip(
+                            "Optional: whether this organism's name was looked "
+                            "up in public taxonomy services (NCBI/GTDB). It "
+                            "records naming only -- it does NOT mean the "
+                            "organism is present in your database or "
+                            "detectable in a run; see 'In Database' for that. "
+                            "Requires network access, so it stays blank on an "
+                            "offline machine.",
+                            target="validated-header-info",
+                            placement="top",
+                        ),
+                    ], width=1),
                     dbc.Col([
                         html.Small("Genome/BLAST", className="fw-bold"),
                         html.I(className="bi bi-info-circle text-muted ms-1",
@@ -1050,16 +1073,9 @@ def create_pathogen_row(
                 ),
             ], width=1),
 
-            # Validated
-            dbc.Col([
-                html.I(
-                    className="bi bi-check-circle-fill text-success" if validated else "bi bi-x-circle text-muted",
-                    id={"type": "watchlist-row-validated", "index": taxid},
-                    style={"cursor": "pointer"} if validated else {},
-                ),
-            ], width=1),
-
-            # Kraken2 Match status with DB info
+            # Kraken2 Match status with DB info. Ordered BEFORE the
+            # public-taxonomy name check: this is the column that says whether
+            # the organism can be detected at all.
             dbc.Col([
                 html.Div([
                     dbc.Badge(
@@ -1088,6 +1104,23 @@ def create_pathogen_row(
                     ]) if db_taxid or db_name else None,
                 ]),
             ], width=2),
+
+            # Public-taxonomy name check (optional, network-dependent). A
+            # muted dash rather than a red cross when absent: not looking a
+            # name up is the normal state on an offline field machine, and a
+            # cross reads as a failure. It must never look like a verdict on
+            # detectability -- that is the "In Database" column to its left.
+            dbc.Col([
+                html.I(
+                    className="bi bi-check-circle text-secondary" if validated else "bi bi-dash text-muted",
+                    id={"type": "watchlist-row-validated", "index": taxid},
+                    style={"cursor": "pointer"} if validated else {},
+                    title=(
+                        "Name looked up in public taxonomy (naming only)"
+                        if validated else "Name not looked up"
+                    ),
+                ),
+            ], width=1),
 
             # Genome status
             dbc.Col([

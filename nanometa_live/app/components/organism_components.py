@@ -458,8 +458,16 @@ def OrganismCard(
                     html.I(className="bi bi-info-circle me-1"),
                     "Details"
                 ],
-                    # Use same ID type as pathogen report for unified view
-                    id={"type": "pathogen-view-report", "taxid": taxid} if taxid else {"type": "pathogen-view-report", "taxid": 0},
+                    # Opens the same pathogen-report modal as the Dashboard's
+                    # alert cards, but under its OWN id type. Sharing the alert
+                    # cards' type put two components with the SAME dict id in
+                    # the layout whenever an organism appeared on both surfaces
+                    # (every watched detection); duplicate ids tear the
+                    # n_clicks bookkeeping, so a genuine click arrived with a
+                    # None triggered value and the modal callback's
+                    # spurious-reopen guard swallowed it (2026-08-19
+                    # bug-report reproduction).
+                    id={"type": "organism-view-report", "taxid": taxid or 0},
                     color="primary",
                     outline=True,
                     size="sm"

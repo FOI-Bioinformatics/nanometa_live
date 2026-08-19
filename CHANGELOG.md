@@ -6,6 +6,57 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-08-19
+
+Field-bug-report release. A user running realtime analysis on a Bioshield
+(flextaxd/GTDB) database reported three defects; each was reproduced against
+a live realtime run before being fixed, and one further defect was found
+during the reproduction. No pipeline changes -- nanometanf stays at v1.7.0.
+
+### Fixed
+- Realtime validation no longer freezes: the Validation tab's data store
+  gated interval refreshes on an in-process "already rendered" memo, so a
+  single store write the browser never applied left the panel stale for the
+  rest of the run -- permanently once the run went quiet, since the results
+  fingerprint stops changing then. The gate now uses a store-backed memo
+  that rides the same response as the data, so a lost write self-heals on
+  the next polling tick. The consensus store had the same gate and gets the
+  same fix
+- The pathogen report modal shows real read counts on GTDB and flextaxd
+  databases. The alert card's View Report button carries the watchlist
+  taxid (a pseudo-taxid for name-only entries), but the read/abundance
+  lookup matched it against the Kraken2 report's database taxid; the two
+  coincide only on an NCBI database, so the modal rendered N/A for
+  organisms the dashboard showed at tens of thousands of reads. The lookup
+  now tries candidate taxids: the clicked one, the entry's mapped database
+  taxid, and the mapping collection's translation
+- The View Report button works again when an organism is visible on both
+  the Dashboard and the Organisms tab. Both surfaces emitted buttons under
+  the same pattern-matching id type, so every watched detection produced
+  two components with the same id; the duplicated id corrupted the click
+  bookkeeping and the modal's reopen guard swallowed genuine clicks.
+  Organism cards now use their own id type and the modal listens to both
+- The dashboard no longer shows STANDBY over completed results when the
+  app is reopened on a config that has not been through Start (for example
+  a custom analysis folder set via `results_dir_override`). Twenty-six
+  call sites across nine app modules resolved the results directory
+  without the override fallback; all now use the shared resolver, and a
+  contract test keeps the raw idiom from returning
+- Verify Taxonomy IDs resolves entries again on GTDB-nomenclature
+  databases (fix landed as `afc5e99` before this release; noted here
+  because it is one of the three reported issues): the lookup no longer
+  narrows the operator's NCBI/GTDB checkbox selection to the loaded
+  database's detected nomenclature, which had disabled NCBI -- the only
+  service that resolves name-only watchlist entries -- on every flextaxd
+  field build
+
+### Changed
+- The watchlist table leads with detectability: the "In Database" column
+  comes before the public-taxonomy lookup, the lookup is labelled
+  "Name check" with a neutral badge instead of a green "Verified" tick,
+  and the report modal's meta row matches. A name found in NCBI/GTDB says
+  nothing about whether the loaded database can detect the organism
+
 ## [0.10.0] - 2026-08-19
 
 Verification-driven release. Every change below was found or confirmed by

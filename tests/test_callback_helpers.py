@@ -139,6 +139,12 @@ class TestPipelineOutputDir:
     def test_neither_exists(self):
         assert get_pipeline_output_dir({"results_output_directory": "/nope"}) is None
 
+    def test_override_only_config_resolves(self, tmp_path):
+        # A config that has not been through Start carries only the
+        # operator's results_dir_override (2026-08-19 bug-report sweep).
+        assert get_pipeline_output_dir(
+            {"results_dir_override": str(tmp_path)}) == str(tmp_path)
+
     def test_validate_wrapper_matches(self, tmp_path):
         cfg = {"results_output_directory": str(tmp_path)}
         assert validate_config_and_get_main_dir(cfg) == get_pipeline_output_dir(cfg)

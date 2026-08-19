@@ -769,6 +769,15 @@ def create_validation_layout() -> html.Div:
         # Consensus results live in a dedicated store so the consensus glob
         # never slows the main validation poll path.
         dcc.Store(id="consensus-data-store", data={}),
+        # Rendered-fingerprint memos for the two loaders above. The memo must
+        # ride the same response as the data (browser round-trip), not an
+        # in-process dict: a response the browser discards then also discards
+        # the memo update, so the next interval tick rebuilds instead of
+        # freezing the stale payload for the rest of a quiet realtime run
+        # (2026-08-19 bug report -- "Results directory not found" shown while
+        # confirmed results sat on disk).
+        dcc.Store(id="validation-rendered-fp"),
+        dcc.Store(id="consensus-rendered-fp"),
 
         # Sub-tabs
         dbc.Tabs(

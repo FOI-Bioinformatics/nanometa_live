@@ -426,13 +426,18 @@ def build_detection_meta(
     items: List[Any] = []
     if detected_at:
         items.append(_meta_row("Reported", detected_at))
+    # Public-taxonomy name lookup. Neutral wording and a neutral badge: a
+    # green "Validated" next to a detection reads as corroboration of the
+    # detection, which this is not -- it records only that the organism's
+    # NAME was found in NCBI/GTDB. Detection evidence is the read counts and
+    # the Validation tab's BLAST/minimap2 results (2026-08-19 audit).
     if taxonomy_validated:
-        txt = "Validated"
+        txt = "Name found in NCBI/GTDB"
         if validation_date:
             txt += f" ({str(validation_date)[:10]})"
-        items.append(_meta_row("Taxonomy ID", txt, badge="success"))
+        items.append(_meta_row("Name check", txt, badge="secondary"))
     elif on_watchlist:
-        items.append(_meta_row("Taxonomy ID", "Not yet validated", badge="secondary"))
+        items.append(_meta_row("Name check", "Not looked up", badge="secondary"))
     # Per-sample breakdown. The card that opens this modal is computed over
     # All Samples while the modal's read count follows the selected sample, so
     # without this the two can disagree with no explanation.
@@ -510,33 +515,92 @@ def build_report_payload(taxid: Any, config: Dict[str, Any],
         return _report_error_payload(taxid, err)
 
 
-def _lookup_organism_reads(taxid: Any, config: Dict[str, Any],
+def _resolve_report_dir(config: Optional[Dict[str, Any]]) -> str:
+    """Results directory for the report modal's lookups.
+
+    Same override-aware resolution as the validation tab (ae63b3a): reading
+    ``results_output_directory`` alone dead-ends on any config that has not
+    been through Start yet.
+    """
+    if not config:
+        return ""
+    from nanometa_live.app.utils.outdir_resolution import (
+        resolve_outdir_for_fingerprint,
+    )
+    return resolve_outdir_for_fingerprint(config) or ""
+
+
+def _report_taxid_candidates(taxid: Any, wl_entry: Any) -> List[int]:
+    """Every taxid the clicked organism may appear under in the Kraken2 report.
+
+    The View Report button carries the WATCHLIST entry taxid (NCBI, or a
+    pseudo-taxid for a name-only entry), while the report's ``taxid`` column
+    holds the DATABASE taxid -- the two coincide only on an NCBI database.
+    Looking up by the clicked taxid alone rendered the modal all-N/A on every
+    GTDB/flextaxd field build (2026-08-19 bug report). Candidates, in order:
+    the clicked taxid, the entry's ``db_taxid`` from the database scan, and
+    the mapping collection's translation.
+    """
+    candidates: List[int] = []
+
+    def _add(value: Any) -> None:
+        try:
+            iv = int(value)
+        except (TypeError, ValueError):
+            return
+        if iv > 0 and iv not in candidates:
+            candidates.append(iv)
+
+    _add(taxid)
+    _add(getattr(wl_entry, "db_taxid", None))
+    try:
+        from nanometa_live.core.taxonomy.taxid_mapping import get_mapping_collection
+        collection = get_mapping_collection()
+        if collection is not None:
+            mapping = collection.mappings.get(int(taxid))
+            if mapping is not None:
+                _add(getattr(mapping, "db_taxid", None))
+    except Exception as e:  # noqa: BLE001 - candidates are best-effort
+        logger.debug("Mapping-collection candidate for taxid %s: %s", taxid, e)
+    return candidates
+
+
+def _lookup_organism_reads(taxids: Any, config: Dict[str, Any],
                            selected_sample: Optional[str]) -> Dict[str, Any]:
-    """Read count / abundance / name / rank for ``taxid`` from Kraken2 data."""
+    """Read count / abundance / name / rank from Kraken2 data.
+
+    ``taxids`` is a candidate list (see :func:`_report_taxid_candidates`);
+    the first candidate present in the report wins. A single taxid is
+    accepted for convenience.
+    """
     out = {"reads": "N/A", "reads_int": None, "abundance": "N/A",
            "name": None, "rank": None}
+    if not isinstance(taxids, (list, tuple)):
+        taxids = [taxids] if taxids else []
     try:
-        main_dir = (config.get("results_output_directory", "")
-                    or config.get("main_dir", "")) if config else ""
+        main_dir = _resolve_report_dir(config)
         if main_dir:
             kraken_df = load_kraken_data(main_dir, selected_sample)
-            if not kraken_df.empty and taxid:
-                match = kraken_df[kraken_df["taxid"] == int(taxid)]
-                if not match.empty:
+            if not kraken_df.empty:
+                for taxid in taxids:
+                    match = kraken_df[kraken_df["taxid"] == int(taxid)]
+                    if match.empty:
+                        continue
                     row = match.iloc[0]
                     out["reads_int"] = int(row.get('reads', 0))
                     out["reads"] = f"{out['reads_int']:,}"
                     out["abundance"] = f"{row.get('%', 0):.1f}%"
                     out["name"] = str(row.get("name", "")).strip()
                     out["rank"] = str(row.get("rank", ""))
+                    break
     except Exception as e:
-        logger.debug("Kraken2 lookup for taxid %s: %s", taxid, e)
+        logger.debug("Kraken2 lookup for taxids %s: %s", taxids, e)
     return out
 
 
-def _lookup_sample_breakdown(taxid: Any,
+def _lookup_sample_breakdown(taxids: Any,
                              config: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Per-sample read counts for ``taxid``, highest first.
+    """Per-sample read counts, highest first, by candidate taxid.
 
     The pathogen card is computed over All Samples while the modal's headline
     read count follows the selected sample; the breakdown makes the difference
@@ -544,19 +608,24 @@ def _lookup_sample_breakdown(taxid: Any,
     Returns [] on any failure -- this is supplementary detail, never a reason
     for the modal not to open.
     """
+    if not isinstance(taxids, (list, tuple)):
+        taxids = [taxids] if taxids else []
     try:
-        main_dir = (config.get("results_output_directory", "")
-                    or config.get("main_dir", "")) if config else ""
-        if not main_dir or not taxid:
+        main_dir = _resolve_report_dir(config)
+        if not main_dir or not taxids:
             return []
         from nanometa_live.core.utils.sample_detector import get_available_samples
         samples = [s for s in get_available_samples(main_dir) if s != "All Samples"]
         if not samples:
             return []
         taxid_to_samples = _load_per_sample_organisms(main_dir, samples, config)
-        return taxid_to_samples.get(int(taxid), [])
+        for taxid in taxids:
+            found = taxid_to_samples.get(int(taxid), [])
+            if found:
+                return found
+        return []
     except Exception as e:
-        logger.debug("Per-sample breakdown for taxid %s: %s", taxid, e)
+        logger.debug("Per-sample breakdown for taxids %s: %s", taxids, e)
         return []
 
 
@@ -688,10 +757,16 @@ def _pathogen_payload(pathogen, taxid, ncbi_taxid, wl_entry, reads, detected_at,
 
 def _build_report_payload_inner(taxid: Any, config: Dict[str, Any],
                                 selected_sample: Optional[str]) -> List[Any]:
-    """Inner builder for :func:`build_report_payload` (may raise)."""
-    reads = _lookup_organism_reads(taxid, config, selected_sample)
-    breakdown = _lookup_sample_breakdown(taxid, config)
+    """Inner builder for :func:`build_report_payload` (may raise).
+
+    The watchlist entry is resolved BEFORE the Kraken2 lookups so its
+    ``db_taxid`` can join the candidate list -- the clicked taxid alone
+    matches nothing on a GTDB/flextaxd database (all-N/A modal, 2026-08-19).
+    """
     pathogen, ncbi_taxid, wl_entry = _resolve_report_pathogen(taxid)
+    candidates = _report_taxid_candidates(taxid, wl_entry)
+    reads = _lookup_organism_reads(candidates, config, selected_sample)
+    breakdown = _lookup_sample_breakdown(candidates, config)
     detected_at = datetime.now().strftime("%Y-%m-%d %H:%M")
     if not pathogen:
         return _unwatched_payload(taxid, ncbi_taxid, reads, detected_at,

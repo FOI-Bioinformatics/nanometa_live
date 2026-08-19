@@ -19,6 +19,7 @@ import pandas as pd
 
 from nanometa_live.app.utils.debounce import (
     should_skip_update, interval_tick_is_redundant,
+    interval_tick_is_redundant_store, fp_to_store,
     mark_rendered,
 )
 from nanometa_live.core.parsers.blast_validation_parser import BlastValidationParser
@@ -129,7 +130,10 @@ def register_validation_callbacks(app: Dash):
         return _format_scope_text(selected_sample), _format_criteria_text(config)
 
     @app.callback(
-        Output("validation-data-store", "data"),
+        [
+            Output("validation-data-store", "data"),
+            Output("validation-rendered-fp", "data"),
+        ],
         [
             Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
@@ -138,13 +142,15 @@ def register_validation_callbacks(app: Dash):
             Input("validation-batch-selector", "value"),
         ],
         [
+            State("validation-rendered-fp", "data"),
             State("app-config", "data"),
             State("backend-status", "data"),
         ],
         prevent_initial_call=True,
     )
     def load_validation_data(_fingerprint, selected_sample, _n_intervals,
-                             view_mode, batch_value, config, backend_status):
+                             view_mode, batch_value, rendered_fp, config,
+                             backend_status):
         """Load validation data filtered by the selected sample.
 
         The Validation tab honours the same sample selector as the
@@ -155,22 +161,32 @@ def register_validation_callbacks(app: Dash):
         aggregates still work.
 
         ``view_mode``/``batch_value`` select cumulative vs a single batch.
+
+        The interval-tick gate uses the STORE-backed rendered-fp memo, not
+        the in-process one: the memo rides the same response as the data, so
+        a response the browser discards also discards the memo update and
+        the next tick rebuilds. With the in-process memo, one lost response
+        froze the stale payload for the rest of a quiet realtime run -- the
+        2026-08-19 field report's "validation never appears" (the panel kept
+        showing the pre-run diagnostic while confirmed results sat on disk).
         """
         batch_id = batch_value if view_mode == "batch" and batch_value else None
-        # Interval ticks are a backstop only; debounce them so a quiet outdir
-        # does not re-parse the validation directory every tick.
-        if interval_tick_is_redundant(ctx, "load_validation_data", _fingerprint):
+        # Interval ticks are a backstop only; skip them when the browser
+        # provably holds a payload built from the current fingerprint.
+        if interval_tick_is_redundant_store(ctx, rendered_fp, _fingerprint):
             raise PreventUpdate
-        mark_rendered("load_validation_data", _fingerprint)
 
         try:
             return build_validation_store(
-                config, backend_status, selected_sample, batch_id)
+                config, backend_status, selected_sample, batch_id
+            ), fp_to_store(_fingerprint)
 
         except Exception as e:
             log_callback_error("load_validation_data", e)
-            return {"results": [], "summary": {}, "message": f"Error loading data: {e}",
-                    "selected_sample": selected_sample}
+            # Do not stamp the memo on failure -- the next tick must retry.
+            return {"results": [], "summary": {},
+                    "message": f"Error loading data: {e}",
+                    "selected_sample": selected_sample}, no_update
 
     @app.callback(
         [
@@ -978,30 +994,42 @@ def register_validation_callbacks(app: Dash):
     # -----------------------------------------------------------------
 
     @app.callback(
-        Output("consensus-data-store", "data"),
+        [
+            Output("consensus-data-store", "data"),
+            Output("consensus-rendered-fp", "data"),
+        ],
         [
             Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
             Input("update-interval", "n_intervals"),
         ],
-        State("app-config", "data"),
+        [
+            State("consensus-rendered-fp", "data"),
+            State("app-config", "data"),
+        ],
         prevent_initial_call=True,
     )
-    def load_consensus_data(_fingerprint, selected_sample, _n_intervals, config):
+    def load_consensus_data(_fingerprint, selected_sample, _n_intervals,
+                            rendered_fp, config):
         """Load consensus stats (small JSON only) into a dedicated store.
 
         Kept off the main validation poll path. The FASTA itself is never read
-        here -- only on download.
+        here -- only on download. Store-backed rendered-fp gate for the same
+        reason as ``load_validation_data`` above: the memo must ride the
+        response so a lost write self-heals on the next tick.
         """
-        if interval_tick_is_redundant(ctx, "load_consensus_data", _fingerprint):
+        if interval_tick_is_redundant_store(ctx, rendered_fp, _fingerprint):
             raise PreventUpdate
-        mark_rendered("load_consensus_data", _fingerprint)
+        stamped = fp_to_store(_fingerprint)
 
         if not config:
-            return {"results": [], "selected_sample": selected_sample}
-        results_dir = config.get("results_output_directory") or config.get("main_dir", "")
+            return {"results": [], "selected_sample": selected_sample}, stamped
+        from nanometa_live.app.utils.outdir_resolution import (
+            resolve_outdir_for_fingerprint,
+        )
+        results_dir = resolve_outdir_for_fingerprint(config)
         if not results_dir or not os.path.isdir(results_dir):
-            return {"results": [], "selected_sample": selected_sample}
+            return {"results": [], "selected_sample": selected_sample}, stamped
 
         try:
             sample = (
@@ -1015,10 +1043,12 @@ def register_validation_callbacks(app: Dash):
                 d = r.__dict__.copy()
                 d["has_sequence"] = r.has_sequence
                 payload.append(d)
-            return {"results": payload, "selected_sample": selected_sample}
+            return {"results": payload, "selected_sample": selected_sample}, stamped
         except Exception as e:
             log_callback_error("load_consensus_data", e)
-            return {"results": [], "selected_sample": selected_sample}
+            # No stamp on failure -- the next tick must retry.
+            return ({"results": [], "selected_sample": selected_sample},
+                    no_update)
 
     @app.callback(
         [

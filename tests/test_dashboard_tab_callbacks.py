@@ -66,14 +66,14 @@ class TestViewReportModalGuard:
         with patch.object(dash_mod, "ctx", fake):
             # view_clicks carries a persisted click from before, but the trigger
             # value is None (recreate) -> the modal must stay closed.
-            out = fn([1], None, None, False, {}, {}, "All Samples")
+            out = fn([1], [], None, None, False, {}, {}, "All Samples")
         assert out[0] is no_update
 
     def test_close_button_closes(self, dash_app):
         fn = self._fn(dash_app)
         fake = MagicMock(triggered_id="pathogen-modal-close", triggered=[{"value": 1}])
         with patch.object(dash_mod, "ctx", fake):
-            out = fn([1], 1, None, True, {}, {}, "All Samples")
+            out = fn([1], [], 1, None, True, {}, {}, "All Samples")
         assert out[0] is False
 
     def test_genuine_click_opens_modal(self, dash_app):
@@ -83,7 +83,7 @@ class TestViewReportModalGuard:
         trig = {"type": "pathogen-view-report", "taxid": 263}
         fake = MagicMock(triggered_id=trig, triggered=[{"value": 1}])
         with patch.object(dash_mod, "ctx", fake):
-            out = fn([1], None, None, False, {}, {}, "All Samples")
+            out = fn([1], [], None, None, False, {}, {}, "All Samples")
         assert out[0] is True  # is_open
         assert str(out[9])  # a taxid string is rendered
 
@@ -96,7 +96,7 @@ class TestViewReportModalGuard:
         with patch.object(dash_mod, "ctx", fake), \
              patch("nanometa_live.app.tabs.dashboard_helpers._build_report_payload_inner",
                    side_effect=RuntimeError("boom")):
-            out = fn([1], None, None, False, {}, {}, "All Samples")
+            out = fn([1], [], None, None, False, {}, {}, "All Samples")
         assert out[0] is True
         assert "could not be built" in str(out[12])  # notes carry the error
 

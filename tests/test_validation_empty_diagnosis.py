@@ -55,7 +55,9 @@ def _load(app, config):
                          input_contains="results-fingerprint")
     with patch.object(vt, "ctx", MagicMock(triggered_id="results-fingerprint",
                                            triggered=[{"prop_id": "x"}])):
-        return fn({"fp": "1"}, None, 0, "cumulative", None, config, None)
+        out, _fp = fn({"fp": "1"}, None, 0, "cumulative", None, None, config,
+                      None)
+        return out
 
 
 class TestEmptyAfterParseIsDiagnosed:

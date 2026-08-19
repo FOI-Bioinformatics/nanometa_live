@@ -136,9 +136,7 @@ def register_progress(app, backend_manager):
         main_dir = ""
         if config:
             main_dir = (
-                config.get("results_output_directory")
-                or config.get("main_dir")
-                or ""
+                resolve_outdir_for_fingerprint(config)
             )
 
         try:
