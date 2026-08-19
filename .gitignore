@@ -206,3 +206,10 @@ results/
 
 # Operator-private exercise material -- never commit
 /private/
+
+# Nextflow launch artifacts. The GUI launches from data_dir, but a run
+# started from the repo (or a debugging invocation) drops its log and
+# cache here. The unsuffixed .nextflow.log was already covered; the
+# rotated logs and the cache directory were not.
+.nextflow/
+.nextflow.log*
