@@ -87,7 +87,23 @@ def should_skip_update(
 # Per-callback memo of the results-fingerprint last rendered, so an
 # interval-driven "backstop" refresh can be skipped when it would only
 # re-render data that is already on screen. Bounded like the debounce dict.
-_render_fp: "OrderedDict[str, object]" = OrderedDict()
+#
+# Entries are ``(fingerprint, stamped_at)`` and EXPIRE after
+# ``RENDER_MEMO_TTL_SECONDS``. The memo is in-process: it records what the
+# server last BUILT, not what the browser holds. If the browser never
+# applies one response (superseded/discarded request), the memo still says
+# "rendered" and, on a quiet outdir where the fingerprint never changes
+# again, every later interval tick is judged redundant -- the panel is
+# stale for the rest of the session. That is exactly how the Validation
+# tab froze in the 2026-08-19 field report. The TTL converts that into at
+# most one TTL of staleness: the next backstop tick past expiry re-renders
+# and re-stamps. Cost on a quiet outdir: one re-render per callback per
+# TTL, absorbed by the loader mtime caches (a full quiet poll measures
+# ~59 ms). Callbacks that need exact self-healing use the store-backed
+# ``interval_tick_is_redundant_store`` instead, whose memo rides the same
+# response as the data.
+RENDER_MEMO_TTL_SECONDS = 120.0
+_render_fp: "OrderedDict[str, tuple]" = OrderedDict()
 _render_fp_lock = threading.Lock()
 
 
@@ -113,7 +129,15 @@ def interval_render_is_redundant(callback_id: str, fingerprint) -> bool:
     """
     fp = _fp_value(fingerprint)
     with _render_fp_lock:
-        return _render_fp.get(callback_id) == fp
+        entry = _render_fp.get(callback_id)
+    if entry is None:
+        return False
+    stored_fp, stamped_at = entry
+    if stored_fp != fp:
+        return False
+    # TTL backstop: an aged memo may describe a response the browser never
+    # applied, so let the refresh through (see the memo comment above).
+    return (time.time() - stamped_at) <= RENDER_MEMO_TTL_SECONDS
 
 
 def interval_tick_is_redundant(ctx, callback_id: str, fingerprint) -> bool:
@@ -173,7 +197,7 @@ def mark_rendered(callback_id: str, fingerprint) -> None:
     interval ticks, so the interval gate reflects the latest displayed state."""
     fp = _fp_value(fingerprint)
     with _render_fp_lock:
-        _render_fp[callback_id] = fp
+        _render_fp[callback_id] = (fp, time.time())
         _render_fp.move_to_end(callback_id)
         if len(_render_fp) > _DEBOUNCE_MAX_KEYS:
             _render_fp.popitem(last=False)
@@ -206,6 +230,11 @@ def reset_debounce(callback_id: Optional[str] = None):
             _debounce_timestamps.pop(callback_id, None)
         else:
             _debounce_timestamps.clear()
+    with _render_fp_lock:
+        if callback_id:
+            _render_fp.pop(callback_id, None)
+        else:
+            _render_fp.clear()
 
 
 class CallbackThrottler:
