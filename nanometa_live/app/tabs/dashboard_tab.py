@@ -486,7 +486,18 @@ def register_dashboard_callbacks(app: Dash):
         ],
         [
             Input("dashboard-overall-status-cache", "data"),
-            Input("sample-selector", "value"),
+            # The selected-sample STORE, never the sample-selector component.
+            # The selector's options are rebuilt from sample-freshness on
+            # every polling tick (the per-sample age pills) and that callback
+            # returns no_update for .value, so the component is almost
+            # continuously marked pending -- and Dash defers any callback
+            # keyed on a pending component's property. Keying these tiles on
+            # the component starved them for an entire realtime run:
+            # "Sequences Analyzed" and "Species Detected" read 0 while the
+            # store held 3,985 reads / 85 organisms and the banner showed 14
+            # pathogens above threshold (2026-08-19 multi-pathogen run).
+            # Every other tab already follows this Store.
+            Input("selected-sample", "data"),
             # Backstop tick: this callback's data is already in the browser
             # (the cache Store), so re-deriving the two counters per tick is
             # near-free -- and it repairs the tile within one poll if the
