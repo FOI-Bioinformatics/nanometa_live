@@ -61,11 +61,25 @@ _REPORT_FRAME_CACHE_MAX = 512
 _report_frame_cache: "OrderedDict[Tuple[str, int, int], pd.DataFrame]" = OrderedDict()
 _report_frame_cache_lock = threading.Lock()
 
+# Last successful parse per physical report, keyed on realpath alone. Served
+# when the CURRENT file state is transiently unparseable -- nanometanf
+# rewrites each sample's cumulative report per batch, and a poll landing
+# inside the write window used to get None for that sample, dropping the
+# whole barcode from the "All Samples" union: the dashboard's cumulative
+# tiles ran BACKWARDS (Sequences Analyzed 3,943 -> 1,393 -> 9,394) and the
+# verdict banner's above-threshold count flickered (2026-08-19 realtime
+# banner audit). For a cumulative report the previous snapshot is strictly
+# better than a missing sample. A stable re-parse replaces the entry, and a
+# report the finder no longer lists is never resurrected -- the fallback
+# only answers for paths a caller still asks about.
+_last_good_frame: "OrderedDict[str, pd.DataFrame]" = OrderedDict()
+
 
 def clear_report_frame_cache() -> None:
     """Drop the per-file parsed-frame cache (test/teardown helper)."""
     with _report_frame_cache_lock:
         _report_frame_cache.clear()
+        _last_good_frame.clear()
 
 
 def _diagnose_empty_kraken_dir(kraken_dir: str, sample: Optional[str] = None) -> str:
@@ -189,14 +203,28 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
 
     df = _parse_kraken2_report_uncached(filepath, check_stability)
     if df is None:
-        # Transient (unstable/empty/malformed) -- do not cache; retry next poll.
-        return None
+        # Transient (unstable/empty/malformed) -- do not cache the miss, but
+        # serve the last successful parse of this physical report so the
+        # sample does not vanish from the aggregate for the poll that landed
+        # inside nanometanf's per-batch rewrite window (see _last_good_frame).
+        with _report_frame_cache_lock:
+            fallback = _last_good_frame.get(key[0])
+        if fallback is not None:
+            logging.debug(
+                "Report transiently unparseable; serving last good parse: %s",
+                filepath,
+            )
+        return fallback
 
     with _report_frame_cache_lock:
         _report_frame_cache[key] = df
         _report_frame_cache.move_to_end(key)
         while len(_report_frame_cache) > _REPORT_FRAME_CACHE_MAX:
             _report_frame_cache.popitem(last=False)
+        _last_good_frame[key[0]] = df
+        _last_good_frame.move_to_end(key[0])
+        while len(_last_good_frame) > _REPORT_FRAME_CACHE_MAX:
+            _last_good_frame.popitem(last=False)
     return df
 
 

@@ -248,6 +248,28 @@ def _refresh_live_profile(kraken_db: str, db_hash: str, mappings_dir: Path):
     return new_profile
 
 
+def _genome_taxid_for_entry(entry) -> int:
+    """Taxid a watchlist entry's reference genome is cached under.
+
+    The database taxid when the entry carries one (every bacterial Bioshield
+    agent: its own ``taxid`` is a synthetic pseudo-taxid), else the entry
+    taxid. Mirrors the resolution order in
+    ``get_validation_species_from_watchlist`` -- looking genomes up by the
+    entry taxid alone made 8 prepared references invisible and reported
+    "0 downloaded / 129 missing" on a Bioshield deployment (2026-08-19).
+    """
+    try:
+        db_taxid = int(entry.get("db_taxid") or 0)
+    except (TypeError, ValueError):
+        db_taxid = 0
+    if db_taxid:
+        return db_taxid
+    try:
+        return int(entry.get("taxid") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def register_preparation_callbacks(app):
     """Register all preparation tab callbacks."""
 
@@ -1553,7 +1575,7 @@ def register_preparation_callbacks(app):
         for entry in entries:
             if not entry.get("enabled"):
                 continue
-            taxid = entry.get("taxid", 0)
+            taxid = _genome_taxid_for_entry(entry)
             if not taxid:
                 continue
             if genome_mgr.has_genome(taxid):

@@ -84,6 +84,7 @@ def parse_minimap2_stats_json(filepath: Path):
         avg_mapq=float(d.get("avg_mapq", 0.0) or 0.0),
         validation_method="minimap2",
         reference_accession=str(d.get("ref_name", "") or ""),
+        reference_length=int(d.get("ref_length", 0) or 0),
         timestamp=str(d.get("timestamp", "") or ""),
     )
     # Real genome breadth comes from the sibling PAF; the stats file's
@@ -112,6 +113,15 @@ def collect_minimap2_results(
     BLAST and minimap2 are distinct methods for the same (sample, taxid), so
     these supplement the blast.tsv results rather than dedup against them; only
     duplicate minimap2 entries are skipped.
+
+    An already-listed pair is not simply skipped: the aggregate
+    ``validation_results.json`` omits ``avg_mapq`` (and often
+    ``ref_name``/``ref_length``) for its minimap2 entries, so an
+    aggregate-seeded result kept ``avg_mapq=0.0`` while the sibling stats
+    file said 59.96 -- the Coverage card rendered "Mapping Confidence
+    0 / 60" for a near-perfect mapping (2026-08-19 realtime sweep). Fields
+    the aggregate never carries are backfilled from disk; fields it does
+    carry stay authoritative.
     """
     # Dedup on the method CLASS, not the literal string: an on-demand run
     # (or an aggregate entry with no per-entry method) carries
@@ -122,7 +132,9 @@ def collect_minimap2_results(
     def _is_coverage(r) -> bool:
         return getattr(r, "validation_method", None) in ("minimap2", "both")
 
-    seen = {(r.sample_id, r.taxid) for r in existing if _is_coverage(r)}
+    existing_by_pair = {
+        (r.sample_id, r.taxid): r for r in existing if _is_coverage(r)
+    }
     out: List = []
     for mm2_dir in minimap2_stats_dirs(results_dir, validation_dir):
         for stats_file in mm2_dir.glob("*.minimap2_stats.json"):
@@ -134,8 +146,28 @@ def collect_minimap2_results(
             if taxid and mm2.taxid != taxid:
                 continue
             key = (mm2.sample_id, mm2.taxid)
-            if key in seen:
+            prior = existing_by_pair.get(key)
+            if prior is not None:
+                _backfill_aggregate_gaps(prior, mm2)
                 continue
-            seen.add(key)
+            existing_by_pair[key] = mm2
             out.append(mm2)
     return out
+
+
+def _backfill_aggregate_gaps(prior, mm2) -> None:
+    """Copy fields the aggregate JSON never carries onto an existing entry.
+
+    Only zero/empty fields are filled, so any value the aggregate DID supply
+    is left authoritative.
+    """
+    if not getattr(prior, "avg_mapq", 0.0) and mm2.avg_mapq:
+        prior.avg_mapq = mm2.avg_mapq
+    if not getattr(prior, "reference_accession", "") and mm2.reference_accession:
+        prior.reference_accession = mm2.reference_accession
+    if not getattr(prior, "reference_length", 0) and getattr(mm2, "reference_length", 0):
+        prior.reference_length = mm2.reference_length
+    if getattr(prior, "genome_breadth", None) is None \
+            and getattr(mm2, "genome_breadth", None) is not None:
+        prior.genome_breadth = mm2.genome_breadth
+        prior.coverage_concentrated = getattr(mm2, "coverage_concentrated", None)

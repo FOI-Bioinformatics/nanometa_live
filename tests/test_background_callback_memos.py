@@ -113,7 +113,8 @@ def test_module_memo_does_not_cross_process():
     from nanometa_live.app.utils.debounce import mark_rendered, _render_fp
 
     mark_rendered("cross_process_probe", FP)
-    assert _render_fp.get("cross_process_probe") == "abc123"  # parent sees it
+    # Entries are (fingerprint, stamped_at) since the TTL backstop.
+    assert _render_fp.get("cross_process_probe")[0] == "abc123"  # parent sees it
 
     ctx = mp.get_context("spawn")
     queue = ctx.Queue()

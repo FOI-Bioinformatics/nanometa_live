@@ -6,6 +6,58 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-08-19
+
+Live-testing release. Every fix below was found by driving real realtime runs
+against the Bioshield database -- first a sweep of every tab, then a focused
+audit of the dashboard and top banner, then a synthetic multi-pathogen
+exercise built from watchlist reference genomes (four barcodes, several
+pathogens per sample, realistic nanopore reads). No pipeline changes;
+nanometanf stays at v1.7.0.
+
+### Fixed
+- BLAST databases are prepared in the taxid space the genomes are cached in.
+  A watchlist entry with no NCBI identity -- every bacterial Bioshield agent,
+  76 of 129 -- is keyed by a synthetic taxid, while its reference genome is
+  stored under the database taxid the reads are extracted for. Both
+  launch-time guards received the entry taxids, so the database builder saw
+  "no genome" for the entire set: a prepared reference reached the pipeline
+  with no BLAST database and nothing in the log, leaving minimap2 coverage
+  populated and the Sequence Matching sub-tab silently empty. The
+  reference-mismatch guard was inert for the same reason, so a
+  wrong-organism reference could be accepted without comment
+- The Watchlist & Preparation tab counts prepared genomes correctly. It
+  reported "0 downloaded / 129 missing" with eight reference genomes present
+  in the configured cache, because it looked them up by the watchlist entry
+  taxid rather than the database taxid the same entry already carries
+- The dashboard metric tiles no longer freeze at zero. "Sequences Analyzed"
+  and "Species Detected" read 0 for a whole realtime run while the verdict
+  banner reported fourteen pathogens above threshold and the browser already
+  held the real figures. The tiles were keyed on the sample-selector
+  component, whose options are rebuilt on every poll from the per-sample
+  freshness pills; a component with a pending output defers every callback
+  keyed on it, so the tiles were starved for as long as data kept arriving.
+  They now follow the shared selected-sample store, as every other tab does
+- Cumulative counters no longer run backwards mid-run. The pipeline rewrites
+  each sample's cumulative classification report per batch; a poll landing
+  inside that write dropped the whole sample from the aggregate, so
+  Sequences Analyzed stepped 3,943 -> 1,393 -> 9,394 and the
+  above-threshold count flickered. The loader now serves the last good parse
+  of a report while it is being rewritten
+- The verdict banner shows completion promptly. It kept its ACTIVE state for
+  over two minutes after a run finished, because the session-end files land
+  before the status flip and the banner's refresh gate keys on file changes
+  alone. A run-state change now bypasses that gate
+- Coverage cards report the real mapping confidence. The session-end
+  aggregate carries no mapping-quality field for its minimap2 entries, so
+  cards showed "0 / 60" under a "30+ reliable" hint for near-perfect
+  alignments; the per-pair statistics are now used to fill what the
+  aggregate omits
+- A panel that misses one browser update repairs itself within two minutes.
+  The refresh gate used a server-side memo of what had been rendered, which
+  diverges from the browser if a response is never applied -- on a quiet
+  realtime run that froze the panel indefinitely. The memo now expires
+
 ## [0.10.1] - 2026-08-19
 
 Field-bug-report release. A user running realtime analysis on a Bioshield
