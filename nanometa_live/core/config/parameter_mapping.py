@@ -534,8 +534,18 @@ def _generate_pathogen_genomes_json(config: Dict[str, Any], main_dir: str):
                     f"Taxid mapping: NCBI {ncbi_taxid} -> Kraken2 db {kraken_taxid}"
                 )
 
-    _warn_on_reference_mismatch(genome_manager, ncbi_taxids, species_list_full)
-    _ensure_blast_dbs_for_validation(genome_manager, ncbi_taxids)
+    # Both guards must look in the taxid space the GENOMES are keyed by. A
+    # watchlist entry with no NCBI identity (every bacterial Bioshield agent)
+    # carries a pseudo-taxid, while its genome is cached under the database
+    # taxid the reads are extracted for -- so passing ncbi_taxids made
+    # blast_db_status report "no genome" for all 129 entries, which is neither
+    # the bucket the builder builds from nor the one it warns about. Measured
+    # on the real watchlist: pseudo taxids -> no_genome 129/129; db taxids ->
+    # present 2, no_genome 127. The whole set reached the pipeline with no
+    # BLAST database and no diagnostic (2026-08-19 multi-pathogen exercise).
+    genome_taxids = _genome_lookup_taxids(species_list_full)
+    _warn_on_reference_mismatch(genome_manager, genome_taxids, species_list_full)
+    _ensure_blast_dbs_for_validation(genome_manager, genome_taxids)
 
     # Write to pipeline_input/, NOT validation/. validation/ is both a
     # detect/archive subdir (BackendManager.RESULT_SUBDIRS) and a nanometanf
@@ -586,8 +596,30 @@ def _write_validation_taxon_names(species_list_full, main_dir):
         logging.debug(f"Could not write validation_taxon_names.json: {e}")
 
 
-def _ensure_blast_dbs_for_validation(genome_manager, ncbi_taxids):
+def _genome_lookup_taxids(species_list):
+    """Taxids under which the validation genomes are actually cached.
+
+    Mirrors the resolution order in ``get_validation_species_from_watchlist``:
+    the Kraken2/database taxid when it differs from the entry taxid (the
+    GTDB/flextaxd case, where the entry carries only a pseudo-taxid),
+    otherwise the entry's own NCBI taxid. Order-preserving and deduplicated.
+    """
+    out = []
+    for species in species_list or []:
+        taxid = species.get("taxid") or 0
+        kraken_taxid = species.get("kraken_taxid") or taxid
+        chosen = kraken_taxid or taxid
+        if chosen and chosen not in out:
+            out.append(chosen)
+    return out
+
+
+def _ensure_blast_dbs_for_validation(genome_manager, genome_taxids):
     """Build any missing BLAST DB for a validation taxid before launch.
+
+    ``genome_taxids`` must be the taxids the GENOMES are cached under (see
+    :func:`_genome_lookup_taxids`) -- not the watchlist entry taxids, which
+    are pseudo-taxids for every entry with no NCBI identity.
 
     BLAST validation needs a built database; minimap2 reads the FASTA directly.
     A genome present without its BLAST DB therefore yields minimap2 hits but an
@@ -595,10 +627,10 @@ def _ensure_blast_dbs_for_validation(genome_manager, ncbi_taxids):
     for every validation taxid that has a genome but no DB; warn (do not fail)
     for any that still lack one so the run proceeds with minimap2.
     """
-    if not ncbi_taxids:
+    if not genome_taxids:
         return
     try:
-        status = genome_manager.blast_db_status(ncbi_taxids)
+        status = genome_manager.blast_db_status(genome_taxids)
     except (AttributeError, OSError) as e:
         logging.debug(f"Could not check BLAST DB status: {e}")
         return
@@ -606,7 +638,7 @@ def _ensure_blast_dbs_for_validation(genome_manager, ncbi_taxids):
         logging.info("Building missing BLAST DB for validation taxid %s", taxid)
         genome_manager.build_blast_db(taxid)
     # Re-check; anything still missing will have no BLAST results this run.
-    still = genome_manager.blast_db_status(ncbi_taxids)
+    still = genome_manager.blast_db_status(genome_taxids)
     if still.get("missing"):
         logging.warning(
             "BLAST DB still missing for taxid(s) %s after build; BLAST "
@@ -615,7 +647,7 @@ def _ensure_blast_dbs_for_validation(genome_manager, ncbi_taxids):
         )
 
 
-def _warn_on_reference_mismatch(genome_manager, ncbi_taxids, species_list_full):
+def _warn_on_reference_mismatch(genome_manager, genome_taxids, species_list_full):
     """Warn if a registered reference genome's organism does not match the
     watchlist species for its taxid.
 
@@ -623,10 +655,18 @@ def _warn_on_reference_mismatch(genome_manager, ncbi_taxids, species_list_full):
     attributed to the wrong organism, so surface it as a warning.
     """
     from nanometa_live.core.parsers.validation_guards import check_reference_organism
-    name_by_taxid = {
-        s.get('taxid', 0): s.get('name', '') for s in species_list_full
-    }
-    for taxid in ncbi_taxids:
+    # Key the expected-name map by the taxid the GENOME is cached under, the
+    # same space this loop iterates. Keying it by the entry taxid returned ""
+    # for every Bioshield agent, and check_reference_organism treats an empty
+    # expected name as "cannot tell" -- so a wrong reference genome passed in
+    # silence even once the loop could see it (2026-08-19).
+    name_by_taxid = {}
+    for s in species_list_full or []:
+        taxid = s.get('taxid') or 0
+        key = s.get('kraken_taxid') or taxid
+        if key:
+            name_by_taxid.setdefault(key, s.get('name', ''))
+    for taxid in genome_taxids:
         has_g = genome_manager.has_genome(taxid)
         logging.debug(f"Taxid {taxid} has_genome={has_g}")
         if not has_g:
