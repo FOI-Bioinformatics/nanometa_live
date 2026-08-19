@@ -56,23 +56,46 @@ def _with_nomenclature(nomenclature):
     )
 
 
-class TestApiSelectionByTaxonomy:
-    def test_ncbi_database_suppresses_gtdb_only_selection(self, validate_fn):
-        # Only GTDB ticked, but the database uses NCBI names -> GTDB is
-        # dropped, leaving no API selected, so the callback returns the
-        # "no databases" payload without instantiating the watchlist manager.
-        from nanometa_live.core.taxonomy.database_profile import Nomenclature
-        with _with_nomenclature(Nomenclature.NCBI):
-            result = _call(validate_fn, ["gtdb"], {"kraken_db": "/db"})
-        assert result == {"error": "no_databases"}
+class TestApiSelectionHonoursTheOperator:
+    """The database's nomenclature must not veto the operator's checkboxes.
 
-    def test_gtdb_database_suppresses_ncbi_only_selection(self, validate_fn):
-        from nanometa_live.core.taxonomy.database_profile import Nomenclature
-        with _with_nomenclature(Nomenclature.GTDB):
-            result = _call(validate_fn, ["ncbi"], {"kraken_db": "/db"})
-        assert result == {"error": "no_databases"}
+    These three cases previously asserted the opposite -- an NCBI database
+    suppressed a GTDB-only selection and vice versa. The narrowing was
+    removed on 2026-08-19: validate_entry_via_api looks up the WATCHLIST
+    ENTRY's name and taxid, never a database node name, so the loaded
+    database's nomenclature does not determine which service can answer. On
+    a GTDB-nomenclature build the narrowing disabled NCBI, which is the
+    service that resolves the 76-of-129 name-only bioshield entries.
+    """
 
-    def test_ncbi_database_runs_ncbi_only(self, validate_fn):
+    def test_gtdb_only_selection_runs_on_an_ncbi_database(self, validate_fn):
+        from nanometa_live.core.taxonomy.database_profile import Nomenclature
+        manager = MagicMock()
+        manager.get_entries_with_toggle_state.return_value = [{"taxid": 562}]
+        manager.bulk_validate_entries.return_value = {"validated": 1, "failed": 0}
+        with patch.object(wt, "get_watchlist_manager", return_value=manager):
+            with _with_nomenclature(Nomenclature.NCBI):
+                _call(validate_fn, ["gtdb"], {"kraken_db": "/db"})
+        kwargs = manager.bulk_validate_entries.call_args.kwargs
+        assert kwargs["use_ncbi"] is False
+        assert kwargs["use_gtdb"] is True
+
+    def test_ncbi_only_selection_runs_on_a_gtdb_database(self, validate_fn):
+        from nanometa_live.core.taxonomy.database_profile import Nomenclature
+        manager = MagicMock()
+        manager.get_entries_with_toggle_state.return_value = [{"taxid": 562}]
+        manager.bulk_validate_entries.return_value = {"validated": 1, "failed": 0}
+        with patch.object(wt, "get_watchlist_manager", return_value=manager):
+            with _with_nomenclature(Nomenclature.GTDB):
+                _call(validate_fn, ["ncbi"], {"kraken_db": "/db"})
+        kwargs = manager.bulk_validate_entries.call_args.kwargs
+        assert kwargs["use_ncbi"] is True, (
+            "NCBI was disabled because the database uses GTDB names -- but "
+            "the lookup queries the watchlist entry, not the database"
+        )
+        assert kwargs["use_gtdb"] is False
+
+    def test_both_ticked_queries_both_on_any_database(self, validate_fn):
         from nanometa_live.core.taxonomy.database_profile import Nomenclature
         manager = MagicMock()
         manager.get_entries_with_toggle_state.return_value = [{"taxid": 562}]
@@ -82,10 +105,14 @@ class TestApiSelectionByTaxonomy:
                 _call(validate_fn, ["ncbi", "gtdb"], {"kraken_db": "/db"})
         kwargs = manager.bulk_validate_entries.call_args.kwargs
         assert kwargs["use_ncbi"] is True
-        assert kwargs["use_gtdb"] is False
+        assert kwargs["use_gtdb"] is True
+
+    def test_nothing_ticked_still_returns_no_databases(self, validate_fn):
+        result = _call(validate_fn, [], {"kraken_db": "/db"})
+        assert result == {"error": "no_databases"}
 
     def test_undetected_nomenclature_queries_both(self, validate_fn):
-        """The safe fallback: narrow nothing when the database is unreadable."""
+        """Unchanged: an unreadable database narrows nothing."""
         from nanometa_live.core.taxonomy.database_profile import Nomenclature
         manager = MagicMock()
         manager.get_entries_with_toggle_state.return_value = [{"taxid": 562}]

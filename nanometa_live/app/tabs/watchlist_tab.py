@@ -40,35 +40,6 @@ from nanometa_live.app.app import background_callback_manager
 logger = logging.getLogger(__name__)
 
 
-def _apis_for_database(
-    config: Optional[Dict[str, Any]],
-    use_ncbi: bool,
-    use_gtdb: bool,
-) -> Tuple[bool, bool]:
-    """Narrow the operator's API selection to what the database can use.
-
-    Which name-resolution service can resolve a database's organism names is
-    a property of the database, so it is read from the detected profile
-    rather than from a config key. This runs inside background callback
-    workers where the index singleton is empty, hence ``load_profile_for_db``,
-    which reads only the small profile object out of the index cache.
-
-    An UNKNOWN nomenclature deliberately narrows nothing: querying both is
-    slower but cannot miss, and an undetectable database is exactly the case
-    where a guess would be wrong.
-    """
-    from nanometa_live.core.taxonomy.database_profile import (
-        Nomenclature, load_profile_for_db,
-    )
-
-    profile = load_profile_for_db(str((config or {}).get("kraken_db", "")))
-    if profile.nomenclature is Nomenclature.NCBI:
-        return use_ncbi, False
-    if profile.nomenclature is Nomenclature.GTDB:
-        return False, use_gtdb
-    return use_ncbi, use_gtdb
-
-
 def _save_last_session(config: Dict[str, Any]) -> None:
     """Persist the WATCHLIST block to last-session.yaml, nothing else.
 
@@ -1045,14 +1016,17 @@ def register_watchlist_callbacks(app: Dash) -> None:
         use_gtdb = "gtdb" in (api_options or [])
         offline_mode = bool((config or {}).get("offline_mode", False))
 
-        # Match the validation API set to the DETECTED nomenclature of the
-        # loaded database. The GTDB API is much slower than NCBI and was
-        # historically the source of multi-minute lockups when degraded, so
-        # querying the one that cannot resolve this database's names is both
-        # wasted work and a stall risk. An undetectable database queries both.
-        # Operators can still tick both boxes for explicit cross-validation.
-        use_ncbi, use_gtdb = _apis_for_database(config, use_ncbi, use_gtdb)
-
+        # The operator's checkboxes are honoured as given. This used to be
+        # narrowed to the loaded database's detected nomenclature, which was
+        # the wrong question: validate_entry_via_api looks up the WATCHLIST
+        # ENTRY's own name and taxid, never a database node name, so the
+        # Kraken2 database's nomenclature says nothing about which service
+        # can answer. On a GTDB-nomenclature build the narrowing disabled
+        # NCBI -- while 76 of 129 bioshield_agents entries are name-only and
+        # NCBI's search_by_name is exactly what resolves them (2026-08-19).
+        # The stall it guarded against is handled where it belongs: the
+        # per-host circuit breaker, and the pseudo-taxid refusal inside
+        # NCBIClient.get_by_taxid that keeps graft ids out of esummary.
         if not use_ncbi and not use_gtdb:
             return {"error": "no_databases"}
 
@@ -1259,9 +1233,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
         use_gtdb = "gtdb" in (api_options or [])
         offline_mode = bool((config or {}).get("offline_mode", False))
 
-        # Same API narrowing as validate_entries; see the note there.
-        use_ncbi, use_gtdb = _apis_for_database(config, use_ncbi, use_gtdb)
-
+        # No narrowing by database profile; see the note in validate_entries.
         if not use_ncbi and not use_gtdb:
             return (
                 {"display": "block"},
