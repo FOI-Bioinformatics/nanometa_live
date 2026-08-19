@@ -89,7 +89,17 @@ class TestConfidence:
 
 
 class TestDetectionMeta:
-    def test_validated_shows_date_and_badge(self):
+    """The name check must not read as corroboration of the detection.
+
+    A green "Taxonomy ID: Validated" row sat directly beneath a detection's
+    read counts. It records only that the organism's NAME was found in
+    NCBI/GTDB -- it says nothing about whether the organism is in the loaded
+    Kraken2 database, let alone whether this detection is real. Detection
+    evidence is the read counts and the Validation tab's BLAST/minimap2
+    results (2026-08-19 taxid-verification audit).
+    """
+
+    def test_name_check_is_neutral_not_a_validation_claim(self):
         rendered = _render(build_detection_meta(
             detected_at="2026-06-03 17:00",
             taxonomy_validated=True,
@@ -98,15 +108,27 @@ class TestDetectionMeta:
         ))
         assert "Reported" in rendered
         assert "2026-06-03 17:00" in rendered
-        assert "Validated" in rendered
+        assert "Name check" in rendered
+        assert "NCBI/GTDB" in rendered
         assert "2026-05-01" in rendered  # date trimmed to 10 chars
         assert "Bacteria > Bacillota > Bacillus anthracis" in rendered
+        assert "Validated" not in rendered, (
+            "a bare 'Validated' beside a detection reads as confirmation of "
+            "the detection itself"
+        )
+        assert 'color="success"' not in rendered and "success" not in rendered, (
+            "the name check must not carry a green/success badge"
+        )
 
-    def test_on_watchlist_unvalidated_shows_not_yet(self):
+    def test_on_watchlist_without_lookup_is_neutral(self):
         rendered = _render(build_detection_meta(
             detected_at="2026-06-03 17:00", on_watchlist=True,
         ))
-        assert "Not yet validated" in rendered
+        assert "Not looked up" in rendered
+        assert "Not yet validated" not in rendered, (
+            "'not yet' implies a pending required step; the lookup is "
+            "optional and impossible on an offline machine"
+        )
 
     def test_gtdb_taxonomy_fallback_when_no_lineage(self):
         rendered = _render(build_detection_meta(

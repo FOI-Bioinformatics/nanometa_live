@@ -426,13 +426,18 @@ def build_detection_meta(
     items: List[Any] = []
     if detected_at:
         items.append(_meta_row("Reported", detected_at))
+    # Public-taxonomy name lookup. Neutral wording and a neutral badge: a
+    # green "Validated" next to a detection reads as corroboration of the
+    # detection, which this is not -- it records only that the organism's
+    # NAME was found in NCBI/GTDB. Detection evidence is the read counts and
+    # the Validation tab's BLAST/minimap2 results (2026-08-19 audit).
     if taxonomy_validated:
-        txt = "Validated"
+        txt = "Name found in NCBI/GTDB"
         if validation_date:
             txt += f" ({str(validation_date)[:10]})"
-        items.append(_meta_row("Taxonomy ID", txt, badge="success"))
+        items.append(_meta_row("Name check", txt, badge="secondary"))
     elif on_watchlist:
-        items.append(_meta_row("Taxonomy ID", "Not yet validated", badge="secondary"))
+        items.append(_meta_row("Name check", "Not looked up", badge="secondary"))
     # Per-sample breakdown. The card that opens this modal is computed over
     # All Samples while the modal's read count follows the selected sample, so
     # without this the two can disagree with no explanation.
