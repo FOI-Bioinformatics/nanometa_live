@@ -266,6 +266,7 @@ def register_dashboard_callbacks(app: Dash):
 
         kraken_has_data = False
         dangerous: List[Dict[str, Any]] = []
+        subthreshold: List[Dict[str, Any]] = []
         n_watched = 0
         # None (not 0) means "depth unknown", which must not be treated as
         # "zero reads" -- the verdict keeps its previous behaviour then.
@@ -303,6 +304,13 @@ def register_dashboard_callbacks(app: Dash):
                     dangerous = _check_pathogens_with_mapping(
                         detected_organisms, config
                     )
+                    # Watchlist hits that landed under their own threshold.
+                    # Shown rather than dropped: the threshold decides whether
+                    # a hit alarms, not whether it exists, and a green banner
+                    # over one is the worst answer available.
+                    subthreshold = _check_pathogens_with_mapping(
+                        detected_organisms, config, below_threshold=True
+                    )
                     kraken_has_data = True
             except Exception as e:
                 logger.error(f"Error updating verdict banner: {e}", exc_info=True)
@@ -310,6 +318,7 @@ def register_dashboard_callbacks(app: Dash):
                 main_dir_available = False
                 kraken_has_data = False
                 dangerous = []
+                subthreshold = []
 
         descriptor = select_verdict(
             has_config=has_config,
@@ -318,6 +327,7 @@ def register_dashboard_callbacks(app: Dash):
             main_dir_available=main_dir_available,
             kraken_has_data=kraken_has_data,
             dangerous=dangerous,
+            subthreshold=subthreshold,
             n_watched=n_watched,
             validation_has_results=validation_has_results,
             total_reads=total_reads,
