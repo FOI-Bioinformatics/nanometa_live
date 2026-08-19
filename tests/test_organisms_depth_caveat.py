@@ -29,7 +29,7 @@ pytestmark = pytest.mark.unit
 
 
 class TestShallowDepthIsQualified:
-    @pytest.mark.parametrize("depth", [0, 1, 10, DEFAULT_LOW_READ_FLOOR - 1])
+    @pytest.mark.parametrize("depth", [0, 1, DEFAULT_LOW_READ_FLOOR - 1])
     def test_a_caveat_is_returned_below_the_floor(self, depth):
         caveat = not_detected_caveat(total_reads=depth, n_not_detected=35)
 

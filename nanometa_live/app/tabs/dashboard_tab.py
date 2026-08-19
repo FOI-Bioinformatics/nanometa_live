@@ -64,6 +64,7 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     _make_banner_content,
     _verdict_banner_style,
     select_verdict,
+    DEFAULT_LOW_READ_FLOOR,
     _classify_dangerous,
     build_pathogen_attribution,
     _get_idle_alerts,
@@ -321,6 +322,14 @@ def register_dashboard_callbacks(app: Dash):
             validation_has_results=validation_has_results,
             total_reads=total_reads,
             highest_alert_threshold=highest_alert_threshold,
+            # The operator's own "too thin to trust" figure. The Organisms
+            # caveat and the exported report already read it; the banner used
+            # to apply the module fallback, so lowering the config value made
+            # the three disagree about the same run.
+            low_read_floor=int(
+                (config or {}).get("min_reads_for_validation")
+                or DEFAULT_LOW_READ_FLOOR
+            ),
         )
 
         # Per-sample attribution for the ACTION REQUIRED subhead (closes

@@ -339,7 +339,7 @@ meaningful when there was something to detect it in.
   organism could not have been called even if every read were it. Check the
   Quality Control tab for why so few reads passed.
 
-The threshold is 50 reads, matching `min_reads_for_validation`: if a detection
+The threshold is 10 reads, matching `min_reads_for_validation`: if a detection
 needs that many reads to be worth confirming, an absence measured over fewer is
 not worth reporting as clear.
 

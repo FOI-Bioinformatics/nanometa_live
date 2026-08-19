@@ -53,8 +53,13 @@ class TestTheAlarmStillFires:
 
 class TestTheAlarmCarriesItsDepth:
     def test_a_shallow_detection_says_how_shallow(self):
-        """The real case: 6 of 11 reads on a negative control."""
-        sub = _verdict(11).subtitle
+        """The real case: 6 of 11 reads on a negative control.
+
+        Pass the floor explicitly: 11 reads was shallow against the old
+        default of 50, and the point of the test is the wording, not which
+        number the product currently ships.
+        """
+        sub = _verdict(11, low_read_floor=50).subtitle
 
         assert "11" in sub, (
             f"an alarm raised on 11 total reads does not say so: {sub!r}"
@@ -67,7 +72,7 @@ class TestTheAlarmCarriesItsDepth:
         assert "34,141" not in sub
         assert "only" not in sub.lower()
 
-    @pytest.mark.parametrize("depth", [1, 11, DEFAULT_LOW_READ_FLOOR - 1])
+    @pytest.mark.parametrize("depth", [1, DEFAULT_LOW_READ_FLOOR - 1])
     def test_every_depth_below_the_floor_is_qualified(self, depth):
         assert "only" in _verdict(depth).subtitle.lower()
 
@@ -81,7 +86,7 @@ class TestTheAlarmCarriesItsDepth:
 
     def test_the_threshold_count_survives(self):
         """The existing wording must not be lost to the new clause."""
-        sub = _verdict(11).subtitle
+        sub = _verdict(11, low_read_floor=50).subtitle
 
         assert "1 of 35" in sub
         assert "alert threshold" in sub
@@ -97,7 +102,7 @@ class TestMonitoringToo:
             "name": "Some organism", "taxid": 1, "reads": 6,
             "threat_level": "moderate", "alert_threshold": 5,
         }]
-        v = _verdict(11, dangerous=moderate)
+        v = _verdict(11, dangerous=moderate, low_read_floor=50)
 
         assert v.state == "MONITORING"
         assert "11" in v.subtitle, (

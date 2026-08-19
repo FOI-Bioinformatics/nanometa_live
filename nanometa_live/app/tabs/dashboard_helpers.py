@@ -850,11 +850,15 @@ def _not_screened_descriptor() -> VerdictDescriptor:
 
 
 #: Read count below which a negative screening result carries little weight.
-#: Anchored to ``min_reads_for_validation`` (default 50), the depth the
+#: Anchored to ``min_reads_for_validation`` (default 10), the depth the
 #: pipeline already treats as the floor for confirming an organism: if a
-#: detection needs 50 reads to be worth validating, an absence measured over
-#: fewer than 50 is not worth reporting as a clear result either.
-DEFAULT_LOW_READ_FLOOR = 50
+#: detection needs that many reads to be worth validating, an absence
+#: measured over fewer is not worth reporting as a clear result either.
+#: This is only the FALLBACK -- every caller should pass the operator's
+#: configured value, as ``update_verdict_banner`` does, so the banner, the
+#: Organisms caveat and the exported report cannot describe the same depth
+#: three different ways (2026-08-19).
+DEFAULT_LOW_READ_FLOOR = 10
 
 
 def _insufficient_reads_descriptor(
