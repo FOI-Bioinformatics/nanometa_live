@@ -358,7 +358,7 @@ pipeline_source: "remote:dev"   # or "/Users/.../nanometanf"
 
 # Validation
 blast_validation: true
-min_reads_for_validation: 50
+min_reads_for_validation: 10
 validation_identity_threshold: 90   # the only identity key; see below
 e_val_cutoff: 0.01
 
@@ -992,8 +992,10 @@ negative result an operator may act on.
 Three guards now enforce the distinction; keep them:
 
 - `select_verdict` returns **NOT_SCREENED** when `n_watched == 0` and
-  **INSUFFICIENT_READS** when `total_reads < low_read_floor` (default 50,
-  anchored to `min_reads_for_validation`). Both are amber, not green: wording
+  **INSUFFICIENT_READS** when `total_reads < low_read_floor` (default 10,
+  anchored to `min_reads_for_validation`, and passed from the config by
+  `update_verdict_banner` so the banner, the Organisms caveat and the
+  exported report cannot disagree about the same depth). Both are amber, not green: wording
   alone is insufficient when a green banner reads as reassurance on its own.
   The genuine ALL CLEAR states its own depth so it cannot be confused with a
   shallow one.

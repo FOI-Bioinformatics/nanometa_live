@@ -32,15 +32,59 @@ logger = logging.getLogger(__name__)
 _GENERIC_FIRST_TOKENS = {"the", "a", "an"}
 
 
+#: Words that appear between a species and its subspecies epithet.
+_SUBSP_MARKERS = {"subsp", "subspecies", "ssp", "serovar", "biovar", "bv", "pv"}
+#: Strain/assembly noise that must never be read as an epithet.
+_STRAIN_MARKERS = {"str", "strain", "chromosome", "complete", "genome",
+                   "sequence", "plasmid", "isolate", "substr"}
+
+
+def _clean_token(token: str) -> str:
+    """Alphabetic core of a token, with any GTDB polyphyly suffix removed.
+
+    GTDB splits polyphyletic genera and suffixes the parts (``Bacillus_A``);
+    the suffix names the same organism, so it must not read as a different
+    genus. Stripping at the underscore also normalises ``Escherichia coli_E``.
+    """
+    base = token.split("_", 1)[0]
+    return "".join(ch for ch in base if ch.isalpha())
+
+
 def _genus_of(name: Optional[str]) -> str:
     """Return the lowercased genus (first alphabetic token) of an organism name."""
     if not name:
         return ""
     for token in str(name).strip().split():
-        t = "".join(ch for ch in token if ch.isalpha())
+        t = _clean_token(token)
         if t and t.lower() not in _GENERIC_FIRST_TOKENS:
             return t.lower()
     return ""
+
+
+def _epithets_of(name: Optional[str]) -> list:
+    """Lowercased [genus, species, subspecies] epithets present in ``name``.
+
+    Stops at strain/assembly noise ("str. Ames Ancestor", "chromosome I") so a
+    strain name is never mistaken for a subspecies. Returns as many ranks as
+    the string actually carries -- a genus-only expectation yields one entry,
+    which is what keeps a coarse reference from reading as a mismatch.
+    """
+    if not name:
+        return []
+    out = []
+    for token in str(name).strip().split():
+        low = "".join(ch for ch in token if ch.isalpha() or ch == ".").rstrip(".").lower()
+        if low in _STRAIN_MARKERS:
+            break
+        if low in _SUBSP_MARKERS:
+            continue
+        t = _clean_token(token)
+        if not t or t.lower() in _GENERIC_FIRST_TOKENS:
+            continue
+        out.append(t.lower())
+        if len(out) == 3:
+            break
+    return out
 
 
 def reference_organism_from_fasta(genome_path) -> Optional[str]:
@@ -80,6 +124,39 @@ def check_reference_organism(genome_path, expected_name: Optional[str]) -> Optio
     exp_genus = _genus_of(expected_name)
     if not ref_genus or not exp_genus:
         return None
+
+    # Compare every rank BOTH sides actually name. Genus alone missed the
+    # corruption that mattered -- a novicida genome filed as holarctica, where
+    # Type A vs Type B is a different clinical call (2026-08-19 audit). Only
+    # ranks present on both sides are compared, so a deliberately coarse
+    # reference (genus- or species-level for an organism GTDB cannot resolve
+    # further) still passes.
+    ref_parts = _epithets_of(ref_org)
+    exp_parts = _epithets_of(expected_name)
+
+    # GTDB files some species as a subspecies of a sibling: the Bioshield
+    # database calls B. pseudomallei "Burkholderia mallei subsp. pseudomallei"
+    # and B. suis "Brucella melitensis subsp. suis". The correct reference for
+    # such an entry is the NCBI species genome, whose header names that
+    # species -- same organism, different nomenclature. Accept it, or the
+    # guard cries wolf on every correct genome for the field database and
+    # trains operators to ignore the warning that matters.
+    if (len(exp_parts) == 3 and len(ref_parts) >= 2
+            and exp_parts[0] == ref_parts[0]
+            and exp_parts[2] == ref_parts[1]):
+        return None
+
+    depth = min(len(ref_parts), len(exp_parts))
+    for i in range(depth):
+        if ref_parts[i] != exp_parts[i]:
+            rank = ("genus", "species", "subspecies")[i]
+            return (
+                f"Reference genome organism '{ref_org}' does not match the "
+                f"expected species '{expected_name}' ({rank} "
+                f"'{ref_parts[i]}' vs '{exp_parts[i]}'). Validation results "
+                "for this target may be attributed to the wrong organism -- "
+                "check the registered reference genome."
+            )
     if ref_genus != exp_genus:
         return (
             f"Reference genome organism '{ref_org}' does not match the expected "

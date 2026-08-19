@@ -6,6 +6,58 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-08-19
+
+Follow-on to 0.10.2 from the same live-testing campaign: a dilution series
+(1%, 0.5%, 0.1% and below) simulated from Bioshield reference genomes, plus a
+fresh-installation walkthrough. All three requested dilution levels were
+detected, alarmed and confirmed by both validation methods; the fixes below
+are what the exercise exposed on the way. No pipeline changes; nanometanf
+stays at v1.7.0.
+
+### Fixed
+- Dashboard metric tiles no longer freeze mid-run. The sample selector
+  embedded a second-resolution freshness age in its option labels, so the
+  component was rewritten on every poll and stayed permanently pending; Dash
+  defers every callback keyed on a pending component, which starved the
+  `selected-sample` store and the tiles that follow it. Measured on a live
+  run: zero calls in 35 seconds to either the selection or metrics callback
+  while the status store already held 8,469 reads. The label now carries a
+  coarse freshness bucket and the callback short-circuits when the option
+  signature is unchanged; the precise age is still shown by the per-sample
+  freshness pills. 0.10.2 addressed a symptom one hop downstream -- this is
+  the cause.
+- Reference genomes can be downloaded for database-keyed watchlist entries at
+  all. The two roles of a taxid are now separate: fetch by the NCBI taxid
+  (what a public database can answer) and cache under the database taxid
+  (what every consumer looks up), via `genome_cache_taxid` /
+  `genome_fetch_taxid`. Four call sites -- missing-genome and status queries,
+  and the readiness checklist's genome and BLAST-database rows -- were
+  reporting every Bioshield genome missing because they looked under the
+  entry's synthetic taxid.
+- The reference-genome guard compares at subspecies rank. It was genus-only,
+  so a cached genome labelled *F. tularensis* subsp. *holarctica* that
+  actually contained subsp. *novicida* passed silently and every Type B
+  coverage figure was measured against the wrong reference. The guard now
+  tolerates GTDB genus suffixes (`Bacillus_A`) and GTDB lumping (*B.
+  pseudomallei* filed under *B. mallei*), so it does not cry wolf on correct
+  field-database genomes.
+
+### Changed
+- The read-depth floor defaults to 10 instead of 50, and the verdict banner
+  reads it from `min_reads_for_validation` like the Organisms tab and the
+  exported report already did. The banner had a hard-coded 50, so with the new
+  default the same detection would have been described three different ways.
+- Watchlist hits below their alert threshold are shown rather than dropped,
+  and never behind a green ALL CLEAR. A threshold decides whether a hit
+  *alarms*, not whether it *exists*. Measured on a dilution barcode:
+  *F. tularensis* subsp. *holarctica* at 8 reads and *Bacillus anthracis* at 7
+  cleared the discovery floor but not their threshold of 10, and the Dashboard
+  showed neither while the Organisms tab and the exported report both marked
+  them DETECTED. Such hits now produce an amber BELOW ALERT THRESHOLD verdict
+  naming the organisms and the depth. An above-threshold hit still wins
+  outright and a genuinely clean screen is still green.
+
 ## [0.10.2] - 2026-08-19
 
 Live-testing release. Every fix below was found by driving real realtime runs

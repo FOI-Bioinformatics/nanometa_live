@@ -980,7 +980,8 @@ class WatchlistManager:
 
     def check_organisms(
         self,
-        detected_organisms: List[Dict[str, Any]]
+        detected_organisms: List[Dict[str, Any]],
+        below_threshold: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Check detected organisms against the watchlist.
@@ -990,8 +991,17 @@ class WatchlistManager:
         Args:
             detected_organisms: List of dicts with 'taxid', 'name', 'reads', 'abundance'
 
+        Args (continued):
+            below_threshold: return the matches that were filtered OUT for
+                sitting under their entry's ``alert_threshold`` instead of the
+                ones above it. Those are still evidence -- the threshold
+                decides whether a hit alarms, not whether it exists -- and the
+                Dashboard renders them so a sub-threshold detection cannot hide
+                behind a green ALL CLEAR (2026-08-19 operator decision).
+
         Returns:
-            List of alert dictionaries for matched organisms exceeding thresholds
+            List of alert dictionaries for matched organisms exceeding
+            thresholds -- or, with ``below_threshold``, those under them
         """
         alerts = []
         active_entries = self.get_active_entries()
@@ -1037,8 +1047,14 @@ class WatchlistManager:
                         best_score = score
                         entry = e
 
-            # Only consider matches above threshold (0.7)
-            if entry and best_score >= 0.7 and reads >= entry.alert_threshold:
+            # 0.7 is the NAME-match floor; alert_threshold then decides which
+            # side of the fence the hit lands on. Both sides are real matches
+            # -- see check_organisms_with_mapping for why sub-threshold hits
+            # are returned rather than dropped.
+            if entry and best_score >= 0.7:
+                above = reads >= entry.alert_threshold
+                if above == below_threshold:
+                    continue
                 alerts.append({
                     "taxid": entry.taxid,
                     # The taxid as it appeared in the Kraken2 report. Callers
@@ -1858,6 +1874,7 @@ class WatchlistManager:
         self,
         detected_organisms: List[Dict[str, Any]],
         mapping_collection: Optional["TaxidMappingCollection"] = None,
+        below_threshold: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Check detected organisms against the watchlist using taxid mappings.
@@ -1876,7 +1893,8 @@ class WatchlistManager:
         """
         # If no mapping collection, fall back to standard method
         if not mapping_collection:
-            return self.check_organisms(detected_organisms)
+            return self.check_organisms(
+                detected_organisms, below_threshold=below_threshold)
 
 
         alerts = []
@@ -1944,8 +1962,12 @@ class WatchlistManager:
                         entry = e
                         match_method = "name_matching"
 
-            # Only consider matches above threshold
-            if entry and best_score >= 0.7 and reads >= entry.alert_threshold:
+            # Threshold decides which side of the fence a match lands on;
+            # both sides are real matches.
+            if entry and best_score >= 0.7:
+                above = reads >= entry.alert_threshold
+                if above == below_threshold:
+                    continue
                 alerts.append({
                     "taxid": entry.taxid,
                     "detected_taxid": detected_taxid,

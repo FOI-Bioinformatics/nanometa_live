@@ -64,6 +64,7 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     _make_banner_content,
     _verdict_banner_style,
     select_verdict,
+    DEFAULT_LOW_READ_FLOOR,
     _classify_dangerous,
     build_pathogen_attribution,
     _get_idle_alerts,
@@ -265,6 +266,7 @@ def register_dashboard_callbacks(app: Dash):
 
         kraken_has_data = False
         dangerous: List[Dict[str, Any]] = []
+        subthreshold: List[Dict[str, Any]] = []
         n_watched = 0
         # None (not 0) means "depth unknown", which must not be treated as
         # "zero reads" -- the verdict keeps its previous behaviour then.
@@ -302,6 +304,13 @@ def register_dashboard_callbacks(app: Dash):
                     dangerous = _check_pathogens_with_mapping(
                         detected_organisms, config
                     )
+                    # Watchlist hits that landed under their own threshold.
+                    # Shown rather than dropped: the threshold decides whether
+                    # a hit alarms, not whether it exists, and a green banner
+                    # over one is the worst answer available.
+                    subthreshold = _check_pathogens_with_mapping(
+                        detected_organisms, config, below_threshold=True
+                    )
                     kraken_has_data = True
             except Exception as e:
                 logger.error(f"Error updating verdict banner: {e}", exc_info=True)
@@ -309,6 +318,7 @@ def register_dashboard_callbacks(app: Dash):
                 main_dir_available = False
                 kraken_has_data = False
                 dangerous = []
+                subthreshold = []
 
         descriptor = select_verdict(
             has_config=has_config,
@@ -317,10 +327,19 @@ def register_dashboard_callbacks(app: Dash):
             main_dir_available=main_dir_available,
             kraken_has_data=kraken_has_data,
             dangerous=dangerous,
+            subthreshold=subthreshold,
             n_watched=n_watched,
             validation_has_results=validation_has_results,
             total_reads=total_reads,
             highest_alert_threshold=highest_alert_threshold,
+            # The operator's own "too thin to trust" figure. The Organisms
+            # caveat and the exported report already read it; the banner used
+            # to apply the module fallback, so lowering the config value made
+            # the three disagree about the same run.
+            low_read_floor=int(
+                (config or {}).get("min_reads_for_validation")
+                or DEFAULT_LOW_READ_FLOOR
+            ),
         )
 
         # Per-sample attribution for the ACTION REQUIRED subhead (closes

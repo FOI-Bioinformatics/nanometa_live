@@ -850,11 +850,15 @@ def _not_screened_descriptor() -> VerdictDescriptor:
 
 
 #: Read count below which a negative screening result carries little weight.
-#: Anchored to ``min_reads_for_validation`` (default 50), the depth the
+#: Anchored to ``min_reads_for_validation`` (default 10), the depth the
 #: pipeline already treats as the floor for confirming an organism: if a
-#: detection needs 50 reads to be worth validating, an absence measured over
-#: fewer than 50 is not worth reporting as a clear result either.
-DEFAULT_LOW_READ_FLOOR = 50
+#: detection needs that many reads to be worth validating, an absence
+#: measured over fewer is not worth reporting as a clear result either.
+#: This is only the FALLBACK -- every caller should pass the operator's
+#: configured value, as ``update_verdict_banner`` does, so the banner, the
+#: Organisms caveat and the exported report cannot describe the same depth
+#: three different ways (2026-08-19).
+DEFAULT_LOW_READ_FLOOR = 10
 
 
 def _insufficient_reads_descriptor(
@@ -1011,6 +1015,47 @@ def _detection_descriptor(
     )
 
 
+
+def _subthreshold_descriptor(
+    subthreshold: List[Dict[str, Any]], n_watched: int,
+    total_reads: Optional[int] = None,
+) -> VerdictDescriptor:
+    """Watchlist organisms found, all below their own alert thresholds.
+
+    Amber, never green. The threshold an operator sets decides whether a hit
+    raises an ALARM; it does not decide whether the hit EXISTS. Reporting
+    "ALL CLEAR" over 8 reads of a Tier-1 select agent -- while the Organisms
+    tab and the exported report both marked it DETECTED -- was the sharpest
+    cross-surface disagreement in the tool (measured on the 2026-08-19
+    dilution run, barcode03). Green is now reserved for a screen that found
+    nothing at all.
+
+    Names the organisms, because a verdict that will not say what it saw
+    sends the operator hunting across tabs for it.
+    """
+    names = []
+    for hit in subthreshold:
+        name = str(hit.get("name") or "").strip()
+        if name and name not in names:
+            names.append(name)
+    shown = ", ".join(names[:3])
+    if len(names) > 3:
+        shown += f" (+{len(names) - 3} more)"
+    n = len(subthreshold)
+    depth = f", across {total_reads:,} reads" if total_reads else ""
+    return VerdictDescriptor(
+        state="MONITORING",
+        icon="eye-fill", icon_color="#fd7e14",
+        title="BELOW ALERT THRESHOLD",
+        subtitle=(
+            f"{n} watched organism{'s' if n != 1 else ''} detected below "
+            f"the alert threshold{depth}: {shown}. Not an alarm -- but not a "
+            "clear screen either."
+        ),
+        sub_color="#664d03", bg_color="#fff3cd", border_color="#fd7e14",
+    )
+
+
 def select_verdict(
     *,
     has_config: bool,
@@ -1019,6 +1064,7 @@ def select_verdict(
     main_dir_available: bool,
     kraken_has_data: bool,
     dangerous: List[Dict[str, Any]],
+    subthreshold: Optional[List[Dict[str, Any]]] = None,
     n_watched: int,
     validation_has_results: bool,
     total_reads: Optional[int] = None,
@@ -1063,6 +1109,13 @@ def select_verdict(
             return _insufficient_reads_descriptor(
                 total_reads, n_watched, highest_alert_threshold
             )
+
+        # Found something, just not loudly enough to alarm. Shown here so a
+        # sub-threshold detection can never hide behind a green banner
+        # (2026-08-19 operator decision).
+        if subthreshold:
+            return _subthreshold_descriptor(
+                subthreshold, n_watched, total_reads)
 
         return _all_clear_descriptor(n_watched, total_reads)
 
@@ -2028,7 +2081,8 @@ def _get_active_watchlist_entries(config: Dict[str, Any]) -> List[Dict[str, Any]
 
 def _check_pathogens_with_mapping(
     detected_organisms: List[Dict[str, Any]],
-    config: Optional[Dict[str, Any]] = None
+    config: Optional[Dict[str, Any]] = None,
+    below_threshold: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Check detected organisms against pathogen database using proper taxid mapping.
@@ -2040,6 +2094,10 @@ def _check_pathogens_with_mapping(
     Args:
         detected_organisms: List of dicts with 'taxid', 'name', 'reads', 'abundance'
         config: Optional config dict (for loading watchlist if needed)
+        below_threshold: return the matches sitting UNDER their entry's alert
+            threshold instead of those above it. Those are still evidence and
+            the Dashboard shows them, so a quiet detection cannot hide behind
+            a green ALL CLEAR (2026-08-19).
 
     Returns:
         List of detected dangerous pathogens with full information
@@ -2067,17 +2125,23 @@ def _check_pathogens_with_mapping(
             # 3. Name-based matching as fallback
             return manager.check_organisms_with_mapping(
                 detected_organisms,
-                mapping_collection
+                mapping_collection,
+                below_threshold=below_threshold,
             )
         else:
             # Fall back to standard method if no mapping available
             # This still uses name matching as backup
             logger.debug("No taxid mapping available, falling back to standard organism check")
-            return manager.check_organisms(detected_organisms)
+            return manager.check_organisms(
+                detected_organisms, below_threshold=below_threshold)
 
     except Exception as e:
         logger.warning(f"Error in pathogen check with mapping: {e}")
         # Fall back to old method on error
+        if below_threshold:
+            # The legacy fallback has no sub-threshold notion; better to show
+            # nothing here than to invent it.
+            return []
         watched_species = _get_active_watchlist_entries(config) if config else []
         return check_for_dangerous_pathogens(detected_organisms, watched_species)
 

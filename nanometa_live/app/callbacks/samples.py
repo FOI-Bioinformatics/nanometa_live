@@ -98,7 +98,47 @@ def _dataless_samples(available_samples, file_mapping, config) -> set:
     return dataless
 
 
+#: Coarse freshness bands used for the sample-selector option labels. The
+#: precise age is a live-ticking number; embedding it in the options rewrote
+#: the dropdown on every poll, which kept the component permanently pending
+#: and starved every callback keyed on it -- including the dashboard metric
+#: tiles, which read 0 for an entire run (2026-08-19 dilution exercise).
+_FRESHNESS_BANDS = ((60.0, "now"), (300.0, "recent"), (3600.0, "idle"))
+
+
+def _freshness_bucket(age_seconds):
+    """Coarse band for an age in seconds: now / recent / idle / stale / --."""
+    if age_seconds is None or age_seconds < 0:
+        return "--"
+    for limit, label in _FRESHNESS_BANDS:
+        if age_seconds < limit:
+            return label
+    return "stale"
+
+
+def _selector_signature(available_samples, freshness, dataless):
+    """What the selector's options actually depend on.
+
+    Two renders with the same signature would produce interchangeable
+    options, so the callback can short-circuit and let the component settle.
+    """
+    freshness = freshness or {}
+    return tuple(
+        (
+            sample,
+            _freshness_bucket(freshness.get(sample)),
+            sample in (dataless or set()),
+        )
+        for sample in (available_samples or [])
+    )
+
+
 def register_samples(app, backend_manager):
+    # Per-registration memo of the last rendered selector signature. A closure
+    # rather than module state, so a re-registered app -- every test -- starts
+    # clean.
+    _last_selector_signature: dict = {}
+
     @app.callback(
         [
             Output("available-samples", "data"),
@@ -192,6 +232,17 @@ def register_samples(app, backend_manager):
 
         dataless = _dataless_samples(available_samples, file_mapping, config)
 
+        # Rebuild the options only when they would actually differ. The
+        # freshness age ticks every second, so without this the dropdown was
+        # rewritten on every poll, leaving the component permanently pending
+        # -- and Dash defers every callback keyed on a pending component, so
+        # the selected-sample store and the dashboard metric tiles were
+        # starved for whole runs (2026-08-19).
+        signature = _selector_signature(available_samples, freshness, dataless)
+        if signature == _last_selector_signature.get("v"):
+            raise PreventUpdate
+        _last_selector_signature["v"] = signature
+
         options = []
         for sample in available_samples:
             if sample == "All Samples":
@@ -199,8 +250,11 @@ def register_samples(app, backend_manager):
                 continue
             last_ts = freshness.get(sample)
             age = age_seconds_for(last_ts, now)
+            # Band, not seconds: the exact age is shown by the per-sample
+            # freshness pills elsewhere; here it only has to stay stable.
             parts = [html.Span(sample, className="text-truncate"),
-                     freshness_pill(sample, age, class_name="ms-2")]
+                     freshness_pill(sample, age, class_name="ms-2",
+                                    label_override=_freshness_bucket(age))]
             if sample in dataless:
                 # Distinct from the freshness pill's muted "--", which means
                 # "age unknown" and is also shown for samples that do have data.

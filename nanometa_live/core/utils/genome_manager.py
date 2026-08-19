@@ -192,6 +192,45 @@ def _validate_fasta(fasta_path: Path) -> bool:
         return False
 
 
+def genome_cache_taxid(entry) -> int:
+    """The taxid a watchlist entry's reference genome is CACHED under.
+
+    The database taxid when the entry carries one -- every bacterial
+    Bioshield agent, whose own ``taxid`` is a synthetic pseudo-taxid -- else
+    the entry taxid. This is the single rule every consumer must use; four
+    call sites once used ``entry["taxid"]`` directly and consequently
+    reported every prepared Bioshield genome as missing.
+    """
+    for key in ("db_taxid", "taxid"):
+        try:
+            value = int((entry or {}).get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if value:
+            return value
+    return 0
+
+
+def genome_fetch_taxid(entry) -> int:
+    """The taxid a public database can actually be asked about.
+
+    A real NCBI taxid (``taxid_ncbi``, else the entry taxid when that is
+    itself real). Returns 0 when the entry has no NCBI identity, so callers
+    fall back to a name-based lookup instead of sending an id that answers
+    HTTP 400 and trips the shared per-host circuit breaker. A database graft
+    id is never offered: it looks real by range alone but names a different
+    organism at NCBI.
+    """
+    for key in ("taxid_ncbi", "taxid"):
+        try:
+            value = int((entry or {}).get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if value and _is_real_ncbi_taxid(value):
+            return value
+    return 0
+
+
 class GenomeDownloadManager:
     """
     Manages pathogen reference genome downloads and BLAST database building.
@@ -575,7 +614,7 @@ class GenomeDownloadManager:
         """
         missing = []
         for entry in entries:
-            taxid = entry.get("taxid", 0)
+            taxid = genome_cache_taxid(entry)
             if taxid and not self.has_genome(taxid):
                 missing.append(entry)
         return missing
@@ -1160,9 +1199,15 @@ class GenomeDownloadManager:
             logger.exception(f"Download failed for {accession}: {e}")
             return None
 
-    def _download_ncbi_genome_by_taxid(self, taxid: int, species_name: str) -> Tuple[Optional[Path], Optional[str]]:
+    def _download_ncbi_genome_by_taxid(
+        self, taxid: int, species_name: str, cache_taxid: Optional[int] = None,
+    ) -> Tuple[Optional[Path], Optional[str]]:
         """
         Download genome directly by taxid using datasets CLI.
+
+        ``taxid`` is asked of NCBI; ``cache_taxid`` (default: the same) is the
+        key the file is written under, so a database-keyed entry lands where
+        every consumer looks for it.
 
         This bypasses the REST API accession lookup, which fails for some
         taxa (notably fungi). The datasets CLI supports downloading by
@@ -1179,7 +1224,7 @@ class GenomeDownloadManager:
             logger.error("NCBI 'datasets' CLI not found.")
             return None, None
 
-        output_file = self.genomes_dir / f"{taxid}.fasta"
+        output_file = self.genomes_dir / f"{cache_taxid or taxid}.fasta"
 
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -1498,7 +1543,7 @@ class GenomeDownloadManager:
         """
         status = {}
         for entry in entries:
-            taxid = entry.get("taxid", 0)
+            taxid = genome_cache_taxid(entry)
             if taxid:
                 status[taxid] = {
                     "genome": self.has_genome(taxid),
@@ -1830,9 +1875,19 @@ class GenomeDownloadManager:
         results: Dict[int, Optional[Path]] = {}
 
         for entry in entries:
-            taxid = entry.get("taxid", 0)
+            # Two different taxids, two different jobs: the genome is CACHED
+            # under the database taxid every consumer looks up, and FETCHED
+            # by a real NCBI taxid, which is the only kind a public database
+            # can answer. Keying both on the watchlist entry taxid made
+            # Bioshield downloads impossible -- NCBI cannot resolve a
+            # synthetic id, and a success would have landed under a filename
+            # nothing reads (2026-08-19).
+            entry = dict(entry)
+            taxid = genome_cache_taxid(entry)
             if not taxid:
                 continue
+            entry["taxid"] = taxid
+            entry["_fetch_taxid"] = genome_fetch_taxid(entry)
             if self.has_genome(taxid):
                 results[taxid] = self.get_genome_path(taxid)
             else:
@@ -1877,10 +1932,10 @@ class GenomeDownloadManager:
         # Step 3: Batch NCBI accession lookup for non-virus entries. Only real
         # NCBI taxids can be looked up by taxid; pseudo-taxids resolve by name.
         ncbi_lookup_taxids = [
-            e["taxid"]
+            e["_fetch_taxid"]
             for e in other_entries
             if e.get("_kingdom") not in ("Bacteria", "Archaea")
-            and _is_real_ncbi_taxid(e["taxid"])
+            and e.get("_fetch_taxid")
         ]
         ncbi_accessions: Dict[int, Tuple[str, Dict[str, Any]]] = {}
         if ncbi_lookup_taxids:
@@ -1926,12 +1981,13 @@ class GenomeDownloadManager:
                             accession, meta_dict = gtdb_result
                             source = "gtdb"
 
-                    # Fallback to NCBI (only with a real NCBI taxid)
-                    if not accession and _is_real_ncbi_taxid(taxid):
-                        if taxid in ncbi_accessions:
-                            accession, meta_dict = ncbi_accessions[taxid]
+                    # Fallback to NCBI, asked by the taxid NCBI can answer.
+                    fetch_taxid = entry.get("_fetch_taxid") or 0
+                    if not accession and fetch_taxid:
+                        if fetch_taxid in ncbi_accessions:
+                            accession, meta_dict = ncbi_accessions[fetch_taxid]
                         else:
-                            ncbi_result = self.fetch_ncbi_accession(taxid)
+                            ncbi_result = self.fetch_ncbi_accession(fetch_taxid)
                             if ncbi_result:
                                 accession, meta_dict = ncbi_result
 
@@ -1953,11 +2009,13 @@ class GenomeDownloadManager:
                                 ),
                             )
 
-                    # Fallback: download directly by taxid via CLI (real NCBI
-                    # taxids only; a pseudo-taxid would query NCBI with garbage).
-                    if not path and _is_real_ncbi_taxid(taxid):
+                    # Fallback: download directly by taxid via CLI, again
+                    # using the NCBI-resolvable id but writing under the
+                    # cache taxid.
+                    if not path and fetch_taxid:
                         logger.info(f"Trying direct taxid download for {name}...")
-                        cli_path, cli_accession = self._download_ncbi_genome_by_taxid(taxid, name)
+                        cli_path, cli_accession = self._download_ncbi_genome_by_taxid(
+                            fetch_taxid, name, cache_taxid=taxid)
                         if cli_path:
                             self._metadata[taxid] = GenomeMetadata(
                                 taxid=taxid,

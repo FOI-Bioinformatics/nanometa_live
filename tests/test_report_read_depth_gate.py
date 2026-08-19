@@ -83,7 +83,7 @@ class TestShallowDepthIsNotAllClear:
         )
         assert "1" in html, "the actual read count belongs in the message"
 
-    @pytest.mark.parametrize("depth", [0, 1, 10, DEFAULT_LOW_READ_FLOOR - 1])
+    @pytest.mark.parametrize("depth", [0, 1, DEFAULT_LOW_READ_FLOOR - 1])
     def test_every_depth_below_the_floor_is_gated(self, depth):
         assert "banner-safe" not in _render(CLEAN, total_reads=depth)
 

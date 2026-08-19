@@ -53,6 +53,7 @@ def freshness_pill(
     *,
     pill: bool = True,
     class_name: str = "ms-2",
+    label_override: Optional[str] = None,
 ) -> dbc.Badge:
     """
     Build a freshness badge for a single sample.
@@ -69,7 +70,7 @@ def freshness_pill(
         attributes documented in the UX spec.
     """
     color, text_class = _band_for_age(age_seconds)
-    label = _format_age_label(age_seconds)
+    label = label_override or _format_age_label(age_seconds)
     badge_class = f"{class_name} {text_class}".strip()
     # dbc.Badge does not accept aria-* kwargs; the component's title
     # attribute is enough for the visible tooltip and the surrounding

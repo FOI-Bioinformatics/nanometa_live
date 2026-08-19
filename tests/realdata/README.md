@@ -63,7 +63,7 @@ reads in the input file and clears the pipeline.
 ## Configuration the assertions assume
 
 The no-false-positive assertions assume the default
-`min_reads_for_validation` (50). A run configured with a lower floor (for
+`min_reads_for_validation` (10). A run configured with a lower floor (for
 example 1, as in exploratory validation runs) will validate the 6
 index-hopped taxid-263 reads in the negative control -- they are genuine
 *F. tularensis* molecules, so BLAST confirms them -- and those tests then
