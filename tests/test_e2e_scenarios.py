@@ -70,11 +70,25 @@ class TestFreshStartToDataAppearance:
         assert int(species.iloc[0]["reads"]) == 100
 
     def test_data_then_corrupt_file(self, tmp_path: pathlib.Path) -> None:
-        """Corrupted report files are gracefully rejected."""
+        """A corrupt rewrite serves the last good parse, not an empty frame.
+
+        A truncated/invalid report after a successful parse is
+        indistinguishable from nanometanf's in-place per-batch rewrite
+        caught mid-write, and dropping the sample made the dashboard's
+        cumulative counters run backwards (2026-08-19 banner audit; see
+        tests/test_unstable_report_fallback.py). The loader now serves the
+        previous snapshot for that path. A corrupt file with NO prior good
+        parse still yields an empty frame (covered there).
+        """
+        from nanometa_live.core.utils.classification_loaders import (
+            clear_report_frame_cache,
+        )
+
         report_path = tmp_path / "kraken2" / "barcode01.kraken2.report.txt"
         _write_kraken_report(report_path, taxid=562, reads=50)
 
         clear_data_cache()
+        clear_report_frame_cache()
         df = load_kraken_data(str(tmp_path))
         assert not df.empty
 
@@ -83,7 +97,8 @@ class TestFreshStartToDataAppearance:
 
         clear_data_cache()
         df_corrupt = load_kraken_data(str(tmp_path))
-        assert df_corrupt.empty
+        assert not df_corrupt.empty, "last good parse must survive a corrupt rewrite"
+        assert int(df_corrupt[df_corrupt["rank"] == "S"].iloc[0]["taxid"]) == 562
 
 
 class TestRealtimeBatchAccumulation:

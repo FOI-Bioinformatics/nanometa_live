@@ -86,6 +86,13 @@ from nanometa_live.app.tabs.dashboard_helpers import (
 )
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
 
+# Last run-state (ACTIVE/COMPLETE/STANDBY) the verdict banner rendered. A
+# state flip bypasses the banner's fingerprint gate so completion shows on
+# the next tick instead of waiting out the render-memo TTL (see
+# update_verdict_banner). In-process on purpose: after a restart the worst
+# case is one extra render.
+_VERDICT_LAST_RUN_STATE: dict = {}
+
 logger = logging.getLogger(__name__)
 def register_dashboard_callbacks(app: Dash):
     """
@@ -194,11 +201,28 @@ def register_dashboard_callbacks(app: Dash):
         # continues through validation, so a fingerprint-only debounce would
         # freeze the countdown. The redundant-render short-circuit therefore
         # applies only when the pipeline is not actively running.
+        #
+        # A RUN-STATE change also bypasses the gate. backend-status is a State
+        # here (as an Input its every-tick churn would defeat the gate), so
+        # the completion flip arrives only when something else re-renders the
+        # banner -- and the session-end files land BEFORE the status poll
+        # flips, leaving the fingerprint already quiet. Measured on the
+        # 2026-08-19 banner audit: pipeline exit 14:18:59, header "Complete"
+        # 14:19:17, banner chip still "ACTIVE" until the render-memo TTL fired
+        # at 14:21:23. The state memo makes the flip land on the next tick.
         pipeline_running_now = bool(status and status.get("running"))
+        run_state_now = (
+            "ACTIVE" if pipeline_running_now
+            else "COMPLETE" if bool(status and status.get("completed"))
+            else "STANDBY"
+        )
+        state_changed = _VERDICT_LAST_RUN_STATE.get("v") != run_state_now
         if (not pipeline_running_now
+                and not state_changed
                 and interval_tick_is_redundant(ctx, "dashboard_verdict_banner", _fingerprint)):
             raise PreventUpdate
         mark_rendered("dashboard_verdict_banner", _fingerprint)
+        _VERDICT_LAST_RUN_STATE["v"] = run_state_now
 
         pipeline_running = status.get("running", False) if status else False
         pipeline_completed = status.get("completed", False) if status else False
@@ -463,6 +487,14 @@ def register_dashboard_callbacks(app: Dash):
         [
             Input("dashboard-overall-status-cache", "data"),
             Input("sample-selector", "value"),
+            # Backstop tick: this callback's data is already in the browser
+            # (the cache Store), so re-deriving the two counters per tick is
+            # near-free -- and it repairs the tile within one poll if the
+            # response for a cache update was dropped. Observed live
+            # (2026-08-19 banner audit): Sequences Analyzed sat at 12,798
+            # for ~5 minutes mid-run while the cache Store already carried
+            # 51,669.
+            Input("update-interval", "n_intervals"),
         ],
         [
             State("app-config", "data"),
@@ -471,7 +503,8 @@ def register_dashboard_callbacks(app: Dash):
         ]
     )
     def update_dashboard_metrics(overall_status, selected_dashboard_sample,
-                                 config, available_samples, prev_cache):
+                                 _n_intervals, config, available_samples,
+                                 prev_cache):
         """Update sequences and organisms counts from cached overall status."""
         idle_metrics = ("0", "0", prev_cache or {})
 
