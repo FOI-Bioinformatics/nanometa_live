@@ -159,7 +159,9 @@ class ReadinessChecker:
         # cache_dir the checks use -- so the checks see the current set.
         if reload_genomes:
             try:
-                from nanometa_live.core.utils.genome_manager import get_genome_manager
+                from nanometa_live.core.utils.genome_manager import (
+                genome_cache_taxid, get_genome_manager,
+            )
                 get_genome_manager(
                     config.get("genome_cache_dir") or str(home)
                 ).reload_metadata()
@@ -758,7 +760,9 @@ class ReadinessChecker:
         active_entries: Optional[List[Dict[str, Any]]],
     ) -> CheckResult:
         try:
-            from nanometa_live.core.utils.genome_manager import get_genome_manager
+            from nanometa_live.core.utils.genome_manager import (
+                genome_cache_taxid, get_genome_manager,
+            )
             gm = get_genome_manager(config.get("genome_cache_dir") or str(home))
             if active_entries is None:
                 raise AttributeError("watchlist unavailable")
@@ -767,9 +771,12 @@ class ReadinessChecker:
                     "Watchlist Genomes", False, Severity.WARNING,
                     "No enabled watchlist entries — enable pathogens in the Watchlist & Preparation tab"
                 )
+            # Genomes are cached under the DATABASE taxid; keying on the
+            # entry taxid reported every Bioshield genome missing.
             missing = [e["name"] for e in active_entries
-                       if e["taxid"] and not gm.has_genome(e["taxid"])]
-            total = sum(1 for e in active_entries if e["taxid"])
+                       if genome_cache_taxid(e)
+                       and not gm.has_genome(genome_cache_taxid(e))]
+            total = sum(1 for e in active_entries if genome_cache_taxid(e))
             have = total - len(missing)
             if not missing:
                 return CheckResult(
@@ -811,7 +818,9 @@ class ReadinessChecker:
                 "BLAST validation not enabled"
             )
         try:
-            from nanometa_live.core.utils.genome_manager import get_genome_manager
+            from nanometa_live.core.utils.genome_manager import (
+                genome_cache_taxid, get_genome_manager,
+            )
             gm = get_genome_manager(config.get("genome_cache_dir") or str(home))
             if active_entries is None:
                 raise AttributeError("watchlist unavailable")
@@ -821,8 +830,9 @@ class ReadinessChecker:
                     "No enabled watchlist entries — enable pathogens in the Watchlist & Preparation tab"
                 )
             missing = [e["name"] for e in active_entries
-                       if e["taxid"] and not gm.has_blast_db(e["taxid"])]
-            total = sum(1 for e in active_entries if e["taxid"])
+                       if genome_cache_taxid(e)
+                       and not gm.has_blast_db(genome_cache_taxid(e))]
+            total = sum(1 for e in active_entries if genome_cache_taxid(e))
             have = total - len(missing)
             if not missing:
                 return CheckResult(

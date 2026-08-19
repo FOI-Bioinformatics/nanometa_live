@@ -1618,8 +1618,19 @@ def register_preparation_callbacks(app):
             ]
 
         # Store missing entries for background download callback
+        # Carry BOTH identifiers through to the download worker: it fetches
+        # by the NCBI taxid (the only kind NCBI can answer) and caches under
+        # the database taxid (the only one consumers look up). Passing the
+        # entry taxid alone made Bioshield genome downloads impossible --
+        # unresolvable id, and a success would have landed under a filename
+        # nothing reads (2026-08-19).
         missing_data = [
-            {"taxid": e.get("taxid", 0), "name": e.get("name", "")}
+            {
+                "taxid": e.get("taxid", 0),
+                "db_taxid": e.get("db_taxid"),
+                "taxid_ncbi": e.get("taxid_ncbi"),
+                "name": e.get("name", ""),
+            }
             for e in missing_entries
         ]
 
