@@ -1659,15 +1659,21 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         prevent_initial_call=True,
     )
     def update_snapshot_on_apply(n_clicks, config):
-        """Update snapshot to match current config after Apply (session-only)."""
+        """Rebase the dirty-check snapshot on Apply and clear the badge.
+
+        Apply both applies AND persists (``apply_config_changes`` calls
+        ``autosave_session_config``, which writes last-session.yaml), so
+        after it the form matches the applied config and the file on disk
+        alike -- nothing is pending. The previous version returned
+        ``no_update`` for both outputs, on the reasoning that Apply was
+        session-only and a separate Save wrote the file; that design is
+        gone, and the leftover behaviour left the "Modified" badge lit for
+        the rest of the session. A badge that never clears is not a signal,
+        and it claims unsaved work that does not exist (2026-08-19 config
+        audit). Rebasing the snapshot also matters for correctness: the
+        next edit must be compared against what was just applied, not
+        against the boot config.
+        """
         if not n_clicks or not config:
             return no_update, no_update
-
-        # Note: After Apply, the form matches the config, so it's "not modified"
-        # relative to the applied state. However, it may still differ from
-        # the saved-to-disk state. For clarity, we only update modified to False
-        # when actually saving to file.
-        #
-        # Actually, let's keep modified=True if it differs from what's on disk,
-        # so the user knows they need to save. We won't update snapshot here.
-        return no_update, no_update
+        return config, False

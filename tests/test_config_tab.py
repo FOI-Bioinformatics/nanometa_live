@@ -107,3 +107,42 @@ class TestValidatePipelinePath:
     def test_nonexistent_is_danger(self, cfg_app, tmp_path):
         fn = _callback_fn(cfg_app, "pipeline-path-status.children")
         assert "text-danger" in _class(fn(str(tmp_path / "nope")))
+
+
+class TestModifiedBadgeClearsOnApply:
+    """Apply Settings must clear the "Modified" badge.
+
+    Apply persists the config (autosave_session_config writes
+    last-session.yaml), so after it the form matches BOTH the applied state
+    and what is on disk -- there is nothing left for the operator to save.
+    The badge nevertheless stayed lit forever: update_snapshot_on_apply
+    returned no_update for both outputs, on the reasoning (in a comment
+    that outlived the design it described) that Apply was session-only and
+    a separate Save wrote the file. A badge that never clears cannot be
+    read as a signal, and it tells the operator they have unsaved work when
+    they do not (2026-08-19 config audit).
+    """
+
+    def _fn(self, cfg_app):
+        return _callback_fn(
+            cfg_app, "saved-config-snapshot",
+            input_contains="apply-config-button",
+        )
+
+    def test_apply_clears_modified_and_updates_snapshot(self, cfg_app):
+        applied = {"analysis_name": "run A", "kraken_db": "/db"}
+        snapshot, modified = self._fn(cfg_app)(1, applied)
+
+        assert modified is False, (
+            "the Modified badge must clear on Apply: the config has been "
+            "applied AND autosaved, so nothing is pending"
+        )
+        assert snapshot == applied, (
+            "the dirty-check baseline must become the applied config, else "
+            "the next edit is compared against a stale snapshot"
+        )
+
+    def test_no_clicks_is_a_noop(self, cfg_app):
+        from dash import no_update
+        snapshot, modified = self._fn(cfg_app)(None, {"a": 1})
+        assert snapshot is no_update and modified is no_update

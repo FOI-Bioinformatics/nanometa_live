@@ -12,7 +12,10 @@ Handles all callback logic for the Watchlist management tab:
 import logging
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+import yaml
 
 from dash import Dash, Input, Output, State, ctx, ALL, MATCH, no_update
 from dash.exceptions import PreventUpdate
@@ -67,13 +70,47 @@ def _apis_for_database(
 
 
 def _save_last_session(config: Dict[str, Any]) -> None:
-    """Save config to last-session.yaml for persistence across restarts."""
+    """Persist the WATCHLIST block to last-session.yaml, nothing else.
+
+    A watchlist toggle owns the ``watchlist`` key and no other setting, so
+    the rest of the file is taken from what is already persisted rather than
+    from this callback's in-memory ``app-config``. That store re-seeds from
+    the BOOT config on every page load (boot is fresh by design), so writing
+    it wholesale silently reverted settings the operator had applied:
+    Apply min_reads_for_validation=50, reload, toggle a watchlist, and the
+    file said 1 again (2026-08-19 config audit). This is the mirror of the
+    protection ``autosave_session_config`` already gives the watchlist when
+    a config write runs with an empty singleton.
+
+    Falls back to the supplied config when nothing is persisted yet (first
+    write) or the file is unreadable -- the toggle must never be lost.
+    """
     try:
         from nanometa_live.core.config.config_loader import ConfigLoader
         from nanometa_live.core.utils.paths import NanometaPaths
         paths = NanometaPaths.from_config(config)
+        session_path = Path(paths.configs) / "last-session.yaml"
+
+        save_config = dict(config)
+        if session_path.is_file():
+            try:
+                import yaml
+                with open(session_path) as fh:
+                    persisted = yaml.safe_load(fh)
+                if isinstance(persisted, dict):
+                    persisted["watchlist"] = config.get(
+                        "watchlist", persisted.get("watchlist")
+                    )
+                    save_config = persisted
+            except (OSError, yaml.YAMLError):
+                logger.debug(
+                    "last-session.yaml unreadable; writing the in-memory "
+                    "config so the watchlist change is not lost",
+                    exc_info=True,
+                )
+
         loader = ConfigLoader(str(paths.configs))
-        loader.save_config(config, "last-session.yaml")
+        loader.save_config(save_config, "last-session.yaml")
     except Exception:
         logger.debug("Could not save last-session.yaml", exc_info=True)
 
