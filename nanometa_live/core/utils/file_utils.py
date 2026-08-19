@@ -13,8 +13,6 @@ import tarfile
 import hashlib
 import tempfile
 from typing import List, Optional
-import requests
-from tqdm.auto import tqdm
 
 
 def ensure_directory(directory: str) -> bool:
@@ -143,54 +141,6 @@ def extract_archive(archive_path: str, extract_dir: str) -> bool:
         return False
     except (FileNotFoundError, PermissionError, OSError) as e:
         logging.error(f"I/O error extracting archive {archive_path}: {e}")
-        return False
-
-
-def download_file(url: str, destination: str, overwrite: bool = False) -> bool:
-    """
-    Download a file from a URL.
-
-    Args:
-        url: URL to download from
-        destination: Local path to save the file
-        overwrite: Whether to overwrite existing file
-
-    Returns:
-        True if successful, False otherwise
-    """
-    try:
-        # Check if destination exists and we don't want to overwrite
-        if os.path.exists(destination) and not overwrite:
-            logging.info(f"File {destination} already exists and overwrite=False")
-            return True
-
-        # Ensure destination directory exists
-        ensure_directory(os.path.dirname(destination))
-
-        # Download with progress bar
-        response = requests.get(url, stream=True, timeout=60)
-        total_size = int(response.headers.get("content-length", 0))
-
-        with open(destination, "wb") as f, tqdm(
-            desc=os.path.basename(destination),
-            total=total_size,
-            unit="B",
-            unit_scale=True,
-            unit_divisor=1024,
-        ) as pbar:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-                    pbar.update(len(chunk))
-
-        logging.info(f"Downloaded {url} to {destination}")
-        return True
-
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Network error downloading {url}: {e}")
-        return False
-    except (PermissionError, OSError) as e:
-        logging.error(f"I/O error saving download to {destination}: {e}")
         return False
 
 

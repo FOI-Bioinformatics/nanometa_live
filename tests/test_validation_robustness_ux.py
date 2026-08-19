@@ -399,8 +399,9 @@ def test_get_validation_results_batch_id_reads_batch_dir(tmp_path):
 def test_load_real_coverage_batch_path(tmp_path):
     _write_batch_minimap2(tmp_path, "barcode14", 263, "batch_2000")
     cfg = {"results_output_directory": str(tmp_path)}
-    cov = _load_real_coverage("barcode14_263", cfg, 0, batch_id="batch_2000")
+    cov, state = _load_real_coverage("barcode14_263", cfg, 0, batch_id="batch_2000")
     assert cov is not None
+    assert state == "ok"
     assert cov.ref_name == "ref1"
     assert round(cov.breadth, 3) == 0.1   # 100 of 1000 bp covered in this batch
 

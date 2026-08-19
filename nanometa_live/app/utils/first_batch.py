@@ -12,9 +12,13 @@ from __future__ import annotations
 import os
 from typing import Iterable
 
+from nanometa_live.core.utils.loader_utils import RESULTS_WATCHED_SUBDIRS
+
 # Subdirectories that nanometanf may write into during normal operation.
 # A non-empty file in any of these counts as "first batch arrived".
-TRACKED_SUBDIRS = ("kraken2", "fastp", "seqkit", "validation", "taxpasta")
+# Shared with check_data_freshness so the two watch lists cannot drift
+# (2026-08-17 audit, finding C6).
+TRACKED_SUBDIRS = RESULTS_WATCHED_SUBDIRS
 
 
 def _dir_has_nonempty_file(path: str) -> bool:

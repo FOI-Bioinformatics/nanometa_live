@@ -341,7 +341,9 @@ Notes:
 ```yaml
 # Input/Output
 nanopore_output_directory: "/path/to/fastq"
-results_output_directory: "/path/to/output"
+# results_output_directory is COMPUTED (see outdir_resolution below); the
+# operator's explicit results-folder choice goes in results_dir_override.
+results_dir_override: ""
 kraken_db: "/path/to/kraken2/db"
 
 # Processing
@@ -368,6 +370,35 @@ negative_control_samples: []
 
 update_interval_seconds: 30
 ```
+
+### Run output directory is derived, not configured
+
+`app/utils/outdir_resolution.py:resolve_run_outdir` decides where a run
+writes: a non-empty `results_dir_override` verbatim, otherwise
+`<project>/results/<slug(analysis_name)>`. It deliberately ignores
+`results_output_directory` — that key holds the *computed* run dir, written
+back at Start so the viewer follows it. A hand-written config that sets only
+`results_output_directory` is silently redirected to the derived folder
+(observed on the 2026-08-18 release check); use `results_dir_override` for an
+explicit custom analysis folder.
+
+### Kraken2 sizing belongs to nanometanf, not the generated `-c` config
+
+`create_nextflow_config` deliberately emits NO `withName: 'KRAKEN2_KRAKEN2'`
+block: the `-c` file outranks every pipeline config layer, and the retired
+pin (`cpus = 1` from the old `kraken_cores` default, `memory = '8.GB'`) made
+every GUI-launched classification single-threaded regardless of nanometanf's
+`max(4, max_cpus/forks)` scaling (2026-08-18 audit). The GUI instead passes
+`--kraken2_memory_gb` sized from the measured `hash.k2d` (+4 GB, floor 12)
+and `kraken2_memory_mapping` resolved by `_resolve_kraken2_memory_mapping`
+(explicit config value wins, else True everywhere — ARM included; mmap is
+proven under Rosetta and nanometanf drops the flag on retry). Neither
+`kraken_cores` nor `kraken_memory_mapping` is written by
+`create_default_config` any more; a default there turns an "explicit
+override wins" resolver into dead code (the `min_perc_identity` pattern).
+The readiness checklist warns when `kraken_db` sits on a removable/network
+volume (mmap random access over USB is pathological; the content-derived
+`db_hash` makes a local copy free of re-preparation).
 
 ### Parameter mapping (non-obvious renames)
 
@@ -712,9 +743,27 @@ Added 2026-06-02 (nanometanf + nanometa_live `validation-cumulative-realtime`).
 against the existing pipeline outdir. Previously-validated `(sample, taxid)` pairs hit
 the Nextflow work cache; only newly-added taxids run end-to-end.
 
-Genome list `<outdir>/validation/pathogen_genomes.json` is cumulative across calls
-(atomic `.replace()`). Aggregator re-runs each invocation to rebuild
-`validation_results.json` over the union.
+**The launch must share the main run's resume context** (2026-08-18): `-resume`
+resolves through `<launch dir>/.nextflow/history` and the `-work-dir` task
+cache, so `resolve_launch_context` launches from `data_dir` with
+`-work-dir <data_dir>/work`, exactly matching `NextflowManager`. Sharing only
+the outdir shares nothing `-resume` reads. The GUI's aggregate-scope
+`sample="all"` token is mapped to "no filter" before the result read-back
+(`_normalise_sample_filter`) — used verbatim it is a sample name matching
+nothing, and a successful run was reported as failed. Every failure path
+writes the command, cwd and stdout/stderr to `<results>/logs/` via
+`write_failure_log`, because the launcher runs in a background worker whose
+logger output reaches no file.
+
+Genome list `<outdir>/on_demand_validation/pathogen_genomes.json` is cumulative
+across calls (atomic `.replace()`), seeded on first call from the main run's
+`pipeline_input/pathogen_genomes.json`. The seed is load-bearing: nanometanf's
+aggregator rebuilds `validation_results.json` over exactly the taxids it is
+handed, so an unseeded first call shrank the aggregate to its single taxid.
+On the pipeline side, `--validation_only` discovers samples from
+`*.kraken2.classified.fastq.gz` in `--kraken2_output_dir` (stem = sample id,
+matching the subworkflow join); the `--reads_dir` flat glob is only a
+fallback and cannot see `by_barcode` subdirectories.
 
 On load, an on-demand result *supersedes* the pipeline result for the same
 `(sample, taxid, method)` in `ValidationParser.get_validation_results` (it is an

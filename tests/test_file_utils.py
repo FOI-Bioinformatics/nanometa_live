@@ -2,8 +2,9 @@
 Unit tests for core/utils/file_utils.py.
 
 A broad set of small filesystem helpers. All real I/O is confined to tmp_path;
-the one network function (download_file) and the command probe are mocked so no
-external resource is touched.
+the command probe is mocked so no external resource is touched. (The module's
+former network helper, download_file, was removed in the 2026-08-17 audit --
+it was unreferenced and had no offline_mode gate.)
 """
 
 import gzip
@@ -103,30 +104,6 @@ class TestExtractArchive:
 
     def test_missing_archive_returns_false(self, tmp_path):
         assert fu.extract_archive(str(tmp_path / "no.zip"), str(tmp_path / "out")) is False
-
-
-class TestDownloadFile:
-    def test_skips_when_exists_and_no_overwrite(self, tmp_path):
-        dst = tmp_path / "f.bin"
-        dst.write_text("present")
-        with patch("requests.get") as get:
-            assert fu.download_file("http://x/f.bin", str(dst)) is True
-        get.assert_not_called()
-
-    def test_writes_downloaded_chunks(self, tmp_path):
-        dst = tmp_path / "sub" / "f.bin"
-        resp = MagicMock()
-        resp.headers = {"content-length": "6"}
-        resp.iter_content.return_value = [b"abc", b"def"]
-        with patch("requests.get", return_value=resp):
-            assert fu.download_file("http://x/f.bin", str(dst)) is True
-        assert dst.read_bytes() == b"abcdef"
-
-    def test_network_error_returns_false(self, tmp_path):
-        import requests
-
-        with patch("requests.get", side_effect=requests.exceptions.ConnectionError()):
-            assert fu.download_file("http://x/f.bin", str(tmp_path / "f.bin")) is False
 
 
 class TestCalculateFileHash:

@@ -277,14 +277,16 @@ class TestBuiltinWatchlistResolution:
         """
         mgr = BundleManager()
         dst = tmp_path / "watchlists"
+        manifest = {"export_warnings": []}
         # Should not raise.
-        mgr._copy_builtin_watchlists(dst)
-        # At least one YAML should be copied across.
+        mgr._copy_builtin_watchlists(dst, manifest)
+        # At least one YAML should be copied across, with no warning recorded.
         assert dst.exists()
         copied = list(dst.glob("*.yaml"))
         assert len(copied) > 0, (
             "Expected built-in watchlist YAMLs to be copied to the bundle"
         )
+        assert manifest["export_warnings"] == []
 
     def test_export_bundle_runs_under_editable_install(self, tmp_path):
         """End-to-end: full export_bundle() succeeds on an editable install."""
@@ -2019,11 +2021,13 @@ class TestEmptyKrakenDbWarning:
 
 class TestMissingMainNfHardFail:
     def test_missing_main_nf_fails(self, tmp_path):
+        # Since the 2026-08-17 audit (finding G2) this is caught by the
+        # shared pre-copy verification as a blocker, so the import aborts
+        # before copying anything rather than after the rebase step.
         bundle = _make_config_bundle(
             tmp_path, with_pipeline=True, pipeline_has_main=False)
         result, _ = _do_import(tmp_path, bundle, kraken_db_path="x")
         assert result["success"] is False
-        assert result.get("pipeline_main_missing") is True
         assert any("main.nf" in w for w in result["warnings"])
 
     def test_main_nf_present_succeeds(self, tmp_path):

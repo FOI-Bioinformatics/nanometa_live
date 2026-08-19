@@ -20,6 +20,7 @@ from dash import html
 
 from nanometa_live.core.workflow.backend_manager import BackendManager
 from nanometa_live.core.config.config_loader import ConfigLoader
+from nanometa_live.core.config.parameter_mapping import _coerce_minimap2_preset
 from nanometa_live.app.utils.github_branches import fetch_nanometanf_branches
 from nanometa_live.app.app import background_callback_manager
 
@@ -650,6 +651,9 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             # Newly exposed settings (2026-05-31)
             Output("max-file-age-input", "value"),
             Output("min-reads-for-validation-input", "value"),
+            # Assembly (2026-08-17)
+            Output("enable-assembly-input", "value"),
+            Output("assembler-input", "value"),
             Output("config-form-initialized", "data"),
         ],
         Input("refresh-form-trigger", "data"),
@@ -668,7 +672,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         # operator's in-progress changes survive a tab switch.
         config = {**(config or {}), **(draft or {})}
         if not config:
-            return [no_update] * 42
+            return [no_update] * 41  # must match the Output list length
 
         # Extract values from config
         analysis_name = config.get("analysis_name", "")
@@ -700,7 +704,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         blast_validation = bool(blast_validation)
 
         validation_method = config.get("validation_method", "minimap2")
-        minimap2_preset = config.get("minimap2_preset", "map-ont")
+        # Normalise presets nanometanf rejects (the GUI briefly offered "sr");
+        # an unmatched value would leave the Select blank rather than showing
+        # the map-ont the launch will actually use.
+        minimap2_preset = _coerce_minimap2_preset(config.get("minimap2_preset", "map-ont"))
         minimap2_min_mapq = config.get("minimap2_min_mapq", 30)
 
         e_value_cutoff = config.get("e_val_cutoff", 0.01)
@@ -774,6 +781,12 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         max_file_age_minutes = config.get("max_file_age_minutes", 1000000)
         min_reads_for_validation = config.get("min_reads_for_validation", 50)
 
+        # Assembly (2026-08-17).
+        enable_assembly = bool(config.get("enable_assembly", False))
+        assembler = config.get("assembler", "flye")
+        if assembler not in ("flye", "miniasm"):
+            assembler = "flye"
+
         return [
             analysis_name,
             nanopore_dir,
@@ -813,6 +826,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             kraken2_hitgroups,
             max_file_age_minutes,
             min_reads_for_validation,
+            enable_assembly,
+            assembler,
             True,  # Mark form as initialized (suppresses first "Modified" badge)
         ]
 
@@ -1543,6 +1558,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("negative-controls-input", "value"),
             Input("max-file-age-input", "value"),
             Input("min-reads-for-validation-input", "value"),
+            Input("enable-assembly-input", "value"),
+            Input("assembler-input", "value"),
         ],
         [
             State("saved-config-snapshot", "data"),
@@ -1563,6 +1580,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         pipeline_profile, pipeline_source_type, pipeline_branch, pipeline_local_path,
         processing_mode, sample_handling, sample_name, negative_controls,
         max_file_age_minutes, min_reads_for_validation,
+        enable_assembly, assembler,
         saved_snapshot, currently_modified, form_initialized
     ):
         """Flag the form as modified when any saved field differs from the
@@ -1621,6 +1639,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 if max_file_age_minutes not in (None, "") else max_file_age_minutes
             ),
             "min_reads_for_validation": min_reads_for_validation,
+            "enable_assembly": enable_assembly,
+            "assembler": assembler if assembler in ("flye", "miniasm") else "flye",
         }
         dirty = config_form_dirty(saved_snapshot, form=form)
         # Persist the in-progress edits as a session draft when the form differs
@@ -1639,15 +1659,21 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         prevent_initial_call=True,
     )
     def update_snapshot_on_apply(n_clicks, config):
-        """Update snapshot to match current config after Apply (session-only)."""
+        """Rebase the dirty-check snapshot on Apply and clear the badge.
+
+        Apply both applies AND persists (``apply_config_changes`` calls
+        ``autosave_session_config``, which writes last-session.yaml), so
+        after it the form matches the applied config and the file on disk
+        alike -- nothing is pending. The previous version returned
+        ``no_update`` for both outputs, on the reasoning that Apply was
+        session-only and a separate Save wrote the file; that design is
+        gone, and the leftover behaviour left the "Modified" badge lit for
+        the rest of the session. A badge that never clears is not a signal,
+        and it claims unsaved work that does not exist (2026-08-19 config
+        audit). Rebasing the snapshot also matters for correctness: the
+        next edit must be compared against what was just applied, not
+        against the boot config.
+        """
         if not n_clicks or not config:
             return no_update, no_update
-
-        # Note: After Apply, the form matches the config, so it's "not modified"
-        # relative to the applied state. However, it may still differ from
-        # the saved-to-disk state. For clarity, we only update modified to False
-        # when actually saving to file.
-        #
-        # Actually, let's keep modified=True if it differs from what's on disk,
-        # so the user knows they need to save. We won't update snapshot here.
-        return no_update, no_update
+        return config, False

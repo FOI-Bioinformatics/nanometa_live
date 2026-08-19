@@ -490,21 +490,28 @@ def _confirmation_testing_card():
                     ], html_for="minimap2-preset-input"),
                     dbc.Select(
                         id="minimap2-preset-input",
+                        # Options must stay within nanometanf's schema enum
+                        # (map-ont / map-pb / map-hifi). An "sr" option for
+                        # short amplicons was offered here earlier but the
+                        # pipeline rejects it at launch, so the choice was
+                        # silently coerced back to map-ont -- a control that
+                        # does nothing. Nanopore amplicons keep the ONT error
+                        # profile regardless of length, so map-ont is the
+                        # correct preset for them.
                         options=[
                             {"label": "Oxford Nanopore (default)", "value": "map-ont"},
-                            {"label": "Short reads <500 bp (amplicons)", "value": "sr"},
                             {"label": "PacBio HiFi", "value": "map-hifi"},
                             {"label": "PacBio CLR", "value": "map-pb"}
                         ],
                         value="map-ont"
                     ),
-                    dbc.FormText("Select your sequencing instrument type or sr for short amplicons"),
+                    dbc.FormText("Select your sequencing instrument type "
+                                 "(also correct for short ONT amplicons)"),
                     dbc.Tooltip(
-                        "Choose the sequencing technology that produced your data. "
-                        "Use 'Short reads' (sr) for amplicons under ~500 bp where "
-                        "the long-read preset under-aligns. "
-                        "This adjusts alignment sensitivity to match the error profile "
-                        "of your instrument.",
+                        "Choose the sequencing technology that produced your "
+                        "data. Nanopore amplicons under 500 bp also use the "
+                        "Oxford Nanopore preset: read length does not change "
+                        "the error profile the aligner tunes for.",
                         target="minimap2-preset-info"
                     )
                 ], md=6),
@@ -829,6 +836,54 @@ def _processing_settings_item():
                     target="memory-mapping-info"
                 )
             ], md=6)
+        ], className="mb-3"),
+        dbc.Row([
+            dbc.Col([
+                html.Div([
+                    dbc.Switch(
+                        id="enable-assembly-input",
+                        label="Assemble reads into contigs",
+                        value=False,
+                        className="mt-3"
+                    ),
+                    html.I(className="bi bi-info-circle text-muted ms-1",
+                           id="enable-assembly-info"),
+                    dbc.Badge("Experimental", color="warning", className="ms-2",
+                              style={"fontSize": "0.65rem"}),
+                ], className="d-flex align-items-center"),
+                dbc.FormText("Adds a metagenome assembly step; results appear "
+                             "on the Reports tab"),
+                dbc.Tooltip(
+                    "Runs the pipeline's experimental assembly step on the "
+                    "filtered reads. Flye runs in metagenome mode, so mixed "
+                    "communities assemble per organism. Adds substantial "
+                    "runtime and memory; contigs and assembly statistics are "
+                    "written to the results directory.",
+                    target="enable-assembly-info"
+                )
+            ], md=6),
+            dbc.Col([
+                dbc.Label([
+                    "Assembler ",
+                    html.I(className="bi bi-info-circle text-muted ms-1",
+                           id="assembler-info"),
+                ], html_for="assembler-input"),
+                dbc.Select(
+                    id="assembler-input",
+                    options=[
+                        {"label": "Flye (metagenome mode, with statistics)", "value": "flye"},
+                        {"label": "Miniasm (fast draft, no statistics)", "value": "miniasm"},
+                    ],
+                    value="flye"
+                ),
+                dbc.FormText("Only used when assembly is enabled"),
+                dbc.Tooltip(
+                    "Flye produces polished contigs and the assembly "
+                    "statistics the Reports tab displays. Miniasm is faster "
+                    "but emits draft contigs without statistics.",
+                    target="assembler-info"
+                )
+            ], md=6)
         ])
     ], title="Processing Settings")
 
@@ -867,18 +922,18 @@ def _read_filtering_item():
                 dbc.Input(
                     id="chopper-minlength-input",
                     type="number",
-                    min=0,
+                    min=1,
                     max=50000,
                     step=50,
                     value=1000,
                 ),
-                dbc.FormText("Reads shorter than this are dropped (set to 100 for V3-V4 amplicons; 0 disables)"),
+                dbc.FormText("Reads shorter than this are dropped (set to 100 for V3-V4 amplicons; 1 disables)"),
                 dbc.Tooltip(
                     "Chopper's --minlength filter. Default 1000 is "
                     "tuned for whole-genome ONT reads. For V3-V4 "
                     "(~460 bp) set to 100; for ITS/16S amplicons "
-                    "use 250-500. Set to 0 to disable length "
-                    "filtering entirely.",
+                    "use 250-500. Set to 1 to disable length "
+                    "filtering (the pipeline rejects 0).",
                     target="chopper-minlength-info",
                 ),
             ], md=4),
@@ -914,7 +969,7 @@ def _read_filtering_item():
                 dbc.Input(
                     id="filtlong-minlength-input",
                     type="number",
-                    min=0,
+                    min=1,
                     max=50000,
                     step=50,
                     value=1000,

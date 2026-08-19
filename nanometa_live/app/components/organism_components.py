@@ -231,7 +231,8 @@ def OrganismCard(
     blast_validation: Optional[Dict] = None,
     show_validate_button: bool = False,
     on_demand_validation: Optional[Dict] = None,
-    annotation: Optional[str] = None
+    annotation: Optional[str] = None,
+    threat_level: Optional[str] = None,
 ) -> dbc.Card:
     """
     Create a visual card for displaying organism information.
@@ -252,6 +253,10 @@ def OrganismCard(
             - status: 'validated', 'partial', 'failed', or 'no_data'
         show_validate_button: Show on-demand validation button (for unexpected organisms)
         on_demand_validation: Optional on-demand validation result data
+        threat_level: Watchlist threat level (critical/high/moderate/low).
+            Rendered as a badge on watched cards -- without it a select
+            agent and a commensal looked identical here (2026-08-17
+            reaudit). Hover shows the level's meaning.
 
     Returns:
         Organism card component
@@ -336,6 +341,11 @@ def OrganismCard(
         header_icon = html.Span("", style={"fontSize": "24px", "marginRight": "12px"})
 
     # Determine badge and text based on detection status
+    threat_badge_el = None
+    if is_watched and threat_level:
+        from nanometa_live.app.utils.threat_display import threat_badge
+        threat_badge_el = threat_badge(threat_level, className="ms-2")
+
     if is_undetected and is_watched:
         status_badge = dbc.Badge("NOT DETECTED", color="secondary", className="ms-2")
         read_count_text = html.Div([
@@ -379,6 +389,7 @@ def OrganismCard(
                         className="text-muted"
                     ),
                     status_badge,
+                    threat_badge_el if threat_badge_el is not None else "",
                     html.Small(
                         annotation,
                         className="text-info fst-italic d-block"
@@ -564,8 +575,8 @@ def _rank_to_plain_language(rank: str) -> str:
 
 
 def BaseQualityCard(
-    q20_rate: float,
-    q30_rate: float,
+    q20_rate: Optional[float],
+    q30_rate: Optional[float],
     total_bases: int,
     quality_curve: Optional[List[float]] = None,
     source: str = "unknown",
@@ -579,8 +590,11 @@ def BaseQualityCard(
     a sparkline.
 
     Args:
-        q20_rate: Percentage of bases with Q >= 20 (0-100)
-        q30_rate: Percentage of bases with Q >= 30 (0-100)
+        q20_rate: Percentage of bases with Q >= 20 (0-100), or None when the
+            QC output does not record it. None renders as "not recorded"
+            rather than 0.0% -- a missing measurement must not display as a
+            poor one (2026-08-17 audit, finding Q2).
+        q30_rate: Percentage of bases with Q >= 30 (0-100), or None (as above)
         total_bases: Total base pairs processed
         quality_curve: Per-position mean quality scores (FASTP only)
         source: Data source ("fastp" or "seqkit") - affects sparkline availability
@@ -641,13 +655,32 @@ def BaseQualityCard(
             return f"{bases / 1_000:.1f} Kb"
         return f"{bases} bp"
 
-    q20_colors = get_q20_color(q20_rate)
-    q30_colors = get_q30_color(q30_rate)
+    _not_recorded = {
+        "bg": "#6c757d",
+        "bg_light": "rgba(108, 117, 125, 0.12)",
+        "icon": "dash-circle",
+    }
+    q20_colors = get_q20_color(q20_rate) if q20_rate is not None else _not_recorded
+    q30_colors = get_q30_color(q30_rate) if q30_rate is not None else _not_recorded
+
+    def _band_label(value, red, amber):
+        if value is None:
+            return "Not recorded"
+        return "Good" if value >= amber else "Fair" if value >= red else "Poor"
+
+    # Band labels use the SAME thresholds as the colors -- these were
+    # previously hardcoded to the long-read bands, so an amplicon run could
+    # show a green metric labelled "Poor".
+    q20_label = _band_label(q20_rate, _q20_red, _q20_amber)
+    q30_label = _band_label(q30_rate, _q30_red, _q30_amber)
 
     # Card surface: white with neutral border + 6px left accent in the threshold
     # color. Matches the Dashboard 8px radius / 6px accent design language.
-    overall_metric = min(q20_rate, q30_rate)
-    if overall_metric < 30:
+    _known = [v for v in (q20_rate, q30_rate) if v is not None]
+    overall_metric = min(_known) if _known else None
+    if overall_metric is None:
+        card_accent = "#6c757d"
+    elif overall_metric < 30:
         card_accent = "#721c24"
     elif overall_metric < 45:
         card_accent = "#664d03"
@@ -752,15 +785,17 @@ def BaseQualityCard(
                 html.Div([
                     html.I(className=f"bi bi-{q20_colors['icon']} me-1",
                            style={"color": q20_colors["bg"], "fontSize": "12px"}),
-                    html.Span(f"{q20_rate:.1f}%", style={
-                        "fontSize": "28px", "fontWeight": "700",
-                        "letterSpacing": "-0.01em", "color": q20_colors["bg"]
-                    })
+                    html.Span(
+                        f"{q20_rate:.1f}%" if q20_rate is not None else "—",
+                        style={
+                            "fontSize": "28px", "fontWeight": "700",
+                            "letterSpacing": "-0.01em", "color": q20_colors["bg"]
+                        })
                 ]),
                 # Progress bar
                 html.Div([
                     html.Div(style={
-                        "width": f"{min(100, max(0, q20_rate))}%",
+                        "width": f"{min(100, max(0, q20_rate or 0))}%",
                         "height": "6px",
                         "backgroundColor": q20_colors["bg"],
                         "borderRadius": "3px"
@@ -772,7 +807,7 @@ def BaseQualityCard(
                     "marginTop": "4px"
                 }),
                 html.Small(
-                    "Good" if q20_rate >= 65 else "Fair" if q20_rate >= 50 else "Poor",
+                    q20_label,
                     style={
                         "fontSize": "10px",
                         "fontWeight": "600",
@@ -801,15 +836,17 @@ def BaseQualityCard(
                 html.Div([
                     html.I(className=f"bi bi-{q30_colors['icon']} me-1",
                            style={"color": q30_colors["bg"], "fontSize": "12px"}),
-                    html.Span(f"{q30_rate:.1f}%", style={
-                        "fontSize": "28px", "fontWeight": "700",
-                        "letterSpacing": "-0.01em", "color": q30_colors["bg"]
-                    })
+                    html.Span(
+                        f"{q30_rate:.1f}%" if q30_rate is not None else "—",
+                        style={
+                            "fontSize": "28px", "fontWeight": "700",
+                            "letterSpacing": "-0.01em", "color": q30_colors["bg"]
+                        })
                 ]),
                 # Progress bar
                 html.Div([
                     html.Div(style={
-                        "width": f"{min(100, max(0, q30_rate))}%",
+                        "width": f"{min(100, max(0, q30_rate or 0))}%",
                         "height": "6px",
                         "backgroundColor": q30_colors["bg"],
                         "borderRadius": "3px"
@@ -821,7 +858,7 @@ def BaseQualityCard(
                     "marginTop": "4px"
                 }),
                 html.Small(
-                    "Good" if q30_rate >= 45 else "Fair" if q30_rate >= 30 else "Poor",
+                    q30_label,
                     style={
                         "fontSize": "10px",
                         "fontWeight": "600",
@@ -871,7 +908,8 @@ def ReadStatisticsCard(
     mean_length_before: Optional[float] = None,
     n50: Optional[int] = None,
     gc_content: Optional[float] = None,
-    source: str = "unknown"
+    source: str = "unknown",
+    amplicon_mode: bool = False,
 ) -> html.Div:
     """
     Create a read statistics card showing length, N50, and GC content.
@@ -885,13 +923,17 @@ def ReadStatisticsCard(
         n50: N50 statistic (Seqkit/Chopper only)
         gc_content: GC content percentage (0-100)
         source: Data source ("fastp" or "seqkit")
+        amplicon_mode: When True, use N50 bands tuned for short-amplicon
+            protocols. The whole-genome bands mark every amplicon run red
+            even when the N50 equals the amplicon length by design.
 
     Returns:
         Read statistics card component
 
     Color thresholds:
         GC Content: 40-60% (normal), 35-40% or 60-65% (warning), <35% or >65% (unusual)
-        N50: >= 2000 bp (good), 1000-2000 bp (warning), < 1000 bp (poor)
+        N50 (whole-genome): >= 2000 bp (good), 1000-2000 bp (warning), < 1000 bp (poor)
+        N50 (amplicon): >= 200 bp (good), 100-200 bp (warning), < 100 bp (poor)
     """
     # Color configuration
     color_config = {
@@ -912,12 +954,13 @@ def ReadStatisticsCard(
         return color_config["success"]
 
     def get_n50_color(value: Optional[int]) -> dict:
-        """Get color for N50."""
+        """Get color for N50 (bands depend on protocol; see docstring)."""
         if value is None:
             return color_config["info"]
-        if value < 1000:
+        danger_below, warning_below = (100, 200) if amplicon_mode else (1000, 2000)
+        if value < danger_below:
             return color_config["danger"]
-        elif value < 2000:
+        elif value < warning_below:
             return color_config["warning"]
         return color_config["success"]
 

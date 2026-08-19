@@ -29,6 +29,7 @@ pathogens:
     bsl_level: 3
     alert_threshold: 5
     category: "WHO-Drinking-Water"
+    action_required: "Verify with confirmatory testing. Assess soil or surface-water ingress. Report to public health."
     notes: "Causes melioidosis. May multiply in water. Low chlorine resistance."
     persistence: "may_multiply"
     chlorine_resistance: "low"
@@ -41,6 +42,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 10
     category: "WHO-Drinking-Water"
+    action_required: "Correlate with gastroenteritis surveillance. Assess fecal contamination and disinfection efficacy."
     notes: "Major cause of gastroenteritis. Moderate persistence, low chlorine resistance."
     persistence: "moderate"
     chlorine_resistance: "low"
@@ -53,6 +55,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 10
     category: "WHO-Drinking-Water"
+    action_required: "Correlate with gastroenteritis surveillance. Assess fecal contamination and disinfection efficacy."
     notes: "Causes gastroenteritis. Moderate persistence, low chlorine resistance."
     persistence: "moderate"
     chlorine_resistance: "low"
@@ -65,6 +68,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 10
     category: "WHO-Drinking-Water"
+    action_required: "Indicator of fecal contamination. Verify disinfectant residual and distribution system integrity."
     notes: "Diarrhoeagenic strains cause gastroenteritis. Moderate persistence, low chlorine resistance."
     persistence: "moderate"
     chlorine_resistance: "low"
@@ -77,6 +81,7 @@ pathogens:
     bsl_level: 3
     alert_threshold: 1
     category: "WHO-Drinking-Water"
+    action_required: "Confirm with validation before reporting. Report to public health. Assess animal contamination of source water."
     notes: "Causes tularemia. Long persistence, moderate chlorine resistance. CDC Category A."
     persistence: "long"
     chlorine_resistance: "moderate"
@@ -89,6 +94,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 5
     category: "WHO-Drinking-Water"
+    action_required: "Inspect storage tanks and warm-water systems for stagnation. Review temperature control and disinfectant residual."
     notes: "Causes Legionnaires' disease. May multiply in water systems. Low chlorine resistance."
     persistence: "may_multiply"
     chlorine_resistance: "low"
@@ -101,6 +107,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 50
     category: "WHO-Drinking-Water"
+    action_required: "Review biofilm control and disinfection. Opportunistic risk concerns mainly immunocompromised consumers."
     notes: "Opportunistic pathogen. May multiply in water. High chlorine resistance."
     persistence: "may_multiply"
     chlorine_resistance: "high"
@@ -114,6 +121,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 5
     category: "WHO-Drinking-Water"
+    action_required: "Report to public health. Assess sewage ingress; S. Typhi indicates human fecal contamination."
     notes: "Causes typhoid fever. Moderate persistence, low chlorine resistance."
     persistence: "moderate"
     chlorine_resistance: "low"
@@ -126,6 +134,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 10
     category: "WHO-Drinking-Water"
+    action_required: "Correlate with salmonellosis reports. Assess fecal contamination including animal reservoir input."
     notes: "Causes gastroenteritis. May multiply in water. Low chlorine resistance."
     persistence: "may_multiply"
     chlorine_resistance: "low"
@@ -138,6 +147,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 5
     category: "WHO-Drinking-Water"
+    action_required: "Report to public health. Assess human fecal contamination; low infectious dose."
     notes: "Causes severe dysentery. Short persistence, low chlorine resistance."
     persistence: "short"
     chlorine_resistance: "low"
@@ -150,6 +160,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 1
     category: "WHO-Drinking-Water"
+    action_required: "Immediate public health notification. Consider boil-water guidance pending confirmation. Verify disinfection."
     notes: "Causes cholera. Variable persistence (short to long). Low chlorine resistance."
     persistence: "variable"
     chlorine_resistance: "low"
@@ -166,6 +177,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 20
     category: "WHO-Drinking-Water"
+    action_required: "Correlate with community illness surveillance. Review disinfection; adenoviruses tolerate UV treatment."
     notes: "Causes respiratory and gastrointestinal illness. Long persistence, moderate chlorine resistance."
     persistence: "long"
     chlorine_resistance: "moderate"
@@ -178,6 +190,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 20
     category: "WHO-Drinking-Water"
+    action_required: "Correlate with gastroenteritis surveillance. Assess sewage ingress."
     notes: "Causes gastroenteritis. Long persistence, moderate chlorine resistance."
     persistence: "long"
     chlorine_resistance: "moderate"
@@ -190,6 +203,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 10
     category: "WHO-Drinking-Water"
+    action_required: "Assess sewage intrusion. Correlate with outbreak reports; low infectious dose."
     notes: "Major cause of viral gastroenteritis outbreaks. Long persistence, moderate chlorine resistance."
     persistence: "long"
     chlorine_resistance: "moderate"
@@ -203,6 +217,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 5
     category: "WHO-Drinking-Water"
+    action_required: "Report to public health. Assess sewage and animal-waste ingress; zoonotic potential."
     notes: "Causes hepatitis E. Long persistence, moderate chlorine resistance. Potentially zoonotic. Formerly Hepatitis E virus (taxid 12461)."
     persistence: "long"
     chlorine_resistance: "moderate"
@@ -215,6 +230,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 10
     category: "WHO-Drinking-Water"
+    action_required: "Correlate with clinical surveillance. Assess sewage ingress and disinfection efficacy."
     notes: "Includes poliovirus, coxsackievirus. Long persistence, moderate chlorine resistance."
     persistence: "long"
     chlorine_resistance: "moderate"
@@ -228,6 +244,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 5
     category: "WHO-Drinking-Water"
+    action_required: "Report to public health. Assess sewage ingress. Consider vaccination guidance for exposed groups."
     notes: "ICTV 2024 binomial. Using taxid 12092 (Hepatovirus A) for Kraken2 database compatibility."
     persistence: "long"
     chlorine_resistance: "moderate"
@@ -240,6 +257,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 10
     category: "WHO-Drinking-Water"
+    action_required: "Correlate with pediatric diarrhea surveillance. Assess sewage ingress."
     notes: "Major cause of childhood diarrhea. Long persistence, moderate chlorine resistance."
     persistence: "long"
     chlorine_resistance: "moderate"
@@ -252,6 +270,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 20
     category: "WHO-Drinking-Water"
+    action_required: "Correlate with gastroenteritis surveillance. Assess sewage ingress."
     notes: "Causes gastroenteritis outbreaks. Listed in WHO Table 7.1. Long persistence, moderate chlorine resistance."
     persistence: "long"
     chlorine_resistance: "moderate"
@@ -264,6 +283,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 20
     category: "WHO-Drinking-Water"
+    action_required: "Correlate with pediatric illness surveillance. Assess sewage ingress."
     notes: "Causes gastroenteritis and respiratory illness. Listed in WHO Table 7.1 alongside enteroviruses. Long persistence, moderate chlorine resistance."
     persistence: "long"
     chlorine_resistance: "moderate"
@@ -280,6 +300,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 10
     category: "WHO-Drinking-Water"
+    action_required: "Review biofilm and stagnation control. Note keratitis risk for contact-lens users in communications."
     notes: "Causes keratitis and encephalitis. May multiply in water. High chlorine resistance."
     persistence: "may_multiply"
     chlorine_resistance: "high"
@@ -292,6 +313,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 5
     category: "WHO-Drinking-Water"
+    action_required: "Chlorination is ineffective against oocysts. Verify filtration and UV barriers. Report to public health."
     notes: "Causes severe diarrhea. Long persistence. HIGH chlorine resistance - major water treatment concern."
     persistence: "long"
     chlorine_resistance: "high"
@@ -304,6 +326,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 5
     category: "WHO-Drinking-Water"
+    action_required: "Chlorination is ineffective against oocysts. Verify filtration and UV barriers. Assess human sewage ingress."
     notes: "Human-specific cryptosporidium. Long persistence, high chlorine resistance."
     persistence: "long"
     chlorine_resistance: "high"
@@ -316,6 +339,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 5
     category: "WHO-Drinking-Water"
+    action_required: "Verify filtration; chlorine-resistant. Correlate with prolonged-diarrhea reports."
     notes: "Causes prolonged diarrhea. Long persistence, high chlorine resistance."
     persistence: "long"
     chlorine_resistance: "high"
@@ -328,6 +352,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 5
     category: "WHO-Drinking-Water"
+    action_required: "Verify filtration; cyst stage is chlorine-resistant. Assess human fecal contamination. Report to public health."
     notes: "Causes amoebic dysentery. Moderate persistence, high chlorine resistance."
     persistence: "moderate"
     chlorine_resistance: "high"
@@ -341,6 +366,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 5
     category: "WHO-Drinking-Water"
+    action_required: "Verify filtration and UV; cysts are chlorine-resistant. Assess fecal contamination including animal sources."
     notes: "Common waterborne parasite. Moderate persistence, high chlorine resistance."
     persistence: "moderate"
     chlorine_resistance: "high"
@@ -353,6 +379,7 @@ pathogens:
     bsl_level: 3
     alert_threshold: 1
     category: "WHO-Drinking-Water"
+    action_required: "Immediate public health notification. Advise against nasal water exposure. Inspect warm-water plumbing and verify disinfection."
     notes: "Causes fatal brain infection. May multiply in warm water. Low chlorine resistance."
     persistence: "may_multiply"
     chlorine_resistance: "low"
@@ -369,6 +396,7 @@ pathogens:
     bsl_level: 2
     alert_threshold: 1
     category: "WHO-Drinking-Water"
+    action_required: "Report to eradication program authorities immediately. Assess copepod control and source-water filtration."
     notes: "Causes dracunculiasis. Moderate persistence and chlorine resistance. Near eradication."
     persistence: "moderate"
     chlorine_resistance: "moderate"

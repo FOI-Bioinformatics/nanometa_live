@@ -287,8 +287,19 @@ def _create_blast_tab() -> dbc.Tab:
                                         dashGridOptions={
                                             "pagination": True,
                                             "paginationPageSize": 25,
+                                            # Selector must include the page
+                                            # size (AG Grid warnings #94/#95).
+                                            "paginationPageSizeSelector": [10, 25, 50, 100],
                                             "getRowId": {
                                                 "function": "params.data.species + '||' + params.data.sample_id"
+                                            },
+                                            # Inert selection: silences AG
+                                            # Grid #132 on rowData updates
+                                            # (see main_layout for detail).
+                                            "rowSelection": {
+                                                "mode": "singleRow",
+                                                "checkboxes": False,
+                                                "enableClickSelection": False,
                                             },
                                         },
                                     )
@@ -354,6 +365,15 @@ def _create_blast_tab() -> dbc.Tab:
                                 columnDefs=[],
                                 rowData=[],
                                 defaultColDef={"sortable": True, "filter": True, "resizable": True},
+                                dashGridOptions={
+                                    # Inert selection: silences AG Grid #132
+                                    # on rowData updates (see main_layout).
+                                    "rowSelection": {
+                                        "mode": "singleRow",
+                                        "checkboxes": False,
+                                        "enableClickSelection": False,
+                                    },
+                                },
                                 style={"height": "200px"},
                                 className="mb-3",
                             ),
@@ -365,7 +385,18 @@ def _create_blast_tab() -> dbc.Tab:
                                 columnDefs=[],
                                 rowData=[],
                                 defaultColDef={"sortable": True, "filter": True, "resizable": True},
-                                dashGridOptions={"pagination": True, "paginationPageSize": 50},
+                                dashGridOptions={
+                                    "pagination": True,
+                                    "paginationPageSize": 50,
+                                    "paginationPageSizeSelector": [25, 50, 100],
+                                    # Inert selection: silences AG Grid #132
+                                    # on rowData updates (see main_layout).
+                                    "rowSelection": {
+                                        "mode": "singleRow",
+                                        "checkboxes": False,
+                                        "enableClickSelection": False,
+                                    },
+                                },
                                 style={"height": "400px"},
                             ),
                             dcc.Download(id="download-perread-tsv"),

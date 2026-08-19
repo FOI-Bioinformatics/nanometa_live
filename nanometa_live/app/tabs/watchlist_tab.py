@@ -12,7 +12,10 @@ Handles all callback logic for the Watchlist management tab:
 import logging
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+import yaml
 
 from dash import Dash, Input, Output, State, ctx, ALL, MATCH, no_update
 from dash.exceptions import PreventUpdate
@@ -67,13 +70,47 @@ def _apis_for_database(
 
 
 def _save_last_session(config: Dict[str, Any]) -> None:
-    """Save config to last-session.yaml for persistence across restarts."""
+    """Persist the WATCHLIST block to last-session.yaml, nothing else.
+
+    A watchlist toggle owns the ``watchlist`` key and no other setting, so
+    the rest of the file is taken from what is already persisted rather than
+    from this callback's in-memory ``app-config``. That store re-seeds from
+    the BOOT config on every page load (boot is fresh by design), so writing
+    it wholesale silently reverted settings the operator had applied:
+    Apply min_reads_for_validation=50, reload, toggle a watchlist, and the
+    file said 1 again (2026-08-19 config audit). This is the mirror of the
+    protection ``autosave_session_config`` already gives the watchlist when
+    a config write runs with an empty singleton.
+
+    Falls back to the supplied config when nothing is persisted yet (first
+    write) or the file is unreadable -- the toggle must never be lost.
+    """
     try:
         from nanometa_live.core.config.config_loader import ConfigLoader
         from nanometa_live.core.utils.paths import NanometaPaths
         paths = NanometaPaths.from_config(config)
+        session_path = Path(paths.configs) / "last-session.yaml"
+
+        save_config = dict(config)
+        if session_path.is_file():
+            try:
+                import yaml
+                with open(session_path) as fh:
+                    persisted = yaml.safe_load(fh)
+                if isinstance(persisted, dict):
+                    persisted["watchlist"] = config.get(
+                        "watchlist", persisted.get("watchlist")
+                    )
+                    save_config = persisted
+            except (OSError, yaml.YAMLError):
+                logger.debug(
+                    "last-session.yaml unreadable; writing the in-memory "
+                    "config so the watchlist change is not lost",
+                    exc_info=True,
+                )
+
         loader = ConfigLoader(str(paths.configs))
-        loader.save_config(config, "last-session.yaml")
+        loader.save_config(save_config, "last-session.yaml")
     except Exception:
         logger.debug("Could not save last-session.yaml", exc_info=True)
 
@@ -96,6 +133,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
             Output("watchlist-stat-validated", "children"),
             Output("watchlist-stat-critical", "children"),
             Output("watchlist-stat-high", "children"),
+            Output("watchlist-stat-moderate", "children"),
+            Output("watchlist-stat-low", "children"),
         ],
         [
             Input("watchlist-tab-state", "data"),
@@ -118,15 +157,15 @@ def register_watchlist_callbacks(app: Dash) -> None:
         validation_status = manager.get_validation_status(enabled_only=True)
 
         by_threat = stats.get("by_threat_level", {})
-        critical = by_threat.get("critical", 0)
-        high = by_threat.get("high", 0)
 
         return (
             str(stats.get("total_entries", 0)),
             str(stats.get("active_entries", 0)),
             str(validation_status.get("validated", 0)),
-            f"Critical: {critical}",
-            f"High: {high}",
+            f"Critical: {by_threat.get('critical', 0)}",
+            f"High: {by_threat.get('high', 0)}",
+            f"Moderate: {by_threat.get('moderate', 0)}",
+            f"Low: {by_threat.get('low', 0)}",
         )
 
     # ---------------------------------------------------------------------
@@ -344,6 +383,32 @@ def register_watchlist_callbacks(app: Dash) -> None:
         if not custom_items:
             custom_items = [html.P("No custom watchlists loaded.", className="text-muted")]
 
+        # Files that fail validation used to vanish from this list with only
+        # a terminal log line -- name them so the operator knows a list they
+        # placed here is not (fully) active (finding W4).
+        from nanometa_live.core.watchlist.watchlist_loader import (
+            get_watchlist_loader,
+        )
+        invalid_files = get_watchlist_loader().find_invalid_watchlist_files()
+        if invalid_files:
+            custom_items.insert(0, dbc.Alert(
+                [
+                    html.Div([
+                        html.I(className="bi bi-exclamation-triangle-fill me-2"),
+                        html.Strong(
+                            f"{len(invalid_files)} watchlist file(s) failed "
+                            f"validation and may be skipped or load "
+                            f"incompletely:"
+                        ),
+                    ], className="mb-1"),
+                    html.Ul([
+                        html.Li([html.Code(name), f" — {problem}"])
+                        for name, problem in invalid_files[:5]
+                    ], className="mb-0 small"),
+                ],
+                color="warning", className="py-2",
+            ))
+
         return builtin_items, custom_items
 
     @app.callback(
@@ -535,6 +600,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
                             "db_taxid": mapping_data.get("db_taxid"),
                             "match_score": mapping_data.get("match_score", 0),
                             "db_name": mapping_data.get("db_name", ""),
+                            "match_method": mapping_data.get("match_method", ""),
                         }
                     except (ValueError, TypeError):
                         pass
@@ -548,6 +614,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
                             "db_taxid": mapping_data.get("db_taxid"),
                             "match_score": mapping_data.get("match_score", 0),
                             "db_name": mapping_data.get("db_name", ""),
+                            "match_method": mapping_data.get("match_method", ""),
                         }
 
         # Fallback: try global collection if store is empty
@@ -566,20 +633,26 @@ def register_watchlist_callbacks(app: Dash) -> None:
                                     "db_taxid": mapping.db_taxid,
                                     "match_score": mapping.match_score,
                                     "db_name": mapping.db_name,
+                                    "match_method": mapping.match_method,
                                 }
             except Exception as e:
                 logger.debug(f"Could not load mapping collection: {e}")
 
-        # Empty-state guard: if the taxonomy index has not been built
+        # Index-missing banner: if the taxonomy index has not been built
         # (taxmap-collection store empty AND the global collection has no
-        # entries either), every row would otherwise render as
-        # "Not Found" -- which misleads the operator into thinking the
-        # species are absent from the database rather than the index
-        # being absent. Render a single empty-state card pointing at
-        # the Watchlist & Preparation tab control instead.
+        # entries either), the "In Database" column cannot be answered
+        # yet. Say so in a banner ABOVE the table -- but still render the
+        # table: the rows fall back to a neutral "Not Scanned" badge for
+        # that one column, and every other control (search, toggles,
+        # edit, genome status) works without the index. The earlier
+        # version returned the banner INSTEAD of the table, so enabling a
+        # watchlist before configuring a database hid all of its entries
+        # (2026-08-17 audit, finding W9; screening itself never needed
+        # the index, so the hidden entries were being screened all along).
         index_appears_empty = not mapping_dict
+        index_banner = None
         if index_appears_empty:
-            empty_state = dbc.Card(
+            index_banner = dbc.Card(
                 dbc.CardBody(
                     [
                         html.Div(
@@ -594,12 +667,14 @@ def register_watchlist_callbacks(app: Dash) -> None:
                         ),
                         html.P(
                             [
-                                "The watchlist cannot be checked against the "
-                                "Kraken2 database until the taxonomy index "
-                                "has been built. Click ",
+                                "The 'In Database' column cannot be checked "
+                                "against the Kraken2 database until the "
+                                "taxonomy index has been built. Click ",
                                 html.Strong("Scan Database"),
                                 " in the 'Verify Watchlist Against Database' "
-                                "card on this tab to (re)build the index.",
+                                "card on this tab to (re)build the index. "
+                                "Enabled organisms are still screened by "
+                                "name in the meantime.",
                             ],
                             className="mb-0 text-muted small",
                         ),
@@ -608,11 +683,6 @@ def register_watchlist_callbacks(app: Dash) -> None:
                 color="warning",
                 outline=True,
                 className="mb-3",
-            )
-            return (
-                [empty_state],
-                str(len(entries)),
-                {"display": "inline-block"},
             )
 
         # Get genome status for all entries
@@ -644,6 +714,19 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
             mapping_info = mapping_dict.get(taxid)
 
+            # An operator-declared db_taxid is a mapping in its own right --
+            # show it even before any Scan Database has run, instead of
+            # "Not Scanned" (2026-08-17 reaudit, G1). The next scan
+            # validates it against the loaded database.
+            if mapping_info is None and entry.get("db_taxid"):
+                mapping_info = {
+                    "confidence": "manual",
+                    "db_taxid": entry.get("db_taxid"),
+                    "db_name": "",
+                    "match_score": 1.0,
+                    "match_method": "operator_db_taxid",
+                }
+
             # Get genome status
             genome_info = None
             if genome_mgr and taxid:
@@ -657,13 +740,10 @@ def register_watchlist_callbacks(app: Dash) -> None:
             except Exception as e:
                 logger.error(f"Failed to create row for taxid {taxid} ({entry.get('name', 'Unknown')}): {e}")
 
-        # The "no mapping data" guidance note that used to live here was
-        # superseded by the empty-state card above (returned early when
-        # mapping_dict is empty); reaching this point implies at least one
-        # mapped entry, so a 'click Rescan' hint would be confusing.
         count = len(entries)
+        children = ([index_banner] if index_banner is not None else []) + rows
         return (
-            rows,
+            children,
             str(count),
             {"display": "inline-block"},  # Show badge when there are pathogens
         )
@@ -1388,10 +1468,100 @@ def register_watchlist_callbacks(app: Dash) -> None:
     # File Upload
     # ---------------------------------------------------------------------
 
+    def _import_and_activate_upload(loader, temp_path, filename, overwrite):
+        """Persist a validated upload and load it into the session.
+
+        Shared by the initial upload and the confirmed replacement so the
+        two paths cannot drift. Returns the (tab-state, feedback) pair.
+        """
+        from pathlib import Path
+
+        no_taxid = loader.find_entries_without_taxid(temp_path)
+
+        success, message = loader.import_watchlist(
+            temp_path, destination="user", file_name=filename,
+            overwrite=overwrite,
+        )
+        if not success:
+            return (
+                no_update,
+                dbc.Alert(f"Import failed: {message}", color="danger", duration=8000),
+            )
+
+        # Load into active session. The destination name must come from
+        # the same sanitizer import_watchlist used -- deriving it from
+        # the raw browser filename made the two disagree for any name
+        # the sanitizer changed, so the file was imported but never
+        # activated while the alert still claimed success (finding W1).
+        manager = get_watchlist_manager()
+        dest_name = loader.sanitize_upload_name(filename)
+        watchlist_id = Path(dest_name).stem
+        dest_dir = loader.user_watchlist_dir
+        dest_file = dest_dir / dest_name
+        if dest_file.exists():
+            manager._load_custom_yaml_file(str(dest_file))
+
+        pathogens = loader.load_watchlist(watchlist_id)
+        count = len(pathogens) if pathogens else 0
+
+        verb = "Replaced" if overwrite else "Imported"
+        body = [
+            html.Div([
+                html.I(className="bi bi-check-circle me-2"),
+                html.Strong(f"{verb}: {filename}"),
+            ]),
+            html.Small(
+                f"{count} pathogens added. Saved to {dest_dir}",
+                className="text-muted d-block mt-1",
+            ),
+        ]
+        if no_taxid:
+            shown = ", ".join(no_taxid[:5])
+            if len(no_taxid) > 5:
+                shown += f", and {len(no_taxid) - 5} more"
+            body.append(html.Small(
+                [
+                    html.I(className="bi bi-exclamation-triangle me-2"),
+                    html.Strong(
+                        f"{len(no_taxid)} entr"
+                        f"{'y has' if len(no_taxid) == 1 else 'ies have'} "
+                        "no taxonomy ID: "
+                    ),
+                    f"{shown}. These are shown and counted but cannot match "
+                    "a Kraken2 report. Add taxid_ncbi (or db_taxid) to each, "
+                    "or resolve them with Verify Taxonomy IDs.",
+                ],
+                className="d-block mt-2 text-warning-emphasis",
+            ))
+
+        return (
+            {"last_update": f"upload-{filename}"},
+            dbc.Alert(
+                body,
+                color="warning" if no_taxid else "success",
+                duration=12000 if no_taxid else 8000,
+            ),
+        )
+
+    def _decode_upload_to_temp(contents, filename):
+        """Base64-decode a dcc.Upload payload into a NamedTemporaryFile."""
+        import base64
+        import tempfile
+        from pathlib import Path
+
+        _content_type, content_string = contents.split(",")
+        decoded = base64.b64decode(content_string)
+        with tempfile.NamedTemporaryFile(
+            mode="wb", suffix=Path(filename).suffix, delete=False,
+        ) as f:
+            f.write(decoded)
+            return Path(f.name)
+
     @app.callback(
         [
             Output("watchlist-tab-state", "data", allow_duplicate=True),
             Output("watchlist-upload-feedback", "children"),
+            Output("watchlist-upload-pending", "data"),
         ],
         Input("watchlist-upload", "contents"),
         State("watchlist-upload", "filename"),
@@ -1402,27 +1572,12 @@ def register_watchlist_callbacks(app: Dash) -> None:
         if not contents or not filename:
             raise PreventUpdate
 
-        import base64
-        import tempfile
-        from pathlib import Path
         from nanometa_live.core.watchlist.watchlist_loader import get_watchlist_loader
 
         temp_path = None
         try:
-            # Decode the file
-            content_type, content_string = contents.split(",")
-            decoded = base64.b64decode(content_string)
+            temp_path = _decode_upload_to_temp(contents, filename)
 
-            # Save to temp file for validation
-            with tempfile.NamedTemporaryFile(
-                mode="wb",
-                suffix=Path(filename).suffix,
-                delete=False,
-            ) as f:
-                f.write(decoded)
-                temp_path = Path(f.name)
-
-            # Validate and persist to the operator watchlist directory
             loader = get_watchlist_loader()
             is_valid, errors = loader.validate_file(temp_path)
 
@@ -1437,79 +1592,53 @@ def register_watchlist_callbacks(app: Dash) -> None:
                         html.Strong("Invalid watchlist file"),
                         error_list,
                     ], color="danger", duration=10000),
+                    None,
                 )
 
-            # Entries without a taxonomy ID load and display but can never
-            # match a Kraken2 report; say so instead of letting the operator
-            # believe an organism is being watched.
-            no_taxid = loader.find_entries_without_taxid(temp_path)
-
-            # Persist: copy to user watchlist directory under the operator's
-            # own filename (temp_path has a random name).
-            success, message = loader.import_watchlist(
-                temp_path, destination="user", file_name=filename
-            )
-
-            if not success:
+            # A collision with the operator's OWN earlier file is offered as
+            # a confirmed replacement; shadowing a built-in list stays
+            # refused (finding W2 -- the refusal used to promise "confirm
+            # the replacement" while no confirm control existed).
+            collision = loader.classify_upload_collision(filename)
+            if collision is not None:
+                kind, message = collision
+                if kind == "builtin":
+                    return (
+                        no_update,
+                        dbc.Alert(f"Import failed: {message}", color="danger",
+                                  duration=10000),
+                        None,
+                    )
                 return (
                     no_update,
-                    dbc.Alert(f"Import failed: {message}", color="danger", duration=8000),
+                    dbc.Alert([
+                        html.Div([
+                            html.I(className="bi bi-exclamation-triangle me-2"),
+                            html.Strong("File already exists. "),
+                            message,
+                        ], className="mb-2"),
+                        dbc.Button(
+                            "Replace existing", id="watchlist-upload-replace-btn",
+                            color="warning", size="sm", className="me-2",
+                        ),
+                        dbc.Button(
+                            "Cancel", id="watchlist-upload-cancel-btn",
+                            color="secondary", size="sm", outline=True,
+                        ),
+                    ], color="warning"),
+                    {"contents": contents, "filename": filename},
                 )
 
-            # Load into active session
-            manager = get_watchlist_manager()
-            watchlist_id = Path(filename).stem
-            dest_dir = loader.user_watchlist_dir
-            dest_file = dest_dir / filename
-            if dest_file.exists():
-                manager._load_custom_yaml_file(str(dest_file))
-
-            # Count pathogens for feedback
-            pathogens = loader.load_watchlist(watchlist_id)
-            count = len(pathogens) if pathogens else 0
-
-            body = [
-                html.Div([
-                    html.I(className="bi bi-check-circle me-2"),
-                    html.Strong(f"Imported: {filename}"),
-                ]),
-                html.Small(
-                    f"{count} pathogens added. Saved to {dest_dir}",
-                    className="text-muted d-block mt-1",
-                ),
-            ]
-            if no_taxid:
-                shown = ", ".join(no_taxid[:5])
-                if len(no_taxid) > 5:
-                    shown += f", and {len(no_taxid) - 5} more"
-                body.append(html.Small(
-                    [
-                        html.I(className="bi bi-exclamation-triangle me-2"),
-                        html.Strong(
-                            f"{len(no_taxid)} entr"
-                            f"{'y has' if len(no_taxid) == 1 else 'ies have'} "
-                            "no taxonomy ID: "
-                        ),
-                        f"{shown}. These are shown and counted but cannot match "
-                        "a Kraken2 report. Add taxid_ncbi (or db_taxid) to each, "
-                        "or resolve them with Verify Taxonomy IDs.",
-                    ],
-                    className="d-block mt-2 text-warning-emphasis",
-                ))
-
-            return (
-                {"last_update": f"upload-{filename}"},
-                dbc.Alert(
-                    body,
-                    color="warning" if no_taxid else "success",
-                    duration=12000 if no_taxid else 8000,
-                ),
+            state, feedback = _import_and_activate_upload(
+                loader, temp_path, filename, overwrite=False
             )
+            return state, feedback, None
 
         except Exception as e:
             return (
                 no_update,
                 dbc.Alert(f"Upload failed: {e}", color="danger", duration=8000),
+                None,
             )
         finally:
             # validate_file can raise, and the blanket except above used to
@@ -1517,6 +1646,69 @@ def register_watchlist_callbacks(app: Dash) -> None:
             # /tmp on every failed upload.
             if temp_path is not None:
                 temp_path.unlink(missing_ok=True)
+
+    @app.callback(
+        [
+            Output("watchlist-tab-state", "data", allow_duplicate=True),
+            Output("watchlist-upload-feedback", "children", allow_duplicate=True),
+            Output("watchlist-upload-pending", "data", allow_duplicate=True),
+        ],
+        Input("watchlist-upload-replace-btn", "n_clicks"),
+        State("watchlist-upload-pending", "data"),
+        prevent_initial_call=True,
+    )
+    def handle_replace_upload(n_clicks: int, pending: Dict) -> Tuple:
+        """Operator confirmed replacing their existing watchlist file."""
+        if not n_clicks or not pending:
+            raise PreventUpdate
+
+        from nanometa_live.core.watchlist.watchlist_loader import get_watchlist_loader
+
+        filename = pending.get("filename", "")
+        temp_path = None
+        try:
+            temp_path = _decode_upload_to_temp(pending.get("contents", ""), filename)
+            loader = get_watchlist_loader()
+            # Re-validate: the pending payload crossed the browser round-trip.
+            is_valid, errors = loader.validate_file(temp_path)
+            if not is_valid:
+                return (
+                    no_update,
+                    dbc.Alert(f"Invalid watchlist file: {'; '.join(errors)}",
+                              color="danger", duration=10000),
+                    None,
+                )
+            state, feedback = _import_and_activate_upload(
+                loader, temp_path, filename, overwrite=True
+            )
+            return state, feedback, None
+        except Exception as e:
+            return (
+                no_update,
+                dbc.Alert(f"Replace failed: {e}", color="danger", duration=8000),
+                None,
+            )
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+
+    @app.callback(
+        [
+            Output("watchlist-upload-feedback", "children", allow_duplicate=True),
+            Output("watchlist-upload-pending", "data", allow_duplicate=True),
+        ],
+        Input("watchlist-upload-cancel-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def handle_cancel_replace(n_clicks: int) -> Tuple:
+        """Operator declined the replacement; drop the pending upload."""
+        if not n_clicks:
+            raise PreventUpdate
+        return (
+            dbc.Alert("Upload cancelled; the existing file was kept.",
+                      color="secondary", duration=5000),
+            None,
+        )
 
     # ---------------------------------------------------------------------
     # Download the current watchlist as YAML

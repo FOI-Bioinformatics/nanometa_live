@@ -160,7 +160,26 @@ def create_cumulative_coverage_figure(coverage: CoverageData) -> go.Figure:
     depth = coverage.depth_array
     max_d = min(int(np.percentile(depth[depth > 0], 99)) if np.any(depth > 0) else 1, 500)
 
-    thresholds = np.arange(0, max_d + 1)
+    # Amplicon-aware scaling: for concentrated coverage (a short locus in a
+    # large genome) the genome-relative fraction is < 0.1% at every depth, so
+    # the whole curve renders as a flat zero line against the fixed 0-105%
+    # axis. Scale to the covered region instead -- that is the material the
+    # operator is asking about -- and say so on the axis.
+    concentrated = getattr(coverage, "is_concentrated", False) and coverage.covered_bp > 0
+    if concentrated:
+        denominator = coverage.covered_bp
+        thresholds = np.arange(1, max_d + 1)  # t=0 would exceed 100%
+        y_title = "Covered region at depth (%)"
+        title = (f"How much of the covered region ({coverage.covered_bp:,} bp) "
+                 "is at each depth")
+        hover = "Depth >= %{x}x<br>Covered region: %{y:.1f}%<extra></extra>"
+    else:
+        denominator = coverage.ref_length
+        thresholds = np.arange(0, max_d + 1)
+        y_title = "Genome covered (%)"
+        title = "How much of the genome is covered at each depth"
+        hover = "Depth >= %{x}x<br>Genome covered: %{y:.1f}%<extra></extra>"
+
     # Vectorized: count(depth >= t) for every threshold at once. Sorting once
     # then searchsorted is O(N log N + max_d) instead of the previous
     # O(max_d * N) Python loop (up to ~2.5e9 comparisons on a 5 Mbp genome).
@@ -169,7 +188,7 @@ def create_cumulative_coverage_figure(coverage: CoverageData) -> go.Figure:
     counts_at_or_above = sorted_depth.size - np.searchsorted(
         sorted_depth, thresholds, side="left"
     )
-    fractions = counts_at_or_above / coverage.ref_length * 100
+    fractions = counts_at_or_above / denominator * 100
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -178,13 +197,13 @@ def create_cumulative_coverage_figure(coverage: CoverageData) -> go.Figure:
         fill="tozeroy",
         fillcolor="rgba(40, 167, 69, 0.2)",
         line=dict(color="#28a745", width=2),
-        hovertemplate="Depth >= %{x}x<br>Genome covered: %{y:.1f}%<extra></extra>",
+        hovertemplate=hover,
     ))
 
     fig.update_layout(
-        title=dict(text="How much of the genome is covered at each depth", font=dict(size=13, color="#374151")),
+        title=dict(text=title, font=dict(size=13, color="#374151")),
         xaxis_title="Minimum number of overlapping sequences",
-        yaxis_title="Genome covered (%)",
+        yaxis_title=y_title,
         yaxis_range=[0, 105],
         template="nanometa",
         height=280,
@@ -193,6 +212,13 @@ def create_cumulative_coverage_figure(coverage: CoverageData) -> go.Figure:
         showlegend=False,
         hovermode="x",
     )
+
+    if concentrated:
+        fig.add_annotation(
+            text=f"Whole genome: {coverage.breadth * 100:.2f}% covered",
+            xref="paper", yref="paper", x=0.98, y=0.95,
+            showarrow=False, font=dict(size=10, color="#6c757d"),
+        )
 
     return fig
 
@@ -211,14 +237,18 @@ def create_depth_histogram_figure(
         Plotly Figure.
     """
     depth = coverage.depth_array
-    # Exclude zeros for cleaner histogram, but note them
+    # Histogram COVERED positions only. Uncovered positions used to be counted
+    # too, so any genome with low breadth (an amplicon above all: ~1.87 M zero
+    # positions vs ~400 covered ones) collapsed into one giant bar at zero
+    # that made every real bar invisible.
     nonzero = depth[depth > 0]
     if len(nonzero) == 0:
         nonzero = depth
 
     max_d = int(np.percentile(nonzero, 99)) if len(nonzero) > 0 else 1
+    max_d = max(max_d, 1)  # all-zero coverage would make every bin edge 0
     bins = np.linspace(0, max_d, n_bins + 1)
-    counts, edges = np.histogram(depth, bins=bins)
+    counts, edges = np.histogram(nonzero, bins=bins)
     centers = (edges[:-1] + edges[1:]) / 2
 
     fig = go.Figure()
@@ -228,20 +258,24 @@ def create_depth_histogram_figure(
         hovertemplate="Depth: %{x:.0f}x<br>Positions: %{y:,}<extra></extra>",
     ))
 
-    # Mark mean depth
+    # Mark the mean over covered positions -- the genome-wide mean includes
+    # the zeros the bars now exclude, so it would sit far left of every bar.
+    covered_mean = (coverage.local_mean_depth
+                    if getattr(coverage, "covered_bp", 0) > 0
+                    else coverage.mean_depth)
     fig.add_vline(
-        x=coverage.mean_depth,
+        x=covered_mean,
         line_dash="dash",
         line_color="#fd7e14",
-        annotation_text=f"Mean: {coverage.mean_depth:.1f}x",
+        annotation_text=f"Mean (covered): {covered_mean:.1f}x",
         annotation_position="top right",
         annotation_font_size=10,
     )
 
     fig.update_layout(
-        title=dict(text="Distribution of coverage depth across the genome", font=dict(size=13, color="#374151")),
+        title=dict(text="Distribution of coverage depth across covered positions", font=dict(size=13, color="#374151")),
         xaxis_title="Number of overlapping sequences",
-        yaxis_title="Number of genome positions",
+        yaxis_title="Number of covered positions",
         yaxis_tickformat=",",
         template="nanometa",
         height=280,
@@ -255,8 +289,31 @@ def create_depth_histogram_figure(
 
 
 def _coverage_stat_items(coverage: CoverageData, concentrated: bool):
-    """Return the (label, value, tooltip) stat tuples for the summary row."""
-    items = [
+    """Return the (label, value, tooltip) stat tuples for the summary row.
+
+    For amplicon-like coverage (reads concentrated on a short locus, e.g. a
+    full-length 16S in a multi-Mb genome) the covered-region stats lead and
+    the genome-wide mean/median are dropped: "Genome Covered 0.0% / Avg.
+    Depth 0.1x" as the FIRST stats visually contradicted a CONFIRMED verdict,
+    and the genome-wide depths are just the local depth diluted by the
+    uncovered genome.
+    """
+    if concentrated:
+        return [
+            ("Covered Region", f"{coverage.covered_bp:,} bp",
+             "Total reference length the reads actually cover (an amplicon / 16S "
+             "locus rather than the whole genome; sums multi-copy rRNA loci)"),
+            ("Depth in Region", f"{coverage.local_mean_depth:.0f}x",
+             "Average depth across the covered region (ignoring the uncovered genome)"),
+            ("Peak Depth", f"{coverage.max_depth:,}x",
+             "Maximum depth at any single position"),
+            ("Genome Covered", f"{coverage.breadth * 100:.2f}%",
+             "Percentage of the reference genome with at least one matching "
+             "sequence - expectedly low for amplicon data, which targets one locus"),
+            ("Genome Size", f"{coverage.ref_length:,} bp",
+             "Total length of the reference genome"),
+        ]
+    return [
         ("Genome Covered", f"{coverage.breadth * 100:.1f}%",
          "Percentage of the reference genome with at least one matching sequence"),
         ("Avg. Depth", f"{coverage.mean_depth:.1f}x",
@@ -268,24 +325,6 @@ def _coverage_stat_items(coverage: CoverageData, concentrated: bool):
         ("Genome Size", f"{coverage.ref_length:,} bp",
          "Total length of the reference genome"),
     ]
-
-    # For amplicon-like coverage (reads concentrated on a short locus, e.g. a
-    # full-length 16S in a multi-Mb genome) the genome-relative breadth is
-    # expectedly tiny; surface the covered region itself so the operator sees the
-    # real, deep local signal instead of a misleading "low coverage".
-    if concentrated:
-        items.insert(1, (
-            "Covered Region",
-            f"{coverage.covered_bp:,} bp",
-            "Total reference length the reads actually cover (an amplicon / 16S "
-            "locus rather than the whole genome; sums multi-copy rRNA loci)",
-        ))
-        items.insert(2, (
-            "Depth in Region",
-            f"{coverage.local_mean_depth:.0f}x",
-            "Average depth across the covered region (ignoring the uncovered genome)",
-        ))
-    return items
 
 
 def _coverage_interpretation(coverage: CoverageData, concentrated: bool):

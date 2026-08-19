@@ -6,6 +6,63 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-19
+
+Verification-driven release. Every change below was found or confirmed by
+driving the real GUI operator flow against real Bioshield sequencing data --
+a full batch release check, a realtime run fed by nanorunner, and a config
+lifecycle audit -- rather than by unit tests alone. Pairs with nanometanf
+v1.7.0; the two repositories are released together.
+
+### Added
+- Readiness check "Database Location": warns when the Kraken2 database sits
+  on a removable or network volume, where memory-mapped random access is
+  pathologically slow, and names the remedy (copy to local disk; the
+  content-derived `db_hash` keeps cached indexes and mappings valid)
+- On-demand validation failures write the command, working directory and
+  captured stderr to `<results>/logs/` -- the directory the error message
+  already told operators to check
+
+### Changed
+- Kraken2 resource sizing belongs to the pipeline: the generated `-c` config
+  no longer pins `KRAKEN2_KRAKEN2` cpus/memory, so nanometanf's own scaling
+  applies. GUI-launched runs classified single-threaded with an 8 GB cap
+  regardless of hardware; the classification stage is now about 4x faster on
+  the reference dataset (198 s to 44 s, whole run 14 min to 4m16s)
+- `--kraken2_memory_gb` is derived from the measured database (hash size
+  plus 4 GB headroom) instead of a flat default sized for MiniKraken
+- Memory mapping defaults on for all platforms, ARM included; the retired
+  ARM opt-out was dead code that also disagreed with the pipeline
+- Apply Settings clears the "Modified" badge and rebases the dirty-check
+  baseline, so the badge is a usable signal again
+
+### Fixed
+- A watchlist toggle no longer reverts applied settings: it persisted its
+  whole in-memory config over `last-session.yaml`, and after a page reload
+  that config is the boot config, silently undoing an applied change
+- On-demand validation works end to end again: the Nextflow launch shares
+  the main run's resume context (launch directory and work directory), the
+  aggregate-scope `sample="all"` token no longer reads as a literal sample
+  name, and the cumulative genome list seeds from the main run so the
+  rebuilt `validation_results.json` keeps every previously validated pair
+- The Validation tab resolves the results directory through the same
+  override chain as the rest of the app; it previously reported "Results
+  directory not found" for a live run whose files were in
+  `results_dir_override`, and the batch drill-down selector came up empty
+  for the same reason
+- Genome lookup keys on the taxid reads are extracted for, so validation is
+  possible on GTDB and custom databases
+- The genome-coverage verdict considers real genome breadth, and confirmation
+  requires read support; see the cross-repo contract below
+
+### Testing
+- Cross-repo contract tests pin what "confirmed" means (read and breadth
+  floors, applied in the pipeline modules, including the realtime cumulative
+  aggregator), the single-sourced Kraken2 memory-mapping decision and preload
+  gate, and the per-batch progressive-report defaults that keep the dashboard
+  live. Each fails if either repository drifts
+- 3,785 tests
+
 ## [0.9.0] - 2026-08-17
 
 Cumulative release covering the 2026-06 through 2026-08 development line,

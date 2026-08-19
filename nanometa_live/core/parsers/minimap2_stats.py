@@ -86,6 +86,16 @@ def parse_minimap2_stats_json(filepath: Path):
         reference_accession=str(d.get("ref_name", "") or ""),
         timestamp=str(d.get("timestamp", "") or ""),
     )
+    # Real genome breadth comes from the sibling PAF; the stats file's
+    # avg_coverage is per-read query coverage and cannot answer "how much of
+    # the genome did we see".
+    paf = filepath.with_name(filepath.name.replace(".minimap2_stats.json", ".paf"))
+    from nanometa_live.core.parsers.paf_coverage_parser import paf_breadth
+    summary = paf_breadth(paf) if paf.exists() else None
+    if summary is not None:
+        result.genome_breadth = summary.breadth
+        result.coverage_concentrated = summary.is_concentrated
+
     result.status = result.determine_status()
     return result
 
@@ -103,11 +113,16 @@ def collect_minimap2_results(
     these supplement the blast.tsv results rather than dedup against them; only
     duplicate minimap2 entries are skipped.
     """
-    seen = {
-        (r.sample_id, r.taxid)
-        for r in existing
-        if getattr(r, "validation_method", None) == "minimap2"
-    }
+    # Dedup on the method CLASS, not the literal string: an on-demand run
+    # (or an aggregate entry with no per-entry method) carries
+    # validation_method="both", which IS a coverage result. Matching only
+    # "minimap2" let it through as a second entry for the same pair, so the
+    # Coverage tab rendered two cards for one organism with conflicting
+    # numbers and the same pattern-matching DOM id (2026-08-18 audit).
+    def _is_coverage(r) -> bool:
+        return getattr(r, "validation_method", None) in ("minimap2", "both")
+
+    seen = {(r.sample_id, r.taxid) for r in existing if _is_coverage(r)}
     out: List = []
     for mm2_dir in minimap2_stats_dirs(results_dir, validation_dir):
         for stats_file in mm2_dir.glob("*.minimap2_stats.json"):

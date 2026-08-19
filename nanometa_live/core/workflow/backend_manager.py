@@ -21,6 +21,7 @@ except ImportError:
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple, IO
 
+from nanometa_live.core.utils.loader_utils import clear_all_loader_caches
 from nanometa_live.core.workflow.nextflow_manager import NextflowManager
 
 
@@ -348,22 +349,17 @@ class BackendManager:
             )
         self.workflow_manager.set_pipeline_source(pipeline_source)
 
-        # Offline guard: reject remote sources before any network attempt.
-        if _parse_bool(self.config.get("offline_mode", False)):
-            is_remote = (
-                pipeline_source.startswith("remote:")
-                or pipeline_source.startswith("https://")
-                or pipeline_source.startswith("git@")
-                or pipeline_source in ("master", "main", "dev")
-            )
-            if is_remote:
-                msg = (
-                    "Offline mode is active but pipeline_source is remote "
-                    f"('{pipeline_source}'). Set pipeline_source to a local "
-                    "path in config.yaml before starting an offline run."
-                )
-                logging.error(msg)
-                return False, msg
+        # Pre-flight the source through the one validator that knows every
+        # failure mode: offline+remote is rejected before any network call,
+        # a local path must exist and contain main.nf, and a remote branch
+        # is resolved via ls-remote so a typo fails here with a clear
+        # message instead of mid-launch. This validator existed with zero
+        # production callers while a partial inline copy of its offline
+        # branch lived here (2026-08-17 audit, finding G1).
+        ok, msg = self.workflow_manager.validate_pipeline_source(self.config)
+        if not ok:
+            logging.error(msg)
+            return False, msg
 
         # Set up Nextflow workflow
         success, message = self.workflow_manager.setup(config_path)
@@ -401,6 +397,11 @@ class BackendManager:
     # Subdirectory names that nanometanf writes into the results dir.
     # detect_existing_results scans for these so the GUI can warn the
     # operator before silently mixing data from different runs.
+    # "canonical" matters more than it looks: the loaders consult
+    # canonical/_manifest.json and canonical/classification/ BEFORE any
+    # cache or freshness check, so a canonical tree left behind by a prior
+    # run keeps serving that run's sample list and classification to the
+    # GUI for as long as it exists (2026-08-17 audit, finding C1).
     RESULT_SUBDIRS = (
         "kraken2",
         "fastp",
@@ -411,6 +412,12 @@ class BackendManager:
         "on_demand_validation",
         "logs",
         "nanoplot",
+        "canonical",
+        "pipeline_info",
+        # The auto-generated operator report describes the run that wrote
+        # it; leaving it behind would show run A's verdict on the Reports
+        # tab during run B.
+        "report",
     )
 
     @staticmethod
@@ -483,6 +490,59 @@ class BackendManager:
         return hashlib.sha256(payload).hexdigest()
 
     @staticmethod
+    def compute_watchlist_fingerprint() -> str:
+        """Stable hash of the currently enabled watchlist entry set.
+
+        Keyed on the sorted taxids of the active entries. Recorded
+        separately from the input fingerprint: the input hash decides
+        whether resuming mixes unrelated DATA, while this one only warns
+        that the same data would be SCREENED differently (2026-08-17
+        audit, finding C10 -- resuming with a different watchlist looked
+        identical to resuming with the same one). Empty string when no
+        entries are enabled or the manager is unavailable.
+        """
+        try:
+            from nanometa_live.core.watchlist.watchlist_manager import (
+                get_watchlist_manager,
+            )
+            taxids = sorted(get_watchlist_manager().get_active_entries().keys())
+        except Exception as e:
+            logging.debug(f"Watchlist fingerprint unavailable: {e}")
+            return ""
+        if not taxids:
+            return ""
+        payload = ",".join(str(t) for t in taxids).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    @staticmethod
+    def _enabled_watchlist_ids() -> list:
+        """Sorted enabled watchlist ids, or [] when the manager is unusable."""
+        try:
+            from nanometa_live.core.watchlist.watchlist_manager import (
+                get_watchlist_manager,
+            )
+            return get_watchlist_manager().enabled_watchlist_ids()
+        except Exception as e:
+            logging.debug(f"Enabled watchlist ids unavailable: {e}")
+            return []
+
+    @staticmethod
+    def watchlist_matches(outdir: str) -> Optional[bool]:
+        """Compare the active watchlist to the prior run's recorded set.
+
+        Returns None when the prior metadata carries no watchlist
+        fingerprint (pre-C10 runs) so callers stay silent rather than
+        crying wolf over old run records.
+        """
+        prior = BackendManager.read_run_metadata(outdir)
+        if not prior or "watchlist_fingerprint" not in prior:
+            return None
+        return (
+            prior["watchlist_fingerprint"]
+            == BackendManager.compute_watchlist_fingerprint()
+        )
+
+    @staticmethod
     def read_run_metadata(outdir: str) -> Optional[Dict[str, Any]]:
         """Return the persisted run metadata for ``outdir`` or None.
 
@@ -513,6 +573,13 @@ class BackendManager:
             return
         payload = {
             "fingerprint": BackendManager.compute_input_fingerprint(config),
+            "watchlist_fingerprint": (
+                BackendManager.compute_watchlist_fingerprint()
+            ),
+            # The ids, not just the fingerprint above: nanometa-report reads
+            # these to reproduce the run's pathogen screen post hoc, where a
+            # hash alone cannot say WHICH lists to enable.
+            "watchlists": BackendManager._enabled_watchlist_ids(),
             "written_at": datetime.now().isoformat(timespec="seconds"),
             "inputs": {
                 key: config.get(key, "")
@@ -571,6 +638,11 @@ class BackendManager:
             dst = os.path.join(archive_path, name)
             os.rename(src, dst)
 
+        # The loaders cache in module globals keyed by directory path, so
+        # the just-archived data would otherwise keep answering from the
+        # TTL/mtime caches until they expire (finding C2/C3).
+        clear_all_loader_caches()
+
         logging.info(
             f"Archived {len(found)} existing result subdirs to {archive_path}"
         )
@@ -619,7 +691,7 @@ class BackendManager:
 
         # Get profile from config if not explicitly passed
         if profile is None:
-            profile = self.config.get("pipeline_profile", "docker")
+            profile = self.config.get("pipeline_profile", "conda")
 
         # Start the Nextflow workflow
         cores = self.config.get("snakemake_cores", None)  # Keep param name for compatibility
@@ -638,6 +710,11 @@ class BackendManager:
         )
         BackendManager.write_run_metadata(outdir_for_meta, self.config)
 
+        # A new run begins: whatever the loader caches hold belongs to the
+        # previous run (or the previous view of this outdir). Drop it all so
+        # the first poll parses what the pipeline actually writes.
+        clear_all_loader_caches()
+
         # Mark as running with start time for elapsed time tracking (thread-safe)
         with self._status_lock:
             self.status["running"] = True
@@ -651,6 +728,48 @@ class BackendManager:
 
         logging.info(f"Backend started successfully with profile: {profile}")
         return True, f"Backend started successfully with profile: {profile}"
+
+    def _auto_generate_report(self) -> Optional[str]:
+        """Write the operator HTML report into ``<outdir>/report/`` best-effort.
+
+        Called when a run ends (completion detected by the monitor thread,
+        or an operator Stop of a realtime run). Without this, the verdict
+        and pathogen screen existed only inside the running dashboard: an
+        operator who closed the app without clicking Export Results kept
+        the raw pipeline output but no human-readable summary of what the
+        run concluded (2026-08-17 storage audit, finding R1).
+
+        Raw files are never copied here (``include_raw=False``): the report
+        lands INSIDE the results directory, so copying raw/ would duplicate
+        the whole tree into itself. The report HTML is self-contained.
+
+        Best-effort by design: a report failure must never fail a stop or
+        mask a completed run. Disable with ``auto_report: false``.
+        Returns the report path, or None when skipped or failed.
+        """
+        config = self.config or {}
+        if not config.get("auto_report", True):
+            return None
+        outdir = (
+            config.get("results_output_directory")
+            or config.get("main_dir")
+            or ""
+        )
+        if not outdir or not os.path.isdir(outdir):
+            return None
+        try:
+            from nanometa_live.core.export.report_generator import (
+                ReportGenerator,
+            )
+            report_path = ReportGenerator(outdir, config).generate(
+                output_dir=os.path.join(outdir, "report"),
+                include_raw=False,
+            )
+            logging.info(f"Run report written to {report_path}")
+            return str(report_path)
+        except Exception as e:
+            logging.warning(f"Automatic run report failed: {e}")
+            return None
 
     def stop(self) -> Tuple[bool, str]:
         """
@@ -678,6 +797,10 @@ class BackendManager:
             self.status["pipeline_status"] = "stopped"
             self.status["errors"] = []  # Clear errors from user-initiated stop
             self.status["last_update"] = time.time()
+
+        # A realtime run ends via Stop, so this is its natural moment to
+        # leave a report behind; best-effort, never fails the stop.
+        self._auto_generate_report()
 
         # Clear workflow manager errors from the expected non-zero exit
         if hasattr(self.workflow_manager, 'status'):
@@ -919,63 +1042,15 @@ class BackendManager:
                             logging.exception(f"Error stopping pipeline after timeout: {e}")
                         break
 
-                # Thread-safe status update
+                # Thread-safe status update. Report generation is deferred
+                # to after the lock is released: it takes seconds, and the
+                # GUI's status polls block on this same lock.
+                run_completed = False
                 with self._status_lock:
                     # Detect pipeline termination (crash or completion)
                     if not workflow_status.get("running"):
-                        workflow_errors = workflow_status.get("errors", [])
-
-                        if len(workflow_errors) > 0:
-                            # Pipeline terminated with errors
-                            self.status["pipeline_status"] = "error"
-                            existing = set(self.status["errors"])
-                            for err in workflow_errors:
-                                if err not in existing:
-                                    self.status["errors"].append(err)
-                                    existing.add(err)
-                            self.status["running"] = False
-                            logging.error("Pipeline encountered errors, stopping")
-
-                        else:
-                            # Pipeline terminated without errors (normal completion
-                            # or undetected crash). Check if it completed
-                            # successfully by looking at process counts.
-                            processes_failed = workflow_status.get("processes_failed", 0)
-                            processes_complete = workflow_status.get("processes_complete", 0)
-
-                            if processes_failed > 0:
-                                # Pipeline had failed processes but no explicit error
-                                self.status["pipeline_status"] = "error"
-                                self.status["errors"].append(
-                                    f"Pipeline terminated with {processes_failed} "
-                                    f"failed process(es)"
-                                )
-                                self.status["running"] = False
-                                logging.error(
-                                    f"Pipeline terminated with {processes_failed} "
-                                    f"failed processes"
-                                )
-
-                            elif processes_complete > 0:
-                                # Pipeline completed successfully
-                                self.status["pipeline_status"] = "completed"
-                                self.status["running"] = False
-                                logging.info("Pipeline completed successfully")
-
-                            else:
-                                # Pipeline terminated unexpectedly with no
-                                # completed processes and no errors -- likely a
-                                # crash during startup or configuration
-                                self.status["pipeline_status"] = "error"
-                                self.status["errors"].append(
-                                    "Pipeline process terminated unexpectedly. "
-                                    "Check the Nextflow log for details."
-                                )
-                                self.status["running"] = False
-                                logging.error(
-                                    "Pipeline process terminated unexpectedly "
-                                    "(no completed processes, no errors reported)"
-                                )
+                        run_completed = self._apply_terminal_workflow_status(
+                            workflow_status)
 
                     # Update process information
                     self.status["processes_running"] = workflow_status.get("processes_running", 0)
@@ -989,6 +1064,12 @@ class BackendManager:
                     # Update last update time
                     self.status["last_update"] = time.time()
 
+                if run_completed:
+                    # Outside the lock on purpose (see above). Leave the
+                    # operator report behind so the verdict survives
+                    # closing the dashboard.
+                    self._auto_generate_report()
+
                 # Sleep for a bit
                 time.sleep(5)
 
@@ -1001,5 +1082,77 @@ class BackendManager:
         # Release lock when monitoring thread exits (pipeline completed or stopped)
         self._release_lock()
         logging.info("BackendManager status monitoring stopped")
+
+    def _apply_terminal_workflow_status(self, workflow_status: dict) -> bool:
+        """Classify a finished run and update ``self.status``.
+
+        Returns True when the run completed (the caller then generates the
+        operator report). Call with ``self._status_lock`` held.
+
+        **The Nextflow exit code decides, not the failed-task count.**
+        nanometanf isolates per-sample failures (``errorStrategy 'ignore'`` in
+        conf/error_isolation.config), so one barcode failing is by design:
+        every other sample runs to completion, all outputs publish, and
+        Nextflow exits 0 with "completed successfully, but with errored
+        process(es)". The trace still records that task as FAILED -- it has no
+        "ignored" status -- so counting failures alone declared a successful
+        3-barcode run failed and, worse, suppressed the auto-report that is
+        supposed to outlive the dashboard (found in the 2026-08-17 multiplex
+        assembly E2E, where the negative control had too few reads to
+        assemble). The isolated failure is still reported, as a warning naming
+        the tasks, so nothing is hidden.
+        """
+        workflow_errors = workflow_status.get("errors", [])
+        if workflow_errors:
+            self._fail_run(workflow_errors)
+            return False
+
+        processes_failed = workflow_status.get("processes_failed", 0)
+        processes_complete = workflow_status.get("processes_complete", 0)
+        exit_code = workflow_status.get("exit_code")
+        failed_tasks = workflow_status.get("failed_tasks") or []
+
+        if processes_failed > 0 and exit_code == 0:
+            named = ", ".join(failed_tasks) if failed_tasks else (
+                f"{processes_failed} task(s)")
+            self.status["pipeline_status"] = "completed"
+            self.status.setdefault("warnings", []).append(
+                f"Run completed; {named} did not produce output and was "
+                "isolated. Other samples are unaffected."
+            )
+            self.status["running"] = False
+            logging.warning(
+                "Pipeline completed with %d isolated task failure(s): %s",
+                processes_failed, named,
+            )
+            return True
+
+        if processes_failed > 0:
+            self._fail_run(
+                [f"Pipeline terminated with {processes_failed} failed process(es)"])
+            return False
+
+        if processes_complete > 0:
+            self.status["pipeline_status"] = "completed"
+            self.status["running"] = False
+            logging.info("Pipeline completed successfully")
+            return True
+
+        # No completed processes and no errors -- likely a crash during
+        # startup or configuration.
+        self._fail_run(["Pipeline process terminated unexpectedly. "
+                        "Check the Nextflow log for details."])
+        return False
+
+    def _fail_run(self, errors) -> None:
+        """Mark the run failed, appending each error once. Lock held."""
+        self.status["pipeline_status"] = "error"
+        existing = set(self.status["errors"])
+        for err in errors:
+            if err not in existing:
+                self.status["errors"].append(err)
+                existing.add(err)
+        self.status["running"] = False
+        logging.error("Pipeline failed: %s", "; ".join(errors))
 
 

@@ -67,6 +67,7 @@ from nanometa_live.app.tabs.validation_tab_helpers import (  # noqa: E402
     _load_real_coverage,
     _enumerate_batch_ids,
     _batch_selector_state,
+    build_validation_store,
 )
 from nanometa_live.app.tabs.consensus_helpers import (  # noqa: E402
     build_consensus_selector_options,
@@ -156,65 +157,15 @@ def register_validation_callbacks(app: Dash):
         ``view_mode``/``batch_value`` select cumulative vs a single batch.
         """
         batch_id = batch_value if view_mode == "batch" and batch_value else None
-        # Interval ticks are a backstop only; debounce them so a quiet
-        # outdir does not re-parse the BLAST validation directory every
-        # tick (matches the pattern on every other results-driven lead
-        # callback).
+        # Interval ticks are a backstop only; debounce them so a quiet outdir
+        # does not re-parse the validation directory every tick.
         if interval_tick_is_redundant(ctx, "load_validation_data", _fingerprint):
             raise PreventUpdate
         mark_rendered("load_validation_data", _fingerprint)
 
         try:
-            if not config:
-                return {"results": [], "summary": {}, "message": "No configuration loaded",
-                        "selected_sample": selected_sample}
-
-            results_dir = config.get("results_output_directory") or config.get("main_dir", "")
-            results_dir_ok = bool(results_dir and os.path.isdir(results_dir))
-
-            # No-results diagnostic: explain *why* (disabled / no organisms /
-            # missing databases / run in progress) instead of a bare wait
-            # message. Cheap to compute and only reached on the empty paths.
-            def _empty():
-                status = build_validation_status_payload(
-                    config, results_dir_ok, backend_status,
-                    has_results=False, results_count=0,
-                )
-                return {"results": [], "summary": {}, "message": status["message"],
-                        "status": status, "selected_sample": selected_sample}
-
-            if not config.get("blast_validation", False) or not results_dir_ok:
-                return _empty()
-
-            parser = BlastValidationParser(results_dir)
-            if not parser.has_validation_data():
-                return _empty()
-
-            results = parser.get_validation_results(batch_id=batch_id)
-            # The cumulative summary is run-wide; in single-batch view the
-            # per-method summary cards recompute from results, so skip it.
-            summary = {} if batch_id else parser.get_validation_summary()
-
-            # Apply sample filter via the pure helper. ``All Samples`` and
-            # empty sentinel values mean "no filter" -- matches the
-            # convention used by the Dashboard and Organism tabs.
-            results_dicts = [r.to_dict() for r in results]
-            filtered = _filter_results_by_sample(results_dicts, selected_sample)
-            if selected_sample and selected_sample != "All Samples":
-                logger.info(
-                    "Validation: %d/%d results match selected sample %s",
-                    len(filtered), len(results_dicts), selected_sample,
-                )
-            results_dicts = filtered
-
-            logger.info("Loaded %d validation results from %s", len(results_dicts), results_dir)
-
-            return {
-                "results": results_dicts,
-                "summary": summary,
-                "message": None,
-                "selected_sample": selected_sample,
-            }
+            return build_validation_store(
+                config, backend_status, selected_sample, batch_id)
 
         except Exception as e:
             log_callback_error("load_validation_data", e)
@@ -611,9 +562,19 @@ def register_validation_callbacks(app: Dash):
             Output("coverage-controls-section", "style"),
         ],
         Input("validation-data-store", "data"),
+        State("app-config", "data"),
     )
-    def update_coverage_empty_state(data):
-        """Show or hide the coverage empty-state message and controls, with context-appropriate text."""
+    def update_coverage_empty_state(data, config):
+        """Show or hide the coverage empty state, naming the actual cause.
+
+        Mirrors the BLAST side: classify on the diagnostic ``code`` the store
+        carries, not on substrings of the message. Before this, disabled /
+        never-ran / running / missing-genome / method-not-selected /
+        ran-and-found-nothing all collapsed into "No Coverage Data — run the
+        pipeline with minimap2 validation enabled", so a run that could not
+        be screened looked exactly like one screened and clean
+        (2026-08-18 audit).
+        """
         from nanometa_live.app.components.modern_components import EmptyStateMessage
 
         hidden = {"display": "none"}
@@ -626,29 +587,56 @@ def register_validation_callbacks(app: Dash):
                 icon="bi-bar-chart-line",
             ), hidden
 
+        method = str((config or {}).get("validation_method", "") or "").lower()
+
         if not data.get("results"):
-            message = data.get("message") or "No minimap2 coverage data available."
-            if "disabled" in message.lower():
-                title = "Validation Disabled"
-                icon = "bi-shield-x"
-            elif "waiting" in message.lower():
-                title = "Awaiting Results"
-                icon = "bi-hourglass-split"
-            else:
+            status = data.get("status") or {}
+            message = status.get("message") or data.get("message") \
+                or "No minimap2 coverage data available."
+            title, icon = empty_state_view(status, message)
+            # empty_state_view speaks for BLAST ("No Validation Results");
+            # say it in coverage terms when the diagnosis is method-agnostic.
+            if title == "No Validation Results":
                 title = "No Coverage Data"
                 icon = "bi-bar-chart-line"
+            if method == "blast":
+                return visible, EmptyStateMessage(
+                    title="Coverage Not Run",
+                    message=(
+                        "minimap2 coverage validation was not run for this "
+                        "analysis — the validation method is set to 'blast'. "
+                        "The BLAST tab shows the read-level results. To add "
+                        "genome coverage, set the validation method to 'both' "
+                        "(or 'minimap2') in the Configuration tab and re-run."
+                    ),
+                    icon="bi-bar-chart-line",
+                ), hidden
             return visible, EmptyStateMessage(
-                title=title,
-                message=message,
-                icon=icon,
+                title=title, message=message, icon=icon,
             ), hidden
 
         cov_results = _filter_by_method(data["results"], "minimap2")
         if cov_results:
             return hidden, [], visible
+        if method == "blast":
+            return visible, EmptyStateMessage(
+                title="Coverage Not Run",
+                message=(
+                    "minimap2 coverage validation was not run — the validation "
+                    "method is set to 'blast'. Set it to 'both' (or "
+                    "'minimap2') to add genome coverage."
+                ),
+                icon="bi-bar-chart-line",
+            ), hidden
+        # Other methods produced results but minimap2 produced none: that is
+        # a screened-and-empty state, distinct from never having run.
         return visible, EmptyStateMessage(
-            title="No Coverage Data",
-            message="No minimap2 coverage results found. Run the pipeline with minimap2 validation enabled.",
+            title="No Coverage Confirmed",
+            message=(
+                "minimap2 ran but confirmed no coverage for the detected "
+                "organisms. Other validation results are shown on the BLAST "
+                "tab."
+            ),
             icon="bi-bar-chart-line",
         ), hidden
 
@@ -766,20 +754,33 @@ def register_validation_callbacks(app: Dash):
             threshold = 10
 
         batch_id = batch_value if view_mode == "batch" and batch_value else None
-        coverage = _load_real_coverage(selected_key, config, min_mapq, batch_id=batch_id)
+        coverage, load_state = _load_real_coverage(
+            selected_key, config, min_mapq, batch_id=batch_id)
 
         if coverage is None:
-            no_paf_msg = "No PAF file found for this species/sample. Ensure minimap2 validation ran and results are in validation/minimap2/."
-            no_paf = lambda: create_empty_coverage_figure(
+            # Name the actual cause: a PAF whose every alignment fails the
+            # MAPQ filter is fixed at the on-screen control, not by re-running
+            # the pipeline -- the old blanket "No PAF file found" sent the
+            # operator to the wrong place.
+            if load_state == "filtered":
+                empty_msg = (
+                    f"Alignments exist, but none has MAPQ >= {min_mapq}. "
+                    "Lower the confidence filter above (0 shows all alignments)."
+                )
+            else:
+                empty_msg = ("No PAF file found for this species/sample. Ensure "
+                             "minimap2 validation ran and results are in "
+                             "validation/minimap2/.")
+            placeholder = lambda: create_empty_coverage_figure(
                 title="No coverage data",
-                message=no_paf_msg,
+                message=empty_msg,
             )
             # Keep the section VISIBLE: coverage-stats-container (where this
             # warning lands) and the placeholder figures live inside
             # coverage-plots-section, so hiding the section would blank the tab
             # and swallow the explanation.
-            return no_paf(), no_paf(), no_paf(), dbc.Alert(
-                no_paf_msg,
+            return placeholder(), placeholder(), placeholder(), dbc.Alert(
+                empty_msg,
                 color="warning",
                 className="text-center",
             ), visible

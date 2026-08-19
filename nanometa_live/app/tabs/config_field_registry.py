@@ -63,6 +63,8 @@ CONFIG_FORM_FIELDS = (
     ("kraken2-hitgroups-input", "kraken2_hitgroups"),
     ("max-file-age-input", "max_file_age_minutes"),
     ("min-reads-for-validation-input", "min_reads_for_validation"),
+    ("enable-assembly-input", "enable_assembly"),
+    ("assembler-input", "assembler"),
 )
 
 #: Component ids of all Configuration-form widgets (order-independent set).

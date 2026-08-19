@@ -181,12 +181,16 @@ class TestEmptyStateCallbacks:
 
     def test_coverage_disabled_state(self, validation_app):
         style, children, section = self._cov_fn(validation_app)(
-            {"results": [], "message": "Validation is disabled. Enable it in Configuration tab."})
+            {"results": [],
+             "status": {"code": "disabled",
+                        "message": "Validation is disabled. Enable it in Configuration tab."}},
+            {"validation_method": "both"})
         assert "Disabled" in self._title(children)
 
     def test_coverage_has_minimap2_results_shows_controls(self, validation_app):
         style, children, section = self._cov_fn(validation_app)(
-            {"results": [{"validation_method": "minimap2", "species": "X"}]})
+            {"results": [{"validation_method": "minimap2", "species": "X"}]},
+            {"validation_method": "both"})
         assert style == {"display": "none"}
         assert section == {"display": "block"}
 
@@ -274,6 +278,18 @@ class TestCoveragePlots:
             "barcode99_9999", 0, 10, "cumulative", None, enabled_config)
         assert style == {"display": "block"}
         assert "No PAF file" in str(stats)
+
+    def test_mapq_filtered_message_names_the_filter(self, validation_app, enabled_config):
+        # PAF exists but min_mapq=99 filters every alignment. The old code
+        # reported "No PAF file found", sending the operator to check the
+        # pipeline output instead of the on-screen confidence filter.
+        depth, cum, hist, stats, style = self._fn(validation_app)(
+            "barcode01_1773", 99, 10, "cumulative", None, enabled_config)
+        s = str(stats)
+        assert style == {"display": "block"}
+        assert "MAPQ" in s
+        assert "confidence filter" in s.lower()
+        assert "No PAF file" not in s
 
     def test_negative_depth_threshold_sanitized(self, validation_app, enabled_config):
         # A negative or None threshold must not raise; it clamps internally.

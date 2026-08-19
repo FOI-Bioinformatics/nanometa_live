@@ -272,8 +272,26 @@ def estimate_bundle_size(
     pipeline_dir = _local_pipeline_dir_for_estimate(config, pipeline_path)
     if pipeline_dir:
         total += _dir_size(pipeline_dir)
-    total += _dir_size(Path.home() / ".nextflow" / "plugins")
+    total += _dir_size(_nextflow_plugins_home())
     return total
+
+
+def _nextflow_plugins_home() -> Path:
+    """The directory Nextflow caches plugins in on this machine.
+
+    Honors ``NXF_HOME`` (and the more specific ``NXF_PLUGINS_DIR``) before
+    falling back to ``~/.nextflow/plugins`` -- a build machine that sets
+    NXF_HOME caches its plugins there, and reading only the home-dir default
+    silently produced bundles with zero plugins (2026-08-17 audit, finding
+    G8).
+    """
+    plugins_dir = os.environ.get("NXF_PLUGINS_DIR")
+    if plugins_dir:
+        return Path(plugins_dir)
+    nxf_home = os.environ.get("NXF_HOME")
+    if nxf_home:
+        return Path(nxf_home) / "plugins"
+    return Path.home() / ".nextflow" / "plugins"
 
 # Patterns of files and directories to skip when copying the pipeline source
 # to keep bundle size manageable.
@@ -716,7 +734,7 @@ class BundleManager:
                     shutil.copy2(wl_file, dst)
 
             # Also include built-in watchlists from the package
-            self._copy_builtin_watchlists(staging / "watchlists")
+            self._copy_builtin_watchlists(staging / "watchlists", manifest)
 
             # Copy containers if available
             containers_dir = home / "containers"
@@ -1052,8 +1070,61 @@ class BundleManager:
         self._verify_db_hash(manifest, kraken_db_path, report)
         self._verify_tool_versions(manifest, report)
         self._verify_build_platform(manifest, report)
+        self._verify_runnable_offline(tmp, report)
 
         return report
+
+    @staticmethod
+    def _verify_runnable_offline(tmp: Path, report: Dict[str, Any]) -> None:
+        """Check the extracted bundle can actually run a pipeline offline.
+
+        These two conditions were previously checked only during import
+        (missing ``main.nf`` fails it; missing plugins warn), so
+        ``verify_bundle`` -- explicitly offered as the dry run that predicts
+        the import -- printed a clean bill for a bundle that could not run a
+        single process offline (2026-08-17 audit, finding G2). Severities
+        mirror the import path: truncated pipeline source is a blocker,
+        absent plugins a warning.
+        """
+        pipeline_dir = tmp / _BUNDLED_PIPELINE_DIRNAME
+        if pipeline_dir.is_dir():
+            if not (pipeline_dir / "main.nf").exists():
+                report["blockers"].append({
+                    "code": "pipeline_main_missing",
+                    "fatal": False,
+                    "message": (
+                        "Bundled pipeline source is missing main.nf; the "
+                        "bundle is incomplete or was truncated in transfer. "
+                        "Re-export and re-transfer the bundle."
+                    ),
+                })
+        else:
+            report["warnings"].append(
+                "The bundle contains no pipeline_source/ directory. The "
+                "field machine will need the nanometanf checkout supplied "
+                "separately; with offline_mode enabled a remote "
+                "pipeline_source is refused at launch."
+            )
+
+        plugins_dir = tmp / _BUNDLED_NXF_PLUGINS_DIRNAME
+        has_plugin = plugins_dir.is_dir() and any(
+            p.is_dir() and p.name.startswith(_PLUGIN_PREFIXES)
+            for p in plugins_dir.iterdir()
+        )
+        if not has_plugin:
+            detail = (
+                f"is empty or missing expected plugin folders"
+                if plugins_dir.is_dir()
+                else "was not included in this bundle at all"
+            )
+            report["warnings"].append(
+                f"Nextflow plugins: the plugin directory {detail}. Offline, "
+                "Nextflow falls back to the online plugin registry and the "
+                "run fails before its first process. Re-export from a "
+                "machine where Nextflow has run at least once (the plugins "
+                "are cached in ~/.nextflow/plugins), or install the plugins "
+                "on the field machine."
+            )
 
     def _verify_load_manifest(
         self, tmp: Path, report: Dict[str, Any]
@@ -2365,10 +2436,10 @@ class BundleManager:
         """
         meta: Dict[str, Any] = {"bundled": False, "plugin_count": 0}
 
-        plugins_home = Path.home() / ".nextflow" / "plugins"
+        plugins_home = _nextflow_plugins_home()
         if not plugins_home.is_dir():
             logger.info(
-                "~/.nextflow/plugins/ not found; skipping plugin bundling."
+                f"{plugins_home} not found; skipping plugin bundling."
             )
             return meta
 
@@ -2524,20 +2595,31 @@ class BundleManager:
             return "docker"
         return None
 
-    def _copy_builtin_watchlists(self, dst_dir: Path) -> None:
+    def _copy_builtin_watchlists(
+        self, dst_dir: Path, manifest: Dict[str, Any]
+    ) -> None:
         """Copy built-in watchlist YAMLs to the bundle.
 
         Resolves the source directory via importlib.resources so the lookup
         works under both regular and editable installs. Editable installs
         produce a namespace package whose __file__ attribute is None, which
         breaks the legacy Path(wl_pkg.__file__).parent approach.
+
+        A failure here is recorded in the manifest's ``export_warnings``:
+        the built-in watchlists are what makes a fresh field install able to
+        screen anything at all, so a bundle silently shipping without them
+        is a bundle that reports NOT SCREENED on the rig (2026-08-17 audit,
+        finding W7 -- the earlier version swallowed OSError at debug level).
         """
         try:
             wl_path = _resolve_builtin_watchlist_dir()
             if wl_path is None or not wl_path.is_dir():
-                logger.debug(
-                    "Built-in watchlist directory not found; skipping copy."
+                msg = (
+                    "Built-in watchlist directory could not be resolved; "
+                    "the bundle ships without the built-in watchlists."
                 )
+                logger.warning(msg)
+                manifest["export_warnings"].append(msg)
                 return
 
             dst_dir.mkdir(parents=True, exist_ok=True)
@@ -2547,7 +2629,11 @@ class BundleManager:
                 if not dst_file.exists():
                     shutil.copy2(yaml_file, dst_file)
         except (ImportError, AttributeError, OSError) as e:
-            logger.debug(f"Could not copy built-in watchlists: {e}")
+            msg = (
+                f"Could not copy built-in watchlists into the bundle: {e}"
+            )
+            logger.warning(msg)
+            manifest["export_warnings"].append(msg)
 
     def _load_container_images(self, containers_dir: Path) -> Dict[str, Any]:
         """Load container images from a restored bundle directory.

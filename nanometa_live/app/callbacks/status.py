@@ -67,26 +67,39 @@ def register_status(app, backend_manager):
         if not main_dir:
             raise PreventUpdate
 
+        # Keep the Flask /reports/<key> route pointed at the directory the
+        # operator is viewing. It used to be set only by the Reports-tab
+        # callback, so after a run switch the route kept serving the
+        # PREVIOUS run's MultiQC/execution HTML until that tab was
+        # revisited (2026-08-17 audit, finding C8). This callback already
+        # runs every poll with the resolved outdir; the refresh is one
+        # lock-protected assignment.
+        from nanometa_live.core.utils.reports_loader import set_reports_dir
+        set_reports_dir(main_dir)
+
         try:
             fp = check_data_freshness(main_dir)
         except Exception as e:
             log_callback_error("compute_results_fingerprint", e)
             raise PreventUpdate
 
-        # U4: sticky 'first batch arrived' flag. Once any tracked
-        # subdirectory holds a non-empty file we leave the flag set for
-        # the remainder of the run; downstream callbacks use it to hide
-        # the waiting banner without re-checking the filesystem.
+        # U4: 'first batch arrived' flag. Downstream callbacks use it to
+        # hide the waiting banner without re-checking the filesystem.
+        #
+        # Recomputed on every fingerprint change rather than kept sticky:
+        # the sticky version survived an Archive (same outdir, now empty)
+        # and an Open Results switch onto a fresh outdir, suppressing run
+        # B's waiting banner with run A's flag (2026-08-17 audit, finding
+        # C5). The check is one early-exit walk and only runs when the
+        # tree changed, so honesty costs nothing here. Between changes the
+        # stored value is reused via the PreventUpdate below.
         from nanometa_live.app.utils.first_batch import first_batch_seen
         prev_seen = bool((prev or {}).get("first_batch_seen", False))
-        if prev_seen:
-            seen = True
-        else:
-            try:
-                seen = first_batch_seen(main_dir)
-            except Exception as e:
-                logging.debug("first_batch_seen(%s) failed: %s", main_dir, e)
-                seen = False
+        try:
+            seen = first_batch_seen(main_dir)
+        except Exception as e:
+            logging.debug("first_batch_seen(%s) failed: %s", main_dir, e)
+            seen = False
 
         if fp == (prev or {}).get("fp") and seen == prev_seen:
             raise PreventUpdate

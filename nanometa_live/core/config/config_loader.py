@@ -89,13 +89,20 @@ class ConfigLoader:
             "default_hierarchy_letters": ["D", "C", "G", "S"],
             "default_reads_per_level": 10,
             "pipeline_cores": 1,
-            "kraken_cores": 1,
+            # kraken_cores retired 2026-08-18: the default of 1 flowed into
+            # the generated -c config as `KRAKEN2_KRAKEN2 { cpus = 1 }`,
+            # overriding nanometanf's own CPU scaling for every operator who
+            # never touched the field. Kraken2 sizing now belongs to the
+            # pipeline (see parameter_mapping.create_nextflow_config).
             "validation_cores": 1,
             "blast_cores": 1,
             "check_intervals_seconds": 15,
             "kraken_db": "",
-            # Using strict boolean values
-            "kraken_memory_mapping": True,
+            # kraken_memory_mapping deliberately NOT defaulted: a default
+            # here made _resolve_kraken2_memory_mapping's "explicit override
+            # wins" branch unconditional (the min_perc_identity pattern).
+            # The resolver defaults to True; only a deliberate operator
+            # value belongs in the config.
             # Validation settings
             # Enabled by default: confirmation testing is cheap and gives operators
             # an immediate cross-check on detected species. It silently no-ops when
@@ -137,6 +144,9 @@ class ConfigLoader:
             # QC and analysis tools
             "qc_tool": "chopper",
             "skip_nanoplot": False,
+            # Assembly (experimental nanometanf step; off by default)
+            "enable_assembly": False,
+            "assembler": "flye",
             # Kraken2 realtime incremental classification
             "kraken2_enable_incremental": True,
             # Visualization options
@@ -144,6 +154,10 @@ class ConfigLoader:
             "enable_nanopore_stats_mqc": False,
             # Offline mode: when enabled, skip all network calls and use cached data only
             "offline_mode": False,
+            # Write the operator HTML report into <outdir>/report/ when a
+            # run completes or is stopped, so the verdict survives closing
+            # the dashboard. Best-effort; disable to skip.
+            "auto_report": True,
             # Processing mode settings
             "processing_mode": "batch",
             "sample_handling": "by_barcode",

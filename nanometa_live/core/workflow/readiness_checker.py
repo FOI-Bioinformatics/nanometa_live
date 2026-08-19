@@ -22,6 +22,7 @@ Tool location logic:
 
 import logging
 import os
+import platform as _platform
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -30,6 +31,38 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Mount-point prefixes where removable and network volumes appear, per OS.
+# Used by _database_on_removable_volume; deliberately a prefix table rather
+# than filesystem-type sniffing -- statvfs cannot name the fstype portably,
+# and the prefix convention covers the cases operators actually hit (USB
+# sticks and network shares auto-mounted by the desktop).
+_REMOVABLE_MOUNT_PREFIXES = {
+    "Darwin": ("/Volumes",),
+    "Linux": ("/media", "/mnt", "/run/media"),
+}
+
+
+def _database_on_removable_volume(db_path: str, system: Optional[str] = None) -> bool:
+    """True when ``db_path`` sits under a removable/network mount prefix.
+
+    Kraken2 memory-maps ``hash.k2d`` in place and classification touches it
+    in random page-sized reads; on a USB or network volume that access
+    pattern is pathological even when sequential throughput is fine
+    (measured 2026-08-18: 63 MB/s sequential, 20+ minutes of paging per
+    task). Matching is on a path-component boundary so ``/mnt2/db`` does
+    not false-positive on ``/mnt``.
+    """
+    prefixes = _REMOVABLE_MOUNT_PREFIXES.get(system or _platform.system(), ())
+    try:
+        parts = Path(db_path).resolve().parts
+    except OSError:
+        parts = Path(db_path).parts
+    for prefix in prefixes:
+        p = Path(prefix).parts
+        if parts[: len(p)] == p:
+            return True
+    return False
 
 
 class Severity(str, Enum):
@@ -137,8 +170,9 @@ class ReadinessChecker:
 
         # === Data checks (critical) ===
         report.checks.append(self._check_kraken_db(config))
+        report.checks.append(self._check_kraken_db_location(config))
         report.checks.append(self._check_db_index(config, home))
-        report.checks.append(self._check_taxid_mappings(config, home))
+        report.checks.append(self._check_taxid_mappings(config, home, active_watchlist))
 
         # === Pipeline execution tools (critical) ===
         # Nextflow runs locally to orchestrate the pipeline
@@ -187,6 +221,7 @@ class ReadinessChecker:
 
         # === Input/output checks (warning) ===
         report.checks.append(self._check_input_directory(config))
+        report.checks.append(self._check_input_read_length(config))
         report.checks.append(self._check_output_directory(config))
         report.checks.append(self._check_disk_space(config))
 
@@ -234,6 +269,35 @@ class ReadinessChecker:
             f"Valid database at {p.name}"
         )
 
+    def _check_kraken_db_location(self, config: Dict[str, Any]) -> CheckResult:
+        """Warn when the database sits on a removable or network volume.
+
+        A WARNING, not a blocker: the run works, just slowly. Unset or
+        missing paths pass silently here -- they are the Kraken2 Database
+        check's finding, and double-reporting one problem teaches operators
+        to skim the list.
+        """
+        db_path = config.get("kraken_db", "")
+        if not db_path or not Path(db_path).is_dir():
+            return CheckResult(
+                "Database Location", True, Severity.INFO,
+                "Not applicable (no database directory)"
+            )
+        if _database_on_removable_volume(db_path):
+            return CheckResult(
+                "Database Location", False, Severity.WARNING,
+                "Database is on a removable or network volume "
+                f"({db_path}). Kraken2 memory-maps it in place, and random "
+                "page access over USB/network is very slow. Copy the "
+                "database to local disk and point kraken_db there — cached "
+                "indexes and mappings remain valid (content-derived hash).",
+                details=str(db_path)
+            )
+        return CheckResult(
+            "Database Location", True, Severity.WARNING,
+            "Database is on local storage"
+        )
+
     def _check_db_index(self, config: Dict[str, Any], home: Path) -> CheckResult:
         db_path = config.get("kraken_db", "")
         if not db_path:
@@ -269,7 +333,10 @@ class ReadinessChecker:
             details=f"expected at {index_file_json} or {index_file_pkl}"
         )
 
-    def _check_taxid_mappings(self, config: Dict[str, Any], home: Path) -> CheckResult:
+    def _check_taxid_mappings(
+        self, config: Dict[str, Any], home: Path,
+        active_watchlist: Optional[List[Dict[str, Any]]] = None,
+    ) -> CheckResult:
         db_path = config.get("kraken_db", "")
         if not db_path:
             return CheckResult(
@@ -292,6 +359,21 @@ class ReadinessChecker:
         from nanometa_live.core.utils.paths import get_mappings_dir_from_env
         mapping_file = Path(get_mappings_dir_from_env()) / f"{db_hash}_mappings.json"
         if mapping_file.exists():
+            # Staleness: a mapping file generated before the operator added
+            # entries passed as green, so newly added organisms were never
+            # resolved against the database (2026-08-17 reaudit, G9). Warn
+            # -- not fail -- when active entries are missing from the file;
+            # operator-declared db_taxids do not need a scan.
+            missing = self._count_unmapped_active(
+                mapping_file, active_watchlist
+            )
+            if missing:
+                return CheckResult(
+                    "Taxid Mappings", False, Severity.WARNING,
+                    f"Taxid mappings found, but {missing} active watchlist "
+                    f"entr{'y is' if missing == 1 else 'ies are'} not in "
+                    f"them - run Scan Database to refresh",
+                )
             return CheckResult(
                 "Taxid Mappings", True, Severity.CRITICAL,
                 "Taxid mappings found"
@@ -300,6 +382,35 @@ class ReadinessChecker:
             "Taxid Mappings", False, Severity.CRITICAL,
             "Taxid mappings not generated (run preparation)"
         )
+
+
+    @staticmethod
+    def _count_unmapped_active(
+        mapping_file: Path,
+        active_watchlist: Optional[List[Dict[str, Any]]],
+    ) -> int:
+        """Active entries absent from the mapping file (0 when unknowable)."""
+        if not active_watchlist:
+            return 0
+        try:
+            import json as _json
+            with open(mapping_file) as fh:
+                data = _json.load(fh)
+            mapped = {
+                int(m.get("ncbi_taxid", 0))
+                for m in (data.get("mappings") or [])
+                if m.get("ncbi_taxid")
+            }
+        except (OSError, ValueError):
+            return 0
+        missing = 0
+        for e in active_watchlist:
+            taxid = e.get("taxid") or 0
+            if e.get("db_taxid"):
+                continue  # operator-declared; no scan needed
+            if taxid and int(taxid) not in mapped:
+                missing += 1
+        return missing
 
     # -- Tool checks --
 
@@ -324,7 +435,10 @@ class ReadinessChecker:
 
     def _check_container_runtime(self, config: Dict[str, Any]) -> CheckResult:
         """Check container runtime matching the pipeline_profile setting."""
-        profile = config.get("pipeline_profile", "docker")
+        profile = config.get("pipeline_profile", "conda")
+        # First component decides the engine; "conda,server" is a supported
+        # comma-form (extra components are plain Nextflow profiles).
+        profile = str(profile).split(",", 1)[0].strip()
 
         if profile == "standard":
             return CheckResult(
@@ -425,6 +539,75 @@ class ReadinessChecker:
             "Input Directory", False, Severity.WARNING,
             f"No FASTQ files or per-sample directories found in {p.name}",
             details="This is expected if the sequencing run has not started yet"
+        )
+
+    def _check_input_read_length(self, config: Dict[str, Any]) -> CheckResult:
+        """Warn when the input reads are shorter than the QC length filter.
+
+        The filter defaults to 1000 bp and discards ALL reads of a short-
+        amplicon run: chopper exits 0 on total loss and the run completes
+        green with every panel blank, so this pre-flight sample is the only
+        warning the operator gets. Median-based: a warning fires when more
+        than half of the sampled reads would be discarded.
+        """
+        name = "Input Read Length"
+        qc_tool = str(config.get("qc_tool") or "chopper").lower()
+        if qc_tool == "fastp":
+            return CheckResult(
+                name, True, Severity.WARNING,
+                "fastp QC applies no long-read length floor",
+            )
+
+        # Effective floor: the lower of the configured chopper/filtlong
+        # values (which of the two runs depends on the pipeline QC profile;
+        # taking the min avoids false alarms at the cost of missing the
+        # mixed case where only the inactive tool was lowered).
+        floors: Dict[str, int] = {}
+        for key in ("chopper_minlength", "filtlong_min_length"):
+            try:
+                floors[key] = int(config.get(key))
+            except (TypeError, ValueError):
+                continue
+        if not floors:
+            floors = {"chopper_minlength": 1000}
+        floor_key, floor = min(floors.items(), key=lambda kv: kv[1])
+        if floor <= 1:
+            return CheckResult(
+                name, True, Severity.WARNING,
+                "Length filter is disabled (minimum length 1 bp or lower)",
+            )
+
+        input_dir = config.get("nanopore_output_directory") or config.get("nanopore_dir", "")
+        if not input_dir or not Path(input_dir).is_dir():
+            return CheckResult(
+                name, True, Severity.WARNING,
+                "No input directory to sample yet",
+                details="This is expected if the sequencing run has not started yet",
+            )
+
+        from nanometa_live.core.utils.read_length_probe import median_input_read_length
+        median, n_reads, example = median_input_read_length(input_dir)
+        if median is None:
+            return CheckResult(
+                name, True, Severity.WARNING,
+                "No input FASTQ to sample yet",
+                details="This is expected if the sequencing run has not started yet",
+            )
+        if median < floor:
+            return CheckResult(
+                name, False, Severity.WARNING,
+                f"Median input read length is ~{median} bp ({n_reads} reads "
+                f"sampled from {example}), below the length filter "
+                f"({floor_key} = {floor}). Most reads would be discarded "
+                "before classification.",
+                details="For amplicon or other short-read protocols, lower the "
+                        "filter in Configuration -> Read Filtering (e.g. "
+                        "100-300 bp).",
+            )
+        return CheckResult(
+            name, True, Severity.WARNING,
+            f"Median input read length ~{median:,} bp clears the length "
+            f"filter ({floor} bp)",
         )
 
     def _check_output_directory(self, config: Dict[str, Any]) -> CheckResult:
@@ -821,6 +1004,17 @@ class ReadinessChecker:
                 "Pipeline Source", False, Severity.WARNING,
                 f"Pipeline source '{source}' is not a recognised remote "
                 f"form. Expected 'remote:<branch>' (e.g. 'remote:dev').",
+            )
+        # A remote source cannot be fetched offline, and the launch path
+        # (backend_manager.setup) refuses it outright -- so the readiness
+        # panel must say so here rather than showing green and letting the
+        # operator find out at Start Analysis (2026-08-17 audit, finding G6).
+        if config.get("offline_mode"):
+            return CheckResult(
+                "Pipeline Source", False, Severity.CRITICAL,
+                f"Offline mode is enabled but pipeline_source is remote "
+                f"({source}). Point pipeline_source at a local nanometanf "
+                f"checkout (e.g. the bundle's pipeline_source directory).",
             )
         # Remote source (well-formed): first run will fetch the pipeline
         # from GitHub. Surfaced as INFO rather than silently skipped.

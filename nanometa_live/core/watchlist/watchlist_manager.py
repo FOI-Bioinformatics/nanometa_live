@@ -770,14 +770,30 @@ class WatchlistManager:
             pseudo_taxid = _stable_pseudo_taxid(entry.name)
 
             if pseudo_taxid in self._entries:
-                # MERGE: Entry already exists
+                # MERGE: Entry already exists. Mirror the taxid-keyed merge
+                # branch above -- this branch used to drop the incoming
+                # entry's names_alt, db_taxid and enabled state, so a
+                # name-only organism behaved differently from the same
+                # organism with a taxid (2026-08-17 audit, finding W8).
                 existing = self._entries[pseudo_taxid]
                 if watchlist_id:
                     existing.watchlist_ids.add(watchlist_id)
                 if _threat_severity(entry.threat_level) > _threat_severity(existing.threat_level):
                     existing.threat_level = entry.threat_level
                 existing.alert_threshold = min(existing.alert_threshold, entry.alert_threshold)
-                # Preserve existing enabled state (don't force enable on merge)
+
+                for alt_name in entry.names_alt:
+                    if alt_name not in existing.names_alt:
+                        existing.names_alt.append(alt_name)
+                        self._name_index[alt_name.lower()] = pseudo_taxid
+
+                if entry.db_taxid and not existing.db_taxid:
+                    existing.db_taxid = entry.db_taxid
+
+                # If incoming entry is enabled (e.g. from enable_watchlist),
+                # also enable existing entry for consistent UX
+                if entry.enabled:
+                    existing.enabled = True
                 return
 
             entry.taxid = pseudo_taxid
@@ -936,6 +952,32 @@ class WatchlistManager:
                 keys.insert(0, key)
         return db_to_ncbi
 
+
+    @staticmethod
+    def _dedupe_alerts_by_entry(alerts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """One detection per watchlist entry, keeping the dominant node.
+
+        A species report row and its subspecies/strain rows all resolve to
+        the same watchlist entry, and the species row's cumulative count
+        already CONTAINS its descendants -- so emitting one alert per
+        matched row both multiplied the "N of M watched pathogens" count
+        (a real LVS run announced 12 pathogens for one organism) and
+        double-counted reads anywhere the alerts are summed (2026-08-17
+        reaudit). The kept row is the one with the most reads: for
+        ancestor/descendant matches that is the ancestor, whose count
+        contains the others. Distinct entries are never merged.
+        """
+        best: Dict[Any, Dict[str, Any]] = {}
+        order: List[Any] = []
+        for alert in alerts:
+            key = alert.get("taxid") or alert.get("name")
+            if key not in best:
+                best[key] = alert
+                order.append(key)
+            elif alert.get("reads", 0) > best[key].get("reads", 0):
+                best[key] = alert
+        return [best[k] for k in order]
+
     def check_organisms(
         self,
         detected_organisms: List[Dict[str, Any]]
@@ -1032,7 +1074,9 @@ class WatchlistManager:
                     ),
                 })
 
-        # Sort by threat level (critical first)
+        # One alert per watchlist entry (dominant node wins), then sort by
+        # threat level (critical first).
+        alerts = self._dedupe_alerts_by_entry(alerts)
         threat_order = {"critical": 0, "high": 1, "moderate": 2, "low": 3}
         alerts.sort(key=lambda x: threat_order.get(x.get("threat_level", "low"), 4))
 
@@ -1234,6 +1278,16 @@ class WatchlistManager:
             })
 
         return result
+
+    def enabled_watchlist_ids(self) -> List[str]:
+        """Sorted ids of the currently enabled watchlists.
+
+        Recorded into the run metadata at pipeline start so a post-hoc
+        ``nanometa-report`` can reproduce the run's pathogen screen without
+        the operator having to remember which lists were active.
+        """
+        with self._lock:
+            return sorted(self._enabled_watchlists)
 
     def enable_watchlist(self, watchlist_id: str) -> int:
         """
@@ -1923,7 +1977,9 @@ class WatchlistManager:
                     ),
                 })
 
-        # Sort by threat level (critical first)
+        # One alert per watchlist entry (dominant node wins), then sort by
+        # threat level (critical first).
+        alerts = self._dedupe_alerts_by_entry(alerts)
         threat_order = {"critical": 0, "high": 1, "moderate": 2, "low": 3}
         alerts.sort(key=lambda x: threat_order.get(x.get("threat_level", "low"), 4))
 

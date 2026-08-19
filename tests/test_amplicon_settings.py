@@ -92,17 +92,20 @@ class TestReadFilteringSubCardLayout:
         dupes = [k for k, v in Counter(ids).items() if v > 1]
         assert not dupes, f"duplicate ids found: {dupes}"
 
-    def test_minimap2_preset_includes_short_read_option(self):
-        """The existing Validation Settings dropdown must offer ``sr``
-        for short-amplicon protocols. This is the single source of
-        truth for the preset; the new sub-card cross-references it."""
+    def test_minimap2_preset_offers_only_pipeline_accepted_values(self):
+        """Every offered preset must be in nanometanf's schema enum. The
+        form once offered ``sr`` for short amplicons, which the pipeline
+        rejects at launch -- the choice was silently coerced to map-ont,
+        making the control a no-op. A control must do something."""
+        from nanometa_live.core.config.parameter_mapping import (
+            _VALID_MINIMAP2_PRESETS,
+        )
         form = create_config_form()
         select = _find_by_id(form, "minimap2-preset-input")
         assert select is not None
         values = [opt["value"] for opt in select.options]
-        assert "sr" in values, (
-            "minimap2-preset-input must offer 'sr' for short amplicons"
-        )
+        assert "sr" not in values
+        assert set(values) <= set(_VALID_MINIMAP2_PRESETS)
 
     def test_minimap2_preset_default_is_long_read(self):
         """Default must remain ``map-ont`` so unmodified configs keep

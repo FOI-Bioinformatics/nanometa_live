@@ -50,11 +50,14 @@ Technical details: Pass rate below 50%
 Meaning: everything processed, data quality acceptable.
 
 What to do:
-1. Click "Generate Report" (in alerts or top right).
-2. Select PDF or Excel format.
-3. Save to your designated location.
-4. Review results in the taxonomy tab if needed.
-5. Archive or share the report per local protocol.
+1. A self-contained HTML report is written automatically to
+   `<results directory>/report/report.html` when the run ends -- it also
+   appears on the Reports tab as "Run Report". It can be opened in any
+   browser without Nanometa Live running.
+2. To export a copy elsewhere (optionally with raw result files), use
+   Export Results on the Dashboard.
+3. Review results in the Taxonomy tab if needed.
+4. Archive or share the report per local protocol.
 
 ---
 
@@ -411,6 +414,24 @@ Advanced
 - [ ] Compare results across multiple samples.
 - [ ] Troubleshoot quality issues.
 - [ ] Rehearse the local pathogen-response protocol.
+
+---
+
+## Storage location
+
+Keep the run directories (results output, data directory, and the
+pipeline work directory) on the machine's internal disk. External
+drives formatted as exFAT — the common factory format for USB and
+SD storage — cannot host Nextflow's cache database, and a run
+started there fails at launch with an error similar to
+`Can't open cache DB`. On macOS, exFAT volumes also accumulate
+`._*` sidecar files next to the data, which can interfere with the
+pipeline.
+
+Raw FASTQ input and the Kraken2 database can stay on an external
+drive; only the directories the pipeline writes to need a local
+filesystem. Copy finished results to external storage after the run
+completes.
 
 ---
 

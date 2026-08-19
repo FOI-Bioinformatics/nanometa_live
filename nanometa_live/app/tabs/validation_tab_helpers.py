@@ -11,7 +11,7 @@ validation_tab.py re-exports these names.
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from dash import html
 import dash_bootstrap_components as dbc
@@ -297,7 +297,8 @@ def _blast_tsv_path(config: Optional[dict], selected_key: Optional[str]):
     """
     if not config or not selected_key:
         return None, None, None
-    results_dir = config.get("results_output_directory") or config.get("main_dir", "")
+    from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+    results_dir = resolve_outdir_for_fingerprint(config)
     if not results_dir:
         return None, None, None
     parts = selected_key.rsplit("_", 1)
@@ -497,12 +498,87 @@ def _compute_summary(results):
     return counts
 
 
+def build_validation_store(config, backend_status, selected_sample, batch_id):
+    """Read the validation results tree into the store payload.
+
+    Pure of Dash: the callback supplies the store values and renders the
+    result. Returns the diagnostic empty payload whenever there is nothing
+    to show -- including a successful parse that yielded zero results, which
+    is a real state (validation ran but had no reference genomes to run
+    against) and must not be reported with wording implying it did run.
+    """
+    import os
+
+    from nanometa_live.core.parsers.blast_validation_parser import (
+        BlastValidationParser,
+    )
+
+    if not config:
+        return {"results": [], "summary": {}, "message": "No configuration loaded",
+                "selected_sample": selected_sample}
+
+    # One resolution for "which results dir drives the app" -- including the
+    # results_dir_override fallback. Reading results_output_directory alone
+    # dead-ends on any config that has not been through Start yet (2026-08-18
+    # realtime audit: a full live run reported "Results directory not found").
+    from nanometa_live.app.utils.outdir_resolution import (
+        resolve_outdir_for_fingerprint,
+    )
+    results_dir = resolve_outdir_for_fingerprint(config)
+    results_dir_ok = bool(results_dir and os.path.isdir(results_dir))
+    empty = (config, results_dir_ok, backend_status, selected_sample)
+
+    if not config.get("blast_validation", False) or not results_dir_ok:
+        return empty_validation_payload(*empty)
+
+    parser = BlastValidationParser(results_dir)
+    if not parser.has_validation_data():
+        return empty_validation_payload(*empty)
+
+    results = parser.get_validation_results(batch_id=batch_id)
+    # The cumulative summary is run-wide; in single-batch view the per-method
+    # summary cards recompute from results, so skip it.
+    summary = {} if batch_id else parser.get_validation_summary()
+
+    # ``All Samples`` and empty sentinel values mean "no filter".
+    results_dicts = _filter_results_by_sample(
+        [r.to_dict() for r in results], selected_sample)
+    logger.info("Loaded %d validation results from %s",
+                len(results_dicts), results_dir)
+
+    if not results_dicts:
+        return empty_validation_payload(*empty)
+
+    return {"results": results_dicts, "summary": summary, "message": None,
+            "selected_sample": selected_sample}
+
+
+def empty_validation_payload(config, results_dir_ok, backend_status,
+                             selected_sample):
+    """Build the validation-store payload for a run with no results.
+
+    Carries the diagnostic status (disabled / no_species / missing_dbs /
+    running / waiting) so the panel can say WHY nothing was confirmed
+    rather than showing wording that implies validation ran and found
+    nothing.
+    """
+    from nanometa_live.app.tabs.validation_status_helpers import (
+        build_validation_status_payload,
+    )
+    status = build_validation_status_payload(
+        config, results_dir_ok, backend_status,
+        has_results=False, results_count=0,
+    )
+    return {"results": [], "summary": {}, "message": status["message"],
+            "status": status, "selected_sample": selected_sample}
+
+
 def _load_real_coverage(
     selected_key: str,
     config: Optional[dict],
     min_mapq: int,
     batch_id: Optional[str] = None,
-) -> Optional[CoverageData]:
+) -> Tuple[Optional[CoverageData], str]:
     """Load coverage from a real PAF file.
 
     ``batch_id`` selects which PAF to read:
@@ -513,20 +589,24 @@ def _load_real_coverage(
     - a batch id -> the preserved per-batch PAF
       ``validation/minimap2/batch/<sample>_taxid<tid>_<batch_id>.paf``.
 
-    Returns None if no PAF file exists or if the file has no alignments
-    passing the min_mapq filter.
+    Returns ``(coverage, state)``. ``state`` distinguishes the None cases so
+    the caller can render an accurate message: ``"ok"``, ``"no_config"``,
+    ``"bad_key"``, ``"no_paf"`` (no file on disk), or ``"filtered"`` (a PAF
+    exists but no alignment passes ``min_mapq`` -- the fix is the on-screen
+    confidence filter, not the pipeline).
     """
     if not config:
-        return None
+        return None, "no_config"
 
-    results_dir = config.get("results_output_directory") or config.get("main_dir", "")
+    from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+    results_dir = resolve_outdir_for_fingerprint(config)
     if not results_dir:
-        return None
+        return None, "no_config"
 
     # selected_key format: "{sample_id}_{taxid}" where taxid is numeric
     parts = selected_key.rsplit("_", 1)
     if len(parts) != 2:
-        return None
+        return None, "bad_key"
     sample_id, taxid_str = parts
 
     mm2 = Path(results_dir) / "validation" / "minimap2"
@@ -542,14 +622,14 @@ def _load_real_coverage(
         if paf_path.exists():
             cov_dict = parse_paf_coverage(paf_path, min_mapq=min_mapq)
             if cov_dict:
-                return aggregate_contig_coverage(cov_dict)
+                return aggregate_contig_coverage(cov_dict), "ok"
             logger.info(
                 "PAF file found but has no alignments passing min_mapq=%d: %s",
                 min_mapq, paf_path,
             )
-            return None
+            return None, "filtered"
 
-    return None
+    return None, "no_paf"
 
 
 def _batch_selector_state(config: Optional[dict], view_mode: Optional[str],
@@ -587,7 +667,8 @@ def _enumerate_batch_ids(config: Optional[dict]) -> List[str]:
     """
     if not config:
         return []
-    results_dir = config.get("results_output_directory") or config.get("main_dir", "")
+    from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+    results_dir = resolve_outdir_for_fingerprint(config)
     if not results_dir:
         return []
 

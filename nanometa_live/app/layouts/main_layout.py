@@ -271,7 +271,25 @@ def _main_detailed_table():
                     dashGridOptions={
                         "pagination": True,
                         "paginationPageSize": 25,
-                        "getRowId": {"function": "params.data.taxid"},
+                        # The selector must include the configured page size
+                        # (AG Grid error #94/#95 console warnings otherwise).
+                        "paginationPageSizeSelector": [10, 25, 50, 100],
+                        # getRowId must return a string (error #25); taxid is
+                        # an integer in rowData. Plain concatenation, because
+                        # dash-ag-grid's expression parser does not resolve
+                        # the String() global (it yields undefined row ids).
+                        "getRowId": {"function": "params.data.taxid + ''"},
+                        # Inert selection: dash-ag-grid re-applies its
+                        # selectedRows prop after every rowData update, and
+                        # AG Grid 33 warns (#132) when the selection module
+                        # is disabled. Checkboxes and click selection off
+                        # keep the table read-only while making that
+                        # internal call legal. Same on every updated grid.
+                        "rowSelection": {
+                            "mode": "singleRow",
+                            "checkboxes": False,
+                            "enableClickSelection": False,
+                        },
                     },
                 )
             ])

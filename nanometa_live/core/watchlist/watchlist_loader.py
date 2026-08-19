@@ -355,6 +355,17 @@ class WatchlistLoader:
         if not data:
             return False, ["Empty file"]
 
+        # Version gate: absent is fine (minimal custom files), but a value
+        # that is present and not the v2.0 schema is refused rather than
+        # imported on faith (2026-08-17 audit, finding W3 -- the field was
+        # parsed and never checked, so any version imported identically).
+        version = data.get("version")
+        if version is not None and str(version) != "2.0":
+            errors.append(
+                f"Unsupported watchlist version '{version}' (this build "
+                f"reads version 2.0)"
+            )
+
         # Check for required sections
         if "pathogens" not in data:
             errors.append("Missing 'pathogens' section")
@@ -365,25 +376,72 @@ class WatchlistLoader:
         elif not pathogens:
             errors.append("No pathogens defined")
         else:
-            # Validate pathogen entries
             for i, p in enumerate(pathogens):
-                if not isinstance(p, dict):
-                    errors.append(f"Pathogen {i+1}: must be a dictionary")
-                    continue
-
-                if "name" not in p:
-                    errors.append(f"Pathogen {i+1}: missing 'name' field")
-
-                if "threat_level" in p:
-                    valid_levels = ["critical", "high", "moderate", "low"]
-                    if p["threat_level"] not in valid_levels:
-                        errors.append(f"Pathogen {i+1}: invalid threat_level '{p['threat_level']}'")
-
-                if "bsl_level" in p:
-                    if not isinstance(p["bsl_level"], int) or p["bsl_level"] not in [1, 2, 3, 4]:
-                        errors.append(f"Pathogen {i+1}: bsl_level must be 1, 2, 3, or 4")
+                errors.extend(self._validate_pathogen_entry(i, p))
 
         return len(errors) == 0, errors
+
+    @staticmethod
+    def _validate_pathogen_entry(i: int, p: object) -> List[str]:
+        """Schema and type errors for one pathogen entry (1-based index i+1).
+
+        The type checks are finding W3 (2026-08-17 audit): without them the
+        errors were "defused" later by from_dict's try/excepts, which
+        silently changed the entry's behaviour -- a non-numeric taxid became
+        a pseudo-taxid entry that can never match a report, and a
+        non-numeric alert_threshold fell back to the default.
+        """
+        errors: List[str] = []
+        if not isinstance(p, dict):
+            return [f"Pathogen {i+1}: must be a dictionary"]
+
+        if "name" not in p:
+            errors.append(f"Pathogen {i+1}: missing 'name' field")
+
+        if "threat_level" in p:
+            valid_levels = ["critical", "high", "moderate", "low"]
+            if p["threat_level"] not in valid_levels:
+                errors.append(
+                    f"Pathogen {i+1}: invalid threat_level "
+                    f"'{p['threat_level']}'"
+                )
+
+        if "bsl_level" in p:
+            if not isinstance(p["bsl_level"], int) or p["bsl_level"] not in [1, 2, 3, 4]:
+                errors.append(f"Pathogen {i+1}: bsl_level must be 1, 2, 3, or 4")
+
+        for taxid_key in ("taxid_ncbi", "db_taxid"):
+            value = p.get(taxid_key)
+            if value is None:
+                continue
+            try:
+                if int(value) <= 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors.append(
+                    f"Pathogen {i+1}: {taxid_key} must be a "
+                    f"positive integer, got '{value}'"
+                )
+
+        if "alert_threshold" in p:
+            try:
+                if int(p["alert_threshold"]) < 1:
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors.append(
+                    f"Pathogen {i+1}: alert_threshold must be a "
+                    f"positive integer, got '{p['alert_threshold']}'"
+                )
+
+        if "names_alt" in p:
+            names_alt = p["names_alt"]
+            if not isinstance(names_alt, list) or not all(
+                isinstance(n, str) for n in names_alt
+            ):
+                errors.append(
+                    f"Pathogen {i+1}: names_alt must be a list of names"
+                )
+        return errors
 
     @staticmethod
     def find_entries_without_taxid(file_path: Path) -> List[str]:
@@ -413,6 +471,55 @@ class WatchlistLoader:
             if p.get("taxid_ncbi") is None and p.get("db_taxid") is None:
                 missing.append(str(p.get("name") or f"entry {i + 1}"))
         return missing
+
+    def find_invalid_watchlist_files(self) -> List[Tuple[str, str]]:
+        """(filename, first problem) for every watchlist file that fails to load.
+
+        ``discover_watchlists`` silently drops a malformed or unreadable
+        YAML with only a log line, so a corrupted upload simply vanished
+        from every list and count with no operator-visible signal
+        (2026-08-17 audit, finding W4). This scans the same tiers with the
+        same validation and returns what was dropped, for the GUI to show.
+        """
+        invalid: List[Tuple[str, str]] = []
+        seen: set = set()
+        for tier_dir, _source in self.get_search_paths():
+            if not tier_dir.is_dir():
+                continue
+            for path in sorted(tier_dir.iterdir()):
+                if path.suffix not in (".yaml", ".yml") or path.name in seen:
+                    continue
+                seen.add(path.name)
+                try:
+                    ok, errors = self.validate_file(path)
+                except (OSError, UnicodeDecodeError) as e:
+                    ok, errors = False, [str(e)]
+                if not ok:
+                    invalid.append((path.name, errors[0] if errors else "invalid"))
+        return invalid
+
+    @staticmethod
+    def sanitize_upload_name(file_name: str) -> Optional[str]:
+        """Reduce an untrusted upload name to a bare, usable filename.
+
+        ``file_name`` carries the browser-supplied dcc.Upload name, so
+        "../evil.yaml" would otherwise write outside the watchlists
+        directory, and an absolute path would ignore the destination
+        entirely. Reducing rather than refusing keeps a well-meaning upload
+        working -- the file is still imported, just not where the string
+        asked. Returns None when nothing usable remains.
+
+        This is the single sanitizer for upload names: ``import_watchlist``
+        and the GUI upload callback must both use it, or they disagree
+        about where the file landed (2026-08-17 audit, finding W1: the
+        callback re-derived the destination from the raw name, so a
+        sanitizer-changed upload was imported but never activated in the
+        session, with a success alert either way).
+        """
+        name = Path(file_name).name if file_name else ""
+        if not name or name in (".", ".."):
+            return None
+        return name
 
     def import_watchlist(
         self,
@@ -451,14 +558,8 @@ class WatchlistLoader:
         # Create directory if needed
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        # Reduce to a bare filename before joining. ``file_name`` carries the
-        # browser-supplied dcc.Upload name, so "../evil.yaml" would otherwise
-        # write outside the watchlists directory, and an absolute path would
-        # ignore dest_dir entirely. Reducing rather than refusing keeps a
-        # well-meaning upload working -- the file is still imported, just not
-        # where the string asked.
-        dest_name = Path(file_name or source_path.name).name
-        if not dest_name or dest_name in (".", ".."):
+        dest_name = self.sanitize_upload_name(file_name or source_path.name)
+        if dest_name is None:
             return False, (
                 f"'{file_name}' is not a usable watchlist file name."
             )
@@ -484,15 +585,49 @@ class WatchlistLoader:
     def _import_collision(
         self, dest_dir: Path, dest_name: str, watchlist_id: str
     ) -> Optional[str]:
-        """Why this import must be refused, or None if it is safe.
+        """Why this import must be refused, or None if it is safe."""
+        classified = self._classify_collision(dest_dir, dest_name, watchlist_id)
+        return classified[1] if classified else None
+
+    def classify_upload_collision(
+        self, file_name: str, destination: str = "user"
+    ) -> Optional[Tuple[str, str]]:
+        """(kind, message) for the collision this upload would cause, or None.
+
+        ``kind`` is ``"exists"`` (same filename), ``"stem"`` (same watchlist
+        id under a different extension) or ``"builtin"`` (shadows a shipped
+        list). The GUI uses the kind to decide whether a confirmed
+        replacement is offered: the first two are the operator overwriting
+        their own file and are replaceable with confirmation; shadowing a
+        built-in stays refused outright (2026-08-17 audit, finding W2 --
+        the refusal message promised "confirm the replacement" while no
+        confirm control existed anywhere).
+        """
+        dest_name = self.sanitize_upload_name(file_name)
+        if dest_name is None:
+            return None
+        if destination == "project" and self._project_dir:
+            dest_dir = self._project_dir / self.PROJECT_SUBDIR
+        else:
+            dest_dir = self.user_watchlist_dir
+        if not dest_dir.is_dir():
+            dest_dir = None
+        return self._classify_collision(
+            dest_dir, dest_name, Path(dest_name).stem
+        )
+
+    def _classify_collision(
+        self, dest_dir: Optional[Path], dest_name: str, watchlist_id: str
+    ) -> Optional[Tuple[str, str]]:
+        """(kind, refusal message) or None when the import is safe.
 
         A watchlist is keyed by its file stem, so two different files with the
         same stem are the same watchlist as far as discovery is concerned: the
         copy would replace the operator's earlier upload, or shadow a built-in
         list, with no indication that anything was lost.
         """
-        if (dest_dir / dest_name).exists():
-            return (
+        if dest_dir is not None and (dest_dir / dest_name).exists():
+            return "exists", (
                 f"A watchlist file named '{dest_name}' already exists in "
                 f"{dest_dir}. Rename the file, or confirm the replacement."
             )
@@ -510,9 +645,9 @@ class WatchlistLoader:
                 and p.name != dest_name
             ),
             None,
-        )
+        ) if dest_dir is not None else None
         if existing is not None:
-            return (
+            return "stem", (
                 f"'{existing.name}' already provides the watchlist "
                 f"'{watchlist_id}' in {dest_dir}. A watchlist is identified by "
                 f"its file name without the extension, so importing "
@@ -527,7 +662,7 @@ class WatchlistLoader:
                 if p.suffix in (".yaml", ".yml")
             }
             if watchlist_id in builtin_stems:
-                return (
+                return "builtin", (
                     f"'{watchlist_id}' is the name of a built-in watchlist. An "
                     "imported file with this name would take precedence over "
                     "it everywhere without saying so. Rename the file before "

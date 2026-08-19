@@ -254,31 +254,30 @@ class TestInputDirMode:
         assert "input_dir" not in params
 
 
-# ---- F11 / P2-9: ARM auto-disables kraken2_memory_mapping ------------------
+# ---- kraken2_memory_mapping defaults ON everywhere (2026-08-18 audit) ------
+# The former ARM-disables-mmap contract (F11 / P2-9) is deliberately
+# reversed: the branch was dead in practice (create_default_config always
+# wrote the key, so the explicit-override path always won), and the accident
+# was correct -- 51 tasks ran with --memory-mapping under Rosetta on an ARM
+# Mac with zero SIGSEGVs, while defaulting False costs a full private DB
+# load per task. nanometanf drops the flag on retry if it ever faults.
 
 
-class TestArmMemoryMappingDefault:
-    def test_arm_disables_memory_mapping(self, base_config):
+class TestMemoryMappingDefault:
+    def test_arm_keeps_memory_mapping_on(self, base_config):
         with patch("platform.machine", return_value="arm64"):
             params = create_nextflow_params(base_config)
-        assert params["kraken2_memory_mapping"] is False
-
-    def test_aarch64_disables_memory_mapping(self, base_config):
-        with patch("platform.machine", return_value="aarch64"):
-            params = create_nextflow_params(base_config)
-        assert params["kraken2_memory_mapping"] is False
+        assert params["kraken2_memory_mapping"] is True
 
     def test_x86_keeps_memory_mapping_on(self, base_config):
         with patch("platform.machine", return_value="x86_64"):
             params = create_nextflow_params(base_config)
         assert params["kraken2_memory_mapping"] is True
 
-    def test_explicit_override_wins_on_arm(self, base_config):
-        base_config["kraken_memory_mapping"] = True
-        with patch("platform.machine", return_value="arm64"):
-            params = create_nextflow_params(base_config)
-        # Explicit user override is respected.
-        assert params["kraken2_memory_mapping"] is True
+    def test_explicit_disable_wins(self, base_config):
+        base_config["kraken_memory_mapping"] = False
+        params = create_nextflow_params(base_config)
+        assert params["kraken2_memory_mapping"] is False
 
 
 # ---- F8 / P2-1..P2-3: custom.config template cleanup -----------------------

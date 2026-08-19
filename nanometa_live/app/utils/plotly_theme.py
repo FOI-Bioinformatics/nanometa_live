@@ -24,11 +24,14 @@ COLORS = {
     "info": "#17a2b8",
     "info_light": "#d1ecf1",
 
-    # Threat level colors
-    "threat_critical": "#8b0000",
-    "threat_high": "#dc3545",
-    "threat_moderate": "#fd7e14",
-    "threat_low": "#28a745",
+    # Threat level colors -- aligned with the shared canon in
+    # core/config/threat_levels.py (critical red, high orange,
+    # moderate amber, low blue). "threat_low" was green here, which
+    # read as "safe" while every table showed a grey/blue badge.
+    "threat_critical": "#dc3545",
+    "threat_high": "#fd7e14",
+    "threat_moderate": "#ffc107",
+    "threat_low": "#17a2b8",
     "threat_unknown": "#6c757d",
 
     # UI colors
@@ -347,14 +350,9 @@ def get_threat_color(threat_level: str) -> str:
     Returns:
         Hex color string
     """
-    color_map = {
-        "critical": COLORS["threat_critical"],
-        "high": COLORS["threat_high"],
-        "moderate": COLORS["threat_moderate"],
-        "low": COLORS["threat_low"],
-        "unknown": COLORS["threat_unknown"]
-    }
-    return color_map.get(threat_level.lower(), COLORS["threat_unknown"])
+    from nanometa_live.core.config.threat_levels import THREAT_LEVELS
+    info = THREAT_LEVELS.get(str(threat_level or "").lower())
+    return info["hex"] if info else COLORS["threat_unknown"]
 
 
 def get_status_color(status: str) -> str:

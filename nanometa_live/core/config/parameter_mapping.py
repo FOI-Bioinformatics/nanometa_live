@@ -25,11 +25,12 @@ import os
 import glob
 import csv
 import json
+import math
 import platform
 import re
 import logging
 from pathlib import Path
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, Optional, Tuple, List
 
 from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
 from nanometa_live.core.utils.genome_manager import get_genome_manager
@@ -73,10 +74,11 @@ def validate_sample_handling_layout(sample_handling: str, input_dir: str) -> Non
         )
 
 
-# nanometanf's schema enum for minimap2_preset. The GUI briefly offered "sr"
-# (recommended for amplicons) which nf-schema rejects at launch; unknown
-# values are coerced to the nanopore default with a warning so a saved
-# config remains launchable.
+# nanometanf's schema enum for minimap2_preset. The GUI no longer offers
+# anything outside it (an "sr" amplicon option was removed 2026-08-17: the
+# pipeline rejects it at launch, so the choice was a silent no-op), but old
+# saved configs may still carry "sr"; unknown values are coerced to the
+# nanopore default with a warning so those configs remain launchable.
 _VALID_MINIMAP2_PRESETS = ("map-ont", "map-pb", "map-hifi")
 
 
@@ -89,6 +91,27 @@ def _coerce_minimap2_preset(value: Any) -> str:
         )
         return "map-ont"
     return preset
+
+
+def _coerce_min_length(value: Any, key: str, default: int = 1000) -> int:
+    """Clamp a QC minimum-length filter to nanometanf's schema floor of 1.
+
+    Older configs (and a since-corrected GUI tooltip) used 0 to mean
+    "disable"; nf-schema sets ``minimum: 1`` on both length filters, so a 0
+    fails validation at launch. 1 is the working "off" value -- no nanopore
+    read is shorter.
+    """
+    try:
+        length = int(value)
+    except (TypeError, ValueError):
+        return default
+    if length < 1:
+        logging.warning(
+            "%s=%r is below nanometanf's schema minimum of 1; using 1 "
+            "(disables the length filter)", key, value,
+        )
+        return 1
+    return length
 
 
 def _coerce_blast_evalue(value: Any, default: float = 1e-10) -> float:
@@ -225,8 +248,18 @@ def get_validation_species_from_watchlist(
             }
             species_list.append(species_info)
 
-            # Check if genome is downloaded (by NCBI taxid)
-            genome_path = genome_manager.get_genome_path(ncbi_taxid)
+            # Look the genome up by the taxid the READS are extracted for.
+            # The pipeline extracts and names outputs by kraken_taxid, and the
+            # genome cache is keyed the same way, so on a custom/GTDB database
+            # -- where an entry with no NCBI identity carries a synthetic
+            # pseudo-taxid -- keying this lookup on ncbi_taxid found nothing
+            # and the launch disabled validation with "no pathogen genomes
+            # downloaded", even with the genome sitting in the cache
+            # (2026-08-18 Bioshield exercise run). Fall back to the NCBI taxid
+            # for the ordinary case where a genome was cached under it.
+            genome_path = genome_manager.get_genome_path(kraken_taxid)
+            if not genome_path and kraken_taxid != ncbi_taxid:
+                genome_path = genome_manager.get_genome_path(ncbi_taxid)
             if genome_path:
                 genome_paths.append(str(genome_path))
 
@@ -629,20 +662,54 @@ def _log_pathogen_genomes_result(pathogen_genomes_path):
 
 
 def _resolve_kraken2_memory_mapping(config: Dict[str, Any]) -> bool:
-    """Pick kraken2_memory_mapping: explicit override wins, else False on ARM.
+    """Pick kraken2_memory_mapping: explicit config value wins, else True.
 
-    nanometanf's KRAKEN2 module falls back to a non-mmap load on ARM anyway;
-    emitting an explicit False silences the per-run WARN.
+    True everywhere, ARM included. This function used to default False on
+    ARM, but the branch was dead code -- ``create_default_config`` wrote
+    ``kraken_memory_mapping: True`` into every config, so the "explicit
+    override" always won (the ``min_perc_identity`` pattern). That accident
+    was also the right answer: the 2026-08-18 release check ran 51 tasks
+    with ``--memory-mapping`` under Rosetta on an ARM Mac with zero
+    SIGSEGVs, and nanometanf's KRAKEN2 processes drop the flag on retry if
+    it ever does fault. Defaulting False would cost a full private
+    database load per task (and per batch in realtime mode).
+
+    The default is gone from ``create_default_config``; only an operator
+    who deliberately sets the key reaches the override branch now.
     """
     if "kraken_memory_mapping" in config:
         return bool(config["kraken_memory_mapping"])
-    if platform.machine().lower() in {"arm64", "aarch64"}:
-        logging.info(
-            "ARM host detected (%s); defaulting kraken2_memory_mapping=False",
-            platform.machine(),
-        )
-        return False
     return True
+
+
+def _resolve_kraken2_memory_gb(config: Dict[str, Any]) -> Optional[int]:
+    """Size the Kraken2 memory request from the actual database.
+
+    nanometanf's default (12 GB) is sized for MiniKraken and its
+    modules.config says operators "MUST raise this" for bigger databases --
+    but the GUI knows the database path, so it can do that for them:
+    ``hash.k2d`` size + 4 GB headroom, floored at nanometanf's default.
+    An explicit ``kraken2_memory_gb`` in the config wins. Returns ``None``
+    (omit the param, let the pipeline default apply) when the database is
+    not measurable -- guessing here would just move the OOM.
+    """
+    explicit = config.get("kraken2_memory_gb")
+    if explicit:
+        try:
+            return int(explicit)
+        except (TypeError, ValueError):
+            logging.warning(
+                "Ignoring non-numeric kraken2_memory_gb: %r", explicit
+            )
+    db_path = config.get("kraken_db") or ""
+    if not db_path:
+        return None
+    try:
+        hash_bytes = (Path(db_path) / "hash.k2d").stat().st_size
+    except OSError:
+        return None
+    gib = hash_bytes / (1024 ** 3)
+    return max(12, math.ceil(gib) + 4)
 
 
 def _validation_params(config: Dict[str, Any], run_validation_enabled: bool,
@@ -718,13 +785,23 @@ def _build_base_params(config: Dict[str, Any], main_dir: str, kraken_db: str,
         "skip_fastp": False,
         "skip_nanoplot": config.get("skip_nanoplot", False),
 
+        # Assembly (experimental nanometanf step). The assembler value is
+        # schema-validated upstream (enum flye/miniasm), so coerce unknowns
+        # rather than failing the launch.
+        "enable_assembly": bool(config.get("enable_assembly", False)),
+        "assembler": (config.get("assembler")
+                      if config.get("assembler") in ("flye", "miniasm")
+                      else "flye"),
+
         # Read-filter overrides surfaced by the Configuration tab's Advanced
         # Settings -> Read Filtering and Validation card. Defaults match
         # nanometanf's pipeline-side defaults. See
         # docs/audit-2026-04-29-short-amplicons.md for rationale.
-        "chopper_minlength": config.get("chopper_minlength", 1000),
+        "chopper_minlength": _coerce_min_length(
+            config.get("chopper_minlength"), "chopper_minlength"),
         "chopper_quality": config.get("chopper_quality", 10),
-        "filtlong_min_length": config.get("filtlong_min_length", 1000),
+        "filtlong_min_length": _coerce_min_length(
+            config.get("filtlong_min_length"), "filtlong_min_length"),
         "kraken2_confidence": config.get("kraken2_confidence", 0.0),
         "kraken2_minimum_hit_groups": config.get(
             "kraken2_minimum_hit_groups", 0
@@ -1007,6 +1084,13 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         run_validation_enabled, blast_validation_enabled, kraken2_memory_mapping,
     )
 
+    # Size the Kraken2 memory request from the measured database rather
+    # than nanometanf's MiniKraken-sized default; omitted when the DB is
+    # not measurable. See _resolve_kraken2_memory_gb.
+    kraken2_memory_gb = _resolve_kraken2_memory_gb(config)
+    if kraken2_memory_gb is not None:
+        params["kraken2_memory_gb"] = kraken2_memory_gb
+
     # Add validation species if configured (from Watchlist or legacy config)
     if has_species and validation_taxids:
         # Convert to comma-separated string for taxids_to_validate (schema type: string)
@@ -1089,8 +1173,6 @@ def create_nextflow_config(config: Dict[str, Any]) -> str:
     Returns:
         String content suitable for writing to a Nextflow ``-c`` config file.
     """
-    max_cores = config.get("pipeline_cores") or config.get("snakemake_cores", 4)
-    kraken_cores = config.get("kraken_cores", max_cores)
     blast_cores = config.get("blast_cores", 2)
     validation_cores = config.get("validation_cores", 2)
     qc_tool = str(config.get("qc_tool", "chopper")).lower()
@@ -1100,6 +1182,11 @@ def create_nextflow_config(config: Dict[str, Any]) -> str:
     # The legacy "docker" default was a remnant of the original nf-core
     # template and contradicted every actual deployment.
     profile = config.get("pipeline_profile", "conda")
+    # Only the first component decides the engine ("conda,server" is a
+    # supported comma-form; the extra components are plain Nextflow
+    # profiles). Without the split a comma value fell into the docker
+    # else-branch and enabled a runtime the operator never chose.
+    profile = str(profile).split(",", 1)[0].strip()
 
     # Profile-specific container runtime settings. Using explicit string
     # concatenation (rather than nested f-strings with doubled braces) to avoid
@@ -1139,12 +1226,14 @@ def create_nextflow_config(config: Dict[str, Any]) -> str:
             "}\n"
         )
 
+    # Deliberately NO withName block for KRAKEN2_KRAKEN2. This file is
+    # passed via ``-c``, which outranks every nanometanf config layer, so a
+    # block here silently flattens the pipeline's own sizing
+    # (cpus = max(4, max_cpus/max_classification_forks), memory from
+    # --kraken2_memory_gb, resourceLimits ceiling). The removed pin
+    # (cpus = 1 from the retired kraken_cores default, memory = 8.GB) made
+    # every GUI-launched classification single-threaded (2026-08-18 audit).
     withname_blocks = [
-        "    // Kraken2 classification (most CPU-intensive)\n"
-        "    withName: 'KRAKEN2_KRAKEN2' {\n"
-        f"        cpus = {kraken_cores}\n"
-        "        memory = '8.GB'\n"
-        "    }\n",
         "    // BLAST validation\n"
         "    withName: 'BLAST_BLASTN' {\n"
         f"        cpus = {blast_cores}\n"

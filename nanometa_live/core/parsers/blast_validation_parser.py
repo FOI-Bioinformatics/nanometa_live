@@ -58,6 +58,19 @@ class ValidationStatus(Enum):
     FAILED = "failed"            # Validation process failed
 
 
+#: Confirmed validation needs at least this many validated reads, whatever
+#: the percentages say. Mirrors the dashboard's low-read-floor doctrine:
+#: a detection resting on a handful of reads is reported, but not as a
+#: confirmation.
+MIN_READS_FOR_CONFIRMED = 10
+
+#: Minimum fraction of the reference genome a minimap2 result must cover to
+#: be CONFIRMED. Only applied when the breadth is known (a PAF was read) and
+#: the coverage is not amplicon-like. 5% matches the concentration ratio the
+#: coverage plots already use as the boundary between focused and diffuse.
+MIN_BREADTH_FOR_CONFIRMED = 0.05
+
+
 @dataclass
 class ValidationResult:
     """
@@ -100,6 +113,14 @@ class ValidationResult:
     reference_length: int = 0
     status: ValidationStatus = ValidationStatus.NO_DATA
     timestamp: str = ""
+    #: Fraction of the REFERENCE GENOME covered, computed from the PAF.
+    #: Distinct from ``coverage_breadth``, which despite its name is the
+    #: per-read query coverage the pipeline reports (span/qlen, qcovs).
+    #: None when no PAF was available.
+    genome_breadth: Optional[float] = None
+    #: Amplicon-like coverage: a small share of the genome, deeply covered.
+    #: Such a result must not be downgraded for thin breadth.
+    coverage_concentrated: bool = False
     errors: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -138,7 +159,26 @@ class ValidationResult:
         # must not look identical to "not yet checked".
         if self.validated_reads == 0 and self.total_reads > 0:
             return ValidationStatus.LOW_CONFIDENCE
+        # A confirmation must rest on more than a percentage. Three reads
+        # mapping at 99% identity gave "100% validated" and sorted to the top
+        # of the tab as CONFIRMED; percentages are unstable at low n, and no
+        # breadth figure can rescue this because avg_coverage from both
+        # pipeline modules is per-READ query coverage (span/qlen, qcovs), not
+        # the fraction of the genome covered. Thin support downgrades to
+        # PARTIAL -- still evidence, never NO_DATA (2026-08-18 audit).
         if self.percent_validated >= 80 and self.percent_identity_mean >= 90:
+            if self.validated_reads < MIN_READS_FOR_CONFIRMED:
+                return ValidationStatus.PARTIAL
+            # A genome-centric verdict must consider the genome. Measured on
+            # the Bioshield run: a real detection covered 98% of the
+            # reference at 79x while index-hop carryover covered 0.07-1.2% at
+            # 1x -- yet hit rate and identity were ~identical for both.
+            # Amplicon data legitimately covers a sliver at high local depth,
+            # so concentrated coverage is exempt (same test the plots use).
+            if (self.genome_breadth is not None
+                    and self.genome_breadth < MIN_BREADTH_FOR_CONFIRMED
+                    and not self.coverage_concentrated):
+                return ValidationStatus.PARTIAL
             return ValidationStatus.CONFIRMED
         if self.percent_validated >= 50:
             return ValidationStatus.PARTIAL
@@ -719,6 +759,15 @@ class ValidationParser:
             if r.total_reads > 0:
                 total_reads_by_pair.setdefault((r.sample_id, r.taxid), r.total_reads)
 
+        # Per-pair BLAST stats sidecars carry the read count the hits were
+        # measured against; the TSV cannot. Without them a realtime run (no
+        # aggregate yet) gave every BLAST result total_reads=0 and a status of
+        # UNCERTAIN -- "Low Confidence" for perfectly clean evidence.
+        from nanometa_live.core.parsers.blast_stats import (
+            apply_blast_stats, collect_blast_stats,
+        )
+        blast_stats_by_pair = collect_blast_stats(self.validation_dir)
+
         for blast_file in self.validation_dir.glob('*.blast.tsv'):
             # Try to extract sample and taxid from filename
             # Expected format: sample_taxid.blast.tsv
@@ -758,6 +807,8 @@ class ValidationParser:
                         (file_sample, file_taxid), 0
                     ),
                 )
+                apply_blast_stats(
+                    result, blast_stats_by_pair.get((file_sample, file_taxid)))
                 results.append(result)
                 seen_keys.add(key)
 
@@ -778,14 +829,29 @@ class ValidationParser:
                 # to "blast" are the same method to every consumer, but the
                 # raw-string key never matched, so the stale result sat
                 # beside the fresh one instead of being replaced.
-                key = (od_r.sample_id, od_r.taxid,
-                       _method_class(od_r.validation_method))
+                od_method = getattr(od_r, "validation_method", "blast")
+                key = (od_r.sample_id, od_r.taxid, _method_class(od_method))
+                replaced = False
                 for i, r in enumerate(results):
                     if (r.sample_id, r.taxid,
                             _method_class(getattr(r, "validation_method", "blast"))) == key:
                         results[i] = od_r
-                        return
-                results.append(od_r)
+                        replaced = True
+                        break
+                if not replaced:
+                    results.append(od_r)
+                # An on-demand run recorded as "both" IS the coverage result
+                # too, so the pipeline's separate minimap2 entry for the same
+                # pair is superseded evidence. Leaving it produced two cards
+                # for one organism -- conflicting numbers under the same
+                # pattern-matching DOM id (2026-08-18 audit).
+                if od_method == "both":
+                    results[:] = [
+                        r for r in results
+                        if r is od_r
+                        or (r.sample_id, r.taxid) != (od_r.sample_id, od_r.taxid)
+                        or getattr(r, "validation_method", "") != "minimap2"
+                    ]
 
             # Aggregate JSON produced by on-demand runs
             od_aggregate = on_demand_dir / "validation_results.json"
@@ -822,11 +888,46 @@ class ValidationParser:
                 if not getattr(r, "species", "") and r.taxid in species_by_taxid:
                     r.species = species_by_taxid[r.taxid]
 
+        # Genome breadth for every coverage result, whatever produced it.
+        # Done here rather than in the minimap2 stats reader because a
+        # completed run is served from the aggregate JSON, which carries no
+        # breadth -- enriching only the realtime path left finished runs
+        # judging coverage without looking at coverage.
+        self._attach_genome_breadth(results)
+
         logger.info(f"Retrieved {len(results)} validation results")
         if cache_this_call:
             self._results_cache = list(results)
             self._results_cache_mtime = fingerprint
         return results
+
+    def _attach_genome_breadth(self, results) -> None:
+        """Fill genome_breadth on coverage results from their PAF, and
+        re-derive the status now that the verdict can see it."""
+        from nanometa_live.core.parsers.minimap2_stats import minimap2_stats_dirs
+        from nanometa_live.core.parsers.paf_coverage_parser import paf_breadth
+
+        dirs = minimap2_stats_dirs(self.results_dir, self.validation_dir)
+        if not dirs:
+            return
+        for r in results:
+            # Coverage-class results only ("both" is one, see the dedup note
+            # in minimap2_stats.collect_minimap2_results).
+            if getattr(r, "validation_method", "") not in ("minimap2", "both"):
+                continue
+            if getattr(r, "genome_breadth", None) is not None:
+                continue
+            for d in dirs:
+                paf = d / f"{r.sample_id}_taxid{r.taxid}.paf"
+                if not paf.exists():
+                    continue
+                summary = paf_breadth(paf)
+                if summary is None:
+                    break
+                r.genome_breadth = summary.breadth
+                r.coverage_concentrated = summary.is_concentrated
+                r.status = r.determine_status()
+                break
 
     def get_validation_summary(self) -> Dict[str, Any]:
         """

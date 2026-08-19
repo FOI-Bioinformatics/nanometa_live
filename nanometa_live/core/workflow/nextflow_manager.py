@@ -82,6 +82,15 @@ class NextflowManager:
             "last_updated": None,
             "errors": [],
             "nextflow_pid": None,
+            # Nextflow's own exit code, set when the process ends. None while
+            # running. It is the authority on whether the RUN succeeded: with
+            # errorStrategy 'ignore' (conf/error_isolation.config) individual
+            # tasks may be FAILED in the trace while the run completes and
+            # exits 0.
+            "exit_code": None,
+            # Labels of tasks the trace reports as FAILED/ABORTED, e.g.
+            # "FLYE (barcode16)", so an isolated failure can be named.
+            "failed_tasks": [],
             # Stage-level tracking for dashboard display
             "stages": [],  # List of {"name": str, "status": str, "count": int, "duration": str}
             "current_stage": None,  # Name of the currently active stage
@@ -525,20 +534,29 @@ class NextflowManager:
             try:
                 logging.info(f"Starting Nextflow pipeline with profile: {profile}")
 
-                # Check container runtime availability based on profile
-                if profile == "docker":
+                # Drop the previous run's artifacts before this one starts.
+                self.reset_run_artifacts()
+
+                # Check container runtime availability based on profile.
+                # Only the first component decides the engine ("conda,server"
+                # is a supported comma-form), and "apptainer" is a synonym
+                # for singularity -- it previously fell through to the docker
+                # branch and failed with a docker-daemon message on hosts
+                # that only have apptainer (2026-08-17 reaudit).
+                engine = profile.split(",", 1)[0].strip()
+                if engine == "docker":
                     docker_check = self._check_docker_available()
                     if not docker_check[0]:
                         return False, docker_check[1]
                     logging.info(docker_check[1])
 
-                elif profile == "singularity":
+                elif engine in ("singularity", "apptainer"):
                     singularity_check = self._check_singularity_available()
                     if not singularity_check[0]:
                         return False, singularity_check[1]
                     logging.info(singularity_check[1])
 
-                elif profile == "conda":
+                elif engine == "conda":
                     conda_check = self._check_conda_available()
                     if not conda_check[0]:
                         return False, conda_check[1]
@@ -841,6 +859,10 @@ class NextflowManager:
 
                 # Wait for completion
                 exit_code = self.process.wait()
+                # Record it before any error handling: BackendManager uses it
+                # to tell an isolated (ignored) task failure from a run
+                # failure -- Nextflow exits 0 for the former.
+                self.status["exit_code"] = exit_code
 
                 if exit_code != 0:
                     if getattr(self, '_user_stopped', False):
@@ -871,6 +893,39 @@ class NextflowManager:
             self.status["running"] = False
             self.status["last_updated"] = time.time()
             logging.info("Nextflow workflow execution finished")
+
+    def reset_run_artifacts(self) -> None:
+        """Clear the previous run's trace and status counters.
+
+        Nextflow writes the trace to a fixed path and only replaces it once
+        the new run emits its first task. Until then the monitor thread reads
+        the PREVIOUS run's completed trace -- stable and old, so the
+        "file is being written" guard does not catch it -- and the dashboard
+        attributes that run's totals, failures included, to the run just
+        started (observed live: "46 complete, 1 failed" carried across two
+        runs for about a minute). Same family as the loader-cache and
+        output-collision bleeds: a fresh run must never present an earlier
+        run's result as its own.
+        """
+        trace_path = os.path.join(self.log_dir, "trace.txt")
+        try:
+            if os.path.exists(trace_path):
+                os.remove(trace_path)
+        except OSError as exc:
+            logging.warning("Could not clear the previous trace file: %s", exc)
+
+        self._last_trace_status = {}
+        self.status.update({
+            "processes_complete": 0,
+            "processes_running": 0,
+            "processes_failed": 0,
+            "total_processes": 0,
+            "stages": [],
+            "current_stage": None,
+            "stage_progress": {},
+            "exit_code": None,
+            "failed_tasks": [],
+        })
 
     def _monitor_status(self) -> None:
         """
@@ -971,6 +1026,10 @@ class NextflowManager:
             # Track per-stage statistics
             stage_progress = {}  # {"STAGE_NAME": {"completed": N, "running": N, "failed": N}}
             current_stage = None
+            # Labels of failed tasks ("FLYE (barcode16)") so the caller can
+            # name an isolated per-sample failure instead of reporting a bare
+            # count.
+            failed_tasks = []
 
             for line in lines[1:]:
                 parts = line.strip().split('\t')
@@ -1016,6 +1075,9 @@ class NextflowManager:
                         current_stage = process_name  # Track currently running stage
                 elif status in ("FAILED", "ABORTED"):
                     failed += 1
+                    label = full_name.split(':')[-1].strip() if full_name else process_name
+                    if label and label not in failed_tasks:
+                        failed_tasks.append(label)
                     if process_name:
                         stage_progress[process_name]["failed"] += 1
                         stage_progress[process_name]["total"] += 1
@@ -1059,7 +1121,8 @@ class NextflowManager:
                 "total_processes": total,
                 "stages": stages,
                 "current_stage": current_stage,
-                "stage_progress": stage_progress
+                "stage_progress": stage_progress,
+                "failed_tasks": failed_tasks,
             }
             self._last_trace_status = result
             return result

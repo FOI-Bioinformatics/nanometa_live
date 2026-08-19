@@ -164,6 +164,34 @@ Pre-run setup, in the lower section of the Watchlist & Preparation tab:
 - BLAST database preparation
 - Genome management status
 
+### Reports tab
+
+Run-level HTML artifacts, each openable in any browser:
+- **Run Report** — the operator summary (verdict, pathogen screening with
+  per-organism action guidance, validation, QC), written automatically to
+  `<results directory>/report/report.html` when a run completes or is
+  stopped (disable with `auto_report: false`)
+- MultiQC report, Nextflow execution report / timeline / trace
+
+## Run report after closing the app
+
+The Run Report is fully self-contained (no server or network needed), so the
+run's verdict remains viewable after Nanometa Live is closed: open
+`<results directory>/report/report.html` directly, or copy that single file
+anywhere.
+
+To (re)generate a report later without launching the dashboard:
+
+```bash
+nanometa-report --results /path/to/results
+```
+
+By default the pathogen screen uses the watchlists recorded by the run in
+`.nanometa.run.json`; override with `--watchlist <ids>` or force an
+unscreened report with `--watchlist none`. The Dashboard's Export Results
+button produces the same report to a directory of your choice, optionally
+bundling raw result files.
+
 ## Subspecies and strains
 
 Some Kraken2 databases resolve below species. A flextaxd field build, for

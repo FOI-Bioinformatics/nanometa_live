@@ -20,6 +20,7 @@ import logging
 import os
 import signal
 import subprocess
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -31,8 +32,12 @@ from nanometa_live.core.workflow.on_demand_helpers import (
     _DEFAULT_VALIDATION_TIMEOUT_MINUTES,
     _genome_file_looks_valid,
     _is_int_str,
+    _normalise_sample_filter,
     _pick_result_for_method,
     _validation_timeout_seconds,
+    resolve_launch_context,
+    supervise_validation_process,
+    write_failure_log,
 )
 from nanometa_live.core.workflow.validation_models import (
     ValidationJob,
@@ -423,13 +428,19 @@ class OnDemandValidator:
         if progress_callback:
             progress_callback("Launching nanometanf validation...", 20)
 
-        # Build nextflow command. Reuses the main pipeline's outdir so
-        # the work/ cache is shared with the original run (this is what
-        # makes -resume effective for the on-demand path).
+        # -resume needs the main run's launch dir + work dir; see
+        # resolve_launch_context for why sharing only the outdir shares
+        # nothing -resume reads.
+        launch_context = resolve_launch_context(config)
+        if launch_context is None:
+            return None
+        launch_dir, work_dir = launch_context
+
         outdir = self.results_dir
         cmd = [
             "nextflow", "run", pipeline_source,
             "-resume",
+            "-work-dir", str(work_dir),
             "--validation_only",
             "--kraken2_output_dir", str(self.results_dir / "kraken2"),
             "--reads_dir", str(self.input_dir),
@@ -466,45 +477,39 @@ class OnDemandValidator:
                 stderr=subprocess.PIPE,
                 text=True,
                 env=env,
+                cwd=str(launch_dir),
                 start_new_session=True,
             )
-            try:
-                stdout, stderr = proc.communicate(timeout=timeout_seconds)
-                returncode = proc.returncode
-            except subprocess.TimeoutExpired:
-                # Escalate SIGTERM -> SIGKILL across the whole process group,
-                # mirroring NextflowManager.stop().
-                try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-                except (ProcessLookupError, PermissionError):
-                    proc.terminate()
-                try:
-                    proc.communicate(timeout=30)
-                except subprocess.TimeoutExpired:
-                    try:
-                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                    except (ProcessLookupError, PermissionError):
-                        proc.kill()
-                    proc.communicate()
-                logger.error(
-                    "nanometanf validation timed out after %d minute(s); "
-                    "raise 'validation_timeout_minutes' in config for large "
-                    "genomes",
-                    timeout_seconds // 60,
+            supervised = supervise_validation_process(proc, timeout_seconds)
+            if supervised is None:
+                write_failure_log(
+                    self.results_dir, cmd, launch_dir,
+                    f"timed out after {timeout_seconds} seconds\n",
                 )
                 return None
+            returncode, stdout, stderr = supervised
 
             if returncode != 0:
                 logger.error(f"nanometanf validation failed: {stderr}")
+                write_failure_log(
+                    self.results_dir, cmd, launch_dir,
+                    f"exit code: {returncode}\n"
+                    f"--- stdout ---\n{stdout or ''}\n"
+                    f"--- stderr ---\n{stderr or ''}\n"
+                )
                 return None
 
             if progress_callback:
                 progress_callback("Parsing validation results...", 90)
 
-            # Parse the output validation_results.json
+            # Parse the output validation_results.json. An aggregate-scope
+            # request ("all") must not be used as a literal sample name --
+            # see _normalise_sample_filter.
             from nanometa_live.core.parsers.blast_validation_parser import ValidationParser
             parser = ValidationParser(str(outdir))
-            results = parser.get_validation_results(sample=sample, taxid=taxid)
+            results = parser.get_validation_results(
+                sample=_normalise_sample_filter(sample), taxid=taxid
+            )
 
             if results:
                 # get_validation_results filters by (sample, taxid) but NOT by
@@ -529,19 +534,21 @@ class OnDemandValidator:
             logger.warning("No validation results found in nanometanf output")
             return None
 
-        except subprocess.TimeoutExpired:
-            logger.error(
-                "nanometanf validation timed out after %d minute(s); raise "
-                "'validation_timeout_minutes' in config for large genomes",
-                timeout_seconds // 60,
-            )
-            return None
-        except FileNotFoundError:
+        except FileNotFoundError as e:
             logger.warning("nextflow not found in PATH")
+            write_failure_log(
+                self.results_dir, cmd, launch_dir,
+                f"launch failed (nextflow not found in PATH?): {e}\n"
+                f"PATH: {env.get('PATH', '')}\n",
+            )
             return None
         except (subprocess.CalledProcessError, PermissionError, OSError,
                 ImportError, AttributeError, KeyError) as e:
             logger.exception(f"nanometanf validation error: {e}")
+            write_failure_log(
+                self.results_dir, cmd, launch_dir,
+                "unexpected error:\n" + traceback.format_exc(),
+            )
             return None
 
     def validate_organism(

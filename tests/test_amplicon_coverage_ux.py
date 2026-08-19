@@ -18,6 +18,8 @@ from nanometa_live.core.parsers.paf_coverage_parser import CoverageData
 from nanometa_live.app.components.coverage_plots import (
     create_coverage_stats_summary,
     create_coverage_depth_figure,
+    create_cumulative_coverage_figure,
+    create_depth_histogram_figure,
 )
 from nanometa_live.core.parsers.validation_guards import (
     check_reference_organism,
@@ -93,6 +95,70 @@ class TestDepthFigureZoom:
     def test_wgs_not_zoomed(self):
         fig = create_coverage_depth_figure(_wgs_low_cov(), threshold=10)
         assert fig.layout.xaxis.range is None
+
+
+class TestCumulativeCurveAmplicon:
+    def test_concentrated_scales_to_covered_region(self):
+        # 1500 bp at 200x in a 1.87 Mb genome: normalised to the genome the
+        # whole curve sits below 0.1% and renders as a flat zero line. The
+        # concentrated view must scale to the covered region instead.
+        fig = create_cumulative_coverage_figure(_amplicon_cov(depth_val=200))
+        y = np.asarray(fig.data[0].y, dtype=float)
+        assert y.max() > 90
+        assert "covered region" in (fig.layout.yaxis.title.text or "").lower()
+
+    def test_wgs_still_genome_normalized(self):
+        fig = create_cumulative_coverage_figure(_wgs_low_cov())
+        y = np.asarray(fig.data[0].y, dtype=float)
+        assert y[0] == pytest.approx(100.0)  # threshold 0: every position >= 0x
+        assert "genome" in (fig.layout.yaxis.title.text or "").lower()
+
+
+class TestHistogramCoveredPositions:
+    def test_zero_positions_excluded_for_amplicon(self):
+        # Previously the ~1.87 M uncovered positions landed in bin 0 and made
+        # every real bar invisible. Only covered positions may be histogrammed.
+        fig = create_depth_histogram_figure(_amplicon_cov(depth_val=200))
+        counts = np.asarray(fig.data[0].y, dtype=float)
+        assert counts.sum() == 1500
+
+    def test_zero_positions_excluded_for_wgs(self):
+        fig = create_depth_histogram_figure(_wgs_low_cov())
+        counts = np.asarray(fig.data[0].y, dtype=float)
+        assert counts.sum() == 40  # the 40 covered single-base hits
+
+    def test_mean_marker_uses_covered_mean(self):
+        # Genome-wide mean is ~0.16x for the amplicon fixture; the marker must
+        # state the mean over covered positions (200x) to match the bars.
+        fig = create_depth_histogram_figure(_amplicon_cov(depth_val=200))
+        texts = [a.text or "" for a in fig.layout.annotations]
+        assert any("200" in t for t in texts)
+
+    def test_all_zero_coverage_does_not_raise(self):
+        cov = CoverageData(
+            ref_name="empty", ref_length=1000,
+            depth_array=np.zeros(1000, dtype=np.uint32),
+        )
+        fig = create_depth_histogram_figure(cov)
+        assert fig.data
+
+
+class TestStatsOrderAmplicon:
+    def test_covered_region_leads_genome_breadth(self):
+        out = _text(create_coverage_stats_summary(_amplicon_cov()))
+        assert out.index("Covered Region") < out.index("Genome Covered")
+
+    def test_genomewide_depth_stats_hidden_when_concentrated(self):
+        # Genome-wide "Avg. Depth 0.2x" beside "Depth in Region 200x" reads as
+        # a contradiction; the concentrated summary drops the genome-wide pair.
+        out = _text(create_coverage_stats_summary(_amplicon_cov()))
+        assert "Avg. Depth" not in out
+        assert "Typical Depth" not in out
+
+    def test_wgs_keeps_genomewide_depth_stats(self):
+        out = _text(create_coverage_stats_summary(_wgs_low_cov()))
+        assert "Avg. Depth" in out
+        assert "Typical Depth" in out
 
 
 class TestReferenceOrganismGuard:

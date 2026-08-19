@@ -11,6 +11,24 @@ from nanometa_live.core.watchlist.watchlist_loader import (
 )
 
 
+@pytest.fixture(autouse=True)
+def isolate_operator_watchlists(tmp_path_factory, monkeypatch):
+    """Point the operator watchlist tier at an empty directory.
+
+    WatchlistLoader searches three tiers; ``project_dir`` and ``app_root``
+    are injectable but the operator tier resolves from the environment, so
+    without this these tests read the real ``~/.nanometa/watchlists`` and
+    their counts depend on whatever the operator has installed. They passed
+    on a clean machine and failed the moment real watchlists were installed
+    (2026-08-18) -- machine state leaking into assertions.
+    """
+    empty = tmp_path_factory.mktemp("operator_watchlists")
+    monkeypatch.setattr(
+        "nanometa_live.core.utils.paths.get_watchlists_dir_from_env",
+        lambda: str(empty),
+    )
+
+
 @pytest.fixture
 def watchlist_dir(tmp_path):
     """Create a temporary watchlist directory with a valid YAML file."""

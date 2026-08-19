@@ -511,13 +511,18 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
     # Scope the invalidation fingerprint to this sample's own files. See
     # _sample_fingerprint_paths for why the whole directory is the wrong
     # scope for a per-sample cache entry.
+    #
+    # The mtime state is consulted even when kraken2/ does not exist: a
+    # directory that vanished after an entry was cached (archive between
+    # two polls) fingerprints differently and classifies as "stale", which
+    # must skip the TTL fallback below. Guarding this call on isdir() left
+    # the state at "absent" in exactly that window, and the TTL cache then
+    # served the just-archived run's frame (2026-08-17 audit, finding C3).
     fingerprint_paths = _sample_fingerprint_paths(kraken_dir, sample)
-    mtime_state = "absent"
-    if os.path.isdir(kraken_dir):
-        mtime_state, mtime_cached = _mtime_cache_state(mtime_key, fingerprint_paths)
-        if mtime_state == "hit":
-            logging.debug(f"Mtime cache hit for Kraken data: {cache_key}")
-            return mtime_cached
+    mtime_state, mtime_cached = _mtime_cache_state(mtime_key, fingerprint_paths)
+    if mtime_state == "hit":
+        logging.debug(f"Mtime cache hit for Kraken data: {cache_key}")
+        return mtime_cached
 
     # Fall back to TTL-based cache -- but only when the mtime check could not
     # answer. A "stale" verdict means the files have demonstrably changed, and
@@ -540,14 +545,13 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
     with parse_lock:
         # Re-check mtime and TTL cache after acquiring the lock. The first
         # waiter to win the lock parses; subsequent waiters find the
-        # result already cached and return without re-parsing.
-        recheck_state = "absent"
-        if os.path.isdir(kraken_dir):
-            recheck_state, mtime_cached = _mtime_cache_state(
-                mtime_key, fingerprint_paths
-            )
-            if recheck_state == "hit":
-                return mtime_cached
+        # result already cached and return without re-parsing. Same
+        # no-isdir-guard rule as above (finding C3).
+        recheck_state, mtime_cached = _mtime_cache_state(
+            mtime_key, fingerprint_paths
+        )
+        if recheck_state == "hit":
+            return mtime_cached
         if recheck_state != "stale":
             with _cache_lock:
                 if cache_key in _kraken_cache:

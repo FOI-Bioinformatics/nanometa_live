@@ -237,51 +237,28 @@ def _build_attribution_popover(
 
 
 # Threat level definitions with visual specifications.
-# Text colors ('color') are tightened from the Bootstrap defaults so
-# foreground/background pairs clear WCAG AA (4.5:1 normal text):
-#   high:     #dc3545 on #f8d7da (3.6:1 fail) -> #721c24 (7.1:1)
-#   moderate: #fd7e14 on #fff3cd (2.5:1 fail) -> #664d03 (7.5:1)
-#   low:      #17a2b8 on #d1ecf1 (2.5:1 fail) -> #0c5460 (7.5:1)
-# critical's #8b0000 already passed AA. Border color stays at the
-# saturated Bootstrap value so the visual identity is preserved
-# (border is decorative, not text, so AA does not apply to it).
+# Derived from the single threat-level definition in
+# core/config/threat_levels.py (2026-08-17 reaudit: this was one of seven
+# independent, mutually disagreeing maps). Labels use the shared alias set
+# (CRITICAL / HIGH RISK / MODERATE / LOW -- the old WATCH/INFO card labels
+# were a fourth vocabulary for the same field), text colors are the
+# AA-tightened text_hex values, and the border carries the level's
+# identity color.
+from nanometa_live.core.config.threat_levels import (
+    THREAT_LEVELS as _CORE_THREAT_LEVELS,
+)
+
 THREAT_LEVELS = {
-    "critical": {
-        "label": "CRITICAL",
-        "color": "#8b0000",
-        "bg_color": "#f8d7da",
-        "border_color": "#8b0000",
-        "icon": "bi-exclamation-octagon-fill",
-        "description": "Dangerous organism requiring immediate action",
-        "action": "Contact your safety officer immediately"
-    },
-    "high": {
-        "label": "HIGH RISK",
-        "color": "#721c24",
-        "bg_color": "#f8d7da",
-        "border_color": "#dc3545",
-        "icon": "bi-exclamation-triangle-fill",
-        "description": "High-risk organism of concern",
-        "action": "Follow your safety protocols"
-    },
-    "moderate": {
-        "label": "WATCH",
-        "color": "#664d03",
-        "bg_color": "#fff3cd",
-        "border_color": "#fd7e14",
-        "icon": "bi-eye-fill",
-        "description": "Monitored species detected",
-        "action": "Document and monitor"
-    },
-    "low": {
-        "label": "INFO",
-        "color": "#0c5460",
-        "bg_color": "#d1ecf1",
-        "border_color": "#17a2b8",
-        "icon": "bi-info-circle-fill",
-        "description": "Species of interest noted",
-        "action": "No immediate action required"
+    level: {
+        "label": info["alias"],
+        "color": info["text_hex"],
+        "bg_color": info["bg_hex"],
+        "border_color": info["hex"],
+        "icon": info["icon"],
+        "description": info["meaning"],
+        "action": info["action"],
     }
+    for level, info in _CORE_THREAT_LEVELS.items()
 }
 
 
@@ -553,6 +530,7 @@ def CriticalPathogenAlert(
                 html.Div([
                     html.Span(
                         threat["label"],
+                        title=threat["description"],
                         className="text-uppercase fw-bold",
                         style={
                             "color": threat["color"],
@@ -679,6 +657,7 @@ def HighRiskPathogenAlert(
                 html.Div([
                     html.Span(
                         threat["label"],
+                        title=threat["description"],
                         className="fw-bold me-2",
                         style={"color": threat["color"]}
                     ),
@@ -766,6 +745,7 @@ def WatchedSpeciesAlert(
             ),
             html.Span(
                 threat["label"],
+                title=threat["description"],
                 className="fw-semibold me-2",
                 style={"color": threat["color"]}
             ),
@@ -804,201 +784,6 @@ def WatchedSpeciesAlert(
             }
         )
     ], className="mb-2")
-
-
-def PathogenAlertPanel(
-    detected_pathogens: List[Dict[str, Any]],
-    watched_species_config: List[Dict[str, Any]]
-) -> html.Div:
-    """
-    Panel displaying all pathogen alerts grouped by severity.
-
-    Args:
-        detected_pathogens: List of detected organisms with their data
-        watched_species_config: Configuration of watched species with threat levels
-
-    Returns:
-        Panel with alerts organized by severity
-    """
-    # Build lookup for watched species
-    watched_lookup = {
-        str(s.get("taxid", "")): s for s in watched_species_config
-    }
-    watched_names = {
-        s.get("name", "").lower().strip(): s for s in watched_species_config
-    }
-
-    # Categorize detected pathogens
-    critical_alerts = []
-    high_alerts = []
-    watch_alerts = []
-
-    for pathogen in detected_pathogens:
-        taxid = str(pathogen.get("taxid", ""))
-        name = pathogen.get("name", "").lower().strip()
-
-        # Check if this is a watched species
-        watch_config = watched_lookup.get(taxid) or watched_names.get(name)
-
-        if watch_config:
-            threat_level = watch_config.get("threat_level", "moderate")
-
-            alert_data = {
-                "pathogen_name": pathogen.get("name", "Unknown"),
-                "common_name": watch_config.get("common_name"),
-                "read_count": pathogen.get("reads", 0),
-                "abundance_pct": pathogen.get("abundance", 0.0),
-                "confidence": _calculate_confidence(pathogen),
-                "taxid": pathogen.get("taxid"),
-                "blast_verified": pathogen.get("blast_verified", False)
-            }
-
-            if threat_level == "critical":
-                critical_alerts.append(alert_data)
-            elif threat_level in ["high", "high_risk"]:
-                high_alerts.append(alert_data)
-            else:
-                watch_alerts.append(alert_data)
-
-    # Build the panel
-    alerts = []
-
-    # Summary header showing counts by threat level
-    total_detected = len(critical_alerts) + len(high_alerts) + len(watch_alerts)
-    if total_detected > 0:
-        summary_badges = []
-        if critical_alerts:
-            summary_badges.append(
-                dbc.Badge(f"{len(critical_alerts)} Critical", color="danger", className="me-1")
-            )
-        if high_alerts:
-            summary_badges.append(
-                dbc.Badge(f"{len(high_alerts)} High", color="warning", className="me-1")
-            )
-        if watch_alerts:
-            summary_badges.append(
-                dbc.Badge(f"{len(watch_alerts)} Watch", color="info")
-            )
-        alerts.append(
-            html.Div([
-                html.Strong(f"{total_detected} watched species detected: "),
-                *summary_badges,
-            ], className="mb-3")
-        )
-
-    # Critical alerts first (most prominent)
-    for alert in critical_alerts:
-        alerts.append(CriticalPathogenAlert(**alert))
-
-    # High risk alerts
-    for alert in high_alerts:
-        alerts.append(HighRiskPathogenAlert(**alert))
-
-    # Watched species (if any)
-    if watch_alerts:
-        alerts.append(
-            html.Div([
-                html.H6([
-                    html.I(className="bi bi-eye me-2"),
-                    f"Watched Species ({len(watch_alerts)})"
-                ], className="text-muted mb-2")
-            ])
-        )
-        for alert in watch_alerts:
-            alerts.append(WatchedSpeciesAlert(
-                pathogen_name=alert["pathogen_name"],
-                read_count=alert["read_count"],
-                abundance_pct=alert["abundance_pct"],
-                taxid=alert["taxid"]
-            ))
-
-    # If no alerts, show all-clear message
-    if not alerts:
-        alerts.append(
-            html.Div([
-                html.Div([
-                    html.I(
-                        className="bi bi-shield-check",
-                        style={"fontSize": "48px", "color": "#28a745"}
-                    )
-                ], className="text-center mb-3"),
-                html.H5(
-                    "All Clear",
-                    className="text-center text-success mb-2"
-                ),
-                html.P(
-                    "No watched pathogens detected in current sample.",
-                    className="text-center text-muted mb-0"
-                )
-            ], className="p-4",
-               style={
-                   "backgroundColor": "#d4edda",
-                   "borderRadius": "8px",
-                   "border": "1px solid #c3e6cb"
-               })
-        )
-
-    return html.Div(
-        alerts,
-        id="pathogen-alert-panel",
-        className="pathogen-alert-panel"
-    )
-
-
-def ThreatSummaryIndicator(
-    critical_count: int = 0,
-    high_count: int = 0,
-    watch_count: int = 0
-) -> html.Div:
-    """
-    Compact threat summary indicator for dashboard header.
-
-    Shows counts of each threat level with color-coded badges.
-    """
-    if critical_count > 0:
-        overall_status = "CRITICAL"
-        overall_color = "#8b0000"
-        bg_color = "#f8d7da"
-    elif high_count > 0:
-        overall_status = "HIGH RISK"
-        overall_color = "#dc3545"
-        bg_color = "#f8d7da"
-    elif watch_count > 0:
-        overall_status = "MONITORING"
-        overall_color = "#fd7e14"
-        bg_color = "#fff3cd"
-    else:
-        overall_status = "ALL CLEAR"
-        overall_color = "#28a745"
-        bg_color = "#d4edda"
-
-    return html.Div([
-        html.Div([
-            html.Span(
-                overall_status,
-                className="fw-bold me-3",
-                style={"color": overall_color}
-            ),
-            dbc.Badge(
-                f"{critical_count} Critical",
-                color="danger" if critical_count > 0 else "secondary",
-                className="me-1"
-            ),
-            dbc.Badge(
-                f"{high_count} High",
-                color="warning" if high_count > 0 else "secondary",
-                className="me-1"
-            ),
-            dbc.Badge(
-                f"{watch_count} Watch",
-                color="info" if watch_count > 0 else "secondary"
-            )
-        ], className="d-flex align-items-center p-2",
-           style={
-               "backgroundColor": bg_color,
-               "borderRadius": "4px"
-           })
-    ], id="threat-summary-indicator")
 
 
 def _calculate_confidence(pathogen: Dict[str, Any]) -> str:

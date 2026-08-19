@@ -624,7 +624,17 @@ def register_dashboard_callbacks(app: Dash):
             Output("dashboard-pathogen-alert-container", "children"),
             Output("dashboard-pathogen-alert-container", "style")
         ],
-        Input("results-fingerprint", "data"),
+        [
+            # Mirrors the verdict banner's trigger set. With only the
+            # fingerprint as Input, enabling a watchlist on a static
+            # results dir (post-run review, the normal audit workflow)
+            # never re-ran this callback: the verdict flipped to ACTION
+            # REQUIRED while the alert cards stayed hidden forever
+            # (2026-08-17 reaudit, live E2E walkthrough).
+            Input("results-fingerprint", "data"),
+            Input("watchlist-tab-state", "data"),
+            Input("update-interval", "n_intervals"),
+        ],
         [
             State("app-config", "data"),
             State("backend-status", "data"),
@@ -634,6 +644,8 @@ def register_dashboard_callbacks(app: Dash):
     )
     def update_pathogen_alert_panel(
         _fingerprint: Dict[str, Any],
+        _watchlist_state: Dict[str, Any],
+        _n_intervals: int,
         config: Dict[str, Any],
         status: Dict[str, Any],
         available_samples: Optional[List[str]]
@@ -655,6 +667,11 @@ def register_dashboard_callbacks(app: Dash):
         Returns:
             Tuple of (alert_panel_children, container_style)
         """
+        # Interval ticks re-render only when the fingerprint moved; direct
+        # triggers (fingerprint change, watchlist toggle) always render.
+        if interval_tick_is_redundant(ctx, "dashboard_pathogen_alert", _fingerprint):
+            raise PreventUpdate
+        mark_rendered("dashboard_pathogen_alert", _fingerprint)
         if should_skip_update("dashboard_pathogen_alert", debounce_ms=2000):
             raise PreventUpdate
 
@@ -1118,6 +1135,19 @@ def register_dashboard_callbacks(app: Dash):
         """
         import time as _time
 
+        from nanometa_live.app.utils.outdir_resolution import (
+            resolve_outdir_for_fingerprint,
+        )
+
+        # A tick buffer carried across an outdir switch computes its first
+        # delta between two different runs' cumulative totals -- one
+        # nonsense rate right after Open Results (2026-08-17 audit,
+        # finding C9). Key the buffer to the directory it measured.
+        current_dir = resolve_outdir_for_fingerprint(config)
+        buffer_dir = (buffer or {}).get("dir")
+        if buffer_dir is not None and buffer_dir != current_dir:
+            buffer = {}
+
         ticks = list((buffer or {}).get("ticks", []) or [])
         running = bool(status and status.get("running"))
 
@@ -1141,6 +1171,7 @@ def register_dashboard_callbacks(app: Dash):
         state = classify_state(new_ticks, now, running)
 
         new_buffer = {
+            "dir": current_dir,
             "ticks": new_ticks,
             "reads_per_min": rpm,
             "files_per_min": fpm,
@@ -1149,44 +1180,50 @@ def register_dashboard_callbacks(app: Dash):
             ),
         }
 
-        if state == "idle":
-            children = [
+        children, class_name = _render_throughput_tile(
+            state, rpm, fpm, new_ticks, now
+        )
+        return children, class_name, new_buffer
+
+# Helper functions
+
+
+def _render_throughput_tile(state, rpm, fpm, ticks, now):
+    """(children, className) for the header throughput tile."""
+    if state == "idle":
+        return (
+            [
                 html.I(className="bi bi-speedometer2 me-2"),
                 html.Span("--- reads/min", className="me-2"),
                 html.Span("--- files/min"),
-            ]
-            class_name = "throughput-tile ms-3 small text-muted"
-
-        elif state == "stalled":
-            last_progress = last_nonzero_delta_ts(new_ticks)
-            age = (now - last_progress) if last_progress else (
-                now - float(new_ticks[0]["ts"]) if new_ticks else 0
-            )
-            children = [
+            ],
+            "throughput-tile ms-3 small text-muted",
+        )
+    if state == "stalled":
+        last_progress = last_nonzero_delta_ts(ticks)
+        age = (now - last_progress) if last_progress else (
+            now - float(ticks[0]["ts"]) if ticks else 0
+        )
+        return (
+            [
                 html.I(className="bi bi-exclamation-triangle me-2 text-warning"),
                 html.Span("Throughput stalled ", className="fw-semibold"),
                 html.Span(
                     f"  0 reads/min   last data {format_age_seconds(age)}",
                     className="ms-2",
                 ),
-            ]
+            ],
             # Amber tokens reused from _verdict_banner_style call sites.
-            class_name = (
-                "throughput-tile ms-3 small fw-semibold "
-                "throughput-tile-stalled"
-            )
-
-        else:
-            rpm_text = f"{int(round(rpm or 0)):,} reads/min"
-            fpm_text = f"{int(round(fpm or 0))} files/min"
-            children = [
-                html.I(className="bi bi-speedometer2 me-2 text-primary"),
-                html.Span(rpm_text, className="fw-semibold me-2"),
-                html.Span(fpm_text, className="text-muted"),
-            ]
-            class_name = "throughput-tile ms-3 small"
-
-        return children, class_name, new_buffer
-
-# Helper functions
+            "throughput-tile ms-3 small fw-semibold throughput-tile-stalled",
+        )
+    rpm_text = f"{int(round(rpm or 0)):,} reads/min"
+    fpm_text = f"{int(round(fpm or 0))} files/min"
+    return (
+        [
+            html.I(className="bi bi-speedometer2 me-2 text-primary"),
+            html.Span(rpm_text, className="fw-semibold me-2"),
+            html.Span(fpm_text, className="text-muted"),
+        ],
+        "throughput-tile ms-3 small",
+    )
 

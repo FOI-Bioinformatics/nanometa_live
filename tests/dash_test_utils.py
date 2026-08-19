@@ -27,6 +27,7 @@ def get_callback_fn(app, output_id, *, input_contains=None):
     Raises AssertionError if no unique-enough match is found.
     """
     cands = []
+    exact = []
     for cb_id, spec in app.callback_map.items():
         if output_id not in cb_id:
             continue
@@ -37,7 +38,14 @@ def get_callback_fn(app, output_id, *, input_contains=None):
                 ids.append(str(cid))
             if not any(input_contains in x for x in ids):
                 continue
+            # An exact component-id match beats a substring match, so
+            # "watchlist-upload" selects the upload callback even though
+            # "watchlist-upload-replace-btn" also contains the substring.
+            if any(input_contains == x for x in ids):
+                exact.append(spec)
         cands.append(spec)
+    if exact:
+        cands = exact
     assert cands, f"no callback for output {output_id!r} (input_contains={input_contains!r})"
     fn = cands[0]["callback"]
     return getattr(fn, "__wrapped__", fn)

@@ -99,6 +99,10 @@ def register_start_stop(app, backend_manager):
             # Compare current input fingerprint with the prior run's
             # (None when no .nanometa.run.json exists yet).
             input_match = backend_manager.fingerprint_matches(outdir, config)
+            # A matching input can still be screened differently: the
+            # watchlist fingerprint says whether the previous run watched
+            # the same organism set (finding C10).
+            watchlist_match = backend_manager.watchlist_matches(outdir)
             # has_metadata is False when the folder holds result-shaped data
             # but no .nanometa.run.json -- i.e. data this app did not create.
             # Resuming over it is meaningless and risks clobbering it, so the
@@ -110,12 +114,15 @@ def register_start_stop(app, backend_manager):
                 no_update,
                 True,
                 render_collision_body(
-                    outdir, found, input_match=input_match, has_metadata=has_metadata
+                    outdir, found, input_match=input_match,
+                    has_metadata=has_metadata,
+                    watchlist_match=watchlist_match,
                 ),
                 {
                     "outdir": outdir,
                     "found": found,
                     "input_match": input_match,
+                    "watchlist_match": watchlist_match,
                     "has_metadata": has_metadata,
                 },
                 no_update,

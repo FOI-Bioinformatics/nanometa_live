@@ -119,3 +119,55 @@ class TestResolveRunOutdir:
             "results_output_directory": "/proj/results/run_one",
         }
         assert resolve_run_outdir(cfg) == "/scratch/out"
+
+
+class TestOverrideFallback:
+    """A config carrying only results_dir_override must still resolve.
+
+    The Configuration tab stores the operator's explicit results folder in
+    results_dir_override and treats results_output_directory as computed --
+    written back only when a run STARTS. A viewer/consumer reading only
+    results_output_directory therefore dead-ends on any config that has not
+    been through a Start yet: on the 2026-08-18 realtime audit the Validation
+    tab reported "Results directory not found" for an entire live run whose
+    validation files sat in the override directory.
+    """
+
+    def test_fingerprint_resolver_falls_back_to_override(self):
+        config = {
+            "results_output_directory": "",
+            "results_dir_override": "/data/results/My_run",
+        }
+        from nanometa_live.app.utils.outdir_resolution import (
+            resolve_outdir_for_fingerprint,
+        )
+        assert resolve_outdir_for_fingerprint(config) == "/data/results/My_run"
+
+    def test_explicit_results_dir_still_wins(self):
+        config = {
+            "results_output_directory": "/computed/run",
+            "results_dir_override": "/data/results/My_run",
+        }
+        from nanometa_live.app.utils.outdir_resolution import (
+            resolve_outdir_for_fingerprint,
+        )
+        assert resolve_outdir_for_fingerprint(config) == "/computed/run"
+
+    def test_validation_store_finds_data_via_override(self, tmp_path):
+        results = tmp_path / "run"
+        (results / "validation").mkdir(parents=True)
+        config = {
+            "blast_validation": True,
+            "results_output_directory": "",
+            "results_dir_override": str(results),
+        }
+        from nanometa_live.app.tabs.validation_tab_helpers import (
+            build_validation_store,
+        )
+        store = build_validation_store(config, {"running": False}, "All Samples", None)
+        status = (store.get("status") or {}).get("code")
+        assert status != "no_results_dir", (
+            "the Validation tab must resolve the results dir the same way "
+            "the rest of the app does; an override-only config is the "
+            "normal state before the first Start"
+        )

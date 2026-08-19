@@ -615,9 +615,12 @@ def register_qc_callbacks(app: Dash):
         try:
             fastp_dir = os.path.join(main_dir, "fastp")
 
-            # Initialize metrics
-            q20_rate = 0.0
-            q30_rate = 0.0
+            # Initialize metrics. Quality rates are None until a source
+            # actually records them: a QC output without q20/q30 fields
+            # must render as "not recorded", not as 0.0% "Poor"
+            # (2026-08-17 audit, finding Q2).
+            q20_rate = None
+            q30_rate = None
             total_bases = 0
             quality_curve = None
             source = "unknown"
@@ -629,7 +632,7 @@ def register_qc_callbacks(app: Dash):
                     source = "fastp"
                     total_q20_bases = 0
                     total_q30_bases = 0
-                    quality_curves_all = []
+                    saw_quality_fields = False
 
                     for fastp_file in fastp_files:
                         try:
@@ -637,6 +640,8 @@ def register_qc_callbacks(app: Dash):
                                 fastp_data = json.load(f)
                                 after = fastp_data.get("summary", {}).get("after_filtering", {})
                                 total_bases += after.get("total_bases", 0)
+                                if "q20_bases" in after or "q30_bases" in after:
+                                    saw_quality_fields = True
                                 total_q20_bases += after.get("q20_bases", 0)
                                 total_q30_bases += after.get("q30_bases", 0)
 
@@ -650,7 +655,7 @@ def register_qc_callbacks(app: Dash):
                             logging.debug(f"Error reading FASTP quality data from {fastp_file}: {e}")
                             continue
 
-                    if total_bases > 0:
+                    if total_bases > 0 and saw_quality_fields:
                         q20_rate = (total_q20_bases / total_bases) * 100
                         q30_rate = (total_q30_bases / total_bases) * 100
 
@@ -660,8 +665,10 @@ def register_qc_callbacks(app: Dash):
                 if not seqkit_df.empty:
                     source = "seqkit"
                     total_bases = int(seqkit_df['sum_len'].sum()) if 'sum_len' in seqkit_df.columns else 0
-                    q20_rate = float(seqkit_df['Q20(%)'].mean()) if 'Q20(%)' in seqkit_df.columns else 0.0
-                    q30_rate = float(seqkit_df['Q30(%)'].mean()) if 'Q30(%)' in seqkit_df.columns else 0.0
+                    if 'Q20(%)' in seqkit_df.columns:
+                        q20_rate = float(seqkit_df['Q20(%)'].mean())
+                    if 'Q30(%)' in seqkit_df.columns:
+                        q30_rate = float(seqkit_df['Q30(%)'].mean())
 
             # If no data, show empty state
             if total_bases == 0:
@@ -772,7 +779,8 @@ def register_qc_callbacks(app: Dash):
                 mean_length_before=mean_length_before,
                 n50=n50,
                 gc_content=gc_content,
-                source=source
+                source=source,
+                amplicon_mode=_is_amplicon_mode(config),
             )
 
         except Exception as e:

@@ -195,3 +195,62 @@ class TestKraken2KrakenExtArgs:
             "retry path emits an empty args string (no --memory-mapping). "
             f"Found body:\n{body}"
         )
+
+
+@pytest.fixture(scope="module")
+def classification_subworkflow_text() -> str:
+    path = _nanometanf_path(
+        "subworkflows/local/taxonomic_classification/main.nf"
+    )
+    if path is None:
+        pytest.skip("nanometanf checkout not found; skipping")
+    return path.read_text()
+
+
+class TestMemoryMappingSingleSourced:
+    """The mmap decision must come from the param alone (2026-08-18 audit).
+
+    An ARM force-disable in the classification subworkflow once produced a
+    split brain: modules.config's KRAKEN2_KRAKEN2 ext.args read
+    params.kraken2_memory_mapping directly, so the standard path ran
+    --memory-mapping on ARM while the subworkflow logged it as disabled,
+    skipped KRAKEN2_DB_PRELOAD, and stripped the flag from the
+    incremental/optimized modules -- realtime mode on an ARM Mac re-loaded
+    the full database on every batch. The ARM premise (SIGSEGV under
+    Rosetta) did not reproduce on real hardware; the per-module retry
+    without the flag remains the safety net.
+    """
+
+    def test_subworkflow_takes_the_param_verbatim(
+        self, classification_subworkflow_text: str
+    ):
+        assert (
+            "use_memory_mapping = params.kraken2_memory_mapping"
+            in classification_subworkflow_text
+        ), (
+            "taxonomic_classification must assign use_memory_mapping from "
+            "params.kraken2_memory_mapping with no platform gating; any "
+            "other expression diverges from modules.config's ext.args, "
+            "which reads the raw param."
+        )
+
+    def test_no_platform_gating_of_the_decision(
+        self, classification_subworkflow_text: str
+    ):
+        assert "os.arch" not in classification_subworkflow_text, (
+            "a platform probe is back in the classification subworkflow; "
+            "if it feeds the mmap decision the split-brain returns "
+            "(subworkflow paths without mmap, ext.args with it)."
+        )
+
+    def test_preload_gated_on_the_same_decision(
+        self, classification_subworkflow_text: str
+    ):
+        assert re.search(
+            r"if\s*\(\s*use_memory_mapping\s*&&[^)]*\)\s*\{\s*\n\s*KRAKEN2_DB_PRELOAD",
+            classification_subworkflow_text,
+        ), (
+            "KRAKEN2_DB_PRELOAD must run whenever the (single-sourced) "
+            "mmap decision is on -- the warm sequential read is what turns "
+            "every later load into page-cache hits."
+        )

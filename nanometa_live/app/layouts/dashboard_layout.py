@@ -21,6 +21,10 @@ from nanometa_live.app.components.modern_components import (
 from nanometa_live.app.components.waiting_banner import (
     waiting_for_first_batch_banner as _lazy_waiting_banner,
 )
+from nanometa_live.app.utils.threat_display import (
+    threat_badges_row,
+    threat_legend_block,
+)
 
 
 def _metric_card(value_id: str, icon_class: str, icon_color: str, label: str, value: str):
@@ -91,6 +95,12 @@ def create_dashboard_layout():
                     "Expand the Sample Details accordion to view per-sample statistics. "
                     "Click a row to filter other tabs to that sample."
                 ),
+                html.H5("Threat Levels"),
+                html.P(
+                    "Each watched organism carries a threat level set by its "
+                    "watchlist entry:"
+                ),
+                threat_legend_block(),
                 html.H5("Refresh"),
                 html.P(
                     "Data refreshes automatically at the configured interval. "
@@ -349,7 +359,19 @@ def create_dashboard_layout():
                                     "pagination": True,
                                     "paginationPageSize": 25,
                                     "paginationPageSizeSelector": [10, 25, 50, 100],
-                                    "rowSelection": {"mode": "singleRow"},
+                                    # Click-to-select is the whole feature
+                                    # here ("Click a row to filter all tabs
+                                    # to this sample"). AG Grid 33's object
+                                    # API defaults enableClickSelection to
+                                    # False and checkboxes to True, so the
+                                    # bare {"mode": "singleRow"} silently
+                                    # stopped selecting on click after the
+                                    # v33 upgrade.
+                                    "rowSelection": {
+                                        "mode": "singleRow",
+                                        "checkboxes": False,
+                                        "enableClickSelection": True,
+                                    },
                                     "tooltipShowDelay": 500,
                                     "getRowId": {"function": "params.data.sample"},
                                 },
@@ -399,12 +421,21 @@ def create_dashboard_layout():
                     html.Small([
                         html.Span("Status key: ", className="text-muted fw-semibold"),
                         dbc.Badge("All Clear", color="success", className="me-1",
+                                  title="No watched organism above its alert threshold",
                                   style={"fontSize": "0.8rem"}),
                         dbc.Badge("Monitoring", color="warning", className="me-1",
+                                  title="A moderate- or low-level watched organism was detected",
                                   style={"fontSize": "0.8rem"}),
                         dbc.Badge("Action Required", color="danger", className="me-1",
+                                  title="A critical- or high-level watched organism is above its alert threshold",
                                   style={"fontSize": "0.8rem"}),
-                    ], className="d-flex align-items-center")
+                    ], className="d-flex align-items-center"),
+                    # Threat-level key: the vocabulary the alert cards and
+                    # watchlist use. Hover a badge for the meaning.
+                    html.Small([
+                        html.Span("Threat levels: ", className="text-muted fw-semibold"),
+                        threat_badges_row(),
+                    ], className="d-flex align-items-center mt-1"),
                 ])
             ], md=8),
             dbc.Col([
