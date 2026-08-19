@@ -27,6 +27,7 @@ from nanometa_live.app.tabs.reports_helpers import (
     build_assembly_panel,
     build_taxpasta_panel,
 )
+from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
 
 
 def _name_by_taxid(results_dir):
@@ -67,7 +68,7 @@ def register_reports_callbacks(app, backend_manager=None):
 
         results_dir = ""
         if config:
-            results_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
+            results_dir = resolve_outdir_for_fingerprint(config)
         # Tell the Flask serve route which directory the links point into.
         set_reports_dir(results_dir or None)
 

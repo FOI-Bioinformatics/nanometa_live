@@ -34,6 +34,7 @@ from nanometa_live.app.tabs.classification_helpers import (
     create_empty_sunburst,
     create_sunburst_data,
 )
+from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
 
 
 def register_classification_callbacks(app: Dash):
@@ -390,7 +391,7 @@ def register_classification_callbacks(app: Dash):
             return no_update
 
         try:
-            main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
+            main_dir = resolve_outdir_for_fingerprint(config)
 
             # Use provided directory or default to reports/
             if export_dir:

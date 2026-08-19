@@ -234,7 +234,7 @@ def register_indicators(app, backend_manager):
             return None
 
         try:
-            main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
+            main_dir = resolve_outdir_for_fingerprint(config)
             if main_dir and os.path.exists(main_dir):
                 # Stamp at fingerprint-change time.
                 return datetime.datetime.now().isoformat()

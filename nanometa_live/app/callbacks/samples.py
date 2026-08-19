@@ -85,8 +85,7 @@ def _dataless_samples(available_samples, file_mapping, config) -> set:
 
     main_dir = ""
     if isinstance(config, dict):
-        main_dir = (config.get("results_output_directory", "")
-                    or config.get("main_dir", ""))
+        main_dir = (resolve_outdir_for_fingerprint(config))
     try:
         dataless |= {
             s for s in get_failed_samples(main_dir)
@@ -138,7 +137,7 @@ def register_samples(app, backend_manager):
         else:
             try:
                 # Use results_output_directory for pipeline output (where kraken2/, fastp/ are)
-                main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
+                main_dir = resolve_outdir_for_fingerprint(config)
 
                 if not main_dir or not os.path.exists(main_dir):
                     new_samples, new_mapping = ["All Samples"], {}
@@ -243,8 +242,7 @@ def register_samples(app, backend_manager):
         if not config or not available_samples:
             return {}
         main_dir = (
-            config.get("results_output_directory", "")
-            or config.get("main_dir", "")
+            resolve_outdir_for_fingerprint(config)
         )
         if not main_dir or not os.path.isdir(main_dir):
             return {}

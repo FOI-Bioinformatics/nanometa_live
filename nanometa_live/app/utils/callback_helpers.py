@@ -310,15 +310,19 @@ def get_pipeline_output_dir(config: Optional[Dict]) -> Optional[str]:
     if not config:
         return None
 
-    # Primary: use results_output_directory (Nextflow --outdir)
-    output_dir = config.get("results_output_directory", "")
-    if output_dir and os.path.exists(output_dir):
-        return output_dir
-
-    # Fallback: try main_dir (legacy compatibility)
-    main_dir = config.get("main_dir", "")
-    if main_dir and os.path.exists(main_dir):
-        return main_dir
+    # Same fallback chain as resolve_outdir_for_fingerprint
+    # (results_output_directory -> main_dir -> results_dir_override; the
+    # override matters for a config that has not been through Start), but
+    # per-candidate: this helper's contract is "an existing directory or
+    # None", so a stale computed dir must not shadow an existing fallback.
+    candidates = (
+        config.get("results_output_directory", ""),
+        config.get("main_dir", ""),
+        (config.get("results_dir_override") or "").strip(),
+    )
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
 
     return None
 

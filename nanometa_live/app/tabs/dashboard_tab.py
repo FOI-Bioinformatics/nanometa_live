@@ -84,6 +84,7 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     build_detection_meta,
     build_report_payload,
 )
+from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
 
 logger = logging.getLogger(__name__)
 def register_dashboard_callbacks(app: Dash):
@@ -107,7 +108,7 @@ def register_dashboard_callbacks(app: Dash):
         pipeline_running = status.get("running", False)
         pipeline_completed = status.get("completed", False)
         has_data = available_samples and len(available_samples) > 1
-        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
+        main_dir = resolve_outdir_for_fingerprint(config)
         has_results_dir = main_dir and os.path.isdir(os.path.join(main_dir, "kraken2"))
         should_load = visualization_mode or pipeline_running or pipeline_completed or has_data or has_results_dir
         return should_load, main_dir
@@ -235,10 +236,7 @@ def register_dashboard_callbacks(app: Dash):
         overall_status_starting = bool(
             overall_status and overall_status.get("status") == "starting"
         )
-        main_dir = (
-            config.get("results_output_directory", "")
-            or config.get("main_dir", "")
-        ) if has_config else ""
+        main_dir = resolve_outdir_for_fingerprint(config)
         main_dir_available = bool(main_dir and os.path.isdir(main_dir))
 
         kraken_has_data = False
@@ -409,7 +407,7 @@ def register_dashboard_callbacks(app: Dash):
         visualization_mode = config.get("visualization_only", False)
         pipeline_running = status.get("running", False) if status else False
         pipeline_completed = status.get("completed", False) if status else False
-        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
+        main_dir = resolve_outdir_for_fingerprint(config)
         has_main_dir = bool(main_dir and os.path.isdir(main_dir))
 
         if not (visualization_mode or pipeline_running or pipeline_completed or has_main_dir):
@@ -681,7 +679,7 @@ def register_dashboard_callbacks(app: Dash):
         visualization_mode = config.get("visualization_only", False)
         pipeline_running = status.get("running", False) if status else False
         pipeline_completed = status.get("completed", False) if status else False
-        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
+        main_dir = resolve_outdir_for_fingerprint(config)
 
         # Only check when we have data
         if not (visualization_mode or pipeline_running or pipeline_completed):
@@ -743,7 +741,15 @@ def register_dashboard_callbacks(app: Dash):
             Output("pathogen-report-data", "data")
         ],
         [
+            # Two id types open the same modal: the Dashboard alert cards
+            # ("pathogen-view-report") and the Organisms tab cards
+            # ("organism-view-report"). They MUST stay distinct types -- a
+            # shared type put duplicate dict ids in the layout whenever an
+            # organism appeared on both surfaces, which tore the n_clicks
+            # bookkeeping and made real clicks arrive with a None triggered
+            # value (swallowed by the spurious-reopen guard below).
             Input({"type": "pathogen-view-report", "taxid": ALL}, "n_clicks"),
+            Input({"type": "organism-view-report", "taxid": ALL}, "n_clicks"),
             Input("pathogen-modal-close", "n_clicks"),
             Input("pathogen-modal-acknowledge", "n_clicks"),
         ],
@@ -757,6 +763,7 @@ def register_dashboard_callbacks(app: Dash):
     )
     def handle_view_report(
         view_clicks: List[Optional[int]],
+        organism_clicks: List[Optional[int]],
         close_clicks: Optional[int],
         ack_clicks: Optional[int],
         is_open: bool,
@@ -786,8 +793,9 @@ def register_dashboard_callbacks(app: Dash):
             )
             return [False] + [no_update] * 16
 
-        # Handle view report buttons
-        if not view_clicks or not any(view_clicks):
+        # Handle view report buttons (either surface)
+        all_clicks = list(view_clicks or []) + list(organism_clicks or [])
+        if not any(all_clicks):
             return [no_update] * 17
 
         if not isinstance(triggered, dict):
@@ -957,7 +965,7 @@ def register_dashboard_callbacks(app: Dash):
                 className="text-danger"
             )
 
-        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
+        main_dir = resolve_outdir_for_fingerprint(config)
         if not main_dir:
             return html.Div(
                 "No results directory configured.",

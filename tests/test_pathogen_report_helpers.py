@@ -218,7 +218,7 @@ class TestReportCallback:
             "nanometa_live.core.utils.pathogen_database.get_pathogen_by_taxid",
             return_value=None,  # exercise the Kraken-only (not-found) path
         ):
-            out = fn([1], None, None, False, {}, {}, "All Samples")
+            out = fn([1], [], None, None, False, {}, {}, "All Samples")
 
         assert len(out) == 17
         assert out[0] is True  # modal opens

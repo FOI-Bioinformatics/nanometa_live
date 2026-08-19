@@ -56,6 +56,7 @@ from nanometa_live.app.tabs.qc_tab_helpers import (  # noqa: E402
     build_qc_figures,
     aggregate_fastp_read_stats,
 )
+from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
 
 
 def _fastp_files_for_sample(fastp_dir: str, selected_sample):
@@ -120,7 +121,7 @@ def register_qc_callbacks(app: Dash):
         mark_rendered("qc_plots", _fingerprint)
 
         # Check if we have valid config and main_dir
-        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
+        main_dir = resolve_outdir_for_fingerprint(config)
         if not main_dir or not os.path.isdir(main_dir):
             return _get_empty_qc_figures()
 
@@ -292,7 +293,7 @@ def register_qc_callbacks(app: Dash):
         ]
 
         # Check if we have valid config and main_dir
-        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
+        main_dir = resolve_outdir_for_fingerprint(config)
         if not main_dir or not os.path.isdir(main_dir):
             return [*default_values, rendered]
 
@@ -483,7 +484,7 @@ def register_qc_callbacks(app: Dash):
 
         try:
             # Determine export directory
-            main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
+            main_dir = resolve_outdir_for_fingerprint(config)
             if export_dir:
                 export_path = export_dir
             else:
@@ -557,7 +558,7 @@ def register_qc_callbacks(app: Dash):
         mark_rendered("qc_per_sample_table", _fingerprint)
 
         # Check if we have valid config and main_dir
-        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
+        main_dir = resolve_outdir_for_fingerprint(config)
         if not main_dir or not os.path.isdir(main_dir):
             return []
 
@@ -608,7 +609,7 @@ def register_qc_callbacks(app: Dash):
         )
 
         # Check if we have valid config and main_dir
-        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
+        main_dir = resolve_outdir_for_fingerprint(config)
         if not main_dir or not os.path.isdir(main_dir):
             return empty_state
 
@@ -726,7 +727,7 @@ def register_qc_callbacks(app: Dash):
         )
 
         # Check if we have valid config and main_dir
-        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
+        main_dir = resolve_outdir_for_fingerprint(config)
         if not main_dir or not os.path.isdir(main_dir):
             return empty_state
 
@@ -820,9 +821,7 @@ def register_qc_callbacks(app: Dash):
             raise PreventUpdate
         mark_rendered("qc_stage_strip", _fingerprint)
 
-        main_dir = (
-            config.get("results_output_directory", "") or config.get("main_dir", "")
-        ) if config else ""
+        main_dir = resolve_outdir_for_fingerprint(config)
         if not main_dir or not os.path.isdir(main_dir):
             return _build_stage_strip_empty()
 
@@ -892,7 +891,7 @@ def register_qc_callbacks(app: Dash):
         if not n_clicks or not config:
             return no_update
 
-        main_dir = config.get("results_output_directory", "") or config.get("main_dir", "")
+        main_dir = resolve_outdir_for_fingerprint(config)
         if not main_dir:
             return no_update
 
@@ -986,12 +985,7 @@ def register_qc_callbacks(app: Dash):
             raise PreventUpdate
         mark_rendered("qc_action_guidance", _fingerprint)
 
-        main_dir = (
-            config.get("results_output_directory", "")
-            or config.get("main_dir", "")
-            if config
-            else ""
-        )
+        main_dir = resolve_outdir_for_fingerprint(config)
         if not main_dir or not os.path.isdir(main_dir):
             return ""
 

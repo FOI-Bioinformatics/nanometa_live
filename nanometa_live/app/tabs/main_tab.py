@@ -68,6 +68,7 @@ from nanometa_live.app.tabs.main_tab_helpers import (  # noqa: E402
 from nanometa_live.app.tabs.dashboard_helpers import (  # noqa: E402
     DEFAULT_LOW_READ_FLOOR,
 )
+from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
 
 
 def register_main_callbacks(app: Dash):
@@ -762,7 +763,7 @@ def register_main_callbacks(app: Dash):
             logging.info(f"Toggled watchlist entry {entry.name} (taxid: {taxid}) to enabled={new_state}")
         else:
             # Add new custom entry to watchlist
-            main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
+            main_dir = resolve_outdir_for_fingerprint(config)
             species_name = f"Species (taxid: {taxid})"  # Default name
 
             # Try to get name from Kraken data
@@ -867,10 +868,7 @@ def register_main_callbacks(app: Dash):
         ``results_output_directory``, so results landed where the reload
         never looked.
         """
-        results_dir = (
-            config.get("results_output_directory", "")
-            or config.get("main_dir", "")
-        ) if config else ""
+        results_dir = resolve_outdir_for_fingerprint(config)
         if not results_dir:
             raise PreventUpdate
 
@@ -985,7 +983,7 @@ def register_main_callbacks(app: Dash):
                 return no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update
 
             # Get read count for this organism
-            main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
+            main_dir = resolve_outdir_for_fingerprint(config)
             read_count = 0
             try:
                 kraken_df = load_kraken_data(main_dir, selected_sample)
@@ -1081,7 +1079,7 @@ def register_main_callbacks(app: Dash):
 
         try:
             # Get config paths
-            main_dir = config.get("results_output_directory", "") or config.get("main_dir", "") if config else ""
+            main_dir = resolve_outdir_for_fingerprint(config)
             input_dir = config.get("nanopore_output_directory", "") if config else ""
 
             if not main_dir:
