@@ -1295,6 +1295,7 @@ def create_watchlist_file_item(wl: Dict[str, Any], pathogens: List[Dict[str, Any
     pathogen_count = wl.get("pathogen_count", 0)
     enabled = wl.get("enabled", False)
     source = wl.get("source", "builtin")
+    file_path = wl.get("file_path", "")
 
     source_colors = {
         "builtin": "primary",
@@ -1351,12 +1352,21 @@ def create_watchlist_file_item(wl: Dict[str, Any], pathogens: List[Dict[str, Any
                    n_clicks=0),
             ], width=5),
 
-            # Pathogen count
+            # Pathogen count, and the file this actually came from. The path
+            # is the only thing that distinguishes two copies of the same
+            # watchlist in different tiers -- an operator editing the wrong
+            # copy otherwise sees no change and no explanation.
             dbc.Col([
                 html.Small(
                     f"{pathogen_count} pathogens",
-                    className="text-muted",
+                    className="text-muted d-block",
                 ),
+                html.Small(
+                    file_path,
+                    className="text-muted font-monospace d-block text-truncate",
+                    style={"fontSize": "0.7rem"},
+                    title=file_path,
+                ) if file_path else "",
             ], width=3),
 
             # Actions
