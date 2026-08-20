@@ -488,6 +488,9 @@ class WatchlistManager:
         self._enabled_watchlists: Set[str] = set()  # YAML watchlist IDs
         self._pathogen_db: Optional[PathogenDatabase] = None
         self._project_dir: Optional[Path] = None
+        # Further watchlist dirs (the run's results dir), kept so every
+        # loader hand-off restates them rather than resetting the search path.
+        self._additional_watchlist_dirs: List[Path] = []
         # data_dir/project_dir captured at load_config time so the toggle
         # state file resolves to the project-local location via NanometaPaths.
         self._paths_config: Dict[str, Any] = {}
@@ -525,12 +528,21 @@ class WatchlistManager:
             "project_dir": config.get("project_dir"),
         }
 
-        # Set project directory for custom watchlist discovery
-        project_dir = config.get("results_output_directory") or config.get("main_dir")
+        # Set project directory for custom watchlist discovery. The project
+        # dir is the documented home of the project tier; the results dir is
+        # searched as well because `import_watchlist(destination="project")`
+        # has been saving operator uploads there, and the two directories stop
+        # coinciding once the project dir defaults outside the working dir.
+        results_dir = (config.get("results_output_directory")
+                       or config.get("main_dir"))
+        project_dir = config.get("project_dir") or results_dir
         if project_dir:
             self._project_dir = Path(project_dir)
-            loader = _get_watchlist_loader()
-            loader.set_project_dir(self._project_dir)
+            self._additional_watchlist_dirs = (
+                [Path(results_dir)]
+                if results_dir and results_dir != project_dir else []
+            )
+            self._apply_watchlist_search_path()
 
         # Get or create pathogen database (for legacy support)
         self._pathogen_db = get_pathogen_database()
@@ -1310,6 +1322,20 @@ class WatchlistManager:
     # New methods for YAML-based watchlists and multi-taxonomy support
     # -------------------------------------------------------------------------
 
+    def _apply_watchlist_search_path(self) -> None:
+        """Restate the loader's project tier from what this manager holds.
+
+        The loader is a process-wide singleton whose search path any caller can
+        overwrite, so both hand-offs go through here: setting the project dir
+        without the additional dirs silently narrows the search.
+        """
+        if not self._project_dir:
+            return
+        _get_watchlist_loader().set_project_dir(
+            self._project_dir,
+            additional_dirs=list(self._additional_watchlist_dirs),
+        )
+
     def get_available_watchlists(self) -> List[Dict[str, Any]]:
         """
         Get all available watchlist files (builtin, user, project).
@@ -1324,8 +1350,7 @@ class WatchlistManager:
             - enabled: Whether this watchlist is currently enabled
         """
         loader = _get_watchlist_loader()
-        if self._project_dir:
-            loader.set_project_dir(self._project_dir)
+        self._apply_watchlist_search_path()
 
         watchlists = loader.discover_watchlists()
 
