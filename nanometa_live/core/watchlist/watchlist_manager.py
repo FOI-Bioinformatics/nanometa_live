@@ -528,21 +528,7 @@ class WatchlistManager:
             "project_dir": config.get("project_dir"),
         }
 
-        # Set project directory for custom watchlist discovery. The project
-        # dir is the documented home of the project tier; the results dir is
-        # searched as well because `import_watchlist(destination="project")`
-        # has been saving operator uploads there, and the two directories stop
-        # coinciding once the project dir defaults outside the working dir.
-        results_dir = (config.get("results_output_directory")
-                       or config.get("main_dir"))
-        project_dir = config.get("project_dir") or results_dir
-        if project_dir:
-            self._project_dir = Path(project_dir)
-            self._additional_watchlist_dirs = (
-                [Path(results_dir)]
-                if results_dir and results_dir != project_dir else []
-            )
-            self._apply_watchlist_search_path()
+        self._resolve_watchlist_dirs(config)
 
         # Get or create pathogen database (for legacy support)
         self._pathogen_db = get_pathogen_database()
@@ -1321,6 +1307,27 @@ class WatchlistManager:
     # -------------------------------------------------------------------------
     # New methods for YAML-based watchlists and multi-taxonomy support
     # -------------------------------------------------------------------------
+
+    def _resolve_watchlist_dirs(self, config: Dict[str, Any]) -> None:
+        """Decide which directories hold this project's watchlists.
+
+        The project dir is the documented home of the project tier. The
+        results dir is searched as well, because
+        `import_watchlist(destination="project")` has been saving operator
+        uploads there and the two directories stop coinciding once the project
+        dir defaults outside the working directory.
+        """
+        results_dir = (config.get("results_output_directory")
+                       or config.get("main_dir"))
+        project_dir = config.get("project_dir") or results_dir
+        if not project_dir:
+            return
+        self._project_dir = Path(project_dir)
+        self._additional_watchlist_dirs = (
+            [Path(results_dir)]
+            if results_dir and results_dir != project_dir else []
+        )
+        self._apply_watchlist_search_path()
 
     def _apply_watchlist_search_path(self) -> None:
         """Restate the loader's project tier from what this manager holds.
