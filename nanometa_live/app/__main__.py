@@ -62,7 +62,8 @@ def parse_arguments():
 
     parser.add_argument(
         "--project", help="Project directory; per-analysis state is kept in "
-                          "<project>/.nanometa/ (default: current directory)"
+                          "<project>/.nanometa/ (default: "
+                          "~/nanometa-projects/<analysis name>)"
     )
 
     parser.add_argument(
@@ -147,7 +148,8 @@ def _run_visualization_mode(args) -> None:
     # a run started with the variable set relocated `nanometa-prepare`
     # (which reads it) while the GUI silently stayed on ~/.nanometa.
     from nanometa_live.core.utils.paths import (
-        resolve_data_dir, set_data_dir_env, set_project_dir_env,
+        resolve_data_dir, resolve_project_dir, set_data_dir_env,
+        set_project_dir_env,
     )
 
     data_dir = resolve_data_dir(args.data_dir)
@@ -158,10 +160,11 @@ def _run_visualization_mode(args) -> None:
     # full-mode entry point in nanometa_live.py does the same thing.
     set_data_dir_env(data_dir)
 
-    project_dir = os.path.abspath(
-        os.path.expanduser(args.project)
-        if getattr(args, "project", None)
-        else os.getcwd()
+    # Defaults to ~/nanometa-projects/<name>, never the working directory --
+    # see resolve_project_dir for why writing into a checkout is a problem.
+    project_dir = resolve_project_dir(
+        getattr(args, "project", None),
+        config_path=getattr(args, "config", None),
     )
     set_project_dir_env(project_dir)
 

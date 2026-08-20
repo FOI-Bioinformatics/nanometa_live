@@ -231,6 +231,30 @@ def genome_fetch_taxid(entry) -> int:
     return 0
 
 
+def normalise_download_entry(entry) -> Optional[Dict[str, Any]]:
+    """Split a watchlist entry's two taxids for the download queue.
+
+    Returns a copy carrying ``taxid`` = the taxid the genome is cached under
+    and ``_fetch_taxid`` = the taxid a public database can be asked about, or
+    None when the entry has no taxid at all.
+
+    The fetch taxid is read BEFORE ``taxid`` is overwritten, and that order is
+    the whole point. `genome_fetch_taxid` falls back to ``taxid`` when no
+    ``taxid_ncbi`` is present, so computing it after the assignment hands it
+    the database graft id -- which sits below the pseudo-taxid band and so
+    passes the "is this a real NCBI taxid" check, then names a different
+    organism at NCBI or nothing at all.
+    """
+    fetch_taxid = genome_fetch_taxid(entry)
+    cache_taxid = genome_cache_taxid(entry)
+    if not cache_taxid:
+        return None
+    normalised = dict(entry)
+    normalised["taxid"] = cache_taxid
+    normalised["_fetch_taxid"] = fetch_taxid
+    return normalised
+
+
 class GenomeDownloadManager:
     """
     Manages pathogen reference genome downloads and BLAST database building.
@@ -1224,7 +1248,11 @@ class GenomeDownloadManager:
             logger.error("NCBI 'datasets' CLI not found.")
             return None, None
 
-        output_file = self.genomes_dir / f"{cache_taxid or taxid}.fasta"
+        # Every write in this method goes under the cache key, including the
+        # two fallbacks below -- a genome under the fetch taxid is invisible to
+        # `has_genome(db_taxid)` and is re-downloaded on every attempt.
+        cache_key = cache_taxid or taxid
+        output_file = self.genomes_dir / f"{cache_key}.fasta"
 
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -1234,6 +1262,11 @@ class GenomeDownloadManager:
                     "datasets", "download", "genome", "taxon",
                     str(taxid),
                     "--reference",
+                    # A taxon query matches descendants, so `--reference` alone
+                    # can return a subspecies assembly for a species taxid. When
+                    # nothing is registered at this exact node the command exits
+                    # non-zero and the accession fallback below takes over.
+                    "--tax-exact-match",
                     "--include", "genome",
                     "--filename", str(zip_file)
                 ]
@@ -1260,7 +1293,7 @@ class GenomeDownloadManager:
                     )
                     acc = self._resolve_assembly_accession(taxid)
                     if acc:
-                        path = self._download_ncbi_genome(acc, taxid)
+                        path = self._download_ncbi_genome(acc, cache_key)
                         if path:
                             return path, acc
                     logger.error(
@@ -1287,7 +1320,7 @@ class GenomeDownloadManager:
                         )
                         acc = self._resolve_assembly_accession(taxid)
                         if acc:
-                            path = self._download_ncbi_genome(acc, taxid)
+                            path = self._download_ncbi_genome(acc, cache_key)
                             if path:
                                 return path, acc
                         logger.error("No FASTA file found in downloaded archive")
@@ -1328,23 +1361,45 @@ class GenomeDownloadManager:
         then any assembly. Used when a by-taxid download returns an exit-0 empty
         archive (no reference flagged) so a concrete accession can be fetched
         instead. Returns the accession string or ``None``.
+
+        Every tier is tried against the exact taxon before the subtree is
+        considered, because a taxon query matches descendants: taxon 263
+        (*F. tularensis*) resolves under ``--reference`` to a *novicida*
+        assembly, the most divergent member of the group, which would then be
+        the reference every validation of that species is measured against.
+        Falling back to the subtree is still better than returning no genome,
+        but it is logged rather than done silently.
         """
         if not shutil.which("datasets"):
             return None
-        for extra in (["--reference"], ["--assembly-level", "complete"], []):
-            cmd = [
-                "datasets", "summary", "genome", "taxon", str(taxon), "--limit", "1"
-            ] + extra
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-                if result.returncode != 0:
-                    continue
-                reports = (json.loads(result.stdout or "{}").get("reports") or [])
-                if reports and reports[0].get("accession"):
+        tiers = (["--reference"], ["--assembly-level", "complete"], [])
+        for exact in (True, False):
+            for extra in tiers:
+                cmd = [
+                    "datasets", "summary", "genome", "taxon", str(taxon), "--limit", "1"
+                ] + extra + (["--tax-exact-match"] if exact else [])
+                try:
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                    if result.returncode != 0:
+                        continue
+                    reports = (json.loads(result.stdout or "{}").get("reports") or [])
+                    if not (reports and reports[0].get("accession")):
+                        continue
+                    if not exact:
+                        organism = reports[0].get("organism", {}) or {}
+                        logger.warning(
+                            f"No assembly registered at taxon {taxon} itself; "
+                            f"using {reports[0]['accession']} from the subtree "
+                            f"({organism.get('organism_name', 'unknown organism')}, "
+                            f"tax_id {organism.get('tax_id', '?')}). Validation "
+                            f"will be measured against that organism."
+                        )
                     return reports[0]["accession"]
-            except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError) as e:
-                logger.debug(f"assembly accession resolve failed (taxon={taxon}, {extra}): {e}")
-                continue
+                except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError) as e:
+                    logger.debug(
+                        f"assembly accession resolve failed "
+                        f"(taxon={taxon}, {extra}, exact={exact}): {e}")
+                    continue
         return None
 
     def build_blast_db(self, taxid: int) -> bool:
@@ -1882,12 +1937,10 @@ class GenomeDownloadManager:
             # Bioshield downloads impossible -- NCBI cannot resolve a
             # synthetic id, and a success would have landed under a filename
             # nothing reads (2026-08-19).
-            entry = dict(entry)
-            taxid = genome_cache_taxid(entry)
-            if not taxid:
+            entry = normalise_download_entry(entry)
+            if entry is None:
                 continue
-            entry["taxid"] = taxid
-            entry["_fetch_taxid"] = genome_fetch_taxid(entry)
+            taxid = entry["taxid"]
             if self.has_genome(taxid):
                 results[taxid] = self.get_genome_path(taxid)
             else:

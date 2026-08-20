@@ -1,0 +1,68 @@
+{
+  "barcode01": {
+    "total_reads": 10000,
+    "total_bp": 40129200,
+    "composition": {
+      "holarctica_LVS": 9800,
+      "random_seq": 104,
+      "junk_seq": 96
+    }
+  },
+  "barcode02": {
+    "total_reads": 10000,
+    "total_bp": 40226257,
+    "composition": {
+      "tularensis_SCHUS4": 9821,
+      "junk_seq": 94,
+      "random_seq": 85
+    }
+  },
+  "barcode03": {
+    "total_reads": 10000,
+    "total_bp": 40182217,
+    "composition": {
+      "mediasiatica_FSC147": 9769,
+      "random_seq": 122,
+      "junk_seq": 109
+    }
+  },
+  "barcode04": {
+    "total_reads": 10000,
+    "total_bp": 40124178,
+    "composition": {
+      "novicida_U112": 9797,
+      "random_seq": 110,
+      "junk_seq": 93
+    }
+  },
+  "barcode05": {
+    "total_reads": 10000,
+    "total_bp": 40106784,
+    "composition": {
+      "holarctica_LVS": 6859,
+      "tularensis_SCHUS4": 2933,
+      "random_seq": 105,
+      "junk_seq": 103
+    }
+  },
+  "barcode06": {
+    "total_reads": 10000,
+    "total_bp": 39870516,
+    "composition": {
+      "philomiragia": 9540,
+      "NZ_CP063139.1": 270,
+      "junk_seq": 104,
+      "random_seq": 86
+    }
+  },
+  "barcode07": {
+    "total_reads": 10000,
+    "total_bp": 40361727,
+    "composition": {
+      "ecoli_K12": 9796,
+      "junk_seq": 95,
+      "random_seq": 90,
+      "holarctica_LVS": 19
+    }
+  }
+}

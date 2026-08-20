@@ -24,6 +24,7 @@ from nanometa_live.core.utils.logging_utils import setup_logging
 from nanometa_live.core.utils.paths import (
     resolve_data_dir,
     set_data_dir_env,
+    resolve_project_dir,
     set_project_dir_env,
 )
 
@@ -75,7 +76,8 @@ def parse_arguments():
         "--project",
         help="Project directory for this analysis. Per-analysis state "
              "(session config, watchlist selection, taxid mappings) is kept "
-             "in <project>/.nanometa/ (default: current working directory)",
+             "in <project>/.nanometa/ (default: "
+             "~/nanometa-projects/<analysis name>)",
     )
 
     parser.add_argument(
@@ -152,9 +154,11 @@ def main():
     # too so project-scoped singletons (e.g. the taxid mapper, constructed
     # before a config is loaded) resolve to the same place as config-aware
     # callers via NanometaPaths.
-    project_dir = (
-        os.path.abspath(os.path.expanduser(args.project))
-        if args.project else os.getcwd()
+    # Defaults to ~/nanometa-projects/<name> rather than the working
+    # directory, so a launch from a source checkout does not write results and
+    # .nanometa into it (see resolve_project_dir).
+    project_dir = resolve_project_dir(
+        args.project, config_path=getattr(args, "config", None)
     )
     set_project_dir_env(project_dir)
 

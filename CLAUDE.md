@@ -1204,8 +1204,13 @@ pytest -n 0                                         # serial, for pdb/print debu
 pytest --cov=nanometa_live --cov-report=term-missing   # with the coverage gate
 ```
 
-3638 tests as of 2026-08-17 (~108 skipped by default). `pytest.ini` enforces a
-`fail_under = 67` floor on coverage runs only (the default `pytest` dev loop
+The `nanometa` conda env has Dash but neither `pytest-xdist` nor `pytest-cov`,
+so run the plain suite there with `-o addopts=""` and the coverage gate from
+the `nf-core` env, which has both.
+
+3973 tests as of 2026-08-20 (~108 skipped by default; measured coverage 75%).
+`pytest.ini` enforces a
+`fail_under = 74` floor on coverage runs only (the default `pytest` dev loop
 does not load coverage); the floor ratchets up as coverage rises — keep it ~1
 point below the measured total, never lower it. Also
 `filterwarnings = error::DeprecationWarning:nanometa_live` (our own deprecations

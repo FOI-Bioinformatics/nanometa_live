@@ -100,6 +100,17 @@ def _threat_severity(level: ThreatLevel) -> int:
     return _THREAT_SEVERITY.get(level, 0)
 
 
+def _same_db_node(a: "WatchlistEntry", b: "WatchlistEntry") -> bool:
+    """Do these two entries name the same node in the loaded Kraken2 database?
+
+    Only a genuine disagreement counts as "different": when both entries state
+    a ``db_taxid`` and the values differ. If either is silent the entries are
+    treated as the same organism, which keeps an NCBI-only watchlist merging
+    with a database-aware one rather than forking it.
+    """
+    return a.db_taxid is None or b.db_taxid is None or a.db_taxid == b.db_taxid
+
+
 # Allowed values for ``WatchlistEntry.organism_type``. Single source of truth so
 # the Add/Edit form options, ``from_dict`` normalisation, and the tests cannot
 # drift apart. An unrecognised or empty value normalises to ``None``.
@@ -477,6 +488,9 @@ class WatchlistManager:
         self._enabled_watchlists: Set[str] = set()  # YAML watchlist IDs
         self._pathogen_db: Optional[PathogenDatabase] = None
         self._project_dir: Optional[Path] = None
+        # Further watchlist dirs (the run's results dir), kept so every
+        # loader hand-off restates them rather than resetting the search path.
+        self._additional_watchlist_dirs: List[Path] = []
         # data_dir/project_dir captured at load_config time so the toggle
         # state file resolves to the project-local location via NanometaPaths.
         self._paths_config: Dict[str, Any] = {}
@@ -514,12 +528,7 @@ class WatchlistManager:
             "project_dir": config.get("project_dir"),
         }
 
-        # Set project directory for custom watchlist discovery
-        project_dir = config.get("results_output_directory") or config.get("main_dir")
-        if project_dir:
-            self._project_dir = Path(project_dir)
-            loader = _get_watchlist_loader()
-            loader.set_project_dir(self._project_dir)
+        self._resolve_watchlist_dirs(config)
 
         # Get or create pathogen database (for legacy support)
         self._pathogen_db = get_pathogen_database()
@@ -697,6 +706,42 @@ class WatchlistManager:
                         # Entry already exists - add this category as a source
                         self._entries[taxid].watchlist_ids.add(cat_key)
 
+    def _identity_key(self, entry: WatchlistEntry) -> int:
+        """Return the key ``entry`` should be stored under.
+
+        Normally the NCBI taxid. But an NCBI taxid does not identify an
+        organism in the loaded Kraken2 database: NCBI has no separate id for
+        many subspecies, and GTDB splits polyphyletic species into several
+        nodes. So *Burkholderia mallei* subsp. *mallei* (db 4003795, glanders)
+        and *Burkholderia mallei* (db 4003703) both carry NCBI 13373, and all
+        three *Escherichia coli* variants carry 562.
+
+        Keying those on the NCBI taxid alone merged them, and the merge kept
+        one ``db_taxid`` and discarded the other -- so a database node that the
+        operator explicitly listed stopped being watched. Measured on the
+        Bioshield list: 129 entries loaded as 125, two of the four lost being
+        Critical.
+
+        ``db_taxid`` is therefore the identity here: entries whose db_taxid
+        genuinely differs get their own key. Entries that agree, or where
+        either side is silent, still share a key and merge as before -- that
+        is the same organism arriving from two watchlist files.
+        """
+        key = entry.taxid
+        existing = self._entries.get(key)
+        if existing is None or _same_db_node(existing, entry):
+            return key
+
+        # A different node that happens to share an NCBI taxid. Prefer its own
+        # database taxid as the key; fall back to a name-derived key if that
+        # is somehow taken by yet another organism.
+        fork = entry.db_taxid
+        if fork:
+            other = self._entries.get(fork)
+            if other is None or _same_db_node(other, entry):
+                return fork
+        return _stable_pseudo_taxid(f"{entry.name}|{entry.db_taxid}")
+
     def _add_entry_from_dict(
         self,
         data: Dict[str, Any],
@@ -716,9 +761,10 @@ class WatchlistManager:
 
         # If taxid exists, use it as key
         if entry.taxid:
-            if entry.taxid in self._entries:
+            key = self._identity_key(entry)
+            if key in self._entries:
                 # MERGE: Entry already exists from another watchlist
-                existing = self._entries[entry.taxid]
+                existing = self._entries[key]
 
                 # Snapshot the pre-merge state so a later user-override can
                 # record the TRUE originals, not the already-merged values.
@@ -740,7 +786,7 @@ class WatchlistManager:
                 for alt_name in entry.names_alt:
                     if alt_name not in existing.names_alt:
                         existing.names_alt.append(alt_name)
-                        self._name_index[alt_name.lower()] = entry.taxid
+                        self._name_index[alt_name.lower()] = key
 
                 # If incoming entry is enabled (e.g. from enable_watchlist),
                 # also enable existing entry for consistent UX
@@ -759,12 +805,12 @@ class WatchlistManager:
                 return
 
             # New entry - add it
-            self._entries[entry.taxid] = entry
+            self._entries[key] = entry
             if entry.name:
-                self._name_index[entry.name.lower()] = entry.taxid
+                self._name_index[entry.name.lower()] = key
                 # Also index alternative names
                 for alt_name in entry.names_alt:
-                    self._name_index[alt_name.lower()] = entry.taxid
+                    self._name_index[alt_name.lower()] = key
         elif entry.name:
             # Name-only entry (no taxid) - use hash of name as pseudo-taxid
             pseudo_taxid = _stable_pseudo_taxid(entry.name)
@@ -1262,6 +1308,41 @@ class WatchlistManager:
     # New methods for YAML-based watchlists and multi-taxonomy support
     # -------------------------------------------------------------------------
 
+    def _resolve_watchlist_dirs(self, config: Dict[str, Any]) -> None:
+        """Decide which directories hold this project's watchlists.
+
+        The project dir is the documented home of the project tier. The
+        results dir is searched as well, because
+        `import_watchlist(destination="project")` has been saving operator
+        uploads there and the two directories stop coinciding once the project
+        dir defaults outside the working directory.
+        """
+        results_dir = (config.get("results_output_directory")
+                       or config.get("main_dir"))
+        project_dir = config.get("project_dir") or results_dir
+        if not project_dir:
+            return
+        self._project_dir = Path(project_dir)
+        self._additional_watchlist_dirs = (
+            [Path(results_dir)]
+            if results_dir and results_dir != project_dir else []
+        )
+        self._apply_watchlist_search_path()
+
+    def _apply_watchlist_search_path(self) -> None:
+        """Restate the loader's project tier from what this manager holds.
+
+        The loader is a process-wide singleton whose search path any caller can
+        overwrite, so both hand-offs go through here: setting the project dir
+        without the additional dirs silently narrows the search.
+        """
+        if not self._project_dir:
+            return
+        _get_watchlist_loader().set_project_dir(
+            self._project_dir,
+            additional_dirs=list(self._additional_watchlist_dirs),
+        )
+
     def get_available_watchlists(self) -> List[Dict[str, Any]]:
         """
         Get all available watchlist files (builtin, user, project).
@@ -1276,8 +1357,7 @@ class WatchlistManager:
             - enabled: Whether this watchlist is currently enabled
         """
         loader = _get_watchlist_loader()
-        if self._project_dir:
-            loader.set_project_dir(self._project_dir)
+        self._apply_watchlist_search_path()
 
         watchlists = loader.discover_watchlists()
 
@@ -1291,6 +1371,10 @@ class WatchlistManager:
                 "pathogen_count": wl.pathogen_count,
                 "categories": wl.categories,
                 "enabled": wl.id in self._enabled_watchlists,
+                # The tier badge alone cannot identify a file: the user tier
+                # moves with the project/data dir, so several copies of one
+                # watchlist can exist and the panel showed them identically.
+                "file_path": str(getattr(wl, "file_path", "") or ""),
             })
 
         return result

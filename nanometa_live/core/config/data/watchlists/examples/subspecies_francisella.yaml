@@ -1,0 +1,85 @@
+# Francisella tularensis subspecies watchlist
+#
+# Purpose-built for the subspecies resolution exercise (see
+# docs/subspecies-resolution-test-plan.md). Every entry carries BOTH
+# identifiers on purpose:
+#
+#   db_taxid   - the Bioshield flextaxd graft id. This is what matches the
+#                Kraken2 report and what the reference genome is cached under.
+#   taxid_ncbi - the real NCBI subspecies taxid. This is what the genome is
+#                fetched by. GTDB has no node below species, so an entry
+#                without this has no route to a reference genome at all.
+#
+# The species node is listed alongside its four subspecies deliberately: all
+# five share NCBI parent 263, which is the collision that entry keying must
+# survive.
+
+version: "2.0"
+taxonomy_support: ["gtdb", "ncbi"]
+
+metadata:
+  name: "Francisella subspecies"
+  description: "F. tularensis resolved to subspecies, for databases that support it"
+  source: "Subspecies resolution exercise, 2026-08-20"
+  database_note: "db_taxid values are Bioshield flextaxd node ids (>= 4000000). Requires a database that resolves below species; on a species-only database the four subspecies entries can never match."
+
+pathogens:
+  - name: "Francisella tularensis"
+    names_alt: ["Francisella_tularensis", "F. tularensis"]
+    db_taxid: 4007169
+    taxid_ncbi: 263
+    common_name: "Tularemia"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "bioagent"
+    alert_threshold: 25
+    action_required: "Notify the biosafety officer. This is the species node: reads land here when they carry no subspecies-discriminating sequence, so a hit here does not by itself distinguish Type A from Type B. Read the subspecies rows before reporting."
+    notes: "Parent of the four subspecies entries below. Kraken2 assigns a read here when it cannot be placed more precisely."
+
+  - name: "Francisella tularensis tularensis"
+    names_alt: ["Francisella tularensis subsp. tularensis", "F. tularensis Type A", "Francisella_tularensis_subsp._tularensis"]
+    db_taxid: 4007186
+    taxid_ncbi: 119856
+    common_name: "Tularemia, Type A"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "bioagent"
+    alert_threshold: 25
+    action_required: "STOP and notify the biosafety officer. Type A is the markedly more virulent lineage, largely North American, with a substantially higher untreated case fatality rate than Type B. Confirm on the Validation tab before reporting, and state the read support: a subspecies call rests on a minority of reads."
+    notes: "Reference strain SCHU S4. Distinguishing Type A from Type B changes the clinical assessment."
+
+  - name: "Francisella tularensis holarctica"
+    names_alt: ["Francisella tularensis subsp. holarctica", "F. tularensis Type B", "Francisella_tularensis_subsp._holarctica"]
+    db_taxid: 4007187
+    taxid_ncbi: 119857
+    common_name: "Tularemia, Type B"
+    threat_level: "critical"
+    bsl_level: 3
+    category: "bioagent"
+    alert_threshold: 25
+    action_required: "Notify the biosafety officer. Type B is the Eurasian lineage and the source of the LVS vaccine strain. Less virulent than Type A but still a Select Agent. Confirm on the Validation tab and state the read support."
+    notes: "Includes the LVS vaccine strain, so a hit may reflect vaccine material rather than a wild isolate."
+
+  - name: "Francisella tularensis mediasiatica"
+    names_alt: ["Francisella tularensis subsp. mediasiatica", "Francisella_tularensis_subsp._mediasiatica"]
+    db_taxid: 4007188
+    taxid_ncbi: 135248
+    common_name: "Tularemia, Central Asian"
+    threat_level: "high"
+    bsl_level: 3
+    category: "bioagent"
+    alert_threshold: 25
+    action_required: "Notify the biosafety officer. Rarely reported outside Central Asia; an unexpected detection warrants checking for misassignment against the other three subspecies before reporting."
+    notes: "Reference strain FSC147. No complete RefSeq assembly exists at subspecies-taxid level."
+
+  - name: "Francisella tularensis novicida"
+    names_alt: ["Francisella novicida", "Francisella tularensis subsp. novicida", "Francisella_tularensis_subsp._novicida"]
+    db_taxid: 4007189
+    taxid_ncbi: 264
+    common_name: "Francisella novicida"
+    threat_level: "moderate"
+    bsl_level: 2
+    category: "bioagent"
+    alert_threshold: 25
+    action_required: "Note the detection. F. novicida is only rarely pathogenic in humans and typically in immunocompromised hosts. It is the most sequence-divergent member of the group, so a confident assignment here is more reliable than one among the other three."
+    notes: "Reference strain U112. Often treated as a separate species; the database places it as a subspecies."

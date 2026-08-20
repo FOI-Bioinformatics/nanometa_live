@@ -244,6 +244,54 @@ def set_data_dir_env(data_dir: str | os.PathLike[str]) -> None:
     os.environ[_DATA_DIR_ENV] = str(data_dir)
 
 
+DEFAULT_PROJECTS_ROOT = os.path.join("~", "nanometa-projects")
+
+
+def project_name_slug(raw: str | None) -> str:
+    """Reduce an operator-supplied label to a safe single folder name.
+
+    Path separators and other awkward characters collapse to hyphens, so a
+    name can never climb out of the projects root or nest unexpectedly.
+    Anything that reduces to nothing becomes ``default``.
+    """
+    text = str(raw or "").strip().lower()
+    kept = [c if (c.isalnum() or c in "-_") else "-" for c in text]
+    slug = "".join(kept).strip("-_")
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    return slug or "default"
+
+
+def resolve_project_dir(
+    explicit: str | os.PathLike[str] | None,
+    config: dict | None = None,
+    config_path: str | os.PathLike[str] | None = None,
+) -> str:
+    """Resolve the project root: flag > environment > ``~/nanometa-projects/<name>``.
+
+    The default used to be :func:`os.getcwd`, which meant launching from a
+    clone wrote the run's results, taxid mappings, toggle state and operator
+    watchlists *into the checkout*. Those paths are gitignored, so nothing was
+    ever committed -- but ``git clean -x`` deletes them, ``git add -f`` commits
+    them, and a project-local watchlist directory inside the repo is how four
+    copies of one watchlist came to exist with no way to tell which was live.
+
+    The name comes from what the operator already stated: the analysis name,
+    else the config file's stem, else ``default``.
+    """
+    raw = explicit or get_project_dir_from_env()
+    if raw:
+        return os.path.abspath(os.path.expanduser(str(raw)))
+
+    name = (config or {}).get("analysis_name")
+    if not name and config_path:
+        name = os.path.splitext(os.path.basename(str(config_path)))[0]
+    return os.path.abspath(
+        os.path.join(os.path.expanduser(DEFAULT_PROJECTS_ROOT),
+                     project_name_slug(name))
+    )
+
+
 def get_project_dir_from_env() -> str | None:
     """Return the project_dir from the environment, or None if unset."""
     val = os.environ.get(_PROJECT_DIR_ENV)

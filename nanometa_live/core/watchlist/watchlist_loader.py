@@ -106,6 +106,7 @@ class WatchlistLoader:
                 single location under ``--data-dir`` / ``--project-dir``.
         """
         self._project_dir = project_dir
+        self._additional_project_dirs: List[Path] = []
         self._app_root = app_root or self._find_app_root()
         self._user_dir = Path(user_dir) if user_dir else None
         self._cached_watchlists: Dict[str, WatchlistMetadata] = {}
@@ -132,9 +133,23 @@ class WatchlistLoader:
             current = current.parent
         return current
 
-    def set_project_dir(self, project_dir: Path) -> None:
-        """Set the project directory."""
+    def set_project_dir(
+        self,
+        project_dir: Path,
+        additional_dirs: Optional[List[Path]] = None,
+    ) -> None:
+        """Set the project directory, plus any further dirs to search.
+
+        ``additional_dirs`` exists for the run's results directory, which
+        `import_watchlist` has been treating as "the project" when saving
+        operator uploads. It is searched after the project directory, so a
+        stem present in both resolves to the project copy. Passing no
+        ``additional_dirs`` clears any previously set ones.
+        """
         self._project_dir = Path(project_dir) if project_dir else None
+        self._additional_project_dirs = [
+            Path(d) for d in (additional_dirs or []) if d
+        ]
         # Clear cache when project changes
         self._cached_watchlists.clear()
         self._loaded_pathogens.clear()
@@ -148,11 +163,18 @@ class WatchlistLoader:
         """
         paths = []
 
-        # 1. Project directory (highest priority)
-        if self._project_dir:
-            project_watchlists = self._project_dir / self.PROJECT_SUBDIR
-            if project_watchlists.exists():
-                paths.append((project_watchlists, "project"))
+        # 1. Project directory (highest priority), then any additional dirs
+        #    such as the run's results directory.
+        seen = set()
+        for candidate in [self._project_dir, *self._additional_project_dirs]:
+            if not candidate:
+                continue
+            project_watchlists = candidate / self.PROJECT_SUBDIR
+            resolved = str(project_watchlists)
+            if resolved in seen or not project_watchlists.exists():
+                continue
+            seen.add(resolved)
+            paths.append((project_watchlists, "project"))
 
         # 2. Operator watchlist directory (uploads land here)
         user_watchlists = self.user_watchlist_dir
