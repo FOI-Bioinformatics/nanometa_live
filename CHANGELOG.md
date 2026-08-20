@@ -6,6 +6,118 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-20
+
+A subspecies resolution exercise: seven barcodes of simulated nanopore reads
+with known composition, run end to end against an in-house flextaxd database
+that resolves *Francisella tularensis* into its four subspecies. Resolution
+itself works -- Kraken2 named the correct subspecies in all four pure barcodes,
+leading its nearest wrong sibling by 33-78x, and a 70/30 mixture of two
+subspecies resolved into both components in the right order.
+
+The path between a subspecies watchlist entry and its reference genome did
+not. Before this release one of five entries obtained a usable genome; now all
+five do, each carrying the right organism. Those fixes, and a change to where
+the project directory lives, are what follow. No pipeline changes; nanometanf
+stays at v1.7.0.
+
+Minor rather than patch because the default project directory moves -- see
+**Changed** first if you have an existing installation.
+
+### Changed
+- **The project directory no longer defaults to the working directory.** It
+  was `os.getcwd()`, so launching from a clone wrote run results, taxid
+  mappings, watchlist toggle state and operator watchlists *into the checkout*.
+  Those paths are gitignored, so nothing was ever committed -- but `git clean
+  -x` deletes them, `git add -f` commits them, and a project-local watchlist
+  directory inside a repository is how several copies of one watchlist came to
+  exist with no way to tell which was live. The default is now
+  `~/nanometa-projects/<name>`, named from the analysis name, else the config
+  file stem, else `default`.
+
+  Existing installations that relied on the old behaviour will find a fresh,
+  empty project on first launch. Pass `--project <dir>` (or set the project-dir
+  environment variable) to keep using the previous location; both still take
+  precedence over the default.
+- Watchlist entries are keyed by database node rather than NCBI taxid. Four
+  subspecies of one species share an NCBI parent taxid, so the previous key
+  silently merged them and the last one loaded won. On the shipped Bioshield
+  agent list this was the difference between 129 entries and 125: *B. mallei*
+  collided with its own subsp. *mallei*, *B. melitensis* with subsp.
+  *melitensis*, and three *E. coli* database nodes with each other.
+
+### Fixed
+- Reference genomes resolve for database-keyed entries, completing the
+  fetch/cache split begun in 0.10.3. Three defects, all on the same path:
+  - The batch download assigned `entry["taxid"]` the *cache* taxid and only
+    then derived the fetch taxid from that same dict, so the flextaxd graft id
+    went to NCBI -- exactly what `genome_fetch_taxid` documents it never does.
+    A graft id sits below the pseudo-taxid band and so passes the "real NCBI
+    taxid" check; only call order separates the two. Species entries were
+    unaffected because the bacterial route tries a name-based GTDB lookup
+    first, and GTDB has no rank below species -- which is why only subspecies
+    exposed it.
+  - Two "no reference genome" fallbacks wrote the FASTA under the NCBI taxid
+    instead of the cache key, making the genome invisible to
+    `has_genome(db_taxid)`: reported missing, and re-downloaded on every
+    attempt.
+  - An NCBI taxon query matches the whole subtree, so asking for the reference
+    genome of *F. tularensis* (taxon 263) returned a *novicida* strain, the
+    most sequence-divergent member of the group. Downloads and accession
+    resolution now try `--tax-exact-match` first; the subtree remains a
+    fallback, logged with the organism actually obtained rather than accepted
+    in silence.
+- Project watchlists are searched for in the project directory. The loader's
+  contract names `<project_dir>/watchlists/` as the highest-priority source,
+  but the manager was passing it the results directory, so two notions of
+  "project" inside one class disagreed. Harmless while the two overlapped;
+  with the project directory moved (above) they no longer do, and a watchlist
+  placed where the documentation says it goes was never found. The results
+  directory stays in the search path, because operator uploads saved to
+  "project" have been landing there; the project directory wins on a filename
+  collision.
+
+### Added
+- The Watchlist tab shows which file each watchlist was loaded from, as a
+  truncated path with the full path on hover. A watchlist is keyed by file
+  stem and can arrive built-in, from the project, or from an operator upload;
+  when several copies of one stem exist there was previously no way to tell
+  which was live.
+- An example subspecies watchlist,
+  `core/config/data/watchlists/examples/subspecies_francisella.yaml`: the
+  *F. tularensis* species node plus its four subspecies, each carrying both
+  `db_taxid` and `taxid_ncbi`. It is the worked example of why an entry below
+  species needs both -- GTDB has no node below species, so an entry without
+  `taxid_ncbi` has no route to a reference genome at all.
+- `scripts/subspecies_exercise/`: the read generator, an evaluation script that
+  judges pure, mixture, sister-species and negative-control barcodes by
+  criteria appropriate to each, and the ground truth, so the exercise can be
+  repeated against another database.
+- Documentation: `docs/subspecies-resolution-test-plan.md` and
+  `docs/audit/subspecies-2026-08-20.md`, the latter carrying the measured
+  numbers and three findings deliberately left open -- a sister species
+  raising a subspecies alert at the configured threshold, an absolute read
+  threshold being the wrong instrument below species, and `confirmed` on the
+  Validation tab not surviving the move below species.
+
+### Known limitations
+- **A subspecies `alert_threshold` cannot be set from species-level
+  intuition.** Cross-assignment between the subspecies of one species runs at
+  roughly 1-3% of clade reads, and that floor is a *fraction* of depth while an
+  absolute threshold is not. At 10,000 reads per barcode it is 40-130 reads,
+  above a threshold of 25. A related species can clear it too: *F.
+  philomiragia*, containing no *F. tularensis*, put 45 reads on subsp.
+  *novicida*.
+- **`confirmed` on the Validation tab does not discriminate below species.**
+  In a barcode containing only subsp. *holarctica*, all four subspecies return
+  `confirmed`, which the current 10-read / 5%-breadth contract permits by
+  design -- those floors separate a real organism from index-hop carryover,
+  not two genomes that are 99.9% identical. The discriminating signal is
+  present in the output (genome breadth separates 6-10x, while identity is
+  useless at 99.60-99.84% across all four), but no verdict uses it that way
+  yet. Read the breadth column, and treat a subspecies `confirmed` as
+  confirmation of the species.
+
 ## [0.10.3] - 2026-08-19
 
 Follow-on to 0.10.2 from the same live-testing campaign: a dilution series
