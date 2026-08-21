@@ -525,6 +525,13 @@ def _create_collapsible_watchlist_files() -> dbc.Accordion:
                     # Holds a collided upload (contents + filename) while the
                     # operator decides whether to replace the existing file.
                     dcc.Store(id="watchlist-upload-pending", data=None),
+                    # Worker/Store/finalize handoff for the background
+                    # import: handle_upload writes the request,
+                    # import_watchlist_worker (background) does the file
+                    # I/O and writes the result, finalize_watchlist_import
+                    # (main process) applies the session side effects.
+                    dcc.Store(id="watchlist-import-request", data=None),
+                    dcc.Store(id="watchlist-import-result", data=None),
                     # Help text for custom watchlists
                     html.Details([
                         html.Summary(

@@ -75,6 +75,10 @@ CANCEL_NOT_DECLARED = {
     "export_bundle",
     "force_export_bundle",
     "import_bundle_worker",
+    # Local file validation + copy of one YAML, a few seconds even at 500
+    # entries; there is no long-running phase for a cancel to interrupt,
+    # and an interrupted copy would strand a half-imported file.
+    "import_watchlist_worker",
     "import_genomes_from_archive_worker",
     "import_genomes_from_dir_worker",
     "import_mapped_genomes_worker",

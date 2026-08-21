@@ -635,17 +635,16 @@ class WatchlistManager:
             return
 
         loader = _get_watchlist_loader()
-        is_valid, errors = loader.validate_file(path)
+        # One parse: validation returns the parsed data, so the file is not
+        # read a second time for the entry load below.
+        is_valid, errors, data = loader.validate_and_parse(path)
 
         if not is_valid:
             logger.warning(f"Invalid watchlist file {file_path}: {errors}")
             raise ValueError(f"Invalid watchlist: {'; '.join(errors)}")
 
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f)
-
-            pathogens = data.get("pathogens", [])
+            pathogens = (data or {}).get("pathogens", [])
             watchlist_id = path.stem
 
             for p_data in pathogens:

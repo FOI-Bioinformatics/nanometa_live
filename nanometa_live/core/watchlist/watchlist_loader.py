@@ -20,6 +20,10 @@ from typing import Dict, List, Optional, Tuple
 import yaml
 
 from nanometa_live.core.config.pathogen_loader import default_alert_threshold
+from nanometa_live.core.watchlist.validation.entry_schema import (
+    entries_without_taxid as _entries_without_taxid_impl,
+    validate_pathogen_entry as _validate_pathogen_entry_impl,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -363,19 +367,40 @@ class WatchlistLoader:
         Returns:
             Tuple of (is_valid, list_of_errors)
         """
+        is_valid, errors, _parsed = self.validate_and_parse(file_path)
+        return is_valid, errors
+
+    def validate_and_parse(
+        self,
+        file_path: Path,
+        progress_cb=None,
+    ) -> Tuple[bool, List[str], Optional[dict]]:
+        """Validate a watchlist YAML file and hand back the parsed data.
+
+        One upload used to be parsed 5-6 times because every step
+        (validation, taxid audit, import, session load) re-read the file;
+        callers that need the content should take it from here and pass it
+        on. ``progress_cb(done, total)`` is called every 25 entries so a
+        background import can report per-entry validation progress.
+
+        Returns:
+            (is_valid, errors, parsed_dict). ``parsed_dict`` is None when
+            the file could not be read or parsed at all; on validation
+            errors the parsed data is still returned for error reporting.
+        """
         errors = []
 
         if not file_path.exists():
-            return False, [f"File not found: {file_path}"]
+            return False, [f"File not found: {file_path}"], None
 
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = yaml.safe_load(f)
         except yaml.YAMLError as e:
-            return False, [f"Invalid YAML syntax: {e}"]
+            return False, [f"Invalid YAML syntax: {e}"], None
 
         if not data:
-            return False, ["Empty file"]
+            return False, ["Empty file"], None
 
         # Version gate: absent is fine (minimal custom files), but a value
         # that is present and not the v2.0 schema is refused rather than
@@ -398,72 +423,20 @@ class WatchlistLoader:
         elif not pathogens:
             errors.append("No pathogens defined")
         else:
+            total = len(pathogens)
             for i, p in enumerate(pathogens):
                 errors.extend(self._validate_pathogen_entry(i, p))
+                if progress_cb is not None and (i + 1) % 25 == 0:
+                    progress_cb(i + 1, total)
+            if progress_cb is not None:
+                progress_cb(total, total)
 
-        return len(errors) == 0, errors
+        return len(errors) == 0, errors, data
 
-    @staticmethod
-    def _validate_pathogen_entry(i: int, p: object) -> List[str]:
-        """Schema and type errors for one pathogen entry (1-based index i+1).
-
-        The type checks are finding W3 (2026-08-17 audit): without them the
-        errors were "defused" later by from_dict's try/excepts, which
-        silently changed the entry's behaviour -- a non-numeric taxid became
-        a pseudo-taxid entry that can never match a report, and a
-        non-numeric alert_threshold fell back to the default.
-        """
-        errors: List[str] = []
-        if not isinstance(p, dict):
-            return [f"Pathogen {i+1}: must be a dictionary"]
-
-        if "name" not in p:
-            errors.append(f"Pathogen {i+1}: missing 'name' field")
-
-        if "threat_level" in p:
-            valid_levels = ["critical", "high", "moderate", "low"]
-            if p["threat_level"] not in valid_levels:
-                errors.append(
-                    f"Pathogen {i+1}: invalid threat_level "
-                    f"'{p['threat_level']}'"
-                )
-
-        if "bsl_level" in p:
-            if not isinstance(p["bsl_level"], int) or p["bsl_level"] not in [1, 2, 3, 4]:
-                errors.append(f"Pathogen {i+1}: bsl_level must be 1, 2, 3, or 4")
-
-        for taxid_key in ("taxid_ncbi", "db_taxid"):
-            value = p.get(taxid_key)
-            if value is None:
-                continue
-            try:
-                if int(value) <= 0:
-                    raise ValueError
-            except (TypeError, ValueError):
-                errors.append(
-                    f"Pathogen {i+1}: {taxid_key} must be a "
-                    f"positive integer, got '{value}'"
-                )
-
-        if "alert_threshold" in p:
-            try:
-                if int(p["alert_threshold"]) < 1:
-                    raise ValueError
-            except (TypeError, ValueError):
-                errors.append(
-                    f"Pathogen {i+1}: alert_threshold must be a "
-                    f"positive integer, got '{p['alert_threshold']}'"
-                )
-
-        if "names_alt" in p:
-            names_alt = p["names_alt"]
-            if not isinstance(names_alt, list) or not all(
-                isinstance(n, str) for n in names_alt
-            ):
-                errors.append(
-                    f"Pathogen {i+1}: names_alt must be a list of names"
-                )
-        return errors
+    # Per-entry schema checks live in validation/entry_schema.py; these
+    # delegating names keep the loader's public surface stable.
+    _validate_pathogen_entry = staticmethod(_validate_pathogen_entry_impl)
+    entries_without_taxid = staticmethod(_entries_without_taxid_impl)
 
     @staticmethod
     def find_entries_without_taxid(file_path: Path) -> List[str]:
@@ -483,16 +456,7 @@ class WatchlistLoader:
         except (OSError, UnicodeDecodeError, yaml.YAMLError):
             return []
 
-        if not isinstance(data, dict):
-            return []
-
-        missing = []
-        for i, p in enumerate(data.get("pathogens") or []):
-            if not isinstance(p, dict):
-                continue
-            if p.get("taxid_ncbi") is None and p.get("db_taxid") is None:
-                missing.append(str(p.get("name") or f"entry {i + 1}"))
-        return missing
+        return _entries_without_taxid_impl(data)
 
     def find_invalid_watchlist_files(self) -> List[Tuple[str, str]]:
         """(filename, first problem) for every watchlist file that fails to load.
@@ -549,6 +513,7 @@ class WatchlistLoader:
         destination: str = "user",
         overwrite: bool = False,
         file_name: Optional[str] = None,
+        parsed: Optional[dict] = None,
     ) -> Tuple[bool, str]:
         """
         Import a watchlist file to user or project directory.
@@ -562,14 +527,18 @@ class WatchlistLoader:
             file_name: Destination file name. Defaults to the source file
                 name; pass the operator's original upload name when the
                 source is a temporary file.
+            parsed: The source file's parsed data from a prior
+                ``validate_and_parse`` of the SAME file. Skips the internal
+                re-validation; the caller vouches that the file validated.
 
         Returns:
             Tuple of (success, message)
         """
-        # Validate first
-        is_valid, errors = self.validate_file(source_path)
-        if not is_valid:
-            return False, f"Invalid watchlist file: {'; '.join(errors)}"
+        # Validate first, unless the caller already did on this same file.
+        if parsed is None:
+            is_valid, errors = self.validate_file(source_path)
+            if not is_valid:
+                return False, f"Invalid watchlist file: {'; '.join(errors)}"
 
         # Determine destination directory
         if destination == "project" and self._project_dir:
@@ -595,14 +564,24 @@ class WatchlistLoader:
         try:
             shutil.copy2(source_path, dest_path)
 
-            # Clear cache to pick up new file
-            self._cached_watchlists.clear()
-            self._loaded_pathogens.clear()
+            # Clear cache to pick up new file. NOTE: this clears the caches
+            # of THIS loader instance. When the import runs in a background
+            # worker process, the live app's loader is a different object --
+            # the finalize callback must call invalidate_cache() on the
+            # main-process singleton.
+            self.invalidate_cache()
 
             return True, f"Imported watchlist to {dest_path}"
         except (FileNotFoundError, PermissionError, OSError, shutil.SameFileError) as e:
             logger.exception(f"Failed to import watchlist: {e}")
             return False, f"Failed to import: {e}"
+
+    def invalidate_cache(self) -> None:
+        """Drop the discovery and pathogen caches so the next read re-scans
+        the watchlist directories. Call on the main-process singleton after
+        any out-of-process change to the files (background import)."""
+        self._cached_watchlists.clear()
+        self._loaded_pathogens.clear()
 
     def _import_collision(
         self, dest_dir: Path, dest_name: str, watchlist_id: str
