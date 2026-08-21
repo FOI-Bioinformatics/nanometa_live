@@ -449,10 +449,22 @@ def _create_pathogens_table_section() -> dbc.Card:
                 ], className="py-2 bg-light border-bottom watchlist-table-header"),
             ]),
 
-            # Table body (populated by callback)
+            # Table body (populated by callback, one page at a time)
             html.Div(
                 id="watchlist-pathogens-table",
                 style={"maxHeight": "400px", "overflowY": "auto"}
+            ),
+            # Server-side pagination: a large watchlist (129+ entries at
+            # ~34 components per row) must not land in the DOM whole.
+            dbc.Pagination(
+                id="watchlist-table-pagination",
+                active_page=1,
+                max_value=1,
+                size="sm",
+                fully_expanded=False,
+                first_last=True,
+                previous_next=True,
+                className="mt-2 justify-content-center",
             ),
         ]),
     ], className="mb-3")
@@ -1278,13 +1290,18 @@ def _create_watchlist_pathogen_list(pathogens: List[Dict[str, Any]], watchlist_i
     return html.Div(rows, style={"maxHeight": "250px", "overflowY": "auto"})
 
 
-def create_watchlist_file_item(wl: Dict[str, Any], pathogens: List[Dict[str, Any]] = None) -> html.Div:
+def create_watchlist_file_item(wl: Dict[str, Any]) -> html.Div:
     """
     Create an expandable watchlist file item for the files section.
 
+    The pathogen rows are NOT embedded here: dbc.Collapse mounts its
+    children regardless of ``is_open``, and pre-rendering every watchlist's
+    rows put ~4,400 components (311 nested rows) into the DOM before the
+    operator expanded anything. The collapse holds an empty placeholder
+    that ``toggle_watchlist_expand`` fills on open and clears on close.
+
     Args:
         wl: Watchlist metadata dict
-        pathogens: Optional list of pathogen entries for this watchlist
 
     Returns:
         html.Div containing the expandable watchlist item
@@ -1302,15 +1319,6 @@ def create_watchlist_file_item(wl: Dict[str, Any], pathogens: List[Dict[str, Any
         "user": "success",
         "project": "warning",
     }
-
-    # Create collapsed pathogen list content
-    if pathogens:
-        pathogen_list_content = _create_watchlist_pathogen_list(pathogens, wl_id)
-    else:
-        pathogen_list_content = html.Div(
-            "No pathogens loaded.",
-            className="text-muted py-2"
-        )
 
     return html.Div([
         # Main row with expand trigger
@@ -1397,11 +1405,14 @@ def create_watchlist_file_item(wl: Dict[str, Any], pathogens: List[Dict[str, Any
         # Description (if any)
         html.Small(description, className="text-muted d-block ms-4 mb-1") if description else None,
 
-        # Collapsible pathogen list
+        # Collapsible pathogen list; content is rendered on expand and
+        # cleared on collapse by toggle_watchlist_expand.
         dbc.Collapse(
-            html.Div([
-                pathogen_list_content
-            ], className="ps-4 py-2 bg-light border-start border-3 border-primary ms-3 rounded-bottom"),
+            html.Div(
+                id={"type": "watchlist-pathogen-collapse-content",
+                    "index": wl_id},
+                className="ps-4 py-2 bg-light border-start border-3 border-primary ms-3 rounded-bottom",
+            ),
             id={"type": "watchlist-pathogen-collapse", "index": wl_id},
             is_open=False,
         ),

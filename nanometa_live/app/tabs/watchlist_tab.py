@@ -29,6 +29,7 @@ from nanometa_live.core.watchlist.watchlist_manager import (
     normalize_organism_type,
 )
 from nanometa_live.app.layouts.watchlist_layout import (
+    _create_watchlist_pathogen_list,
     create_pathogen_row,
     create_watchlist_file_item,
     create_api_lookup_result,
@@ -84,6 +85,11 @@ def _save_last_session(config: Dict[str, Any]) -> None:
         loader.save_config(save_config, "last-session.yaml")
     except Exception:
         logger.debug("Could not save last-session.yaml", exc_info=True)
+
+
+# Rows per page in the pathogens table. Row action ids are keyed by taxid,
+# so pattern-matching callbacks work regardless of which page is shown.
+WATCHLIST_TABLE_PAGE_SIZE = 25
 
 
 def register_watchlist_callbacks(app: Dash) -> None:
@@ -336,18 +342,12 @@ def register_watchlist_callbacks(app: Dash) -> None:
         _order_map = {wl_id: i for i, wl_id in enumerate(_BUILTIN_ORDER)}
         builtin.sort(key=lambda wl: _order_map.get(wl.get("id", ""), 999))
 
-        # Create items with pathogens data for expandable view
-        # Use get_watchlist_pathogens_preview() to load directly from YAML
-        builtin_items = []
-        for wl in builtin:
-            # Load pathogens directly from YAML file for preview
-            pathogen_dicts = manager.get_watchlist_pathogens_preview(wl["id"])
-            builtin_items.append(create_watchlist_file_item(wl, pathogen_dicts))
-
-        custom_items = []
-        for wl in custom:
-            pathogen_dicts = manager.get_watchlist_pathogens_preview(wl["id"])
-            custom_items.append(create_watchlist_file_item(wl, pathogen_dicts))
+        # Headers only: the per-watchlist pathogen rows render on expand
+        # (toggle_watchlist_expand), not up front. Pre-rendering every
+        # list's rows here cost ~4,400 components per update and a YAML
+        # preview load per watchlist.
+        builtin_items = [create_watchlist_file_item(wl) for wl in builtin]
+        custom_items = [create_watchlist_file_item(wl) for wl in custom]
 
         if not builtin_items:
             builtin_items = [html.P("No built-in watchlists available.", className="text-muted")]
@@ -438,13 +438,20 @@ def register_watchlist_callbacks(app: Dash) -> None:
         [
             Output({"type": "watchlist-pathogen-collapse", "index": MATCH}, "is_open"),
             Output({"type": "watchlist-expand-icon", "index": MATCH}, "style"),
+            Output({"type": "watchlist-pathogen-collapse-content", "index": MATCH}, "children"),
         ],
         Input({"type": "watchlist-expand-trigger", "index": MATCH}, "n_clicks"),
         State({"type": "watchlist-pathogen-collapse", "index": MATCH}, "is_open"),
         prevent_initial_call=True,
     )
-    def toggle_watchlist_expand(n_clicks: int, is_open: bool) -> Tuple[bool, Dict]:
-        """Toggle expand/collapse of watchlist pathogen list."""
+    def toggle_watchlist_expand(n_clicks: int, is_open: bool) -> Tuple[bool, Dict, Any]:
+        """Toggle expand/collapse of watchlist pathogen list.
+
+        The rows are rendered here, on open, and cleared on close: a
+        collapsed dbc.Collapse still mounts its children, so embedding
+        every watchlist's rows up front kept ~311 rows permanently in the
+        DOM (audit 2026-08-21).
+        """
         if not n_clicks:
             raise PreventUpdate
 
@@ -457,7 +464,17 @@ def register_watchlist_callbacks(app: Dash) -> None:
             "transform": "rotate(90deg)" if new_is_open else "rotate(0deg)"
         }
 
-        return new_is_open, icon_style
+        if not new_is_open:
+            return new_is_open, icon_style, []
+
+        wl_id = None
+        if isinstance(ctx.triggered_id, dict):
+            wl_id = ctx.triggered_id.get("index")
+        if not wl_id:
+            raise PreventUpdate
+        pathogens = get_watchlist_manager().get_watchlist_pathogens_preview(wl_id)
+        content = _create_watchlist_pathogen_list(pathogens, wl_id)
+        return new_is_open, icon_style, content
 
     # ---------------------------------------------------------------------
     # Nested Pathogen Toggle
@@ -515,6 +532,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
             Output("watchlist-pathogens-table", "children"),
             Output("watchlist-pathogen-count", "children"),
             Output("watchlist-pathogen-count", "style"),
+            Output("watchlist-table-pagination", "max_value"),
+            Output("watchlist-table-pagination", "active_page"),
         ],
         [
             Input("watchlist-tab-state", "data"),
@@ -522,15 +541,23 @@ def register_watchlist_callbacks(app: Dash) -> None:
             Input("watchlist-search-input", "value"),
             Input("taxmap-rescan-complete", "data"),  # Refresh after mapping rescan
             Input("taxmap-collection", "data"),  # Mapping data from background rescan
+            Input("watchlist-table-pagination", "active_page"),
         ],
         State("app-config", "data"),
         prevent_initial_call=False,
     )
     def update_pathogens_table(
         tab_state: Dict, table_refresh: int, search_term: str, rescan_complete: Any,
-        taxmap_collection: Dict, config: Dict
-    ) -> Tuple[List, str, Dict]:
-        """Update the pathogens table with Kraken2 mapping status."""
+        taxmap_collection: Dict, active_page: Optional[int], config: Dict
+    ) -> Tuple[List, str, Dict, int, Any]:
+        """Update the pathogens table with Kraken2 mapping status.
+
+        Renders one page (WATCHLIST_TABLE_PAGE_SIZE rows): a large
+        watchlist rendered whole put ~3,800 components / 645 pattern ids
+        into the DOM and re-serialized them on every edit. Row action ids
+        are keyed by taxid, so the pattern-matching callbacks are
+        page-agnostic.
+        """
         manager = get_watchlist_manager()
 
         # Initialize manager with config if not loaded
@@ -554,7 +581,21 @@ def register_watchlist_callbacks(app: Dash) -> None:
                 [html.P("No pathogens in watchlist.", className="text-muted text-center py-4")],
                 "",
                 {"display": "none"},
+                1,
+                1 if (active_page or 1) != 1 else no_update,
             )
+
+        # Resolve the page BEFORE any per-entry work. A new search starts
+        # from page 1; a page past the end (entries removed, filter
+        # narrowed) clamps to the last page.
+        requested_page = active_page or 1
+        if ctx.triggered_id == "watchlist-search-input":
+            requested_page = 1
+        total_pages = max(
+            1, -(-len(entries) // WATCHLIST_TABLE_PAGE_SIZE))
+        page = min(requested_page, total_pages)
+        page_start = (page - 1) * WATCHLIST_TABLE_PAGE_SIZE
+        page_entries = entries[page_start:page_start + WATCHLIST_TABLE_PAGE_SIZE]
 
         # Build mapping dict from taxmap-collection store data
         # This data comes from the background rescan callback
@@ -656,7 +697,9 @@ def register_watchlist_callbacks(app: Dash) -> None:
                 className="mb-3",
             )
 
-        # Get genome status for all entries
+        # Get genome status for the visible page only: has_genome /
+        # has_blast_db are stat() calls, and running them for every entry
+        # cost ~500 syscalls per refresh at 129 entries.
         try:
             from nanometa_live.core.utils.genome_manager import get_genome_manager
             genome_mgr = get_genome_manager()
@@ -670,7 +713,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         # Create rows with mapping info and genome status
         rows = []
-        for i, entry in enumerate(entries):
+        for i, entry in enumerate(page_entries, start=page_start):
             taxid = entry.get("taxid", 0)
 
             # Validate taxid before creating pattern-matching IDs
@@ -713,10 +756,15 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         count = len(entries)
         children = ([index_banner] if index_banner is not None else []) + rows
+        # Only emit active_page when it actually moved (search reset or
+        # end-clamp); echoing the incoming value re-fires this callback.
+        page_out = page if page != (active_page or 1) else no_update
         return (
             children,
             str(count),
             {"display": "inline-block"},  # Show badge when there are pathogens
+            total_pages,
+            page_out,
         )
 
     @app.callback(
