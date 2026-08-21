@@ -526,7 +526,23 @@ def register_watchlist_callbacks(app: Dash) -> None:
         for value, id_info in zip(values, ids):
             if id_info.get("index") == taxid and id_info.get("watchlist") == watchlist_id:
                 manager = get_watchlist_manager()
-                manager.toggle_entry(taxid, value)
+                # Spurious-fire guard: expanding a watchlist ADDS its nested
+                # checkboxes to the layout, and Dash re-fires this ALL
+                # callback for newly added components with their current
+                # values. Treating that as an edit bumped tab-state, which
+                # re-rendered the file list and wiped the just-expanded
+                # content. A value equal to the entry's current state is not
+                # an operator action.
+                entry = manager.get_entry_by_taxid(taxid)
+                if entry is not None and bool(entry.enabled) == bool(value):
+                    raise PreventUpdate
+                if not manager.toggle_entry(taxid, value):
+                    # The manager cannot resolve this taxid (entries from a
+                    # db_taxid-keyed watchlist are stored under the database
+                    # node, not the NCBI taxid the row carries). Nothing
+                    # changed, so writing config/tab-state here would only
+                    # feed the re-render cascade.
+                    raise PreventUpdate
 
                 # Sync watchlist state to app-config and save to disk
                 updated_config = dict(current_config) if current_config else {}

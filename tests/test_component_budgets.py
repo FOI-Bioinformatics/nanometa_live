@@ -307,6 +307,95 @@ class TestGenomeStatsTabGate:
                 fn(None, None, "qc-tab", {})
 
 
+class TestNestedToggleSpuriousFire:
+    """Lazy-rendering the nested rows ADDS their checkboxes to the layout,
+    and Dash re-fires the nested-toggle ALL callback for newly added
+    components. Without a no-op guard that spurious fire bumps
+    watchlist-tab-state, update_watchlist_files re-renders the file list,
+    and the freshly expanded content is wiped -- expand appears dead
+    (found live in the 2026-08-21 smoke test)."""
+
+    @pytest.fixture
+    def app(self):
+        from tests.dash_test_utils import make_callback_app
+        from nanometa_live.app.tabs.watchlist_tab import (
+            register_watchlist_callbacks,
+        )
+        return make_callback_app(register_watchlist_callbacks)
+
+    def _fn(self, app):
+        from tests.dash_test_utils import get_callback_fn
+        return get_callback_fn(
+            app, "watchlist-tab-state",
+            input_contains="watchlist-nested-pathogen-toggle")
+
+    def test_value_matching_current_state_is_a_noop(self, app):
+        from dash.exceptions import PreventUpdate
+        from nanometa_live.app.tabs import watchlist_tab
+
+        with patch.object(WatchlistManager, "_save_toggle_state",
+                          lambda self: None):
+            mgr = get_watchlist_manager()
+            mgr._entries.clear()
+            mgr._name_index.clear()
+            mgr.add_custom_entry({
+                "taxid": 4242, "name": "Testus organismus",
+                "threat_level": "high", "enabled": True,
+                "alert_threshold": 10,
+            })
+            trig = {"type": "watchlist-nested-pathogen-toggle",
+                    "index": 4242, "watchlist": "custom_list"}
+            with patch.object(watchlist_tab, "ctx") as mock_ctx:
+                mock_ctx.triggered_id = trig
+                with pytest.raises(PreventUpdate):
+                    self._fn(app)([True], [trig], {})
+            assert mgr._entries[4242].enabled is True
+
+    def test_unresolvable_taxid_is_a_noop(self, app):
+        """Entries from a db_taxid-keyed watchlist are stored under the
+        database node, so the row's NCBI taxid resolves to nothing. The
+        spurious add-fire for those rows fell through the enabled-state
+        guard and still wrote config + tab-state -- the cascade that wiped
+        the expanded content on the live Bioshield list."""
+        from dash.exceptions import PreventUpdate
+        from nanometa_live.app.tabs import watchlist_tab
+
+        with patch.object(WatchlistManager, "_save_toggle_state",
+                          lambda self: None):
+            mgr = get_watchlist_manager()
+            mgr._entries.clear()
+            mgr._name_index.clear()
+            trig = {"type": "watchlist-nested-pathogen-toggle",
+                    "index": 99999, "watchlist": "bioshield"}
+            with patch.object(watchlist_tab, "ctx") as mock_ctx:
+                mock_ctx.triggered_id = trig
+                with pytest.raises(PreventUpdate):
+                    self._fn(app)([True], [trig], {})
+
+    def test_a_genuine_change_still_applies(self, app):
+        from nanometa_live.app.tabs import watchlist_tab
+
+        with patch.object(WatchlistManager, "_save_toggle_state",
+                          lambda self: None), \
+             patch.object(watchlist_tab, "_save_last_session",
+                          lambda cfg: None):
+            mgr = get_watchlist_manager()
+            mgr._entries.clear()
+            mgr._name_index.clear()
+            mgr.add_custom_entry({
+                "taxid": 4242, "name": "Testus organismus",
+                "threat_level": "high", "enabled": True,
+                "alert_threshold": 10,
+            })
+            trig = {"type": "watchlist-nested-pathogen-toggle",
+                    "index": 4242, "watchlist": "custom_list"}
+            with patch.object(watchlist_tab, "ctx") as mock_ctx:
+                mock_ctx.triggered_id = trig
+                state, _config = self._fn(app)([False], [trig], {})
+            assert mgr._entries[4242].enabled is False
+            assert "4242" in state["last_update"]
+
+
 class TestWatchlistFilesCallback:
     @pytest.fixture
     def app(self):
