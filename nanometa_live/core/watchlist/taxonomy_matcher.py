@@ -18,11 +18,38 @@ NCBI characteristics:
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 
 from nanometa_live.core.watchlist.validation.name_normalizer import GTDB_RANK_PREFIXES
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class EntryMatchIndex:
+    """Precomputed lookup structures over a fixed list of watchlist entries.
+
+    Built once per watchlist state by ``TaxonomyMatcher.build_entry_index``
+    and probed per report row by ``match_row_indexed``, replacing the
+    O(rows x entries) inner loop that recomputed name variants for every
+    pair. Dict values are ``(position, entry)`` so ties resolve to the
+    entry earliest in iteration order, matching the naive loop's strict-``>``
+    first-wins behaviour.
+
+    Only the alert-relevant tiers (score >= 0.7) are indexed: the 0.6 and
+    0.3 tiers of ``match_organism`` sit below the 0.7 alert floor in both
+    ``check_organisms`` paths, so a sub-0.7 winner and no winner are
+    indistinguishable to every caller.
+    """
+
+    exact: Dict[str, Tuple[int, Any]] = field(default_factory=dict)
+    alt: Dict[str, Tuple[int, Any]] = field(default_factory=dict)
+    variants: Dict[str, Tuple[int, Any]] = field(default_factory=dict)
+    genus_species: Dict[Tuple[str, str], Tuple[int, Any]] = field(
+        default_factory=dict)
+    # (normalized entry name, entry) in entry order, for the substring tier.
+    substring_scan: List[Tuple[str, Any]] = field(default_factory=list)
 
 
 class TaxonomyMatcher:
@@ -108,6 +135,79 @@ class TaxonomyMatcher:
             variants.add(f"s__{gtdb_style}")
 
         return list(variants)
+
+    def build_entry_index(self, entries: List[Any]) -> EntryMatchIndex:
+        """Precompute the alert-relevant match tiers for a list of entries.
+
+        Entries are objects with ``name`` and ``names_alt`` attributes
+        (``WatchlistEntry``), in the iteration order the caller's loop would
+        have used -- position decides ties.
+        """
+        index = EntryMatchIndex()
+        for pos, entry in enumerate(entries):
+            normalized = self.normalize_name(getattr(entry, "name", "") or "")
+            if not normalized:
+                continue
+            index.exact.setdefault(normalized, (pos, entry))
+            for alt_name in (getattr(entry, "names_alt", None) or []):
+                alt_norm = self.normalize_name(alt_name)
+                if alt_norm:
+                    index.alt.setdefault(alt_norm, (pos, entry))
+            for variant in self.get_name_variants(entry.name):
+                index.variants.setdefault(variant, (pos, entry))
+            parts = normalized.split()
+            if len(parts) >= 2:
+                index.genus_species.setdefault(
+                    (parts[0], parts[1]), (pos, entry))
+            index.substring_scan.append((normalized, entry))
+        return index
+
+    def match_row_indexed(
+        self, detected_name: str, index: EntryMatchIndex
+    ) -> Tuple[Optional[Any], float]:
+        """Resolve one detected name against a prebuilt entry index.
+
+        Returns ``(entry, score)`` for the best alert-relevant match
+        (score >= 0.7) or ``(None, 0.0)``. Equivalent to running
+        ``match_organism`` against every indexed entry and keeping the
+        highest score, first entry winning ties -- proven by the
+        equivalence tests in ``tests/test_watchlist_matching_equivalence``.
+
+        Tiers are probed in descending score order. An entry that can
+        score at a higher tier is always discoverable at that tier's dict,
+        so a hit at tier t means no indexed entry scores above t.
+        """
+        detected_normalized = self.normalize_name(detected_name)
+        if not detected_normalized:
+            return None, 0.0
+
+        hit = index.exact.get(detected_normalized)
+        if hit is not None:
+            return hit[1], 1.0
+
+        hit = index.alt.get(detected_normalized)
+        if hit is not None:
+            return hit[1], 0.95
+
+        candidates = [
+            index.variants[v]
+            for v in self.get_name_variants(detected_name)
+            if v in index.variants
+        ]
+        if candidates:
+            return min(candidates, key=lambda t: t[0])[1], 0.9
+
+        parts = detected_normalized.split()
+        if len(parts) >= 2:
+            hit = index.genus_species.get((parts[0], parts[1]))
+            if hit is not None:
+                return hit[1], 0.85
+
+        for entry_normalized, entry in index.substring_scan:
+            if entry_normalized in detected_normalized:
+                return entry, 0.7
+
+        return None, 0.0
 
     def match_organism(
         self,

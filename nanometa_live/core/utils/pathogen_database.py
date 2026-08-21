@@ -59,6 +59,30 @@ __all__ = [
 _database: Optional[PathogenDatabase] = None
 _database_lock = threading.Lock()
 
+# (custom-watchlist digest, merged pathogen dict). check_for_dangerous_
+# pathogens runs on dashboard alert ticks with the full active watchlist as
+# custom_watchlist, and constructing a fresh PathogenDatabase re-parsed
+# pathogens.yaml from disk on every call (~11 ms plus the merge). The
+# digest is content-derived, so an edited watchlist reloads by construction.
+_merged_db_cache: Optional[tuple] = None
+
+
+def _merged_pathogen_db(
+    custom_watchlist: List[Dict[str, Any]],
+) -> Dict[Any, PathogenEntry]:
+    global _merged_db_cache
+    import json
+
+    digest = json.dumps(custom_watchlist, sort_keys=True, default=str)
+    cached = _merged_db_cache
+    if cached is not None and cached[0] == digest:
+        return cached[1]
+    db = PathogenDatabase(user_watchlist=custom_watchlist)
+    db.load()
+    merged = db.get_all_pathogens()
+    _merged_db_cache = (digest, merged)
+    return merged
+
 
 def _get_database() -> PathogenDatabase:
     """Get the module-level database instance, initializing if needed (thread-safe)."""
@@ -192,9 +216,7 @@ def check_for_dangerous_pathogens(
     # Note: Use 'is not None' to distinguish between None (no watchlist)
     # and [] (empty watchlist means no alerts wanted)
     if custom_watchlist is not None:
-        db = PathogenDatabase(user_watchlist=custom_watchlist)
-        db.load()
-        dangerous_db = db.get_all_pathogens()
+        dangerous_db = _merged_pathogen_db(custom_watchlist)
     else:
         dangerous_db = _get_database().get_all_pathogens()
 

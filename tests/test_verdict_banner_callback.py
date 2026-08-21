@@ -99,8 +99,8 @@ def _run_verdict_banner(
         "nanometa_live.app.tabs.dashboard_tab._get_active_watchlist_entries",
         return_value=[{"taxid": 1392, "name": "Bacillus anthracis"}],
     ), patch(
-        "nanometa_live.app.tabs.dashboard_tab._check_pathogens_with_mapping",
-        return_value=detections,
+        "nanometa_live.app.tabs.dashboard_tab._check_pathogens_both",
+        return_value=(detections, []),
     ), patch(
         "nanometa_live.app.tabs.dashboard_tab._load_per_sample_organisms",
         **per_sample_kwargs,

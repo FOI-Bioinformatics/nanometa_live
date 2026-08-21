@@ -32,7 +32,12 @@ from nanometa_live.app.tabs import preparation_tab, watchlist_tab
 pytestmark = pytest.mark.callback
 
 #: Callbacks that change the watchlist and therefore must reach the snapshot.
-MUTATORS = ("handle_upload", "add_custom_species", "handle_edit_modal")
+#: The upload flow's mutation lives in finalize_watchlist_import (the
+#: main-process half of the background import); handle_upload itself only
+#: stages the file and no longer touches the session.
+MUTATORS = (
+    "finalize_watchlist_import", "add_custom_species", "handle_edit_modal",
+)
 
 
 def _callback_map(register, **kwargs):

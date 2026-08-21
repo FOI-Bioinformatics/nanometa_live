@@ -62,13 +62,15 @@ def test_empty_taxmap_collection_renders_empty_state_not_not_found():
     ), patch(
         "nanometa_live.core.taxonomy.taxid_mapping.get_mapping_collection",
         return_value=None,
-    ):
-        rows, count, badge_style = fn(
+    ), patch("nanometa_live.app.tabs.watchlist_tab.ctx") as mock_ctx:
+        mock_ctx.triggered_id = "watchlist-table-refresh"
+        rows, count, badge_style, _max_value, _page = fn(
             tab_state={},
             table_refresh=0,
             search_term="",
             rescan_complete=None,
             taxmap_collection={},  # empty store
+            active_page=1,
             config={},
         )
 

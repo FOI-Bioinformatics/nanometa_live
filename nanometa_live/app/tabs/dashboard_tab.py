@@ -59,7 +59,7 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     _species_df_to_organisms,
     _load_per_sample_organisms,
     _get_active_watchlist_entries,
-    _check_pathogens_with_mapping,
+    _check_pathogens_both,
     _count_input_files,
     _make_banner_content,
     _verdict_banner_style,
@@ -301,15 +301,12 @@ def register_dashboard_callbacks(app: Dash):
                         if isinstance(w, dict)
                     ]
                     highest_alert_threshold = max(thresholds) if thresholds else None
-                    dangerous = _check_pathogens_with_mapping(
+                    # One matching pass yields both sides. Sub-threshold hits
+                    # are shown rather than dropped: the threshold decides
+                    # whether a hit alarms, not whether it exists, and a green
+                    # banner over one is the worst answer available.
+                    dangerous, subthreshold = _check_pathogens_both(
                         detected_organisms, config
-                    )
-                    # Watchlist hits that landed under their own threshold.
-                    # Shown rather than dropped: the threshold decides whether
-                    # a hit alarms, not whether it exists, and a green banner
-                    # over one is the worst answer available.
-                    subthreshold = _check_pathogens_with_mapping(
-                        detected_organisms, config, below_threshold=True
                     )
                     kraken_has_data = True
             except Exception as e:

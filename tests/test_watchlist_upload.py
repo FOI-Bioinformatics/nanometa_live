@@ -92,6 +92,19 @@ def _alert_text(component) -> str:
     return " ".join(out)
 
 
+@pytest.fixture(autouse=True)
+def _reset_manager_loader_cache():
+    """watchlist_manager keeps its own module-level loader cache
+    (``_get_watchlist_loader``). A test that runs a real manager method
+    while ``get_watchlist_loader`` is patched (the parse-count test)
+    freezes the patched, tmp-dir loader into that cache and every later
+    test in the process silently reads the wrong watchlist directory."""
+    from nanometa_live.core.watchlist import watchlist_manager as wm_mod
+    wm_mod._watchlist_loader = None
+    yield
+    wm_mod._watchlist_loader = None
+
+
 @pytest.fixture
 def user_wl_dir(tmp_path, monkeypatch):
     """Point the whole watchlist stack at a throwaway directory."""
@@ -102,12 +115,52 @@ def user_wl_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def upload_fn():
+def upload_app():
     app = Dash(__name__, suppress_callback_exceptions=True)
     register_watchlist_callbacks(app)
+    return app
+
+
+@pytest.fixture
+def upload_fn(upload_app):
     return get_callback_fn(
-        app, "watchlist-upload-feedback.children",
+        upload_app, "watchlist-upload-feedback.children",
         input_contains="watchlist-upload")
+
+
+@pytest.fixture
+def worker_fn(upload_app):
+    return get_callback_fn(
+        upload_app, "watchlist-import-result.data",
+        input_contains="watchlist-import-request")
+
+
+@pytest.fixture
+def finalize_fn(upload_app):
+    return get_callback_fn(
+        upload_app, "watchlist-tab-state.data",
+        input_contains="watchlist-import-result")
+
+
+@pytest.fixture
+def import_chain(upload_fn, worker_fn, finalize_fn):
+    """Drive the full upload -> worker -> finalize chain like the app does.
+
+    Returns (state, final_feedback, upload_feedback, pending, result).
+    When the upload stops early (invalid name, collision, builtin shadow)
+    the worker and finalize never run and state/result are None.
+    """
+    from dash import no_update
+
+    def run(contents, filename):
+        feedback, pending, request = upload_fn(contents, filename)
+        if request is no_update or not request:
+            return None, None, feedback, pending, None
+        result = worker_fn(lambda *_a: None, request)
+        state, final_feedback = finalize_fn(result)
+        return state, final_feedback, feedback, pending, result
+
+    return run
 
 
 @pytest.fixture
@@ -140,11 +193,12 @@ def fresh_loader(user_wl_dir):
 
 class TestUploadCallback:
     def test_valid_upload_persists_and_loads(
-        self, upload_fn, fresh_loader, user_wl_dir
+        self, import_chain, fresh_loader, user_wl_dir
     ):
         manager = MagicMock()
         with patch.object(wt, "get_watchlist_manager", return_value=manager):
-            state, alert, pending = upload_fn(_contents(VALID_YAML), "field.yaml")
+            state, alert, _fb, _p, _r = import_chain(
+                _contents(VALID_YAML), "field.yaml")
 
         saved = user_wl_dir / "field.yaml"
         assert saved.exists(), "upload must persist to the user watchlist dir"
@@ -158,21 +212,25 @@ class TestUploadCallback:
         assert "2 pathogens" in text
 
     def test_invalid_upload_is_rejected_and_not_persisted(
-        self, upload_fn, fresh_loader, user_wl_dir
+        self, import_chain, fresh_loader, user_wl_dir
     ):
         from dash import no_update
 
-        state, alert, _pending = upload_fn(_contents(INVALID_YAML), "bad.yaml")
+        state, alert, _fb, _p, _r = import_chain(
+            _contents(INVALID_YAML), "bad.yaml")
         assert state is no_update
         assert not (user_wl_dir / "bad.yaml").exists()
         assert "Invalid watchlist file" in _alert_text(alert)
+        # The decoded pending file is cleaned up on failure too.
+        assert not (user_wl_dir / ".pending" / "bad.yaml").exists()
 
     def test_entries_without_taxid_are_flagged(
-        self, upload_fn, fresh_loader, user_wl_dir
+        self, import_chain, fresh_loader, user_wl_dir
     ):
         manager = MagicMock()
         with patch.object(wt, "get_watchlist_manager", return_value=manager):
-            _, alert, _p = upload_fn(_contents(NO_TAXID_YAML), "names.yaml")
+            _s, alert, _fb, _p, _r = import_chain(
+                _contents(NO_TAXID_YAML), "names.yaml")
 
         text = _alert_text(alert)
         assert "no taxonomy ID" in text
@@ -181,82 +239,171 @@ class TestUploadCallback:
         assert alert.color == "warning"
 
     def test_all_entries_with_taxid_gives_clean_success(
-        self, upload_fn, fresh_loader
+        self, import_chain, fresh_loader
     ):
         manager = MagicMock()
         with patch.object(wt, "get_watchlist_manager", return_value=manager):
-            _, alert, _p = upload_fn(_contents(VALID_YAML), "field.yaml")
+            _s, alert, _fb, _p, _r = import_chain(
+                _contents(VALID_YAML), "field.yaml")
         assert alert.color == "success"
         assert "no taxonomy ID" not in _alert_text(alert)
 
-    def test_duplicate_upload_refused(self, upload_fn, fresh_loader, user_wl_dir):
-        from dash import no_update
-
+    def test_duplicate_upload_refused(
+        self, import_chain, fresh_loader, user_wl_dir
+    ):
         manager = MagicMock()
         with patch.object(wt, "get_watchlist_manager", return_value=manager):
-            upload_fn(_contents(VALID_YAML), "field.yaml")
+            import_chain(_contents(VALID_YAML), "field.yaml")
             first = (user_wl_dir / "field.yaml").read_text()
             other = VALID_YAML.replace("Field List", "Different content")
-            state, alert, pending = upload_fn(_contents(other), "field.yaml")
+            state, _fa, alert, pending, _r = import_chain(
+                _contents(other), "field.yaml")
 
-        assert state is no_update
+        assert state is None, "a collision must not reach the import worker"
         assert "already exists" in _alert_text(alert)
         assert (user_wl_dir / "field.yaml").read_text() == first, (
             "a second upload of the same name must not silently overwrite")
 
-    def test_no_temp_file_leak_when_validation_raises(
-        self, upload_fn, fresh_loader
+    def test_no_pending_file_leak_when_collision_check_raises(
+        self, upload_fn, fresh_loader, user_wl_dir
     ):
-        """validate_file raising used to be swallowed by the blanket except,
-        leaving the NamedTemporaryFile(delete=False) behind in /tmp."""
-        before = set(Path(tempfile.gettempdir()).glob("*.yaml"))
+        """An exception after the decoded upload lands in .pending/ must
+        not strand the file there for the life of the session."""
         with patch.object(
-            fresh_loader, "validate_file", side_effect=RuntimeError("boom")
+            fresh_loader, "classify_upload_collision",
+            side_effect=RuntimeError("boom"),
         ):
-            _, alert, _p = upload_fn(_contents(VALID_YAML), "field.yaml")
-        after = set(Path(tempfile.gettempdir()).glob("*.yaml"))
-        assert after == before
+            alert, _p, _req = upload_fn(_contents(VALID_YAML), "field.yaml")
         assert "Upload failed" in _alert_text(alert)
+        pending_dir = user_wl_dir / ".pending"
+        assert not pending_dir.is_dir() or not list(pending_dir.iterdir())
 
     def test_no_contents_prevents_update(self, upload_fn):
         with pytest.raises(PreventUpdate):
             upload_fn(None, None)
 
 
+class TestImportWorkerIsolation:
+    """The background worker is file I/O only; session side effects belong
+    to the finalize callback (DiskcacheManager runs the worker in another
+    OS process, where singleton mutations are invisible to the app)."""
+
+    def test_worker_never_touches_the_manager_and_reports_progress(
+        self, upload_fn, worker_fn, fresh_loader, user_wl_dir
+    ):
+        manager = MagicMock()
+        progress_calls = []
+        with patch.object(wt, "get_watchlist_manager", return_value=manager):
+            _fb, _p, request = upload_fn(_contents(VALID_YAML), "field.yaml")
+            result = worker_fn(
+                lambda payload: progress_calls.append(payload), request)
+
+        assert result["success"] is True
+        assert result["count"] == 2
+        assert result["dest_name"] == "field.yaml"
+        manager._load_custom_yaml_file.assert_not_called()
+        assert len(progress_calls) >= 2, "the worker must report progress"
+
+    def test_worker_result_for_missing_pending_file(
+        self, worker_fn, fresh_loader, user_wl_dir
+    ):
+        result = worker_fn(
+            lambda *_a: None,
+            {"path": str(user_wl_dir / ".pending" / "gone.yaml"),
+             "filename": "gone.yaml", "overwrite": False, "nonce": "x"},
+        )
+        assert result["success"] is False
+        assert "no longer available" in result["message"]
+
+
+class TestImportParseCount:
+    def test_full_import_parses_the_yaml_at_most_twice(
+        self, import_chain, fresh_loader, user_wl_dir, monkeypatch
+    ):
+        """One upload used to be parsed 5-6 times (validate, taxid audit,
+        import re-validate, session validate + load, cache-refill load).
+        The budget: once in the worker (validate_and_parse), once for the
+        destination file in the finalize path."""
+        from nanometa_live.core.watchlist import watchlist_loader as wl_mod
+
+        counts = {"n": 0}
+        real_safe_load = yaml.safe_load
+
+        def counting(stream):
+            counts["n"] += 1
+            return real_safe_load(stream)
+
+        monkeypatch.setattr(wl_mod.yaml, "safe_load", counting)
+        from nanometa_live.core.watchlist import watchlist_manager as wm_mod
+        monkeypatch.setattr(wm_mod.yaml, "safe_load", counting)
+
+        from nanometa_live.core.watchlist.watchlist_manager import (
+            WatchlistManager,
+        )
+        with patch.object(WatchlistManager, "_save_toggle_state",
+                          lambda self: None):
+            manager = WatchlistManager()
+            manager._entries.clear()
+            manager._name_index.clear()
+            with patch.object(wt, "get_watchlist_manager",
+                              return_value=manager):
+                state, _a, _fb, _p, _r = import_chain(
+                    _contents(VALID_YAML), "field.yaml")
+
+        assert state is not None
+        assert counts["n"] <= 2, (
+            f"import parsed the watchlist YAML {counts['n']} times"
+        )
+
+
 @pytest.fixture
-def replace_fn():
-    app = Dash(__name__, suppress_callback_exceptions=True)
-    register_watchlist_callbacks(app)
+def replace_fn(upload_app):
     return get_callback_fn(
-        app, "watchlist-upload-feedback.children",
+        upload_app, "watchlist-upload-feedback.children",
         input_contains="watchlist-upload-replace-btn")
+
+
+@pytest.fixture
+def cancel_fn(upload_app):
+    return get_callback_fn(
+        upload_app, "watchlist-upload-feedback.children",
+        input_contains="watchlist-upload-cancel-btn")
 
 
 class TestReplaceFlow:
     """W2: a collision with the operator's own file offers a confirmed
     replacement; the confirm actually replaces; builtin stems stay refused."""
 
-    def test_collision_returns_pending_payload(
-        self, upload_fn, fresh_loader, user_wl_dir
+    def test_collision_returns_pending_payload_without_the_blob(
+        self, import_chain, upload_fn, fresh_loader, user_wl_dir
     ):
         manager = MagicMock()
         with patch.object(wt, "get_watchlist_manager", return_value=manager):
-            upload_fn(_contents(VALID_YAML), "field.yaml")
+            import_chain(_contents(VALID_YAML), "field.yaml")
             other = VALID_YAML.replace("Field List", "Corrected List")
-            _state, alert, pending = upload_fn(_contents(other), "field.yaml")
+            alert, pending, _req = upload_fn(_contents(other), "field.yaml")
         assert pending is not None
         assert pending["filename"] == "field.yaml"
+        assert Path(pending["path"]).exists()
+        assert "contents" not in pending, (
+            "the decoded upload must wait on disk, not round-trip through "
+            "the browser as a base64 blob"
+        )
         assert "Replace existing" in _alert_text(alert)
 
     def test_confirmed_replace_overwrites_and_activates(
-        self, upload_fn, replace_fn, fresh_loader, user_wl_dir
+        self, import_chain, upload_fn, replace_fn, worker_fn, finalize_fn,
+        fresh_loader, user_wl_dir
     ):
         manager = MagicMock()
         with patch.object(wt, "get_watchlist_manager", return_value=manager):
-            upload_fn(_contents(VALID_YAML), "field.yaml")
+            import_chain(_contents(VALID_YAML), "field.yaml")
             other = VALID_YAML.replace("Field List", "Corrected List")
-            _s, _a, pending = upload_fn(_contents(other), "field.yaml")
-            state, alert, cleared = replace_fn(1, pending)
+            _a, pending, _req = upload_fn(_contents(other), "field.yaml")
+            _alert2, cleared, request = replace_fn(1, pending)
+            assert request["overwrite"] is True
+            result = worker_fn(lambda *_a: None, request)
+            state, alert = finalize_fn(result)
 
         saved = user_wl_dir / "field.yaml"
         assert yaml.safe_load(saved.read_text())["metadata"]["name"] == "Corrected List"
@@ -266,6 +413,25 @@ class TestReplaceFlow:
         # Activation runs for the replacement too (snapshot rehydration
         # depends on the tab-state write; the manager reload on this call).
         assert manager._load_custom_yaml_file.call_count == 2
+        # The consumed pending file is gone.
+        assert not (user_wl_dir / ".pending" / "field.yaml").exists()
+
+    def test_cancel_discards_the_pending_file(
+        self, import_chain, upload_fn, cancel_fn, fresh_loader, user_wl_dir
+    ):
+        manager = MagicMock()
+        with patch.object(wt, "get_watchlist_manager", return_value=manager):
+            import_chain(_contents(VALID_YAML), "field.yaml")
+            other = VALID_YAML.replace("Field List", "Corrected List")
+            _a, pending, _req = upload_fn(_contents(other), "field.yaml")
+            alert, cleared = cancel_fn(1, pending)
+        assert cleared is None
+        assert "cancelled" in _alert_text(alert)
+        assert not Path(pending["path"]).exists()
+        # The original file was kept.
+        assert yaml.safe_load(
+            (user_wl_dir / "field.yaml").read_text()
+        )["metadata"]["name"] == "Field List"
 
     def test_builtin_stem_is_not_offered_replacement(
         self, upload_fn, user_wl_dir, tmp_path
@@ -279,12 +445,15 @@ class TestReplaceFlow:
             "nanometa_live.core.watchlist.watchlist_loader.get_watchlist_loader",
             return_value=loader,
         ):
-            _state, alert, pending = upload_fn(
+            alert, pending, _req = upload_fn(
                 _contents(VALID_YAML), "biothreat.yaml"
             )
         assert pending is None
         assert "built-in watchlist" in _alert_text(alert)
         assert "Replace existing" not in _alert_text(alert)
+        # The refused upload's pending file is not left behind.
+        pending_dir = user_wl_dir / ".pending"
+        assert not pending_dir.is_dir() or not list(pending_dir.iterdir())
 
 
 class TestImportWatchlistCollisions:

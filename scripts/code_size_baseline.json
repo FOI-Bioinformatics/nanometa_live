@@ -180,8 +180,6 @@
     "nanometa_live/core/watchlist/watchlist_manager.py",
     "nanometa_live/core/watchlist/watchlist_manager.py::WatchlistEntry.from_dict",
     "nanometa_live/core/watchlist/watchlist_manager.py::WatchlistManager._add_entry_from_dict",
-    "nanometa_live/core/watchlist/watchlist_manager.py::WatchlistManager.check_organisms",
-    "nanometa_live/core/watchlist/watchlist_manager.py::WatchlistManager.check_organisms_with_mapping",
     "nanometa_live/core/watchlist/watchlist_manager.py::WatchlistManager.validate_entry_via_api",
     "nanometa_live/core/workflow/backend_manager.py",
     "nanometa_live/core/workflow/backend_manager.py::BackendManager._monitor_status",

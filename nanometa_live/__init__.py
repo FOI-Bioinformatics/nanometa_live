@@ -6,4 +6,4 @@ nanopore sequencers, including taxonomic classification, visualization, and
 species identification.
 """
 
-__version__ = "0.11.0"  # Version number for the package
+__version__ = "0.11.1"  # Version number for the package

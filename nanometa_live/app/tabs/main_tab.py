@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import List
 
 import dash
-from dash import Dash, Input, Output, State, ctx, no_update, html
+from dash import Dash, Input, Output, State, ctx, dcc, no_update, html
 from nanometa_live.app.utils.debounce import (
     interval_tick_is_redundant_store, fp_to_store,
 )
@@ -69,6 +69,69 @@ from nanometa_live.app.tabs.dashboard_helpers import (  # noqa: E402
     DEFAULT_LOW_READ_FLOOR,
 )
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+
+
+# Cards shown before the "Show N more" overflow collapse takes over. One
+# cap for every card list on this tab: the browser cost is per mounted
+# card, watched or not (audit 2026-08-21: 129 watched cards froze Chrome).
+MAX_VISIBLE_CARDS = 20
+
+
+def wrap_cards_with_overflow(cards, collapse_id, button_id, noun="organisms"):
+    """Wrap card columns in a Row, collapsing everything past
+    MAX_VISIBLE_CARDS behind a "Show N more" button.
+
+    Small lists get a plain Row with no overflow machinery.
+    """
+    if len(cards) <= MAX_VISIBLE_CARDS:
+        return dbc.Row(cards)
+    visible = cards[:MAX_VISIBLE_CARDS]
+    hidden = cards[MAX_VISIBLE_CARDS:]
+    return html.Div([
+        dbc.Row(visible),
+        dbc.Collapse(
+            dbc.Row(hidden),
+            id=collapse_id,
+            is_open=False,
+        ),
+        html.Div(
+            dbc.Button(
+                f"Show {len(hidden)} more {noun}",
+                id=button_id,
+                color="secondary",
+                outline=True,
+                size="sm",
+                className="mt-2",
+            ),
+            className="text-center",
+        ),
+    ])
+
+
+def _not_detected_card_cols(species_dicts):
+    """Build the not-detected watched-organism cards from the plain dicts
+    stored in ``not-detected-species-store``.
+
+    Shared by the lazy renderer in ``toggle_not_detected_collapse``; the
+    background results callback only stores the dicts. Rendering the cards
+    eagerly kept ~126 mounted cards inside a closed collapse.
+    """
+    cols = []
+    for species in species_dicts or []:
+        card = OrganismCard(
+            name=species.get("name", ""),
+            abundance=species.get("abundance", 0.0),
+            read_count=species.get("reads", 0),
+            confidence="none",
+            taxid=species.get("taxid"),
+            rank="S",
+            is_watched=True,
+            blast_validation=species.get("blast"),
+            annotation=species.get("annotation", ""),
+            threat_level=species.get("threat_level"),
+        )
+        cols.append(dbc.Col(card, md=6, lg=4, className="mb-3"))
+    return cols
 
 
 def register_main_callbacks(app: Dash):
@@ -339,9 +402,14 @@ def register_main_callbacks(app: Dash):
             high_confidence_threshold = config.get('high_confidence_reads', 1000)
             medium_confidence_threshold = config.get('medium_confidence_reads', 100)
 
-            # Split watchlist species into detected and not detected
+            # Split watchlist species into detected and not detected.
+            # Detected species become cards here; not-detected species are
+            # only STORED as dicts and rendered on demand when the operator
+            # opens the collapsed section -- a closed dbc.Collapse still
+            # mounts its children, and ~126 pre-built cards inside it froze
+            # the browser on a 129-entry watchlist (audit 2026-08-21).
             detected_cards = []
-            not_detected_cards = []
+            not_detected_species = []
             watched_style = hidden_style
 
             if all_watchlist_species:
@@ -350,19 +418,29 @@ def register_main_callbacks(app: Dash):
                 for species in all_watchlist_species:
                     is_detected = species.get('detected', False)
 
-                    # Determine confidence based on detection and read count
+                    # Get BLAST validation data for this species (if available)
+                    species_taxid = int(species['taxid'])
+                    blast_data = blast_validation_data.get(species_taxid, None)
+
                     if not is_detected:
-                        confidence = "none"  # Not detected
-                    elif species['reads'] >= high_confidence_threshold:
+                        not_detected_species.append({
+                            "name": species['name'],
+                            "abundance": species['abundance'],
+                            "reads": species['reads'],
+                            "taxid": species['taxid'],
+                            "annotation": species.get('annotation', ''),
+                            "threat_level": species.get('threat_level'),
+                            "blast": blast_data,
+                        })
+                        continue
+
+                    # Determine confidence based on read count
+                    if species['reads'] >= high_confidence_threshold:
                         confidence = "high"
                     elif species['reads'] >= medium_confidence_threshold:
                         confidence = "medium"
                     else:
                         confidence = "low"
-
-                    # Get BLAST validation data for this species (if available)
-                    species_taxid = int(species['taxid'])
-                    blast_data = blast_validation_data.get(species_taxid, None)
 
                     card = OrganismCard(
                         name=species['name'],
@@ -376,17 +454,15 @@ def register_main_callbacks(app: Dash):
                         annotation=species.get('annotation', ''),
                         threat_level=species.get('threat_level'),
                     )
-                    col = dbc.Col(card, md=6, lg=4, className="mb-3")
-
-                    if is_detected:
-                        detected_cards.append(col)
-                    else:
-                        not_detected_cards.append(col)
+                    detected_cards.append(
+                        dbc.Col(card, md=6, lg=4, className="mb-3"))
 
             # Build the watched organisms section with detected/not-detected split
             watched_cards_content = []
 
-            # Detected section (always visible if there are detected species)
+            # Detected section (always visible if there are detected
+            # species; capped with the shared overflow collapse so a
+            # 500-entry all-detected watchlist cannot mount 500 cards)
             if detected_cards:
                 watched_cards_content.append(
                     html.Div([
@@ -394,12 +470,17 @@ def register_main_callbacks(app: Dash):
                             html.I(className="bi bi-exclamation-triangle-fill text-danger me-2"),
                             f"Detected ({len(detected_cards)})"
                         ], className="mb-3 text-danger"),
-                        dbc.Row(detected_cards)
+                        wrap_cards_with_overflow(
+                            detected_cards,
+                            collapse_id="watched-cards-overflow",
+                            button_id="show-more-watched-btn",
+                            noun="watched organisms",
+                        ),
                     ], className="mb-4")
                 )
 
             # Not detected section (collapsible, collapsed by default)
-            if not_detected_cards:
+            if not_detected_species:
                 # An absence measured over almost no reads is not evidence of
                 # absence. The caveat sits ABOVE the collapsed list on purpose:
                 # the list is closed by default, so a qualifier placed inside
@@ -413,7 +494,7 @@ def register_main_callbacks(app: Dash):
                     or DEFAULT_LOW_READ_FLOOR
                 )
                 depth_caveat = not_detected_caveat(
-                    total_reads, len(not_detected_cards), low_read_floor
+                    total_reads, len(not_detected_species), low_read_floor
                 )
                 if depth_caveat:
                     watched_cards_content.append(
@@ -428,7 +509,7 @@ def register_main_callbacks(app: Dash):
                         dbc.Button(
                             [
                                 html.I(className="bi bi-check-circle text-secondary me-2"),
-                                f"Not Detected ({len(not_detected_cards)})",
+                                f"Not Detected ({len(not_detected_species)})",
                                 html.I(className="bi bi-chevron-down ms-2", id="not-detected-chevron")
                             ],
                             id="not-detected-collapse-btn",
@@ -436,8 +517,15 @@ def register_main_callbacks(app: Dash):
                             className="mb-3 w-100 text-start",
                             style={"border": "1px solid #dee2e6"}
                         ),
+                        # Card data for the lazy renderer; the collapse
+                        # starts EMPTY and toggle_not_detected_collapse
+                        # builds the cards on first open.
+                        dcc.Store(
+                            id="not-detected-species-store",
+                            data=not_detected_species,
+                        ),
                         dbc.Collapse(
-                            dbc.Row(not_detected_cards),
+                            [],
                             id="not-detected-collapse",
                             is_open=False  # Collapsed by default
                         )
@@ -499,33 +587,14 @@ def register_main_callbacks(app: Dash):
                 )
                 organism_cards.append(dbc.Col(card, md=6, lg=4, className="mb-3"))
 
-            # Wrap cards in a Row with "Show more" if > 20
-            MAX_VISIBLE_CARDS = 20
+            # Wrap cards in a Row with "Show more" past MAX_VISIBLE_CARDS
             if organism_cards:
-                if len(organism_cards) > MAX_VISIBLE_CARDS:
-                    visible = organism_cards[:MAX_VISIBLE_CARDS]
-                    hidden = organism_cards[MAX_VISIBLE_CARDS:]
-                    cards_container = html.Div([
-                        dbc.Row(visible),
-                        dbc.Collapse(
-                            dbc.Row(hidden),
-                            id="organism-cards-overflow",
-                            is_open=False,
-                        ),
-                        html.Div(
-                            dbc.Button(
-                                f"Show {len(hidden)} more organisms",
-                                id="show-more-organisms-btn",
-                                color="secondary",
-                                outline=True,
-                                size="sm",
-                                className="mt-2",
-                            ),
-                            className="text-center",
-                        ),
-                    ])
-                else:
-                    cards_container = dbc.Row(organism_cards)
+                cards_container = wrap_cards_with_overflow(
+                    organism_cards,
+                    collapse_id="organism-cards-overflow",
+                    button_id="show-more-organisms-btn",
+                    noun="organisms",
+                )
             else:
                 cards_container = EmptyStateMessage(
                     title="No Matches",
@@ -651,6 +720,25 @@ def register_main_callbacks(app: Dash):
             return no_update, no_update
         new_state = not is_open
         label = "Show fewer organisms" if new_state else "Show more organisms"
+        return new_state, label
+
+    # Show more watched-organism cards (detected list past the cap)
+    @app.callback(
+        [
+            Output("watched-cards-overflow", "is_open"),
+            Output("show-more-watched-btn", "children"),
+        ],
+        Input("show-more-watched-btn", "n_clicks"),
+        State("watched-cards-overflow", "is_open"),
+        prevent_initial_call=True,
+    )
+    def toggle_show_more_watched(n_clicks, is_open):
+        """Toggle visibility of overflow watched-organism cards."""
+        if not n_clicks:
+            return no_update, no_update
+        new_state = not is_open
+        label = ("Show fewer watched organisms" if new_state
+                 else "Show more watched organisms")
         return new_state, label
 
     # Export modal callbacks - open modal and pre-select format
@@ -799,18 +887,30 @@ def register_main_callbacks(app: Dash):
 
         return updated_watchlist
 
-    # Toggle collapse for "Not Detected" watchlist section
+    # Toggle collapse for "Not Detected" watchlist section. The cards are
+    # rendered HERE, on open, from the species dicts the results callback
+    # stored -- and cleared on close. Keeping ~126 pre-built cards mounted
+    # inside the closed collapse froze the browser on a large watchlist.
     @app.callback(
-        Output("not-detected-collapse", "is_open"),
+        [
+            Output("not-detected-collapse", "is_open"),
+            Output("not-detected-collapse", "children"),
+        ],
         Input("not-detected-collapse-btn", "n_clicks"),
-        State("not-detected-collapse", "is_open"),
+        [
+            State("not-detected-collapse", "is_open"),
+            State("not-detected-species-store", "data"),
+        ],
         prevent_initial_call=True,
     )
-    def toggle_not_detected_collapse(n_clicks, is_open):
+    def toggle_not_detected_collapse(n_clicks, is_open, species_dicts):
         """Toggle the Not Detected watchlist section collapse."""
-        if n_clicks:
-            return not is_open
-        return is_open
+        if not n_clicks:
+            return is_open, no_update
+        new_is_open = not is_open
+        if not new_is_open:
+            return new_is_open, []
+        return new_is_open, dbc.Row(_not_detected_card_cols(species_dicts))
 
     # Note: View toggle callback removed - charts moved to Taxonomy tab
 

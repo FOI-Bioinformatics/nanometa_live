@@ -29,6 +29,7 @@ from nanometa_live.core.watchlist.watchlist_manager import (
     normalize_organism_type,
 )
 from nanometa_live.app.layouts.watchlist_layout import (
+    _create_watchlist_pathogen_list,
     create_pathogen_row,
     create_watchlist_file_item,
     create_api_lookup_result,
@@ -86,6 +87,11 @@ def _save_last_session(config: Dict[str, Any]) -> None:
         logger.debug("Could not save last-session.yaml", exc_info=True)
 
 
+# Rows per page in the pathogens table. Row action ids are keyed by taxid,
+# so pattern-matching callbacks work regardless of which page is shown.
+WATCHLIST_TABLE_PAGE_SIZE = 25
+
+
 def register_watchlist_callbacks(app: Dash) -> None:
     """
     Register all watchlist tab callbacks.
@@ -93,6 +99,22 @@ def register_watchlist_callbacks(app: Dash) -> None:
     Args:
         app: Dash application instance
     """
+    # Sweep decoded uploads a previous session left in .pending/ (a worker
+    # crash or restart between upload and finalize strands the file there).
+    # Registration runs once per app boot, in the main process. Resolved via
+    # the pure env resolver, NOT get_watchlist_loader(): instantiating the
+    # loader singleton here freezes it to registration-time environment,
+    # which leaks across tests and precedes the app's own configuration.
+    try:
+        from nanometa_live.core.utils.paths import get_watchlists_dir_from_env
+
+        pending_dir = Path(get_watchlists_dir_from_env()) / ".pending"
+        if pending_dir.is_dir():
+            for stale in pending_dir.iterdir():
+                stale.unlink(missing_ok=True)
+    except Exception:
+        logger.debug("Pending-upload sweep skipped", exc_info=True)
+
     # ---------------------------------------------------------------------
     # Stats Bar Update
     # ---------------------------------------------------------------------
@@ -336,18 +358,12 @@ def register_watchlist_callbacks(app: Dash) -> None:
         _order_map = {wl_id: i for i, wl_id in enumerate(_BUILTIN_ORDER)}
         builtin.sort(key=lambda wl: _order_map.get(wl.get("id", ""), 999))
 
-        # Create items with pathogens data for expandable view
-        # Use get_watchlist_pathogens_preview() to load directly from YAML
-        builtin_items = []
-        for wl in builtin:
-            # Load pathogens directly from YAML file for preview
-            pathogen_dicts = manager.get_watchlist_pathogens_preview(wl["id"])
-            builtin_items.append(create_watchlist_file_item(wl, pathogen_dicts))
-
-        custom_items = []
-        for wl in custom:
-            pathogen_dicts = manager.get_watchlist_pathogens_preview(wl["id"])
-            custom_items.append(create_watchlist_file_item(wl, pathogen_dicts))
+        # Headers only: the per-watchlist pathogen rows render on expand
+        # (toggle_watchlist_expand), not up front. Pre-rendering every
+        # list's rows here cost ~4,400 components per update and a YAML
+        # preview load per watchlist.
+        builtin_items = [create_watchlist_file_item(wl) for wl in builtin]
+        custom_items = [create_watchlist_file_item(wl) for wl in custom]
 
         if not builtin_items:
             builtin_items = [html.P("No built-in watchlists available.", className="text-muted")]
@@ -438,13 +454,20 @@ def register_watchlist_callbacks(app: Dash) -> None:
         [
             Output({"type": "watchlist-pathogen-collapse", "index": MATCH}, "is_open"),
             Output({"type": "watchlist-expand-icon", "index": MATCH}, "style"),
+            Output({"type": "watchlist-pathogen-collapse-content", "index": MATCH}, "children"),
         ],
         Input({"type": "watchlist-expand-trigger", "index": MATCH}, "n_clicks"),
         State({"type": "watchlist-pathogen-collapse", "index": MATCH}, "is_open"),
         prevent_initial_call=True,
     )
-    def toggle_watchlist_expand(n_clicks: int, is_open: bool) -> Tuple[bool, Dict]:
-        """Toggle expand/collapse of watchlist pathogen list."""
+    def toggle_watchlist_expand(n_clicks: int, is_open: bool) -> Tuple[bool, Dict, Any]:
+        """Toggle expand/collapse of watchlist pathogen list.
+
+        The rows are rendered here, on open, and cleared on close: a
+        collapsed dbc.Collapse still mounts its children, so embedding
+        every watchlist's rows up front kept ~311 rows permanently in the
+        DOM (audit 2026-08-21).
+        """
         if not n_clicks:
             raise PreventUpdate
 
@@ -457,7 +480,17 @@ def register_watchlist_callbacks(app: Dash) -> None:
             "transform": "rotate(90deg)" if new_is_open else "rotate(0deg)"
         }
 
-        return new_is_open, icon_style
+        if not new_is_open:
+            return new_is_open, icon_style, []
+
+        wl_id = None
+        if isinstance(ctx.triggered_id, dict):
+            wl_id = ctx.triggered_id.get("index")
+        if not wl_id:
+            raise PreventUpdate
+        pathogens = get_watchlist_manager().get_watchlist_pathogens_preview(wl_id)
+        content = _create_watchlist_pathogen_list(pathogens, wl_id)
+        return new_is_open, icon_style, content
 
     # ---------------------------------------------------------------------
     # Nested Pathogen Toggle
@@ -495,7 +528,23 @@ def register_watchlist_callbacks(app: Dash) -> None:
         for value, id_info in zip(values, ids):
             if id_info.get("index") == taxid and id_info.get("watchlist") == watchlist_id:
                 manager = get_watchlist_manager()
-                manager.toggle_entry(taxid, value)
+                # Spurious-fire guard: expanding a watchlist ADDS its nested
+                # checkboxes to the layout, and Dash re-fires this ALL
+                # callback for newly added components with their current
+                # values. Treating that as an edit bumped tab-state, which
+                # re-rendered the file list and wiped the just-expanded
+                # content. A value equal to the entry's current state is not
+                # an operator action.
+                entry = manager.get_entry_by_taxid(taxid)
+                if entry is not None and bool(entry.enabled) == bool(value):
+                    raise PreventUpdate
+                if not manager.toggle_entry(taxid, value):
+                    # The manager cannot resolve this taxid (entries from a
+                    # db_taxid-keyed watchlist are stored under the database
+                    # node, not the NCBI taxid the row carries). Nothing
+                    # changed, so writing config/tab-state here would only
+                    # feed the re-render cascade.
+                    raise PreventUpdate
 
                 # Sync watchlist state to app-config and save to disk
                 updated_config = dict(current_config) if current_config else {}
@@ -515,6 +564,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
             Output("watchlist-pathogens-table", "children"),
             Output("watchlist-pathogen-count", "children"),
             Output("watchlist-pathogen-count", "style"),
+            Output("watchlist-table-pagination", "max_value"),
+            Output("watchlist-table-pagination", "active_page"),
         ],
         [
             Input("watchlist-tab-state", "data"),
@@ -522,15 +573,23 @@ def register_watchlist_callbacks(app: Dash) -> None:
             Input("watchlist-search-input", "value"),
             Input("taxmap-rescan-complete", "data"),  # Refresh after mapping rescan
             Input("taxmap-collection", "data"),  # Mapping data from background rescan
+            Input("watchlist-table-pagination", "active_page"),
         ],
         State("app-config", "data"),
         prevent_initial_call=False,
     )
     def update_pathogens_table(
         tab_state: Dict, table_refresh: int, search_term: str, rescan_complete: Any,
-        taxmap_collection: Dict, config: Dict
-    ) -> Tuple[List, str, Dict]:
-        """Update the pathogens table with Kraken2 mapping status."""
+        taxmap_collection: Dict, active_page: Optional[int], config: Dict
+    ) -> Tuple[List, str, Dict, int, Any]:
+        """Update the pathogens table with Kraken2 mapping status.
+
+        Renders one page (WATCHLIST_TABLE_PAGE_SIZE rows): a large
+        watchlist rendered whole put ~3,800 components / 645 pattern ids
+        into the DOM and re-serialized them on every edit. Row action ids
+        are keyed by taxid, so the pattern-matching callbacks are
+        page-agnostic.
+        """
         manager = get_watchlist_manager()
 
         # Initialize manager with config if not loaded
@@ -554,7 +613,21 @@ def register_watchlist_callbacks(app: Dash) -> None:
                 [html.P("No pathogens in watchlist.", className="text-muted text-center py-4")],
                 "",
                 {"display": "none"},
+                1,
+                1 if (active_page or 1) != 1 else no_update,
             )
+
+        # Resolve the page BEFORE any per-entry work. A new search starts
+        # from page 1; a page past the end (entries removed, filter
+        # narrowed) clamps to the last page.
+        requested_page = active_page or 1
+        if ctx.triggered_id == "watchlist-search-input":
+            requested_page = 1
+        total_pages = max(
+            1, -(-len(entries) // WATCHLIST_TABLE_PAGE_SIZE))
+        page = min(requested_page, total_pages)
+        page_start = (page - 1) * WATCHLIST_TABLE_PAGE_SIZE
+        page_entries = entries[page_start:page_start + WATCHLIST_TABLE_PAGE_SIZE]
 
         # Build mapping dict from taxmap-collection store data
         # This data comes from the background rescan callback
@@ -656,7 +729,9 @@ def register_watchlist_callbacks(app: Dash) -> None:
                 className="mb-3",
             )
 
-        # Get genome status for all entries
+        # Get genome status for the visible page only: has_genome /
+        # has_blast_db are stat() calls, and running them for every entry
+        # cost ~500 syscalls per refresh at 129 entries.
         try:
             from nanometa_live.core.utils.genome_manager import get_genome_manager
             genome_mgr = get_genome_manager()
@@ -670,7 +745,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         # Create rows with mapping info and genome status
         rows = []
-        for i, entry in enumerate(entries):
+        for i, entry in enumerate(page_entries, start=page_start):
             taxid = entry.get("taxid", 0)
 
             # Validate taxid before creating pattern-matching IDs
@@ -713,10 +788,15 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         count = len(entries)
         children = ([index_banner] if index_banner is not None else []) + rows
+        # Only emit active_page when it actually moved (search reset or
+        # end-clamp); echoing the incoming value re-fires this callback.
+        page_out = page if page != (active_page or 1) else no_update
         return (
             children,
             str(count),
             {"display": "inline-block"},  # Show badge when there are pathogens
+            total_pages,
+            page_out,
         )
 
     @app.callback(
@@ -1440,50 +1520,39 @@ def register_watchlist_callbacks(app: Dash) -> None:
     # File Upload
     # ---------------------------------------------------------------------
 
-    def _import_and_activate_upload(loader, temp_path, filename, overwrite):
-        """Persist a validated upload and load it into the session.
+    def _render_import_result(result):
+        """Pure renderer: the finished import's result dict -> feedback alert.
 
-        Shared by the initial upload and the confirmed replacement so the
-        two paths cannot drift. Returns the (tab-state, feedback) pair.
+        No I/O and no singleton access, so the finalize callback can reuse
+        it and it is unit-testable on its own.
         """
-        from pathlib import Path
+        if result.get("invalid_errors"):
+            return dbc.Alert([
+                html.Strong("Invalid watchlist file"),
+                html.Ul(
+                    [html.Li(e, className="small")
+                     for e in result["invalid_errors"]],
+                    className="mb-0 ps-3",
+                ),
+            ], color="danger", duration=10000)
 
-        no_taxid = loader.find_entries_without_taxid(temp_path)
-
-        success, message = loader.import_watchlist(
-            temp_path, destination="user", file_name=filename,
-            overwrite=overwrite,
-        )
-        if not success:
-            return (
-                no_update,
-                dbc.Alert(f"Import failed: {message}", color="danger", duration=8000),
+        if not result.get("success"):
+            return dbc.Alert(
+                f"Import failed: {result.get('message', 'see logs')}",
+                color="danger", duration=8000,
             )
 
-        # Load into active session. The destination name must come from
-        # the same sanitizer import_watchlist used -- deriving it from
-        # the raw browser filename made the two disagree for any name
-        # the sanitizer changed, so the file was imported but never
-        # activated while the alert still claimed success (finding W1).
-        manager = get_watchlist_manager()
-        dest_name = loader.sanitize_upload_name(filename)
-        watchlist_id = Path(dest_name).stem
-        dest_dir = loader.user_watchlist_dir
-        dest_file = dest_dir / dest_name
-        if dest_file.exists():
-            manager._load_custom_yaml_file(str(dest_file))
-
-        pathogens = loader.load_watchlist(watchlist_id)
-        count = len(pathogens) if pathogens else 0
-
-        verb = "Replaced" if overwrite else "Imported"
+        filename = result.get("filename", "")
+        no_taxid = result.get("no_taxid") or []
+        verb = "Replaced" if result.get("overwrite") else "Imported"
         body = [
             html.Div([
                 html.I(className="bi bi-check-circle me-2"),
                 html.Strong(f"{verb}: {filename}"),
             ]),
             html.Small(
-                f"{count} pathogens added. Saved to {dest_dir}",
+                f"{result.get('count', 0)} pathogens added. "
+                f"Saved to {result.get('dest_dir', '')}",
                 className="text-muted d-block mt-1",
             ),
         ]
@@ -1506,66 +1575,96 @@ def register_watchlist_callbacks(app: Dash) -> None:
                 className="d-block mt-2 text-warning-emphasis",
             ))
 
-        return (
-            {"last_update": f"upload-{filename}"},
-            dbc.Alert(
-                body,
-                color="warning" if no_taxid else "success",
-                duration=12000 if no_taxid else 8000,
-            ),
+        return dbc.Alert(
+            body,
+            color="warning" if no_taxid else "success",
+            duration=12000 if no_taxid else 8000,
         )
 
-    def _decode_upload_to_temp(contents, filename):
-        """Base64-decode a dcc.Upload payload into a NamedTemporaryFile."""
+    def _pending_upload_dir(loader) -> Path:
+        """Directory holding decoded uploads awaiting import/confirmation.
+
+        Lives beside the user watchlists (dot-prefixed, so discovery's
+        ``*.yaml`` iteration of the parent never sees it) instead of round-
+        tripping the ~120 KB base64 blob through the browser via the
+        pending Store, which is what the confirm-replace flow used to do.
+        """
+        return Path(loader.user_watchlist_dir) / ".pending"
+
+    def _write_pending_upload(loader, contents, dest_name) -> Path:
+        """Base64-decode a dcc.Upload payload into the pending directory."""
         import base64
-        import tempfile
-        from pathlib import Path
 
         _content_type, content_string = contents.split(",")
         decoded = base64.b64decode(content_string)
-        with tempfile.NamedTemporaryFile(
-            mode="wb", suffix=Path(filename).suffix, delete=False,
-        ) as f:
-            f.write(decoded)
-            return Path(f.name)
+        pending_dir = _pending_upload_dir(loader)
+        pending_dir.mkdir(parents=True, exist_ok=True)
+        pending_path = pending_dir / dest_name
+        pending_path.write_bytes(decoded)
+        return pending_path
+
+    def _discard_pending_upload(path_str) -> None:
+        if path_str:
+            Path(path_str).unlink(missing_ok=True)
+
+    def _replace_offer_alert(message: str) -> dbc.Alert:
+        """The confirm-or-cancel offer shown on a replaceable collision."""
+        return dbc.Alert([
+            html.Div([
+                html.I(className="bi bi-exclamation-triangle me-2"),
+                html.Strong("File already exists. "),
+                message,
+            ], className="mb-2"),
+            dbc.Button(
+                "Replace existing", id="watchlist-upload-replace-btn",
+                color="warning", size="sm", className="me-2",
+            ),
+            dbc.Button(
+                "Cancel", id="watchlist-upload-cancel-btn",
+                color="secondary", size="sm", outline=True,
+            ),
+        ], color="warning")
 
     @app.callback(
         [
-            Output("watchlist-tab-state", "data", allow_duplicate=True),
             Output("watchlist-upload-feedback", "children"),
             Output("watchlist-upload-pending", "data"),
+            Output("watchlist-import-request", "data"),
         ],
         Input("watchlist-upload", "contents"),
         State("watchlist-upload", "filename"),
+        running=[(Output("watchlist-upload", "disabled"), True, False)],
         prevent_initial_call=True,
     )
     def handle_upload(contents: str, filename: str) -> Tuple:
-        """Handle watchlist file upload — validates, persists, and loads."""
+        """Accept a watchlist upload and hand it to the background importer.
+
+        Thin on purpose: decode the payload to a pending file, classify
+        collisions, and write the import request Store. The parsing,
+        per-entry validation and copy happen in import_watchlist_worker
+        (background, with the progress modal); session side effects happen
+        in finalize_watchlist_import (main process). The synchronous
+        predecessor parsed a 129-entry file 5-6 times on the request
+        thread with no feedback -- a frozen screen.
+        """
         if not contents or not filename:
             raise PreventUpdate
 
         from nanometa_live.core.watchlist.watchlist_loader import get_watchlist_loader
 
-        temp_path = None
+        pending_path = None
         try:
-            temp_path = _decode_upload_to_temp(contents, filename)
-
             loader = get_watchlist_loader()
-            is_valid, errors = loader.validate_file(temp_path)
-
-            if not is_valid:
-                error_list = html.Ul(
-                    [html.Li(e, className="small") for e in errors],
-                    className="mb-0 ps-3"
-                )
+            dest_name = loader.sanitize_upload_name(filename)
+            if dest_name is None:
                 return (
-                    no_update,
-                    dbc.Alert([
-                        html.Strong("Invalid watchlist file"),
-                        error_list,
-                    ], color="danger", duration=10000),
+                    dbc.Alert(f"'{filename}' is not a usable watchlist "
+                              f"file name.", color="danger", duration=8000),
                     None,
+                    no_update,
                 )
+
+            pending_path = _write_pending_upload(loader, contents, dest_name)
 
             # A collision with the operator's OWN earlier file is offered as
             # a confirmed replacement; shadowing a built-in list stays
@@ -1575,55 +1674,178 @@ def register_watchlist_callbacks(app: Dash) -> None:
             if collision is not None:
                 kind, message = collision
                 if kind == "builtin":
+                    _discard_pending_upload(str(pending_path))
                     return (
-                        no_update,
                         dbc.Alert(f"Import failed: {message}", color="danger",
                                   duration=10000),
                         None,
+                        no_update,
                     )
+                # Only the file's location crosses the browser now; the
+                # decoded bytes used to round-trip as a ~120 KB base64 blob.
                 return (
+                    _replace_offer_alert(message),
+                    {"path": str(pending_path), "filename": filename},
                     no_update,
-                    dbc.Alert([
-                        html.Div([
-                            html.I(className="bi bi-exclamation-triangle me-2"),
-                            html.Strong("File already exists. "),
-                            message,
-                        ], className="mb-2"),
-                        dbc.Button(
-                            "Replace existing", id="watchlist-upload-replace-btn",
-                            color="warning", size="sm", className="me-2",
-                        ),
-                        dbc.Button(
-                            "Cancel", id="watchlist-upload-cancel-btn",
-                            color="secondary", size="sm", outline=True,
-                        ),
-                    ], color="warning"),
-                    {"contents": contents, "filename": filename},
                 )
 
-            state, feedback = _import_and_activate_upload(
-                loader, temp_path, filename, overwrite=False
+            return (
+                dbc.Alert([
+                    dbc.Spinner(size="sm", spinner_class_name="me-2"),
+                    f"Importing {filename}...",
+                ], color="info", className="py-2"),
+                None,
+                {"path": str(pending_path), "filename": filename,
+                 "overwrite": False, "nonce": os.urandom(4).hex()},
             )
-            return state, feedback, None
 
         except Exception as e:
+            if pending_path is not None:
+                _discard_pending_upload(str(pending_path))
             return (
-                no_update,
                 dbc.Alert(f"Upload failed: {e}", color="danger", duration=8000),
                 None,
+                no_update,
             )
-        finally:
-            # validate_file can raise, and the blanket except above used to
-            # swallow it -- leaking the NamedTemporaryFile(delete=False) into
-            # /tmp on every failed upload.
-            if temp_path is not None:
-                temp_path.unlink(missing_ok=True)
+
+    @app.callback(
+        Output("watchlist-import-result", "data"),
+        Input("watchlist-import-request", "data"),
+        background=True,
+        manager=background_callback_manager,
+        progress=[
+            Output("watchlist-progress-bar", "value", allow_duplicate=True),
+            Output("watchlist-progress-text", "children", allow_duplicate=True),
+            Output("watchlist-progress-detail", "children", allow_duplicate=True),
+        ],
+        running=[
+            (Output("watchlist-progress-modal", "is_open", allow_duplicate=True),
+             True, False),
+            (Output("watchlist-upload", "disabled", allow_duplicate=True),
+             True, False),
+        ],
+        prevent_initial_call=True,
+    )
+    def import_watchlist_worker(set_progress, request: Dict):
+        """Background half of the watchlist import: file I/O only.
+
+        Runs in a DiskcacheManager worker process, so it must not touch
+        the WatchlistManager singleton, the loader caches the live app
+        reads, or any dcc.Store the finalize callback owns -- none of
+        those mutations would reach the main process. The file on disk is
+        its only product; finalize_watchlist_import applies the session
+        side effects.
+        """
+        if not request or not request.get("path"):
+            raise PreventUpdate
+
+        from nanometa_live.core.watchlist.watchlist_loader import get_watchlist_loader
+
+        filename = request.get("filename", "")
+        pending_path = Path(request["path"])
+        result = {
+            "nonce": request.get("nonce"),
+            "filename": filename,
+            "path": str(pending_path),
+            "overwrite": bool(request.get("overwrite")),
+            "success": False,
+        }
+        try:
+            if not pending_path.exists():
+                result["message"] = (
+                    "The uploaded file is no longer available (the server "
+                    "may have restarted). Upload it again."
+                )
+                return result
+
+            loader = get_watchlist_loader()
+            set_progress((5, "Validating watchlist...", filename))
+
+            def _entry_progress(done, total):
+                set_progress((
+                    5 + int(75 * done / max(total, 1)),
+                    f"Validating entries ({done}/{total})...",
+                    filename,
+                ))
+
+            is_valid, errors, parsed = loader.validate_and_parse(
+                pending_path, progress_cb=_entry_progress)
+            if not is_valid:
+                result["invalid_errors"] = errors
+                return result
+
+            set_progress((85, "Checking taxonomy IDs...", filename))
+            no_taxid = loader.entries_without_taxid(parsed)
+
+            set_progress((92, "Saving watchlist...", filename))
+            success, message = loader.import_watchlist(
+                pending_path, destination="user", file_name=filename,
+                overwrite=result["overwrite"], parsed=parsed,
+            )
+            result["success"] = success
+            result["message"] = message
+            if success:
+                dest_name = loader.sanitize_upload_name(filename)
+                result["dest_name"] = dest_name
+                result["watchlist_id"] = Path(dest_name).stem
+                result["dest_dir"] = str(loader.user_watchlist_dir)
+                result["count"] = len((parsed or {}).get("pathogens") or [])
+                result["no_taxid"] = no_taxid
+            set_progress((100, "Activating...", filename))
+            return result
+        except Exception as e:
+            logger.error(f"Watchlist import failed: {e}", exc_info=True)
+            result["message"] = str(e)
+            return result
 
     @app.callback(
         [
             Output("watchlist-tab-state", "data", allow_duplicate=True),
             Output("watchlist-upload-feedback", "children", allow_duplicate=True),
+        ],
+        Input("watchlist-import-result", "data"),
+        prevent_initial_call=True,
+    )
+    def finalize_watchlist_import(result: Dict) -> Tuple:
+        """Main-process half of the import: session side effects + render.
+
+        The worker ran in a separate OS process, so its loader cache clears
+        and any manager state died with it. Everything the live app must
+        see happens here: cache invalidation, loading the imported file
+        into the WatchlistManager singleton, and the tab-state bump that
+        re-renders the watchlist views.
+        """
+        if not result:
+            raise PreventUpdate
+
+        from nanometa_live.core.watchlist.watchlist_loader import get_watchlist_loader
+
+        _discard_pending_upload(result.get("path"))
+
+        if not result.get("success"):
+            return no_update, _render_import_result(result)
+
+        loader = get_watchlist_loader()
+        loader.invalidate_cache()
+
+        # Load into active session. The destination name must come from
+        # the same sanitizer import_watchlist used -- deriving it from
+        # the raw browser filename made the two disagree for any name
+        # the sanitizer changed, so the file was imported but never
+        # activated while the alert still claimed success (finding W1).
+        manager = get_watchlist_manager()
+        dest_file = Path(result.get("dest_dir", "")) / result.get("dest_name", "")
+        if dest_file.exists():
+            manager._load_custom_yaml_file(str(dest_file))
+
+        filename = result.get("filename", "")
+        return {"last_update": f"upload-{filename}"}, _render_import_result(result)
+
+    @app.callback(
+        [
+            Output("watchlist-upload-feedback", "children", allow_duplicate=True),
             Output("watchlist-upload-pending", "data", allow_duplicate=True),
+            Output("watchlist-import-request", "data", allow_duplicate=True),
         ],
         Input("watchlist-upload-replace-btn", "n_clicks"),
         State("watchlist-upload-pending", "data"),
@@ -1634,35 +1856,16 @@ def register_watchlist_callbacks(app: Dash) -> None:
         if not n_clicks or not pending:
             raise PreventUpdate
 
-        from nanometa_live.core.watchlist.watchlist_loader import get_watchlist_loader
-
         filename = pending.get("filename", "")
-        temp_path = None
-        try:
-            temp_path = _decode_upload_to_temp(pending.get("contents", ""), filename)
-            loader = get_watchlist_loader()
-            # Re-validate: the pending payload crossed the browser round-trip.
-            is_valid, errors = loader.validate_file(temp_path)
-            if not is_valid:
-                return (
-                    no_update,
-                    dbc.Alert(f"Invalid watchlist file: {'; '.join(errors)}",
-                              color="danger", duration=10000),
-                    None,
-                )
-            state, feedback = _import_and_activate_upload(
-                loader, temp_path, filename, overwrite=True
-            )
-            return state, feedback, None
-        except Exception as e:
-            return (
-                no_update,
-                dbc.Alert(f"Replace failed: {e}", color="danger", duration=8000),
-                None,
-            )
-        finally:
-            if temp_path is not None:
-                temp_path.unlink(missing_ok=True)
+        return (
+            dbc.Alert([
+                dbc.Spinner(size="sm", spinner_class_name="me-2"),
+                f"Replacing {filename}...",
+            ], color="info", className="py-2"),
+            None,
+            {"path": pending.get("path"), "filename": filename,
+             "overwrite": True, "nonce": os.urandom(4).hex()},
+        )
 
     @app.callback(
         [
@@ -1670,12 +1873,15 @@ def register_watchlist_callbacks(app: Dash) -> None:
             Output("watchlist-upload-pending", "data", allow_duplicate=True),
         ],
         Input("watchlist-upload-cancel-btn", "n_clicks"),
+        State("watchlist-upload-pending", "data"),
         prevent_initial_call=True,
     )
-    def handle_cancel_replace(n_clicks: int) -> Tuple:
+    def handle_cancel_replace(n_clicks: int, pending: Optional[Dict]) -> Tuple:
         """Operator declined the replacement; drop the pending upload."""
         if not n_clicks:
             raise PreventUpdate
+        if pending:
+            _discard_pending_upload(pending.get("path"))
         return (
             dbc.Alert("Upload cancelled; the existing file was kept.",
                       color="secondary", duration=5000),

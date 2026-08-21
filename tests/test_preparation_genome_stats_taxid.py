@@ -100,7 +100,12 @@ class TestStatsCountDbKeyedGenomes:
             lambda cache_dir=None: _Genomes())
 
         fn = self._app_and_fn()
-        out = fn(1, None, "preparation-tab", {"genome_cache_dir": str(tmp_path)})
+        from unittest.mock import patch as _patch
+        from nanometa_live.app.tabs import preparation_tab
+        with _patch.object(preparation_tab, "ctx") as mock_ctx:
+            mock_ctx.triggered_id = "genome-refresh-btn"
+            out = fn(1, None, "watchlist-tab",
+                     {"genome_cache_dir": str(tmp_path)})
         downloaded, missing = out[0], out[1]
 
         assert downloaded == "1", (

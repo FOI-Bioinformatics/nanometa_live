@@ -423,22 +423,25 @@ def OrganismCard(
             # Read count
             read_count_text,
 
-            # Confidence badge with explanatory tooltip
+            # Confidence badge. The explanation is a native title attribute,
+            # not a dbc.Tooltip: each Tooltip is a react-popper instance
+            # with its own DOM listeners, and one per card (129 on a large
+            # watchlist) froze the browser (audit 2026-08-21).
             html.Div([
-                dbc.Badge([
-                    html.I(className=f"bi bi-{confidence_icon} me-1"),
-                    confidence_label
-                ],
-                    color=confidence_color,
-                    className="me-2",
-                    id={"type": "confidence-badge", "taxid": taxid or 0},
-                ),
-                dbc.Tooltip(
-                    "Based on the number of matching DNA sequences. "
-                    "More sequences means higher confidence that this organism "
-                    "is truly present in the sample.",
-                    target={"type": "confidence-badge", "taxid": taxid or 0},
-                    placement="top",
+                html.Span(
+                    dbc.Badge([
+                        html.I(className=f"bi bi-{confidence_icon} me-1"),
+                        confidence_label
+                    ],
+                        color=confidence_color,
+                        className="me-2",
+                        id={"type": "confidence-badge", "taxid": taxid or 0},
+                    ),
+                    title=(
+                        "Based on the number of matching DNA sequences. "
+                        "More sequences means higher confidence that this "
+                        "organism is truly present in the sample."
+                    ),
                 ),
                 html.Small(
                     f"Identified at {_rank_to_plain_language(rank)} level",

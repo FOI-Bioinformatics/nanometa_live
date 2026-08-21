@@ -1546,6 +1546,15 @@ def register_preparation_callbacks(app):
         config: Dict,
     ) -> Tuple:
         """Update genome download statistics and list."""
+        # The tabs Input exists so the stats populate when the operator
+        # first opens this tab -- but it fires on EVERY tab switch, and the
+        # loop below stats every enabled entry (~500 syscalls at 129
+        # entries) and renders one item per missing genome. Skip when the
+        # switch went somewhere else; the refresh button and download
+        # completion still recompute unconditionally.
+        if ctx.triggered_id == "tabs" and active_tab != "watchlist-tab":
+            raise PreventUpdate
+
         from nanometa_live.core.utils.genome_manager import get_genome_manager
         from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
         from nanometa_live.app.layouts.watchlist_layout import (
