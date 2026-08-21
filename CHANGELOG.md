@@ -6,6 +6,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+A large-watchlist audit (2026-08-21): the 129-organism Bioshield watchlist
+froze Chrome during import and made the dashboard sluggish afterwards. Three
+independent causes were measured and fixed; watchlists up to 500 entries are
+now covered by regression tests.
+
+### Fixed
+- **Per-poll matching cost no longer scales with watchlist size times report
+  size.** The name-matching loop evaluated every (report row x entry) pair
+  (~1.5 s per pass at 129 entries x 2000 rows), the verdict banner ran it
+  twice per tick, the alert panel a third time, and nothing cached the
+  result. A precomputed entry index (`TaxonomyMatcher.build_entry_index`),
+  a single-pass above/below-threshold split, a content-keyed memo, and a
+  cached builtin+custom pathogen merge take the same work to ~12 ms per
+  tick. Behavior-identical, pinned by characterization tests against the
+  previous loop semantics.
+- **The browser no longer mounts the whole watchlist.** ~13,000 components
+  (1.9 MB of component JSON) were live in the DOM at 129 entries: every
+  watchlist's pathogen rows pre-rendered inside collapsed accordions, the
+  full table, 129 tooltip instances, 129 missing-genome items rebuilt on
+  every tab switch. Accordion rows now render on expand and unmount on
+  collapse, the pathogens table paginates at 25 rows, organism-card
+  tooltips are native `title` attributes, not-detected watched cards render
+  on first open, detected cards share the existing show-more cap, and
+  genome stats skip recomputing when the switch went to another tab.
+- **Importing a watchlist shows progress instead of a frozen screen.** The
+  upload ran synchronously on the request thread and parsed the YAML five
+  to six times. It now runs in a background worker with the per-entry
+  progress modal, parses at most twice (pinned by test), and no longer
+  round-trips the decoded file through the browser on a filename collision.
+- **Expanding a watchlist's pathogen list no longer collapses itself.** The
+  lazily added checkboxes re-fired the nested-toggle callback, which
+  treated the fire as an edit and re-rendered the file list over the
+  expanded content. No-op and unresolvable-taxid fires are now ignored.
+
+### Added
+- Regression guards: component-budget tests for every large rendering
+  surface, an O(rows + entries) matching-cost pin at the 500-entry /
+  5000-row design target, a parse-count budget for imports, and memo
+  isolation tests.
+
 ## [0.11.0] - 2026-08-20
 
 A subspecies resolution exercise: seven barcodes of simulated nanopore reads

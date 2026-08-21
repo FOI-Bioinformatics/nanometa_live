@@ -92,6 +92,19 @@ def _alert_text(component) -> str:
     return " ".join(out)
 
 
+@pytest.fixture(autouse=True)
+def _reset_manager_loader_cache():
+    """watchlist_manager keeps its own module-level loader cache
+    (``_get_watchlist_loader``). A test that runs a real manager method
+    while ``get_watchlist_loader`` is patched (the parse-count test)
+    freezes the patched, tmp-dir loader into that cache and every later
+    test in the process silently reads the wrong watchlist directory."""
+    from nanometa_live.core.watchlist import watchlist_manager as wm_mod
+    wm_mod._watchlist_loader = None
+    yield
+    wm_mod._watchlist_loader = None
+
+
 @pytest.fixture
 def user_wl_dir(tmp_path, monkeypatch):
     """Point the whole watchlist stack at a throwaway directory."""

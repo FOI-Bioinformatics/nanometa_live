@@ -502,6 +502,47 @@ session-scoped convenience, not a saved config.
 
 ## Watchlist System
 
+**Large-watchlist invariants (2026-08-21 audit; do not regress).** The
+129-entry Bioshield list froze Chrome via three independent mechanisms;
+each now has a guard and a test:
+
+- **Matching is index-based, O(rows + entries).** `TaxonomyMatcher.
+  build_entry_index` / `match_row_indexed` replace the per-(row x entry)
+  loop; only the alert-relevant tiers (score >= 0.7) are indexed because
+  the 0.7 alert floor makes lower tiers unobservable. `check_organisms_split`
+  / `check_organisms_with_mapping_split` return (above, below) from ONE
+  pass; the old entry points are wrappers. `_check_pathogens_both`
+  (dashboard_helpers) memoizes on (organisms digest,
+  `WatchlistManager.watchlist_signature()`, mapping signature) and returns
+  per-call copies — the validation overlay mutates alert dicts in place.
+  The signature is content-derived so edits invalidate by construction.
+  Equivalence + scaling pinned in `tests/test_watchlist_matching_equivalence.py`
+  (incl. N=500 x M=5000) and `tests/test_pathogen_check_memo.py`.
+- **The DOM holds roughly the visible set, not the watchlist.** Accordion
+  pathogen rows render on expand and unmount on collapse
+  (`toggle_watchlist_expand`); the pathogens table paginates
+  (`WATCHLIST_TABLE_PAGE_SIZE`, row ids keyed by taxid so ALL/MATCH
+  callbacks are page-agnostic); organism cards use native `title=` not
+  `dbc.Tooltip`; not-detected watched cards render from
+  `not-detected-species-store` on first open; `update_genome_stats` skips
+  tab switches away from the Watchlist tab. A collapsed `dbc.Collapse`
+  MOUNTS its children — never pre-render bulk content into one. Budgets
+  pinned in `tests/test_component_budgets.py`.
+- **Lazily added pattern-matching components re-fire ALL callbacks.**
+  Dash fires an ALL callback when matching components are ADDED, with
+  their current values. `toggle_nested_pathogen` ignores fires whose value
+  equals the entry's current state and fires whose taxid the manager
+  cannot resolve; without both guards, expanding a list bumped tab-state
+  and the resulting re-render wiped the expanded content. Apply the same
+  guard style to any new value-carrying ALL input that lazy rendering can
+  add.
+- **Watchlist import is the worker/Store/finalize split** (`handle_upload`
+  stages to `watchlists/.pending/`, `import_watchlist_worker` validates
+  with progress and copies, `finalize_watchlist_import` owns the session
+  side effects). `validate_and_parse` returns the parsed data; one import
+  parses the YAML at most twice (pinned in `tests/test_watchlist_upload.py`).
+  The collision confirm keeps only {path, filename} in the pending Store.
+
 Sources searched in priority order:
 
 1. Project: `{project_dir}/watchlists/*.yaml`
@@ -1208,7 +1249,7 @@ The `nanometa` conda env has Dash but neither `pytest-xdist` nor `pytest-cov`,
 so run the plain suite there with `-o addopts=""` and the coverage gate from
 the `nf-core` env, which has both.
 
-3973 tests as of 2026-08-20 (~108 skipped by default; measured coverage 75%).
+4023 tests as of 2026-08-21 (~110 skipped by default; measured coverage 75%).
 `pytest.ini` enforces a
 `fail_under = 74` floor on coverage runs only (the default `pytest` dev loop
 does not load coverage); the floor ratchets up as coverage rises — keep it ~1

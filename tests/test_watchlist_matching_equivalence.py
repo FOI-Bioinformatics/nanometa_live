@@ -398,3 +398,35 @@ class TestScaling:
         # Per row: normalize + variant set ~ 6 calls. Generous headroom;
         # the naive loop would need >= m_rows * n_entries = 51,600.
         assert calls["n"] <= 15 * n_entries + 8 * m_rows, calls["n"]
+
+    def test_target_scale_500_entries_5000_rows(self, monkeypatch):
+        """The design target: a 500-entry watchlist against a 5000-row
+        report stays O(M + N). The naive loop would need 2.5M pair
+        evaluations here."""
+        from nanometa_live.core.watchlist.validation.name_normalizer import (
+            get_name_normalizer,
+        )
+        with patch.object(WatchlistManager, "_save_toggle_state",
+                          lambda self: None):
+            mgr = WatchlistManager()
+            mgr._entries.clear()
+            mgr._name_index.clear()
+            for i in range(500):
+                mgr.add_custom_entry(_entry(
+                    500000 + i, f"Bigus organismus{i}",
+                    names_alt=[f"Bigus_A organismus{i}"],
+                ))
+            rows = [{"taxid": 800000 + i, "name": f"Missus taxon{i} extra",
+                     "reads": 50, "abundance": 0.1} for i in range(5000)]
+            normalizer = get_name_normalizer()
+            calls = {"n": 0}
+            orig = normalizer.normalize
+
+            def counting(name):
+                calls["n"] += 1
+                return orig(name)
+
+            monkeypatch.setattr(normalizer, "normalize", counting)
+            above, below = mgr.check_organisms_split(rows)
+            assert above == [] and below == []
+            assert calls["n"] <= 15 * 500 + 8 * 5000, calls["n"]

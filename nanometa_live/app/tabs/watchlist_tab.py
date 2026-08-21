@@ -101,12 +101,14 @@ def register_watchlist_callbacks(app: Dash) -> None:
     """
     # Sweep decoded uploads a previous session left in .pending/ (a worker
     # crash or restart between upload and finalize strands the file there).
-    # Registration runs once per app boot, in the main process.
+    # Registration runs once per app boot, in the main process. Resolved via
+    # the pure env resolver, NOT get_watchlist_loader(): instantiating the
+    # loader singleton here freezes it to registration-time environment,
+    # which leaks across tests and precedes the app's own configuration.
     try:
-        from nanometa_live.core.watchlist.watchlist_loader import (
-            get_watchlist_loader,
-        )
-        pending_dir = Path(get_watchlist_loader().user_watchlist_dir) / ".pending"
+        from nanometa_live.core.utils.paths import get_watchlists_dir_from_env
+
+        pending_dir = Path(get_watchlists_dir_from_env()) / ".pending"
         if pending_dir.is_dir():
             for stale in pending_dir.iterdir():
                 stale.unlink(missing_ok=True)
