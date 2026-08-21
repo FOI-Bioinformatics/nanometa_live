@@ -6,6 +6,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-08-21
+
 A large-watchlist audit (2026-08-21): the 129-organism Bioshield watchlist
 froze Chrome during import and made the dashboard sluggish afterwards. Three
 independent causes were measured and fixed; watchlists up to 500 entries are
