@@ -17,13 +17,14 @@ This replaces the separate pathogen_database and species_of_interest systems
 with a single, unified approach.
 """
 
+import hashlib
 import logging
 import os
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 if TYPE_CHECKING:
     from nanometa_live.core.taxonomy.taxid_mapping import TaxidMappingCollection
@@ -495,6 +496,10 @@ class WatchlistManager:
         # state file resolves to the project-local location via NanometaPaths.
         self._paths_config: Dict[str, Any] = {}
         self._loaded = False
+        # (watchlist_signature, EntryMatchIndex) built lazily by
+        # _entry_match_index. Content-keyed, so every mutation invalidates
+        # by construction -- there is no bump hook to forget.
+        self._match_index_cache: Optional[Tuple[str, Any]] = None
 
     def load_config(self, config: Dict[str, Any]) -> None:
         """
@@ -1049,9 +1054,68 @@ class WatchlistManager:
             List of alert dictionaries for matched organisms exceeding
             thresholds -- or, with ``below_threshold``, those under them
         """
-        alerts = []
+        above, below = self.check_organisms_split(detected_organisms)
+        return below if below_threshold else above
+
+    def _finalise_alerts(
+        self, alerts: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """One alert per watchlist entry (dominant node wins), then sort by
+        threat level (critical first)."""
+        alerts = self._dedupe_alerts_by_entry(alerts)
+        threat_order = {"critical": 0, "high": 1, "moderate": 2, "low": 3}
+        alerts.sort(
+            key=lambda x: threat_order.get(x.get("threat_level", "low"), 4))
+        return alerts
+
+    def watchlist_signature(
+        self, active_entries: Optional[Dict[int, WatchlistEntry]] = None
+    ) -> str:
+        """Content signature of the active watchlist.
+
+        Covers every entry field (dataclass repr), so any edit -- toggle,
+        threshold, alt names, threat level, db_taxid -- yields a new value.
+        Keys the entry-match index and the dashboard's pathogen-check memo;
+        being content-derived, a missed invalidation hook cannot serve
+        stale results.
+        """
+        if active_entries is None:
+            active_entries = self.get_active_entries()
+        parts = "|".join(repr(e) for e in active_entries.values())
+        return hashlib.md5(parts.encode("utf-8", "replace")).hexdigest()
+
+    def _entry_match_index(self, active_entries: Dict[int, WatchlistEntry]):
+        """Entry-match index for the given active set, cached on content.
+
+        Rebuilding costs O(entries); the win is per report row, where the
+        former inner loop recomputed name variants for every
+        (row x entry) pair.
+        """
+        signature = self.watchlist_signature(active_entries)
+        cached = self._match_index_cache
+        if cached is not None and cached[0] == signature:
+            return cached[1]
+        index = _get_taxonomy_matcher().build_entry_index(
+            list(active_entries.values()))
+        self._match_index_cache = (signature, index)
+        return index
+
+    def check_organisms_split(
+        self,
+        detected_organisms: List[Dict[str, Any]],
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Single matching pass, partitioned by alert threshold.
+
+        Returns ``(above, below)``: the alerts at or above their entry's
+        ``alert_threshold``, and the sub-threshold matches. The dashboard
+        needs both sides every tick, and matching is the expensive part --
+        one pass instead of two halves the dominant per-poll cost.
+        """
+        above: List[Dict[str, Any]] = []
+        below: List[Dict[str, Any]] = []
         active_entries = self.get_active_entries()
         matcher = _get_taxonomy_matcher()
+        match_index = self._entry_match_index(active_entries)
         # A raw taxid comparison is only meaningful when the database's taxids
         # are NCBI's. False is the safe default: trusting an unverified taxid
         # names the WRONG organism, while distrusting a good one only falls
@@ -1081,68 +1145,71 @@ class WatchlistManager:
                 entry = active_entries[taxid]
                 best_score = 1.0
             if entry is None:
-                # Use TaxonomyMatcher for name-based matching
-                for e in active_entries.values():
-                    score = matcher.match_organism(
-                        detected=organism,
-                        entry_name=e.name,
-                        entry_alt_names=e.names_alt,
-                        entry_taxid=e.taxid if e.taxid else None
-                    )
-                    if score > best_score:
-                        best_score = score
-                        entry = e
+                # Name-based matching against the prebuilt index; equivalent
+                # to looping match_organism over every entry (max score wins,
+                # first entry wins ties) at O(1) instead of O(entries).
+                entry, best_score = matcher.match_row_indexed(
+                    organism.get("name", ""), match_index)
 
             # 0.7 is the NAME-match floor; alert_threshold then decides which
             # side of the fence the hit lands on. Both sides are real matches
             # -- see check_organisms_with_mapping for why sub-threshold hits
             # are returned rather than dropped.
             if entry and best_score >= 0.7:
-                above = reads >= entry.alert_threshold
-                if above == below_threshold:
-                    continue
-                alerts.append({
-                    "taxid": entry.taxid,
-                    # The taxid as it appeared in the Kraken2 report. Callers
-                    # attribute detections to samples by this key; without it
-                    # attribution is unrecoverable on a GTDB or custom
-                    # database, where the report taxid differs from the
-                    # watchlist entry's NCBI taxid.
-                    "detected_taxid": taxid,
-                    "name": entry.name,
-                    "common_name": entry.common_name,
-                    "reads": reads,
-                    "abundance": organism.get("abundance", 0.0),
-                    "threat_level": entry.threat_level.value,
-                    "bsl": entry.bsl_level.value if entry.bsl_level else None,
-                    "category": entry.category,
-                    "notes": entry.notes,
-                    "action_required": entry.action_required,
-                    "organism_type": entry.organism_type,
-                    "annotation": entry.annotation,
-                    "source": entry.source.value,
-                    "threshold": entry.alert_threshold,
-                    "match_score": best_score,
-                    "detected_name": name,
-                    # Same disclosure as check_organisms_with_mapping: a
-                    # detection on a database node shared by several entries
-                    # (GTDB folds B. mallei into pseudomallei) genuinely
-                    # cannot say which organism it is, and this fallback
-                    # path is the NORMAL one whenever no mapping collection
-                    # exists -- announcing one name at full confidence there
-                    # is a false identification on a biothreat panel.
-                    "ambiguous_with": self._other_entries_on_node(
-                        taxid, db_to_ncbi, active_entries, entry
-                    ),
-                })
+                (above if reads >= entry.alert_threshold else below).append(
+                    self._alert_dict(entry, organism, taxid, best_score,
+                                     db_to_ncbi, active_entries))
 
-        # One alert per watchlist entry (dominant node wins), then sort by
-        # threat level (critical first).
-        alerts = self._dedupe_alerts_by_entry(alerts)
-        threat_order = {"critical": 0, "high": 1, "moderate": 2, "low": 3}
-        alerts.sort(key=lambda x: threat_order.get(x.get("threat_level", "low"), 4))
+        return self._finalise_alerts(above), self._finalise_alerts(below)
 
-        return alerts
+    def _alert_dict(
+        self,
+        entry: WatchlistEntry,
+        organism: Dict[str, Any],
+        detected_taxid: Optional[int],
+        best_score: float,
+        db_to_ncbi: Dict[int, List[int]],
+        active_entries: Dict[int, WatchlistEntry],
+        match_method: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Build one alert from a matched entry and its detected organism.
+
+        ``detected_taxid`` is the taxid as it appeared in the Kraken2 report.
+        Callers attribute detections to samples by this key; without it
+        attribution is unrecoverable on a GTDB or custom database, where the
+        report taxid differs from the watchlist entry's NCBI taxid.
+
+        ``ambiguous_with`` discloses the other watchlist entries sharing this
+        database node. A detection there genuinely cannot say which organism
+        it is (GTDB folds B. mallei into pseudomallei), and announcing one
+        name at full confidence would be a false identification on a
+        biothreat panel.
+        """
+        alert = {
+            "taxid": entry.taxid,
+            "detected_taxid": detected_taxid,
+            "name": entry.name,
+            "common_name": entry.common_name,
+            "reads": organism.get("reads", 0),
+            "abundance": organism.get("abundance", 0.0),
+            "threat_level": entry.threat_level.value,
+            "bsl": entry.bsl_level.value if entry.bsl_level else None,
+            "category": entry.category,
+            "notes": entry.notes,
+            "action_required": entry.action_required,
+            "organism_type": entry.organism_type,
+            "annotation": entry.annotation,
+            "source": entry.source.value,
+            "threshold": entry.alert_threshold,
+            "match_score": best_score,
+            "detected_name": organism.get("name", "").strip(),
+            "ambiguous_with": self._other_entries_on_node(
+                detected_taxid, db_to_ncbi, active_entries, entry
+            ),
+        }
+        if match_method is not None:
+            alert["match_method"] = match_method
+        return alert
 
     def add_custom_entry(self, entry_data: Dict[str, Any]) -> WatchlistEntry:
         """Add a custom entry to the watchlist."""
@@ -1975,16 +2042,64 @@ class WatchlistManager:
         Returns:
             List of alert dictionaries for matched organisms exceeding thresholds
         """
+        above, below = self.check_organisms_with_mapping_split(
+            detected_organisms, mapping_collection)
+        return below if below_threshold else above
+
+    @staticmethod
+    def _reverse_mapping_hit(
+        detected_taxid: int,
+        db_to_ncbi: Dict[int, List[int]],
+        active_entries: Dict[int, WatchlistEntry],
+        mapping_collection: "TaxidMappingCollection",
+    ) -> Optional[Tuple[WatchlistEntry, float]]:
+        """Resolve a database taxid to a watchlist entry via the reverse map.
+
+        Carries the generated mapping's own confidence when there is one. An
+        operator-set db_taxid has no mapping record, and scores 1.0: it is an
+        explicit statement, not a guess. ``or`` would promote a genuine 0.0
+        mapping score to 0.9, turning a no-confidence mapping into a strong
+        match; only an ABSENT score takes the default.
+        """
+        ncbi_taxid = db_to_ncbi[detected_taxid][0]
+        entry = active_entries.get(ncbi_taxid)
+        if entry is None:
+            return None
+        mapping = mapping_collection.mappings.get(ncbi_taxid)
+        if mapping:
+            score = (mapping.match_score
+                     if mapping.match_score is not None else 0.9)
+        elif getattr(entry, "db_taxid", None) == detected_taxid:
+            score = 1.0
+        else:
+            score = 0.9
+        return entry, score
+
+    def check_organisms_with_mapping_split(
+        self,
+        detected_organisms: List[Dict[str, Any]],
+        mapping_collection: Optional["TaxidMappingCollection"] = None,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Single mapping-aware matching pass, partitioned by threshold.
+
+        Returns ``(above, below)`` like :meth:`check_organisms_split`, using
+        the taxid mapping steps first and the indexed name matcher as the
+        fallback.
+        """
         # If no mapping collection, fall back to standard method
         if not mapping_collection:
-            return self.check_organisms(
-                detected_organisms, below_threshold=below_threshold)
+            return self.check_organisms_split(detected_organisms)
 
-
-        alerts = []
+        above: List[Dict[str, Any]] = []
+        below: List[Dict[str, Any]] = []
         active_entries = self.get_active_entries()
 
         db_to_ncbi = self._build_db_taxid_index(active_entries, mapping_collection)
+        matcher = _get_taxonomy_matcher()
+        match_index = self._entry_match_index(active_entries)
+        # See the note on the equivalent gate in check_organisms for why
+        # False is the safe default rather than True. Loop-invariant.
+        db_is_ncbi = bool(mapping_collection.profile.taxids_are_ncbi)
 
         for organism in detected_organisms:
             detected_taxid = organism.get("taxid")
@@ -1995,14 +2110,7 @@ class WatchlistManager:
             best_score = 0.0
             match_method = "none"
 
-            # Try to find matching entry
-            # 1. First, try direct NCBI taxid match. See the note on the
-            #    equivalent gate in check_organisms for why False is the safe
-            #    default rather than True.
-            db_is_ncbi = bool(
-                mapping_collection and mapping_collection.profile.taxids_are_ncbi
-            )
-
+            # 1. First, try direct NCBI taxid match.
             if db_is_ncbi and detected_taxid and detected_taxid in active_entries:
                 entry = active_entries[detected_taxid]
                 best_score = 1.0
@@ -2010,86 +2118,32 @@ class WatchlistManager:
 
             # 2. Try reverse mapping from database taxid to NCBI taxid
             if not entry and detected_taxid and detected_taxid in db_to_ncbi:
-                ncbi_taxid = db_to_ncbi[detected_taxid][0]
-                if ncbi_taxid in active_entries:
-                    entry = active_entries[ncbi_taxid]
-                    # Carry the generated mapping's own confidence when there
-                    # is one. An operator-set db_taxid has no mapping record,
-                    # and scores 1.0: it is an explicit statement, not a guess.
-                    mapping = mapping_collection.mappings.get(ncbi_taxid)
-                    if mapping:
-                        # `or` would promote a genuine 0.0 score to 0.9, turning a
-                        # no-confidence mapping into a strong match; only an
-                        # ABSENT score takes the default.
-                        best_score = (
-                            mapping.match_score
-                            if mapping.match_score is not None else 0.9
-                        )
-                    elif getattr(entry, "db_taxid", None) == detected_taxid:
-                        best_score = 1.0
-                    else:
-                        best_score = 0.9
+                hit = self._reverse_mapping_hit(
+                    detected_taxid, db_to_ncbi, active_entries,
+                    mapping_collection)
+                if hit is not None:
+                    entry, best_score = hit
                     match_method = "taxid_mapping"
 
-            # 3. Fall back to name-based matching using TaxonomyMatcher
+            # 3. Fall back to name-based matching against the prebuilt
+            #    index; equivalent to looping match_organism over every
+            #    entry (max score wins, first entry wins ties).
             if not entry:
-                matcher = _get_taxonomy_matcher()
-                for e in active_entries.values():
-                    score = matcher.match_organism(
-                        detected=organism,
-                        entry_name=e.name,
-                        entry_alt_names=e.names_alt,
-                        entry_taxid=e.taxid if e.taxid else None
-                    )
-                    if score > best_score:
-                        best_score = score
-                        entry = e
-                        match_method = "name_matching"
+                m_entry, m_score = matcher.match_row_indexed(
+                    organism.get("name", ""), match_index)
+                if m_entry is not None:
+                    entry, best_score = m_entry, m_score
+                    match_method = "name_matching"
 
             # Threshold decides which side of the fence a match lands on;
             # both sides are real matches.
             if entry and best_score >= 0.7:
-                above = reads >= entry.alert_threshold
-                if above == below_threshold:
-                    continue
-                alerts.append({
-                    "taxid": entry.taxid,
-                    "detected_taxid": detected_taxid,
-                    "name": entry.name,
-                    "common_name": entry.common_name,
-                    "reads": reads,
-                    "abundance": organism.get("abundance", 0.0),
-                    "threat_level": entry.threat_level.value,
-                    "bsl": entry.bsl_level.value if entry.bsl_level else None,
-                    "category": entry.category,
-                    "notes": entry.notes,
-                    "action_required": entry.action_required,
-                    "organism_type": entry.organism_type,
-                    "annotation": entry.annotation,
-                    "source": entry.source.value,
-                    "threshold": entry.alert_threshold,
-                    "match_score": best_score,
-                    "match_method": match_method,
-                    "detected_name": name,
-                    # Other watchlist entries sharing this database node. A
-                    # detection here cannot distinguish them, so naming only
-                    # the first would state a species -- and on a biothreat
-                    # panel a disease -- with more confidence than the data
-                    # supports. GTDB merges Burkholderia mallei into
-                    # pseudomallei, so a melioidosis case would otherwise be
-                    # reported as glanders.
-                    "ambiguous_with": self._other_entries_on_node(
-                        detected_taxid, db_to_ncbi, active_entries, entry
-                    ),
-                })
+                (above if reads >= entry.alert_threshold else below).append(
+                    self._alert_dict(entry, organism, detected_taxid,
+                                     best_score, db_to_ncbi, active_entries,
+                                     match_method=match_method))
 
-        # One alert per watchlist entry (dominant node wins), then sort by
-        # threat level (critical first).
-        alerts = self._dedupe_alerts_by_entry(alerts)
-        threat_order = {"critical": 0, "high": 1, "moderate": 2, "low": 3}
-        alerts.sort(key=lambda x: threat_order.get(x.get("threat_level", "low"), 4))
-
-        return alerts
+        return self._finalise_alerts(above), self._finalise_alerts(below)
 
 
 # Module-level singleton instance with thread-safe initialization.

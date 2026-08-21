@@ -10,6 +10,8 @@ register_dashboard_callbacks() block.
 
 import os
 import glob
+from collections import OrderedDict
+
 import pandas as pd
 from dataclasses import dataclass
 from typing import Dict, Any, List, Tuple, Optional
@@ -2079,6 +2081,97 @@ def _get_active_watchlist_entries(config: Dict[str, Any]) -> List[Dict[str, Any]
 
     return active_entries
 
+# Memo for _check_pathogens_both, keyed on (organisms digest, watchlist
+# signature, mapping signature). The dashboard runs the same matching pass
+# 3-4 times per interval tick (verdict banner, alert panel, dashboard
+# alerts); at 129 watchlist entries x thousands of report rows that was
+# seconds of identical recomputation per tick. Content-keyed, so watchlist
+# edits and new results invalidate by construction. Two keys retained:
+# the ticking callbacks share one, and one edit-in-flight can coexist.
+_pathogen_check_memo: "OrderedDict[tuple, tuple]" = OrderedDict()
+_PATHOGEN_CHECK_MEMO_KEYS = 2
+
+
+def _copy_alerts(alerts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Per-call copies of memoized alerts.
+
+    The validation-overlay helpers below attach summaries onto alert dicts
+    in place; handing out the cached dicts would leak one tick's mutations
+    into the next.
+    """
+    return [
+        dict(a, ambiguous_with=list(a.get("ambiguous_with", ())))
+        for a in alerts
+    ]
+
+
+def _pathogen_check_memo_key(
+    detected_organisms: List[Dict[str, Any]],
+    manager,
+    mapping_collection,
+) -> tuple:
+    organisms_digest = hash(tuple(
+        (o.get("taxid"), o.get("name"), o.get("reads"), o.get("abundance"))
+        for o in detected_organisms
+    ))
+    mapping_sig = (
+        (id(mapping_collection), len(mapping_collection.mappings))
+        if mapping_collection else None
+    )
+    return (organisms_digest, manager.watchlist_signature(), mapping_sig)
+
+
+def _check_pathogens_both(
+    detected_organisms: List[Dict[str, Any]],
+    config: Optional[Dict[str, Any]] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """One matching pass returning (dangerous, subthreshold), memoized.
+
+    Same resolution order as the former ``_check_pathogens_with_mapping``:
+    the mapping-aware check when a mapping collection exists, the standard
+    check otherwise, and the legacy ``check_for_dangerous_pathogens`` on
+    error (which has no sub-threshold notion, so that side stays empty).
+    """
+    if not detected_organisms:
+        return [], []
+
+    try:
+        manager = get_watchlist_manager()
+        if not manager._loaded and config:
+            manager.load_config(config)
+
+        from nanometa_live.core.taxonomy.taxid_mapping import get_mapping_collection
+        mapping_collection = get_mapping_collection()
+
+        key = None
+        if manager._loaded:
+            key = _pathogen_check_memo_key(
+                detected_organisms, manager, mapping_collection)
+            cached = _pathogen_check_memo.get(key)
+            if cached is not None:
+                return _copy_alerts(cached[0]), _copy_alerts(cached[1])
+
+        if mapping_collection:
+            dangerous, subthreshold = manager.check_organisms_with_mapping_split(
+                detected_organisms, mapping_collection)
+        else:
+            logger.debug(
+                "No taxid mapping available, falling back to standard organism check")
+            dangerous, subthreshold = manager.check_organisms_split(
+                detected_organisms)
+
+        if key is not None:
+            _pathogen_check_memo[key] = (dangerous, subthreshold)
+            while len(_pathogen_check_memo) > _PATHOGEN_CHECK_MEMO_KEYS:
+                _pathogen_check_memo.popitem(last=False)
+        return _copy_alerts(dangerous), _copy_alerts(subthreshold)
+
+    except Exception as e:
+        logger.warning(f"Error in pathogen check with mapping: {e}")
+        watched_species = _get_active_watchlist_entries(config) if config else []
+        return check_for_dangerous_pathogens(detected_organisms, watched_species), []
+
+
 def _check_pathogens_with_mapping(
     detected_organisms: List[Dict[str, Any]],
     config: Optional[Dict[str, Any]] = None,
@@ -2102,48 +2195,8 @@ def _check_pathogens_with_mapping(
     Returns:
         List of detected dangerous pathogens with full information
     """
-    if not detected_organisms:
-        return []
-
-    try:
-        # Get WatchlistManager
-        manager = get_watchlist_manager()
-
-        # Ensure manager is loaded
-        if not manager._loaded and config:
-            manager.load_config(config)
-
-        # Get taxid mapping collection for proper db_taxid -> ncbi_taxid lookup
-        from nanometa_live.core.taxonomy.taxid_mapping import get_mapping_collection
-        mapping_collection = get_mapping_collection()
-
-        # Use the proper mapping-aware check function
-        if mapping_collection:
-            # WatchlistManager.check_organisms_with_mapping() properly handles:
-            # 1. Direct NCBI taxid match
-            # 2. Reverse mapping from Kraken2 db_taxid to NCBI taxid
-            # 3. Name-based matching as fallback
-            return manager.check_organisms_with_mapping(
-                detected_organisms,
-                mapping_collection,
-                below_threshold=below_threshold,
-            )
-        else:
-            # Fall back to standard method if no mapping available
-            # This still uses name matching as backup
-            logger.debug("No taxid mapping available, falling back to standard organism check")
-            return manager.check_organisms(
-                detected_organisms, below_threshold=below_threshold)
-
-    except Exception as e:
-        logger.warning(f"Error in pathogen check with mapping: {e}")
-        # Fall back to old method on error
-        if below_threshold:
-            # The legacy fallback has no sub-threshold notion; better to show
-            # nothing here than to invent it.
-            return []
-        watched_species = _get_active_watchlist_entries(config) if config else []
-        return check_for_dangerous_pathogens(detected_organisms, watched_species)
+    dangerous, subthreshold = _check_pathogens_both(detected_organisms, config)
+    return subthreshold if below_threshold else dangerous
 
 
 # ---------------------------------------------------------------------------
