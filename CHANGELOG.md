@@ -14,6 +14,17 @@ synthetic 96-barcode tree: the three per-tick attribution passes went from
 cliff, and the per-tick browser upload drops roughly 35x.
 
 ### Fixed
+- **Watchlist rows now address entries by the manager's storage key.** A
+  fork entry (two Kraken2 database nodes sharing one NCBI taxid, such as
+  the two *Burkholderia mallei* nodes) is stored under its `db_taxid`,
+  while the UI addressed entries by the shared NCBI taxid: Disable All
+  left 4 of 129 Bioshield entries active, Verify-all validated one of
+  each pair twice and the other never, the fork rows carried duplicate
+  component ids, and the accordion preview showed and toggled the
+  sibling's state. Entry dicts now carry the storage key
+  (`manager_key`), row component ids and bulk operations use it, and
+  the NCBI taxid remains for display, reference links and genome
+  lookups.
 - **Per-tick server work no longer scales with barcode count several times
   over.** Loader cache capacity now scales with the detected sample count
   (a fixed cap of 100 evicted two thirds of ~300 live keys at 96 barcodes
