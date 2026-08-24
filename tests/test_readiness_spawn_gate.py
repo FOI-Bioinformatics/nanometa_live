@@ -119,3 +119,38 @@ class TestWorkerFiresFromTheStoreOnly:
         assert 'Input("update-interval"' not in dec, (
             "the per-tick Input is exactly what spawned a process per tick"
         )
+
+
+class TestNoBackgroundCallbackFiresPerTick:
+    """Structural fence: no background callback may take a per-tick Input.
+
+    Each DiskcacheManager invocation spawns an OS process and leaks
+    parent-side pipe fds; the soak measured three per-tick background
+    callbacks (readiness, Organisms, QC summary) driving 28-34 fds/min.
+    All three now fire from gate-bumped due Stores. This test greps every
+    background=True decorator for update-interval so the class of defect
+    cannot quietly return.
+    """
+
+    def test_no_update_interval_input_on_background_callbacks(self):
+        import re
+        from pathlib import Path
+        import nanometa_live
+        pkg = Path(nanometa_live.__file__).parent / "app"
+        offenders = []
+        for f in pkg.rglob("*.py"):
+            src = f.read_text()
+            for m in re.finditer(
+                    r"@app\.callback\((.*?)\n    \)\s*\n\s*def (\w+)\(",
+                    src, re.DOTALL):
+                dec, name = m.group(1), m.group(2)
+                if "background=True" not in dec:
+                    continue
+                inputs = re.findall(r'Input\("([^"]+)"', dec)
+                if "update-interval" in inputs:
+                    offenders.append(f"{f.name}::{name}")
+        assert not offenders, (
+            f"background callbacks with a per-tick Input: {offenders} -- "
+            "each tick spawns a worker process that leaks pipe fds; use a "
+            "synchronous main-process gate bumping a due Store instead"
+        )

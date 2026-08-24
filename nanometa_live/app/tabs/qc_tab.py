@@ -242,6 +242,29 @@ def register_qc_callbacks(app: Dash):
             return error_figures
 
     @app.callback(
+        Output("qc-stats-due", "data"),
+        [
+            Input("results-fingerprint", "data"),
+            Input("selected-sample", "data"),
+            Input("update-interval", "n_intervals"),
+        ],
+        [
+            State("qc-stats-rendered-fp", "data"),
+            State("qc-stats-due", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def gate_qc_stats(_fingerprint, _sample, _n, rendered_fp, due):
+        """Main-process gate for the QC summary rebuild (round 3).
+
+        Same defect class as gate_main_results: the background worker was
+        spawned every tick just to PreventUpdate. The guard runs here.
+        """
+        if interval_tick_is_redundant_store(ctx, rendered_fp, _fingerprint):
+            raise PreventUpdate
+        return {"n": int((due or {}).get("n", 0)) + 1}
+
+    @app.callback(
         [
             Output("qc-reads-pre-filtering", "children"),
             Output("qc-reads-passed", "children"),
@@ -257,12 +280,10 @@ def register_qc_callbacks(app: Dash):
             # interval_tick_is_redundant_store.
             Output("qc-stats-rendered-fp", "data"),
         ],
+        Input("qc-stats-due", "data"),
         [
-            Input("results-fingerprint", "data"),
-            Input("selected-sample", "data"),
-            Input("update-interval", "n_intervals"),
-        ],
-        [
+            State("results-fingerprint", "data"),
+            State("selected-sample", "data"),
             State("app-config", "data"),
             State("backend-status", "data"),
             # The interval-backstop memo has to round-trip through a Store:
@@ -279,11 +300,11 @@ def register_qc_callbacks(app: Dash):
         background=True,
         manager=background_callback_manager,
     )
-    def update_qc_stats(_fingerprint, selected_sample, _n_intervals, config,
+    def update_qc_stats(_due, _fingerprint, selected_sample, config,
                         status, rendered_fp):
         """Update the QC statistics based on the latest data."""
-        if interval_tick_is_redundant_store(ctx, rendered_fp, _fingerprint):
-            raise PreventUpdate
+        # Redundancy is decided by the main-process gate (round 3); this
+        # worker fires only when qc-stats-due bumps.
         rendered = fp_to_store(_fingerprint)
 
         # Default values for when no data is available

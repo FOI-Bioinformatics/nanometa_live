@@ -232,6 +232,36 @@ def register_main_callbacks(app: Dash):
         return children
 
     @app.callback(
+        Output("main-results-due", "data"),
+        [
+            Input("results-fingerprint", "data"),
+            Input("apply-organism-filters", "n_clicks"),
+            Input("selected-sample", "data"),
+            Input("main-watchlist-store", "data"),
+            Input("update-interval", "n_intervals"),  # Polling backstop
+        ],
+        [
+            State("main-results-rendered-fp", "data"),
+            State("main-results-due", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def gate_main_results(_fingerprint, _clicks, _sample, _wl, _n,
+                          rendered_fp, due):
+        """Main-process gate for the Organisms rebuild (round 3).
+
+        The worker below is background=True; with update-interval as a
+        direct Input, DiskcacheManager spawned a worker process on every
+        tick just to evaluate the redundancy guard and PreventUpdate --
+        one of the two per-tick spawns behind the soak's pipe-fd leak.
+        The guard runs HERE, synchronously; the worker fires only when
+        this Store bumps.
+        """
+        if interval_tick_is_redundant_store(ctx, rendered_fp, _fingerprint):
+            raise PreventUpdate
+        return {"n": int((due or {}).get("n", 0)) + 1}
+
+    @app.callback(
         [
             Output("organism-summary-container", "children"),
             Output("organism-cards-container", "children"),
@@ -247,14 +277,12 @@ def register_main_callbacks(app: Dash):
             # fresh per invocation, so an in-process memo is empty every time.
             Output("main-results-rendered-fp", "data"),
         ],
+        Input("main-results-due", "data"),
         [
-            Input("results-fingerprint", "data"),
-            Input("apply-organism-filters", "n_clicks"),
-            Input("selected-sample", "data"),
-            Input("main-watchlist-store", "data"),  # React to watchlist changes
-            Input("update-interval", "n_intervals"),  # Polling backstop
-        ],
-        [
+            State("results-fingerprint", "data"),
+            State("apply-organism-filters", "n_clicks"),
+            State("selected-sample", "data"),
+            State("main-watchlist-store", "data"),
             State("top-organisms-count", "value"),
             State("min-abundance", "value"),
             State("tax-rank-filter", "value"),
@@ -281,8 +309,8 @@ def register_main_callbacks(app: Dash):
         manager=background_callback_manager,
     )
     def update_main_results(
-        _fingerprint, apply_clicks, selected_sample, watchlist_store,
-        _n_intervals, top_count, min_abundance, tax_ranks, config, status,
+        _due, _fingerprint, apply_clicks, selected_sample, watchlist_store,
+        top_count, min_abundance, tax_ranks, config, status,
         overall_status_cache, rendered_fp,
     ):
         """
@@ -301,13 +329,9 @@ def register_main_callbacks(app: Dash):
 
         Note: Charts have been moved to Taxonomy tab to reduce redundancy.
         """
-        # Interval ticks are a backstop only: skip the rebuild when the
-        # results fingerprint has not advanced since this tab last rendered,
-        # so the Organisms view does not re-read Kraken2 every poll on a quiet
-        # outdir. User actions (Apply, sample, watchlist, filters) are not
-        # "interval" triggers, so they always render.
-        if interval_tick_is_redundant_store(ctx, rendered_fp, _fingerprint):
-            raise PreventUpdate
+        # The redundancy decision lives in the main-process GATE below
+        # (round 3): this worker fires only when the gate bumped
+        # main-results-due, so a quiet tick never spawns a process here.
         rendered = fp_to_store(_fingerprint)
 
         # Default empty returns

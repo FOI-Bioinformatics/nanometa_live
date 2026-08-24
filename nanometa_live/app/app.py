@@ -447,6 +447,8 @@ def create_app(
         # Round 3: bumps only when a readiness recompute is genuinely due,
         # so the background worker is not spawned once per tick.
         dcc.Store(id='readiness-recompute-due', data=None),
+        dcc.Store(id='main-results-due', data=None),
+        dcc.Store(id='qc-stats-due', data=None),
 
         # Shared stores for cross-tab communication (Watchlist <-> Preparation)
         dcc.Store(id='taxmap-collection', data=None),
