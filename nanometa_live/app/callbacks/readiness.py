@@ -170,6 +170,64 @@ def _reap_spawn_children() -> None:
         pass
 
 
+# ---------------------------------------------------------------------------
+# Main-process probe thread (round 3, phase 6 follow-up)
+#
+# Even with the TTL gate, the idle 60 s tick meets an expired 60 s TTL every
+# time, so the background worker still spawned once per minute -- and each
+# DiskcacheManager spawn leaks parent-side pipe fds that reaping does not
+# reclaim (measured 5-7 fds/min on the soak). The PERIODIC recompute
+# therefore runs in a plain daemon THREAD in the main process (the round-2
+# start/stop pattern): no process spawn, no pipes, and the probes were
+# in-process before round 2 anyway. The gate feeds the thread the latest
+# config/snapshot (threads cannot read dcc.Stores) and publishes finished
+# results synchronously. The background worker remains only for the
+# explicit "Check Everything" button, where a spawn per click is fine.
+# ---------------------------------------------------------------------------
+_probe_lock = threading.Lock()
+_probe_input: dict = {}
+_probe_result: dict = {}
+_probe_wakeup = threading.Event()
+_probe_thread_started = False
+
+
+def _probe_loop() -> None:
+    while True:
+        _probe_wakeup.wait(timeout=_READINESS_TTL)
+        _probe_wakeup.clear()
+        with _probe_lock:
+            config = _probe_input.get("config")
+            entries = _probe_input.get("watchlist_entries")
+            genome = _probe_input.get("genome_changed", False)
+            _probe_input["genome_changed"] = False
+        if not config:
+            continue
+        try:
+            from nanometa_live.core.workflow.readiness_checker import (
+                ReadinessChecker,
+            )
+            report = ReadinessChecker().check_readiness(
+                config, watchlist_entries=entries, reload_genomes=genome)
+            new = _serialize_report(report)
+        except Exception as e:
+            logging.error(f"Readiness probe thread failed: {e}")
+            new = _empty_readiness_state(str(e))
+        with _probe_lock:
+            _probe_result["state"] = new
+            _probe_result["ts"] = time.time()
+            _probe_result["fingerprint"] = _readiness_fingerprint(
+                config, entries)
+
+
+def _ensure_probe_thread() -> None:
+    global _probe_thread_started
+    if _probe_thread_started:
+        return
+    _probe_thread_started = True
+    threading.Thread(target=_probe_loop, daemon=True,
+                     name="readiness-probes").start()
+
+
 def register_readiness(app, backend_manager):
     # Recompute callback: the ONLY place that runs ReadinessChecker. It writes
     # the shared readiness-state Store; both the header pill (below) and the
@@ -193,33 +251,67 @@ def register_readiness(app, backend_manager):
     )
     def gate_readiness_recompute(_n, config, _clicks, _genome, probe_stamp,
                                  watchlist_entries, due):
-        """Main-process gate in front of the background readiness worker.
+        """Main-process gate: feed the probe thread and publish its results.
 
         Round 3: the worker had update-interval as a direct Input, so
-        DiskcacheManager spawned a NEW OS process every tick just to
-        evaluate the TTL and return no_update -- and each spawn leaked
-        parent-side pipe fds (measured live: 28-34 fds/min during a run,
-        4,500+ pipes after two hours). The TTL/fingerprint check is pure
-        and cheap, so it runs HERE; the worker fires only when this Store
-        bumps. The gate also reaps finished worker processes.
+        DiskcacheManager spawned a process per tick (leaking pipe fds).
+        The periodic path now never spawns: this callback hands the
+        current config/snapshot to the daemon probe thread, wakes it when
+        the TTL window has lapsed or a genome event landed, and publishes
+        the thread's finished result into the due Store for the
+        synchronous publisher below. Only the explicit "Check Everything"
+        button still routes to the background worker.
         """
         _reap_spawn_children()
+        _ensure_probe_thread()
 
         trig = None
         try:
             trig = dash.ctx.triggered_id
         except Exception:
             pass
-        forced = trig in ("check-readiness-btn", "genome-download-complete")
-        if not forced:
-            fingerprint = _readiness_fingerprint(config, watchlist_entries)
-            if _probe_window_is_fresh(probe_stamp, fingerprint, time.time()):
-                raise PreventUpdate
-        return {
-            "n": int((due or {}).get("n", 0)) + 1,
-            "forced": forced,
-            "genome": trig == "genome-download-complete",
-        }
+
+        if trig == "check-readiness-btn":
+            return {
+                "n": int((due or {}).get("n", 0)) + 1,
+                "forced": True,
+                "genome": False,
+            }
+
+        with _probe_lock:
+            _probe_input["config"] = config
+            _probe_input["watchlist_entries"] = watchlist_entries
+            if trig == "genome-download-complete":
+                _probe_input["genome_changed"] = True
+        fingerprint = _readiness_fingerprint(config, watchlist_entries)
+        fresh = _probe_window_is_fresh(probe_stamp, fingerprint, time.time())
+        if trig == "genome-download-complete" or not fresh:
+            _probe_wakeup.set()
+        raise PreventUpdate
+
+    @app.callback(
+        Output("readiness-state", "data", allow_duplicate=True),
+        Output("readiness-probe-stamp", "data", allow_duplicate=True),
+        Input("update-interval", "n_intervals"),
+        State("readiness-probe-stamp", "data"),
+        State("readiness-state", "data"),
+        prevent_initial_call="initial_duplicate",
+    )
+    def publish_probe_result(_n, probe_stamp, prev_state):
+        """Publish the probe thread's latest result, deduplicated."""
+        with _probe_lock:
+            result = dict(_probe_result)
+        if not result.get("state"):
+            raise PreventUpdate
+        ts = result.get("ts", 0.0)
+        if isinstance(probe_stamp, dict) and \
+                float(probe_stamp.get("ts") or 0.0) >= ts:
+            raise PreventUpdate
+        stamp = {"fingerprint": result.get("fingerprint", ""), "ts": ts}
+        new = result["state"]
+        if _readiness_unchanged(prev_state, new):
+            return no_update, stamp
+        return new, stamp
 
     @app.callback(
         Output("readiness-state", "data"),

@@ -40,26 +40,33 @@ CONFIG = {"kraken_db": "/db", "pipeline_profile": "conda"}
 
 
 class TestGate:
-    def test_fresh_ttl_prevents_update(self):
+    def test_fresh_ttl_prevents_update_without_wakeup(self):
         import nanometa_live.app.callbacks.readiness as rd
         app = _app()
         fn = _gate(app)
         fp = rd._readiness_fingerprint(CONFIG, None)
         stamp = {"fingerprint": fp, "ts": time.time()}
+        rd._probe_wakeup.clear()
         with ctx_with("update-interval"):
             with pytest.raises(PreventUpdate):
                 fn(5, CONFIG, 0, None, stamp, None, {"n": 3})
+        assert not rd._probe_wakeup.is_set(), (
+            "a fresh window must not wake the probe thread")
 
-    def test_expired_ttl_bumps_the_counter(self):
+    def test_expired_ttl_wakes_the_probe_thread(self):
+        # The periodic path never spawns a worker: an expired TTL wakes
+        # the main-process probe thread and PreventUpdates.
         import nanometa_live.app.callbacks.readiness as rd
         app = _app()
         fn = _gate(app)
         fp = rd._readiness_fingerprint(CONFIG, None)
         stamp = {"fingerprint": fp, "ts": time.time() - 999}
+        rd._probe_wakeup.clear()
         with ctx_with("update-interval"):
-            due = fn(5, CONFIG, 0, None, stamp, None, {"n": 3})
-        assert due["n"] == 4
-        assert not due.get("forced")
+            with pytest.raises(PreventUpdate):
+                fn(5, CONFIG, 0, None, stamp, None, {"n": 3})
+        assert rd._probe_wakeup.is_set()
+        rd._probe_wakeup.clear()
 
     def test_button_forces_and_flags(self):
         import nanometa_live.app.callbacks.readiness as rd
@@ -71,15 +78,21 @@ class TestGate:
             due = fn(5, CONFIG, 1, None, stamp, None, None)
         assert due["forced"] is True
 
-    def test_genome_completion_forces_with_genome_flag(self):
+    def test_genome_completion_wakes_thread_with_genome_flag(self):
         import nanometa_live.app.callbacks.readiness as rd
         app = _app()
         fn = _gate(app)
         fp = rd._readiness_fingerprint(CONFIG, None)
         stamp = {"fingerprint": fp, "ts": time.time()}
+        rd._probe_wakeup.clear()
         with ctx_with("genome-download-complete"):
-            due = fn(5, CONFIG, 0, {"x": 1}, stamp, None, {"n": 0})
-        assert due["forced"] is True and due["genome"] is True
+            with pytest.raises(PreventUpdate):
+                fn(5, CONFIG, 0, {"x": 1}, stamp, None, {"n": 0})
+        assert rd._probe_wakeup.is_set()
+        with rd._probe_lock:
+            assert rd._probe_input.get("genome_changed") is True
+            rd._probe_input["genome_changed"] = False
+        rd._probe_wakeup.clear()
 
     def test_gate_reaps_finished_children(self):
         import nanometa_live.app.callbacks.readiness as rd
