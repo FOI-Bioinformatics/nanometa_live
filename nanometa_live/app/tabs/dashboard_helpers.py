@@ -1798,6 +1798,20 @@ def _create_pathogen_alert_panel(
         high_count = 0
         watch_count = 0
 
+        # Display cap: every hit is still counted (tier counts + the
+        # overflow row state the total), but only the first
+        # ALERT_PANEL_CARD_CAP cards are built. Detections arrive
+        # threat-sorted, so the cap can never hide the worst hits, and the
+        # verdict banner remains the uncapped alarm surface. Uncapped, 129
+        # hits x per-sample popovers were 17.8k-55k components per tick
+        # (round-2 audit, 2026-08-22).
+        overflow_detections = dangerous_detections[ALERT_PANEL_CARD_CAP:]
+        # One lazy popover per resolved attribution key: two entries can
+        # legitimately share a database node (GTDB folds B. mallei into
+        # pseudomallei), and duplicate dict ids tear Dash's bookkeeping --
+        # the second card falls back to the eager popover.
+        used_attribution_keys: set = set()
+
         for detection in dangerous_detections:
             threat_level = detection.get("threat_level", "moderate")
             pathogen_name = detection.get("name", "Unknown organism")
@@ -1834,51 +1848,87 @@ def _create_pathogen_alert_panel(
                     "n_samples": len(detection_samples),
                 }
 
+            # The resolved attribution key: the same lookup order
+            # samples_for_detection uses, so the on-open popover reads the
+            # exact list this card's chips summarise.
+            attribution_taxid = None
+            if detection_samples:
+                detected = detection.get("detected_taxid")
+                key = (detected if detected is not None
+                       and detected in (taxid_to_samples or {}) else taxid)
+                try:
+                    key = int(key)
+                except (TypeError, ValueError):
+                    key = None
+                if key is not None and key not in used_attribution_keys:
+                    used_attribution_keys.add(key)
+                    attribution_taxid = key
+
+            card_capped = (critical_count + high_count + watch_count
+                           >= ALERT_PANEL_CARD_CAP)
+
             if threat_level == "critical":
                 critical_count += 1
-                alert_components.append(
-                    CriticalPathogenAlert(
-                        pathogen_name=pathogen_name,
-                        common_name=common_name,
-                        read_count=reads,
-                        abundance_pct=abundance,
-                        confidence="HIGH" if reads >= 100 else "MODERATE",
-                        taxid=taxid,
-                        recommendation=action,
-                        samples=detection_samples,
-                        validation=validation,
+                if not card_capped:
+                    alert_components.append(
+                        CriticalPathogenAlert(
+                            pathogen_name=pathogen_name,
+                            common_name=common_name,
+                            read_count=reads,
+                            abundance_pct=abundance,
+                            confidence="HIGH" if reads >= 100 else "MODERATE",
+                            taxid=taxid,
+                            recommendation=action,
+                            samples=detection_samples,
+                            validation=validation,
+                            attribution_taxid=attribution_taxid,
+                        )
                     )
-                )
             elif threat_level in ["high", "high_risk"]:
                 high_count += 1
-                alert_components.append(
-                    HighRiskPathogenAlert(
-                        pathogen_name=pathogen_name,
-                        common_name=common_name,
-                        read_count=reads,
-                        abundance_pct=abundance,
-                        taxid=taxid,
-                        recommendation=action,
-                        samples=detection_samples,
-                        validation=validation,
+                if not card_capped:
+                    alert_components.append(
+                        HighRiskPathogenAlert(
+                            pathogen_name=pathogen_name,
+                            common_name=common_name,
+                            read_count=reads,
+                            abundance_pct=abundance,
+                            taxid=taxid,
+                            recommendation=action,
+                            samples=detection_samples,
+                            validation=validation,
+                            attribution_taxid=attribution_taxid,
+                        )
                     )
-                )
             else:
                 # Moderate / watched species
                 watch_count += 1
-                watch_components.append(
-                    WatchedSpeciesAlert(
-                        pathogen_name=pathogen_name,
-                        read_count=reads,
-                        abundance_pct=abundance,
-                        taxid=taxid,
-                        samples=detection_samples,
-                        validation=validation,
+                if not card_capped:
+                    watch_components.append(
+                        WatchedSpeciesAlert(
+                            pathogen_name=pathogen_name,
+                            read_count=reads,
+                            abundance_pct=abundance,
+                            taxid=taxid,
+                            samples=detection_samples,
+                            validation=validation,
+                            attribution_taxid=attribution_taxid,
+                        )
                     )
-                )
 
         if not alert_components and not watch_components:
             return html.Div(), {"display": "none"}
+
+        # State the hidden count explicitly -- caps hide cards, never state.
+        if overflow_detections:
+            names = ", ".join(
+                d.get("name", "?") for d in overflow_detections[:3])
+            alert_components.append(dbc.Alert(
+                f"...and {len(overflow_detections)} more watched organisms "
+                f"above threshold ({names}, ...). The exported report "
+                f"lists every detection.",
+                color="warning", className="py-2 mb-2",
+            ))
 
         # Create summary header if multiple threats
         total_count = critical_count + high_count + watch_count
@@ -2099,6 +2149,11 @@ def _get_active_watchlist_entries(config: Dict[str, Any]) -> List[Dict[str, Any]
             })
 
     return active_entries
+
+# Alert cards rendered before the "...and N more" overflow row. Display
+# only: tier counts and the overflow row carry the full totals, and the
+# verdict banner remains the uncapped alarm surface.
+ALERT_PANEL_CARD_CAP = 30
 
 # Memo for _check_pathogens_both, keyed on (organisms digest, watchlist
 # signature, mapping signature). The dashboard runs the same matching pass

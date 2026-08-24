@@ -1302,15 +1302,15 @@ def register_preparation_callbacks(app):
             )
 
             if collection:
-                collection_data = collection.to_dict()
-                mappings_list = collection_data.get("mappings", [])
-                mappings_dict = {}
-                for mapping in mappings_list:
-                    ncbi_tid = mapping.get("ncbi_taxid")
-                    if ncbi_tid is not None:
-                        mappings_dict[str(ncbi_tid)] = mapping
-                collection_data["mappings"] = mappings_dict
-                logger.info(f"Rescan complete: {len(mappings_dict)} mappings prepared")
+                from nanometa_live.core.taxonomy.taxid_mapping import (
+                    slim_mapping_store_payload,
+                )
+                # Slim store form; consumers read 5 fields per mapping.
+                collection_data = slim_mapping_store_payload(
+                    collection.to_dict())
+                logger.info(
+                    f"Rescan complete: "
+                    f"{len(collection_data['mappings'])} mappings prepared")
             else:
                 collection_data = None
                 logger.warning("Rescan produced no collection data")

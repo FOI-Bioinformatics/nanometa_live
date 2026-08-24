@@ -253,20 +253,48 @@ class TestNotDetectedLazyRender:
 
 
 class TestWatchedCardsOverflowCap:
-    def test_more_than_max_visible_cards_are_collapsed(self):
+    def test_overflow_ships_as_data_not_components(self):
+        """Round 2: the collapse is EMPTY; hidden cards live as dicts in
+        the paired store and are built on the Show-more click."""
         import dash_bootstrap_components as dbc
         from dash import html
         from nanometa_live.app.tabs.main_tab import (
             MAX_VISIBLE_CARDS, wrap_cards_with_overflow,
         )
-        cards = [dbc.Col(html.Div(f"card{i}")) for i in range(30)]
+        cards = [dbc.Col(html.Div(f"card{i}"))
+                 for i in range(MAX_VISIBLE_CARDS)]
+        overflow = [{"name": f"Hiddenus organismus{i}", "reads": 10,
+                     "abundance": 0.1, "taxid": 90000 + i,
+                     "confidence": "low"} for i in range(10)]
         container = wrap_cards_with_overflow(
             cards, collapse_id="watched-cards-overflow",
-            button_id="show-more-watched-btn", noun="watched organisms")
+            button_id="show-more-watched-btn", noun="watched organisms",
+            overflow_data=overflow, store_id="watched-cards-overflow-data")
         text = str(container)
-        assert count_components(container) > 30  # all cards present
         assert "watched-cards-overflow" in text
-        assert f"Show {30 - MAX_VISIBLE_CARDS} more watched organisms" in text
+        assert "Show 10 more watched organisms" in text
+        assert "Hiddenus organismus0" in text  # data in the store...
+        assert count_components(container) <= MAX_VISIBLE_CARDS * 3, (
+            "...but no hidden CARD components mounted"
+        )
+
+    def test_overflow_toggle_builds_the_cards_on_open(self):
+        from tests.dash_test_utils import get_callback_fn, make_callback_app
+        from nanometa_live.app.tabs.main_tab import register_main_callbacks
+        app = make_callback_app(register_main_callbacks)
+        fn = get_callback_fn(app, "watched-cards-overflow",
+                             input_contains="show-more-watched-btn")
+        overflow = [{"name": f"Hiddenus organismus{i}", "reads": 10,
+                     "abundance": 0.1, "taxid": 90000 + i,
+                     "confidence": "low", "is_watched": True}
+                    for i in range(10)]
+        is_open, children, label = fn(1, False, overflow)
+        assert is_open is True
+        badges = [p for p in collect_pattern_ids(children)
+                  if p.get("type") == "confidence-badge"]
+        assert len(badges) == 10
+        is_open, children, _ = fn(2, True, overflow)
+        assert is_open is False and children == []
 
     def test_few_cards_get_no_overflow_machinery(self):
         import dash_bootstrap_components as dbc
@@ -277,6 +305,95 @@ class TestWatchedCardsOverflowCap:
             cards, collapse_id="watched-cards-overflow",
             button_id="show-more-watched-btn", noun="watched organisms")
         assert "watched-cards-overflow" not in str(container)
+
+
+class TestAlertPanelBudget:
+    """The pathogen alert panel at many barcodes x many hits: capped cards,
+    lazy popovers. Eager, uncapped rendering was 17.8k components / 2.9 MB
+    per tick at 24 barcodes x 129 hits (round-2 audit, 2026-08-22)."""
+
+    def _detections(self, n):
+        return [
+            {"taxid": 90000 + i, "detected_taxid": 90000 + i,
+             "name": f"Danger organismus{i}", "common_name": "",
+             "reads": 5000 - i, "abundance": 1.0,
+             "threat_level": "critical" if i % 3 == 0 else "high",
+             "action_required": "Act.", "threshold": 10, "match_score": 1.0,
+             "ambiguous_with": []}
+            for i in range(n)
+        ]
+
+    def _samples_map(self, detections, n_samples):
+        return {
+            d["taxid"]: [
+                {"sample": f"barcode{j:02d}", "reads": 100 - j,
+                 "abundance": 0.5, "is_negative_control": False}
+                for j in range(n_samples)
+            ]
+            for d in detections
+        }
+
+    def _panel(self, n_detections, n_samples):
+        from nanometa_live.app.tabs.dashboard_helpers import (
+            _create_pathogen_alert_panel,
+        )
+        detections = self._detections(n_detections)
+        with patch(
+            "nanometa_live.app.tabs.dashboard_helpers."
+            "_check_pathogens_with_mapping",
+            return_value=detections,
+        ):
+            panel, style = _create_pathogen_alert_panel(
+                detections, [], {}, self._samples_map(detections, n_samples),
+                main_dir=None,
+            )
+        return panel, style
+
+    def test_panel_stays_under_budget_at_scale(self):
+        panel, _style = self._panel(129, 96)
+        n = count_components(panel)
+        assert n <= 3000, (
+            f"{n} components for 129 hits x 96 barcodes; the cap and the "
+            f"lazy popovers must hold the panel to roughly the visible set"
+        )
+
+    def test_popovers_ship_empty(self):
+        panel, _style = self._panel(10, 24)
+        text = str(panel)
+        assert '"type": "attr-popover-body"' in text.replace("'", '"'), (
+            "lazy popover bodies must be present as empty placeholders"
+        )
+        # No per-sample rows serialized: the row text pattern is absent.
+        assert "reads (0.50%)" not in text
+
+    def test_overflow_row_states_the_hidden_count(self):
+        from nanometa_live.app.tabs.dashboard_helpers import (
+            ALERT_PANEL_CARD_CAP,
+        )
+        panel, _style = self._panel(50, 4)
+        text = str(panel)
+        hidden = 50 - ALERT_PANEL_CARD_CAP
+        assert f"and {hidden} more watched organisms" in text
+
+    def test_fill_callback_builds_rows_from_the_memo(self):
+        from tests.dash_test_utils import get_callback_fn, make_callback_app
+        from nanometa_live.app.tabs import dashboard_tab as dt
+        from nanometa_live.app.tabs.dashboard_tab import (
+            register_dashboard_callbacks,
+        )
+        app = make_callback_app(register_dashboard_callbacks)
+        fn = get_callback_fn(app, "attr-popover-body")
+        samples = [{"sample": "barcode07", "reads": 42, "abundance": 1.5,
+                    "is_negative_control": False}]
+        with patch.object(dt, "get_per_sample_organisms_cached",
+                          return_value={666: samples}), \
+             patch.object(dt, "os") as mock_os, \
+             patch.object(dt, "ctx") as mock_ctx:
+            mock_os.path.isdir.return_value = True
+            mock_ctx.triggered_id = {"type": "attr-popover", "taxid": 666}
+            rows = fn(True, {"results_dir_override": "/x"}, ["barcode07"])
+        assert "barcode07" in str(rows)
+        assert "42" in str(rows)
 
 
 class TestGenomeStatsTabGate:

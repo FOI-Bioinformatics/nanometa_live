@@ -108,28 +108,25 @@ class TestPipelineStageDisplay:
 # --------------------------------------------------------------------------
 
 class TestStaleDataWarning:
-    _RUNNING = {"running": True}
+    """Clientside since round 2 (2026-08-24): the server version fired every
+    tick and re-uploaded the full app-config to compare two timestamps. The
+    logic now runs in the browser; here we pin its registration and the
+    invariants encoded in its JS source (runtime behavior is covered by the
+    smoke test)."""
 
-    def test_no_config_hidden(self, app_backend):
-        fn = _fn(app_backend[0], "stale-data-warning.style")
-        assert fn(1, None, self._RUNNING, None) == {"display": "none"}
-
-    def test_recent_update_not_stale(self, app_backend):
-        fn = _fn(app_backend[0], "stale-data-warning.style")
-        now_iso = _dt.datetime.now().isoformat()
-        assert fn(1, now_iso, self._RUNNING, {"update_interval_seconds": 10}) == {"display": "none"}
-
-    def test_old_update_is_stale_while_running(self, app_backend):
-        fn = _fn(app_backend[0], "stale-data-warning.style")
-        old_iso = (_dt.datetime.now() - _dt.timedelta(hours=1)).isoformat()
-        assert fn(1, old_iso, self._RUNNING, {"update_interval_seconds": 10}) == {"display": "flex"}
-
-    def test_old_update_hidden_when_completed(self, app_backend):
-        fn = _fn(app_backend[0], "stale-data-warning.style")
-        old_iso = (_dt.datetime.now() - _dt.timedelta(hours=1)).isoformat()
-        completed = {"running": True, "completed": True}
-        assert fn(1, old_iso, completed, {"update_interval_seconds": 10}) == {"display": "none"}
-
+    def test_registered_clientside_with_the_invariants(self, app_backend):
+        app = app_backend[0]
+        spec = next(
+            (s for key, s in app.callback_map.items()
+             if "stale-data-warning.style" in key), None)
+        assert spec is not None
+        assert "callback" not in spec, (
+            "stale-data-warning must be clientside; a server round trip "
+            "re-uploads app-config every tick"
+        )
+        src = "".join(app._inline_scripts)
+        assert "status.running" in src and "status.completed" in src
+        assert "2 * interval" in src
 
 class TestTrackLastUpdateTime:
     def test_no_config_returns_none(self, app_backend):

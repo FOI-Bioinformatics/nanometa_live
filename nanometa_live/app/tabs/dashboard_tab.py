@@ -13,7 +13,7 @@ from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
 import logging
 
-from dash import Dash, Input, Output, State, ctx, no_update, html, ALL
+from dash import Dash, Input, Output, State, ctx, no_update, html, ALL, MATCH
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
@@ -776,6 +776,39 @@ def register_dashboard_callbacks(app: Dash):
         except Exception as e:
             logger.error(f"Error updating pathogen alert panel: {e}")
             return html.Div(), {"display": "none"}
+
+    @app.callback(
+        Output({"type": "attr-popover-body", "taxid": MATCH}, "children"),
+        Input({"type": "attr-popover", "taxid": MATCH}, "is_open"),
+        State("app-config", "data"),
+        State("available-samples", "data"),
+        prevent_initial_call=True,
+    )
+    def fill_attribution_popover(is_open, config, available_samples):
+        """Build the attribution popover's per-sample rows ON OPEN.
+
+        The eager version serialized one row per sample per card on every
+        tick (17.8k-55k components at 24-96 barcodes x 129 hits, round-2
+        audit). The rows come from the shared per-tick organisms memo, so
+        opening costs one dict lookup; the popover id carries the resolved
+        report taxid the card's chips were built from.
+        """
+        if not is_open:
+            return []
+        try:
+            taxid = int(ctx.triggered_id.get("taxid"))
+        except (TypeError, ValueError, AttributeError):
+            raise PreventUpdate
+        main_dir = resolve_outdir_for_fingerprint(config)
+        if not main_dir:
+            raise PreventUpdate
+        resolved = _resolve_samples(main_dir, available_samples)
+        taxid_to_samples = get_per_sample_organisms_cached(
+            main_dir, resolved, config)
+        from nanometa_live.app.components.pathogen_alert import (
+            attribution_popover_rows,
+        )
+        return attribution_popover_rows(taxid_to_samples.get(taxid, []))
 
     # Pattern-matching callbacks for pathogen alert buttons
     @app.callback(

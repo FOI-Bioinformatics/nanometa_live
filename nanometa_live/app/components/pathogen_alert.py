@@ -42,6 +42,7 @@ def _render_sample_attribution(
     samples: Optional[List[Dict[str, Any]]],
     tier: str,
     max_inline: int = 3,
+    attribution_taxid: Optional[int] = None,
 ) -> Optional[html.Div]:
     """
     Render the "DETECTED IN:" attribution row for a pathogen alert card.
@@ -150,9 +151,21 @@ def _render_sample_attribution(
         # Popover lists every sample, not just the overflow. Operators
         # asking "which barcodes carry this pathogen?" want the complete
         # list, not the tail.
-        popover_components.append(
-            _build_attribution_popover(samples, pill_id, tier_key)
-        )
+        #
+        # With an attribution taxid the popover ships EMPTY and its rows
+        # are built on open by fill_attribution_popover from the shared
+        # per-tick organisms memo: the eager version serialized one row
+        # per SAMPLE per CARD every tick -- 17.8k-55k components at 24-96
+        # barcodes x 129 hits (round-2 audit, 2026-08-22).
+        if attribution_taxid is not None:
+            popover_components.append(
+                _build_lazy_attribution_popover(
+                    pill_id, attribution_taxid, len(samples))
+            )
+        else:
+            popover_components.append(
+                _build_attribution_popover(samples, pill_id, tier_key)
+            )
 
     return html.Div(
         [
@@ -169,18 +182,34 @@ def _render_sample_attribution(
     )
 
 
-def _build_attribution_popover(
-    samples: List[Dict[str, Any]],
-    target_id: str,
-    tier_key: str,
+def _build_lazy_attribution_popover(
+    target_id: str, attribution_taxid: int, n_samples: int
 ) -> dbc.Popover:
-    """Popover listing every triggering sample with reads + abundance.
+    """Empty popover shell; rows arrive on open from the organisms memo."""
+    return dbc.Popover(
+        [
+            dbc.PopoverHeader(
+                f"All {n_samples} samples (sorted by read count)",
+                style={"fontSize": "12px", "fontWeight": "600"},
+            ),
+            dbc.PopoverBody(
+                html.Div(
+                    id={"type": "attr-popover-body",
+                        "taxid": int(attribution_taxid)}),
+                style={"maxHeight": "320px", "overflowY": "auto",
+                       "padding": "8px 12px"},
+            ),
+        ],
+        id={"type": "attr-popover", "taxid": int(attribution_taxid)},
+        target=target_id,
+        trigger="legacy",
+        placement="bottom",
+        hide_arrow=False,
+    )
 
-    Hung off the "+N more" pill so an operator can answer the clinical
-    question "which of 24 barcodes carries this pathogen?" Closes
-    P0-T01 from docs/audit-2026-04-28-throughput-ux.md, where the pill
-    was a non-interactive dead end.
-    """
+
+def attribution_popover_rows(samples: List[Dict[str, Any]]) -> List[html.Div]:
+    """Popover rows: one per sample with reads + abundance, NC-marked."""
     rows = []
     for rank, s in enumerate(samples, start=1):
         sample_label = s.get("sample", "")
@@ -217,7 +246,22 @@ def _build_attribution_popover(
                 style={"padding": "2px 0", "fontSize": "12px"},
             )
         )
+    return rows
 
+
+def _build_attribution_popover(
+    samples: List[Dict[str, Any]],
+    target_id: str,
+    tier_key: str,
+) -> dbc.Popover:
+    """Popover listing every triggering sample with reads + abundance.
+
+    Hung off the "+N more" pill so an operator can answer the clinical
+    question "which of 24 barcodes carries this pathogen?" Closes
+    P0-T01 from docs/audit-2026-04-28-throughput-ux.md, where the pill
+    was a non-interactive dead end. Eager form; the alert panel uses the
+    lazy shell above.
+    """
     return dbc.Popover(
         [
             dbc.PopoverHeader(
@@ -225,7 +269,7 @@ def _build_attribution_popover(
                 style={"fontSize": "12px", "fontWeight": "600"},
             ),
             dbc.PopoverBody(
-                rows,
+                attribution_popover_rows(samples),
                 style={"maxHeight": "320px", "overflowY": "auto", "padding": "8px 12px"},
             ),
         ],
@@ -414,6 +458,7 @@ def CriticalPathogenAlert(
     recommendation: Optional[str] = None,
     samples: Optional[List[Dict[str, Any]]] = None,
     validation: Optional[Dict[str, Any]] = None,
+    attribution_taxid: Optional[int] = None,
 ) -> html.Div:
     """
     Full-width critical pathogen alert banner.
@@ -562,7 +607,7 @@ def CriticalPathogenAlert(
                 html.Div(metrics, className="mb-3"),
 
                 # Per-sample attribution row (always visible for critical tier)
-                *([attr_row] if (attr_row := _render_sample_attribution(samples or [], "critical")) else []),
+                *([attr_row] if (attr_row := _render_sample_attribution(samples or [], "critical", attribution_taxid=attribution_taxid)) else []),
 
                 # Confidence bar
                 html.Div([
@@ -617,6 +662,7 @@ def HighRiskPathogenAlert(
     recommendation: Optional[str] = None,
     samples: Optional[List[Dict[str, Any]]] = None,
     validation: Optional[Dict[str, Any]] = None,
+    attribution_taxid: Optional[int] = None,
 ) -> html.Div:
     """
     High-risk pathogen alert (less severe than critical).
@@ -640,7 +686,7 @@ def HighRiskPathogenAlert(
     if common_name:
         name_display = f"{pathogen_name} ({common_name})"
 
-    attr_row = _render_sample_attribution(samples or [], "high")
+    attr_row = _render_sample_attribution(samples or [], "high", attribution_taxid=attribution_taxid)
 
     return html.Div([
         html.Div([
@@ -714,6 +760,7 @@ def WatchedSpeciesAlert(
     taxid: Optional[int] = None,
     samples: Optional[List[Dict[str, Any]]] = None,
     validation: Optional[Dict[str, Any]] = None,
+    attribution_taxid: Optional[int] = None,
 ) -> html.Div:
     """
     Alert for monitored/watched species (informational level).
@@ -735,7 +782,7 @@ def WatchedSpeciesAlert(
 
     # Attribution: suppressed for multi-sample by _render_sample_attribution;
     # for exactly 1 sample it returns the row which we render below the main line.
-    attr_row = _render_sample_attribution(samples or [], "watched")
+    attr_row = _render_sample_attribution(samples or [], "watched", attribution_taxid=attribution_taxid)
 
     main_row_children = [
         html.Div([

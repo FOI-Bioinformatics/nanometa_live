@@ -1689,13 +1689,33 @@ class WatchlistManager:
             entry.alert_threshold = threshold
             return True
 
-    def export_config(self) -> Dict[str, Any]:
-        """Export the current watchlist configuration."""
+    def export_config(self, slim: bool = False) -> Dict[str, Any]:
+        """Export the current watchlist configuration.
+
+        ``slim=True`` is the BROWSER-STORE form: each custom entry carries
+        only the six fields any store consumer reads (taxid, db_taxid,
+        enabled, alert_threshold, threat_level, name — ~125 B/entry). The
+        full ``to_dict`` form was 96-99% of the app-config Store and was
+        re-uploaded by 24 per-tick callbacks (4.4-16.9 MB per tick at
+        129-500 entries; round-2 audit, 2026-08-22). DISK writers
+        (last-session.yaml) must stay on the default full form — the file
+        is what session restore rebuilds fat entries from.
+        """
         custom_entries = []
         overrides = []
 
         for entry in self._entries.values():
             if entry.source in [WatchlistSource.USER, WatchlistSource.MIGRATED, WatchlistSource.IMPORTED]:
+                if slim:
+                    custom_entries.append({
+                        "taxid": entry.taxid,
+                        "db_taxid": entry.db_taxid,
+                        "enabled": entry.enabled,
+                        "alert_threshold": entry.alert_threshold,
+                        "threat_level": entry.threat_level.value,
+                        "name": entry.name,
+                    })
+                    continue
                 custom_entries.append(entry.to_dict())
             elif entry.user_override:
                 overrides.append({

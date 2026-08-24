@@ -56,6 +56,16 @@ def _save_last_session(config: Dict[str, Any]) -> None:
 
     Falls back to the supplied config when nothing is persisted yet (first
     write) or the file is unreadable -- the toggle must never be lost.
+
+    The persisted block's ``custom`` entries are re-fattened from the live
+    singleton: the app-config Store carries the slim six-field form
+    (round-2 audit, 2026-08-22), and persisting it verbatim would strip
+    action_required/notes/lineage from the file that session restore
+    rebuilds entries from. The rest of the block (enabled/builtin/
+    overrides) stays authoritative from the caller -- it is the toggle
+    that just happened. Fallback rule: with an empty singleton
+    (fresh-boot edge), keep the file's existing custom entries -- never
+    overwrite full data with slim data.
     """
     try:
         from nanometa_live.core.config.config_loader import ConfigLoader
@@ -63,17 +73,12 @@ def _save_last_session(config: Dict[str, Any]) -> None:
         paths = NanometaPaths.from_config(config)
         session_path = Path(paths.configs) / "last-session.yaml"
 
-        save_config = dict(config)
+        persisted = None
         if session_path.is_file():
             try:
                 import yaml
                 with open(session_path) as fh:
                     persisted = yaml.safe_load(fh)
-                if isinstance(persisted, dict):
-                    persisted["watchlist"] = config.get(
-                        "watchlist", persisted.get("watchlist")
-                    )
-                    save_config = persisted
             except (OSError, yaml.YAMLError):
                 logger.debug(
                     "last-session.yaml unreadable; writing the in-memory "
@@ -81,10 +86,52 @@ def _save_last_session(config: Dict[str, Any]) -> None:
                     exc_info=True,
                 )
 
+        persisted_block = (persisted or {}).get("watchlist") \
+            if isinstance(persisted, dict) else None
+        watchlist_block = _full_watchlist_block(
+            config.get("watchlist"), persisted_block)
+
+        if isinstance(persisted, dict):
+            persisted["watchlist"] = (
+                watchlist_block if watchlist_block is not None
+                else persisted.get("watchlist")
+            )
+            save_config = persisted
+        else:
+            save_config = dict(config)
+            if watchlist_block is not None:
+                save_config["watchlist"] = watchlist_block
+
         loader = ConfigLoader(str(paths.configs))
         loader.save_config(save_config, "last-session.yaml")
     except Exception:
         logger.debug("Could not save last-session.yaml", exc_info=True)
+
+
+def _full_watchlist_block(store_block, persisted_block):
+    """The block to persist: caller's structure, full-form custom entries.
+
+    ``store_block`` is what the callback holds (slim custom entries);
+    ``persisted_block`` is what last-session.yaml already carries. The
+    singleton is the source of full custom data; when it is empty, the
+    persisted full entries win over the caller's slim ones.
+    """
+    if not isinstance(store_block, dict):
+        return store_block if store_block is not None else persisted_block
+    block = dict(store_block)
+    entries_available = False
+    try:
+        manager = get_watchlist_manager()
+        if manager._entries:
+            block["custom"] = manager.export_config(slim=False)["custom"]
+            entries_available = True
+    except Exception:
+        logger.debug("full watchlist export unavailable", exc_info=True)
+    if (not entries_available
+            and isinstance(persisted_block, dict)
+            and persisted_block.get("custom")):
+        block["custom"] = persisted_block["custom"]
+    return block
 
 
 # Rows per page in the pathogens table. Row action ids are keyed by taxid,
@@ -239,7 +286,9 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
                 # Sync watchlist state to app-config and save to disk
                 updated_config = dict(current_config) if current_config else {}
-                updated_config["watchlist"] = manager.export_config()
+                # Slim store form; _save_last_session persists the full
+                # form from the singleton (round-2 audit, 2026-08-22).
+                updated_config["watchlist"] = manager.export_config(slim=True)
                 _save_last_session(updated_config)
 
                 action = "disable" if is_enabled else "enable"
@@ -439,7 +488,9 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         # Sync watchlist state to app-config and save to disk
         updated_config = dict(current_config) if current_config else {}
-        updated_config["watchlist"] = manager.export_config()
+        # Slim store form; _save_last_session persists the full form
+        # from the singleton (round-2 audit, 2026-08-22).
+        updated_config["watchlist"] = manager.export_config(slim=True)
         _save_last_session(updated_config)
 
         # Return updated state and increment refresh counter
@@ -548,7 +599,9 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
                 # Sync watchlist state to app-config and save to disk
                 updated_config = dict(current_config) if current_config else {}
-                updated_config["watchlist"] = manager.export_config()
+                # Slim store form; _save_last_session persists the full
+                # form from the singleton (round-2 audit, 2026-08-22).
+                updated_config["watchlist"] = manager.export_config(slim=True)
                 _save_last_session(updated_config)
 
                 return {"last_update": f"nested-toggle-{taxid}"}, updated_config

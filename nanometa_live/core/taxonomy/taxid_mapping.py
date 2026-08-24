@@ -666,6 +666,32 @@ def get_database_hash(database_path: str) -> str:
     return ""
 
 
+# Fields of one mapping that the Dash store consumers actually read: the
+# watchlist table's badge columns, the edit modal's Kraken2 line, and the
+# status count. Everything else in TaxidMapping.to_dict (alternatives,
+# audit timestamps, verification metadata) stays server-side — it was
+# ~111 kB of dead weight per wire crossing at 129 entries (round-2 audit,
+# 2026-08-22).
+_STORE_MAPPING_FIELDS = (
+    "ncbi_taxid", "confidence", "db_taxid", "match_score", "db_name",
+    "match_method",
+)
+
+
+def slim_mapping_store_payload(collection_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """The browser-store form of a serialized mapping collection."""
+    return {
+        "mappings": {
+            str(m["ncbi_taxid"]): {
+                k: m.get(k) for k in _STORE_MAPPING_FIELDS
+            }
+            for m in collection_dict.get("mappings", [])
+            if m.get("ncbi_taxid") is not None
+        },
+        "statistics": collection_dict.get("statistics", {}),
+    }
+
+
 def get_mapping_cache_path(database_path: str) -> Path:
     """Get the cache file path for a database's mappings.
 
