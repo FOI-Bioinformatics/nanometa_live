@@ -883,8 +883,16 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         # One batched save: per-entry toggle_entry fsynced the toggle-state
         # YAML once PER ENTRY, tens of seconds on a large watchlist.
+        # Addressed by manager_key, not the dict's NCBI taxid: fork entries
+        # (one NCBI taxid, two db nodes) are stored under their db_taxid, so
+        # toggling by "taxid" left them untouched -- Disable All on the
+        # Bioshield list kept 4 of 129 active (verified live, 2026-08-24).
         manager.set_entries_enabled(
-            [entry.get("taxid") for entry in entries if entry.get("taxid")],
+            [
+                entry.get("manager_key") or entry.get("taxid")
+                for entry in entries
+                if entry.get("manager_key") or entry.get("taxid")
+            ],
             enable,
         )
 
@@ -1040,16 +1048,21 @@ def register_watchlist_callbacks(app: Dash) -> None:
             manager = get_watchlist_manager()
             entry = manager.get_entry_by_taxid(taxid)
             if entry:
+                # The row index is the manager's storage key; NCBI-scoped
+                # lookups (taxmap, the displayed NCBI id) use the entry's own
+                # taxid, which differs from the key for fork entries.
+                ncbi_taxid = entry.taxid
+
                 # Get Kraken2 mapping info
                 kraken_taxid = "-"
                 kraken_name = "-"
                 if taxmap_collection and isinstance(taxmap_collection, dict):
                     mappings = taxmap_collection.get("mappings", {})
                     if isinstance(mappings, dict):
-                        mapping_data = mappings.get(str(taxid), {})
+                        mapping_data = mappings.get(str(ncbi_taxid), {})
                     elif isinstance(mappings, list):
                         mapping_data = next(
-                            (m for m in mappings if m.get("ncbi_taxid") == taxid),
+                            (m for m in mappings if m.get("ncbi_taxid") == ncbi_taxid),
                             {}
                         )
                     else:
@@ -1076,7 +1089,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
                     entry.notes or "",
                     entry.organism_type or "",
                     entry.annotation or "",
-                    str(taxid),
+                    str(ncbi_taxid),
                     kraken_taxid,
                     kraken_name,
                 )
@@ -1172,7 +1185,13 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         if "validate-all" in trigger:
             entries = manager.get_entries_with_toggle_state()
-            taxids_to_validate = [e.get("taxid") for e in entries]
+            # manager_key, not the dict taxid: a fork pair shares the NCBI
+            # taxid, so validating by "taxid" hit one entry twice and the
+            # other never. The API call itself uses the resolved entry's own
+            # NCBI taxid/name (validate_entry_via_api).
+            taxids_to_validate = [
+                e.get("manager_key") or e.get("taxid") for e in entries
+            ]
         elif (
             isinstance(ctx.triggered_id, dict)
             and ctx.triggered_id.get("type") == "watchlist-row-validate"

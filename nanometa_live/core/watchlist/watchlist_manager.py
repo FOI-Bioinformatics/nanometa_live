@@ -903,6 +903,43 @@ class WatchlistManager:
         """Get a specific entry by taxonomy ID."""
         return self._entries.get(taxid)
 
+    def resolve_entry_key(
+        self,
+        taxid: Optional[int] = None,
+        db_taxid: Optional[int] = None,
+        name: Optional[str] = None,
+    ) -> Optional[int]:
+        """Return the ``_entries`` key for an organism, or None.
+
+        The lookup mirror of :meth:`_identity_key`: a fork entry (same NCBI
+        taxid as another entry but a different ``db_taxid``) is stored under
+        its ``db_taxid`` or a name-derived pseudo key, so a plain
+        ``_entries[taxid]`` lookup finds the wrong entry -- or none. Callers
+        that hold watchlist-file fields (NCBI taxid, db_taxid, name) rather
+        than a storage key resolve through here.
+        """
+        if taxid:
+            entry = self._entries.get(taxid)
+            if entry is not None and (
+                db_taxid is None
+                or entry.db_taxid is None
+                or entry.db_taxid == db_taxid
+            ):
+                return taxid
+        if db_taxid:
+            entry = self._entries.get(db_taxid)
+            if entry is not None and entry.db_taxid == db_taxid:
+                return db_taxid
+        if name:
+            if db_taxid:
+                key = _stable_pseudo_taxid(f"{name}|{db_taxid}")
+                if key in self._entries:
+                    return key
+            key = _stable_pseudo_taxid(name)
+            if key in self._entries:
+                return key
+        return None
+
     def get_entry_by_name(self, name: str) -> Optional[WatchlistEntry]:
         """Get a specific entry by name (case-insensitive)."""
         taxid = self._name_index.get(name.lower())
@@ -1618,14 +1655,14 @@ class WatchlistManager:
 
         result = []
         for p in pathogens:
-            # Check if entry exists in active _entries for enabled status
-            existing = None
-            if p.taxid_ncbi:
-                existing = self._entries.get(p.taxid_ncbi)
-            if not existing:
-                # Try by name hash for name-only entries
-                pseudo_taxid = _stable_pseudo_taxid(p.name)
-                existing = self._entries.get(pseudo_taxid)
+            # Resolve the ACTIVE entry through the identity scheme: a plain
+            # _entries[taxid_ncbi] lookup returns the wrong entry for a fork
+            # (two db nodes sharing one NCBI taxid), so its preview row
+            # showed -- and its toggle drove -- the sibling's state.
+            key = self.resolve_entry_key(
+                taxid=p.taxid_ncbi, db_taxid=p.db_taxid, name=p.name
+            )
+            existing = self._entries.get(key) if key is not None else None
 
             result.append({
                 "taxid": p.taxid_ncbi or 0,
@@ -1635,6 +1672,9 @@ class WatchlistManager:
                 "alert_threshold": p.alert_threshold,
                 "enabled": existing.enabled if existing else False,
                 "watchlist_id": watchlist_id,
+                # None when the watchlist is not enabled (entry not loaded);
+                # the nested-toggle guard PreventUpdates on unresolvable ids.
+                "manager_key": key,
             })
 
         return result
@@ -1647,8 +1687,15 @@ class WatchlistManager:
             List of entry dicts with toggle information for UI display
         """
         result = []
-        for entry in self._entries.values():
+        for key, entry in self._entries.items():
             entry_dict = entry.to_dict()
+            # The storage key. Usually the NCBI taxid, but a fork entry
+            # (same NCBI taxid, different db_taxid -- see _identity_key) is
+            # keyed by its db_taxid or a pseudo key. UI component ids and
+            # every manager lookup must use THIS, never the dict's "taxid":
+            # bulk-toggling by "taxid" left the Bioshield forks untouched
+            # (4 of 129 still active after Disable All, verified live).
+            entry_dict["manager_key"] = key
             entry_dict["can_remove"] = entry.source != WatchlistSource.BUILTIN
             entry_dict["can_toggle"] = True
             entry_dict["threat_level_display"] = entry.threat_level.value.title()

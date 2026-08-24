@@ -168,3 +168,154 @@ class TestLookupStillWorks:
         m._add_entry_from_dict(GLANDERS, WatchlistSource.USER, watchlist_id="bio")
         m._add_entry_from_dict(MALLEI, WatchlistSource.USER, watchlist_id="bio")
         assert len(m.get_active_entries()) == 2
+
+
+class TestManagerKeyReachesTheUi:
+    """A fork entry is stored under its db_taxid (or a name-derived pseudo
+    key), while its dict ``taxid`` stays the shared NCBI id. Any UI path
+    that addresses entries by the dict ``taxid`` therefore misses the
+    forks: Disable All on the real Bioshield list left 4 of 129 entries
+    active (verified live, 2026-08-24). The fix: entry dicts carry the
+    storage key as ``manager_key`` and the UI addresses entries by it.
+    """
+
+    def _fork_mgr(self):
+        m = _mgr()
+        m._add_entry_from_dict(GLANDERS, WatchlistSource.USER, watchlist_id="bio")
+        m._add_entry_from_dict(MALLEI, WatchlistSource.USER, watchlist_id="bio")
+        return m
+
+    def test_entry_dicts_carry_the_storage_key(self):
+        m = self._fork_mgr()
+        dicts = m.get_entries_with_toggle_state()
+        keys = {d["manager_key"] for d in dicts}
+        assert keys == set(m._entries.keys())
+
+    def test_fork_keeps_its_ncbi_taxid_in_the_dict(self):
+        # manager_key is the address; taxid stays the NCBI id for display,
+        # reference links and genome download.
+        m = self._fork_mgr()
+        dicts = m.get_entries_with_toggle_state()
+        assert {d["taxid"] for d in dicts} == {13373}
+        assert len({d["manager_key"] for d in dicts}) == 2
+
+    def test_disable_all_by_manager_key_reaches_every_entry(self):
+        # The live finding: bulk-toggling by dict taxid left forks active.
+        m = self._fork_mgr()
+        dicts = m.get_entries_with_toggle_state()
+        changed = m.set_entries_enabled([d["manager_key"] for d in dicts], False)
+        assert changed == 2
+        assert all(not e.enabled for e in m._entries.values())
+
+    def test_disable_all_by_dict_taxid_misses_the_fork(self):
+        # Documents WHY manager_key exists; if this ever starts passing the
+        # storage scheme changed and manager_key may be droppable.
+        m = self._fork_mgr()
+        dicts = m.get_entries_with_toggle_state()
+        m.set_entries_enabled([d["taxid"] for d in dicts], False)
+        assert any(e.enabled for e in m._entries.values())
+
+
+class TestResolveEntryKey:
+    def _fork_mgr(self):
+        m = _mgr()
+        m._add_entry_from_dict(GLANDERS, WatchlistSource.USER, watchlist_id="bio")
+        m._add_entry_from_dict(MALLEI, WatchlistSource.USER, watchlist_id="bio")
+        return m
+
+    def test_primary_resolves_by_plain_taxid(self):
+        m = self._fork_mgr()
+        key = m.resolve_entry_key(taxid=13373, db_taxid=4003795)
+        assert m._entries[key].db_taxid == 4003795
+
+    def test_fork_resolves_by_taxid_plus_db_taxid(self):
+        m = self._fork_mgr()
+        key = m.resolve_entry_key(taxid=13373, db_taxid=4003703)
+        assert m._entries[key].db_taxid == 4003703
+
+    def test_taxid_alone_returns_the_stored_primary(self):
+        m = self._fork_mgr()
+        key = m.resolve_entry_key(taxid=13373)
+        assert key == 13373
+
+    def test_name_only_entry_resolves_by_name(self):
+        from nanometa_live.core.taxonomy.pseudo_taxid import stable_pseudo_taxid
+        m = _mgr()
+        m._add_entry_from_dict(
+            {"name": "Nameonlyvirus fictus", "threat_level": "low",
+             "alert_threshold": 10, "enabled": True},
+            WatchlistSource.USER, watchlist_id="bio")
+        key = m.resolve_entry_key(name="Nameonlyvirus fictus")
+        assert key == stable_pseudo_taxid("Nameonlyvirus fictus")
+
+    def test_unknown_organism_returns_none(self):
+        m = self._fork_mgr()
+        assert m.resolve_entry_key(taxid=999999, db_taxid=888888) is None
+
+
+class TestRowIdsUseTheManagerKey:
+    """Pattern-matching component ids must be unique and must address the
+    manager. Two fork rows sharing the NCBI taxid produced duplicate Dash
+    pattern ids AND routed every action to whichever entry owned the key.
+    """
+
+    def _rows(self):
+        from nanometa_live.app.layouts.watchlist_layout import create_pathogen_row
+        m = _mgr()
+        m._add_entry_from_dict(GLANDERS, WatchlistSource.USER, watchlist_id="bio")
+        m._add_entry_from_dict(MALLEI, WatchlistSource.USER, watchlist_id="bio")
+        return [create_pathogen_row(d, i) for i, d in enumerate(m.get_entries_with_toggle_state())]
+
+    @staticmethod
+    def _pattern_indices(component, type_name):
+        found = []
+        def walk(c):
+            cid = getattr(c, "id", None)
+            if isinstance(cid, dict) and cid.get("type") == type_name:
+                found.append(cid["index"])
+            for child in getattr(c, "children", None) or []:
+                if hasattr(child, "to_plotly_json"):
+                    walk(child)
+                elif isinstance(child, (list, tuple)):
+                    for cc in child:
+                        if hasattr(cc, "to_plotly_json"):
+                            walk(cc)
+        def walk_all(c):
+            cid = getattr(c, "id", None)
+            if isinstance(cid, dict) and cid.get("type") == type_name:
+                found.append(cid["index"])
+            children = getattr(c, "children", None)
+            if children is None:
+                return
+            if not isinstance(children, (list, tuple)):
+                children = [children]
+            for child in children:
+                if isinstance(child, (list, tuple)):
+                    for cc in child:
+                        walk_all(cc)
+                elif hasattr(child, "children") or getattr(child, "id", None):
+                    walk_all(child)
+        walk_all(component)
+        return found
+
+    def test_toggle_ids_are_distinct_for_a_fork_pair(self):
+        rows = self._rows()
+        indices = []
+        for row in rows:
+            indices += self._pattern_indices(row, "watchlist-row-toggle")
+        assert len(indices) == 2
+        assert len(set(indices)) == 2, (
+            "two rows share a pattern id; every action on one addresses "
+            "the other entry"
+        )
+
+    def test_toggle_ids_are_the_manager_keys(self):
+        m = _mgr()
+        m._add_entry_from_dict(GLANDERS, WatchlistSource.USER, watchlist_id="bio")
+        m._add_entry_from_dict(MALLEI, WatchlistSource.USER, watchlist_id="bio")
+        from nanometa_live.app.layouts.watchlist_layout import create_pathogen_row
+        indices = set()
+        for i, d in enumerate(m.get_entries_with_toggle_state()):
+            row = create_pathogen_row(d, i)
+            indices |= set(self._pattern_indices(row, "watchlist-row-toggle"))
+        assert indices == set(m._entries.keys())
