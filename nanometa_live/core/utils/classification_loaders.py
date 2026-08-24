@@ -250,7 +250,14 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
         cached = _report_frame_cache.get(key)
         if cached is not None:
             _report_frame_cache.move_to_end(key)  # LRU bump
-            return cached
+    if cached is not None:
+        # A hit proves the CURRENT file state parses, so any stale flag
+        # from a transient failure at another mtime clears here. Without
+        # this, flags set on a run's final ticks froze forever once the
+        # tree went quiet (round-3 soak observation: three honest reports
+        # flagged stale after completion).
+        _record_staleness(filepath, served_fallback=False)
+        return cached
 
     df = _parse_kraken2_report_uncached(filepath, check_stability)
     if df is None:

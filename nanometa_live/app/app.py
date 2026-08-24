@@ -444,6 +444,9 @@ def create_app(
         dcc.Store(id='config-reseeded', data=False),
         # Round 3: export-watchdog tracking (progress value + since-when).
         dcc.Store(id='export-watchdog-state', data=None),
+        # Round 3: bumps only when a readiness recompute is genuinely due,
+        # so the background worker is not spawned once per tick.
+        dcc.Store(id='readiness-recompute-due', data=None),
 
         # Shared stores for cross-tab communication (Watchlist <-> Preparation)
         dcc.Store(id='taxmap-collection', data=None),

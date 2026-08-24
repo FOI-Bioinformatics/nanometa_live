@@ -142,3 +142,46 @@ class TestLoaderIntegration:
         cl.load_kraken_data(str(tmp_path), "barcode01")
         assert staleness.stale_sample_count(str(tmp_path),
                                             grace_seconds=0) == 0
+
+
+class TestCacheHitClearsTheFlag:
+    """A frame-cache hit proves the CURRENT file state parses, so it must
+    clear the sample's stale flag.
+
+    Round-3 soak observation: three samples stayed flagged after the run
+    completed although every report on disk parsed cleanly -- the flags
+    were set by transient mid-write catches on the final ticks, and the
+    hit path skipped the staleness bookkeeping, so a quiet tree could
+    never clear them."""
+
+    def test_hit_on_previously_cached_state_clears(self, tmp_path):
+        import os
+        from nanometa_live.core.utils import classification_loaders as cl
+        from nanometa_live.core.utils import loader_utils
+        loader_utils.clear_all_loader_caches()
+        loader_utils._freshness_epoch = 0
+
+        report = tmp_path / "kraken2" / "barcode01.kraken2.report.txt"
+        report.parent.mkdir(parents=True)
+        good = ("100.00\t100\t10\tR\t1\troot\n"
+                " 10.00\t50\t50\tS\t101\tSpecies testus\n")
+        t0 = time.time() - 120
+        report.write_text(good)
+        os.utime(report, (t0, t0))
+        cl._parse_kraken2_report(str(report))  # good state cached
+
+        # Transient corruption at a new mtime -> fallback + flag.
+        report.write_text("garbage")
+        os.utime(report, (t0 + 5, t0 + 5))
+        cl._parse_kraken2_report(str(report))
+        assert staleness.stale_sample_count(str(tmp_path),
+                                            grace_seconds=0) == 1
+
+        # The file returns to the EXACT cached state (same mtime/size):
+        # the next parse is a cache hit, which must clear the flag.
+        report.write_text(good)
+        os.utime(report, (t0, t0))
+        cl._parse_kraken2_report(str(report))
+        assert staleness.stale_sample_count(str(tmp_path),
+                                            grace_seconds=0) == 0
+        loader_utils.clear_all_loader_caches()

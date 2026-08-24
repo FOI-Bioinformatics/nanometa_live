@@ -154,6 +154,22 @@ def _readiness_unchanged(prev: Optional[Dict[str, Any]],
     )
 
 
+def _reap_spawn_children() -> None:
+    """Reap finished DiskcacheManager worker processes (round 3).
+
+    dash's call_job_fn starts a multiprocess.Process per background job
+    and never joins it; the soak measured the parent accumulating pipe
+    fds for every spawn (4,500+ over two hours). active_children() joins
+    the finished ones and drops their references, releasing the plumbing.
+    Called from the main-process gate below, so it runs once per tick.
+    """
+    try:
+        import multiprocess
+        multiprocess.active_children()
+    except Exception:
+        pass
+
+
 def register_readiness(app, backend_manager):
     # Recompute callback: the ONLY place that runs ReadinessChecker. It writes
     # the shared readiness-state Store; both the header pill (below) and the
@@ -165,12 +181,51 @@ def register_readiness(app, backend_manager):
     # Werkzeug request thread responsive. ``check-readiness-btn`` is a direct
     # Input so the operator's "Check Everything" forces an immediate recompute.
     @app.callback(
-        Output("readiness-state", "data"),
-        Output("readiness-probe-stamp", "data"),
+        Output("readiness-recompute-due", "data"),
         Input("update-interval", "n_intervals"),
         Input("app-config", "data"),
         Input("check-readiness-btn", "n_clicks"),
         Input("genome-download-complete", "data"),
+        State("readiness-probe-stamp", "data"),
+        State("watchlist-entries-snapshot", "data"),
+        State("readiness-recompute-due", "data"),
+        prevent_initial_call=False,
+    )
+    def gate_readiness_recompute(_n, config, _clicks, _genome, probe_stamp,
+                                 watchlist_entries, due):
+        """Main-process gate in front of the background readiness worker.
+
+        Round 3: the worker had update-interval as a direct Input, so
+        DiskcacheManager spawned a NEW OS process every tick just to
+        evaluate the TTL and return no_update -- and each spawn leaked
+        parent-side pipe fds (measured live: 28-34 fds/min during a run,
+        4,500+ pipes after two hours). The TTL/fingerprint check is pure
+        and cheap, so it runs HERE; the worker fires only when this Store
+        bumps. The gate also reaps finished worker processes.
+        """
+        _reap_spawn_children()
+
+        trig = None
+        try:
+            trig = dash.ctx.triggered_id
+        except Exception:
+            pass
+        forced = trig in ("check-readiness-btn", "genome-download-complete")
+        if not forced:
+            fingerprint = _readiness_fingerprint(config, watchlist_entries)
+            if _probe_window_is_fresh(probe_stamp, fingerprint, time.time()):
+                raise PreventUpdate
+        return {
+            "n": int((due or {}).get("n", 0)) + 1,
+            "forced": forced,
+            "genome": trig == "genome-download-complete",
+        }
+
+    @app.callback(
+        Output("readiness-state", "data"),
+        Output("readiness-probe-stamp", "data"),
+        Input("readiness-recompute-due", "data"),
+        State("app-config", "data"),
         State("readiness-state", "data"),
         State("watchlist-entries-snapshot", "data"),
         State("readiness-probe-stamp", "data"),
@@ -187,7 +242,7 @@ def register_readiness(app, backend_manager):
               "Check Everything"]),
         ],
     )
-    def update_readiness_state(n_intervals, config, n_clicks, genome_change,
+    def update_readiness_state(due, config,
                                prev_state, watchlist_entries, probe_stamp):
         """Compute readiness and publish it to the shared Store, deduplicated.
 
@@ -206,12 +261,13 @@ def register_readiness(app, backend_manager):
         # Watchlist-Genomes / BLAST-Databases checks would stay stale. Treat
         # genome-download-complete as a forcing trigger, and reload the (stale)
         # worker-process genome singleton before the checks read it.
-        try:
-            trig = dash.ctx.triggered_id
-        except Exception:
-            trig = None
-        genome_set_changed = (trig == "genome-download-complete")
-        forced = trig in ("check-readiness-btn", "genome-download-complete")
+        # The gate encodes why the recompute is due; ctx is not consulted
+        # here because the only Input is the due Store (round 3).
+        genome_set_changed = bool((due or {}).get("genome"))
+        forced = bool((due or {}).get("forced"))
+        if due is None:
+            # Initial fire on app boot: run one baseline recompute.
+            forced = False
 
         if not config:
             new = _empty_readiness_state("No configuration loaded")

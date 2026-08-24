@@ -55,8 +55,10 @@ class TestCallbackForcing:
     def _fn(self):
         app = Dash(__name__, suppress_callback_exceptions=True)
         register_readiness(app, MagicMock())
+        # Round 3: the worker fires from the readiness-recompute-due Store
+        # (the gate encodes forced/genome), not from raw triggers.
         return get_callback_fn(app, "readiness-state.data",
-                               input_contains="genome-download-complete")
+                               input_contains="readiness-recompute-due")
 
     def test_genome_change_forces_recompute_with_reload(self):
         fn = self._fn()
@@ -64,11 +66,10 @@ class TestCallbackForcing:
         with patch("nanometa_live.core.workflow.readiness_checker.ReadinessChecker",
                    return_value=checker), \
              patch("nanometa_live.app.callbacks.readiness._serialize_report",
-                   return_value={"ok": 1}), \
-             ctx_with("genome-download-complete"):
-            # (n_intervals, config, n_clicks, genome_change, prev_state,
-            #  watchlist, probe_stamp)
-            out, _stamp = fn(5, {"kraken_db": "/dbA"}, None, 3, None, [], None)
+                   return_value={"ok": 1}):
+            # (due, config, prev_state, watchlist, probe_stamp)
+            out, _stamp = fn({"n": 3, "forced": True, "genome": True},
+                             {"kraken_db": "/dbA"}, None, [], None)
         checker.check_readiness.assert_called_once()
         _, kwargs = checker.check_readiness.call_args
         assert kwargs.get("reload_genomes") is True
@@ -80,10 +81,9 @@ class TestCallbackForcing:
         with patch("nanometa_live.core.workflow.readiness_checker.ReadinessChecker",
                    return_value=checker), \
              patch("nanometa_live.app.callbacks.readiness._serialize_report",
-                   return_value={"ok": 1}), \
-             ctx_with("update-interval"):
-            # distinct config so the fingerprint is not fresh and it recomputes
-            fn(9, {"kraken_db": "/dbB-idle"}, None, None, None, [], None)
+                   return_value={"ok": 1}):
+            fn({"n": 4, "forced": False, "genome": False},
+               {"kraken_db": "/dbB-idle"}, None, [], None)
         if checker.check_readiness.called:
             _, kwargs = checker.check_readiness.call_args
             assert kwargs.get("reload_genomes") is False
