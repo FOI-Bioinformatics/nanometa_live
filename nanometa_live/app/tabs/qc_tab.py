@@ -104,19 +104,26 @@ def register_qc_callbacks(app: Dash):
             Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
             Input("update-interval", "n_intervals"),
+            # Tab-aware rendering (round-2 audit): pure display work for a
+            # possibly-hidden tab. Switching here fires this Input and
+            # renders the latest fingerprint. Detection callbacks are
+            # NEVER gated this way (see test_tab_gating).
+            Input("tabs", "active_tab"),
         ],
         [
             State("app-config", "data"),
             State("backend-status", "data"),
         ],
     )
-    def update_qc_plots(_fingerprint, selected_sample, _n_intervals, config, status):
+    def update_qc_plots(_fingerprint, selected_sample, _n_intervals, active_tab, config, status):
         """
         Update the QC plots based on actual processed data from FASTP/Kraken2.
 
         Shows actual reads and base pairs that passed through the pipeline,
         ordered by file modification time to show processing progress.
         """
+        if active_tab != "qc-tab":
+            raise PreventUpdate
         if interval_tick_is_redundant(ctx, "qc_plots", _fingerprint):
             raise PreventUpdate
         mark_rendered("qc_plots", _fingerprint)
@@ -558,13 +565,20 @@ def register_qc_callbacks(app: Dash):
             Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
             Input("update-interval", "n_intervals"),
+            # Tab-aware rendering (round-2 audit): pure display work for a
+            # possibly-hidden tab. Switching here fires this Input and
+            # renders the latest fingerprint. Detection callbacks are
+            # NEVER gated this way (see test_tab_gating).
+            Input("tabs", "active_tab"),
         ],
         [
             State("app-config", "data"),
             State("backend-status", "data"),
         ],
     )
-    def update_per_sample_table(_fingerprint, selected_sample, _n_intervals, config, status):
+    def update_per_sample_table(_fingerprint, selected_sample, _n_intervals, active_tab, config, status):
+        if active_tab != "qc-tab":
+            raise PreventUpdate
         """
         Update the per-sample breakdown table with statistics for each barcode.
 
@@ -600,13 +614,20 @@ def register_qc_callbacks(app: Dash):
             Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
             Input("update-interval", "n_intervals"),
+            # Tab-aware rendering (round-2 audit): pure display work for a
+            # possibly-hidden tab. Switching here fires this Input and
+            # renders the latest fingerprint. Detection callbacks are
+            # NEVER gated this way (see test_tab_gating).
+            Input("tabs", "active_tab"),
         ],
         [
             State("app-config", "data"),
             State("backend-status", "data"),
         ],
     )
-    def update_base_quality_card(_fingerprint, selected_sample, _n_intervals, config, status):
+    def update_base_quality_card(_fingerprint, selected_sample, _n_intervals, active_tab, config, status):
+        if active_tab != "qc-tab":
+            raise PreventUpdate
         """
         Update the base quality card showing Q20/Q30 rates and optional sparkline.
 
@@ -714,13 +735,20 @@ def register_qc_callbacks(app: Dash):
             Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
             Input("update-interval", "n_intervals"),
+            # Tab-aware rendering (round-2 audit): pure display work for a
+            # possibly-hidden tab. Switching here fires this Input and
+            # renders the latest fingerprint. Detection callbacks are
+            # NEVER gated this way (see test_tab_gating).
+            Input("tabs", "active_tab"),
         ],
         [
             State("app-config", "data"),
             State("backend-status", "data"),
         ],
     )
-    def update_read_statistics_card(_fingerprint, selected_sample, _n_intervals, config, status):
+    def update_read_statistics_card(_fingerprint, selected_sample, _n_intervals, active_tab, config, status):
+        if active_tab != "qc-tab":
+            raise PreventUpdate
         """
         Update the read statistics card showing mean length, N50, and GC content.
 

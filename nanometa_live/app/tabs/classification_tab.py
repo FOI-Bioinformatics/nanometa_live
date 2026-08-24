@@ -165,6 +165,10 @@ def register_classification_callbacks(app: Dash):
             # Apply; only the auto-scaled floor forces a re-render.
             Input("classification-autoscale-applied", "data"),
             Input("update-interval", "n_intervals"),  # Polling backstop
+            # Tab-aware rendering (round-2 audit): the Sankey/Sunburst is
+            # pure display; skip while the Taxonomy tab is hidden.
+            # Detection callbacks are NEVER gated this way.
+            Input("tabs", "active_tab"),
         ],
         [
             State("classification-filter-input", "value"),
@@ -185,6 +189,7 @@ def register_classification_callbacks(app: Dash):
         chart_height,     # Chart height control
         _autoscale,       # Programmatic min-reads rescale
         _n_intervals,     # Polling backstop
+        active_tab,       # Tab-aware rendering gate
         filter_value,     # State
         domains,          # State
         config,
@@ -199,6 +204,9 @@ def register_classification_callbacks(app: Dash):
         Returns:
             Tuple of (figure, info_message_children, graph_style)
         """
+
+        if active_tab != "classification-tab":
+            raise PreventUpdate
 
         # Debounce interval-triggered refreshes
         if interval_tick_is_redundant(ctx, "classification_plot", _fingerprint):

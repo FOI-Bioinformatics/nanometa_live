@@ -152,7 +152,7 @@ class TestKreportSampleName:
         from unittest.mock import MagicMock as _MM, patch
         from nanometa_live.app.tabs import qc_tab as qc_tab_mod
         with patch.object(qc_tab_mod, "ctx", _MM(triggered_id="results-fingerprint")):
-            figs = fn({"fp": "x"}, "All Samples", 0,
+            figs = fn({"fp": "x"}, "All Samples", 0, "qc-tab",
                       {"results_output_directory": str(tmp_path)},
                       {"running": False})
 
