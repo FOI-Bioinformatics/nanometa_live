@@ -437,6 +437,13 @@ def create_app(
         # re-walked the whole results tree and cascaded into every
         # fingerprint-gated callback (round-2 audit, 2026-08-22).
         dcc.Store(id='results-dir-path', data=None),
+        # Round 3: once-per-page-load guard for the refresh reseed. Memory
+        # storage on purpose -- it resets on page load (re-arming the
+        # reseed) but persists across callbacks, so a deliberate Reset in
+        # the Configuration tab is never overridden.
+        dcc.Store(id='config-reseeded', data=False),
+        # Round 3: export-watchdog tracking (progress value + since-when).
+        dcc.Store(id='export-watchdog-state', data=None),
 
         # Shared stores for cross-tab communication (Watchlist <-> Preparation)
         dcc.Store(id='taxmap-collection', data=None),
@@ -916,9 +923,13 @@ def register_callbacks(app: Dash, backend_manager: BackendManager):
     from nanometa_live.app.tabs.reports_tab import register_reports_callbacks
     from nanometa_live.app.tabs.preparation_tab import register_preparation_callbacks
     from nanometa_live.app.callbacks import register_core_callbacks
+    from nanometa_live.app.callbacks.worker_watchdog import (
+        register_worker_watchdog,
+    )
 
     # Register callbacks for each tab
     register_core_callbacks(app, backend_manager)
+    register_worker_watchdog(app)
     register_dashboard_callbacks(app)
     register_config_callbacks(app, backend_manager)
     register_main_callbacks(app)

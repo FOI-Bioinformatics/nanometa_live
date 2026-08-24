@@ -64,6 +64,12 @@ class FakeClock:
     def time(self) -> float:
         return self.now
 
+    def monotonic(self) -> float:
+        # The inactivity timeout moved to the monotonic clock (round 3,
+        # so a laptop sleep cannot SIGTERM a healthy run on wake). The
+        # fake advances both clocks together.
+        return self.now
+
     def sleep(self, _seconds: float) -> None:
         self.ticks += 1
         if self.ticks > self.max_ticks:

@@ -226,6 +226,7 @@ class ReadinessChecker:
         report.checks.append(self._check_input_read_length(config))
         report.checks.append(self._check_output_directory(config))
         report.checks.append(self._check_disk_space(config))
+        report.checks.append(self._check_cache_disk_space(config))
 
         # === Data completeness (warning) ===
         report.checks.append(self._check_watchlist_active(config, active_watchlist))
@@ -664,6 +665,24 @@ class ReadinessChecker:
         try:
             usage = shutil.disk_usage(str(check_path))
             free_gb = usage.free / (1024 ** 3)
+            if free_gb < 5:
+                # Round 3: below the hard floor the check FAILS and gates
+                # Start. A run launched onto a nearly full volume hits
+                # ENOSPC mid-run, which truncates reports -- the compound
+                # case where the dashboard then serves last-good data
+                # behind a staleness badge. The explicit env override is
+                # for operators who know their volume.
+                allow = os.environ.get("NANOMETA_ALLOW_LOW_DISK") == "1"
+                return CheckResult(
+                    "Disk Space", False,
+                    Severity.WARNING if allow else Severity.CRITICAL,
+                    f"Only {free_gb:.1f} GB free in the output volume -- "
+                    "below the 5 GB floor for a run",
+                    details=(
+                        "Free space or choose another results folder. To "
+                        "start anyway, export NANOMETA_ALLOW_LOW_DISK=1."
+                    ),
+                )
             if free_gb < 10:
                 return CheckResult(
                     "Disk Space", False, Severity.WARNING,
@@ -678,6 +697,36 @@ class ReadinessChecker:
             return CheckResult(
                 "Disk Space", False, Severity.WARNING,
                 f"Could not check disk space: {e}"
+            )
+
+    def _check_cache_disk_space(self, config: Dict[str, Any]) -> CheckResult:
+        """Free space on the app-data volume (diskcache, logs, genomes).
+
+        Round 3: a full data volume makes every background callback fail
+        in ways the running=/progress= machinery cannot report (the
+        DiskcacheManager cannot store results). WARNING, not CRITICAL --
+        the run itself writes to the results volume.
+        """
+        try:
+            from nanometa_live.core.utils.paths import NanometaPaths
+            data_dir = str(NanometaPaths.from_config(config or {}).data_dir)
+            usage = shutil.disk_usage(data_dir)
+            free_gb = usage.free / (1024 ** 3)
+            if free_gb < 2:
+                return CheckResult(
+                    "App Data Disk Space", False, Severity.WARNING,
+                    f"Only {free_gb:.1f} GB free on the app-data volume "
+                    f"({data_dir}) -- background operations (export, "
+                    "import, rescans) may fail",
+                )
+            return CheckResult(
+                "App Data Disk Space", True, Severity.WARNING,
+                f"{free_gb:.1f} GB free on the app-data volume",
+            )
+        except (OSError, Exception) as e:
+            return CheckResult(
+                "App Data Disk Space", False, Severity.WARNING,
+                f"Could not check app-data disk space: {e}",
             )
 
     # -- Data completeness checks --

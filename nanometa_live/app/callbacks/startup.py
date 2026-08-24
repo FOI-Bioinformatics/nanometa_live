@@ -43,6 +43,58 @@ def register_startup(app, backend_manager):
     _paths_checked = {"done": False}
 
     @app.callback(
+        [
+            Output("app-config", "data", allow_duplicate=True),
+            Output("config-reseeded", "data"),
+        ],
+        Input("update-interval", "n_intervals"),
+        [
+            State("app-config", "data"),
+            State("config-reseeded", "data"),
+        ],
+        prevent_initial_call="initial_duplicate",
+    )
+    def reseed_config_after_refresh(_n, config, already_reseeded):
+        """Restore the applied config after a browser refresh (round 3).
+
+        The app-config Store is memory-scoped: a refresh mid-run reset it
+        to the boot default, and nothing re-seeded it from the live
+        backend -- the header said RUNNING while the verdict banner said
+        STANDBY and every tab was empty. When the backend holds an
+        applied config for a run this session (running, completed or
+        errored) and the browser's store has no results dir of its own,
+        the applied config is restored within one tick. The
+        config-reseeded memory Store re-arms on every page load and
+        blocks re-seeding afterwards, so a deliberate Reset is never
+        fought.
+        """
+        from nanometa_live.app.utils.outdir_resolution import (
+            resolve_outdir_for_fingerprint,
+        )
+
+        if already_reseeded:
+            raise PreventUpdate
+        live = getattr(backend_manager, "config", None)
+        if not live:
+            raise PreventUpdate
+        status = getattr(backend_manager, "status", None) or {}
+        run_happened = bool(
+            status.get("running")
+            or status.get("completed")
+            or status.get("pipeline_status") in
+            ("running", "completed", "error", "stopped")
+        )
+        if not run_happened:
+            raise PreventUpdate
+        if resolve_outdir_for_fingerprint(config or {}):
+            raise PreventUpdate
+        if not resolve_outdir_for_fingerprint(live):
+            raise PreventUpdate
+        logging.info("Reseeded app-config from the live backend after a "
+                     "page load")
+        return dict(live), True
+
+    @app.callback(
         Output("toast-message", "data", allow_duplicate=True),
         Input("app-config", "data"),
         prevent_initial_call="initial_duplicate",

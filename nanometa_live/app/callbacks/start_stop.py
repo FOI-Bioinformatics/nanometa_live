@@ -257,6 +257,22 @@ def register_start_stop(app, backend_manager):
                 no_update,
             )
 
+        # The same transition guard every other start path has (round 3):
+        # without it a double-click on Archive ran
+        # archive_existing_results TWICE -- two timestamped folders,
+        # results split -- before the second start_async was refused.
+        if backend_manager.transition_in_progress():
+            return (
+                False,
+                {
+                    "title": "Already in progress",
+                    "message": "A start or stop is already in progress.",
+                    "color": "warning",
+                },
+                no_update,
+                no_update,
+            )
+
         # Both Archive and Resume need to actually start the pipeline.
         if not config:
             return (

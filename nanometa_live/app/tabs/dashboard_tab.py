@@ -1091,8 +1091,12 @@ def register_dashboard_callbacks(app: Dash):
         ],
         running=[
             (Output("export-generate-btn", "disabled"), True, False),
-            (Output("export-cancel-btn", "disabled"), True, False),
         ],
+        # Round 3: Cancel actually cancels. It used to be DISABLED while
+        # the export ran (its only job was closing the modal), so a
+        # multi-minute 5 GiB copy -- or a dead worker -- left the operator
+        # with no exit but a browser refresh.
+        cancel=[Input("export-cancel-btn", "n_clicks")],
         prevent_initial_call=True,
     )
     def generate_export(set_progress, n_clicks, output_dir, include_raw, config):

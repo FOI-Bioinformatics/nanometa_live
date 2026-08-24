@@ -1057,7 +1057,12 @@ class BackendManager:
         # (max_files .take / its realtime timer) that close the watchPath stream;
         # this GUI stop is a last-resort backstop for a GENUINELY stalled run, so
         # we only fire it when no task has completed for timeout_seconds.
-        last_progress_time = start_time
+        # time.monotonic(), not time.time(): the monotonic clock freezes
+        # while the machine sleeps on macOS/Linux, so a laptop lid-close
+        # longer than realtime_timeout_minutes no longer SIGTERMs a
+        # healthy run the moment it wakes (round 3). Wall-clock deltas
+        # jumped by the whole sleep interval.
+        last_progress_monotonic = time.monotonic()
         last_finished_count = -1
         pipeline_has_worked = False
 
@@ -1081,13 +1086,14 @@ class BackendManager:
                 running_now = workflow_status.get("processes_running", 0)
                 if running_now > 0 or finished_count != last_finished_count:
                     last_finished_count = finished_count
-                    last_progress_time = time.time()
+                    last_progress_monotonic = time.monotonic()
                     if running_now > 0 or finished_count > 0:
                         pipeline_has_worked = True
 
                 # Check realtime timeout (inactivity-based, once work has begun)
                 if timeout_seconds is not None and pipeline_has_worked:
-                    idle = time.time() - last_progress_time
+                    idle = self.inactivity_elapsed_s(
+                        last_progress_monotonic, time.monotonic())
                     if idle >= timeout_seconds:
                         logging.warning(
                             f"Realtime inactivity timeout reached after "
@@ -1215,6 +1221,12 @@ class BackendManager:
                         "Check the Nextflow log for details."])
         self._record_final_status()
         return False
+
+    @staticmethod
+    def inactivity_elapsed_s(last_progress_monotonic: float,
+                             now_monotonic: float) -> float:
+        """Idle seconds for the realtime timeout, on the monotonic clock."""
+        return max(0.0, now_monotonic - last_progress_monotonic)
 
     def _record_final_status(self) -> None:
         """Merge the terminal classification into .nanometa.run.json.

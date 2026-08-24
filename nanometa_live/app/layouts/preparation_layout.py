@@ -116,6 +116,20 @@ def _build_containerization_radio() -> dbc.RadioItems:
 # (watchlist_preparation_layout.py, deployment_layout.py) compose them.
 # ---------------------------------------------------------------------------
 
+def _cancelable_action_row(main_button: dbc.Button, cancel_id: str):
+    """A worker's trigger button beside its round-3 Cancel button.
+
+    Every multi-minute background worker is cancellable -- a dead worker
+    used to leave its trigger disabled for the session with no exit but
+    a browser refresh.
+    """
+    return ActionRow([
+        main_button,
+        dbc.Button("Cancel", id=cancel_id, color="secondary", outline=True,
+                   className="ms-2"),
+    ])
+
+
 def build_wizard_stores():
     """Wizard-step stores driving the offline-deployment wizard (Deployment tab)."""
     return [
@@ -334,13 +348,14 @@ def build_export_bundle_card():
             _build_containerization_radio(),
             _build_prewarm_toggle(),
             _build_platform_banner(),
-            ActionRow([
+            _cancelable_action_row(
                 dbc.Button(
                     [html.I(className="bi bi-download me-2"), "Export Bundle"],
                     id="export-bundle-btn",
                     color="success",
                 ),
-            ]),
+                "export-bundle-cancel-btn",
+            ),
             html.Div(
                 "Large exports take several minutes; conda pre-warm adds ~30 min. "
                 "The button stays disabled and a spinner shows while it runs.",
@@ -458,13 +473,14 @@ def build_import_bundle_card():
                 "Copy it across from the source machine -- e.g. on the same USB "
                 "drive -- and point here at the folder where you placed it.",
             ], className="text-muted small mb-3"),
-            ActionRow([
+            _cancelable_action_row(
                 dbc.Button(
                     [html.I(className="bi bi-upload me-2"), "Import Bundle"],
                     id="import-bundle-btn",
                     color="info",
                 ),
-            ]),
+                "import-bundle-cancel-btn",
+            ),
             # Import runs in a background worker; it writes its outcome here and
             # a main-process callback renders it + activates offline mode (the
             # worker cannot re-init the live singletons).
@@ -567,6 +583,11 @@ def _create_rescan_db_card() -> dbc.Card:
                         color="primary",
                         n_clicks=0,
                         title="Scan the species database to verify watchlist organisms are present",
+                    ),
+                    dbc.Button(
+                        "Cancel", id="taxmap-rescan-cancel-btn",
+                        color="secondary", outline=True, size="sm",
+                        className="ms-2",
                     ),
                     html.Small(id="taxmap-rescan-status", className="ms-2 text-muted"),
                 ], width="auto"),

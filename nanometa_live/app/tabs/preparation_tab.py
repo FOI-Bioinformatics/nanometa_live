@@ -668,6 +668,7 @@ def register_preparation_callbacks(app):
         running=[
             (Output("export-bundle-btn", "disabled"), True, False),
         ],
+        cancel=[Input("export-bundle-cancel-btn", "n_clicks")],
     )
     def export_bundle(n_clicks, directory, filename, pre_warm,
                       containerization, config, watchlist_snapshot):
@@ -852,6 +853,7 @@ def register_preparation_callbacks(app):
         progress=[Output("import-result", "children")],
         running=[(Output("import-bundle-btn", "disabled"), True, False)],
         prevent_initial_call=True,
+        cancel=[Input("import-bundle-cancel-btn", "n_clicks")],
     )
     def import_bundle_worker(set_progress, n_clicks, bundle_path, kraken_db_path):
         if not n_clicks:
@@ -1251,6 +1253,7 @@ def register_preparation_callbacks(app):
             (Output("taxmap-rescan-progress-container", "style", allow_duplicate=True),
              {"display": "block"}, {"display": "none"}),
         ],
+        cancel=[Input("taxmap-rescan-cancel-btn", "n_clicks")],
     )
     def run_rescan(set_progress, n_clicks, config, current_refresh, watchlist_entries_snapshot):
         """Callback for Kraken2 database rescan.
