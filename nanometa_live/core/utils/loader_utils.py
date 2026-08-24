@@ -283,8 +283,17 @@ def clear_all_loader_caches():
     # Round 3: staleness is per-run bookkeeping -- a new run's samples must
     # not inherit the previous run's "serving stale data" flags -- and the
     # seqkit per-batch frames belong to the run that wrote them.
+    from nanometa_live.core.parsers.blast_validation_parser import (
+        reset_validation_parsers,
+    )
+
     staleness.clear()
     clear_seqkit_batch_cache()
+    # Parser singletons carry per-run result caches; a run switch must not
+    # let the previous run's validation answer the new one's first tick.
+    reset_validation_parsers()
+    with _parse_locks_lock:
+        _parse_locks.clear()
 
 
 _saturation_warned: set = set()

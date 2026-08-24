@@ -61,6 +61,34 @@ _REPORT_FRAME_CACHE_MAX = 512
 _report_frame_cache: "OrderedDict[Tuple[str, int, int], pd.DataFrame]" = OrderedDict()
 _report_frame_cache_lock = threading.Lock()
 
+# Round-3 byte budget over BOTH frame caches. The count cap alone is
+# size-blind: at the 96-barcode envelope with 5,000-row reports the
+# harness measured 3.8 GB of frames resident behind an in-cap entry
+# count. Per-entry sizes are tracked at insert (memory_usage(deep) is
+# O(rows), amortised by the parse that just ran); eviction pops plain
+# LRU entries first and touches the last-good fallbacks -- the honesty
+# layer -- only when the plain side alone cannot fit the budget.
+_FRAME_CACHE_BUDGET_BYTES = int(
+    os.environ.get("NANOMETA_FRAME_CACHE_MB", "2048")) * 1024 * 1024
+_frame_sizes: Dict[Tuple[str, int, int], int] = {}
+_last_good_sizes: Dict[str, int] = {}
+
+
+def report_frame_cache_bytes() -> int:
+    """Tracked byte total of both frame caches. Lock-free read of ints."""
+    return sum(_frame_sizes.values()) + sum(_last_good_sizes.values())
+
+
+def _evict_to_budget_locked() -> None:
+    """Pop LRU entries until the byte budget holds. Caller holds the lock."""
+    total = sum(_frame_sizes.values()) + sum(_last_good_sizes.values())
+    while total > _FRAME_CACHE_BUDGET_BYTES and _report_frame_cache:
+        old_key, _ = _report_frame_cache.popitem(last=False)
+        total -= _frame_sizes.pop(old_key, 0)
+    while total > _FRAME_CACHE_BUDGET_BYTES and len(_last_good_frame) > 1:
+        old_path, _ = _last_good_frame.popitem(last=False)
+        total -= _last_good_sizes.pop(old_path, 0)
+
 # Last successful parse per physical report, keyed on realpath alone. Served
 # when the CURRENT file state is transiently unparseable -- nanometanf
 # rewrites each sample's cumulative report per batch, and a poll landing
@@ -95,6 +123,8 @@ def clear_report_frame_cache() -> None:
     with _report_frame_cache_lock:
         _report_frame_cache.clear()
         _last_good_frame.clear()
+        _frame_sizes.clear()
+        _last_good_sizes.clear()
     with _latest_batch_memo_lock:
         _latest_batch_memo.clear()
     from nanometa_live.core.utils.report_accumulation import (
@@ -243,17 +273,38 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
             _record_staleness(filepath, served_fallback=True)
         return fallback
 
-    with _report_frame_cache_lock:
-        _report_frame_cache[key] = df
-        _report_frame_cache.move_to_end(key)
-        while len(_report_frame_cache) > _REPORT_FRAME_CACHE_MAX:
-            _report_frame_cache.popitem(last=False)
-        _last_good_frame[key[0]] = df
-        _last_good_frame.move_to_end(key[0])
-        while len(_last_good_frame) > _REPORT_FRAME_CACHE_MAX:
-            _last_good_frame.popitem(last=False)
+    _store_parsed_frame(key, df)
     _record_staleness(filepath, served_fallback=False)
     return df
+
+
+def _store_parsed_frame(key: Tuple[str, int, int], df: pd.DataFrame) -> None:
+    """Insert a parsed frame into both frame caches, size-tracked.
+
+    Eager supersession first: a rewritten report's older versions are dead
+    weight the moment the new parse lands -- under count pressure alone
+    they lingered for the whole run (the mtime-keyed entries are distinct
+    keys, one per rewrite). Then the count caps, then the byte budget.
+    """
+    size = int(df.memory_usage(deep=True).sum())
+    with _report_frame_cache_lock:
+        for stale_key in [k for k in _report_frame_cache
+                          if k[0] == key[0] and k != key]:
+            del _report_frame_cache[stale_key]
+            _frame_sizes.pop(stale_key, None)
+        _report_frame_cache[key] = df
+        _frame_sizes[key] = size
+        _report_frame_cache.move_to_end(key)
+        while len(_report_frame_cache) > _REPORT_FRAME_CACHE_MAX:
+            old_key, _ = _report_frame_cache.popitem(last=False)
+            _frame_sizes.pop(old_key, None)
+        _last_good_frame[key[0]] = df
+        _last_good_sizes[key[0]] = size
+        _last_good_frame.move_to_end(key[0])
+        while len(_last_good_frame) > _REPORT_FRAME_CACHE_MAX:
+            old_path, _ = _last_good_frame.popitem(last=False)
+            _last_good_sizes.pop(old_path, None)
+        _evict_to_budget_locked()
 
 
 def _record_staleness(filepath: str, *, served_fallback: bool) -> None:
@@ -955,12 +1006,19 @@ def _cache_and_return(result_df: pd.DataFrame, cache_key: str, mtime_key: str,
     ``fingerprint_paths`` must be the same sample-scoped path list used for the
     matching ``_check_mtime_cache`` lookup, or the entry can never be hit.
     """
+    # ONE shared defensive copy for BOTH caches (round 3): the old code
+    # stored two independent copies, tripling the resident bytes of every
+    # load. A single copy keeps the tested guarantee that a caller
+    # mutating the RETURNED frame in place cannot corrupt the caches,
+    # while the TTL and mtime layers share one object (frames served from
+    # cache are read-only by loader contract; mutating consumers copy).
+    shared = result_df.copy()
     with _cache_lock:
-        _kraken_cache[cache_key] = (time.time(), result_df.copy())
+        _kraken_cache[cache_key] = (time.time(), shared)
     _store_mtime_cache(
         mtime_key,
         fingerprint_paths if fingerprint_paths is not None else [kraken_dir],
-        result_df.copy(),
+        shared,
     )
     return result_df
 

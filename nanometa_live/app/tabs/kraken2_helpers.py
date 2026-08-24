@@ -166,6 +166,10 @@ def load_kraken2_taxonomy(kraken_db_path: str) -> dict:
     # key used to be the plain inspect.txt path).
     if kraken_db_path in _TAXONOMY_CACHE:
         return _TAXONOMY_CACHE[kraken_db_path]
+    # Round 3: exactly one database's map stays resident. The map is
+    # int->int over every DB taxon (3 MB to ~250 MB); an operator
+    # switching databases mid-session held both forever.
+    _TAXONOMY_CACHE.clear()
 
     # Prefer a plain inspect.txt; fall back to a gzipped inspect.txt.gz. Some
     # Kraken2 builds (e.g. GTDB-derived / size-conscious DBs) ship only the
