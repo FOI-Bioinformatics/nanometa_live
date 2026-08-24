@@ -15,6 +15,8 @@ missing measurement must not render as a negative result.
 """
 
 import json
+import os
+import time
 
 import pytest
 from dash import Dash
@@ -103,6 +105,8 @@ class TestEmptyAfterParseIsDiagnosed:
         vdir.mkdir(parents=True)
         (vdir / "bc01_taxid263.blast.tsv").write_text(
             "read1\tNZ_CP009607.1\t99.0\t500\t2\t0\t1\t500\t10\t510\t1e-50\t900\n")
+        _bd = time.time() - 120
+        os.utime(vdir / "bc01_taxid263.blast.tsv", (_bd, _bd))
         store = _load(app, {
             "blast_validation": True,
             "validation_method": "both",

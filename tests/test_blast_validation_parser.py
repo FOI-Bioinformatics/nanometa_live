@@ -16,6 +16,7 @@ existing test_validation_system.py suite.
 """
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -36,9 +37,15 @@ def parser(tmp_path):
 
 
 def _write_blast(path: Path, rows, cols=12):
-    """Write BLAST outfmt-6 rows. Each row is a tuple of field values."""
+    """Write BLAST outfmt-6 rows, backdated past the stability window.
+
+    The round-3 mid-write gate skips files younger than the stability
+    threshold; a fixture is by definition a settled file.
+    """
     assert all(len(r) == cols for r in rows)
     path.write_text("".join("\t".join(str(v) for v in r) + "\n" for r in rows))
+    t = time.time() - 120
+    os.utime(path, (t, t))
 
 
 # 12-column outfmt 6: qseqid sseqid pident length mismatch gapopen qstart qend
@@ -781,3 +788,38 @@ class TestSupersedeMatchesByMethodClass:
             f"instead of being replaced: {[(r.validation_method, r.validated_reads) for r in blast_class]}"
         )
         assert blast_class[0].validated_reads == 95
+
+
+class TestUnstableBlastTsvIsSkipped:
+    """A blast.tsv still being written must not be parsed (round 3).
+
+    A mid-write read undercounts qseqids, so validated_reads drops and a
+    CONFIRMED organism transiently flips to UNCERTAIN on a live run. The
+    kraken/QC loaders already gate on _is_file_stable; the blast disk
+    scan did not. An unstable file is skipped for the poll -- the pair
+    simply appears one tick later, which is invisible; a downgrade is not.
+    """
+
+    def _tsv(self, tmp_path, age_seconds):
+        vdir = tmp_path / "validation" / "blast"
+        vdir.mkdir(parents=True)
+        f = vdir / "barcode01_taxid562.blast.tsv"
+        _write_blast(f, ROWS_12)
+        t = time.time() - age_seconds
+        os.utime(f, (t, t))
+        return f
+
+    def test_fresh_file_is_skipped_for_the_poll(self, tmp_path):
+        self._tsv(tmp_path, age_seconds=0)
+        p = ValidationParser(str(tmp_path))
+        results = p.get_validation_results()
+        assert not [r for r in results
+                    if r.validation_method == "blast"], (
+            "a file younger than the stability window was parsed mid-write"
+        )
+
+    def test_settled_file_is_parsed(self, tmp_path):
+        self._tsv(tmp_path, age_seconds=120)
+        p = ValidationParser(str(tmp_path))
+        results = p.get_validation_results()
+        assert [r for r in results if r.validation_method == "blast"]

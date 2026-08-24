@@ -1426,7 +1426,23 @@ class WatchlistManager:
             if count:
                 logger.info(f"Restored toggle state: {count} entries disabled from previous session")
         except (FileNotFoundError, PermissionError, OSError, UnicodeDecodeError, yaml.YAMLError, AttributeError) as e:
-            logger.debug(f"Could not restore toggle state: {e}")
+            # Fail-loud-ward but SAID (round 3): a corrupt state file means
+            # every entry the operator disabled comes back ENABLED. More
+            # screening, not less -- but silently reversing an operator
+            # decision on a biothreat panel needs a warning and a toast,
+            # not a debug line.
+            logger.warning(f"Could not restore toggle state: {e}")
+            self._toggle_restore_warning = (
+                "The saved enable/disable state could not be read "
+                f"({type(e).__name__}); all watchlist entries are enabled. "
+                "Re-apply any entries you had disabled."
+            )
+
+    def consume_toggle_restore_warning(self) -> Optional[str]:
+        """One-shot fetch of the corrupt-toggle-state warning, if any."""
+        msg = getattr(self, "_toggle_restore_warning", None)
+        self._toggle_restore_warning = None
+        return msg
 
     # -------------------------------------------------------------------------
     # New methods for YAML-based watchlists and multi-taxonomy support

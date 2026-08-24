@@ -1172,6 +1172,7 @@ class BackendManager:
         workflow_errors = workflow_status.get("errors", [])
         if workflow_errors:
             self._fail_run(workflow_errors)
+            self._record_final_status()
             return False
 
         processes_failed = workflow_status.get("processes_failed", 0)
@@ -1192,24 +1193,51 @@ class BackendManager:
                 "Pipeline completed with %d isolated task failure(s): %s",
                 processes_failed, named,
             )
+            self._record_final_status()
             return True
 
         if processes_failed > 0:
             self._fail_run(
                 [f"Pipeline terminated with {processes_failed} failed process(es)"])
+            self._record_final_status()
             return False
 
         if processes_complete > 0:
             self.status["pipeline_status"] = "completed"
             self.status["running"] = False
             logging.info("Pipeline completed successfully")
+            self._record_final_status()
             return True
 
         # No completed processes and no errors -- likely a crash during
         # startup or configuration.
         self._fail_run(["Pipeline process terminated unexpectedly. "
                         "Check the Nextflow log for details."])
+        self._record_final_status()
         return False
+
+    def _record_final_status(self) -> None:
+        """Merge the terminal classification into .nanometa.run.json.
+
+        The exported report reads ``final_status``/``final_errors`` from
+        here (the export worker cannot see the live backend singleton), so
+        a report generated over a crashed run refuses the green banner --
+        the round-3 every-surface-says-the-same-thing rule. Best-effort:
+        a missing outdir or a write failure never affects the run
+        classification itself.
+        """
+        try:
+            outdir = (self.config or {}).get("results_output_directory") or ""
+            if not outdir or not os.path.isdir(outdir):
+                return
+            path = os.path.join(outdir, self.RUN_METADATA_FILENAME)
+            meta = self.read_run_metadata(outdir) or {}
+            meta["final_status"] = self.status.get("pipeline_status")
+            meta["final_errors"] = list(self.status.get("errors") or [])
+            from nanometa_live.core.utils.atomic_write import atomic_write_json
+            atomic_write_json(path, meta)
+        except Exception:
+            logging.warning("Could not record final run status", exc_info=True)
 
     def _fail_run(self, errors) -> None:
         """Mark the run failed, appending each error once. Lock held."""

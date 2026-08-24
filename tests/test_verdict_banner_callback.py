@@ -55,6 +55,9 @@ def _run_verdict_banner(
     taxid_to_samples,
     available_samples,
     per_sample_side_effect=None,
+    status=None,
+    make_results_dir=True,
+    fingerprint="fp1",
 ):
     """Drive ``update_verdict_banner`` with mocked pathogen/attribution data.
 
@@ -68,12 +71,14 @@ def _run_verdict_banner(
     callback_fn = getattr(spec["callback"], "__wrapped__", spec["callback"])
 
     results_dir = tmp_path / "results"
-    (results_dir / "kraken2").mkdir(parents=True, exist_ok=True)
+    if make_results_dir:
+        (results_dir / "kraken2").mkdir(parents=True, exist_ok=True)
     config = {
         "results_output_directory": str(results_dir),
         "main_dir": str(results_dir),
     }
-    status = {"running": True, "completed": False, "start_time": None}
+    if status is None:
+        status = {"running": True, "completed": False, "start_time": None}
 
     kraken_df = pd.DataFrame([
         {
@@ -109,7 +114,7 @@ def _run_verdict_banner(
         return_value=False,
     ):
         outputs = callback_fn(
-            "fp1", None, 0,
+            fingerprint, None, 0,
             config, status, {"status": "ok"}, {"results": []},
             available_samples,
         )
@@ -373,3 +378,69 @@ class TestPathogenNaming:
     def test_no_block_when_empty(self):
         assert "Above threshold" not in self._render(None)
         assert "Above threshold" not in self._render([])
+
+
+class TestRunHealthReachesTheBanner:
+    """The callback must thread backend-status run health into
+    select_verdict: a crashed pipeline or a vanished results dir must
+    change the banner, not just the header pill (round-3 audit)."""
+
+    _ERROR_STATUS = {
+        "running": False, "completed": False, "start_time": None,
+        "pipeline_status": "error",
+        "errors": ["Nextflow exited with code 137"],
+    }
+
+    def test_pipeline_error_shows_on_the_banner(self, tmp_path):
+        rendered = _run_verdict_banner(
+            tmp_path, detections=[], taxid_to_samples={},
+            available_samples=["barcode01"], status=self._ERROR_STATUS,
+        )
+        assert "PIPELINE ERROR" in rendered
+
+    def test_pipeline_error_carries_the_detail(self, tmp_path):
+        rendered = _run_verdict_banner(
+            tmp_path, detections=[], taxid_to_samples={},
+            available_samples=["barcode01"], status=self._ERROR_STATUS,
+        )
+        assert "137" in rendered
+
+    def test_detection_still_wins_with_error_noted(self, tmp_path):
+        rendered = _run_verdict_banner(
+            tmp_path,
+            detections=[{"name": "Bacillus anthracis", "taxid": 1392,
+                         "threat_level": "critical", "reads": 500}],
+            taxid_to_samples={88888: [_sample("barcode01", 500)]},
+            available_samples=["barcode01"], status=self._ERROR_STATUS,
+        )
+        assert "ACTION REQUIRED" in rendered
+        assert "pipeline error" in rendered.lower()
+
+    def test_run_state_badge_shows_error(self, tmp_path):
+        rendered = _run_verdict_banner(
+            tmp_path, detections=[], taxid_to_samples={},
+            available_samples=["barcode01"], status=self._ERROR_STATUS,
+        )
+        assert '"ERROR"' in rendered and '"danger"' in rendered
+
+    def test_lost_results_dir_is_unavailable_not_standby(self, tmp_path):
+        # The dir was fingerprinted earlier this session (fingerprint
+        # non-empty) and is now absent.
+        rendered = _run_verdict_banner(
+            tmp_path, detections=[], taxid_to_samples={},
+            available_samples=["barcode01"], make_results_dir=False,
+            status={"running": True, "completed": False, "start_time": None},
+        )
+        assert "RESULTS UNAVAILABLE" in rendered
+        assert "STANDBY" not in rendered
+
+    def test_never_fingerprinted_missing_dir_stays_standby(self, tmp_path):
+        # No fingerprint ever computed -> the dir never held data -> the
+        # old STANDBY behaviour is correct and must not change.
+        rendered = _run_verdict_banner(
+            tmp_path, detections=[], taxid_to_samples={},
+            available_samples=["barcode01"], make_results_dir=False,
+            fingerprint=None,
+            status={"running": False, "completed": False, "start_time": None},
+        )
+        assert "STANDBY" in rendered

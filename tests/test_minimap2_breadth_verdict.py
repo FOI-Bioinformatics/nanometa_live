@@ -22,6 +22,8 @@ concentrated-coverage test that already governs the plots governs this too.
 """
 
 import json
+import os
+import time
 
 import pytest
 
@@ -113,6 +115,9 @@ class TestBreadthGovernsTheCoverageVerdict:
         (blast / "bc01_taxid4007187.blast.tsv").write_text("".join(
             f"r{i}\tNZ_TEST\t99.0\t500\t2\t0\t1\t500\t10\t510\t1e-50\t900\n"
             for i in range(50)))
+        # Backdate past the round-3 mid-write stability gate.
+        _t = time.time() - 120
+        os.utime(blast / "bc01_taxid4007187.blast.tsv", (_t, _t))
         (blast / "bc01_taxid4007187.blast_stats.json").write_text(json.dumps({
             "sample_id": "bc01", "taxid": 4007187, "total_reads": 50,
             "blast_hits": 50, "hit_rate": 1.0, "avg_identity": 99.0,

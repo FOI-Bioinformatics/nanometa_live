@@ -47,6 +47,8 @@ from dataclasses import dataclass, field, asdict
 from enum import Enum
 import pandas as pd
 
+from nanometa_live.core.utils.loader_utils import _is_file_stable
+
 logger = logging.getLogger(__name__)
 
 # Shared parser per results dir. The per-instance results cache (mtime-keyed)
@@ -549,6 +551,10 @@ class ValidationParser:
             tsv = blast_dir / f"{r.sample_id}_taxid{r.taxid}.blast.tsv"
             if not tsv.exists():
                 continue
+            # Mid-write files are skipped (see the disk-scan gate): partial
+            # identity ranges are worse than the aggregate's own values.
+            if not _is_file_stable(str(tsv)):
+                continue
             detail = self.parse_blast_tabular(tsv, r.sample_id, r.taxid, r.total_reads)
             if detail.percent_identity_max:
                 r.percent_identity_min = detail.percent_identity_min
@@ -835,6 +841,13 @@ class ValidationParser:
                 # (sample, taxid) dedup was the hide-on-disk-BLAST bug.
                 key = (file_sample, file_taxid, "blast")
                 if key in seen_keys:
+                    continue
+
+                # A file still being written undercounts qseqids, so
+                # validated_reads drops and a CONFIRMED organism transiently
+                # flips to UNCERTAIN. Skip it this poll -- the pair appears
+                # one tick later instead, which is invisible (round 3).
+                if not _is_file_stable(str(blast_file)):
                     continue
 
                 # Parse tabular file

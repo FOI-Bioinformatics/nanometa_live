@@ -794,26 +794,15 @@ def _build_report_payload_inner(taxid: Any, config: Dict[str, Any],
 # ----------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class VerdictDescriptor:
-    """Describes which verdict banner to render, without building components.
-
-    Carries every argument needed by _make_banner_content and
-    _verdict_banner_style. ``needs_attribution`` signals to the callback that
-    the per-sample triggering attribution I/O should run for this state (only
-    ACTION REQUIRED today).
-    """
-    state: str
-    icon: str
-    icon_color: str
-    title: str
-    subtitle: str
-    sub_color: str
-    bg_color: str
-    border_color: str
-    icon_extra_class: str = ""
-    show_icon_mobile: bool = False
-    needs_attribution: bool = False
+# The descriptor dataclass and the round-3 failure states (PIPELINE_ERROR,
+# RESULTS_UNAVAILABLE, the stale/error subtitle clauses) live in
+# verdict_states.py; re-exported here so existing imports keep working.
+from nanometa_live.app.tabs.verdict_states import (  # noqa: F401
+    VerdictDescriptor,
+    pipeline_error_descriptor as _pipeline_error_descriptor,
+    results_unavailable_descriptor as _results_unavailable_descriptor,
+    with_failure_clauses as _with_failure_clauses,
+)
 
 
 def _screening_descriptor() -> VerdictDescriptor:
@@ -1062,6 +1051,74 @@ def _subthreshold_descriptor(
     )
 
 
+def _data_verdict(
+    *,
+    dangerous,
+    subthreshold,
+    n_watched,
+    validation_has_results,
+    total_reads,
+    low_read_floor,
+    highest_alert_threshold,
+    pipeline_error,
+    pipeline_error_detail,
+    stale_samples,
+) -> VerdictDescriptor:
+    """The data-available branch of select_verdict (extracted, still pure).
+
+    Precedence: detection > run health > not-screened > depth >
+    sub-threshold > all-clear. A hit outranks run health -- a verdict never
+    suppresses a hit -- but run health outranks every non-detection state.
+    """
+    if dangerous:
+        return _with_failure_clauses(
+            _detection_descriptor(
+                dangerous, n_watched, validation_has_results,
+                total_reads, low_read_floor,
+            ),
+            pipeline_error=pipeline_error,
+            pipeline_error_detail=pipeline_error_detail,
+            stale_samples=stale_samples,
+        )
+    if pipeline_error:
+        if subthreshold:
+            return _with_failure_clauses(
+                _subthreshold_descriptor(subthreshold, n_watched, total_reads),
+                pipeline_error=True,
+                pipeline_error_detail=pipeline_error_detail,
+                stale_samples=stale_samples,
+            )
+        return _pipeline_error_descriptor(
+            pipeline_error_detail, has_partial_data=True)
+    # No hits. Whether that is reassuring depends entirely on whether
+    # anything was screened -- see _not_screened_descriptor.
+    if not n_watched:
+        return _not_screened_descriptor()
+
+    # An absence measured over almost no reads is not evidence of absence.
+    # Only applied when the caller supplies a depth: passing None keeps the
+    # previous behaviour for callers that cannot determine it, rather than
+    # silently treating "unknown" as "zero".
+    if total_reads is not None and total_reads < low_read_floor:
+        return _insufficient_reads_descriptor(
+            total_reads, n_watched, highest_alert_threshold
+        )
+
+    # Found something, just not loudly enough to alarm. Shown here so a
+    # sub-threshold detection can never hide behind a green banner
+    # (2026-08-19 operator decision).
+    if subthreshold:
+        return _with_failure_clauses(
+            _subthreshold_descriptor(subthreshold, n_watched, total_reads),
+            stale_samples=stale_samples,
+        )
+
+    return _with_failure_clauses(
+        _all_clear_descriptor(n_watched, total_reads),
+        stale_samples=stale_samples,
+    )
+
+
 def select_verdict(
     *,
     has_config: bool,
@@ -1076,6 +1133,10 @@ def select_verdict(
     total_reads: Optional[int] = None,
     low_read_floor: int = DEFAULT_LOW_READ_FLOOR,
     highest_alert_threshold: Optional[int] = None,
+    pipeline_error: bool = False,
+    pipeline_error_detail: Optional[str] = None,
+    results_dir_lost: bool = False,
+    stale_samples: int = 0,
 ) -> VerdictDescriptor:
     """Pure decision: pick the verdict banner state from the analysis inputs.
 
@@ -1085,10 +1146,21 @@ def select_verdict(
     2. overall_status == "starting" -> SCREENING (takes priority over data).
     3. Results directory present with Kraken data -> classify the watchlist
        hits: any critical/high-risk hit -> ACTION REQUIRED; other hits ->
-       MONITORING; no hits -> ALL CLEAR.
-    4. Results directory present but no data yet and still running -> SCREENING.
-    5. Everything else (no results dir, idle with no data, load failure) ->
+       MONITORING; no hits -> ALL CLEAR. ``pipeline_error`` outranks every
+       non-hit state in this branch (a dead pipeline must never render as a
+       clean result) but never a hit -- detections and sub-threshold hits
+       keep their state with the failure noted in the subtitle.
+    4. Results directory previously seen but now unreadable
+       (``results_dir_lost``) -> RESULTS UNAVAILABLE; a crashed run with no
+       output (``pipeline_error``) -> PIPELINE ERROR. Both distinct from
+       STANDBY on purpose.
+    5. Results directory present but no data yet and still running -> SCREENING.
+    6. Everything else (no results dir, idle with no data, load failure) ->
        STANDBY.
+
+    ``stale_samples`` (samples currently serving last-good fallback data)
+    appends a clause to the data-state subtitles so frozen numbers cannot
+    present as live ones.
     """
     if not has_config:
         return _screening_descriptor() if pipeline_running else _standby_descriptor()
@@ -1097,33 +1169,25 @@ def select_verdict(
         return _screening_descriptor()
 
     if main_dir_available and kraken_has_data:
-        if dangerous:
-            return _detection_descriptor(
-                dangerous, n_watched, validation_has_results,
-                total_reads, low_read_floor,
-            )
-        # No hits. Whether that is reassuring depends entirely on whether
-        # anything was screened -- see _not_screened_descriptor.
-        if not n_watched:
-            return _not_screened_descriptor()
+        return _data_verdict(
+            dangerous=dangerous, subthreshold=subthreshold,
+            n_watched=n_watched,
+            validation_has_results=validation_has_results,
+            total_reads=total_reads, low_read_floor=low_read_floor,
+            highest_alert_threshold=highest_alert_threshold,
+            pipeline_error=pipeline_error,
+            pipeline_error_detail=pipeline_error_detail,
+            stale_samples=stale_samples,
+        )
 
-        # An absence measured over almost no reads is not evidence of absence.
-        # Only applied when the caller supplies a depth: passing None keeps the
-        # previous behaviour for callers that cannot determine it, rather than
-        # silently treating "unknown" as "zero".
-        if total_reads is not None and total_reads < low_read_floor:
-            return _insufficient_reads_descriptor(
-                total_reads, n_watched, highest_alert_threshold
-            )
-
-        # Found something, just not loudly enough to alarm. Shown here so a
-        # sub-threshold detection can never hide behind a green banner
-        # (2026-08-19 operator decision).
-        if subthreshold:
-            return _subthreshold_descriptor(
-                subthreshold, n_watched, total_reads)
-
-        return _all_clear_descriptor(n_watched, total_reads)
+    # A directory that held data earlier and is now unreadable is an event
+    # (unmounted volume, deleted folder), not idleness -- and a crashed run
+    # with no output is a failure, not standby.
+    if results_dir_lost and not main_dir_available:
+        return _results_unavailable_descriptor()
+    if pipeline_error:
+        return _pipeline_error_descriptor(
+            pipeline_error_detail, has_partial_data=False)
 
     # Results directory present but no rows yet, pipeline still producing them.
     if main_dir_available and pipeline_running:

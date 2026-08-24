@@ -133,3 +133,64 @@ class TestTraceFailedTasks:
         out = mgr._parse_trace_file()
         assert out["processes_failed"] == 1
         assert out["failed_tasks"] == ["FLYE (barcode16)"]
+
+
+class TestFinalStatusOnDisk:
+    """The terminal classification is recorded into .nanometa.run.json.
+
+    Round-3 parity rule: the exported report reads the run's terminal
+    status from disk (the export worker cannot see the live backend), so
+    a report over a crashed run can refuse the green banner. The write is
+    best-effort -- a missing outdir must never fail the classification.
+    """
+
+    def _meta(self, bm):
+        import json, os
+        path = os.path.join(bm.config["results_output_directory"],
+                            ".nanometa.run.json")
+        with open(path) as f:
+            return json.load(f)
+
+    def test_error_run_records_final_status(self, bm, tmp_path):
+        (tmp_path / "out").mkdir()
+        _statuses(bm, {
+            "running": False, "errors": ["Nextflow exited with code 137"],
+            "processes_complete": 3, "processes_failed": 0,
+            "exit_code": 137,
+        })
+        meta = self._meta(bm)
+        assert meta["final_status"] == "error"
+        assert any("137" in e for e in meta["final_errors"])
+
+    def test_completed_run_records_final_status(self, bm, tmp_path):
+        (tmp_path / "out").mkdir()
+        _statuses(bm, {
+            "running": False, "errors": [],
+            "processes_complete": 46, "processes_failed": 0,
+            "exit_code": 0,
+        })
+        assert self._meta(bm)["final_status"] == "completed"
+
+    def test_existing_metadata_keys_survive(self, bm, tmp_path):
+        import json
+        out = tmp_path / "out"
+        out.mkdir()
+        (out / ".nanometa.run.json").write_text(
+            json.dumps({"fingerprint": "abc", "watchlists": ["bio"]}))
+        _statuses(bm, {
+            "running": False, "errors": [],
+            "processes_complete": 46, "processes_failed": 0,
+            "exit_code": 0,
+        })
+        meta = self._meta(bm)
+        assert meta["fingerprint"] == "abc"
+        assert meta["watchlists"] == ["bio"]
+        assert meta["final_status"] == "completed"
+
+    def test_missing_outdir_never_raises(self, bm):
+        _statuses(bm, {
+            "running": False, "errors": ["boom"],
+            "processes_complete": 0, "processes_failed": 0,
+            "exit_code": 1,
+        })
+        assert bm.status["pipeline_status"] == "error"

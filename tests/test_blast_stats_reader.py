@@ -21,6 +21,9 @@ determine_status falls through to UNCERTAIN when the denominator is unknown.
 
 import json
 
+import os
+import time
+
 import pytest
 
 from nanometa_live.core.parsers.blast_validation_parser import (
@@ -29,6 +32,12 @@ from nanometa_live.core.parsers.blast_validation_parser import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+def _backdate(path):
+    """Age a fixture past the round-3 mid-write stability gate."""
+    t = time.time() - 120
+    os.utime(path, (t, t))
 
 
 def _realtime_tree(tmp_path, *, with_stats=True, hits=40, total=50):
@@ -40,6 +49,7 @@ def _realtime_tree(tmp_path, *, with_stats=True, hits=40, total=50):
     (blast / "bc01_taxid263.blast.tsv").write_text("\n".join(
         f"r{i}\tNZ_X\t99.0\t500\t2\t0\t1\t500\t10\t510\t1e-50\t900\t500\t1900000\t95"
         for i in range(hits)) + "\n")
+    _backdate(blast / "bc01_taxid263.blast.tsv")
     if with_stats:
         (blast / "bc01_taxid263.blast_stats.json").write_text(json.dumps({
             "sample_id": "bc01", "taxid": 263, "total_reads": total,

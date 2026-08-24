@@ -46,7 +46,19 @@ def _render(watched_results, total_reads, low_read_floor=DEFAULT_LOW_READ_FLOOR)
     )
     source = (template_dir / "report.html").read_text()
     start = source.index("<!-- DECISION BANNER -->")
-    end = source.index("{% endif %}", start) + len("{% endif %}")
+    # Matching endif (the banner divs carry inline {% if %} clauses now).
+    import re as _re
+    depth = 0
+    end = None
+    for m in _re.finditer(r"{%-?\s*(if|endif)\b.*?%}", source[start:]):
+        if m.group(1) == "if":
+            depth += 1
+        else:
+            depth -= 1
+            if depth == 0:
+                end = start + m.end()
+                break
+    assert end is not None
     banner = env.from_string(source[start:end])
     return banner.render(data={
         "watched_results": watched_results,

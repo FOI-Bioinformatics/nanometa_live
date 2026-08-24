@@ -135,8 +135,12 @@ def _is_file_stable(filepath: str, wait_ms: int = FILE_STABILITY_CHECK_INTERVAL_
 
     Args:
         filepath: Path to the file to check
-        wait_ms: Age threshold in milliseconds; the file's mtime must be at
-            least this old to be considered stable (default: 200ms)
+        wait_ms: Age threshold in milliseconds. NOTE the floor below: the
+            effective threshold is ``max(wait_ms/1000, 1.0)``, so the
+            default 200 ms constant is dead and the REAL window is 1 second.
+            Documented rather than changed (round-3 audit): shrinking the
+            window loosens the mid-write guard, which is not a change to
+            make quietly.
 
     Returns:
         True if file exists, has content, and mtime is sufficiently old; False otherwise
@@ -266,11 +270,41 @@ def clear_all_loader_caches():
         clear_report_frame_cache,
     )
     from nanometa_live.core.utils.sample_detector import invalidate_sample_cache
+    from nanometa_live.core.utils import staleness
 
     clear_data_cache()
     clear_report_frame_cache()
     invalidate_sample_cache()
     get_alert_engine().clear_alerts()
+    # Round 3: staleness is per-run bookkeeping -- a new run's samples must
+    # not inherit the previous run's "serving stale data" flags.
+    staleness.clear()
+
+
+_saturation_warned: set = set()
+
+
+def _saturated_mtime(observed_mtime: float, label: str) -> float:
+    """Fold the TTL time-bucket into a SATURATED fingerprint component.
+
+    Past ``_MAX_FINGERPRINT_FILES`` the walk stops stat'ing, so an in-place
+    rewrite of a late file changes nothing the fingerprint can see -- the
+    old behaviour froze it INDEFINITELY. Returning the current TTL bucket
+    (wall time rounded down to ``CACHE_TTL_SECONDS``) instead makes every
+    saturated fingerprint roll over once per TTL, degrading both cache
+    layers to periodic re-validation: honest, bounded staleness. Warned
+    once per path so a permanently oversized tree is visible in the log.
+    """
+    if label not in _saturation_warned:
+        _saturation_warned.add(label)
+        logging.warning(
+            "Fingerprint saturated at %d files for %s -- freshness "
+            "detection degrades to a %ss refresh interval for this path. "
+            "Raise NANOMETA_MAX_FINGERPRINT_FILES to restore exact "
+            "detection.", _MAX_FINGERPRINT_FILES, label, CACHE_TTL_SECONDS,
+        )
+    bucket = float(int(time.time() / CACHE_TTL_SECONDS) * CACHE_TTL_SECONDS)
+    return max(observed_mtime, bucket)
 
 
 def _get_dir_latest_mtime(directory: str) -> Tuple[float, int]:
@@ -305,8 +339,15 @@ def _get_dir_latest_mtime(directory: str) -> Tuple[float, int]:
                     continue
                 if mt > latest:
                     latest = mt
-    except OSError:
-        pass
+    except OSError as e:
+        # A walk failure here is how a vanished/unreadable results volume
+        # first shows up. Warn once per directory (the verdict banner's
+        # results_dir_lost state carries the operator-facing message).
+        if directory not in _saturation_warned:
+            _saturation_warned.add(directory)
+            logging.warning("Cannot walk %s: %s", directory, e)
+    if files_seen > _MAX_FINGERPRINT_FILES:
+        latest = _saturated_mtime(latest, directory)
     return latest, files_seen
 
 
@@ -365,6 +406,9 @@ def _get_path_fingerprint(paths: List[str]) -> Tuple[float, int, int]:
             if st.st_mtime > combined_mtime:
                 combined_mtime = st.st_mtime
             combined_size += st.st_size
+    if file_count > files_stat and files_stat >= _MAX_FINGERPRINT_FILES:
+        combined_mtime = _saturated_mtime(
+            combined_mtime, paths[0] if paths else "?")
     return (combined_mtime, combined_size, file_count)
 
 

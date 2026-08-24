@@ -214,6 +214,12 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
                 "Report transiently unparseable; serving last good parse: %s",
                 filepath,
             )
+            # Honesty hook (round 3): a fallback that persists is frozen
+            # data. The registry tracks it per sample so the verdict banner
+            # can say "N samples serving stale data" instead of presenting
+            # last-good numbers as live; it also owns the throttled warning
+            # for the permanently-corrupt case (the disk-full signature).
+            _record_staleness(filepath, served_fallback=True)
         return fallback
 
     with _report_frame_cache_lock:
@@ -225,7 +231,32 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
         _last_good_frame.move_to_end(key[0])
         while len(_last_good_frame) > _REPORT_FRAME_CACHE_MAX:
             _last_good_frame.popitem(last=False)
+    _record_staleness(filepath, served_fallback=False)
     return df
+
+
+def _record_staleness(filepath: str, *, served_fallback: bool) -> None:
+    """Report a parse outcome to the staleness registry.
+
+    Scope is the results dir (the parent of the ``kraken2`` path component);
+    the sample is derived the same way report discovery derives it. Never
+    raises -- honesty bookkeeping must not break a load.
+    """
+    try:
+        from nanometa_live.core.utils import staleness
+
+        parts = os.path.abspath(filepath).replace("\\", "/").split("/")
+        if "kraken2" not in parts:
+            return
+        scope = "/".join(parts[: parts.index("kraken2")]) or "/"
+        sample = _report_sample_key(filepath)
+        if served_fallback:
+            staleness.record_last_good_served(scope, sample)
+        else:
+            staleness.record_parse_ok(scope, sample)
+    except Exception:  # pragma: no cover - defensive
+        logging.debug("staleness bookkeeping failed for %s", filepath,
+                      exc_info=True)
 
 
 def _parse_kraken2_report_uncached(filepath: str, check_stability: bool = True) -> Optional[pd.DataFrame]:
