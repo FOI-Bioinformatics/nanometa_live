@@ -1242,6 +1242,27 @@ class WatchlistManager:
                 return True
             return False
 
+    def set_entries_enabled(self, taxids, enabled: bool) -> int:
+        """Toggle many entries under one lock with a SINGLE state save.
+
+        Enable All / Disable All used to call :meth:`toggle_entry` per
+        entry, and each call fsyncs the full toggle-state YAML -- 500
+        entries meant 500 locks + dumps + fsyncs on the click thread
+        (round-2 audit, 2026-08-22). Unknown taxids are skipped. Returns
+        the number of entries changed; nothing is written for an empty
+        batch.
+        """
+        changed = 0
+        with self._lock:
+            for taxid in taxids:
+                entry = self._entries.get(taxid)
+                if entry is not None:
+                    entry.enabled = enabled
+                    changed += 1
+            if changed:
+                self._save_toggle_state()
+        return changed
+
     def toggle_category(self, category: str, enabled: bool) -> int:
         """Enable or disable all entries in a category and persist state."""
         with self._lock:

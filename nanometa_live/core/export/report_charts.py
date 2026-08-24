@@ -10,10 +10,13 @@ keeps a thin delegating wrapper so the class's public surface (and its
 existing monkeypatch-based tests) are unaffected.
 """
 
+import logging
 from typing import Any, Dict, List
 
 import plotly.graph_objects as go
 import plotly.io as pio
+
+logger = logging.getLogger(__name__)
 
 
 def fig_to_json(fig: go.Figure) -> str:
@@ -141,3 +144,52 @@ def build_charts(data: Dict[str, Any]) -> Dict[str, str]:
             )
 
     return charts
+
+
+_PLOTLY_CDN_URL = "https://cdn.plot.ly/plotly-2.35.2.min.js"
+
+
+def find_local_plotly_js(offline_mode: bool = False) -> str:
+    """Plotly.js source for inline embedding, or "" when no local bundle.
+
+    Moved from ReportGenerator._get_plotly_js (code-size gate); behavior
+    unchanged. In offline mode a CDN reference is useless (and a dangling
+    external request when the report is opened), so the caller must not
+    emit one -- see _build_html_report. The degradation is surfaced loudly
+    rather than silently shipping a chart-less "self-contained" report.
+    """
+    from pathlib import Path
+
+    try:
+        import dash
+        dash_dir = Path(dash.__file__).parent
+        # Dash bundles plotly.js in its package
+        candidates = [
+            dash_dir / "dcc" / "plotly.min.js",
+            dash_dir / "dcc" / "async-plotlyjs.js",
+        ]
+        # Also check plotly's own bundled JS
+        import plotly
+        plotly_dir = Path(plotly.__file__).parent
+        candidates.append(plotly_dir / "package_data" / "plotly.min.js")
+
+        for candidate in candidates:
+            if candidate.exists():
+                logger.info("Using local plotly.js from %s", candidate)
+                return candidate.read_text(encoding="utf-8")
+    except (ImportError, AttributeError, FileNotFoundError, PermissionError,
+            OSError, UnicodeDecodeError):
+        pass
+
+    if offline_mode:
+        logger.error(
+            "No local plotly.js bundle found and offline_mode is set: "
+            "the exported report's charts will not render. Install plotly "
+            "with its bundled package_data, or export with network access."
+        )
+    else:
+        logger.warning(
+            "Could not find local plotly.js bundle. "
+            "Report will reference CDN: %s", _PLOTLY_CDN_URL
+        )
+    return ""

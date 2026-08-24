@@ -128,15 +128,27 @@ def register_start_stop(app, backend_manager):
                 no_update,
             )
 
-        # Clean outdir -- start the analysis directly.
+        # Clean outdir -- launch the analysis in a background thread. The
+        # blocking preflight (git ls-remote, engine probes, conda-cache
+        # walks) froze this click for 25-40 s; the click now returns
+        # instantly with optimistic status, and surface_backend_transition
+        # posts the terminal success/failure toast when the thread ends.
+        if backend_manager.transition_in_progress():
+            return (
+                {"title": "Please wait",
+                 "message": "A start or stop is already in progress.",
+                 "color": "info"},
+                no_update, no_update, no_update, no_update, no_update,
+                no_update,
+            )
         backend_manager.config = config
-        success, message = backend_manager.start()
-        color = "success" if success else "danger"
+        success, message = backend_manager.start_async()
+        color = "info" if success else "danger"
 
-        if success:
-            updated_config = merge_config_safely(config, backend_manager.config)
-        else:
-            updated_config = no_update
+        # The derived outdir was written into `config` above; push it now so
+        # the viewer follows the run directory. The full post-start config
+        # merge happens in surface_backend_transition.
+        updated_config = dict(config) if success else no_update
 
         # Optimistic backend-status update on successful launch so
         # the verdict banner flips from STANDBY to SCREENING IN
@@ -166,7 +178,7 @@ def register_start_stop(app, backend_manager):
 
         return (
             {
-                "title": "Analysis Started" if success else "Error",
+                "title": "Starting Analysis" if success else "Error",
                 "message": message,
                 "color": color,
                 # Explicit navigation intent, so switch_to_results_tab does
@@ -275,7 +287,7 @@ def register_start_stop(app, backend_manager):
                     no_update,
                     no_update,
                 )
-            success, message = backend_manager.start(resume=False)
+            success, message = backend_manager.start_async(resume=False)
             if success and archive_path:
                 message = (
                     f"{message}\nPrevious results archived to "
@@ -301,13 +313,15 @@ def register_start_stop(app, backend_manager):
                     no_update,
                     no_update,
                 )
-            success, message = backend_manager.start(resume=True)
+            success, message = backend_manager.start_async(resume=True)
         else:
             raise PreventUpdate
 
-        color = "success" if success else "danger"
+        color = "info" if success else "danger"
         if success:
-            updated_config = merge_config_safely(config, backend_manager.config)
+            # Terminal toast + full config merge arrive via
+            # surface_backend_transition when the start thread finishes.
+            updated_config = dict(config)
             # Optimistic backend-status update -- see start_or_prompt_stop
             # for the rationale. Without this the verdict banner sits
             # at STANDBY for up to one polling tick after the operator
@@ -328,7 +342,7 @@ def register_start_stop(app, backend_manager):
         return (
             False,
             {
-                "title": "Analysis Started" if success else "Error",
+                "title": "Starting Analysis" if success else "Error",
                 "message": message,
                 "color": color,
                 # Explicit navigation intent (see switch_to_results_tab).
@@ -366,17 +380,73 @@ def register_start_stop(app, backend_manager):
 
         triggered = dash.ctx.triggered_id
         if triggered == "confirm-stop-analysis" and confirm_clicks:
-            success, message = backend_manager.stop()
-            color = "success" if success else "danger"
+            # Non-blocking: stop() waits on the process for up to 30+ s.
+            # The stop-requested flag is raised on the REQUEST (it only
+            # affects completion-toast wording, and the operator did ask);
+            # the terminal stop result arrives via
+            # surface_backend_transition.
+            success, message = backend_manager.stop_async()
+            color = "info" if success else "danger"
             return False, {
-                "title": "Analysis Stopped" if success else "Error",
-                "message": message,
+                "title": "Stopping Analysis" if success else "Error",
+                "message": message
+                if not success
+                else "Stopping the pipeline; this can take up to 30 "
+                     "seconds. A toast will confirm when it has stopped.",
                 "color": color,
             }, (True if success else no_update)
         elif triggered == "cancel-stop-analysis" and cancel_clicks:
             return False, no_update, no_update
 
         return no_update, no_update, no_update
+
+    @app.callback(
+        [
+            Output("notification-trigger", "data", allow_duplicate=True),
+            Output("app-config", "data", allow_duplicate=True),
+        ],
+        Input("backend-status", "data"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
+    )
+    def surface_backend_transition(_status, config):
+        """Post the terminal toast for an async start/stop, exactly once.
+
+        The click callbacks return instantly with an optimistic "Starting/
+        Stopping..." toast; the daemon thread's real outcome -- including a
+        preflight FAILURE, which must never be silent -- is picked up here
+        on the next status tick. A successful start also merges the
+        backend's post-start config (run metadata paths etc.) into the
+        app-config Store, which the synchronous path used to do inline.
+        """
+        result = backend_manager.consume_transition_result()
+        if not result:
+            raise PreventUpdate
+
+        from nanometa_live.app.utils.config_manager import merge_config_safely
+
+        if result["kind"] == "start":
+            if result["success"]:
+                updated_config = merge_config_safely(
+                    config or {}, backend_manager.config or {})
+                return {
+                    "title": "Analysis Started",
+                    "message": result["message"],
+                    "color": "success",
+                    "navigate_to": "dashboard-tab",
+                }, updated_config
+            return {
+                "title": "Start failed",
+                "message": result["message"],
+                "color": "danger",
+            }, no_update
+
+        return {
+            "title": "Analysis Stopped" if result["success"] else
+                     "Stop failed",
+            "message": result["message"],
+            "color": "success" if result["success"] else "danger",
+        }, no_update
 
     @app.callback(
         Output("tabs", "active_tab"),

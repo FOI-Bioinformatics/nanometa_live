@@ -12,6 +12,7 @@ precedence over built-in watchlists.
 """
 
 import logging
+import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,54 +29,10 @@ from nanometa_live.core.watchlist.validation.entry_schema import (
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class WatchlistMetadata:
-    """Metadata for a watchlist file."""
-    id: str  # Unique identifier (filename without extension)
-    name: str
-    description: str
-    source: str  # "builtin", "user", "project"
-    file_path: Path
-    pathogen_count: int = 0
-    version: str = "1.0"
-    taxonomy_support: List[str] = field(default_factory=lambda: ["ncbi", "gtdb"])
-    categories: List[str] = field(default_factory=list)
-
-
-@dataclass
-class WatchlistPathogenEntry:
-    """A pathogen entry from a YAML watchlist file."""
-    name: str
-    names_alt: List[str] = field(default_factory=list)
-    taxid_ncbi: Optional[int] = None
-    # Optional taxid in the Kraken2 *database* (GTDB/custom DBs assign their own
-    # integers). Carried through to WatchlistEntry.db_taxid for matching +
-    # pipeline filtering. NCBI watchlists leave it unset.
-    db_taxid: Optional[int] = None
-    common_name: Optional[str] = None
-    threat_level: str = "moderate"
-    bsl_level: Optional[int] = None
-    category: Optional[str] = None
-    # None means "not stated"; __post_init__ derives it from threat_level via
-    # the shared table. A flat default here disagreed with
-    # WatchlistEntry.from_dict, so the same entry screened at different
-    # thresholds depending on which path loaded it.
-    alert_threshold: Optional[int] = None
-    action_required: str = "Follow laboratory biosafety protocols"
-    notes: str = ""
-    # Organism kingdom/type declared by the operator (virus / bacteria /
-    # fungi / archaea / parasite / other). Inference from taxonomy is no longer
-    # required for grouping.
-    organism_type: Optional[str] = None
-    # Free-text extra information shown next to the species name (e.g. the toxin
-    # a producer secretes). Distinct from ``notes`` (longer context).
-    annotation: str = ""
-
-    def __post_init__(self):
-        # Derive the threshold only when the entry did not state one, so an
-        # operator's explicit value is never overwritten.
-        if self.alert_threshold is None:
-            self.alert_threshold = default_alert_threshold(self.threat_level)
+from nanometa_live.core.watchlist.watchlist_models import (  # noqa: F401
+    WatchlistMetadata,
+    WatchlistPathogenEntry,
+)
 
 
 class WatchlistLoader:
@@ -115,6 +72,14 @@ class WatchlistLoader:
         self._user_dir = Path(user_dir) if user_dir else None
         self._cached_watchlists: Dict[str, WatchlistMetadata] = {}
         self._loaded_pathogens: Dict[str, List[WatchlistPathogenEntry]] = {}
+        # Corpus fingerprint the discovery cache was built against, and the
+        # invalid-file sweep cached on the same fingerprint. Discovery used
+        # to write _cached_watchlists and never consult it, so every
+        # tab-state change re-parsed the whole corpus three times
+        # (round-2 audit, 2026-08-22).
+        self._cache_fingerprint: Optional[tuple] = None
+        self._invalid_files_cache: Optional[
+            Tuple[tuple, List[Tuple[str, str]]]] = None
 
     @property
     def user_watchlist_dir(self) -> Path:
@@ -192,14 +157,49 @@ class WatchlistLoader:
 
         return paths
 
+    def _corpus_fingerprint(self) -> tuple:
+        """(path, mtime_ns, size) of every watchlist YAML across the tiers.
+
+        One scandir per tier -- cheap enough to run per call, and content-
+        derived so nothing can serve a stale discovery.
+        """
+        entries = []
+        for search_path, _source in self.get_search_paths():
+            try:
+                with os.scandir(search_path) as it:
+                    for entry in it:
+                        name = entry.name
+                        if name.startswith(".") or not (
+                            name.endswith(".yaml") or name.endswith(".yml")
+                        ):
+                            continue
+                        try:
+                            st = entry.stat()
+                            entries.append(
+                                (entry.path, st.st_mtime_ns, st.st_size))
+                        except OSError:
+                            continue
+            except OSError:
+                continue
+        return tuple(sorted(entries))
+
     def discover_watchlists(self) -> List[WatchlistMetadata]:
         """
         Discover all available watchlist files.
+
+        Serves from the instance cache while the corpus fingerprint is
+        unchanged; any file added, removed, or edited in any tier forces a
+        rescan.
 
         Returns:
             List of WatchlistMetadata for each discovered watchlist,
             sorted by source priority (project > user > builtin)
         """
+        fingerprint = self._corpus_fingerprint()
+        if (self._cached_watchlists
+                and fingerprint == self._cache_fingerprint):
+            return list(self._cached_watchlists.values())
+
         discovered = {}  # id -> WatchlistMetadata (later sources override)
         search_paths = self.get_search_paths()
 
@@ -232,6 +232,7 @@ class WatchlistLoader:
                     logger.exception(f"Error reading watchlist {file_path}: {e}")
 
         self._cached_watchlists = discovered
+        self._cache_fingerprint = fingerprint
         return list(discovered.values())
 
     def _read_metadata(self, file_path: Path, source: str) -> Optional[WatchlistMetadata]:
@@ -467,6 +468,13 @@ class WatchlistLoader:
         (2026-08-17 audit, finding W4). This scans the same tiers with the
         same validation and returns what was dropped, for the GUI to show.
         """
+        # Cached on the same corpus fingerprint as discovery: the sweep
+        # re-validated every YAML in every tier on every tab-state change.
+        fingerprint = self._corpus_fingerprint()
+        if (self._invalid_files_cache is not None
+                and self._invalid_files_cache[0] == fingerprint):
+            return list(self._invalid_files_cache[1])
+
         invalid: List[Tuple[str, str]] = []
         seen: set = set()
         for tier_dir, _source in self.get_search_paths():
@@ -482,6 +490,7 @@ class WatchlistLoader:
                     ok, errors = False, [str(e)]
                 if not ok:
                     invalid.append((path.name, errors[0] if errors else "invalid"))
+        self._invalid_files_cache = (fingerprint, list(invalid))
         return invalid
 
     @staticmethod
@@ -582,6 +591,8 @@ class WatchlistLoader:
         any out-of-process change to the files (background import)."""
         self._cached_watchlists.clear()
         self._loaded_pathogens.clear()
+        self._cache_fingerprint = None
+        self._invalid_files_cache = None
 
     def _import_collision(
         self, dest_dir: Path, dest_name: str, watchlist_id: str

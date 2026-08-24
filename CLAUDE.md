@@ -1196,8 +1196,14 @@ Raw files copied are `_RAW_SUBDIRS`
 AppleDouble-filtered, skipped above `export_max_raw_bytes` (default 5 GiB).
 Plotly is inlined for offline self-containment; `offline_mode` suppresses the
 CDN fallback so an offline report never emits a dead `<script src>`. The export
-runs synchronously in the callback ON PURPOSE — a background callback would
-empty the `WatchlistManager` singleton and re-break the screen.
+runs as a `background=True` worker with staged `set_progress` (since round 2,
+2026-08-24; it previously ran synchronously because a worker's
+`WatchlistManager` singleton is empty). That objection no longer holds:
+`_screen_watchlist` self-hydrates its empty local singleton via
+`wm.load_config(self.config)` — the second sanctioned worker pattern in
+`tests/test_background_callback_contract.py`. The export modal STAYS OPEN
+during the run showing the progress bar, and the terminal status renders
+inside it plus a page toast; never mutate the LIVE singleton from the worker.
 
 ### macOS bind-mount gotcha
 

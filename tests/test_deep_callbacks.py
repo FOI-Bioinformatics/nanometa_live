@@ -218,15 +218,15 @@ class TestHandleStopConfirmation:
 
     def test_confirm_stops_backend(self, app_backend):
         app, backend = app_backend
-        backend.stop.return_value = (True, "stopped")
+        backend.stop_async.return_value = (True, "stopping")
         fn = _fn(app, "stop-confirm-modal.is_open", input_contains="confirm-stop-analysis")
         with _ctx("confirm-stop-analysis"):
             is_open, notif, stopped_flag = fn(1, 0, True)
         assert is_open is False
-        assert notif["title"] == "Analysis Stopped"
+        assert notif["title"] == "Stopping Analysis"
         # The abort marker so the completion toast does not claim a finished run.
         assert stopped_flag is True
-        backend.stop.assert_called_once()
+        backend.stop_async.assert_called_once()
 
     def test_cancel_closes_without_stop(self, app_backend):
         app, backend = app_backend
@@ -236,7 +236,7 @@ class TestHandleStopConfirmation:
         assert is_open is False
         assert notif is no_update
         assert stopped_flag is no_update
-        backend.stop.assert_not_called()
+        backend.stop_async.assert_not_called()
 
 
 class TestHandleCollisionChoice:
@@ -251,21 +251,21 @@ class TestHandleCollisionChoice:
     def test_archive_starts_fresh_run(self, app_backend):
         app, backend = app_backend
         backend.archive_existing_results.return_value = "/o/_archive_1"
-        backend.start.return_value = (True, "started")
+        backend.start_async.return_value = (True, "starting")
         fn = _fn(app, "collision-modal.is_open", input_contains="collision-archive-btn")
         with _ctx("collision-archive-btn"):
             modal, notif, cfg, status = fn(1, 0, 0, {"outdir": "/o"}, {"x": 1}, {})
-        backend.start.assert_called_once_with(resume=False)
-        assert notif["title"] == "Analysis Started"
+        backend.start_async.assert_called_once_with(resume=False)
+        assert notif["title"] == "Starting Analysis"
         assert status["running"] is True
 
     def test_resume_uses_resume_flag(self, app_backend):
         app, backend = app_backend
-        backend.start.return_value = (True, "resumed")
+        backend.start_async.return_value = (True, "resuming")
         fn = _fn(app, "collision-modal.is_open", input_contains="collision-archive-btn")
         with _ctx("collision-resume-btn"):
             fn(0, 1, 0, {"outdir": "/o"}, {"x": 1}, {})
-        backend.start.assert_called_once_with(resume=True)
+        backend.start_async.assert_called_once_with(resume=True)
 
 
 # --------------------------------------------------------------------------

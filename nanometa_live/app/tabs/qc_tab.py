@@ -476,14 +476,30 @@ def register_qc_callbacks(app: Dash):
             State("reads-graph", "figure"),
             State("bp-graph", "figure"),
         ],
+        # pio.write_image spawns a headless Chromium via kaleido -- 5-30 s
+        # cold, on the request thread until round 2. Pure file I/O from
+        # figure JSON, so a plain background conversion suffices; the
+        # progress toast tells the operator the export is underway since
+        # the modal closes on confirm.
+        background=True,
+        manager=background_callback_manager,
+        progress=[Output("notification-trigger", "data", allow_duplicate=True)],
+        running=[(Output("confirm-qc-export", "disabled"), True, False)],
         prevent_initial_call=True,
     )
-    def export_qc_plots(n_clicks, export_dir, export_filename, config, *figures):
-        """Export QC plots to image files."""
+    def export_qc_plots(set_progress, n_clicks, export_dir, export_filename,
+                        config, *figures):
+        """Export QC plots to image files (background worker)."""
         if not n_clicks:
             return no_update
 
         try:
+            set_progress(({
+                "title": "Exporting QC plots",
+                "message": "Rendering figures to PNG; a toast will confirm "
+                           "when the files are written.",
+                "color": "info",
+            },))
             # Determine export directory
             main_dir = resolve_outdir_for_fingerprint(config)
             if export_dir:

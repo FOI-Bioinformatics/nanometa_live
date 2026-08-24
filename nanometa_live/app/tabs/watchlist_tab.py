@@ -828,10 +828,12 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         enable = "enable-all" in ctx.triggered_id
 
-        for entry in entries:
-            taxid = entry.get("taxid")
-            if taxid:
-                manager.toggle_entry(taxid, enable)
+        # One batched save: per-entry toggle_entry fsynced the toggle-state
+        # YAML once PER ENTRY, tens of seconds on a large watchlist.
+        manager.set_entries_enabled(
+            [entry.get("taxid") for entry in entries if entry.get("taxid")],
+            enable,
+        )
 
         new_refresh = (current_refresh or 0) + 1
         action = "enable-all" if enable else "disable-all"
@@ -1296,16 +1298,28 @@ def register_watchlist_callbacks(app: Dash) -> None:
             State("watchlist-api-options", "value"),
             State("app-config", "data"),
         ],
+        # Live NCBI + GTDB HTTP with 5 s timeouts and rate-limit sleeps --
+        # up to ~20 s. It ran synchronously on the request thread with no
+        # feedback (flagged in round 1, fixed in round 2); pure I/O, no
+        # singleton writes, so plain background with a spinner suffices.
+        background=True,
+        manager=background_callback_manager,
+        progress=[
+            Output("watchlist-lookup-section", "style", allow_duplicate=True),
+            Output("watchlist-lookup-results", "children", allow_duplicate=True),
+        ],
+        running=[(Output("watchlist-lookup-btn", "disabled"), True, False)],
         prevent_initial_call=True,
     )
     def lookup_species(
+        set_progress,
         n_clicks: int,
         name: str,
         taxid: Optional[int],
         api_options: list,
         config: Optional[Dict],
     ) -> Tuple:
-        """Look up species in NCBI/GTDB APIs."""
+        """Look up species in NCBI/GTDB APIs (background worker)."""
         if not n_clicks or not name:
             raise PreventUpdate
 
@@ -1325,6 +1339,15 @@ def register_watchlist_callbacks(app: Dash) -> None:
             )
 
         try:
+            sources = " and ".join(
+                s for s, on in (("NCBI", use_ncbi), ("GTDB", use_gtdb)) if on)
+            set_progress((
+                {"display": "block"},
+                dbc.Alert([
+                    dbc.Spinner(size="sm", spinner_class_name="me-2"),
+                    f"Querying {sources} for '{name}'...",
+                ], color="info", className="py-2"),
+            ))
             from nanometa_live.core.taxonomy.taxonomy_api import lookup_species as api_lookup
             result = api_lookup(name, use_ncbi=use_ncbi, use_gtdb=use_gtdb, offline_mode=offline_mode)
 

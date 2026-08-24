@@ -87,6 +87,7 @@ from nanometa_live.app.tabs.dashboard_helpers import (
 )
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
 from nanometa_live.app.utils.organisms_memo import get_per_sample_organisms_cached
+from nanometa_live.app.app import background_callback_manager
 
 # Last run-state (ACTIVE/COMPLETE/STANDBY) the verdict banner rendered. A
 # state flip bypasses the banner's fingerprint gate so completion shows on
@@ -1001,18 +1002,41 @@ def register_dashboard_callbacks(app: Dash):
         if trigger == "export-cancel-btn":
             return False
         if trigger == "export-generate-btn":
-            return False  # Close after generation starts
+            # Stay open: the background export reports its progress and its
+            # terminal status INSIDE this modal. Closing here rendered the
+            # status message into a closed modal (round-2 audit).
+            return True
         return is_open
 
     @app.callback(
-        Output("export-status-message", "children"),
+        [
+            Output("export-status-message", "children"),
+            Output("notification-trigger", "data", allow_duplicate=True),
+        ],
         Input("export-generate-btn", "n_clicks"),
         State("export-output-dir", "value"),
         State("export-include-raw", "value"),
         State("app-config", "data"),
-        prevent_initial_call=True
+        # Minutes of raw-file copying (up to the 5 GiB cap) plus chart and
+        # report builds ran synchronously on the request thread until
+        # round 2. Safe in a worker process: the only singleton touch on
+        # this path, _screen_watchlist, self-hydrates its (empty) local
+        # WatchlistManager from the config + watchlist files -- the second
+        # sanctioned worker pattern in test_background_callback_contract.
+        background=True,
+        manager=background_callback_manager,
+        progress=[
+            Output("export-progress-area", "style"),
+            Output("export-progress", "value"),
+            Output("export-progress-label", "children"),
+        ],
+        running=[
+            (Output("export-generate-btn", "disabled"), True, False),
+            (Output("export-cancel-btn", "disabled"), True, False),
+        ],
+        prevent_initial_call=True,
     )
-    def generate_export(n_clicks, output_dir, include_raw, config):
+    def generate_export(set_progress, n_clicks, output_dir, include_raw, config):
         if not n_clicks or not config:
             raise PreventUpdate
 
@@ -1020,14 +1044,17 @@ def register_dashboard_callbacks(app: Dash):
             return html.Div(
                 "Please specify an output directory.",
                 className="text-danger"
-            )
+            ), no_update
 
         main_dir = resolve_outdir_for_fingerprint(config)
         if not main_dir:
             return html.Div(
                 "No results directory configured.",
                 className="text-danger"
-            )
+            ), no_update
+
+        def _progress(percent, label):
+            set_progress(({"display": "block"}, percent, label))
 
         try:
             from nanometa_live.core.export.report_generator import ReportGenerator
@@ -1036,17 +1063,26 @@ def register_dashboard_callbacks(app: Dash):
             report_path = generator.generate(
                 output_dir=output_dir.strip(),
                 include_raw=include_raw,
+                progress_cb=_progress,
             )
             return html.Div([
                 html.I(className="bi bi-check-circle-fill text-success me-2"),
                 f"Report exported to: {report_path}"
-            ], className="text-success mt-2")
+            ], className="text-success mt-2"), {
+                "title": "Export complete",
+                "message": f"Report exported to {report_path}",
+                "color": "success",
+            }
         except Exception as e:
             logger.error("Export failed: %s", e)
             return html.Div(
                 f"Export failed: {e}",
                 className="text-danger mt-2"
-            )
+            ), {
+                "title": "Export failed",
+                "message": str(e),
+                "color": "danger",
+            }
 
     # ========================================================================
     # Pathogen Modal Print (clientside)

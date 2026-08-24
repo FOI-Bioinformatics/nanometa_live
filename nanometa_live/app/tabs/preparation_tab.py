@@ -270,6 +270,32 @@ def _genome_taxid_for_entry(entry) -> int:
         return 0
 
 
+# Missing-genome items rendered before the "and N more" summary row takes
+# over. 500 mounted items served no operator decision the first 20 plus a
+# count cannot (round-2 audit, 2026-08-22). Display-only: every hidden
+# entry is still counted in the row and in the stats tiles.
+MISSING_GENOME_LIST_CAP = 20
+
+
+def _missing_genome_items(missing_entries):
+    """Capped missing-genome list with the hidden count stated."""
+    from nanometa_live.app.layouts.watchlist_layout import (
+        create_missing_genome_item,
+    )
+    items = [
+        create_missing_genome_item(entry)
+        for entry in missing_entries[:MISSING_GENOME_LIST_CAP]
+    ]
+    hidden = len(missing_entries) - MISSING_GENOME_LIST_CAP
+    if hidden > 0:
+        items.append(html.P(
+            f"...and {hidden} more missing. Batch download covers all of "
+            f"them.",
+            className="text-muted fst-italic mt-1",
+        ))
+    return items
+
+
 def register_preparation_callbacks(app):
     """Register all preparation tab callbacks."""
 
@@ -564,6 +590,12 @@ def register_preparation_callbacks(app):
         Output("bundle-export-directory", "value"),
         Input("bundle-export-browse-btn", "n_clicks"),
         State("bundle-export-directory", "value"),
+        # The OS dialog blocks until dismissed (up to 120 s); a background
+        # worker keeps request threads free and running= stops double
+        # dialogs (round-2 audit, 2026-08-22).
+        background=True,
+        manager=background_callback_manager,
+        running=[(Output("bundle-export-browse-btn", "disabled"), True, False)],
         prevent_initial_call=True,
     )
     def browse_export_directory(n_clicks, current_dir):
@@ -579,6 +611,9 @@ def register_preparation_callbacks(app):
         Output("import-bundle-path", "value"),
         Input("import-bundle-browse-btn", "n_clicks"),
         State("import-bundle-path", "value"),
+        background=True,
+        manager=background_callback_manager,
+        running=[(Output("import-bundle-browse-btn", "disabled"), True, False)],
         prevent_initial_call=True,
     )
     def browse_import_bundle(n_clicks, current):
@@ -595,6 +630,9 @@ def register_preparation_callbacks(app):
         Output("import-kraken-db-path", "value"),
         Input("import-kraken-db-browse-btn", "n_clicks"),
         State("import-kraken-db-path", "value"),
+        background=True,
+        manager=background_callback_manager,
+        running=[(Output("import-kraken-db-browse-btn", "disabled"), True, False)],
         prevent_initial_call=True,
     )
     def browse_import_kraken_db(n_clicks, current):
@@ -1602,10 +1640,7 @@ def register_preparation_callbacks(app):
         total_size_mb = round(total_size / (1024 * 1024), 2) if total_size else 0
 
         if missing_entries:
-            missing_list = [
-                create_missing_genome_item(entry)
-                for entry in missing_entries
-            ]
+            missing_list = _missing_genome_items(missing_entries)
         else:
             missing_list = [
                 html.P("All genomes downloaded.", className="text-muted fst-italic")

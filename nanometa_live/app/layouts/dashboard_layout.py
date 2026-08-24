@@ -473,6 +473,20 @@ def create_dashboard_layout():
                     value=True,
                     className="mb-3"
                 ),
+                # Progress area for the background export; revealed by the
+                # worker's set_progress. The modal STAYS OPEN during the
+                # export -- it used to close on Generate while the status
+                # message rendered into the closed modal, invisible.
+                html.Div([
+                    dbc.Progress(
+                        id="export-progress", value=0, striped=True,
+                        animated=True, style={"height": "12px"},
+                        className="mb-1",
+                    ),
+                    html.Small(id="export-progress-label",
+                               className="text-muted"),
+                ], id="export-progress-area", style={"display": "none"},
+                    className="mb-2"),
                 html.Div(id="export-status-message")
             ]),
             dbc.ModalFooter([

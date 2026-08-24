@@ -51,6 +51,15 @@ class BackendManager:
         # Note: legacy _prep_status_lock removed along with prepare_data methods
         self._lock_fd: Optional[IO] = None  # File lock descriptor for multi-user safety
         self._lock_file_path: Optional[str] = None  # Path to lock file
+        # Start/stop transition state for the async click path. start() and
+        # stop() block for tens of seconds (preflight probes, process.wait);
+        # the GUI runs them in a daemon THREAD in this process -- the
+        # subprocess handles live here, so a DiskcacheManager worker process
+        # cannot own them -- and the status tick surfaces the terminal
+        # result via consume_transition_result() (round-2 audit,
+        # 2026-08-22).
+        self._transition_lock = threading.Lock()
+        self._transition: Optional[Dict[str, Any]] = None
         self.status = {
             "running": False,
             "pipeline_status": "idle",
@@ -647,6 +656,64 @@ class BackendManager:
             f"Archived {len(found)} existing result subdirs to {archive_path}"
         )
         return archive_path
+
+    # ------------------------------------------------------------------
+    # Async start/stop (round-2 audit, 2026-08-22)
+    # ------------------------------------------------------------------
+
+    def _launch_transition(self, kind: str, fn) -> Tuple[bool, str]:
+        """Run ``fn`` (start or stop) in a daemon thread, one at a time."""
+        with self._transition_lock:
+            if self._transition is not None and not self._transition.get("done"):
+                return False, (
+                    f"A {self._transition.get('kind', 'start/stop')} is "
+                    f"already in progress."
+                )
+            self._transition = {"kind": kind, "done": False}
+
+        def _run():
+            try:
+                success, message = fn()
+            except Exception as exc:  # a silent preflight failure is worse
+                logging.exception("Async %s failed", kind)
+                success, message = False, str(exc)
+            with self._transition_lock:
+                self._transition = {
+                    "kind": kind, "done": True,
+                    "success": bool(success), "message": message,
+                }
+
+        threading.Thread(
+            target=_run, name=f"backend-{kind}", daemon=True).start()
+        return True, f"{kind.capitalize()} running in the background..."
+
+    def start_async(self, profile: str = None,
+                    resume: bool = False) -> Tuple[bool, str]:
+        """Non-blocking :meth:`start`; the click path must return instantly."""
+        return self._launch_transition(
+            "start", lambda: self.start(profile=profile, resume=resume))
+
+    def stop_async(self) -> Tuple[bool, str]:
+        """Non-blocking :meth:`stop` (process.wait can take 30+ s)."""
+        return self._launch_transition("stop", self.stop)
+
+    def transition_in_progress(self) -> bool:
+        with self._transition_lock:
+            return (self._transition is not None
+                    and not self._transition.get("done"))
+
+    def consume_transition_result(self) -> Optional[Dict[str, Any]]:
+        """The finished transition's result, exactly once, else None."""
+        with self._transition_lock:
+            if self._transition is None or not self._transition.get("done"):
+                return None
+            result = {
+                "kind": self._transition["kind"],
+                "success": self._transition["success"],
+                "message": self._transition["message"],
+            }
+            self._transition = None
+            return result
 
     def start(self, profile: str = None, resume: bool = False) -> Tuple[bool, str]:
         """

@@ -75,6 +75,22 @@ CANCEL_NOT_DECLARED = {
     "export_bundle",
     "force_export_bundle",
     "import_bundle_worker",
+    # One NCBI/GTDB lookup, bounded by 5 s HTTP timeouts and the per-host
+    # circuit breaker (~20 s worst case); the running= disable prevents
+    # stacking clicks and there is no meaningful mid-flight state to save.
+    "lookup_species",
+    # Four kaleido PNG renders, bounded and unresumable; the
+    # confirm button is disabled while it runs.
+    "export_qc_plots",
+    # Native OS dialogs: they end when the operator dismisses them;
+    # running= already prevents a second dialog.
+    "browse_export_directory",
+    "browse_import_bundle",
+    "browse_import_kraken_db",
+    # The report export writes into the operator-chosen output dir;
+    # killing it mid-copy strands a half-written export, and both
+    # modal buttons are disabled while it runs.
+    "generate_export",
     # Local file validation + copy of one YAML, a few seconds even at 500
     # entries; there is no long-running phase for a cancel to interrupt,
     # and an interrupted copy would strand a half-imported file.
