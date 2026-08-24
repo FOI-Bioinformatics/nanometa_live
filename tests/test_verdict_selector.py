@@ -464,3 +464,21 @@ class TestStaleSamplesClause:
                     stale_samples=2)
         assert d.state == "ACTION_REQUIRED"
         assert "stale" in d.subtitle
+
+
+class TestErrorOutranksStarting:
+    """A crash during the startup phase must not render eternal SCREENING.
+
+    Live drill (2026-08-24 soak): kill -9 during a resumed run's startup
+    left overall_status == "starting" shadowing pipeline_error, so the
+    banner said SCREENING IN PROGRESS for ~2 minutes after the pipeline
+    was dead, then froze on the transitional no-data wording."""
+
+    def test_error_beats_starting(self):
+        d = verdict(pipeline_error=True, overall_status_starting=True,
+                    main_dir_available=False, kraken_has_data=False)
+        assert d.state == "PIPELINE_ERROR"
+
+    def test_starting_without_error_is_still_screening(self):
+        d = verdict(overall_status_starting=True)
+        assert d.state == "SCREENING"

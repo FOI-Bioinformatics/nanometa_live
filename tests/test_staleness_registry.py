@@ -185,3 +185,20 @@ class TestCacheHitClearsTheFlag:
         assert staleness.stale_sample_count(str(tmp_path),
                                             grace_seconds=0) == 0
         loader_utils.clear_all_loader_caches()
+
+
+class TestScopeNormalization:
+    def test_symlinked_scope_matches_its_realpath(self, tmp_path):
+        """Live drill (2026-08-24): the loader records under the report's
+        REALPATH (discovery realpaths every file; /tmp is a symlink to
+        /private/tmp on macOS) while the banner queries the config's
+        path. abspath does not resolve symlinks, so the flag was
+        invisible to the query. The registry normalizes with realpath."""
+        real = tmp_path / "real_results"
+        real.mkdir()
+        link = tmp_path / "link_results"
+        link.symlink_to(real)
+        staleness.record_last_good_served(str(real), "barcode05",
+                                          when=time.time() - 999)
+        assert staleness.stale_sample_count(str(link),
+                                            grace_seconds=0) == 1

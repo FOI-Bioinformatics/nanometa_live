@@ -46,7 +46,11 @@ class StaleEntry:
 
 
 def _key(scope: str, sample: str) -> Tuple[str, str]:
-    return (os.path.abspath(scope), str(sample))
+    # realpath, not abspath: report discovery realpaths every file, so the
+    # loader records under e.g. /private/tmp/... while the banner queries
+    # the config's /tmp/... -- abspath does not resolve the symlink and
+    # the flag was invisible to the query (live drill, 2026-08-24).
+    return (os.path.realpath(scope), str(sample))
 
 
 def record_parse_ok(scope: str, sample: str,
@@ -87,7 +91,7 @@ def stale_entries(scope: str,
                   grace_seconds: float = DEFAULT_GRACE_SECONDS
                   ) -> List[StaleEntry]:
     """Samples under ``scope`` on last-good fallback beyond the grace window."""
-    scope_abs = os.path.abspath(scope) if scope else scope
+    scope_abs = os.path.realpath(scope) if scope else scope
     now = time.time()
     with _lock:
         return [
@@ -112,7 +116,7 @@ def clear(scope: Optional[str] = None) -> None:
             _serving_since.clear()
             _last_warned.clear()
             return
-        scope_abs = os.path.abspath(scope)
+        scope_abs = os.path.realpath(scope)
         for d in (_serving_since, _last_warned):
             for key in [k for k in d if k[0] == scope_abs]:
                 del d[key]

@@ -215,13 +215,24 @@ def register_dashboard_callbacks(app: Dash):
         # 14:19:17, banner chip still "ACTIVE" until the render-memo TTL fired
         # at 14:21:23. The state memo makes the flip land on the next tick.
         pipeline_running_now = bool(status and status.get("running"))
+        pipeline_error_now = bool(
+            status and status.get("pipeline_status") == "error"
+        )
         run_state_now = (
             "ACTIVE" if pipeline_running_now
+            else "ERROR" if pipeline_error_now
             else "COMPLETE" if bool(status and status.get("completed"))
             else "STANDBY"
         )
         state_changed = _VERDICT_LAST_RUN_STATE.get("v") != run_state_now
+        # ERROR bypasses the render gate like ACTIVE does: the first render
+        # after a crash lands during the starting->error transition with the
+        # data gather skipped, and gating then froze that transitional
+        # wording ("produced no results" over a tree full of detections --
+        # live drill, 2026-08-24). Re-rendering per tick while in ERROR is
+        # a few cache-hit loads; the state is rare and operator-visible.
         if (not pipeline_running_now
+                and not pipeline_error_now
                 and not state_changed
                 and interval_tick_is_redundant(ctx, "dashboard_verdict_banner", _fingerprint)):
             raise PreventUpdate

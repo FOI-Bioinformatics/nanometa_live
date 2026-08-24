@@ -1051,6 +1051,13 @@ def _subthreshold_descriptor(
     )
 
 
+def _starting_verdict(pipeline_error, detail, has_data) -> VerdictDescriptor:
+    """The overall_status == "starting" branch of select_verdict (pure)."""
+    if pipeline_error:
+        return _pipeline_error_descriptor(detail, has_partial_data=has_data)
+    return _screening_descriptor()
+
+
 def _data_verdict(
     *,
     dangerous,
@@ -1158,15 +1165,19 @@ def select_verdict(
     6. Everything else (no results dir, idle with no data, load failure) ->
        STANDBY.
 
-    ``stale_samples`` (samples currently serving last-good fallback data)
-    appends a clause to the data-state subtitles so frozen numbers cannot
-    present as live ones.
+    ``stale_samples`` appends a clause to the data-state subtitles so
+    frozen numbers cannot present as live ones.
     """
     if not has_config:
         return _screening_descriptor() if pipeline_running else _standby_descriptor()
 
     if overall_status_starting:
-        return _screening_descriptor()
+        # A dead pipeline outranks the transitional starting state
+        # (live drill 2026-08-24: a crash during startup rendered
+        # eternal SCREENING).
+        return _starting_verdict(
+            pipeline_error, pipeline_error_detail,
+            bool(main_dir_available and kraken_has_data))
 
     if main_dir_available and kraken_has_data:
         return _data_verdict(
