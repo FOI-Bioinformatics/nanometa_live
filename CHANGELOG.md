@@ -6,6 +6,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-24
+
 Round two of the large-scale hardening (2026-08-24): many barcodes (24-96)
 and large watchlists together, with two acceptance criteria — the interface
 never freezes, and the operator always sees progress. Measured on a
