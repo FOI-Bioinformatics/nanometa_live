@@ -68,6 +68,17 @@ WATCHLIST_STATE_SOURCES = (WATCHLIST_SNAPSHOT_STORE, APP_CONFIG_STORE)
 #: operator who starts one of those on a field laptop cannot stop it.
 #:
 #: Shrinking this set is an improvement. Growing it needs a reason.
+#: Background callbacks with neither running= nor progress=, recorded as a
+#: RATCHET (round-2 audit, 2026-08-24). Every entry is tick- or startup-
+#: driven -- no operator click starts it, so there is no interaction to
+#: leave frozen. Anything an operator triggers must declare feedback.
+FEEDBACK_NOT_DECLARED = {
+    "check_internet_on_startup",   # startup probe, no operator action
+    "update_main_results",         # tick recompute (Organisms tab)
+    "update_qc_stats",             # tick recompute (QC tiles)
+    "populate_pipeline_branch_options",  # config dropdown fill on load
+}
+
 CANCEL_NOT_DECLARED = {
     "check_internet_on_startup",
     "download_kraken_database",
@@ -253,6 +264,25 @@ class TestPerCallbackContract:
         assert cb.params and cb.params[0] == "set_progress", (
             f"{cb.where} declares progress= but its first parameter is "
             f"{cb.params[0] if cb.params else '<none>'!r}, not 'set_progress'"
+        )
+
+    def test_background_callbacks_declare_visible_feedback(self, cb):
+        """Every background callback declares running= or progress=.
+
+        Round-2 acceptance criterion: the operator must ALWAYS see
+        progress instead of a frozen screen. running= (disable the
+        button, reveal a spinner/modal) is the minimum; progress= for
+        anything staged. FEEDBACK_NOT_DECLARED is a ratchet for the
+        tick-driven recompute callbacks that no operator click starts --
+        shrinking it is an improvement, growing it needs a reason.
+        """
+        if cb.name in FEEDBACK_NOT_DECLARED:
+            pytest.skip("recorded in the FEEDBACK_NOT_DECLARED baseline")
+        assert cb.running or cb.has_progress, (
+            f"{cb.where} is a background callback with neither running= "
+            f"nor progress=: whoever triggers it stares at a frozen "
+            f"screen. Declare at least a running= affordance, or baseline "
+            f"it with a reason."
         )
 
     def test_new_background_callbacks_declare_a_cancel(self, cb):

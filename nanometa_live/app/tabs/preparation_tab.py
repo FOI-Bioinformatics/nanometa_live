@@ -1239,13 +1239,20 @@ def register_preparation_callbacks(app):
         prevent_initial_call=True,
         background=True,
         manager=background_callback_manager,
+        # Stage-level set_progress: the running= clause revealed a progress
+        # bar that sat at 0% for the whole 5-30 s scan (round-2 audit).
+        progress=[
+            Output("taxmap-rescan-progress", "value", allow_duplicate=True),
+            Output("taxmap-rescan-progress-label", "children",
+                   allow_duplicate=True),
+        ],
         running=[
             (Output("taxmap-rescan-btn", "disabled"), True, False),
             (Output("taxmap-rescan-progress-container", "style", allow_duplicate=True),
              {"display": "block"}, {"display": "none"}),
         ],
     )
-    def run_rescan(n_clicks, config, current_refresh, watchlist_entries_snapshot):
+    def run_rescan(set_progress, n_clicks, config, current_refresh, watchlist_entries_snapshot):
         """Callback for Kraken2 database rescan.
 
         Runs in a DiskcacheManager-backed background process so the
@@ -1268,6 +1275,7 @@ def register_preparation_callbacks(app):
         try:
             from nanometa_live.core.taxonomy.taxid_mapping import get_taxid_mapper
 
+            set_progress((10, "Loading the Kraken2 database index..."))
             mapper = get_taxid_mapper()
             success = mapper.load_database(kraken_db)
 
@@ -1290,6 +1298,8 @@ def register_preparation_callbacks(app):
 
             total = len(watchlist_entries)
             logger.info(f"Processing {total} watchlist entries")
+            set_progress((55, f"Mapping {total} organisms against the "
+                              f"database..."))
 
             # preserve_manual keeps operator-verified and operator-declared
             # mappings across rescans of the SAME database (the mapper
@@ -1301,6 +1311,7 @@ def register_preparation_callbacks(app):
                 preserve_manual=True,
             )
 
+            set_progress((90, "Saving mappings..."))
             if collection:
                 from nanometa_live.core.taxonomy.taxid_mapping import (
                     slim_mapping_store_payload,
@@ -1869,7 +1880,19 @@ def register_preparation_callbacks(app):
                     add_log(f"Building BLAST databases for {len(successful_taxids)} genome(s)"),
                     dbc.Badge("BLAST", color="info", className="me-2"),
                 ))
-                built = genome_mgr.build_blast_dbs_batch(successful_taxids, max_workers=2)
+                def _blast_progress(done, total_dbs, _taxid):
+                    pct = 90 + int(9 * done / max(total_dbs, 1))
+                    set_progress((
+                        pct,
+                        f"Building BLAST databases ({done}/{total_dbs})...",
+                        "Building BLAST databases",
+                        add_log(f"BLAST database {done}/{total_dbs} built"),
+                        dbc.Badge("BLAST", color="info", className="me-2"),
+                    ))
+
+                built = genome_mgr.build_blast_dbs_batch(
+                    successful_taxids, max_workers=2,
+                    on_progress=_blast_progress)
                 add_log(f"Built {built} BLAST database(s)", "success" if built > 0 else "warning")
                 # A genome without a BLAST database cannot be validated
                 # against, so a build failure is not cosmetic. `failed`
@@ -2008,10 +2031,17 @@ def register_preparation_callbacks(app):
         prevent_initial_call=True,
         background=True,
         manager=background_callback_manager,
-        # No `running` button-disable here: a pattern-matching (ALL)
-        # running output is not reliably supported and crashes the
-        # dash-renderer. The background conversion alone removes the UI
-        # freeze, which is the point.
+        # A pattern-matching (ALL) running output is not reliably supported
+        # and crashes the dash-renderer, so the per-row button cannot be
+        # disabled -- the static note above the list is the feedback.
+        running=[(
+            Output("genome-single-download-note", "children"),
+            dbc.Alert([
+                dbc.Spinner(size="sm", spinner_class_name="me-2"),
+                "Downloading the selected genome...",
+            ], color="info", className="py-2 mb-2"),
+            [],
+        )],
     )
     def download_single_genome(
         download_clicks: List[int],
