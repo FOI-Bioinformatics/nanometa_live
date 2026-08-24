@@ -543,8 +543,11 @@ def build_validation_store(config, backend_status, selected_sample, batch_id):
     summary = {} if batch_id else parser.get_validation_summary()
 
     # ``All Samples`` and empty sentinel values mean "no filter".
+    # Round 3: entries ship without their empty fields (None/[]/"") --
+    # every consumer reads via .get(), and at the pairs envelope the
+    # dead fields were roughly a third of a multi-MB store payload.
     results_dicts = _filter_results_by_sample(
-        [r.to_dict() for r in results], selected_sample)
+        [_slim_result_dict(r.to_dict()) for r in results], selected_sample)
     logger.info("Loaded %d validation results from %s",
                 len(results_dicts), results_dir)
 
@@ -553,6 +556,16 @@ def build_validation_store(config, backend_status, selected_sample, batch_id):
 
     return {"results": results_dicts, "summary": summary, "message": None,
             "selected_sample": selected_sample}
+
+
+def _slim_result_dict(d: dict) -> dict:
+    """Drop empty fields from a store-bound result dict (round 3).
+
+    None, empty-list and empty-string values carry no information across
+    the wire; every store consumer reads with ``.get()``. Numeric zeros
+    are kept -- 0.0 is a real measurement, not an absence.
+    """
+    return {k: v for k, v in d.items() if v is not None and v != [] and v != ""}
 
 
 def empty_validation_payload(config, results_dir_ok, backend_status,
@@ -648,14 +661,33 @@ def _batch_selector_state(config: Optional[dict], view_mode: Optional[str],
     batch_ids = _enumerate_batch_ids(config)
     if not batch_ids:
         return hidden, hidden, [], None
+    total = len(batch_ids)
+    shown = batch_ids[:BATCH_DROPDOWN_CAP]
     # Label numeric batch ids as "Batch N" for clarity; keep raw label otherwise.
     options = [
         {"label": (f"Batch {b}" if b.isdigit() else b), "value": b}
-        for b in batch_ids
+        for b in shown
     ]
-    value = current_value if current_value in batch_ids else batch_ids[0]
+    if total > len(shown):
+        options.append({
+            "label": f"...showing latest {len(shown)} of {total} batches",
+            "value": "__overflow__", "disabled": True,
+        })
+    value = current_value if current_value in shown else shown[0]
     col_style = {} if view_mode == "batch" else hidden
     return {}, col_style, options, value
+
+
+#: Most recent batch ids offered in the drill-down dropdown. A cap on a
+#: NAVIGATION list, stated with a "latest N of M" notice row -- never
+#: hidden state. The batch dirs grow as pairs x batches; nobody scrolls
+#: a dropdown of thousands.
+BATCH_DROPDOWN_CAP = 100
+
+# Dir-mtime memo for the batch-id enumeration (round 3): per-batch files
+# are write-once, so the ID SET only changes when a file is added, which
+# bumps its directory's mtime. Keyed on the resolved results dir.
+_batch_ids_memo: dict = {}
 
 
 def _enumerate_batch_ids(config: Optional[dict]) -> List[str]:
@@ -674,11 +706,24 @@ def _enumerate_batch_ids(config: Optional[dict]) -> List[str]:
     if not results_dir:
         return []
 
+    batch_dirs = [Path(results_dir) / "validation" / tool / "batch"
+                  for tool in ("minimap2", "blast")]
+
+    def _dir_state(p: Path):
+        try:
+            return p.stat().st_mtime_ns
+        except OSError:
+            return -1
+
+    dir_state = tuple(_dir_state(p) for p in batch_dirs)
+    hit = _batch_ids_memo.get(results_dir)
+    if hit is not None and hit[0] == dir_state:
+        return list(hit[1])
+
     # <sample>_taxid<digits>_<batch_id>.<ext>  -> capture <batch_id>
     pattern = re.compile(r"_taxid\d+_(?P<batch>.+?)\.(?:paf|blast\.tsv|minimap2_stats\.json|blast_stats\.json)$")
     batch_ids: set = set()
-    for tool in ("minimap2", "blast"):
-        batch_dir = Path(results_dir) / "validation" / tool / "batch"
+    for batch_dir in batch_dirs:
         if not batch_dir.is_dir():
             continue
         for f in batch_dir.iterdir():
@@ -691,8 +736,11 @@ def _enumerate_batch_ids(config: Optional[dict]) -> List[str]:
     # landed in, so the set is sparse). Sort numerically so the most recent batch
     # is first; fall back to lexical for any non-numeric id scheme.
     if batch_ids and all(b.isdigit() for b in batch_ids):
-        return sorted(batch_ids, key=int, reverse=True)
-    return sorted(batch_ids, reverse=True)
+        ordered = sorted(batch_ids, key=int, reverse=True)
+    else:
+        ordered = sorted(batch_ids, reverse=True)
+    _batch_ids_memo[results_dir] = (dir_state, ordered)
+    return list(ordered)
 
 
 def _create_empty_identity_plot(message: str = "No identity data available") -> go.Figure:

@@ -798,30 +798,19 @@ def _load_seqkit_incremental(
         if not batch_files:
             continue
 
+        # Round 3: batch TSVs are immutable once stable, so each is parsed
+        # through the per-file cache -- a new batch costs one read_csv
+        # instead of re-reading every batch of every sample (measured
+        # 2,414 reads / 19.6 s per incremental tick at 24x100 before).
+        # The cache owns the stability/error handling this loop used to.
+        from nanometa_live.core.utils.seqkit_batch_cache import (
+            load_batch_frame,
+        )
         per_batch: List[pd.DataFrame] = []
         for batch_file in batch_files:
-            try:
-                if not _is_file_stable(batch_file):
-                    logging.debug(f"Skipping unstable seqkit batch: {batch_file}")
-                    continue
-                df = pd.read_csv(batch_file, sep='\t')
-            except (FileNotFoundError, PermissionError, OSError) as exc:
-                logging.warning(
-                    f"Cannot read seqkit batch file {batch_file}: {exc}"
-                )
-                continue
-            except (
-                pd.errors.ParserError,
-                pd.errors.EmptyDataError,
-                UnicodeDecodeError,
-            ) as exc:
-                logging.warning(
-                    f"Malformed seqkit batch file {batch_file}: {exc}"
-                )
-                continue
-            if df.empty:
-                continue
-            per_batch.append(df)
+            df = load_batch_frame(batch_file)
+            if df is not None:
+                per_batch.append(df)
 
         if not per_batch:
             continue

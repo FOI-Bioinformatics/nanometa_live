@@ -295,6 +295,33 @@ class ValidationParser:
         self._results_cache_mtime: Optional[float] = None
         self._results_cache: Optional[List["ValidationResult"]] = None
 
+    def _cached_fingerprint(self) -> Optional[float]:
+        """The dir fingerprint, skipping the walk within one freshness epoch.
+
+        The fingerprint walk stats every per-pair file (~3 per pair; ~37k
+        stats at the 129x96 envelope) and ran on EVERY
+        get_validation_results call. check_data_freshness already walks
+        validation/ once per poll and bumps the epoch when anything under
+        the results tree changes, so within an unchanged nonzero epoch the
+        stored fingerprint is still valid -- the `_mtime_cache_state`
+        idiom. Epoch 0 (CLI, tests, report generation: no poll loop)
+        keeps the unconditional walk so those callers can never be served
+        stale data.
+        """
+        from nanometa_live.core.utils import loader_utils
+
+        epoch = loader_utils._freshness_epoch
+        if (
+            epoch
+            and getattr(self, "_fingerprint_epoch", None) == epoch
+            and getattr(self, "_fingerprint_value", None) is not None
+        ):
+            return self._fingerprint_value
+        value = self._validation_dir_fingerprint()
+        self._fingerprint_epoch = epoch
+        self._fingerprint_value = value
+        return value
+
     def _validation_dir_fingerprint(self) -> Optional[float]:
         """Latest mtime under ``validation_dir``; ``None`` when missing."""
         if not self.validation_dir or not self.validation_dir.exists():
@@ -691,10 +718,23 @@ class ValidationParser:
             from nanometa_live.core.parsers.validation_batch import collect_batch_results
             return collect_batch_results(self.results_dir, batch_id, sample, taxid, self.parse_blast_tabular)
 
+        # Round 3: a filtered call runs the UNFILTERED parse (populating
+        # the shared cache) and subsets in memory. The old path parsed the
+        # whole O(pairs) tree with the filters woven in and then discarded
+        # the work (cache_this_call was False), so every
+        # get_species_validation call was a full cold parse.
+        if sample is not None or taxid is not None:
+            full = self.get_validation_results()
+            return [
+                r for r in full
+                if (sample is None or r.sample_id == sample)
+                and (taxid is None or r.taxid == taxid)
+            ]
+
         # Cache fast-path: if the validation directory has not changed
         # since the last full parse, reuse the cached unfiltered list
         # and apply the (sample, taxid) filter in-memory.
-        fingerprint = self._validation_dir_fingerprint()
+        fingerprint = self._cached_fingerprint()
         if (
             fingerprint is not None
             and self._results_cache is not None

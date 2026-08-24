@@ -171,7 +171,7 @@
     "nanometa_live/core/utils/qc_loaders.py::get_sample_statistics_summary",
     "nanometa_live/core/utils/qc_loaders.py::load_nanoplot_stats",
     "nanometa_live/core/utils/read_extractor.py::ReadExtractor.extract_reads_for_taxid",
-    "nanometa_live/core/utils/validation_loaders.py::load_blast_validation_data",
+    "nanometa_live/core/utils/validation_loaders.py::_load_blast_validation_data_uncached",
     "nanometa_live/core/watchlist/validation/confidence_scorer.py::ConfidenceScorer.calculate_score",
     "nanometa_live/core/watchlist/validation/match_strategies.py",
     "nanometa_live/core/watchlist/validation/match_strategies.py::CompositeMatchStrategy.find_alternatives",

@@ -188,8 +188,14 @@ def reset_caches() -> None:
     om._memo.clear()
     dh._pathogen_check_memo.clear()
     pdb._dangerous_check_memo.clear()
+    from nanometa_live.core.utils import seqkit_batch_cache as sbc
+
+    from nanometa_live.core.utils import report_accumulation as racc
+
     bvp.reset_validation_parsers()
     staleness.clear()
+    sbc.clear_seqkit_batch_cache()
+    racc.clear_sample_accum_cache()
     with lu._parse_locks_lock:
         lu._parse_locks.clear()
 

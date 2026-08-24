@@ -272,13 +272,19 @@ def clear_all_loader_caches():
     from nanometa_live.core.utils.sample_detector import invalidate_sample_cache
     from nanometa_live.core.utils import staleness
 
+    from nanometa_live.core.utils.seqkit_batch_cache import (
+        clear_seqkit_batch_cache,
+    )
+
     clear_data_cache()
     clear_report_frame_cache()
     invalidate_sample_cache()
     get_alert_engine().clear_alerts()
     # Round 3: staleness is per-run bookkeeping -- a new run's samples must
-    # not inherit the previous run's "serving stale data" flags.
+    # not inherit the previous run's "serving stale data" flags -- and the
+    # seqkit per-batch frames belong to the run that wrote them.
     staleness.clear()
+    clear_seqkit_batch_cache()
 
 
 _saturation_warned: set = set()

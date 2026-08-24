@@ -241,3 +241,22 @@ class TestStoreWritersAreSlim:
             _state, updated_config = fn([False], [trig], {})
         for entry in updated_config["watchlist"]["custom"]:
             assert set(entry) <= SLIM_KEYS
+
+class TestValidationStoreEntrySlim:
+    """Store-bound validation entries ship without empty fields (round 3).
+
+    At the pairs envelope the store carried ~25k dicts x 24 fields; the
+    None/empty third of every dict was pure wire cost. Zeros stay: 0.0
+    is a measurement."""
+
+    def test_empty_fields_dropped_zeros_kept(self):
+        from nanometa_live.app.tabs.validation_tab_helpers import (
+            _slim_result_dict,
+        )
+        slim = _slim_result_dict({
+            "sample_id": "bc01", "taxid": 5, "errors": [],
+            "reference_accession": None, "species": "",
+            "hit_rate": 0.0, "validated_reads": 0,
+        })
+        assert slim == {"sample_id": "bc01", "taxid": 5,
+                        "hit_rate": 0.0, "validated_reads": 0}

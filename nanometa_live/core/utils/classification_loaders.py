@@ -75,11 +75,32 @@ _report_frame_cache_lock = threading.Lock()
 _last_good_frame: "OrderedDict[str, pd.DataFrame]" = OrderedDict()
 
 
+# Latest-batch path memo (round 3): (main_dir, sample) -> (dir-mtime state,
+# winning path or None). The globs it replaces enumerated every batch file
+# per sample per poll; the winner only changes when a directory does.
+_latest_batch_memo_lock = threading.Lock()
+_latest_batch_memo: Dict[Tuple[str, str], Tuple[tuple, Optional[str]]] = {}
+
+
+def _safe_mtime_ns(path: str) -> int:
+    """Directory mtime for memo keys; -1 for a missing/unreadable path."""
+    try:
+        return os.stat(path).st_mtime_ns
+    except OSError:
+        return -1
+
+
 def clear_report_frame_cache() -> None:
     """Drop the per-file parsed-frame cache (test/teardown helper)."""
     with _report_frame_cache_lock:
         _report_frame_cache.clear()
         _last_good_frame.clear()
+    with _latest_batch_memo_lock:
+        _latest_batch_memo.clear()
+    from nanometa_live.core.utils.report_accumulation import (
+        clear_sample_accum_cache,
+    )
+    clear_sample_accum_cache()
 
 
 def _diagnose_empty_kraken_dir(kraken_dir: str, sample: Optional[str] = None) -> str:
@@ -978,19 +999,31 @@ def _parse_kraken_data_uncached(
 
         # Accumulate reads/cumul_reads per taxid in a running dict, avoiding
         # pd.concat of all raw reports (O(unique_taxa) memory instead of
-        # O(all_rows_across_files)).
-        agg: Dict[int, List] = {}
-        ordered_taxids: List[int] = []
-        seen_taxids: set = set()
-        has_data = False
-        for kreport_file in kreport_files:
-            df = _parse_kraken2_report(kreport_file)
-            if df is None or df.empty:
-                continue
-            has_data = True
-            _accumulate_kraken_df(df, agg, ordered_taxids, seen_taxids)
+        # O(all_rows_across_files)). Round 3: the per-sample accumulation
+        # cache makes the rebuild O(changed sample), not O(total files) --
+        # a new batch used to re-accumulate every batch of every sample.
+        # None means the segment precondition failed (interleaved sample
+        # names in sort order) and the plain loop below is the answer.
+        from nanometa_live.core.utils.report_accumulation import (
+            aggregate_with_sample_cache,
+        )
+        cached = aggregate_with_sample_cache(
+            kraken_dir, kreport_files, _report_sample_key,
+            _parse_kraken2_report, _accumulate_kraken_df,
+        )
+        if cached is not None:
+            agg, ordered_taxids = cached
+        else:
+            agg = {}
+            ordered_taxids = []
+            seen_taxids: set = set()
+            for kreport_file in kreport_files:
+                df = _parse_kraken2_report(kreport_file)
+                if df is None or df.empty:
+                    continue
+                _accumulate_kraken_df(df, agg, ordered_taxids, seen_taxids)
 
-        if not has_data:
+        if not agg:
             return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
         result_df = _aggregate_to_result_df(agg, ordered_taxids)
         return _cache_and_return(result_df, cache_key, mtime_key, kraken_dir, fingerprint_paths)
@@ -1070,20 +1103,42 @@ def load_kraken_latest_batch(main_dir: str, sample_name: str) -> pd.DataFrame:
     """
     main_dir = resolve_analysis_directory(main_dir)
     kraken_dir = os.path.join(main_dir, "kraken2")
-
-    # 1. Collect candidate batch files and pick the highest-numbered one.
-    candidate_batches: List[str] = []
-    for ext_pattern in (
-        f"{sample_name}_batch*.kraken2.report.txt",
-    ):
-        candidate_batches.extend(glob.glob(os.path.join(kraken_dir, ext_pattern)))
-
-    # v1.5 layout: batch_reports/ inside per-sample subdirectory
     batch_dir = os.path.join(kraken_dir, sample_name, "batch_reports")
-    if os.path.isdir(batch_dir):
-        candidate_batches.extend(
-            glob.glob(os.path.join(batch_dir, "*.kraken2.report.txt"))
-        )
+
+    # Round 3: the winning path is memoized on the two candidate dirs'
+    # mtimes (a new file bumps its directory's mtime on POSIX). Called per
+    # sample per poll, the globs below enumerated every batch file with
+    # two regex passes each -- 28,800 paths per poll at 96x300 -- for a
+    # selection that only changes when a directory does.
+    memo_key = (main_dir, sample_name)
+    dir_state = tuple(
+        _safe_mtime_ns(p) for p in (kraken_dir, batch_dir)
+    )
+    with _latest_batch_memo_lock:
+        hit = _latest_batch_memo.get(memo_key)
+    if hit is not None and hit[0] == dir_state:
+        latest_path = hit[1]
+        if latest_path is not None:
+            df = _parse_kraken2_report(latest_path)
+            if df is not None:
+                return df
+        # Memoized "no batch files" (or a vanished winner): fall through
+        # to the standard-report fallback below via an empty candidate set.
+        candidate_batches = []
+    else:
+        # 1. Collect candidate batch files and pick the highest-numbered one.
+        candidate_batches = []
+        for ext_pattern in (
+            f"{sample_name}_batch*.kraken2.report.txt",
+        ):
+            candidate_batches.extend(
+                glob.glob(os.path.join(kraken_dir, ext_pattern)))
+
+        # v1.5 layout: batch_reports/ inside per-sample subdirectory
+        if os.path.isdir(batch_dir):
+            candidate_batches.extend(
+                glob.glob(os.path.join(batch_dir, "*.kraken2.report.txt"))
+            )
 
     if candidate_batches:
         candidate_batches = _deduplicate_batch_files(candidate_batches)
@@ -1095,9 +1150,16 @@ def load_kraken_latest_batch(main_dir: str, sample_name: str) -> pd.DataFrame:
 
         latest = max(candidate_batches, key=_extract_num)
         logging.debug("Latest batch file for %s: %s", sample_name, latest)
+        with _latest_batch_memo_lock:
+            _latest_batch_memo[memo_key] = (dir_state, latest)
         df = _parse_kraken2_report(latest)
         if df is not None:
             return df
+    elif hit is None or hit[0] != dir_state:
+        # Remember that this dir state has no batch files, so the fallback
+        # path below is also glob-free on the next poll.
+        with _latest_batch_memo_lock:
+            _latest_batch_memo[memo_key] = (dir_state, None)
 
     # 2. Fall back to standard (non-cumulative) report when no batch files exist.
     for ext in (

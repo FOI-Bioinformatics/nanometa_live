@@ -457,11 +457,19 @@ class TestBlastValidationParserCache:
         # Sanity: results equal the cached set
         assert len(second) == len(first)
 
-    def test_cache_invalidates_on_dir_mtime_change(self, tmp_path):
-        """Touching the validation directory invalidates the cache."""
+    def test_cache_invalidates_on_dir_mtime_change(self, tmp_path, monkeypatch):
+        """Touching the validation directory invalidates the cache.
+
+        Pinned to freshness epoch 0 (the CLI/test contract): in the app
+        the epoch bump from check_data_freshness is what re-triggers the
+        fingerprint walk (round 3), covered in
+        test_validation_parser_reuse.py.
+        """
         import time
+        from nanometa_live.core.utils import loader_utils
         from nanometa_live.core.parsers.blast_validation_parser import BlastValidationParser
 
+        monkeypatch.setattr(loader_utils, "_freshness_epoch", 0)
         validation = self._build_validation_dir(tmp_path)
         parser = BlastValidationParser(str(tmp_path))
         parser.get_validation_results()
