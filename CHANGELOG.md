@@ -6,6 +6,59 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+Round two of the large-scale hardening (2026-08-24): many barcodes (24-96)
+and large watchlists together, with two acceptance criteria — the interface
+never freezes, and the operator always sees progress. Measured on a
+synthetic 96-barcode tree: the three per-tick attribution passes went from
+283 ms to ~0 ms, a quiet 96-sample poll holds at 176 ms with no cache
+cliff, and the per-tick browser upload drops roughly 35x.
+
+### Fixed
+- **Per-tick server work no longer scales with barcode count several times
+  over.** Loader cache capacity now scales with the detected sample count
+  (a fixed cap of 100 evicted two thirds of ~300 live keys at 96 barcodes
+  every cleanup); per-sample attribution is built once per tick and shared
+  by the verdict banner, alert panel and dashboard alerts (was up to three
+  full passes, the panel's unconditional); the validation parser is shared
+  per results dir so its cache survives ticks; nanoplot gets the mtime
+  cache every other loader had; freshness, file-mapping, processed-count
+  and on-demand scans are single-scan or fingerprint-gated; a watchlist
+  toggle no longer re-walks the results tree (the fingerprint keys on a
+  derived results-dir Store instead of the whole config).
+- **Every click path is de-frozen with visible progress.** Export Results
+  runs in the background with a staged progress bar in the still-open
+  modal (it ran minutes on the request thread and wrote its status into a
+  closed modal); Start/Stop run in main-process threads with instant
+  optimistic feedback and a terminal toast (failures included); Enable/
+  Disable All persists once instead of once per entry (500 fsyncs);
+  watchlist discovery finally consults its cache (three full YAML-corpus
+  parses per toggle become cache hits); taxonomy lookup, QC plot export
+  and the native path pickers are backgrounded with spinners; config path
+  fields validate on blur, not per keystroke.
+- **Wire payloads are slim.** The app-config Store carries a six-field
+  watchlist form (~125 B/entry; the full form — 96-99% of the store — was
+  re-uploaded by 24 per-tick callbacks, 4.4-16.9 MB per tick). Disk
+  session files keep the full form. The taxmap store ships the 5 fields
+  its consumers read; alert-card attribution popovers build their rows on
+  open; overflow organism cards ship as data and render on the Show-more
+  click.
+- **Hidden tabs stop rebuilding.** The Sankey/Sunburst figure, QC figures,
+  per-sample QC table and QC cards skip while their tab is hidden and
+  render fresh on activation. The detection chain (status cache, verdict
+  banner, alerts, alert panel, readiness, fingerprint) is never gated on
+  the visible tab, enforced by a permanent introspection test.
+- Progress gaps in existing background operations closed: database rescan
+  reports its stages (the bar sat at 0%), Check Everything shows a spinner
+  (was 15-20 s of dead air), BLAST database builds report per-item
+  progress (was a silent plateau at 90%), single genome downloads show a
+  note while running.
+
+### Added
+- Contract fence: every background callback must declare `running=` or
+  `progress=`; per-tick call-count pins at 96 barcodes; payload budget
+  tests; the perf benchmark axis extended to 48/96 barcodes with a
+  regenerated baseline.
+
 ## [0.11.1] - 2026-08-21
 
 A large-watchlist audit (2026-08-21): the 129-organism Bioshield watchlist
