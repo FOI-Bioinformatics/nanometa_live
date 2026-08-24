@@ -163,12 +163,8 @@ class TestComputeResultsFingerprint:
         (kraken / "barcode01.kraken2.report.txt").write_text(
             "100.00\t10\t10\tS\t562\tEscherichia coli\n"
         )
-        config = {
-            "results_output_directory": str(tmp_path),
-            "main_dir": str(tmp_path),
-        }
         fn = _callback_fn(core_app, "results-fingerprint.data")
-        result = fn(1, config, None)
+        result = fn(1, str(tmp_path), None)
         assert "fp" in result and result["fp"]
 
     def test_unchanged_fingerprint_prevents_update(self, core_app, tmp_path):
@@ -177,8 +173,7 @@ class TestComputeResultsFingerprint:
         (kraken / "barcode01.kraken2.report.txt").write_text(
             "100.00\t10\t10\tS\t562\tEscherichia coli\n"
         )
-        config = {"results_output_directory": str(tmp_path), "main_dir": str(tmp_path)}
         fn = _callback_fn(core_app, "results-fingerprint.data")
-        first = fn(1, config, None)
+        first = fn(1, str(tmp_path), None)
         with pytest.raises(PreventUpdate):
-            fn(2, config, first)
+            fn(2, str(tmp_path), first)

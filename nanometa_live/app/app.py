@@ -431,6 +431,12 @@ def create_app(
         # results-fingerprint only fire when the fingerprint actually
         # advances (i.e. when nanometanf wrote a new file).
         dcc.Store(id='results-fingerprint', data={"fp": "", "ts": 0}),
+        # Resolved results directory, derived from app-config only when the
+        # path actually changes. The fingerprint walk keys on THIS, not on
+        # app-config: with app-config as its Input, every watchlist toggle
+        # re-walked the whole results tree and cascaded into every
+        # fingerprint-gated callback (round-2 audit, 2026-08-22).
+        dcc.Store(id='results-dir-path', data=None),
 
         # Shared stores for cross-tab communication (Watchlist <-> Preparation)
         dcc.Store(id='taxmap-collection', data=None),

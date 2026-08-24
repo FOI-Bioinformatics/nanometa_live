@@ -191,6 +191,61 @@ def load_fastp_per_sample(main_dir: str) -> List[Dict[str, Any]]:
     return rows
 
 
+def load_fastp_card_payloads(
+    main_dir: str, sample: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Reduced fastp payloads for the QC cards, mtime-cached.
+
+    Carries exactly what the base-quality and read-statistics cards read:
+    the ``summary`` block and the read1 mean quality curve. The cards used
+    to glob the fastp dir and ``json.load`` every report inline on every
+    tick (2 x S parses at S barcodes); this shares one parse per change.
+
+    Sample scoping matches the historical card fix: ``None``/"All Samples"
+    means every report; anything else matches ``<sample>.fastp.json``
+    exactly, so barcode1 does not pick up barcode10's report.
+    """
+    main_dir = resolve_analysis_directory(main_dir)
+    fastp_dir = os.path.join(main_dir, "fastp")
+    if not os.path.exists(fastp_dir):
+        return []
+
+    mtime_key = f"fastp_cards:{_get_cache_key(main_dir, sample)}"
+    cached = _check_mtime_cache(mtime_key, [fastp_dir])
+    if cached is not None:
+        return list(cached)
+
+    if sample is None or sample == "All Samples":
+        files = sorted(glob.glob(os.path.join(fastp_dir, "*.fastp.json")))
+    else:
+        exact = os.path.join(fastp_dir, f"{sample}.fastp.json")
+        files = [exact] if os.path.isfile(exact) else []
+
+    payloads: List[Dict[str, Any]] = []
+    for fastp_file in files:
+        try:
+            if not _is_file_stable(fastp_file):
+                continue
+            with open(fastp_file, "r") as f:
+                payload = json.load(f)
+            payloads.append({
+                "summary": payload.get("summary", {}),
+                "read1_after_filtering": {
+                    "quality_curves": {
+                        "mean": payload.get("read1_after_filtering", {})
+                        .get("quality_curves", {}).get("mean", []),
+                    },
+                },
+            })
+        except (json.JSONDecodeError, OSError, KeyError, TypeError) as exc:
+            logging.debug(
+                f"load_fastp_card_payloads skipping {fastp_file}: {exc}")
+            continue
+
+    _store_mtime_cache(mtime_key, [fastp_dir], list(payloads))
+    return payloads
+
+
 def load_fastp_data(main_dir: str, sample: Optional[str] = None) -> Dict[str, Any]:
     """
     Load FASTP statistics for specific sample or all samples.
@@ -327,6 +382,17 @@ def load_nanoplot_stats(main_dir: str, sample: Optional[str] = None) -> Dict[str
         }
     """
     nanoplot_dir = os.path.join(main_dir, "nanoplot")
+
+    # Mtime cache, same idiom as the fastp/seqkit loaders in this file.
+    # This was the one loader without it, and the dashboard calls it
+    # per sample per tick plus twice more for the quality estimate
+    # (round-2 audit, 2026-08-22).
+    mtime_key = f"nanoplot:{_get_cache_key(main_dir, sample)}"
+    if os.path.exists(nanoplot_dir):
+        cached = _check_mtime_cache(mtime_key, [nanoplot_dir])
+        if cached is not None:
+            return cached.copy() if isinstance(cached, dict) else cached
+
     nanostats_files = []
 
     if os.path.exists(nanoplot_dir):
@@ -391,6 +457,7 @@ def load_nanoplot_stats(main_dir: str, sample: Optional[str] = None) -> Dict[str
     if file_count > 0:
         aggregated['source'] = 'nanoplot'
 
+    _store_mtime_cache(mtime_key, [nanoplot_dir], dict(aggregated))
     return aggregated
 
 

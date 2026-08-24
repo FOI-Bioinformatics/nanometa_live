@@ -620,7 +620,11 @@ def _lookup_sample_breakdown(taxids: Any,
         samples = [s for s in get_available_samples(main_dir) if s != "All Samples"]
         if not samples:
             return []
-        taxid_to_samples = _load_per_sample_organisms(main_dir, samples, config)
+        from nanometa_live.app.utils.organisms_memo import (
+            get_per_sample_organisms_cached,
+        )
+        taxid_to_samples = get_per_sample_organisms_cached(
+            main_dir, samples, config)
         for taxid in taxids:
             found = taxid_to_samples.get(int(taxid), [])
             if found:
@@ -1307,19 +1311,31 @@ def _estimate_quality_score(main_dir: str, kraken_df: pd.DataFrame) -> Optional[
 
 
 def _count_processed_samples(main_dir: str, samples: List[str]) -> int:
-    """Count how many samples have been processed (have Kraken output)."""
+    """Count how many samples have been processed (have Kraken output).
+
+    One directory scan answers for every sample; the previous per-sample
+    ``glob.glob`` was S full-directory pattern matches per tick to derive
+    a single integer (round-2 audit, 2026-08-22). Semantics unchanged:
+    a sample counts when any top-level ``kraken2/*.txt`` filename contains
+    its name.
+    """
     kraken_dir = os.path.join(main_dir, "kraken2")
     if not os.path.exists(kraken_dir):
         return 0
 
-    count = 0
-    for sample in samples:
-        # Check for sample-specific Kraken output
-        sample_kraken = glob.glob(os.path.join(kraken_dir, f"*{sample}*.txt"))
-        if sample_kraken:
-            count += 1
+    try:
+        with os.scandir(kraken_dir) as it:
+            txt_names = [
+                e.name for e in it
+                if e.name.endswith(".txt") and e.is_file(follow_symlinks=False)
+            ]
+    except OSError:
+        return 0
 
-    return count
+    return sum(
+        1 for sample in samples
+        if any(sample in name for name in txt_names)
+    )
 
 
 def _generate_status_display(status: str) -> Tuple[Dict, str, str, str, str, str, str]:
@@ -1663,7 +1679,10 @@ def _generate_alerts(
     if taxid_to_samples is None:
         sample_names = [s["name"] for s in samples if s.get("name")]
         try:
-            taxid_to_samples = _load_per_sample_organisms(
+            from nanometa_live.app.utils.organisms_memo import (
+                get_per_sample_organisms_cached,
+            )
+            taxid_to_samples = get_per_sample_organisms_cached(
                 main_dir, sample_names, config
             )
         except Exception as e:
@@ -2242,9 +2261,11 @@ def _load_validation_lookup(main_dir: str) -> Dict[Tuple[str, int], Dict[str, An
         return {}
     try:
         from nanometa_live.core.parsers.blast_validation_parser import (
-            BlastValidationParser,
+            get_validation_parser,
         )
-        parser = BlastValidationParser(main_dir)
+        # Shared instance so the mtime-keyed results cache survives across
+        # ticks; a fresh instance per call kept it permanently cold.
+        parser = get_validation_parser(main_dir)
         if not parser.has_validation_data():
             return {}
         results = parser.get_validation_results()

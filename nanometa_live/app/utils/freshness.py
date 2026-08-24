@@ -73,12 +73,54 @@ def sample_last_data_ts(main_dir: str, sample: str) -> Optional[float]:
 def freshness_map(
     main_dir: str, samples: Iterable[str]
 ) -> Dict[str, Optional[float]]:
-    """Build a {sample_name: last_data_ts} map for the given samples."""
+    """Build a {sample_name: last_data_ts} map for the given samples.
+
+    The flat-layout fallback scans the top-level ``kraken2/`` directory
+    ONCE for all samples. Delegating to ``sample_last_data_ts`` per sample
+    re-scanned that directory once per sample -- O(S x F) stat calls per
+    tick at S barcodes (round-2 audit, 2026-08-22). Per-sample semantics
+    are unchanged: the realtime batch_reports layout wins when present,
+    the flat scan answers for everyone else.
+    """
+    wanted = [s for s in (samples or []) if s != "All Samples"]
+    if not wanted:
+        return {}
+    if not main_dir:
+        return {s: None for s in wanted}
+
+    kraken_dir = os.path.join(main_dir, "kraken2")
     out: Dict[str, Optional[float]] = {}
-    for s in samples or []:
-        if s == "All Samples":
+    flat_latest: Dict[str, Optional[float]] = {s: None for s in wanted}
+    flat_scanned = False
+
+    for s in wanted:
+        nested_mt = _max_mtime_in_dir(
+            os.path.join(kraken_dir, s, "batch_reports"))
+        if nested_mt is not None:
+            out[s] = nested_mt
             continue
-        out[s] = sample_last_data_ts(main_dir, s)
+
+        if not flat_scanned:
+            flat_scanned = True
+            if os.path.isdir(kraken_dir):
+                try:
+                    with os.scandir(kraken_dir) as it:
+                        for entry in it:
+                            try:
+                                if not entry.is_file(follow_symlinks=False):
+                                    continue
+                                mt = entry.stat().st_mtime
+                            except OSError:
+                                continue
+                            name = entry.name
+                            for cand in wanted:
+                                if cand in name:
+                                    prev = flat_latest[cand]
+                                    if prev is None or mt > prev:
+                                        flat_latest[cand] = mt
+                except OSError:
+                    pass
+        out[s] = flat_latest[s]
     return out
 
 

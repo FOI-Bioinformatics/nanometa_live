@@ -71,6 +71,32 @@ from nanometa_live.app.tabs.dashboard_helpers import (  # noqa: E402
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
 
 
+# reload_on_demand_results' per-directory fingerprint: (name, mtime_ns) of
+# every *_validation.json, so an unchanged tick skips the per-file parses.
+_od_results_fp: dict = {}
+
+
+def _od_dir_unchanged(od_dir: str) -> bool:
+    """One scandir decides whether the on-demand results changed.
+
+    Keyed on the directory path, so an Archive / Open Results switch to a
+    different run always re-parses (finding C4 stays fixed). A scan error
+    reports "changed" so the parse loop stays authoritative.
+    """
+    try:
+        with os.scandir(od_dir) as it:
+            entries = [
+                (e.name, e.stat().st_mtime_ns) for e in it
+                if e.name.endswith("_validation.json")
+            ]
+        dir_fp = tuple(sorted(entries))
+    except OSError:
+        return False
+    if _od_results_fp.get(od_dir) == dir_fp:
+        return True
+    _od_results_fp[od_dir] = dir_fp
+    return False
+
 # Cards shown before the "Show N more" overflow collapse takes over. One
 # cap for every card list on this tab: the browser cost is per mounted
 # card, watched or not (audit 2026-08-21: 129 watched cards froze Chrome).
@@ -978,6 +1004,11 @@ def register_main_callbacks(app: Dash):
                 # The directory the store was loaded from is gone
                 # (archived, or the operator switched runs): clear it.
                 return {}, no_update
+            raise PreventUpdate
+
+        # Cheap directory fingerprint so an unchanged tick costs one scandir
+        # instead of a json.load per result file, forever (round-2 audit).
+        if _od_dir_unchanged(od_dir):
             raise PreventUpdate
 
         results = {}

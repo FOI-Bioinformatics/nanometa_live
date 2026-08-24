@@ -34,15 +34,35 @@ def register_status(app, backend_manager):
         return backend_manager.get_status()
 
     @app.callback(
+        Output("results-dir-path", "data"),
+        Input("app-config", "data"),
+        State("results-dir-path", "data"),
+    )
+    def derive_results_dir(config, prev):
+        """Resolve the results directory, emitting only on actual change.
+
+        This is the decoupler that keeps the original intent (pointing the
+        app at a NEW results folder via Open Results or Apply Settings
+        rescans immediately) without the amplification: with app-config as
+        the fingerprint's own Input, every watchlist toggle and settings
+        write re-walked the whole results tree and re-fired the entire
+        fingerprint-gated cascade (round-2 audit, 2026-08-22).
+        """
+        if not config:
+            raise PreventUpdate
+        main_dir = resolve_outdir_for_fingerprint(config)
+        if not main_dir or main_dir == prev:
+            raise PreventUpdate
+        return main_dir
+
+    @app.callback(
         Output("results-fingerprint", "data"),
         Input("update-interval", "n_intervals"),
-        # app-config is an Input (not just State) so that pointing the app at a
-        # new results folder via Open Results or Apply Settings rescans
-        # immediately instead of waiting for the next interval tick.
-        Input("app-config", "data"),
+        # The derived dir Store, NOT app-config: see derive_results_dir.
+        Input("results-dir-path", "data"),
         State("results-fingerprint", "data"),
     )
-    def compute_results_fingerprint(_n_intervals, config, prev):
+    def compute_results_fingerprint(_n_intervals, main_dir, prev):
         """
         Scan the nanometanf output directories and emit a fingerprint
         update only when at least one of them has changed.
@@ -61,9 +81,6 @@ def register_status(app, backend_manager):
         loader caches skip their own per-key fingerprint walks for the rest
         of the poll, so this is the only tree traversal a quiet poll pays.
         """
-        if not config:
-            raise PreventUpdate
-        main_dir = resolve_outdir_for_fingerprint(config)
         if not main_dir:
             raise PreventUpdate
 

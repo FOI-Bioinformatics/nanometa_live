@@ -102,7 +102,7 @@ def _run_verdict_banner(
         "nanometa_live.app.tabs.dashboard_tab._check_pathogens_both",
         return_value=(detections, []),
     ), patch(
-        "nanometa_live.app.tabs.dashboard_tab._load_per_sample_organisms",
+        "nanometa_live.app.tabs.dashboard_tab.get_per_sample_organisms_cached",
         **per_sample_kwargs,
     ), patch(
         "nanometa_live.app.tabs.dashboard_tab.interval_tick_is_redundant",

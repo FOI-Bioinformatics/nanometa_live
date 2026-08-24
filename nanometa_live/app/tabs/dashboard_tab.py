@@ -57,7 +57,7 @@ from nanometa_live.app.components.pathogen_alert import (
 from nanometa_live.app.tabs.dashboard_helpers import (
     _species_discovery_df,
     _species_df_to_organisms,
-    _load_per_sample_organisms,
+
     _get_active_watchlist_entries,
     _check_pathogens_both,
     _count_input_files,
@@ -86,6 +86,7 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     build_report_payload,
 )
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+from nanometa_live.app.utils.organisms_memo import get_per_sample_organisms_cached
 
 # Last run-state (ACTIVE/COMPLETE/STANDBY) the verdict banner rendered. A
 # state flip bypasses the banner's fingerprint gate so completion shows on
@@ -379,7 +380,7 @@ def register_dashboard_callbacks(app: Dash):
                 total_count = len(
                     [s for s in resolved_samples if s != "All Samples"]
                 )
-                taxid_to_samples = _load_per_sample_organisms(
+                taxid_to_samples = get_per_sample_organisms_cached(
                     main_dir, resolved_samples, config
                 )
                 # Keep each pathogen paired with its own samples: two
@@ -711,19 +712,10 @@ def register_dashboard_callbacks(app: Dash):
         """
         Update the pathogen alert panel with detected dangerous organisms.
 
-        This callback checks for CDC Category A/B/C agents, WHO priority
-        pathogens, and user-configured watchlist species.  Per-sample
-        attribution data (which barcodes carry each pathogen) is built from
-        individual per-sample Kraken2 reports and passed to the alert components.
-
-        Args:
-            n_intervals: Interval counter
-            config: Application configuration
-            status: Backend status
-            available_samples: List of detected sample names
-
-        Returns:
-            Tuple of (alert_panel_children, container_style)
+        Checks CDC Category A/B/C agents, WHO priority pathogens, and the
+        configured watchlist. Per-sample attribution (which barcodes carry
+        each pathogen) comes from the shared per-tick organisms memo, and
+        only when something is hit.
         """
         # Interval ticks re-render only when the fingerprint moved; direct
         # triggers (fingerprint change, watchlist toggle) always render.
@@ -757,11 +749,16 @@ def register_dashboard_callbacks(app: Dash):
             species_df = _species_discovery_df(kraken_df)
             detected_organisms = _species_df_to_organisms(species_df)
 
-            # Build per-sample attribution: taxid -> [{sample, reads, abundance, is_nc}]
-            resolved_samples = _resolve_samples(main_dir, available_samples)
-            taxid_to_samples = _load_per_sample_organisms(
-                main_dir, resolved_samples, config
-            )
+            # Attribution only when something is hit (the memoized check
+            # answers that for free); an all-clear tick used to pay S
+            # kraken loads here unconditionally.
+            dangerous, subthreshold = _check_pathogens_both(
+                detected_organisms, config)
+            taxid_to_samples = {}
+            if dangerous or subthreshold:
+                taxid_to_samples = get_per_sample_organisms_cached(
+                    main_dir, _resolve_samples(main_dir, available_samples),
+                    config)
 
             # Get only ENABLED watchlist entries for alerting
             watched_species = _get_active_watchlist_entries(config)

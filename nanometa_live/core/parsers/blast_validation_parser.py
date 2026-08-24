@@ -39,6 +39,8 @@ Author: Nanometa Live Development Team
 
 import json
 import logging
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field, asdict
@@ -46,6 +48,41 @@ from enum import Enum
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# Shared parser per results dir. The per-instance results cache (mtime-keyed)
+# only pays off if the instance survives across callbacks/ticks; the per-tick
+# callers used to construct a fresh parser every call, so every tick
+# re-parsed S x W validation JSON files with a permanently cold cache
+# (round-2 audit, 2026-08-22). Bounded LRU so switching between run dirs
+# does not accumulate parsers forever.
+_parser_singletons: "OrderedDict[str, BlastValidationParser]" = OrderedDict()
+_PARSER_SINGLETONS_MAX = 8
+_parser_singletons_lock = threading.Lock()
+
+
+def get_validation_parser(results_dir: str) -> "BlastValidationParser":
+    """Shared ``BlastValidationParser`` for ``results_dir``.
+
+    Re-constructs while the instance has no ``validation_dir``: the layout
+    is probed at construction time, and a run whose validation directory
+    appears later must not be stuck with a parser that never finds it.
+    """
+    key = str(Path(results_dir))
+    with _parser_singletons_lock:
+        parser = _parser_singletons.get(key)
+        if parser is None or parser.validation_dir is None:
+            parser = BlastValidationParser(results_dir)
+            _parser_singletons[key] = parser
+            _parser_singletons.move_to_end(key)
+            while len(_parser_singletons) > _PARSER_SINGLETONS_MAX:
+                _parser_singletons.popitem(last=False)
+        return parser
+
+
+def reset_validation_parsers() -> None:
+    """Drop the shared parsers (tests, run-switch cache clears)."""
+    with _parser_singletons_lock:
+        _parser_singletons.clear()
 
 
 class ValidationStatus(Enum):

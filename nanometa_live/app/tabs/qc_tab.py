@@ -22,6 +22,7 @@ from nanometa_live.core.utils.classification_loaders import load_kraken_data
 from nanometa_live.core.utils.qc_loaders import (
     get_qc_stats,
     get_sample_statistics_summary,
+    load_fastp_card_payloads,
     load_fastp_data,
     load_seqkit_stats,
 )
@@ -626,35 +627,31 @@ def register_qc_callbacks(app: Dash):
             quality_curve = None
             source = "unknown"
 
-            # Try FASTP first
+            # Try FASTP first (cached reduced payloads; the inline
+            # json.load-per-file version cost 2 x S parses per tick)
             if os.path.exists(fastp_dir):
-                fastp_files = _fastp_files_for_sample(fastp_dir, selected_sample)
-                if fastp_files:
+                fastp_payloads = load_fastp_card_payloads(
+                    main_dir, selected_sample)
+                if fastp_payloads:
                     source = "fastp"
                     total_q20_bases = 0
                     total_q30_bases = 0
                     saw_quality_fields = False
 
-                    for fastp_file in fastp_files:
-                        try:
-                            with open(fastp_file, 'r') as f:
-                                fastp_data = json.load(f)
-                                after = fastp_data.get("summary", {}).get("after_filtering", {})
-                                total_bases += after.get("total_bases", 0)
-                                if "q20_bases" in after or "q30_bases" in after:
-                                    saw_quality_fields = True
-                                total_q20_bases += after.get("q20_bases", 0)
-                                total_q30_bases += after.get("q30_bases", 0)
+                    for fastp_data in fastp_payloads:
+                        after = fastp_data.get("summary", {}).get("after_filtering", {})
+                        total_bases += after.get("total_bases", 0)
+                        if "q20_bases" in after or "q30_bases" in after:
+                            saw_quality_fields = True
+                        total_q20_bases += after.get("q20_bases", 0)
+                        total_q30_bases += after.get("q30_bases", 0)
 
-                                # Get quality curve (use first file's curve)
-                                if not quality_curve:
-                                    read1_after = fastp_data.get("read1_after_filtering", {})
-                                    curve = read1_after.get("quality_curves", {}).get("mean", [])
-                                    if curve:
-                                        quality_curve = curve
-                        except (json.JSONDecodeError, IOError, KeyError, TypeError) as e:
-                            logging.debug(f"Error reading FASTP quality data from {fastp_file}: {e}")
-                            continue
+                        # Get quality curve (use first file's curve)
+                        if not quality_curve:
+                            read1_after = fastp_data.get("read1_after_filtering", {})
+                            curve = read1_after.get("quality_curves", {}).get("mean", [])
+                            if curve:
+                                quality_curve = curve
 
                     if total_bases > 0 and saw_quality_fields:
                         q20_rate = (total_q20_bases / total_bases) * 100
@@ -741,19 +738,13 @@ def register_qc_callbacks(app: Dash):
             gc_content = None
             source = "unknown"
 
-            # Try FASTP first
+            # Try FASTP first (cached reduced payloads)
             if os.path.exists(fastp_dir):
-                fastp_files = _fastp_files_for_sample(fastp_dir, selected_sample)
-                if fastp_files:
+                fastp_payloads = load_fastp_card_payloads(
+                    main_dir, selected_sample)
+                if fastp_payloads:
                     source = "fastp"
-                    summaries = []
-                    for fastp_file in fastp_files:
-                        try:
-                            with open(fastp_file, 'r') as f:
-                                summaries.append(json.load(f).get("summary", {}))
-                        except (json.JSONDecodeError, IOError, KeyError, TypeError) as e:
-                            logging.debug(f"Error reading FASTP length data from {fastp_file}: {e}")
-                            continue
+                    summaries = [p.get("summary", {}) for p in fastp_payloads]
 
                     # Weighted-average aggregation is a pure helper.
                     _stats = aggregate_fastp_read_stats(summaries)
