@@ -17,10 +17,17 @@ Fidelity is instead pinned by ``tests/test_perf_poll_fidelity.py``, which
 drives the real callbacks with ``load_kraken_data`` wrapped in a counter and
 asserts the total matches :func:`simulate_poll`.
 
-Deliberately excluded, because they would dominate the measurement without
-scaling in the sample count: ``load_kraken2_taxonomy`` /
-``apply_authoritative_taxonomy`` (needs a real Kraken2 ``inspect.txt``), Dash
-JSON serialisation, and the browser.
+Deliberately excluded: ``load_kraken2_taxonomy`` /
+``apply_authoritative_taxonomy`` (they need a real Kraken2 ``inspect.txt``,
+which would couple the fixture to the database format, and round 3 does not
+touch them), Dash JSON serialisation, and the browser.
+
+Round-3 additions, measured as steps 9-10 so the older cells stay
+comparable metric by metric: the per-sample organisms build
+(``_species_df_to_organisms``, the attribution-path cost that is O(rows)
+per sample) and the validation scan (``get_validation_results`` plus the
+batch-id enumeration) -- the O(pairs) and O(pairs x batches) paths that
+had never been in the measured tick.
 """
 
 from __future__ import annotations
@@ -51,6 +58,9 @@ class PollResult:
     figures_built: int
     rows: int
     samples: int
+    organisms_built: int = 0
+    validation_results: int = 0
+    validation_batches_seen: int = 0
 
 
 def simulate_poll(
@@ -134,9 +144,40 @@ def simulate_poll(
         )
         figures_built += 1
 
+    # 9. Organisms build (round 3). dashboard_helpers._load_per_sample_
+    #    organisms turns each sample's species rows into per-taxon dicts;
+    #    O(rows) per sample and previously unmeasured. The frames are
+    #    cache hits after step 4, so this isolates the dict-build cost.
+    from nanometa_live.app.tabs.dashboard_helpers import (
+        _species_df_to_organisms, _species_discovery_df,
+    )
+    organisms_built = 0
+    for sample in real_samples:
+        df = load_kraken_data(main_dir, sample)
+        if not df.empty:
+            organisms_built += len(
+                _species_df_to_organisms(_species_discovery_df(df)))
+
+    # 10. Validation scan (round 3). main_tab/validation_tab read through
+    #     the shared parser each poll; the batch-selector enumerates the
+    #     drill-down dirs. O(pairs) and O(pairs x batches) respectively.
+    from nanometa_live.core.parsers.blast_validation_parser import (
+        get_validation_parser,
+    )
+    from nanometa_live.app.tabs.validation_tab_helpers import (
+        _enumerate_batch_ids,
+    )
+    validation_results = len(
+        get_validation_parser(main_dir).get_validation_results())
+    validation_batches_seen = len(
+        _enumerate_batch_ids({"results_dir_override": main_dir}))
+
     return PollResult(
         kraken_loads=kraken_loads,
         figures_built=figures_built,
         rows=int(len(summary)) if summary is not None else 0,
         samples=len(real_samples),
+        organisms_built=organisms_built,
+        validation_results=validation_results,
+        validation_batches_seen=validation_batches_seen,
     )

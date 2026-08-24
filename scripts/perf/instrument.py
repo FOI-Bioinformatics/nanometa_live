@@ -170,6 +170,47 @@ def reset_caches() -> None:
         if isinstance(cache, dict):
             cache.clear()
 
+    # Round-3 additions: the caches the first version missed, which made
+    # every "cold" cell measure warm for the paths that touch them
+    # (taxonomy map, PAF breadth, validation parser singletons, the
+    # organisms/pathogen memos, per-key parse locks, staleness flags).
+    # Pinned by tests/test_perf_fixtures_validation.py.
+    from nanometa_live.app.tabs import kraken2_helpers as kh
+    from nanometa_live.app.tabs import dashboard_helpers as dh
+    from nanometa_live.app.utils import organisms_memo as om
+    from nanometa_live.core.parsers import paf_coverage_parser as pcp
+    from nanometa_live.core.parsers import blast_validation_parser as bvp
+    from nanometa_live.core.utils import pathogen_database as pdb
+    from nanometa_live.core.utils import staleness
+
+    kh._TAXONOMY_CACHE.clear()
+    pcp._breadth_cache.clear()
+    om._memo.clear()
+    dh._pathogen_check_memo.clear()
+    pdb._dangerous_check_memo.clear()
+    bvp.reset_validation_parsers()
+    staleness.clear()
+    with lu._parse_locks_lock:
+        lu._parse_locks.clear()
+
+
+def report_frame_cache_bytes() -> int:
+    """Deep byte size of the parsed-frame caches (round 3).
+
+    The count-based LRU is size-blind; this is the number the memory gate
+    watches so a 50k-row report population cannot silently multiply the
+    resident set by 20x behind an unchanged entry count.
+    """
+    from nanometa_live.core.utils import classification_loaders as cl
+
+    try:
+        with cl._report_frame_cache_lock:
+            frames = list(cl._report_frame_cache.values()) + list(
+                cl._last_good_frame.values())
+        return int(sum(df.memory_usage(deep=True).sum() for df in frames))
+    except Exception:
+        return -1
+
 
 def cache_ttl_seconds() -> int:
     """Current loader TTL, recorded in the baseline for interpretation."""

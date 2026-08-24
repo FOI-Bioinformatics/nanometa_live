@@ -70,6 +70,11 @@ class FixtureSpec:
     batches_per_sample: int = 20
     seed: int = 1337
     write_manifest: bool = False
+    # Round-3 validation axis: total (sample, taxid) pairs written under
+    # validation/{blast,minimap2}/ (0 keeps the old bare directory), and
+    # per-pair batch files under the batch/ subdirs.
+    validation_pairs: int = 0
+    validation_batches: int = 0
 
     def __post_init__(self) -> None:
         if self.layout not in LAYOUTS:
@@ -82,10 +87,14 @@ class FixtureSpec:
     @property
     def key(self) -> str:
         manifest = "-man" if self.write_manifest else ""
+        validation = (
+            f"-v{self.validation_pairs}"
+            + (f"-vb{self.validation_batches}" if self.validation_batches else "")
+        ) if self.validation_pairs else ""
         return (
             f"{self.layout}-n{self.n_samples}"
             f"-t{self.taxa_per_report}-b{self.effective_batches}"
-            f"-s{self.seed}{manifest}"
+            f"-s{self.seed}{manifest}{validation}"
         )
 
     @property
@@ -367,6 +376,62 @@ def _build_realtime_layout(spec: FixtureSpec, root: Path,
         # _is_incremental_seqkit_layout keys on.
 
 
+# Taxid block for validation pairs, clear of the report taxid blocks.
+_TAXID_VALIDATION_BASE = 4_000_000
+
+
+def _build_validation_layout(spec: FixtureSpec, root: Path) -> None:
+    """Write per-pair validation files in nanometanf's published layout.
+
+    ``validation_pairs`` total (sample, taxid) pairs, distributed
+    round-robin across the samples; per pair one ``.blast.tsv`` +
+    ``.blast_stats.json`` under blast/ and one ``.minimap2_stats.json`` +
+    ``.paf`` under minimap2/ -- the exact shapes
+    ``ValidationParser.get_validation_results`` scans, pinned by
+    tests/test_perf_fixtures_validation.py so drift fails loudly. When
+    ``validation_batches`` is set, each pair also gets one file per batch
+    under the batch/ subdirs (``<sample>_taxid<tid>_batch_<i>.*``), the
+    drill-down layout ``validation_batch.collect_batch_results`` reads.
+    """
+    blast_dir = root / "validation" / "blast"
+    mm2_dir = root / "validation" / "minimap2"
+    blast_dir.mkdir(parents=True, exist_ok=True)
+    mm2_dir.mkdir(parents=True, exist_ok=True)
+    if spec.validation_batches:
+        (blast_dir / "batch").mkdir(exist_ok=True)
+        (mm2_dir / "batch").mkdir(exist_ok=True)
+
+    samples = spec.sample_names
+    blast_row = ("r{i}\tNZ_PERF\t99.0\t500\t2\t0\t1\t500\t10\t510"
+                 "\t1e-50\t900\n")
+    paf_line = ("r0\t500\t0\t500\t+\tNZ_PERF\t1900000\t1000\t1500"
+                "\t500\t500\t60\n")
+    for pair_idx in range(spec.validation_pairs):
+        sample = samples[pair_idx % len(samples)]
+        taxid = _TAXID_VALIDATION_BASE + pair_idx // len(samples)
+        stem = f"{sample}_taxid{taxid}"
+        reads = 20 + _spread(spec.seed, 0, 30, "vpair", pair_idx)
+        tsv = "".join(blast_row.format(i=i) for i in range(min(reads, 5)))
+        stats = json.dumps({
+            "sample_id": sample, "taxid": taxid, "total_reads": reads,
+            "blast_hits": reads, "hit_rate": 1.0, "avg_identity": 99.0,
+            "avg_coverage": 0.9, "validation_status": "confirmed",
+        })
+        mm2 = json.dumps({
+            "sample_id": sample, "taxid": taxid, "total_reads": reads,
+            "mapped_reads": reads, "hit_rate": 1.0, "avg_identity": 99.5,
+            "avg_coverage": 0.9, "avg_mapq": 60, "ref_name": "NZ_PERF",
+            "ref_length": 1_900_000,
+        })
+        _write(blast_dir / f"{stem}.blast.tsv", tsv)
+        _write(blast_dir / f"{stem}.blast_stats.json", stats)
+        _write(mm2_dir / f"{stem}.minimap2_stats.json", mm2)
+        _write(mm2_dir / f"{stem}.paf", paf_line)
+        for b in range(spec.validation_batches):
+            _write(blast_dir / "batch" / f"{stem}_batch_{b}.blast.tsv", tsv)
+            _write(mm2_dir / "batch" / f"{stem}_batch_{b}.paf", paf_line)
+
+
 def _write_manifest(spec: FixtureSpec, root: Path) -> None:
     payload = {
         "samples": spec.sample_names,
@@ -471,9 +536,11 @@ def build_fixture(spec: FixtureSpec, base: Path) -> Path:
             spec, root, cumulative=spec.layout == "realtime_cumulative"
         )
 
-    # Present but empty: the freshness fingerprint walks it every poll, and a
-    # missing directory would understate that cost.
+    # Present even when empty: the freshness fingerprint walks it every
+    # poll, and a missing directory would understate that cost.
     (root / "validation").mkdir(exist_ok=True)
+    if spec.validation_pairs:
+        _build_validation_layout(spec, root)
 
     if spec.write_manifest:
         _write_manifest(spec, root)
