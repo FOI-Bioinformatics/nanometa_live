@@ -228,15 +228,13 @@ def register_startup(app, backend_manager):
                         f"{collection.mapped_exact} exact, {collection.mapped_fuzzy} fuzzy"
                     )
 
-                    # Populate Dash stores for Watchlist & Preparation tab display
-                    coll_dict = collection.to_dict()
-                    collection_data = {
-                        "mappings": {
-                            str(m["ncbi_taxid"]): m
-                            for m in coll_dict.get("mappings", [])
-                        },
-                        "statistics": coll_dict.get("statistics", {}),
-                    }
+                    # Populate Dash stores for Watchlist & Preparation tab
+                    # display (slim store form; consumers read 5 fields)
+                    from nanometa_live.core.taxonomy.taxid_mapping import (
+                        slim_mapping_store_payload,
+                    )
+                    collection_data = slim_mapping_store_payload(
+                        collection.to_dict())
                     # Shared builder keeps this writer's key set identical to
                     # the Scan Database and override-editor writers (G7).
                     from nanometa_live.app.utils.db_info import build_db_info

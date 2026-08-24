@@ -27,6 +27,18 @@ from nanometa_live.app.app import background_callback_manager
 
 
 
+def slim_file_mapping(mapping) -> dict:
+    """Presence-only form of the sample->files mapping for the browser Store.
+
+    Consumers of ``sample-file-mapping`` read per-sample truthiness only
+    (``_dataless_samples``); the full path lists grew unboundedly over a
+    realtime run (S x batches strings, ~400 kB at 96 barcodes) and were
+    re-uploaded from the browser on every tick (round-2 audit, 2026-08-22).
+    Server-side callers keep using ``get_sample_file_mapping`` directly.
+    """
+    return {s: True for s, families in (mapping or {}).items() if families}
+
+
 def _dataless_samples(available_samples, file_mapping, config) -> set:
     """Samples offered in the selector that produced no output.
 
@@ -184,7 +196,8 @@ def register_samples(app, backend_manager):
                 else:
                     # Get available samples from output files
                     new_samples = get_available_samples(main_dir)
-                    new_mapping = get_sample_file_mapping(main_dir)
+                    new_mapping = slim_file_mapping(
+                        get_sample_file_mapping(main_dir))
                     logging.debug(f"Detected {len(new_samples)-1} samples: {new_samples}")
             except Exception as e:
                 log_callback_error("update_available_samples", e, level=logging.WARNING)

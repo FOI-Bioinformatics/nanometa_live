@@ -136,6 +136,65 @@ class TestCheckPathogensBoth:
         assert _both([]) == ([], [])
 
 
+class TestDangerousCheckMemo:
+    """`check_for_dangerous_pathogens` runs on every alert tick (via the
+    alert engine) with identical inputs; the merged-db build was memoized
+    in 0.11.1 but the O(M x |db|) matching loop still re-ran per call.
+    Routing through the watchlist memo would DROP builtin-database alerts,
+    so the function memoizes itself instead — semantics identical."""
+
+    CUSTOM = [
+        {"taxid": 4242, "name": "Customus organismus", "threat_level": "high",
+         "alert_threshold": 10},
+    ]
+    ROWS = [{"taxid": 4242, "name": "Customus organismus", "reads": 50,
+             "abundance": 0.5}]
+
+    def test_identical_call_skips_the_matching_loop(self, monkeypatch):
+        from nanometa_live.core.utils import pathogen_database as pd
+        pd._dangerous_check_memo.clear()
+        calls = {"n": 0}
+        orig = pd._check_for_dangerous_pathogens_uncached
+
+        def counting(*a, **kw):
+            calls["n"] += 1
+            return orig(*a, **kw)
+
+        monkeypatch.setattr(
+            pd, "_check_for_dangerous_pathogens_uncached", counting)
+        first = pd.check_for_dangerous_pathogens(self.ROWS, self.CUSTOM)
+        second = pd.check_for_dangerous_pathogens(self.ROWS, self.CUSTOM)
+        assert calls["n"] == 1
+        assert first == second
+        assert [d["name"] for d in first] == ["Customus organismus"]
+
+    def test_returned_dicts_are_copies(self):
+        from nanometa_live.core.utils import pathogen_database as pd
+        pd._dangerous_check_memo.clear()
+        first = pd.check_for_dangerous_pathogens(self.ROWS, self.CUSTOM)
+        first[0]["name"] = "MUTATED"
+        second = pd.check_for_dangerous_pathogens(self.ROWS, self.CUSTOM)
+        assert second[0]["name"] == "Customus organismus"
+
+    def test_changed_organisms_recompute(self, monkeypatch):
+        from nanometa_live.core.utils import pathogen_database as pd
+        pd._dangerous_check_memo.clear()
+        calls = {"n": 0}
+        orig = pd._check_for_dangerous_pathogens_uncached
+
+        def counting(*a, **kw):
+            calls["n"] += 1
+            return orig(*a, **kw)
+
+        monkeypatch.setattr(
+            pd, "_check_for_dangerous_pathogens_uncached", counting)
+        pd.check_for_dangerous_pathogens(self.ROWS, self.CUSTOM)
+        pd.check_for_dangerous_pathogens(
+            [{"taxid": 4242, "name": "Customus organismus", "reads": 999,
+              "abundance": 5.0}], self.CUSTOM)
+        assert calls["n"] == 2
+
+
 class TestPathogenDatabaseMergeCache:
     CUSTOM = [
         {"taxid": 4242, "name": "Customus organismus", "threat_level": "high",
@@ -146,6 +205,7 @@ class TestPathogenDatabaseMergeCache:
             self, monkeypatch):
         from nanometa_live.core.utils import pathogen_database as pd
         pd._merged_db_cache = None
+        pd._dangerous_check_memo.clear()
         calls = {"n": 0}
         orig = pd.PathogenDatabase.load
 
@@ -161,6 +221,7 @@ class TestPathogenDatabaseMergeCache:
     def test_a_changed_custom_watchlist_reloads(self, monkeypatch):
         from nanometa_live.core.utils import pathogen_database as pd
         pd._merged_db_cache = None
+        pd._dangerous_check_memo.clear()
         calls = {"n": 0}
         orig = pd.PathogenDatabase.load
 

@@ -22,6 +22,7 @@ from nanometa_live.core.utils.classification_loaders import load_kraken_data
 from nanometa_live.core.utils.qc_loaders import (
     get_qc_stats,
     get_sample_statistics_summary,
+    load_fastp_card_payloads,
     load_fastp_data,
     load_seqkit_stats,
 )
@@ -103,19 +104,26 @@ def register_qc_callbacks(app: Dash):
             Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
             Input("update-interval", "n_intervals"),
+            # Tab-aware rendering (round-2 audit): pure display work for a
+            # possibly-hidden tab. Switching here fires this Input and
+            # renders the latest fingerprint. Detection callbacks are
+            # NEVER gated this way (see test_tab_gating).
+            Input("tabs", "active_tab"),
         ],
         [
             State("app-config", "data"),
             State("backend-status", "data"),
         ],
     )
-    def update_qc_plots(_fingerprint, selected_sample, _n_intervals, config, status):
+    def update_qc_plots(_fingerprint, selected_sample, _n_intervals, active_tab, config, status):
         """
         Update the QC plots based on actual processed data from FASTP/Kraken2.
 
         Shows actual reads and base pairs that passed through the pipeline,
         ordered by file modification time to show processing progress.
         """
+        if active_tab != "qc-tab":
+            raise PreventUpdate
         if interval_tick_is_redundant(ctx, "qc_plots", _fingerprint):
             raise PreventUpdate
         mark_rendered("qc_plots", _fingerprint)
@@ -475,14 +483,30 @@ def register_qc_callbacks(app: Dash):
             State("reads-graph", "figure"),
             State("bp-graph", "figure"),
         ],
+        # pio.write_image spawns a headless Chromium via kaleido -- 5-30 s
+        # cold, on the request thread until round 2. Pure file I/O from
+        # figure JSON, so a plain background conversion suffices; the
+        # progress toast tells the operator the export is underway since
+        # the modal closes on confirm.
+        background=True,
+        manager=background_callback_manager,
+        progress=[Output("notification-trigger", "data", allow_duplicate=True)],
+        running=[(Output("confirm-qc-export", "disabled"), True, False)],
         prevent_initial_call=True,
     )
-    def export_qc_plots(n_clicks, export_dir, export_filename, config, *figures):
-        """Export QC plots to image files."""
+    def export_qc_plots(set_progress, n_clicks, export_dir, export_filename,
+                        config, *figures):
+        """Export QC plots to image files (background worker)."""
         if not n_clicks:
             return no_update
 
         try:
+            set_progress(({
+                "title": "Exporting QC plots",
+                "message": "Rendering figures to PNG; a toast will confirm "
+                           "when the files are written.",
+                "color": "info",
+            },))
             # Determine export directory
             main_dir = resolve_outdir_for_fingerprint(config)
             if export_dir:
@@ -541,13 +565,20 @@ def register_qc_callbacks(app: Dash):
             Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
             Input("update-interval", "n_intervals"),
+            # Tab-aware rendering (round-2 audit): pure display work for a
+            # possibly-hidden tab. Switching here fires this Input and
+            # renders the latest fingerprint. Detection callbacks are
+            # NEVER gated this way (see test_tab_gating).
+            Input("tabs", "active_tab"),
         ],
         [
             State("app-config", "data"),
             State("backend-status", "data"),
         ],
     )
-    def update_per_sample_table(_fingerprint, selected_sample, _n_intervals, config, status):
+    def update_per_sample_table(_fingerprint, selected_sample, _n_intervals, active_tab, config, status):
+        if active_tab != "qc-tab":
+            raise PreventUpdate
         """
         Update the per-sample breakdown table with statistics for each barcode.
 
@@ -583,13 +614,20 @@ def register_qc_callbacks(app: Dash):
             Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
             Input("update-interval", "n_intervals"),
+            # Tab-aware rendering (round-2 audit): pure display work for a
+            # possibly-hidden tab. Switching here fires this Input and
+            # renders the latest fingerprint. Detection callbacks are
+            # NEVER gated this way (see test_tab_gating).
+            Input("tabs", "active_tab"),
         ],
         [
             State("app-config", "data"),
             State("backend-status", "data"),
         ],
     )
-    def update_base_quality_card(_fingerprint, selected_sample, _n_intervals, config, status):
+    def update_base_quality_card(_fingerprint, selected_sample, _n_intervals, active_tab, config, status):
+        if active_tab != "qc-tab":
+            raise PreventUpdate
         """
         Update the base quality card showing Q20/Q30 rates and optional sparkline.
 
@@ -626,35 +664,31 @@ def register_qc_callbacks(app: Dash):
             quality_curve = None
             source = "unknown"
 
-            # Try FASTP first
+            # Try FASTP first (cached reduced payloads; the inline
+            # json.load-per-file version cost 2 x S parses per tick)
             if os.path.exists(fastp_dir):
-                fastp_files = _fastp_files_for_sample(fastp_dir, selected_sample)
-                if fastp_files:
+                fastp_payloads = load_fastp_card_payloads(
+                    main_dir, selected_sample)
+                if fastp_payloads:
                     source = "fastp"
                     total_q20_bases = 0
                     total_q30_bases = 0
                     saw_quality_fields = False
 
-                    for fastp_file in fastp_files:
-                        try:
-                            with open(fastp_file, 'r') as f:
-                                fastp_data = json.load(f)
-                                after = fastp_data.get("summary", {}).get("after_filtering", {})
-                                total_bases += after.get("total_bases", 0)
-                                if "q20_bases" in after or "q30_bases" in after:
-                                    saw_quality_fields = True
-                                total_q20_bases += after.get("q20_bases", 0)
-                                total_q30_bases += after.get("q30_bases", 0)
+                    for fastp_data in fastp_payloads:
+                        after = fastp_data.get("summary", {}).get("after_filtering", {})
+                        total_bases += after.get("total_bases", 0)
+                        if "q20_bases" in after or "q30_bases" in after:
+                            saw_quality_fields = True
+                        total_q20_bases += after.get("q20_bases", 0)
+                        total_q30_bases += after.get("q30_bases", 0)
 
-                                # Get quality curve (use first file's curve)
-                                if not quality_curve:
-                                    read1_after = fastp_data.get("read1_after_filtering", {})
-                                    curve = read1_after.get("quality_curves", {}).get("mean", [])
-                                    if curve:
-                                        quality_curve = curve
-                        except (json.JSONDecodeError, IOError, KeyError, TypeError) as e:
-                            logging.debug(f"Error reading FASTP quality data from {fastp_file}: {e}")
-                            continue
+                        # Get quality curve (use first file's curve)
+                        if not quality_curve:
+                            read1_after = fastp_data.get("read1_after_filtering", {})
+                            curve = read1_after.get("quality_curves", {}).get("mean", [])
+                            if curve:
+                                quality_curve = curve
 
                     if total_bases > 0 and saw_quality_fields:
                         q20_rate = (total_q20_bases / total_bases) * 100
@@ -701,13 +735,20 @@ def register_qc_callbacks(app: Dash):
             Input("results-fingerprint", "data"),
             Input("selected-sample", "data"),
             Input("update-interval", "n_intervals"),
+            # Tab-aware rendering (round-2 audit): pure display work for a
+            # possibly-hidden tab. Switching here fires this Input and
+            # renders the latest fingerprint. Detection callbacks are
+            # NEVER gated this way (see test_tab_gating).
+            Input("tabs", "active_tab"),
         ],
         [
             State("app-config", "data"),
             State("backend-status", "data"),
         ],
     )
-    def update_read_statistics_card(_fingerprint, selected_sample, _n_intervals, config, status):
+    def update_read_statistics_card(_fingerprint, selected_sample, _n_intervals, active_tab, config, status):
+        if active_tab != "qc-tab":
+            raise PreventUpdate
         """
         Update the read statistics card showing mean length, N50, and GC content.
 
@@ -741,19 +782,13 @@ def register_qc_callbacks(app: Dash):
             gc_content = None
             source = "unknown"
 
-            # Try FASTP first
+            # Try FASTP first (cached reduced payloads)
             if os.path.exists(fastp_dir):
-                fastp_files = _fastp_files_for_sample(fastp_dir, selected_sample)
-                if fastp_files:
+                fastp_payloads = load_fastp_card_payloads(
+                    main_dir, selected_sample)
+                if fastp_payloads:
                     source = "fastp"
-                    summaries = []
-                    for fastp_file in fastp_files:
-                        try:
-                            with open(fastp_file, 'r') as f:
-                                summaries.append(json.load(f).get("summary", {}))
-                        except (json.JSONDecodeError, IOError, KeyError, TypeError) as e:
-                            logging.debug(f"Error reading FASTP length data from {fastp_file}: {e}")
-                            continue
+                    summaries = [p.get("summary", {}) for p in fastp_payloads]
 
                     # Weighted-average aggregation is a pure helper.
                     _stats = aggregate_fastp_read_stats(summaries)

@@ -167,7 +167,31 @@ def register_indicators(app, backend_manager):
     # Stale Data Indicator Callback
     # ========================================================================
 
-    @app.callback(
+    # Clientside: pure timestamp arithmetic. The server version fired every
+    # tick and re-uploaded the full app-config Store to read one integer --
+    # 189 kB per tick at 129 validated watchlist entries (round-2 audit,
+    # 2026-08-22). Semantics unchanged: stale only applies to a live,
+    # still-running pipeline that has gone quiet for 2x the configured
+    # interval; a completed or idle dataset is authoritative, so the
+    # warning is hidden.
+    app.clientside_callback(
+        """
+        function(n_intervals, lastUpdateTime, status, config) {
+            var hidden = {display: "none"};
+            if (!config) { return hidden; }
+            if (!(status && status.running && !status.completed)) {
+                return hidden;
+            }
+            var interval = (config.update_interval_seconds || 10) * 1000;
+            if (lastUpdateTime) {
+                var last = Date.parse(lastUpdateTime);
+                if (!isNaN(last) && (Date.now() - last) > 2 * interval) {
+                    return {display: "flex"};
+                }
+            }
+            return hidden;
+        }
+        """,
         Output("stale-data-warning", "style"),
         [
             Input("update-interval", "n_intervals"),
@@ -176,42 +200,6 @@ def register_indicators(app, backend_manager):
         ],
         State("app-config", "data"),
     )
-    def update_stale_data_warning(n_intervals, last_update_time, status, config):
-        """
-        Show a warning if data hasn't been updated within expected timeframe.
-
-        Data is considered stale only while a run is actively in progress and
-        has gone quiet (no update within 2x the configured interval). Once the
-        pipeline has completed -- or is not running at all -- the dataset is the
-        final, authoritative result, so "Data may be stale" is misleading and is
-        hidden.
-        """
-        import datetime
-
-        if not config:
-            return {"display": "none"}
-
-        # Stale only applies to a live, still-running pipeline.
-        if not (status and status.get("running") and not status.get("completed")):
-            return {"display": "none"}
-
-        try:
-            update_interval = config.get("update_interval_seconds", 10)
-            stale_threshold = update_interval * 2  # 2x the interval
-
-            if last_update_time:
-                # Calculate time since last update
-                last_update = datetime.datetime.fromisoformat(last_update_time)
-                time_since_update = (datetime.datetime.now() - last_update).total_seconds()
-
-                if time_since_update > stale_threshold:
-                    return {"display": "flex"}
-
-            return {"display": "none"}
-
-        except Exception as e:
-            log_callback_error("check_stale_data", e, level=logging.WARNING)
-            return {"display": "none"}
 
     @app.callback(
         Output("last-update-time", "data"),

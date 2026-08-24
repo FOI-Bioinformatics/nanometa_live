@@ -152,7 +152,7 @@ class TestKreportSampleName:
         from unittest.mock import MagicMock as _MM, patch
         from nanometa_live.app.tabs import qc_tab as qc_tab_mod
         with patch.object(qc_tab_mod, "ctx", _MM(triggered_id="results-fingerprint")):
-            figs = fn({"fp": "x"}, "All Samples", 0,
+            figs = fn({"fp": "x"}, "All Samples", 0, "qc-tab",
                       {"results_output_directory": str(tmp_path)},
                       {"running": False})
 
@@ -221,7 +221,8 @@ class TestOptimisticStartTimeIsIso:
     def test_start_writes_iso_start_time(self):
         app, backend = _core_app()
         backend.detect_existing_results.return_value = []
-        backend.start.return_value = (True, "Pipeline started")
+        backend.transition_in_progress.return_value = False
+        backend.start_async.return_value = (True, "Starting")
         fn = get_callback_fn(app, "collision-decision-pending.data")
         result = fn(1, {"results_dir_override": "/out"}, {"running": False})
         start_time = result[-1]["start_time"]
@@ -230,7 +231,8 @@ class TestOptimisticStartTimeIsIso:
 
     def test_collision_choice_writes_iso_start_time(self):
         app, backend = _core_app()
-        backend.start.return_value = (True, "Pipeline started")
+        backend.transition_in_progress.return_value = False
+        backend.start_async.return_value = (True, "Starting")
         fn = get_callback_fn(app, "collision-modal.is_open",
                              input_contains="collision-archive-btn")
         with ctx_with("collision-resume-btn"):
@@ -246,7 +248,8 @@ class TestOptimisticStartTimeIsIso:
 
         app, backend = _core_app()
         backend.detect_existing_results.return_value = []
-        backend.start.return_value = (True, "ok")
+        backend.transition_in_progress.return_value = False
+        backend.start_async.return_value = (True, "ok")
         fn = get_callback_fn(app, "collision-decision-pending.data")
         status = fn(1, {"results_dir_override": "/out"}, {"running": False})[-1]
 
@@ -298,7 +301,7 @@ class TestOperatorStopIsNotAnnouncedAsComplete:
 
     def test_stop_confirmation_raises_the_flag(self):
         app, backend = _core_app()
-        backend.stop.return_value = (True, "Stopped")
+        backend.stop_async.return_value = (True, "Stopping")
         fn = get_callback_fn(app, "stop-confirm-modal.is_open",
                              input_contains="confirm-stop-analysis")
         with ctx_with("confirm-stop-analysis"):
@@ -309,7 +312,7 @@ class TestOperatorStopIsNotAnnouncedAsComplete:
     def test_failed_stop_does_not_raise_the_flag(self):
         """The run is still going; nothing to relabel."""
         app, backend = _core_app()
-        backend.stop.return_value = (False, "could not stop")
+        backend.stop_async.return_value = (False, "could not stop")
         fn = get_callback_fn(app, "stop-confirm-modal.is_open",
                              input_contains="confirm-stop-analysis")
         with ctx_with("confirm-stop-analysis"):

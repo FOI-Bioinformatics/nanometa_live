@@ -108,28 +108,25 @@ class TestPipelineStageDisplay:
 # --------------------------------------------------------------------------
 
 class TestStaleDataWarning:
-    _RUNNING = {"running": True}
+    """Clientside since round 2 (2026-08-24): the server version fired every
+    tick and re-uploaded the full app-config to compare two timestamps. The
+    logic now runs in the browser; here we pin its registration and the
+    invariants encoded in its JS source (runtime behavior is covered by the
+    smoke test)."""
 
-    def test_no_config_hidden(self, app_backend):
-        fn = _fn(app_backend[0], "stale-data-warning.style")
-        assert fn(1, None, self._RUNNING, None) == {"display": "none"}
-
-    def test_recent_update_not_stale(self, app_backend):
-        fn = _fn(app_backend[0], "stale-data-warning.style")
-        now_iso = _dt.datetime.now().isoformat()
-        assert fn(1, now_iso, self._RUNNING, {"update_interval_seconds": 10}) == {"display": "none"}
-
-    def test_old_update_is_stale_while_running(self, app_backend):
-        fn = _fn(app_backend[0], "stale-data-warning.style")
-        old_iso = (_dt.datetime.now() - _dt.timedelta(hours=1)).isoformat()
-        assert fn(1, old_iso, self._RUNNING, {"update_interval_seconds": 10}) == {"display": "flex"}
-
-    def test_old_update_hidden_when_completed(self, app_backend):
-        fn = _fn(app_backend[0], "stale-data-warning.style")
-        old_iso = (_dt.datetime.now() - _dt.timedelta(hours=1)).isoformat()
-        completed = {"running": True, "completed": True}
-        assert fn(1, old_iso, completed, {"update_interval_seconds": 10}) == {"display": "none"}
-
+    def test_registered_clientside_with_the_invariants(self, app_backend):
+        app = app_backend[0]
+        spec = next(
+            (s for key, s in app.callback_map.items()
+             if "stale-data-warning.style" in key), None)
+        assert spec is not None
+        assert "callback" not in spec, (
+            "stale-data-warning must be clientside; a server round trip "
+            "re-uploads app-config every tick"
+        )
+        src = "".join(app._inline_scripts)
+        assert "status.running" in src and "status.completed" in src
+        assert "2 * interval" in src
 
 class TestTrackLastUpdateTime:
     def test_no_config_returns_none(self, app_backend):
@@ -218,15 +215,15 @@ class TestHandleStopConfirmation:
 
     def test_confirm_stops_backend(self, app_backend):
         app, backend = app_backend
-        backend.stop.return_value = (True, "stopped")
+        backend.stop_async.return_value = (True, "stopping")
         fn = _fn(app, "stop-confirm-modal.is_open", input_contains="confirm-stop-analysis")
         with _ctx("confirm-stop-analysis"):
             is_open, notif, stopped_flag = fn(1, 0, True)
         assert is_open is False
-        assert notif["title"] == "Analysis Stopped"
+        assert notif["title"] == "Stopping Analysis"
         # The abort marker so the completion toast does not claim a finished run.
         assert stopped_flag is True
-        backend.stop.assert_called_once()
+        backend.stop_async.assert_called_once()
 
     def test_cancel_closes_without_stop(self, app_backend):
         app, backend = app_backend
@@ -236,7 +233,7 @@ class TestHandleStopConfirmation:
         assert is_open is False
         assert notif is no_update
         assert stopped_flag is no_update
-        backend.stop.assert_not_called()
+        backend.stop_async.assert_not_called()
 
 
 class TestHandleCollisionChoice:
@@ -251,21 +248,21 @@ class TestHandleCollisionChoice:
     def test_archive_starts_fresh_run(self, app_backend):
         app, backend = app_backend
         backend.archive_existing_results.return_value = "/o/_archive_1"
-        backend.start.return_value = (True, "started")
+        backend.start_async.return_value = (True, "starting")
         fn = _fn(app, "collision-modal.is_open", input_contains="collision-archive-btn")
         with _ctx("collision-archive-btn"):
             modal, notif, cfg, status = fn(1, 0, 0, {"outdir": "/o"}, {"x": 1}, {})
-        backend.start.assert_called_once_with(resume=False)
-        assert notif["title"] == "Analysis Started"
+        backend.start_async.assert_called_once_with(resume=False)
+        assert notif["title"] == "Starting Analysis"
         assert status["running"] is True
 
     def test_resume_uses_resume_flag(self, app_backend):
         app, backend = app_backend
-        backend.start.return_value = (True, "resumed")
+        backend.start_async.return_value = (True, "resuming")
         fn = _fn(app, "collision-modal.is_open", input_contains="collision-archive-btn")
         with _ctx("collision-resume-btn"):
             fn(0, 1, 0, {"outdir": "/o"}, {"x": 1}, {})
-        backend.start.assert_called_once_with(resume=True)
+        backend.start_async.assert_called_once_with(resume=True)
 
 
 # --------------------------------------------------------------------------

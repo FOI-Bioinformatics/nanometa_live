@@ -510,7 +510,7 @@ def build_validation_store(config, backend_status, selected_sample, batch_id):
     import os
 
     from nanometa_live.core.parsers.blast_validation_parser import (
-        BlastValidationParser,
+        get_validation_parser,
     )
 
     if not config:
@@ -531,7 +531,9 @@ def build_validation_store(config, backend_status, selected_sample, batch_id):
     if not config.get("blast_validation", False) or not results_dir_ok:
         return empty_validation_payload(*empty)
 
-    parser = BlastValidationParser(results_dir)
+    # Shared instance so the parser's mtime-keyed results cache survives
+    # across ticks; a fresh instance per call kept it permanently cold.
+    parser = get_validation_parser(results_dir)
     if not parser.has_validation_data():
         return empty_validation_payload(*empty)
 

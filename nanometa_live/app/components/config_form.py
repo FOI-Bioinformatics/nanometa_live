@@ -79,6 +79,9 @@ def _essential_settings_card():
                     dbc.InputGroup([
                         dbc.Input(
                             id="nanopore-dir-input",
+                            # Validators walk the filesystem; fire on blur/Enter,
+                            # not per keystroke (round-2 audit, 2026-08-22).
+                            debounce=True,
                             type="text",
                             placeholder="/path/to/nanopore/output"
                         ),
@@ -245,6 +248,9 @@ def _essential_settings_card():
                     dbc.InputGroup([
                         dbc.Input(
                             id="kraken-db-input",
+                            # Validators walk the filesystem; fire on blur/Enter,
+                            # not per keystroke (round-2 audit, 2026-08-22).
+                            debounce=True,
                             type="text",
                             placeholder="/path/to/kraken2/database"
                         ),
@@ -312,6 +318,9 @@ def _essential_settings_card():
                     dbc.InputGroup([
                         dbc.Input(
                             id="results-dir-input",
+                            # Validators walk the filesystem; fire on blur/Enter,
+                            # not per keystroke (round-2 audit, 2026-08-22).
+                            debounce=True,
                             type="text",
                             placeholder="Leave empty to use <project>/results/<run name>"
                         ),
@@ -598,6 +607,9 @@ def _confirmation_testing_card():
                     ], html_for="genome-cache-dir-input"),
                     dbc.Input(
                         id="genome-cache-dir-input",
+                        # Validators walk the filesystem; fire on blur/Enter,
+                        # not per keystroke (round-2 audit, 2026-08-22).
+                        debounce=True,
                         type="text",
                         value="~/.nanometa",
                         placeholder="Path to genome cache (default: ~/.nanometa)"

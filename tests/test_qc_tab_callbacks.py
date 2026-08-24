@@ -92,7 +92,7 @@ def test_update_qc_stats_empty_returns_defaults(qc_app):
 def test_update_qc_plots_empty_returns_four_figures(qc_app):
     fn = get_callback_fn(qc_app, "cumul-reads-graph")
     with ctx_trigger("selected-sample"):
-        result = fn(None, "All Samples", 0, {}, {})
+        result = fn(None, "All Samples", 0, "qc-tab", {}, {})
     assert isinstance(result, (list, tuple))
     assert len(result) == 4                # cumul-reads, cumul-bp, reads, bp
     # each output is a plotly figure (dict-like with 'data'/'layout' or Figure)
@@ -103,7 +103,7 @@ def test_update_qc_plots_empty_returns_four_figures(qc_app):
 def test_update_per_sample_table_empty_returns_list(qc_app):
     fn = get_callback_fn(qc_app, "per-sample-table")
     with ctx_trigger("selected-sample"):
-        result = fn(None, "All Samples", 0, {}, {})
+        result = fn(None, "All Samples", 0, "qc-tab", {}, {})
     assert isinstance(result, list)
 
 
@@ -125,7 +125,7 @@ def test_update_qc_stats_populated(qc_app, populated_config):
 def test_update_qc_plots_populated(qc_app, populated_config):
     fn = get_callback_fn(qc_app, "cumul-reads-graph")
     with ctx_trigger("results-fingerprint"):
-        result = fn("fp1", "All Samples", 0, populated_config, {"running": True})
+        result = fn("fp1", "All Samples", 0, "qc-tab", populated_config, {"running": True})
     assert len(result) == 4
     for fig in result:
         assert fig is not None
@@ -134,6 +134,6 @@ def test_update_qc_plots_populated(qc_app, populated_config):
 def test_update_per_sample_table_populated(qc_app, populated_config):
     fn = get_callback_fn(qc_app, "per-sample-table")
     with ctx_trigger("results-fingerprint"):
-        result = fn("fp1", "All Samples", 0, populated_config, {"running": True})
+        result = fn("fp1", "All Samples", 0, "qc-tab", populated_config, {"running": True})
     assert isinstance(result, list)
     assert len(result) > 0  # 3 samples in the dataset

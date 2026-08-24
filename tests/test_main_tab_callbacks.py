@@ -65,20 +65,24 @@ def main_app():
 
 def test_toggle_show_more_opens_and_relabels(main_app):
     fn = get_callback_fn(main_app, "show-more-organisms-btn")
-    # closed -> open
-    is_open, label = fn(1, False)
+    overflow = [{"name": "Hiddenus organismus", "reads": 10,
+                 "abundance": 0.1, "taxid": 90001, "confidence": "low"}]
+    # closed -> open: overflow cards are BUILT here (round 2 laziness)
+    is_open, children, label = fn(1, False, overflow)
     assert is_open is True
     assert "fewer" in str(label).lower()
-    # open -> closed
-    is_open, label = fn(2, True)
+    assert "Hiddenus organismus" in str(children)
+    # open -> closed: cards unmount
+    is_open, children, label = fn(2, True, overflow)
     assert is_open is False
+    assert children == []
     assert "more" in str(label).lower()
 
 
 def test_toggle_show_more_no_click_is_noupdate(main_app):
     from dash import no_update
     fn = get_callback_fn(main_app, "show-more-organisms-btn")
-    assert fn(0, False) == (no_update, no_update)
+    assert fn(0, False, []) == (no_update, no_update, no_update)
 
 
 # --------------------------------------------------------------------------- #

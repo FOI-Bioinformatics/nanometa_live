@@ -775,6 +775,10 @@ def _create_genome_downloads_card() -> dbc.Card:
                     # Missing genomes list
                     html.Div([
                         html.H6("Missing Genomes", className="text-muted mb-2"),
+                        # Filled by download_single_genome's running= so a
+                        # per-row download click has visible feedback (a
+                        # pattern-matching running output is unsupported).
+                        html.Div(id="genome-single-download-note"),
                         html.Div(
                             id="genome-missing-list",
                             children=[

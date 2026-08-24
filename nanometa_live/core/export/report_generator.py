@@ -31,6 +31,8 @@ from nanometa_live.app.utils.callback_helpers import get_classification_stats
 logger = logging.getLogger(__name__)
 
 # Plotly CDN version to embed (minified JS is fetched at build time or bundled)
+from nanometa_live.core.export.report_charts import find_local_plotly_js  # noqa: E402
+
 _PLOTLY_CDN_URL = "https://cdn.plot.ly/plotly-2.35.2.min.js"
 
 # Result subdirectories copied into the export's raw/ folder. Covers both QC
@@ -90,7 +92,8 @@ class ReportGenerator:
 
     def generate(
         self, output_dir: str, samples: Optional[List[str]] = None,
-        include_raw: bool = True
+        include_raw: bool = True,
+        progress_cb: Optional[Any] = None,
     ) -> Path:
         """
         Generate complete export: HTML report + raw files + metadata.
@@ -99,14 +102,25 @@ class ReportGenerator:
             output_dir: Directory to write the export into.
             samples: Specific samples to include, or None for all.
             include_raw: Whether to copy raw result files.
+            progress_cb: Optional ``cb(percent, label)`` at stage
+                boundaries; callback failures never fail the export.
 
         Returns:
             Path to the generated report.html file.
         """
+        def _report(percent: int, label: str) -> None:
+            if progress_cb is None:
+                return
+            try:
+                progress_cb(percent, label)
+            except Exception:
+                logger.debug("export progress callback failed", exc_info=True)
+
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
         # Discover samples
+        _report(5, "Discovering samples...")
         all_samples = get_available_samples(self.results_dir)
         if samples:
             selected_samples = [s for s in samples if s in all_samples and s != "All Samples"]
@@ -127,10 +141,13 @@ class ReportGenerator:
         raw_files_included: List[str] = []
         raw_skip_reason: Optional[str] = None
         if include_raw:
+            _report(10, "Copying raw result files (the long stage; up to "
+                        "the configured size cap)...")
             raw_files_included, raw_skip_reason = self._copy_raw_files_verbose(
                 str(output_path)
             )
 
+        _report(60, "Collecting classification, QC and watchlist data...")
         report_data = self._collect_data(
             selected_samples,
             include_raw=include_raw,
@@ -140,13 +157,16 @@ class ReportGenerator:
         report_data["raw_files_included"] = raw_files_included
 
         # Build HTML
+        _report(85, "Building the HTML report...")
         html_content = self._build_html_report(report_data)
+        _report(95, "Writing report and metadata...")
         report_file = output_path / "report.html"
         report_file.write_text(html_content, encoding="utf-8")
         logger.info("Report written to %s", report_file)
 
         # Write metadata
         self._write_metadata(str(output_path), report_data)
+        _report(100, "Done.")
 
         return report_file
 
@@ -558,49 +578,10 @@ class ReportGenerator:
             return []
 
     def _get_plotly_js(self) -> str:
-        """Get Plotly.js source for inline embedding."""
-        if self._plotly_js is not None:
-            return self._plotly_js
-
-        # Try to find a local copy bundled with Dash
-        try:
-            import dash
-            dash_dir = Path(dash.__file__).parent
-            # Dash bundles plotly.js in its package
-            candidates = [
-                dash_dir / "dcc" / "plotly.min.js",
-                dash_dir / "dcc" / "async-plotlyjs.js",
-            ]
-            # Also check plotly's own bundled JS
-            import plotly
-            plotly_dir = Path(plotly.__file__).parent
-            candidates.append(plotly_dir / "package_data" / "plotly.min.js")
-
-            for candidate in candidates:
-                if candidate.exists():
-                    self._plotly_js = candidate.read_text(encoding="utf-8")
-                    logger.info("Using local plotly.js from %s", candidate)
-                    return self._plotly_js
-        except (ImportError, AttributeError, FileNotFoundError, PermissionError, OSError, UnicodeDecodeError):
-            pass
-
-        # No local bundle. In offline mode a CDN reference is useless (and a
-        # dangling external request when the report is opened), so the caller
-        # must not emit one -- see _build_html_report. Surface the degradation
-        # clearly rather than silently shipping a chart-less "self-contained"
-        # report.
-        if self.config.get("offline_mode"):
-            logger.error(
-                "No local plotly.js bundle found and offline_mode is set: "
-                "the exported report's charts will not render. Install plotly "
-                "with its bundled package_data, or export with network access."
-            )
-        else:
-            logger.warning(
-                "Could not find local plotly.js bundle. "
-                "Report will reference CDN: %s", _PLOTLY_CDN_URL
-            )
-        self._plotly_js = ""
+        """Get Plotly.js source for inline embedding (see report_charts)."""
+        if self._plotly_js is None:
+            self._plotly_js = find_local_plotly_js(
+                offline_mode=bool(self.config.get("offline_mode")))
         return self._plotly_js
 
     def _build_html_report(self, data: Dict[str, Any]) -> str:

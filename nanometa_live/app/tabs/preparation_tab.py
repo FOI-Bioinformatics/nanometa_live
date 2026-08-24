@@ -270,6 +270,32 @@ def _genome_taxid_for_entry(entry) -> int:
         return 0
 
 
+# Missing-genome items rendered before the "and N more" summary row takes
+# over. 500 mounted items served no operator decision the first 20 plus a
+# count cannot (round-2 audit, 2026-08-22). Display-only: every hidden
+# entry is still counted in the row and in the stats tiles.
+MISSING_GENOME_LIST_CAP = 20
+
+
+def _missing_genome_items(missing_entries):
+    """Capped missing-genome list with the hidden count stated."""
+    from nanometa_live.app.layouts.watchlist_layout import (
+        create_missing_genome_item,
+    )
+    items = [
+        create_missing_genome_item(entry)
+        for entry in missing_entries[:MISSING_GENOME_LIST_CAP]
+    ]
+    hidden = len(missing_entries) - MISSING_GENOME_LIST_CAP
+    if hidden > 0:
+        items.append(html.P(
+            f"...and {hidden} more missing. Batch download covers all of "
+            f"them.",
+            className="text-muted fst-italic mt-1",
+        ))
+    return items
+
+
 def register_preparation_callbacks(app):
     """Register all preparation tab callbacks."""
 
@@ -564,6 +590,12 @@ def register_preparation_callbacks(app):
         Output("bundle-export-directory", "value"),
         Input("bundle-export-browse-btn", "n_clicks"),
         State("bundle-export-directory", "value"),
+        # The OS dialog blocks until dismissed (up to 120 s); a background
+        # worker keeps request threads free and running= stops double
+        # dialogs (round-2 audit, 2026-08-22).
+        background=True,
+        manager=background_callback_manager,
+        running=[(Output("bundle-export-browse-btn", "disabled"), True, False)],
         prevent_initial_call=True,
     )
     def browse_export_directory(n_clicks, current_dir):
@@ -579,6 +611,9 @@ def register_preparation_callbacks(app):
         Output("import-bundle-path", "value"),
         Input("import-bundle-browse-btn", "n_clicks"),
         State("import-bundle-path", "value"),
+        background=True,
+        manager=background_callback_manager,
+        running=[(Output("import-bundle-browse-btn", "disabled"), True, False)],
         prevent_initial_call=True,
     )
     def browse_import_bundle(n_clicks, current):
@@ -595,6 +630,9 @@ def register_preparation_callbacks(app):
         Output("import-kraken-db-path", "value"),
         Input("import-kraken-db-browse-btn", "n_clicks"),
         State("import-kraken-db-path", "value"),
+        background=True,
+        manager=background_callback_manager,
+        running=[(Output("import-kraken-db-browse-btn", "disabled"), True, False)],
         prevent_initial_call=True,
     )
     def browse_import_kraken_db(n_clicks, current):
@@ -1201,13 +1239,20 @@ def register_preparation_callbacks(app):
         prevent_initial_call=True,
         background=True,
         manager=background_callback_manager,
+        # Stage-level set_progress: the running= clause revealed a progress
+        # bar that sat at 0% for the whole 5-30 s scan (round-2 audit).
+        progress=[
+            Output("taxmap-rescan-progress", "value", allow_duplicate=True),
+            Output("taxmap-rescan-progress-label", "children",
+                   allow_duplicate=True),
+        ],
         running=[
             (Output("taxmap-rescan-btn", "disabled"), True, False),
             (Output("taxmap-rescan-progress-container", "style", allow_duplicate=True),
              {"display": "block"}, {"display": "none"}),
         ],
     )
-    def run_rescan(n_clicks, config, current_refresh, watchlist_entries_snapshot):
+    def run_rescan(set_progress, n_clicks, config, current_refresh, watchlist_entries_snapshot):
         """Callback for Kraken2 database rescan.
 
         Runs in a DiskcacheManager-backed background process so the
@@ -1230,6 +1275,7 @@ def register_preparation_callbacks(app):
         try:
             from nanometa_live.core.taxonomy.taxid_mapping import get_taxid_mapper
 
+            set_progress((10, "Loading the Kraken2 database index..."))
             mapper = get_taxid_mapper()
             success = mapper.load_database(kraken_db)
 
@@ -1252,6 +1298,8 @@ def register_preparation_callbacks(app):
 
             total = len(watchlist_entries)
             logger.info(f"Processing {total} watchlist entries")
+            set_progress((55, f"Mapping {total} organisms against the "
+                              f"database..."))
 
             # preserve_manual keeps operator-verified and operator-declared
             # mappings across rescans of the SAME database (the mapper
@@ -1263,16 +1311,17 @@ def register_preparation_callbacks(app):
                 preserve_manual=True,
             )
 
+            set_progress((90, "Saving mappings..."))
             if collection:
-                collection_data = collection.to_dict()
-                mappings_list = collection_data.get("mappings", [])
-                mappings_dict = {}
-                for mapping in mappings_list:
-                    ncbi_tid = mapping.get("ncbi_taxid")
-                    if ncbi_tid is not None:
-                        mappings_dict[str(ncbi_tid)] = mapping
-                collection_data["mappings"] = mappings_dict
-                logger.info(f"Rescan complete: {len(mappings_dict)} mappings prepared")
+                from nanometa_live.core.taxonomy.taxid_mapping import (
+                    slim_mapping_store_payload,
+                )
+                # Slim store form; consumers read 5 fields per mapping.
+                collection_data = slim_mapping_store_payload(
+                    collection.to_dict())
+                logger.info(
+                    f"Rescan complete: "
+                    f"{len(collection_data['mappings'])} mappings prepared")
             else:
                 collection_data = None
                 logger.warning("Rescan produced no collection data")
@@ -1602,10 +1651,7 @@ def register_preparation_callbacks(app):
         total_size_mb = round(total_size / (1024 * 1024), 2) if total_size else 0
 
         if missing_entries:
-            missing_list = [
-                create_missing_genome_item(entry)
-                for entry in missing_entries
-            ]
+            missing_list = _missing_genome_items(missing_entries)
         else:
             missing_list = [
                 html.P("All genomes downloaded.", className="text-muted fst-italic")
@@ -1834,7 +1880,19 @@ def register_preparation_callbacks(app):
                     add_log(f"Building BLAST databases for {len(successful_taxids)} genome(s)"),
                     dbc.Badge("BLAST", color="info", className="me-2"),
                 ))
-                built = genome_mgr.build_blast_dbs_batch(successful_taxids, max_workers=2)
+                def _blast_progress(done, total_dbs, _taxid):
+                    pct = 90 + int(9 * done / max(total_dbs, 1))
+                    set_progress((
+                        pct,
+                        f"Building BLAST databases ({done}/{total_dbs})...",
+                        "Building BLAST databases",
+                        add_log(f"BLAST database {done}/{total_dbs} built"),
+                        dbc.Badge("BLAST", color="info", className="me-2"),
+                    ))
+
+                built = genome_mgr.build_blast_dbs_batch(
+                    successful_taxids, max_workers=2,
+                    on_progress=_blast_progress)
                 add_log(f"Built {built} BLAST database(s)", "success" if built > 0 else "warning")
                 # A genome without a BLAST database cannot be validated
                 # against, so a build failure is not cosmetic. `failed`
@@ -1973,10 +2031,17 @@ def register_preparation_callbacks(app):
         prevent_initial_call=True,
         background=True,
         manager=background_callback_manager,
-        # No `running` button-disable here: a pattern-matching (ALL)
-        # running output is not reliably supported and crashes the
-        # dash-renderer. The background conversion alone removes the UI
-        # freeze, which is the point.
+        # A pattern-matching (ALL) running output is not reliably supported
+        # and crashes the dash-renderer, so the per-row button cannot be
+        # disabled -- the static note above the list is the feedback.
+        running=[(
+            Output("genome-single-download-note", "children"),
+            dbc.Alert([
+                dbc.Spinner(size="sm", spinner_class_name="me-2"),
+                "Downloading the selected genome...",
+            ], color="info", className="py-2 mb-2"),
+            [],
+        )],
     )
     def download_single_genome(
         download_clicks: List[int],

@@ -903,6 +903,43 @@ class WatchlistManager:
         """Get a specific entry by taxonomy ID."""
         return self._entries.get(taxid)
 
+    def resolve_entry_key(
+        self,
+        taxid: Optional[int] = None,
+        db_taxid: Optional[int] = None,
+        name: Optional[str] = None,
+    ) -> Optional[int]:
+        """Return the ``_entries`` key for an organism, or None.
+
+        The lookup mirror of :meth:`_identity_key`: a fork entry (same NCBI
+        taxid as another entry but a different ``db_taxid``) is stored under
+        its ``db_taxid`` or a name-derived pseudo key, so a plain
+        ``_entries[taxid]`` lookup finds the wrong entry -- or none. Callers
+        that hold watchlist-file fields (NCBI taxid, db_taxid, name) rather
+        than a storage key resolve through here.
+        """
+        if taxid:
+            entry = self._entries.get(taxid)
+            if entry is not None and (
+                db_taxid is None
+                or entry.db_taxid is None
+                or entry.db_taxid == db_taxid
+            ):
+                return taxid
+        if db_taxid:
+            entry = self._entries.get(db_taxid)
+            if entry is not None and entry.db_taxid == db_taxid:
+                return db_taxid
+        if name:
+            if db_taxid:
+                key = _stable_pseudo_taxid(f"{name}|{db_taxid}")
+                if key in self._entries:
+                    return key
+            key = _stable_pseudo_taxid(name)
+            if key in self._entries:
+                return key
+        return None
+
     def get_entry_by_name(self, name: str) -> Optional[WatchlistEntry]:
         """Get a specific entry by name (case-insensitive)."""
         taxid = self._name_index.get(name.lower())
@@ -1241,6 +1278,27 @@ class WatchlistManager:
                 self._save_toggle_state()
                 return True
             return False
+
+    def set_entries_enabled(self, taxids, enabled: bool) -> int:
+        """Toggle many entries under one lock with a SINGLE state save.
+
+        Enable All / Disable All used to call :meth:`toggle_entry` per
+        entry, and each call fsyncs the full toggle-state YAML -- 500
+        entries meant 500 locks + dumps + fsyncs on the click thread
+        (round-2 audit, 2026-08-22). Unknown taxids are skipped. Returns
+        the number of entries changed; nothing is written for an empty
+        batch.
+        """
+        changed = 0
+        with self._lock:
+            for taxid in taxids:
+                entry = self._entries.get(taxid)
+                if entry is not None:
+                    entry.enabled = enabled
+                    changed += 1
+            if changed:
+                self._save_toggle_state()
+        return changed
 
     def toggle_category(self, category: str, enabled: bool) -> int:
         """Enable or disable all entries in a category and persist state."""
@@ -1597,14 +1655,14 @@ class WatchlistManager:
 
         result = []
         for p in pathogens:
-            # Check if entry exists in active _entries for enabled status
-            existing = None
-            if p.taxid_ncbi:
-                existing = self._entries.get(p.taxid_ncbi)
-            if not existing:
-                # Try by name hash for name-only entries
-                pseudo_taxid = _stable_pseudo_taxid(p.name)
-                existing = self._entries.get(pseudo_taxid)
+            # Resolve the ACTIVE entry through the identity scheme: a plain
+            # _entries[taxid_ncbi] lookup returns the wrong entry for a fork
+            # (two db nodes sharing one NCBI taxid), so its preview row
+            # showed -- and its toggle drove -- the sibling's state.
+            key = self.resolve_entry_key(
+                taxid=p.taxid_ncbi, db_taxid=p.db_taxid, name=p.name
+            )
+            existing = self._entries.get(key) if key is not None else None
 
             result.append({
                 "taxid": p.taxid_ncbi or 0,
@@ -1614,6 +1672,9 @@ class WatchlistManager:
                 "alert_threshold": p.alert_threshold,
                 "enabled": existing.enabled if existing else False,
                 "watchlist_id": watchlist_id,
+                # None when the watchlist is not enabled (entry not loaded);
+                # the nested-toggle guard PreventUpdates on unresolvable ids.
+                "manager_key": key,
             })
 
         return result
@@ -1626,8 +1687,15 @@ class WatchlistManager:
             List of entry dicts with toggle information for UI display
         """
         result = []
-        for entry in self._entries.values():
+        for key, entry in self._entries.items():
             entry_dict = entry.to_dict()
+            # The storage key. Usually the NCBI taxid, but a fork entry
+            # (same NCBI taxid, different db_taxid -- see _identity_key) is
+            # keyed by its db_taxid or a pseudo key. UI component ids and
+            # every manager lookup must use THIS, never the dict's "taxid":
+            # bulk-toggling by "taxid" left the Bioshield forks untouched
+            # (4 of 129 still active after Disable All, verified live).
+            entry_dict["manager_key"] = key
             entry_dict["can_remove"] = entry.source != WatchlistSource.BUILTIN
             entry_dict["can_toggle"] = True
             entry_dict["threat_level_display"] = entry.threat_level.value.title()
@@ -1668,13 +1736,33 @@ class WatchlistManager:
             entry.alert_threshold = threshold
             return True
 
-    def export_config(self) -> Dict[str, Any]:
-        """Export the current watchlist configuration."""
+    def export_config(self, slim: bool = False) -> Dict[str, Any]:
+        """Export the current watchlist configuration.
+
+        ``slim=True`` is the BROWSER-STORE form: each custom entry carries
+        only the six fields any store consumer reads (taxid, db_taxid,
+        enabled, alert_threshold, threat_level, name — ~125 B/entry). The
+        full ``to_dict`` form was 96-99% of the app-config Store and was
+        re-uploaded by 24 per-tick callbacks (4.4-16.9 MB per tick at
+        129-500 entries; round-2 audit, 2026-08-22). DISK writers
+        (last-session.yaml) must stay on the default full form — the file
+        is what session restore rebuilds fat entries from.
+        """
         custom_entries = []
         overrides = []
 
         for entry in self._entries.values():
             if entry.source in [WatchlistSource.USER, WatchlistSource.MIGRATED, WatchlistSource.IMPORTED]:
+                if slim:
+                    custom_entries.append({
+                        "taxid": entry.taxid,
+                        "db_taxid": entry.db_taxid,
+                        "enabled": entry.enabled,
+                        "alert_threshold": entry.alert_threshold,
+                        "threat_level": entry.threat_level.value,
+                        "name": entry.name,
+                    })
+                    continue
                 custom_entries.append(entry.to_dict())
             elif entry.user_override:
                 overrides.append({

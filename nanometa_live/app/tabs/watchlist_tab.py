@@ -56,6 +56,16 @@ def _save_last_session(config: Dict[str, Any]) -> None:
 
     Falls back to the supplied config when nothing is persisted yet (first
     write) or the file is unreadable -- the toggle must never be lost.
+
+    The persisted block's ``custom`` entries are re-fattened from the live
+    singleton: the app-config Store carries the slim six-field form
+    (round-2 audit, 2026-08-22), and persisting it verbatim would strip
+    action_required/notes/lineage from the file that session restore
+    rebuilds entries from. The rest of the block (enabled/builtin/
+    overrides) stays authoritative from the caller -- it is the toggle
+    that just happened. Fallback rule: with an empty singleton
+    (fresh-boot edge), keep the file's existing custom entries -- never
+    overwrite full data with slim data.
     """
     try:
         from nanometa_live.core.config.config_loader import ConfigLoader
@@ -63,17 +73,12 @@ def _save_last_session(config: Dict[str, Any]) -> None:
         paths = NanometaPaths.from_config(config)
         session_path = Path(paths.configs) / "last-session.yaml"
 
-        save_config = dict(config)
+        persisted = None
         if session_path.is_file():
             try:
                 import yaml
                 with open(session_path) as fh:
                     persisted = yaml.safe_load(fh)
-                if isinstance(persisted, dict):
-                    persisted["watchlist"] = config.get(
-                        "watchlist", persisted.get("watchlist")
-                    )
-                    save_config = persisted
             except (OSError, yaml.YAMLError):
                 logger.debug(
                     "last-session.yaml unreadable; writing the in-memory "
@@ -81,10 +86,52 @@ def _save_last_session(config: Dict[str, Any]) -> None:
                     exc_info=True,
                 )
 
+        persisted_block = (persisted or {}).get("watchlist") \
+            if isinstance(persisted, dict) else None
+        watchlist_block = _full_watchlist_block(
+            config.get("watchlist"), persisted_block)
+
+        if isinstance(persisted, dict):
+            persisted["watchlist"] = (
+                watchlist_block if watchlist_block is not None
+                else persisted.get("watchlist")
+            )
+            save_config = persisted
+        else:
+            save_config = dict(config)
+            if watchlist_block is not None:
+                save_config["watchlist"] = watchlist_block
+
         loader = ConfigLoader(str(paths.configs))
         loader.save_config(save_config, "last-session.yaml")
     except Exception:
         logger.debug("Could not save last-session.yaml", exc_info=True)
+
+
+def _full_watchlist_block(store_block, persisted_block):
+    """The block to persist: caller's structure, full-form custom entries.
+
+    ``store_block`` is what the callback holds (slim custom entries);
+    ``persisted_block`` is what last-session.yaml already carries. The
+    singleton is the source of full custom data; when it is empty, the
+    persisted full entries win over the caller's slim ones.
+    """
+    if not isinstance(store_block, dict):
+        return store_block if store_block is not None else persisted_block
+    block = dict(store_block)
+    entries_available = False
+    try:
+        manager = get_watchlist_manager()
+        if manager._entries:
+            block["custom"] = manager.export_config(slim=False)["custom"]
+            entries_available = True
+    except Exception:
+        logger.debug("full watchlist export unavailable", exc_info=True)
+    if (not entries_available
+            and isinstance(persisted_block, dict)
+            and persisted_block.get("custom")):
+        block["custom"] = persisted_block["custom"]
+    return block
 
 
 # Rows per page in the pathogens table. Row action ids are keyed by taxid,
@@ -239,7 +286,9 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
                 # Sync watchlist state to app-config and save to disk
                 updated_config = dict(current_config) if current_config else {}
-                updated_config["watchlist"] = manager.export_config()
+                # Slim store form; _save_last_session persists the full
+                # form from the singleton (round-2 audit, 2026-08-22).
+                updated_config["watchlist"] = manager.export_config(slim=True)
                 _save_last_session(updated_config)
 
                 action = "disable" if is_enabled else "enable"
@@ -439,7 +488,9 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         # Sync watchlist state to app-config and save to disk
         updated_config = dict(current_config) if current_config else {}
-        updated_config["watchlist"] = manager.export_config()
+        # Slim store form; _save_last_session persists the full form
+        # from the singleton (round-2 audit, 2026-08-22).
+        updated_config["watchlist"] = manager.export_config(slim=True)
         _save_last_session(updated_config)
 
         # Return updated state and increment refresh counter
@@ -548,7 +599,9 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
                 # Sync watchlist state to app-config and save to disk
                 updated_config = dict(current_config) if current_config else {}
-                updated_config["watchlist"] = manager.export_config()
+                # Slim store form; _save_last_session persists the full
+                # form from the singleton (round-2 audit, 2026-08-22).
+                updated_config["watchlist"] = manager.export_config(slim=True)
                 _save_last_session(updated_config)
 
                 return {"last_update": f"nested-toggle-{taxid}"}, updated_config
@@ -828,10 +881,20 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         enable = "enable-all" in ctx.triggered_id
 
-        for entry in entries:
-            taxid = entry.get("taxid")
-            if taxid:
-                manager.toggle_entry(taxid, enable)
+        # One batched save: per-entry toggle_entry fsynced the toggle-state
+        # YAML once PER ENTRY, tens of seconds on a large watchlist.
+        # Addressed by manager_key, not the dict's NCBI taxid: fork entries
+        # (one NCBI taxid, two db nodes) are stored under their db_taxid, so
+        # toggling by "taxid" left them untouched -- Disable All on the
+        # Bioshield list kept 4 of 129 active (verified live, 2026-08-24).
+        manager.set_entries_enabled(
+            [
+                entry.get("manager_key") or entry.get("taxid")
+                for entry in entries
+                if entry.get("manager_key") or entry.get("taxid")
+            ],
+            enable,
+        )
 
         new_refresh = (current_refresh or 0) + 1
         action = "enable-all" if enable else "disable-all"
@@ -985,16 +1048,21 @@ def register_watchlist_callbacks(app: Dash) -> None:
             manager = get_watchlist_manager()
             entry = manager.get_entry_by_taxid(taxid)
             if entry:
+                # The row index is the manager's storage key; NCBI-scoped
+                # lookups (taxmap, the displayed NCBI id) use the entry's own
+                # taxid, which differs from the key for fork entries.
+                ncbi_taxid = entry.taxid
+
                 # Get Kraken2 mapping info
                 kraken_taxid = "-"
                 kraken_name = "-"
                 if taxmap_collection and isinstance(taxmap_collection, dict):
                     mappings = taxmap_collection.get("mappings", {})
                     if isinstance(mappings, dict):
-                        mapping_data = mappings.get(str(taxid), {})
+                        mapping_data = mappings.get(str(ncbi_taxid), {})
                     elif isinstance(mappings, list):
                         mapping_data = next(
-                            (m for m in mappings if m.get("ncbi_taxid") == taxid),
+                            (m for m in mappings if m.get("ncbi_taxid") == ncbi_taxid),
                             {}
                         )
                     else:
@@ -1021,7 +1089,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
                     entry.notes or "",
                     entry.organism_type or "",
                     entry.annotation or "",
-                    str(taxid),
+                    str(ncbi_taxid),
                     kraken_taxid,
                     kraken_name,
                 )
@@ -1117,7 +1185,13 @@ def register_watchlist_callbacks(app: Dash) -> None:
 
         if "validate-all" in trigger:
             entries = manager.get_entries_with_toggle_state()
-            taxids_to_validate = [e.get("taxid") for e in entries]
+            # manager_key, not the dict taxid: a fork pair shares the NCBI
+            # taxid, so validating by "taxid" hit one entry twice and the
+            # other never. The API call itself uses the resolved entry's own
+            # NCBI taxid/name (validate_entry_via_api).
+            taxids_to_validate = [
+                e.get("manager_key") or e.get("taxid") for e in entries
+            ]
         elif (
             isinstance(ctx.triggered_id, dict)
             and ctx.triggered_id.get("type") == "watchlist-row-validate"
@@ -1296,16 +1370,28 @@ def register_watchlist_callbacks(app: Dash) -> None:
             State("watchlist-api-options", "value"),
             State("app-config", "data"),
         ],
+        # Live NCBI + GTDB HTTP with 5 s timeouts and rate-limit sleeps --
+        # up to ~20 s. It ran synchronously on the request thread with no
+        # feedback (flagged in round 1, fixed in round 2); pure I/O, no
+        # singleton writes, so plain background with a spinner suffices.
+        background=True,
+        manager=background_callback_manager,
+        progress=[
+            Output("watchlist-lookup-section", "style", allow_duplicate=True),
+            Output("watchlist-lookup-results", "children", allow_duplicate=True),
+        ],
+        running=[(Output("watchlist-lookup-btn", "disabled"), True, False)],
         prevent_initial_call=True,
     )
     def lookup_species(
+        set_progress,
         n_clicks: int,
         name: str,
         taxid: Optional[int],
         api_options: list,
         config: Optional[Dict],
     ) -> Tuple:
-        """Look up species in NCBI/GTDB APIs."""
+        """Look up species in NCBI/GTDB APIs (background worker)."""
         if not n_clicks or not name:
             raise PreventUpdate
 
@@ -1325,6 +1411,15 @@ def register_watchlist_callbacks(app: Dash) -> None:
             )
 
         try:
+            sources = " and ".join(
+                s for s, on in (("NCBI", use_ncbi), ("GTDB", use_gtdb)) if on)
+            set_progress((
+                {"display": "block"},
+                dbc.Alert([
+                    dbc.Spinner(size="sm", spinner_class_name="me-2"),
+                    f"Querying {sources} for '{name}'...",
+                ], color="info", className="py-2"),
+            ))
             from nanometa_live.core.taxonomy.taxonomy_api import lookup_species as api_lookup
             result = api_lookup(name, use_ncbi=use_ncbi, use_gtdb=use_gtdb, offline_mode=offline_mode)
 

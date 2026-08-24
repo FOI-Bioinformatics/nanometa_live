@@ -996,6 +996,11 @@ def create_pathogen_row(
         html.Div containing the row
     """
     taxid = entry.get("taxid", 0) or 0
+    # Pattern-matching ids carry the manager's STORAGE key, not the NCBI
+    # taxid: a fork pair (two db nodes, one NCBI taxid) rendered duplicate
+    # ids and every row action addressed whichever entry owned the key.
+    # ``taxid`` stays the NCBI id for display and reference links only.
+    row_key = entry.get("manager_key") or taxid
     name = entry.get("name") or "Unknown"
     common_name = entry.get("common_name") or ""
     organism_type = entry.get("organism_type") or ""
@@ -1102,7 +1107,7 @@ def create_pathogen_row(
                             html.I(className=f"bi {config['icon']} me-1"),
                             config["label"],
                         ],
-                        id={"type": "watchlist-row-mapping", "index": taxid},
+                        id={"type": "watchlist-row-mapping", "index": row_key},
                         color=config["color"],
                         className="kraken2-match-badge",
                         title="Kraken2 mapping status",
@@ -1132,7 +1137,7 @@ def create_pathogen_row(
             dbc.Col([
                 html.I(
                     className="bi bi-check-circle text-secondary" if validated else "bi bi-dash text-muted",
-                    id={"type": "watchlist-row-validated", "index": taxid},
+                    id={"type": "watchlist-row-validated", "index": row_key},
                     style={"cursor": "pointer"} if validated else {},
                     title=(
                         "Name looked up in public taxonomy (naming only)"
@@ -1164,7 +1169,7 @@ def create_pathogen_row(
                 dbc.ButtonGroup([
                     dbc.Button(
                         [html.I(className="bi bi-pencil me-1"), "Edit"],
-                        id={"type": "watchlist-row-edit", "index": taxid},
+                        id={"type": "watchlist-row-edit", "index": row_key},
                         size="sm",
                         color="secondary",
                         outline=True,
@@ -1172,7 +1177,7 @@ def create_pathogen_row(
                     ),
                     dbc.Button(
                         [html.I(className="bi bi-check2-circle me-1"), "Verify"],
-                        id={"type": "watchlist-row-validate", "index": taxid},
+                        id={"type": "watchlist-row-validate", "index": row_key},
                         size="sm",
                         color="info",
                         outline=True,
@@ -1182,7 +1187,7 @@ def create_pathogen_row(
                         [
                             html.I(className="bi bi-toggle-on" if enabled else "bi bi-toggle-off"),
                         ],
-                        id={"type": "watchlist-row-toggle", "index": taxid},
+                        id={"type": "watchlist-row-toggle", "index": row_key},
                         size="sm",
                         color="success" if enabled else "secondary",
                         outline=not enabled,
@@ -1206,6 +1211,10 @@ def _create_nested_pathogen_row(entry: Dict[str, Any], watchlist_id: str) -> htm
         html.Div containing the pathogen row
     """
     taxid = entry.get("taxid", 0)
+    # Address the manager by its storage key (see create_pathogen_row); a
+    # missing/None manager_key (watchlist not enabled) falls back to the
+    # NCBI taxid, and the toggle callback's unresolvable-id guard applies.
+    row_key = entry.get("manager_key") or taxid
     name = entry.get("name", "Unknown")
     threat_level = entry.get("threat_level", "moderate")
     threshold = entry.get("alert_threshold", 10)
@@ -1221,7 +1230,7 @@ def _create_nested_pathogen_row(entry: Dict[str, Any], watchlist_id: str) -> htm
             # Checkbox for individual selection
             dbc.Col([
                 dbc.Checkbox(
-                    id={"type": "watchlist-nested-pathogen-toggle", "index": taxid, "watchlist": watchlist_id},
+                    id={"type": "watchlist-nested-pathogen-toggle", "index": row_key, "watchlist": watchlist_id},
                     value=enabled,
                 ),
             ], width=1),
@@ -1249,7 +1258,7 @@ def _create_nested_pathogen_row(entry: Dict[str, Any], watchlist_id: str) -> htm
             dbc.Col([
                 dbc.Button(
                     html.I(className="bi bi-pencil"),
-                    id={"type": "watchlist-nested-edit", "index": taxid, "watchlist": watchlist_id},
+                    id={"type": "watchlist-nested-edit", "index": row_key, "watchlist": watchlist_id},
                     size="sm",
                     color="link",
                     className="p-0",

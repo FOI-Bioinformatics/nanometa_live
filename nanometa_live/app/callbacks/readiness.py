@@ -176,6 +176,16 @@ def register_readiness(app, backend_manager):
         State("readiness-probe-stamp", "data"),
         background=True,
         manager=background_callback_manager,
+        # "Check Everything" is 15-20 s of probes on a cold run; without
+        # this the click was dead air (round-2 audit, 2026-08-22).
+        running=[
+            (Output("check-readiness-btn", "disabled"), True, False),
+            (Output("check-readiness-btn", "children"),
+             [dbc.Spinner(size="sm", spinner_class_name="me-1"),
+              "Checking..."],
+             [html.I(className="bi bi-arrow-clockwise me-1"),
+              "Check Everything"]),
+        ],
     )
     def update_readiness_state(n_intervals, config, n_clicks, genome_change,
                                prev_state, watchlist_entries, probe_stamp):

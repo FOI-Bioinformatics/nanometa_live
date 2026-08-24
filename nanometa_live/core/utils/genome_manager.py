@@ -2141,7 +2141,8 @@ class GenomeDownloadManager:
         return results
 
     def build_blast_dbs_batch(
-        self, taxids: List[int], max_workers: Optional[int] = None
+        self, taxids: List[int], max_workers: Optional[int] = None,
+        on_progress=None,
     ) -> int:
         """
         Build BLAST databases for multiple genomes concurrently.
@@ -2152,6 +2153,10 @@ class GenomeDownloadManager:
                 (default) derives the size from os.cpu_count() via
                 _default_blast_build_workers() (CPU-bound, half cpus,
                 capped at 8).
+            on_progress: Optional ``cb(done, total, taxid)`` per completed
+                build, so a GUI caller can show per-item progress (the
+                batch used to be a silent plateau at 90%; round-2 audit).
+                Callback failures never fail the build.
 
         Returns:
             Number of databases successfully built.
@@ -2180,6 +2185,7 @@ class GenomeDownloadManager:
                 executor.submit(self.build_blast_db, taxid): taxid
                 for taxid in to_build
             }
+            done = 0
             for future in as_completed(futures):
                 taxid = futures[future]
                 try:
@@ -2188,6 +2194,13 @@ class GenomeDownloadManager:
                 except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
                         FileNotFoundError, PermissionError, OSError) as e:
                     logger.exception(f"BLAST DB build failed for taxid {taxid}: {e}")
+                done += 1
+                if on_progress is not None:
+                    try:
+                        on_progress(done, len(to_build), taxid)
+                    except Exception:
+                        logger.debug("BLAST build progress callback failed",
+                                     exc_info=True)
 
         logger.info(f"Built {built}/{len(to_build)} BLAST databases")
         return built

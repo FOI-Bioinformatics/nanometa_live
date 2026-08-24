@@ -42,7 +42,9 @@ DEFAULT_FIXTURE_BASE = Path("/tmp/nanometa_perf_fixtures")
 BASELINE_PATH = Path(__file__).resolve().parent / "baseline.json"
 
 SCENARIOS: Tuple[str, ...] = ("cold", "full_refresh", "incremental", "quiet")
-DEFAULT_N: Tuple[int, ...] = (1, 2, 6, 12, 24)
+# 48/96 added in round 2 (2026-08-24): the loader-cache capacity cliff only
+# bites above ~33 samples and was invisible at N=24.
+DEFAULT_N: Tuple[int, ...] = (1, 2, 6, 12, 24, 48, 96)
 DEFAULT_LAYOUTS: Tuple[str, ...] = ("batch", "realtime_incremental")
 
 SCHEMA = 1

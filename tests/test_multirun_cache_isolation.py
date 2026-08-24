@@ -151,13 +151,13 @@ class TestFirstBatchFlagFollowsDisk:
             lambda a: register_status(a, MagicMock())
         )
         return get_callback_fn(
-            app, "results-fingerprint.data", input_contains="app-config"
+            app, "results-fingerprint.data", input_contains="results-dir-path"
         )
 
     def test_flag_resets_when_outdir_is_emptied(self, tmp_path):
         fn = self._fn()
         prev = {"fp": "run-a-fp", "ts": 0, "first_batch_seen": True}
-        out = fn(1, {"main_dir": str(tmp_path)}, prev)
+        out = fn(1, str(tmp_path), prev)
         assert out["first_batch_seen"] is False
 
     def test_flag_set_when_data_present(self, tmp_path):
@@ -166,7 +166,7 @@ class TestFirstBatchFlagFollowsDisk:
             RUN_A_REPORT
         )
         fn = self._fn()
-        out = fn(1, {"main_dir": str(tmp_path)}, None)
+        out = fn(1, str(tmp_path), None)
         assert out["first_batch_seen"] is True
 
 
@@ -240,10 +240,10 @@ class TestReportsRouteFollowsRun:
 
         app = make_callback_app(lambda a: register_status(a, MagicMock()))
         fn = get_callback_fn(
-            app, "results-fingerprint.data", input_contains="app-config"
+            app, "results-fingerprint.data", input_contains="results-dir-path"
         )
         reports_loader.set_reports_dir(None)
-        fn(1, {"main_dir": str(tmp_path)}, None)
+        fn(1, str(tmp_path), None)
         assert reports_loader._get_reports_dir() == str(tmp_path)
 
 

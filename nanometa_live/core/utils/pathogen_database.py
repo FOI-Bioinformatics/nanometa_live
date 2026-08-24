@@ -183,7 +183,51 @@ def _database_taxids_are_ncbi() -> bool:
         return False
 
 
+# (organisms digest, custom digest) -> detections. The alert engine calls
+# check_for_dangerous_pathogens with identical inputs on every tick; the
+# merged-db build is cached below, but the O(M x |db|) matching loop still
+# re-ran per call. Two keys: the ticking callers share one, an edit in
+# flight can coexist. Content-derived, so nothing can serve stale results.
+_dangerous_check_memo: Dict[tuple, List[Dict[str, Any]]] = {}
+_DANGEROUS_CHECK_MEMO_KEYS = 2
+
+
 def check_for_dangerous_pathogens(
+    detected_organisms: List[Dict[str, Any]],
+    custom_watchlist: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """Memoizing wrapper over the matching pass; semantics unchanged.
+
+    Returns per-call copies of the detection dicts because callers may
+    annotate them in place.
+    """
+    import json as _json
+
+    try:
+        organisms_digest = hash(tuple(
+            (o.get("taxid"), o.get("name"), o.get("reads"), o.get("abundance"))
+            for o in detected_organisms
+        ))
+        custom_digest = (
+            _json.dumps(custom_watchlist, sort_keys=True, default=str)
+            if custom_watchlist is not None else None
+        )
+        key = (organisms_digest, custom_digest)
+    except TypeError:
+        return _check_for_dangerous_pathogens_uncached(
+            detected_organisms, custom_watchlist)
+
+    cached = _dangerous_check_memo.get(key)
+    if cached is None:
+        cached = _check_for_dangerous_pathogens_uncached(
+            detected_organisms, custom_watchlist)
+        _dangerous_check_memo[key] = cached
+        while len(_dangerous_check_memo) > _DANGEROUS_CHECK_MEMO_KEYS:
+            _dangerous_check_memo.pop(next(iter(_dangerous_check_memo)))
+    return [dict(d) for d in cached]
+
+
+def _check_for_dangerous_pathogens_uncached(
     detected_organisms: List[Dict[str, Any]],
     custom_watchlist: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:

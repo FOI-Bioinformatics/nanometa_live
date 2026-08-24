@@ -71,32 +71,62 @@ from nanometa_live.app.tabs.dashboard_helpers import (  # noqa: E402
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
 
 
+# reload_on_demand_results' per-directory fingerprint: (name, mtime_ns) of
+# every *_validation.json, so an unchanged tick skips the per-file parses.
+_od_results_fp: dict = {}
+
+
+def _od_dir_unchanged(od_dir: str) -> bool:
+    """One scandir decides whether the on-demand results changed.
+
+    Keyed on the directory path, so an Archive / Open Results switch to a
+    different run always re-parses (finding C4 stays fixed). A scan error
+    reports "changed" so the parse loop stays authoritative.
+    """
+    try:
+        with os.scandir(od_dir) as it:
+            entries = [
+                (e.name, e.stat().st_mtime_ns) for e in it
+                if e.name.endswith("_validation.json")
+            ]
+        dir_fp = tuple(sorted(entries))
+    except OSError:
+        return False
+    if _od_results_fp.get(od_dir) == dir_fp:
+        return True
+    _od_results_fp[od_dir] = dir_fp
+    return False
+
 # Cards shown before the "Show N more" overflow collapse takes over. One
 # cap for every card list on this tab: the browser cost is per mounted
 # card, watched or not (audit 2026-08-21: 129 watched cards froze Chrome).
 MAX_VISIBLE_CARDS = 20
 
 
-def wrap_cards_with_overflow(cards, collapse_id, button_id, noun="organisms"):
-    """Wrap card columns in a Row, collapsing everything past
-    MAX_VISIBLE_CARDS behind a "Show N more" button.
+def wrap_cards_with_overflow(cards, collapse_id, button_id, noun="organisms",
+                             overflow_data=None, store_id=None):
+    """Visible cards in a Row; everything past MAX_VISIBLE_CARDS behind a
+    "Show N more" button whose collapse ships EMPTY.
 
-    Small lists get a plain Row with no overflow machinery.
+    Since round 2 the hidden cards are NOT mounted: a collapsed
+    dbc.Collapse mounts its children, and 109-480 hidden cards were
+    serialized and re-diffed on every render (543 kB at 129, 2.1 MB at
+    500). Callers pass the overflow card DATA (``overflow_data`` dicts +
+    a ``store_id``); the paired toggle callback builds the cards on the
+    first click via ``_overflow_card_cols``. Small lists get a plain Row.
     """
-    if len(cards) <= MAX_VISIBLE_CARDS:
+    if len(cards) <= MAX_VISIBLE_CARDS and not overflow_data:
         return dbc.Row(cards)
     visible = cards[:MAX_VISIBLE_CARDS]
-    hidden = cards[MAX_VISIBLE_CARDS:]
-    return html.Div([
-        dbc.Row(visible),
-        dbc.Collapse(
-            dbc.Row(hidden),
-            id=collapse_id,
-            is_open=False,
-        ),
+    hidden_n = len(overflow_data or []) + max(0, len(cards) - MAX_VISIBLE_CARDS)
+    children = [dbc.Row(visible)]
+    if store_id is not None:
+        children.append(dcc.Store(id=store_id, data=overflow_data or []))
+    children.extend([
+        dbc.Collapse([], id=collapse_id, is_open=False),
         html.Div(
             dbc.Button(
-                f"Show {len(hidden)} more {noun}",
+                f"Show {hidden_n} more {noun}",
                 id=button_id,
                 color="secondary",
                 outline=True,
@@ -106,6 +136,30 @@ def wrap_cards_with_overflow(cards, collapse_id, button_id, noun="organisms"):
             className="text-center",
         ),
     ])
+    return html.Div(children)
+
+
+def _overflow_card_cols(card_dicts):
+    """Build OrganismCard columns from the dicts an overflow store holds."""
+    cols = []
+    for card in card_dicts or []:
+        cols.append(dbc.Col(
+            OrganismCard(
+                name=card.get("name", ""),
+                abundance=card.get("abundance", 0.0),
+                read_count=card.get("reads", 0),
+                confidence=card.get("confidence", "low"),
+                taxid=card.get("taxid"),
+                rank=card.get("rank", "S"),
+                is_watched=card.get("is_watched", False),
+                blast_validation=card.get("blast"),
+                annotation=card.get("annotation", ""),
+                threat_level=card.get("threat_level"),
+                show_validate_button=card.get("show_validate", False),
+            ),
+            md=6, lg=4, className="mb-3",
+        ))
+    return cols
 
 
 def _not_detected_card_cols(species_dicts):
@@ -409,6 +463,7 @@ def register_main_callbacks(app: Dash):
             # mounts its children, and ~126 pre-built cards inside it froze
             # the browser on a 129-entry watchlist (audit 2026-08-21).
             detected_cards = []
+            detected_overflow = []
             not_detected_species = []
             watched_style = hidden_style
 
@@ -442,6 +497,22 @@ def register_main_callbacks(app: Dash):
                     else:
                         confidence = "low"
 
+                    # Past the visible cap: data only, card built on click.
+                    if len(detected_cards) >= MAX_VISIBLE_CARDS:
+                        detected_overflow.append({
+                            "name": species['name'],
+                            "abundance": species['abundance'],
+                            "reads": species['reads'],
+                            "confidence": confidence,
+                            "taxid": species['taxid'],
+                            "rank": "S",
+                            "is_watched": True,
+                            "blast": blast_data,
+                            "annotation": species.get('annotation', ''),
+                            "threat_level": species.get('threat_level'),
+                        })
+                        continue
+
                     card = OrganismCard(
                         name=species['name'],
                         abundance=species['abundance'],
@@ -464,17 +535,20 @@ def register_main_callbacks(app: Dash):
             # species; capped with the shared overflow collapse so a
             # 500-entry all-detected watchlist cannot mount 500 cards)
             if detected_cards:
+                n_detected = len(detected_cards) + len(detected_overflow)
                 watched_cards_content.append(
                     html.Div([
                         html.H6([
                             html.I(className="bi bi-exclamation-triangle-fill text-danger me-2"),
-                            f"Detected ({len(detected_cards)})"
+                            f"Detected ({n_detected})"
                         ], className="mb-3 text-danger"),
                         wrap_cards_with_overflow(
                             detected_cards,
                             collapse_id="watched-cards-overflow",
                             button_id="show-more-watched-btn",
                             noun="watched organisms",
+                            overflow_data=detected_overflow,
+                            store_id="watched-cards-overflow-data",
                         ),
                     ], className="mb-4")
                 )
@@ -558,7 +632,11 @@ def register_main_callbacks(app: Dash):
             # Minimum reads to show validate button (avoid noise)
             min_reads_for_validation = config.get('min_reads_for_validation', 50)
 
+            # Cards past MAX_VISIBLE_CARDS are only collected as DATA; the
+            # overflow toggle builds them on the first click.
             organism_cards = []
+            organism_overflow = []
+            n_non_watched = 0
             for name, abundance, read_count, taxid, rank in zip(names, abundances, read_counts, taxids, ranks):
                 # Determine confidence based on read count (using configurable thresholds)
                 if read_count >= high_confidence_threshold:
@@ -575,6 +653,16 @@ def register_main_callbacks(app: Dash):
                     read_count >= min_reads_for_validation and
                     rank == "S"  # Only species-level
                 )
+
+                n_non_watched += 1
+                if n_non_watched > MAX_VISIBLE_CARDS:
+                    organism_overflow.append({
+                        "name": name, "abundance": abundance,
+                        "reads": read_count, "confidence": confidence,
+                        "taxid": taxid, "rank": rank,
+                        "show_validate": show_validate,
+                    })
+                    continue
 
                 card = OrganismCard(
                     name=name,
@@ -594,6 +682,8 @@ def register_main_callbacks(app: Dash):
                     collapse_id="organism-cards-overflow",
                     button_id="show-more-organisms-btn",
                     noun="organisms",
+                    overflow_data=organism_overflow,
+                    store_id="organism-cards-overflow-data",
                 )
             else:
                 cards_container = EmptyStateMessage(
@@ -704,42 +794,53 @@ def register_main_callbacks(app: Dash):
                 "color": "danger",
             }
 
-    # Show more organisms toggle
+    # Show more organisms toggle. The overflow cards are BUILT here on
+    # open from the paired data store and cleared on close -- a collapsed
+    # dbc.Collapse mounts its children, so shipping them eagerly cost
+    # 543 kB at 129 hidden cards and 2.1 MB at 500 (round-2 audit).
     @app.callback(
         [
             Output("organism-cards-overflow", "is_open"),
+            Output("organism-cards-overflow", "children"),
             Output("show-more-organisms-btn", "children"),
         ],
         Input("show-more-organisms-btn", "n_clicks"),
         State("organism-cards-overflow", "is_open"),
+        State("organism-cards-overflow-data", "data"),
         prevent_initial_call=True,
     )
-    def toggle_show_more_organisms(n_clicks, is_open):
-        """Toggle visibility of overflow organism cards."""
+    def toggle_show_more_organisms(n_clicks, is_open, overflow_data):
+        """Toggle visibility of overflow organism cards (built on open)."""
         if not n_clicks:
-            return no_update, no_update
+            return no_update, no_update, no_update
         new_state = not is_open
         label = "Show fewer organisms" if new_state else "Show more organisms"
-        return new_state, label
+        children = (dbc.Row(_overflow_card_cols(overflow_data))
+                    if new_state else [])
+        return new_state, children, label
 
     # Show more watched-organism cards (detected list past the cap)
     @app.callback(
         [
             Output("watched-cards-overflow", "is_open"),
+            Output("watched-cards-overflow", "children"),
             Output("show-more-watched-btn", "children"),
         ],
         Input("show-more-watched-btn", "n_clicks"),
         State("watched-cards-overflow", "is_open"),
+        State("watched-cards-overflow-data", "data"),
         prevent_initial_call=True,
     )
-    def toggle_show_more_watched(n_clicks, is_open):
-        """Toggle visibility of overflow watched-organism cards."""
+    def toggle_show_more_watched(n_clicks, is_open, overflow_data):
+        """Toggle visibility of overflow watched cards (built on open)."""
         if not n_clicks:
-            return no_update, no_update
+            return no_update, no_update, no_update
         new_state = not is_open
         label = ("Show fewer watched organisms" if new_state
                  else "Show more watched organisms")
-        return new_state, label
+        children = (dbc.Row(_overflow_card_cols(overflow_data))
+                    if new_state else [])
+        return new_state, children, label
 
     # Export modal callbacks - open modal and pre-select format
     @app.callback(
@@ -978,6 +1079,11 @@ def register_main_callbacks(app: Dash):
                 # The directory the store was loaded from is gone
                 # (archived, or the operator switched runs): clear it.
                 return {}, no_update
+            raise PreventUpdate
+
+        # Cheap directory fingerprint so an unchanged tick costs one scandir
+        # instead of a json.load per result file, forever (round-2 audit).
+        if _od_dir_unchanged(od_dir):
             raise PreventUpdate
 
         results = {}

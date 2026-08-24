@@ -16,10 +16,19 @@ from typing import List, Dict, Optional, Set, Tuple
 
 from nanometa_live.core.utils.canonical_loaders import load_manifest
 
+
+def set_cache_capacity(n_samples: int) -> None:
+    """Deferred import: loader_utils imports this module at module level,
+    so the reverse import must happen at call time."""
+    from nanometa_live.core.utils import loader_utils
+    loader_utils.set_cache_capacity(n_samples)
+
 # Module-level cache for sample detection.
 # Stores (dir_mtimes_fingerprint, cached_sample_list) keyed by main_dir.
 _sample_cache_lock = threading.Lock()
 _sample_cache: Dict[str, Tuple[Tuple[Tuple[str, float], ...], List[str]]] = {}
+# get_sample_file_mapping's mtime cache, same key discipline as above.
+_file_mapping_cache: Dict[str, Tuple[Tuple[Tuple[str, float], ...], Dict]] = {}
 
 # Output subdirectories whose mtime we monitor for cache invalidation.
 #
@@ -446,49 +455,85 @@ def get_available_samples(main_dir: str) -> List[str]:
             stored_mtimes, stored_result = cached
             if stored_mtimes == current_mtimes:
                 logging.debug("Sample detection cache hit for %s", main_dir)
+                set_cache_capacity(len(stored_result))
                 return stored_result
 
     manifest_result = _samples_from_manifest(main_dir)
     if manifest_result is not None:
         with _sample_cache_lock:
             _sample_cache[main_dir] = (current_mtimes, manifest_result)
+        set_cache_capacity(len(manifest_result))
         return manifest_result
 
-    all_samples: Set[str] = set()
-
-    # Detect from Kraken2 output
-    kraken_dir = os.path.join(main_dir, "kraken2")
-    all_samples.update(detect_samples_from_kraken(kraken_dir))
-
-    # Detect from FASTP output
-    fastp_dir = os.path.join(main_dir, "fastp")
-    all_samples.update(detect_samples_from_fastp(fastp_dir))
-
-    # Detect from seqkit output (used with chopper QC tool)
-    seqkit_dir = os.path.join(main_dir, "seqkit")
-    all_samples.update(detect_samples_from_seqkit(seqkit_dir))
-
-    # Detect from NanoPlot output
-    nanoplot_dir = os.path.join(main_dir, "nanoplot")
-    all_samples.update(detect_samples_from_nanoplot(nanoplot_dir))
-
-    # Detect from BLAST output (nanometanf v1.1+ publishes to validation/blast/)
-    blast_dir = os.path.join(main_dir, "validation", "blast")
-    if not os.path.exists(blast_dir):
-        blast_dir = os.path.join(main_dir, "blast")
-    all_samples.update(detect_samples_from_blast(blast_dir))
-
-    # Sort samples alphabetically
-    sorted_samples = sorted(list(all_samples))
-
     # Always add "All Samples" as the first option
-    result = ["All Samples"] + sorted_samples
+    result = ["All Samples"] + sorted(_detect_all_samples(main_dir))
 
     # Store in mtime cache
     with _sample_cache_lock:
         _sample_cache[main_dir] = (current_mtimes, result)
 
+    # Size the loader caches for this sample population; a fixed cap
+    # thrashed above ~33 samples (round-2 audit, 2026-08-22).
+    set_cache_capacity(len(result))
+
     return result
+
+
+def _detect_all_samples(main_dir: str) -> Set[str]:
+    """Union of sample names across every output family."""
+    all_samples: Set[str] = set()
+    all_samples.update(
+        detect_samples_from_kraken(os.path.join(main_dir, "kraken2")))
+    all_samples.update(
+        detect_samples_from_fastp(os.path.join(main_dir, "fastp")))
+    # seqkit is used with the chopper QC tool
+    all_samples.update(
+        detect_samples_from_seqkit(os.path.join(main_dir, "seqkit")))
+    all_samples.update(
+        detect_samples_from_nanoplot(os.path.join(main_dir, "nanoplot")))
+    # BLAST: nanometanf v1.1+ publishes to validation/blast/
+    blast_dir = os.path.join(main_dir, "validation", "blast")
+    if not os.path.exists(blast_dir):
+        blast_dir = os.path.join(main_dir, "blast")
+    all_samples.update(detect_samples_from_blast(blast_dir))
+    return all_samples
+
+
+def _sample_output_files(main_dir: str, sample: str) -> Dict[str, List[str]]:
+    """Per-family output files for one sample (kraken2/fastp/blast)."""
+    sample_files: Dict[str, List[str]] = {}
+
+    kraken_dir = os.path.join(main_dir, "kraken2")
+    kraken_files: List[str] = []
+    # Match nanometanf report naming, with and without batch suffix
+    for pattern in (
+        os.path.join(kraken_dir, f"{sample}.kraken2.report.txt"),
+        os.path.join(kraken_dir, f"{sample}_*.kraken2.report.txt"),
+    ):
+        kraken_files.extend(glob.glob(pattern))
+    if kraken_files:
+        sample_files['kraken2'] = sorted(kraken_files)
+
+    fastp_dir = os.path.join(main_dir, "fastp")
+    fastp_files: List[str] = []
+    for pattern in (
+        os.path.join(fastp_dir, f"{sample}.fastp.json"),
+        os.path.join(fastp_dir, f"{sample}_*.fastp.json"),
+    ):
+        fastp_files.extend(glob.glob(pattern))
+    if fastp_files:
+        sample_files['fastp'] = sorted(fastp_files)
+
+    # BLAST files (nanometanf v1.1+ publishes to validation/blast/)
+    blast_dir = os.path.join(main_dir, "validation", "blast")
+    if not os.path.exists(blast_dir):
+        blast_dir = os.path.join(main_dir, "blast")
+    blast_files = glob.glob(os.path.join(blast_dir, f"{sample}_*.blast.tsv"))
+    blast_files.extend(glob.glob(os.path.join(blast_dir, f"{sample}_*.txt")))
+    if blast_files:
+        sample_files['blast'] = sorted(blast_files)
+
+    return sample_files
 
 
 def get_sample_file_mapping(main_dir: str) -> Dict[str, Dict[str, List[str]]]:
@@ -514,55 +559,27 @@ def get_sample_file_mapping(main_dir: str) -> Dict[str, Dict[str, List[str]]]:
             ...
         }
     """
+    # Mtime cache, same idiom as get_available_samples above: the function
+    # runs 6 globs per sample per call, and the sample callbacks invoke it
+    # every tick (round-2 audit, 2026-08-22).
+    current_mtimes = _get_dir_mtimes(main_dir)
+    with _sample_cache_lock:
+        cached = _file_mapping_cache.get(main_dir)
+        if cached is not None and cached[0] == current_mtimes:
+            return cached[1]
+
     mapping = {}
 
-    # Get all samples
-    samples = get_available_samples(main_dir)
-
     # Skip "All Samples" virtual sample
-    for sample in samples:
+    for sample in get_available_samples(main_dir):
         if sample == "All Samples":
             continue
-
-        sample_files = {}
-
-        # Kraken2 files (may be multiple batches)
-        kraken_dir = os.path.join(main_dir, "kraken2")
-        # Match nanometanf report naming, with and without batch suffix
-        kraken_patterns = [
-            os.path.join(kraken_dir, f"{sample}.kraken2.report.txt"),    # nanometanf v1.2+
-            os.path.join(kraken_dir, f"{sample}_*.kraken2.report.txt"),  # nanometanf batches
-        ]
-        kraken_files = []
-        for pattern in kraken_patterns:
-            kraken_files.extend(glob.glob(pattern))
-        if kraken_files:
-            sample_files['kraken2'] = sorted(kraken_files)
-
-        # FASTP files (may be multiple batches)
-        fastp_dir = os.path.join(main_dir, "fastp")
-        # Match both with and without batch suffix
-        fastp_patterns = [
-            os.path.join(fastp_dir, f"{sample}.fastp.json"),
-            os.path.join(fastp_dir, f"{sample}_*.fastp.json")
-        ]
-        fastp_files = []
-        for pattern in fastp_patterns:
-            fastp_files.extend(glob.glob(pattern))
-        if fastp_files:
-            sample_files['fastp'] = sorted(fastp_files)
-
-        # BLAST files (nanometanf v1.1+ publishes to validation/blast/)
-        blast_dir = os.path.join(main_dir, "validation", "blast")
-        if not os.path.exists(blast_dir):
-            blast_dir = os.path.join(main_dir, "blast")
-        blast_files = glob.glob(os.path.join(blast_dir, f"{sample}_*.blast.tsv"))
-        blast_files.extend(glob.glob(os.path.join(blast_dir, f"{sample}_*.txt")))
-        if blast_files:
-            sample_files['blast'] = sorted(blast_files)
-
+        sample_files = _sample_output_files(main_dir, sample)
         if sample_files:
             mapping[sample] = sample_files
+
+    with _sample_cache_lock:
+        _file_mapping_cache[main_dir] = (current_mtimes, mapping)
 
     return mapping
 

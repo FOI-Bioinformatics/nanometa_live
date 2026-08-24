@@ -13,7 +13,7 @@ from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
 import logging
 
-from dash import Dash, Input, Output, State, ctx, no_update, html, ALL
+from dash import Dash, Input, Output, State, ctx, no_update, html, ALL, MATCH
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
@@ -57,7 +57,7 @@ from nanometa_live.app.components.pathogen_alert import (
 from nanometa_live.app.tabs.dashboard_helpers import (
     _species_discovery_df,
     _species_df_to_organisms,
-    _load_per_sample_organisms,
+
     _get_active_watchlist_entries,
     _check_pathogens_both,
     _count_input_files,
@@ -86,6 +86,8 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     build_report_payload,
 )
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+from nanometa_live.app.utils.organisms_memo import get_per_sample_organisms_cached
+from nanometa_live.app.app import background_callback_manager
 
 # Last run-state (ACTIVE/COMPLETE/STANDBY) the verdict banner rendered. A
 # state flip bypasses the banner's fingerprint gate so completion shows on
@@ -379,7 +381,7 @@ def register_dashboard_callbacks(app: Dash):
                 total_count = len(
                     [s for s in resolved_samples if s != "All Samples"]
                 )
-                taxid_to_samples = _load_per_sample_organisms(
+                taxid_to_samples = get_per_sample_organisms_cached(
                     main_dir, resolved_samples, config
                 )
                 # Keep each pathogen paired with its own samples: two
@@ -711,19 +713,10 @@ def register_dashboard_callbacks(app: Dash):
         """
         Update the pathogen alert panel with detected dangerous organisms.
 
-        This callback checks for CDC Category A/B/C agents, WHO priority
-        pathogens, and user-configured watchlist species.  Per-sample
-        attribution data (which barcodes carry each pathogen) is built from
-        individual per-sample Kraken2 reports and passed to the alert components.
-
-        Args:
-            n_intervals: Interval counter
-            config: Application configuration
-            status: Backend status
-            available_samples: List of detected sample names
-
-        Returns:
-            Tuple of (alert_panel_children, container_style)
+        Checks CDC Category A/B/C agents, WHO priority pathogens, and the
+        configured watchlist. Per-sample attribution (which barcodes carry
+        each pathogen) comes from the shared per-tick organisms memo, and
+        only when something is hit.
         """
         # Interval ticks re-render only when the fingerprint moved; direct
         # triggers (fingerprint change, watchlist toggle) always render.
@@ -757,11 +750,16 @@ def register_dashboard_callbacks(app: Dash):
             species_df = _species_discovery_df(kraken_df)
             detected_organisms = _species_df_to_organisms(species_df)
 
-            # Build per-sample attribution: taxid -> [{sample, reads, abundance, is_nc}]
-            resolved_samples = _resolve_samples(main_dir, available_samples)
-            taxid_to_samples = _load_per_sample_organisms(
-                main_dir, resolved_samples, config
-            )
+            # Attribution only when something is hit (the memoized check
+            # answers that for free); an all-clear tick used to pay S
+            # kraken loads here unconditionally.
+            dangerous, subthreshold = _check_pathogens_both(
+                detected_organisms, config)
+            taxid_to_samples = {}
+            if dangerous or subthreshold:
+                taxid_to_samples = get_per_sample_organisms_cached(
+                    main_dir, _resolve_samples(main_dir, available_samples),
+                    config)
 
             # Get only ENABLED watchlist entries for alerting
             watched_species = _get_active_watchlist_entries(config)
@@ -778,6 +776,39 @@ def register_dashboard_callbacks(app: Dash):
         except Exception as e:
             logger.error(f"Error updating pathogen alert panel: {e}")
             return html.Div(), {"display": "none"}
+
+    @app.callback(
+        Output({"type": "attr-popover-body", "taxid": MATCH}, "children"),
+        Input({"type": "attr-popover", "taxid": MATCH}, "is_open"),
+        State("app-config", "data"),
+        State("available-samples", "data"),
+        prevent_initial_call=True,
+    )
+    def fill_attribution_popover(is_open, config, available_samples):
+        """Build the attribution popover's per-sample rows ON OPEN.
+
+        The eager version serialized one row per sample per card on every
+        tick (17.8k-55k components at 24-96 barcodes x 129 hits, round-2
+        audit). The rows come from the shared per-tick organisms memo, so
+        opening costs one dict lookup; the popover id carries the resolved
+        report taxid the card's chips were built from.
+        """
+        if not is_open:
+            return []
+        try:
+            taxid = int(ctx.triggered_id.get("taxid"))
+        except (TypeError, ValueError, AttributeError):
+            raise PreventUpdate
+        main_dir = resolve_outdir_for_fingerprint(config)
+        if not main_dir:
+            raise PreventUpdate
+        resolved = _resolve_samples(main_dir, available_samples)
+        taxid_to_samples = get_per_sample_organisms_cached(
+            main_dir, resolved, config)
+        from nanometa_live.app.components.pathogen_alert import (
+            attribution_popover_rows,
+        )
+        return attribution_popover_rows(taxid_to_samples.get(taxid, []))
 
     # Pattern-matching callbacks for pathogen alert buttons
     @app.callback(
@@ -1004,18 +1035,41 @@ def register_dashboard_callbacks(app: Dash):
         if trigger == "export-cancel-btn":
             return False
         if trigger == "export-generate-btn":
-            return False  # Close after generation starts
+            # Stay open: the background export reports its progress and its
+            # terminal status INSIDE this modal. Closing here rendered the
+            # status message into a closed modal (round-2 audit).
+            return True
         return is_open
 
     @app.callback(
-        Output("export-status-message", "children"),
+        [
+            Output("export-status-message", "children"),
+            Output("notification-trigger", "data", allow_duplicate=True),
+        ],
         Input("export-generate-btn", "n_clicks"),
         State("export-output-dir", "value"),
         State("export-include-raw", "value"),
         State("app-config", "data"),
-        prevent_initial_call=True
+        # Minutes of raw-file copying (up to the 5 GiB cap) plus chart and
+        # report builds ran synchronously on the request thread until
+        # round 2. Safe in a worker process: the only singleton touch on
+        # this path, _screen_watchlist, self-hydrates its (empty) local
+        # WatchlistManager from the config + watchlist files -- the second
+        # sanctioned worker pattern in test_background_callback_contract.
+        background=True,
+        manager=background_callback_manager,
+        progress=[
+            Output("export-progress-area", "style"),
+            Output("export-progress", "value"),
+            Output("export-progress-label", "children"),
+        ],
+        running=[
+            (Output("export-generate-btn", "disabled"), True, False),
+            (Output("export-cancel-btn", "disabled"), True, False),
+        ],
+        prevent_initial_call=True,
     )
-    def generate_export(n_clicks, output_dir, include_raw, config):
+    def generate_export(set_progress, n_clicks, output_dir, include_raw, config):
         if not n_clicks or not config:
             raise PreventUpdate
 
@@ -1023,14 +1077,17 @@ def register_dashboard_callbacks(app: Dash):
             return html.Div(
                 "Please specify an output directory.",
                 className="text-danger"
-            )
+            ), no_update
 
         main_dir = resolve_outdir_for_fingerprint(config)
         if not main_dir:
             return html.Div(
                 "No results directory configured.",
                 className="text-danger"
-            )
+            ), no_update
+
+        def _progress(percent, label):
+            set_progress(({"display": "block"}, percent, label))
 
         try:
             from nanometa_live.core.export.report_generator import ReportGenerator
@@ -1039,17 +1096,26 @@ def register_dashboard_callbacks(app: Dash):
             report_path = generator.generate(
                 output_dir=output_dir.strip(),
                 include_raw=include_raw,
+                progress_cb=_progress,
             )
             return html.Div([
                 html.I(className="bi bi-check-circle-fill text-success me-2"),
                 f"Report exported to: {report_path}"
-            ], className="text-success mt-2")
+            ], className="text-success mt-2"), {
+                "title": "Export complete",
+                "message": f"Report exported to {report_path}",
+                "color": "success",
+            }
         except Exception as e:
             logger.error("Export failed: %s", e)
             return html.Div(
                 f"Export failed: {e}",
                 className="text-danger mt-2"
-            )
+            ), {
+                "title": "Export failed",
+                "message": str(e),
+                "color": "danger",
+            }
 
     # ========================================================================
     # Pathogen Modal Print (clientside)

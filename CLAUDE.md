@@ -543,6 +543,61 @@ each now has a guard and a test:
   parses the YAML at most twice (pinned in `tests/test_watchlist_upload.py`).
   The collision confirm keeps only {path, filename} in the pending Store.
 
+**Scale invariants, round 2 (2026-08-24 audit; do not regress).** Round 2
+added the barcode axis (24-96 samples) with two acceptance criteria: the
+interface never freezes, and the operator always sees progress. The guards:
+
+- **Per-tick work is built once and shared.** Loader cache capacity scales
+  with the detected sample count (`set_cache_capacity` in `loader_utils`,
+  called from `sample_detector`; a fixed cap of 100 evicted two thirds of
+  ~300 live keys at 96 barcodes on every cleanup). Per-sample organism
+  attribution goes through `app/utils/organisms_memo.py` — the verdict
+  banner, alert panel, dashboard alerts, modal breakdown and popover fill
+  all read the one memo (epoch + negative-control keyed; epoch 0 bypasses).
+  The validation parser is shared per results dir
+  (`get_validation_parser`); construct `BlastValidationParser` directly
+  only in tests. Pinned in `tests/test_tick_call_counts.py` (S=96: one
+  organisms build across three call sites, zero parser constructions on a
+  warm tick, zero globs for the processed count) and
+  `tests/test_cache_capacity_scaling.py`.
+- **The fingerprint keys on `results-dir-path`, not app-config.**
+  `derive_results_dir` (callbacks/status.py) emits only when the resolved
+  dir actually changes; `compute_results_fingerprint` takes that Store as
+  Input with app-config demoted to State. A watchlist toggle must never
+  re-walk the results tree (the old app-config Input made every toggle
+  fire the whole fingerprint cascade). Pinned in
+  `tests/test_fingerprint_dir_gate.py` and the walk-count test in
+  `test_tick_call_counts.py`.
+- **Browser stores are slim; disk files are full.** `export_config(
+  slim=True)` (six fields, ~125 B/entry) is what every `dcc.Store` writer
+  ships — the full form was 96-99% of a 189-721 kB app-config re-uploaded
+  by 24 per-tick callbacks. `_save_last_session` re-fattens the custom
+  block from the live singleton via `_full_watchlist_block` and never
+  writes slim data over a full persisted block. The taxmap store ships
+  `slim_mapping_store_payload`. Budgets pinned in
+  `tests/test_payload_budgets.py`.
+- **Click paths never block the request thread without feedback.** Export
+  Results, QC plot export, taxonomy lookup, the path pickers and watchlist
+  import are `background=True`; Start/Stop run main-process daemon threads
+  (`start_async`/`stop_async` — BackendManager owns subprocess handles a
+  DiskcacheManager worker process cannot hold) with a transition guard and
+  a terminal toast via `surface_backend_transition`. Enable/Disable All
+  persists once per batch (`set_entries_enabled`), and watchlist discovery
+  consults its corpus-fingerprint cache. Every `background=True` callback
+  must declare `running=` or `progress=` —
+  `tests/test_background_callback_contract.py` is the fence.
+- **Tab gating is display-only.** Sankey/Sunburst, QC figures, the
+  per-sample QC table and QC cards skip while their tab is hidden and
+  render fresh on activation. The detection chain (status cache, verdict
+  banner, alerts, alert panel, readiness, fingerprint) is NEVER gated on
+  the visible tab; `tests/test_tab_gating.py` introspects the callback map
+  to enforce both directions permanently.
+- **Caps hide cards, never state.** The alert panel caps at
+  `ALERT_PANEL_CARD_CAP` (30, threat-sorted) with an explicit "…and N
+  more" row; attribution popovers fill on open (MATCH callback from the
+  memo); overflow organism cards ship as data and render on the Show-more
+  click. The verdict banner stays uncapped and aggregate-scoped.
+
 Sources searched in priority order:
 
 1. Project: `{project_dir}/watchlists/*.yaml`
@@ -1196,8 +1251,14 @@ Raw files copied are `_RAW_SUBDIRS`
 AppleDouble-filtered, skipped above `export_max_raw_bytes` (default 5 GiB).
 Plotly is inlined for offline self-containment; `offline_mode` suppresses the
 CDN fallback so an offline report never emits a dead `<script src>`. The export
-runs synchronously in the callback ON PURPOSE — a background callback would
-empty the `WatchlistManager` singleton and re-break the screen.
+runs as a `background=True` worker with staged `set_progress` (since round 2,
+2026-08-24; it previously ran synchronously because a worker's
+`WatchlistManager` singleton is empty). That objection no longer holds:
+`_screen_watchlist` self-hydrates its empty local singleton via
+`wm.load_config(self.config)` — the second sanctioned worker pattern in
+`tests/test_background_callback_contract.py`. The export modal STAYS OPEN
+during the run showing the progress bar, and the terminal status renders
+inside it plus a page toast; never mutate the LIVE singleton from the worker.
 
 ### macOS bind-mount gotcha
 
@@ -1249,7 +1310,7 @@ The `nanometa` conda env has Dash but neither `pytest-xdist` nor `pytest-cov`,
 so run the plain suite there with `-o addopts=""` and the coverage gate from
 the `nf-core` env, which has both.
 
-4023 tests as of 2026-08-21 (~110 skipped by default; measured coverage 75%).
+4142 tests as of 2026-08-24 (~128 skipped by default; measured coverage 75%).
 `pytest.ini` enforces a
 `fail_under = 74` floor on coverage runs only (the default `pytest` dev loop
 does not load coverage); the floor ratchets up as coverage rises — keep it ~1

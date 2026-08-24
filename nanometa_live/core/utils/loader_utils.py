@@ -37,8 +37,30 @@ RESULTS_WATCHED_SUBDIRS = (
 
 # Cache configuration
 CACHE_TTL_SECONDS = 30  # Time-to-live for cached data
-CACHE_MAX_ENTRIES = 100  # Maximum cache entries to prevent unbounded growth
+# Floor for the cache caps; raised dynamically by set_cache_capacity() from
+# the detected sample count. A fixed cap of 100 against ~300 live keys at 96
+# barcodes (kraken/seqkit/fastp per sample plus aggregates) evicted two
+# thirds of the cache on every cleanup pass, turning every cached per-tick
+# path periodically cold (round-2 audit, 2026-08-22).
+CACHE_MAX_ENTRIES = 100
 CACHE_CLEANUP_INTERVAL_SECONDS = 60  # Run cleanup every 60 seconds
+
+
+def set_cache_capacity(n_samples: int) -> None:
+    """Size the loader caches to hold every live key for ``n_samples``.
+
+    ~3 per-loader keys per sample (kraken/seqkit/fastp) plus aggregates and
+    headroom; the per-file report-frame LRU is sized for ~20 batches per
+    barcode. Monotonic within a process: a transient short detection (e.g.
+    mid-rewrite) must not collapse the cap under a fuller population seen
+    earlier. Idempotent and cheap; called from sample detection whenever
+    the count changes.
+    """
+    global CACHE_MAX_ENTRIES
+    CACHE_MAX_ENTRIES = max(CACHE_MAX_ENTRIES, 100, 4 * n_samples + 50)
+    from nanometa_live.core.utils import classification_loaders
+    classification_loaders._REPORT_FRAME_CACHE_MAX = max(
+        classification_loaders._REPORT_FRAME_CACHE_MAX, 512, 24 * n_samples)
 
 # File stability configuration (for real-time mode)
 FILE_STABILITY_CHECK_INTERVAL_MS = 200  # Wait time between size checks
