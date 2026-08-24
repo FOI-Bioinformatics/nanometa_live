@@ -598,6 +598,53 @@ interface never freezes, and the operator always sees progress. The guards:
   memo); overflow organism cards ship as data and render on the Show-more
   click. The verdict banner stays uncapped and aggregate-scoped.
 
+**Round-3 invariants (2026-08-24/25 audit; do not regress).** The
+data-volume, memory and truthfulness pass, verified live on a real
+realtime run plus failure drills:
+
+- **The verdict knows about run health.** `select_verdict` takes
+  `pipeline_error` (from backend `pipeline_status == "error"`; a user
+  Stop clears it), `results_dir_lost` (dir previously fingerprinted,
+  now unreadable) and `stale_samples` (from `core/utils/staleness.py`,
+  fed by the loader's last-good fallback path). Precedence: a detection
+  always wins (error noted in its subtitle); `pipeline_error` outranks
+  every other state INCLUDING `overall_status_starting` (a crash during
+  startup must not show eternal SCREENING); the ERROR run-state
+  bypasses the banner's render gate like ACTIVE (the first post-crash
+  render is transitional and must not freeze). The exported report has
+  the same branch, reading `final_status` that
+  `_apply_terminal_workflow_status` records into `.nanometa.run.json`.
+  Staleness scopes normalize with realpath (macOS /tmp symlink).
+- **No background callback may take a per-tick Input.** DiskcacheManager
+  spawns an OS process per invocation and leaks parent-side pipe fds
+  (~5/spawn, measured 4,500+ pipes in 2 h). Per-tick work runs behind a
+  synchronous main-process gate that bumps a due Store
+  (`readiness-recompute-due`, `main-results-due`, `qc-stats-due`), and
+  the periodic readiness probes run in a daemon thread with no spawn.
+  `tests/test_readiness_spawn_gate.py` greps every background decorator
+  and fails on `update-interval` Inputs.
+- **Batch-axis loaders are cached on immutability.** seqkit batch TSVs
+  and kraken batch reports are write-once: per-file frame caches
+  (`seqkit_batch_cache`, `_report_frame_cache`) plus the per-sample
+  accumulation cache (`report_accumulation.py`, byte-identical via
+  contiguous-segment merge with an interleaved-names fallback) make a
+  rebuild O(changed sample). The latest-batch path and the validation
+  batch-id enumeration memoize on directory mtimes (adding a file bumps
+  the dir mtime; in-place rewrites bump the FILE mtime and are covered
+  by per-file keys -- do not swap one for the other).
+- **Caches are byte-budgeted and inventoried.** The frame caches honor
+  `NANOMETA_FRAME_CACHE_MB` (default 2048) with eager same-path
+  supersession; `_cache_and_return` stores ONE shared frame (consumers
+  copy before mutating); every module-level cache must be wired into
+  BOTH `clear_all_loader_caches` and `instrument.reset_caches` --
+  `tests/test_cache_inventory.py` greps for unwired cache-shaped
+  assignments and is the fence.
+- **A saturated fingerprint degrades, never freezes.** Past
+  `_MAX_FINGERPRINT_FILES` the stat pass stops but the TTL time-bucket
+  is folded into the fingerprint, so both cache layers re-validate
+  every `CACHE_TTL_SECONDS` instead of serving a late in-place rewrite
+  stale forever.
+
 Sources searched in priority order:
 
 1. Project: `{project_dir}/watchlists/*.yaml`
@@ -1310,7 +1357,7 @@ The `nanometa` conda env has Dash but neither `pytest-xdist` nor `pytest-cov`,
 so run the plain suite there with `-o addopts=""` and the coverage gate from
 the `nf-core` env, which has both.
 
-4142 tests as of 2026-08-24 (~128 skipped by default; measured coverage 75%).
+4284 tests as of 2026-08-25 (~128 skipped by default; measured coverage ~76%).
 `pytest.ini` enforces a
 `fail_under = 74` floor on coverage runs only (the default `pytest` dev loop
 does not load coverage); the floor ratchets up as coverage rises — keep it ~1
