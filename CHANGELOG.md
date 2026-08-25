@@ -4,7 +4,7 @@ All notable changes to Nanometa Live are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.13.0] - 2026-08-25
 
 Round three of the hardening audits (2026-08-24/25): the data-volume axis
 (large reports, hundreds of realtime batches, thousands of validation
