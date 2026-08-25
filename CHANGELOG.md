@@ -15,6 +15,7 @@ drills (kill -9, vanished results volume, corrupt reports, port
 conflicts, double-clicks).
 
 ### Fixed
+- The sample selector's "produced no output files" marker fired on healthy realtime samples: the file mapping recognised neither the cumulative Kraken2 report (written first in realtime mode) nor seqkit QC output, so a sample whose data was rendering in the Organisms tab was simultaneously labelled dataless. Both now count, and sample discovery also sees the realtime seqkit batch_stats layout. (Companion nanometanf fix: the unclassified/ bin is one sample, not one sample per chunk file.)
 - **The verdict banner never lies about run health.** New PIPELINE ERROR
   and RESULTS UNAVAILABLE states (both amber/red, never green or grey):
   a pipeline killed mid-run rendered a green ALL CLEAR before, and an

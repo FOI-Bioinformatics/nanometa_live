@@ -290,3 +290,36 @@ class TestFastpCardPayloadsCache:
         from nanometa_live.core.utils import qc_loaders
         scoped = qc_loaders.load_fastp_card_payloads(str(tmp_path), "barcode1")
         assert len(scoped) == 1
+
+
+class TestRealtimeOutputsCountAsData:
+    """The dataless marker must not fire on a sample whose only artifacts
+    are the realtime-primary files.
+
+    Live find (2026-08-25 verify run): early in a realtime run a sample has
+    only <sample>.cumulative.kraken2.report.txt (written first) and seqkit
+    batch stats -- no standard-named report, no fastp. _sample_output_files
+    matched neither, so the selector showed "produced no output files.
+    ... nothing was written" for four samples whose cumulative reports were
+    on disk and rendering in the Organisms tab at that moment."""
+
+    def test_cumulative_only_sample_is_mapped(self, tmp_path):
+        kraken = tmp_path / "kraken2"
+        kraken.mkdir()
+        (kraken / "barcode05.cumulative.kraken2.report.txt").write_text("x")
+        from nanometa_live.core.utils import sample_detector
+        mapping = sample_detector.get_sample_file_mapping(str(tmp_path))
+        assert "barcode05" in mapping
+        assert mapping["barcode05"]["kraken2"]
+
+    def test_seqkit_only_sample_is_mapped(self, tmp_path):
+        seqkit = tmp_path / "seqkit"
+        seqkit.mkdir()
+        (seqkit / "barcode06.tsv").write_text("x")
+        batch = seqkit / "barcode07" / "batch_stats"
+        batch.mkdir(parents=True)
+        (batch / "barcode07_batch0.tsv").write_text("x")
+        from nanometa_live.core.utils import sample_detector
+        mapping = sample_detector.get_sample_file_mapping(str(tmp_path))
+        assert "barcode06" in mapping and mapping["barcode06"]["seqkit"]
+        assert "barcode07" in mapping and mapping["barcode07"]["seqkit"]
