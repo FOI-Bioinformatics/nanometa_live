@@ -70,7 +70,10 @@ class TestPortInUseMessage:
     def test_run_app_reports_the_port(self):
         from nanometa_live.app.__main__ import _run_server
         app = MagicMock()
-        app.run.side_effect = OSError(48, "Address already in use")
+        import errno
+        # errno.EADDRINUSE, not a literal: 48 on macOS but 98 on Linux, so a
+        # hard-coded value escapes the handler on the CI runner.
+        app.run.side_effect = OSError(errno.EADDRINUSE, "Address already in use")
         with pytest.raises(SystemExit):
             with patch("builtins.print") as fake_print:
                 _run_server(app, host="127.0.0.1", port=8050, debug=False)
