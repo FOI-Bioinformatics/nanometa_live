@@ -145,6 +145,8 @@ def test_export_no_clicks_is_noop():
 # ---------------------------------------------------------------------------
 
 import json
+import os
+import time
 
 from nanometa_live.core.parsers.blast_validation_parser import ValidationParser
 
@@ -208,6 +210,8 @@ def test_minimap2_and_blast_coexist_for_same_taxid(tmp_path):
     (blast / "barcode14_taxid263.blast.tsv").write_text(
         "read1\tNZ_CP009607.1\t98.0\t500\t0\t0\t1\t500\t1\t500\t1e-50\t900\n"
     )
+    _bd = time.time() - 120
+    os.utime(blast / "barcode14_taxid263.blast.tsv", (_bd, _bd))
     results = ValidationParser(str(tmp_path)).get_validation_results()
     pair = [r for r in results if r.sample_id == "barcode14" and r.taxid == 263]
     methods = {r.validation_method for r in pair}

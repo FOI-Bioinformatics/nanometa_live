@@ -5,8 +5,8 @@ Functions for loading BLAST and minimap2 validation results from
 nanometanf output, supporting both aggregate JSON and legacy tabular formats.
 """
 
-import glob
 import json
+import re
 import logging
 import os
 from typing import Any, Dict, List, Optional
@@ -62,7 +62,57 @@ def load_validation_data(
     return [r.to_dict() for r in results]
 
 
+_BLAST_TSV_TAXID_RE = re.compile(r"_(?:taxid)?(\d+)\.blast\.tsv$")
+
+
+def _index_blast_dir(blast_dir: str) -> Dict[int, List[str]]:
+    """One directory listing -> {taxid: [paths]}, both naming layouts."""
+    index: Dict[int, List[str]] = {}
+    try:
+        names = os.listdir(blast_dir)
+    except OSError:
+        return index
+    for name in sorted(names):
+        m = _BLAST_TSV_TAXID_RE.search(name)
+        if m:
+            index.setdefault(int(m.group(1)), []).append(
+                os.path.join(blast_dir, name))
+    return index
+
+
 def load_blast_validation_data(
+    main_dir: str,
+    watchlist: List[Dict[str, Any]],
+    sample: Optional[str] = None
+) -> Dict[int, Dict[str, Any]]:
+    """Cached wrapper around the uncached loader (round 3).
+
+    Runs on the main-tab poll path once per tick; the standard mtime-cache
+    idiom (epoch fast-path within one poll, path fingerprint across polls)
+    makes an unchanged tick a zero-I/O hit. The watchlist's taxid set is
+    part of the key, so a watchlist edit can never be served from the
+    previous entry. Returns per-call copies -- callers annotate the dicts.
+    """
+    from nanometa_live.core.utils.loader_utils import (
+        _check_mtime_cache, _store_mtime_cache,
+    )
+
+    main_dir = resolve_analysis_directory(main_dir)
+    taxid_digest = hash(tuple(sorted(
+        int(s["taxid"]) for s in watchlist
+        if s.get("taxid") is not None and str(s["taxid"]).lstrip("-").isdigit()
+    )))
+    cache_key = f"blastval:{main_dir}:{sample}:{taxid_digest}"
+    fingerprint_paths = [os.path.join(main_dir, "validation")]
+    cached = _check_mtime_cache(cache_key, fingerprint_paths)
+    if cached is not None:
+        return {tid: dict(entry) for tid, entry in cached.items()}
+    result = _load_blast_validation_data_uncached(main_dir, watchlist, sample)
+    _store_mtime_cache(cache_key, fingerprint_paths, result)
+    return {tid: dict(entry) for tid, entry in result.items()}
+
+
+def _load_blast_validation_data_uncached(
     main_dir: str,
     watchlist: List[Dict[str, Any]],
     sample: Optional[str] = None
@@ -106,6 +156,17 @@ def load_blast_validation_data(
     # on-disk blast.tsv results from the Organisms tab's BLAST badge.
     results = {}
 
+    # First-wins map, replacing the linear watchlist scan per entry
+    # (12,384 aggregate entries x 129 watchlist = 1.6 M comparisons).
+    wl_by_taxid: Dict[int, Dict[str, Any]] = {}
+    for s in watchlist:
+        try:
+            tid_key = int(s["taxid"]) if s.get("taxid") is not None else None
+        except (ValueError, TypeError):
+            tid_key = None
+        if tid_key is not None and tid_key not in wl_by_taxid:
+            wl_by_taxid[tid_key] = s
+
     canonical_data = load_canonical_validation(main_dir)
     if canonical_data is not None:
         logging.debug("Using canonical validation results")
@@ -116,11 +177,7 @@ def load_blast_validation_data(
                 continue
             for tid_str, entry in taxid_entries.items():
                 tid = int(tid_str)
-                watchlist_match = None
-                for s in watchlist:
-                    if s.get("taxid") and int(s["taxid"]) == tid:
-                        watchlist_match = s
-                        break
+                watchlist_match = wl_by_taxid.get(tid)
                 if not watchlist_match:
                     continue
 
@@ -159,11 +216,7 @@ def load_blast_validation_data(
                     if tid in results:
                         continue
                     # Check if this taxid is in the watchlist
-                    watchlist_match = None
-                    for s in watchlist:
-                        if s.get('taxid') and int(s['taxid']) == tid:
-                            watchlist_match = s
-                            break
+                    watchlist_match = wl_by_taxid.get(tid)
                     if not watchlist_match:
                         continue
 
@@ -220,6 +273,7 @@ def load_blast_validation_data(
     # OPTIMIZATION: Load Kraken data ONCE outside the loop (was loading per-species)
     # This provides ~50x speedup for typical watchlists with 50+ species
     kraken_df = load_kraken_data(main_dir, sample)
+    blast_index: Optional[Dict[int, List[str]]] = None
 
     for species in watchlist:
         taxid = species.get('taxid')
@@ -240,20 +294,16 @@ def load_blast_validation_data(
 
         # Find BLAST result files for this taxid. nanometanf names them with
         # a "taxid" prefix (barcode01_taxid562.blast.tsv); the bare-number
-        # form is the legacy layout. The old glob matched only the legacy
-        # form, so this tier never found a current pipeline file.
-        blast_files = []
-
-        if sample is None or sample == "All Samples":
-            for pattern in (f"*_taxid{taxid}.blast.tsv", f"*_{taxid}.blast.tsv"):
-                blast_files.extend(glob.glob(os.path.join(blast_dir, pattern)))
-        else:
-            blast_files.append(
-                os.path.join(blast_dir, f"{sample}_taxid{taxid}.blast.tsv")
-            )
-            blast_files.append(
-                os.path.join(blast_dir, f"{sample}_{taxid}.blast.tsv")
-            )
+        # form is the legacy layout. Round 3: the directory is listed once
+        # and indexed by taxid -- two globs per watchlist entry enumerated
+        # the whole (potentially tens of thousands of files) dir each time.
+        if blast_index is None:
+            blast_index = _index_blast_dir(blast_dir)
+        blast_files = [
+            fp for fp in blast_index.get(taxid, [])
+            if sample is None or sample == "All Samples"
+            or os.path.basename(fp).startswith(f"{sample}_")
+        ]
 
         # Count validated reads from all matching files
         unique_reads = set()

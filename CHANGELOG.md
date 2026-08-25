@@ -4,7 +4,72 @@ All notable changes to Nanometa Live are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.13.0] - 2026-08-25
+
+Round three of the hardening audits (2026-08-24/25): the data-volume axis
+(large reports, hundreds of realtime batches, thousands of validation
+pairs), memory and endurance on a field laptop, and truthfulness under
+failure. Verified live: a 2h11m GUI-driven realtime run against the real
+Bioshield database with the 129-entry watchlist, followed by failure
+drills (kill -9, vanished results volume, corrupt reports, port
+conflicts, double-clicks).
+
+### Fixed
+- The sample selector's "produced no output files" marker fired on healthy realtime samples: the file mapping recognised neither the cumulative Kraken2 report (written first in realtime mode) nor seqkit QC output, so a sample whose data was rendering in the Organisms tab was simultaneously labelled dataless. Both now count, and sample discovery also sees the realtime seqkit batch_stats layout. (Companion nanometanf fix: the unclassified/ bin is one sample, not one sample per chunk file.)
+- **The verdict banner never lies about run health.** New PIPELINE ERROR
+  and RESULTS UNAVAILABLE states (both amber/red, never green or grey):
+  a pipeline killed mid-run rendered a green ALL CLEAR before, and an
+  unplugged results volume rendered STANDBY. A detection still outranks
+  the error, with "pipeline error - coverage is partial" appended.
+  Samples served from the last-good fallback are counted in the
+  subtitle ("N samples serving stale data") via a staleness registry
+  the loader feeds; the exported report carries the same PIPELINE ERROR
+  branch, reading the terminal status the backend now records into
+  .nanometa.run.json. A fingerprint that saturates its stat cap
+  degrades to TTL refresh instead of freezing forever; mid-write
+  blast.tsv reads are gated; a corrupt toggle-state file warns and
+  toasts instead of silently re-enabling everything.
+- **Poll cost is O(changed data), not O(total data).** Measured on the
+  extended perf harness: an incremental tick at 24 barcodes x 100
+  batches dropped from 19.6 s / 2,414 file reads to 1.5 s / 119; a
+  quiet tick at the 96-barcode envelope with 12,384 validation pairs is
+  1.4 s with zero re-reads. Per-batch seqkit frames, the latest-batch
+  path, per-sample aggregate accumulation (byte-identical, pinned by
+  frame-equality tests), the validation parser and the main-tab
+  validation loader are all cached on the standard mtime idiom; the
+  batch drill-down selector is dir-mtime gated and capped with an
+  explicit "latest N of M" row.
+- **Memory plateaus on an overnight run.** The parsed-frame caches are
+  byte-budgeted (default 2 GB; the envelope measured 3.8 GB resident
+  before) with eager eviction of superseded report versions; each load
+  stores one shared frame instead of three copies; the organisms memo
+  keeps two epochs instead of four; the PAF-breadth, read-length and
+  DB-taxonomy caches are bounded (all previously unbounded); old log
+  rotation families are pruned at launch. A cache-inventory test fails
+  on any module-level cache not wired into both reset paths.
+- **No background worker spawns per tick.** Three background callbacks
+  (readiness, Organisms rebuild, QC summary) had per-tick Inputs, so
+  DiskcacheManager spawned OS processes every tick just to evaluate
+  their guards -- measured live as a 28-34 fds/min pipe leak (4,500+
+  after two hours). All three now run behind synchronous main-process
+  gates; the periodic readiness probes run in a daemon thread with no
+  spawn at all. A structural test fails any background callback that
+  acquires a per-tick Input. Post-fix rate: ~2 fds/min under load.
+- Operational resilience: a browser refresh mid-run restores the
+  dashboard within one tick (the applied config is re-seeded from the
+  live backend); Export/bundle/rescan workers are cancellable and a
+  watchdog re-enables a modal whose worker died; Start is gated on a
+  5 GB disk floor (override: NANOMETA_ALLOW_LOW_DISK=1); double-clicked
+  Archive can no longer split results across two archive folders;
+  port-in-use prints an actionable message; the realtime inactivity
+  timeout uses the monotonic clock so a laptop lid-close cannot kill a
+  healthy run on wake.
+
+### Added
+- Perf harness: taxa/batches/validation-pairs sweep axes, a validation
+  fixture builder verified against the real parser, tracemalloc and
+  cache-byte columns with a memory gate, and committed exercise-profile
+  baseline cells at the 24- and 96-barcode envelopes.
 
 ## [0.12.0] - 2026-08-24
 

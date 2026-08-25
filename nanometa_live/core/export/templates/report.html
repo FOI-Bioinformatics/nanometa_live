@@ -243,11 +243,23 @@
 
   {% if critical_threats or high_threats %}
   <div class="decision-banner banner-action">
-    ACTION REQUIRED - {{ (critical_threats | length) + (high_threats | length) }} high-priority organism{{ "s" if (critical_threats | length) + (high_threats | length) != 1 else "" }} detected
+    ACTION REQUIRED - {{ (critical_threats | length) + (high_threats | length) }} high-priority organism{{ "s" if (critical_threats | length) + (high_threats | length) != 1 else "" }} detected{% if data.pipeline_error %} (pipeline error - coverage is partial){% endif %}
   </div>
   {% elif detected_threats %}
   <div class="decision-banner banner-review">
-    REVIEW RECOMMENDED - {{ detected_threats | length }} watched organism{{ "s" if detected_threats | length != 1 else "" }} detected
+    REVIEW RECOMMENDED - {{ detected_threats | length }} watched organism{{ "s" if detected_threats | length != 1 else "" }} detected{% if data.pipeline_error %} (pipeline error - coverage is partial){% endif %}
+  </div>
+  {% elif data.pipeline_error %}
+  {#
+    A dead pipeline must never render as a clean result. Mirrors
+    dashboard_helpers.select_verdict -> PIPELINE_ERROR (round 3): a
+    detection above still wins, with the failure noted; every non-detection
+    outcome is replaced by this banner, because "no watched organisms
+    detected" over a run that stopped at 40% of its samples is a false
+    negative in the artifact that leaves the building.
+  #}
+  <div class="decision-banner banner-review">
+    PIPELINE ERROR - results reflect only data classified before the failure{% if data.pipeline_error_detail %} ({{ data.pipeline_error_detail }}){% endif %}
   </div>
   {% elif not data.watched_results %}
   {#

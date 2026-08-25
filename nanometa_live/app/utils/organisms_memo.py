@@ -73,6 +73,20 @@ def get_per_sample_organisms_cached(
     result = _load_impl(main_dir, available_samples, config)
     with _lock:
         _memo[key] = result
+        # Round 3: the epoch is in the key and bumps every batch, so the
+        # 4-slot LRU held four dead epochs' worth of 50-120 MB payloads.
+        # Keep the current and previous epoch only (the previous covers
+        # callbacks still in flight across a bump).
+        _evict_stale_epochs(current_epoch=key[2])
         while len(_memo) > _MEMO_MAX:
             _memo.popitem(last=False)
     return result
+
+def _evict_stale_epochs(current_epoch) -> None:
+    """Drop memo entries more than one epoch behind. Caller holds the lock
+    or is the single writer path."""
+    if not isinstance(current_epoch, int):
+        return
+    for key in [k for k in _memo
+                if isinstance(k[2], int) and k[2] < current_epoch - 1]:
+        _memo.pop(key, None)

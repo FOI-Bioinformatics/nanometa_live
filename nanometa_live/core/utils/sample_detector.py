@@ -379,6 +379,15 @@ def detect_samples_from_seqkit(seqkit_dir: str) -> Set[str]:
         samples.add(sample_name)
         logging.debug(f"Detected sample from seqkit: {sample_name}")
 
+    # Realtime incremental layout: seqkit/<sample>/batch_stats/*.tsv is
+    # written before the flat <sample>.tsv exists, so early in a realtime
+    # run it is the only seqkit evidence of the sample.
+    for stats_file in glob.glob(
+            os.path.join(seqkit_dir, "*", "batch_stats", "*.tsv")):
+        sample_name = os.path.basename(
+            os.path.dirname(os.path.dirname(stats_file)))
+        samples.add(sample_name)
+
     return samples
 
 
@@ -505,14 +514,31 @@ def _sample_output_files(main_dir: str, sample: str) -> Dict[str, List[str]]:
 
     kraken_dir = os.path.join(main_dir, "kraken2")
     kraken_files: List[str] = []
-    # Match nanometanf report naming, with and without batch suffix
+    # Match nanometanf report naming: standard, batch-suffixed, and the
+    # realtime cumulative report -- which is written FIRST in realtime mode
+    # and may be the only top-level report a sample has early in a run.
+    # Without it the selector's "produced no output files" marker fired on
+    # samples whose cumulative data was rendering at that moment.
     for pattern in (
         os.path.join(kraken_dir, f"{sample}.kraken2.report.txt"),
+        os.path.join(kraken_dir, f"{sample}.cumulative.kraken2.report.txt"),
         os.path.join(kraken_dir, f"{sample}_*.kraken2.report.txt"),
     ):
         kraken_files.extend(glob.glob(pattern))
     if kraken_files:
         sample_files['kraken2'] = sorted(kraken_files)
+
+    # seqkit QC (mutually exclusive with fastp): flat per-sample TSV plus
+    # the realtime incremental batch stats.
+    seqkit_dir = os.path.join(main_dir, "seqkit")
+    seqkit_files: List[str] = []
+    for pattern in (
+        os.path.join(seqkit_dir, f"{sample}.tsv"),
+        os.path.join(seqkit_dir, sample, "batch_stats", "*.tsv"),
+    ):
+        seqkit_files.extend(glob.glob(pattern))
+    if seqkit_files:
+        sample_files['seqkit'] = sorted(seqkit_files)
 
     fastp_dir = os.path.join(main_dir, "fastp")
     fastp_files: List[str] = []

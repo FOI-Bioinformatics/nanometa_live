@@ -86,6 +86,7 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     build_report_payload,
 )
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+from nanometa_live.core.utils.staleness import stale_sample_count
 from nanometa_live.app.utils.organisms_memo import get_per_sample_organisms_cached
 from nanometa_live.app.app import background_callback_manager
 
@@ -214,13 +215,24 @@ def register_dashboard_callbacks(app: Dash):
         # 14:19:17, banner chip still "ACTIVE" until the render-memo TTL fired
         # at 14:21:23. The state memo makes the flip land on the next tick.
         pipeline_running_now = bool(status and status.get("running"))
+        pipeline_error_now = bool(
+            status and status.get("pipeline_status") == "error"
+        )
         run_state_now = (
             "ACTIVE" if pipeline_running_now
+            else "ERROR" if pipeline_error_now
             else "COMPLETE" if bool(status and status.get("completed"))
             else "STANDBY"
         )
         state_changed = _VERDICT_LAST_RUN_STATE.get("v") != run_state_now
+        # ERROR bypasses the render gate like ACTIVE does: the first render
+        # after a crash lands during the starting->error transition with the
+        # data gather skipped, and gating then froze that transitional
+        # wording ("produced no results" over a tree full of detections --
+        # live drill, 2026-08-24). Re-rendering per tick while in ERROR is
+        # a few cache-hit loads; the state is rare and operator-visible.
         if (not pipeline_running_now
+                and not pipeline_error_now
                 and not state_changed
                 and interval_tick_is_redundant(ctx, "dashboard_verdict_banner", _fingerprint)):
             raise PreventUpdate
@@ -244,9 +256,23 @@ def register_dashboard_callbacks(app: Dash):
             validation_data and validation_data.get("results")
         )
 
+        # Run health, from the same backend-status the header pill reads.
+        # A user-initiated Stop clears pipeline_status/errors in the
+        # backend, so a deliberate stop can never trip the error state.
+        pipeline_error = bool(
+            status and status.get("pipeline_status") == "error"
+        )
+        pipeline_errors = (status or {}).get("errors") or []
+        pipeline_error_detail = (
+            str(pipeline_errors[-1]) if pipeline_errors else None
+        )
+
         if pipeline_running:
             run_state = "ACTIVE"
             run_state_color = "success"
+        elif pipeline_error:
+            run_state = "ERROR"
+            run_state_color = "danger"
         elif pipeline_completed:
             run_state = "COMPLETE"
             run_state_color = "info"
@@ -265,6 +291,13 @@ def register_dashboard_callbacks(app: Dash):
         )
         main_dir = resolve_outdir_for_fingerprint(config)
         main_dir_available = bool(main_dir and os.path.isdir(main_dir))
+        # A non-empty results fingerprint proves this session already read
+        # data from the results dir; its absence NOW is an event (unmounted
+        # volume, deleted folder), not idleness. Without the fingerprint
+        # guard a never-created dir would false-positive on every boot.
+        results_dir_lost = bool(
+            main_dir and not main_dir_available and _fingerprint
+        )
 
         kraken_has_data = False
         dangerous: List[Dict[str, Any]] = []
@@ -339,6 +372,10 @@ def register_dashboard_callbacks(app: Dash):
                 (config or {}).get("min_reads_for_validation")
                 or DEFAULT_LOW_READ_FLOOR
             ),
+            pipeline_error=pipeline_error,
+            pipeline_error_detail=pipeline_error_detail,
+            results_dir_lost=results_dir_lost,
+            stale_samples=stale_sample_count(main_dir),
         )
 
         # Per-sample attribution for the ACTION REQUIRED subhead (closes
@@ -1065,8 +1102,12 @@ def register_dashboard_callbacks(app: Dash):
         ],
         running=[
             (Output("export-generate-btn", "disabled"), True, False),
-            (Output("export-cancel-btn", "disabled"), True, False),
         ],
+        # Round 3: Cancel actually cancels. It used to be DISABLED while
+        # the export ran (its only job was closing the modal), so a
+        # multi-minute 5 GiB copy -- or a dead worker -- left the operator
+        # with no exit but a browser refresh.
+        cancel=[Input("export-cancel-btn", "n_clicks")],
         prevent_initial_call=True,
     )
     def generate_export(set_progress, n_clicks, output_dir, include_raw, config):

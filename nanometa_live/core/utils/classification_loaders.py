@@ -61,6 +61,34 @@ _REPORT_FRAME_CACHE_MAX = 512
 _report_frame_cache: "OrderedDict[Tuple[str, int, int], pd.DataFrame]" = OrderedDict()
 _report_frame_cache_lock = threading.Lock()
 
+# Round-3 byte budget over BOTH frame caches. The count cap alone is
+# size-blind: at the 96-barcode envelope with 5,000-row reports the
+# harness measured 3.8 GB of frames resident behind an in-cap entry
+# count. Per-entry sizes are tracked at insert (memory_usage(deep) is
+# O(rows), amortised by the parse that just ran); eviction pops plain
+# LRU entries first and touches the last-good fallbacks -- the honesty
+# layer -- only when the plain side alone cannot fit the budget.
+_FRAME_CACHE_BUDGET_BYTES = int(
+    os.environ.get("NANOMETA_FRAME_CACHE_MB", "2048")) * 1024 * 1024
+_frame_sizes: Dict[Tuple[str, int, int], int] = {}
+_last_good_sizes: Dict[str, int] = {}
+
+
+def report_frame_cache_bytes() -> int:
+    """Tracked byte total of both frame caches. Lock-free read of ints."""
+    return sum(_frame_sizes.values()) + sum(_last_good_sizes.values())
+
+
+def _evict_to_budget_locked() -> None:
+    """Pop LRU entries until the byte budget holds. Caller holds the lock."""
+    total = sum(_frame_sizes.values()) + sum(_last_good_sizes.values())
+    while total > _FRAME_CACHE_BUDGET_BYTES and _report_frame_cache:
+        old_key, _ = _report_frame_cache.popitem(last=False)
+        total -= _frame_sizes.pop(old_key, 0)
+    while total > _FRAME_CACHE_BUDGET_BYTES and len(_last_good_frame) > 1:
+        old_path, _ = _last_good_frame.popitem(last=False)
+        total -= _last_good_sizes.pop(old_path, 0)
+
 # Last successful parse per physical report, keyed on realpath alone. Served
 # when the CURRENT file state is transiently unparseable -- nanometanf
 # rewrites each sample's cumulative report per batch, and a poll landing
@@ -75,11 +103,34 @@ _report_frame_cache_lock = threading.Lock()
 _last_good_frame: "OrderedDict[str, pd.DataFrame]" = OrderedDict()
 
 
+# Latest-batch path memo (round 3): (main_dir, sample) -> (dir-mtime state,
+# winning path or None). The globs it replaces enumerated every batch file
+# per sample per poll; the winner only changes when a directory does.
+_latest_batch_memo_lock = threading.Lock()
+_latest_batch_memo: Dict[Tuple[str, str], Tuple[tuple, Optional[str]]] = {}
+
+
+def _safe_mtime_ns(path: str) -> int:
+    """Directory mtime for memo keys; -1 for a missing/unreadable path."""
+    try:
+        return os.stat(path).st_mtime_ns
+    except OSError:
+        return -1
+
+
 def clear_report_frame_cache() -> None:
     """Drop the per-file parsed-frame cache (test/teardown helper)."""
     with _report_frame_cache_lock:
         _report_frame_cache.clear()
         _last_good_frame.clear()
+        _frame_sizes.clear()
+        _last_good_sizes.clear()
+    with _latest_batch_memo_lock:
+        _latest_batch_memo.clear()
+    from nanometa_live.core.utils.report_accumulation import (
+        clear_sample_accum_cache,
+    )
+    clear_sample_accum_cache()
 
 
 def _diagnose_empty_kraken_dir(kraken_dir: str, sample: Optional[str] = None) -> str:
@@ -199,7 +250,14 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
         cached = _report_frame_cache.get(key)
         if cached is not None:
             _report_frame_cache.move_to_end(key)  # LRU bump
-            return cached
+    if cached is not None:
+        # A hit proves the CURRENT file state parses, so any stale flag
+        # from a transient failure at another mtime clears here. Without
+        # this, flags set on a run's final ticks froze forever once the
+        # tree went quiet (round-3 soak observation: three honest reports
+        # flagged stale after completion).
+        _record_staleness(filepath, served_fallback=False)
+        return cached
 
     df = _parse_kraken2_report_uncached(filepath, check_stability)
     if df is None:
@@ -214,18 +272,70 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
                 "Report transiently unparseable; serving last good parse: %s",
                 filepath,
             )
+            # Honesty hook (round 3): a fallback that persists is frozen
+            # data. The registry tracks it per sample so the verdict banner
+            # can say "N samples serving stale data" instead of presenting
+            # last-good numbers as live; it also owns the throttled warning
+            # for the permanently-corrupt case (the disk-full signature).
+            _record_staleness(filepath, served_fallback=True)
         return fallback
 
+    _store_parsed_frame(key, df)
+    _record_staleness(filepath, served_fallback=False)
+    return df
+
+
+def _store_parsed_frame(key: Tuple[str, int, int], df: pd.DataFrame) -> None:
+    """Insert a parsed frame into both frame caches, size-tracked.
+
+    Eager supersession first: a rewritten report's older versions are dead
+    weight the moment the new parse lands -- under count pressure alone
+    they lingered for the whole run (the mtime-keyed entries are distinct
+    keys, one per rewrite). Then the count caps, then the byte budget.
+    """
+    size = int(df.memory_usage(deep=True).sum())
     with _report_frame_cache_lock:
+        for stale_key in [k for k in _report_frame_cache
+                          if k[0] == key[0] and k != key]:
+            del _report_frame_cache[stale_key]
+            _frame_sizes.pop(stale_key, None)
         _report_frame_cache[key] = df
+        _frame_sizes[key] = size
         _report_frame_cache.move_to_end(key)
         while len(_report_frame_cache) > _REPORT_FRAME_CACHE_MAX:
-            _report_frame_cache.popitem(last=False)
+            old_key, _ = _report_frame_cache.popitem(last=False)
+            _frame_sizes.pop(old_key, None)
         _last_good_frame[key[0]] = df
+        _last_good_sizes[key[0]] = size
         _last_good_frame.move_to_end(key[0])
         while len(_last_good_frame) > _REPORT_FRAME_CACHE_MAX:
-            _last_good_frame.popitem(last=False)
-    return df
+            old_path, _ = _last_good_frame.popitem(last=False)
+            _last_good_sizes.pop(old_path, None)
+        _evict_to_budget_locked()
+
+
+def _record_staleness(filepath: str, *, served_fallback: bool) -> None:
+    """Report a parse outcome to the staleness registry.
+
+    Scope is the results dir (the parent of the ``kraken2`` path component);
+    the sample is derived the same way report discovery derives it. Never
+    raises -- honesty bookkeeping must not break a load.
+    """
+    try:
+        from nanometa_live.core.utils import staleness
+
+        parts = os.path.abspath(filepath).replace("\\", "/").split("/")
+        if "kraken2" not in parts:
+            return
+        scope = "/".join(parts[: parts.index("kraken2")]) or "/"
+        sample = _report_sample_key(filepath)
+        if served_fallback:
+            staleness.record_last_good_served(scope, sample)
+        else:
+            staleness.record_parse_ok(scope, sample)
+    except Exception:  # pragma: no cover - defensive
+        logging.debug("staleness bookkeeping failed for %s", filepath,
+                      exc_info=True)
 
 
 def _parse_kraken2_report_uncached(filepath: str, check_stability: bool = True) -> Optional[pd.DataFrame]:
@@ -903,12 +1013,19 @@ def _cache_and_return(result_df: pd.DataFrame, cache_key: str, mtime_key: str,
     ``fingerprint_paths`` must be the same sample-scoped path list used for the
     matching ``_check_mtime_cache`` lookup, or the entry can never be hit.
     """
+    # ONE shared defensive copy for BOTH caches (round 3): the old code
+    # stored two independent copies, tripling the resident bytes of every
+    # load. A single copy keeps the tested guarantee that a caller
+    # mutating the RETURNED frame in place cannot corrupt the caches,
+    # while the TTL and mtime layers share one object (frames served from
+    # cache are read-only by loader contract; mutating consumers copy).
+    shared = result_df.copy()
     with _cache_lock:
-        _kraken_cache[cache_key] = (time.time(), result_df.copy())
+        _kraken_cache[cache_key] = (time.time(), shared)
     _store_mtime_cache(
         mtime_key,
         fingerprint_paths if fingerprint_paths is not None else [kraken_dir],
-        result_df.copy(),
+        shared,
     )
     return result_df
 
@@ -947,19 +1064,31 @@ def _parse_kraken_data_uncached(
 
         # Accumulate reads/cumul_reads per taxid in a running dict, avoiding
         # pd.concat of all raw reports (O(unique_taxa) memory instead of
-        # O(all_rows_across_files)).
-        agg: Dict[int, List] = {}
-        ordered_taxids: List[int] = []
-        seen_taxids: set = set()
-        has_data = False
-        for kreport_file in kreport_files:
-            df = _parse_kraken2_report(kreport_file)
-            if df is None or df.empty:
-                continue
-            has_data = True
-            _accumulate_kraken_df(df, agg, ordered_taxids, seen_taxids)
+        # O(all_rows_across_files)). Round 3: the per-sample accumulation
+        # cache makes the rebuild O(changed sample), not O(total files) --
+        # a new batch used to re-accumulate every batch of every sample.
+        # None means the segment precondition failed (interleaved sample
+        # names in sort order) and the plain loop below is the answer.
+        from nanometa_live.core.utils.report_accumulation import (
+            aggregate_with_sample_cache,
+        )
+        cached = aggregate_with_sample_cache(
+            kraken_dir, kreport_files, _report_sample_key,
+            _parse_kraken2_report, _accumulate_kraken_df,
+        )
+        if cached is not None:
+            agg, ordered_taxids = cached
+        else:
+            agg = {}
+            ordered_taxids = []
+            seen_taxids: set = set()
+            for kreport_file in kreport_files:
+                df = _parse_kraken2_report(kreport_file)
+                if df is None or df.empty:
+                    continue
+                _accumulate_kraken_df(df, agg, ordered_taxids, seen_taxids)
 
-        if not has_data:
+        if not agg:
             return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
         result_df = _aggregate_to_result_df(agg, ordered_taxids)
         return _cache_and_return(result_df, cache_key, mtime_key, kraken_dir, fingerprint_paths)
@@ -1039,20 +1168,42 @@ def load_kraken_latest_batch(main_dir: str, sample_name: str) -> pd.DataFrame:
     """
     main_dir = resolve_analysis_directory(main_dir)
     kraken_dir = os.path.join(main_dir, "kraken2")
-
-    # 1. Collect candidate batch files and pick the highest-numbered one.
-    candidate_batches: List[str] = []
-    for ext_pattern in (
-        f"{sample_name}_batch*.kraken2.report.txt",
-    ):
-        candidate_batches.extend(glob.glob(os.path.join(kraken_dir, ext_pattern)))
-
-    # v1.5 layout: batch_reports/ inside per-sample subdirectory
     batch_dir = os.path.join(kraken_dir, sample_name, "batch_reports")
-    if os.path.isdir(batch_dir):
-        candidate_batches.extend(
-            glob.glob(os.path.join(batch_dir, "*.kraken2.report.txt"))
-        )
+
+    # Round 3: the winning path is memoized on the two candidate dirs'
+    # mtimes (a new file bumps its directory's mtime on POSIX). Called per
+    # sample per poll, the globs below enumerated every batch file with
+    # two regex passes each -- 28,800 paths per poll at 96x300 -- for a
+    # selection that only changes when a directory does.
+    memo_key = (main_dir, sample_name)
+    dir_state = tuple(
+        _safe_mtime_ns(p) for p in (kraken_dir, batch_dir)
+    )
+    with _latest_batch_memo_lock:
+        hit = _latest_batch_memo.get(memo_key)
+    if hit is not None and hit[0] == dir_state:
+        latest_path = hit[1]
+        if latest_path is not None:
+            df = _parse_kraken2_report(latest_path)
+            if df is not None:
+                return df
+        # Memoized "no batch files" (or a vanished winner): fall through
+        # to the standard-report fallback below via an empty candidate set.
+        candidate_batches = []
+    else:
+        # 1. Collect candidate batch files and pick the highest-numbered one.
+        candidate_batches = []
+        for ext_pattern in (
+            f"{sample_name}_batch*.kraken2.report.txt",
+        ):
+            candidate_batches.extend(
+                glob.glob(os.path.join(kraken_dir, ext_pattern)))
+
+        # v1.5 layout: batch_reports/ inside per-sample subdirectory
+        if os.path.isdir(batch_dir):
+            candidate_batches.extend(
+                glob.glob(os.path.join(batch_dir, "*.kraken2.report.txt"))
+            )
 
     if candidate_batches:
         candidate_batches = _deduplicate_batch_files(candidate_batches)
@@ -1064,9 +1215,16 @@ def load_kraken_latest_batch(main_dir: str, sample_name: str) -> pd.DataFrame:
 
         latest = max(candidate_batches, key=_extract_num)
         logging.debug("Latest batch file for %s: %s", sample_name, latest)
+        with _latest_batch_memo_lock:
+            _latest_batch_memo[memo_key] = (dir_state, latest)
         df = _parse_kraken2_report(latest)
         if df is not None:
             return df
+    elif hit is None or hit[0] != dir_state:
+        # Remember that this dir state has no batch files, so the fallback
+        # path below is also glob-free on the next poll.
+        with _latest_batch_memo_lock:
+            _latest_batch_memo[memo_key] = (dir_state, None)
 
     # 2. Fall back to standard (non-cumulative) report when no batch files exist.
     for ext in (

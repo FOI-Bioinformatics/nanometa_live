@@ -25,6 +25,9 @@ from nanometa_live.app.callbacks import register_core_callbacks
 def app_backend():
     app = Dash(__name__, suppress_callback_exceptions=True)
     backend = MagicMock()
+    # A bare MagicMock is truthy, which trips the round-3 transition
+    # guard on the collision paths.
+    backend.transition_in_progress.return_value = False
     register_core_callbacks(app, backend)
     return app, backend
 

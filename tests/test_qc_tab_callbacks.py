@@ -114,7 +114,9 @@ def test_update_per_sample_table_empty_returns_list(qc_app):
 def test_update_qc_stats_populated(qc_app, populated_config):
     fn = get_callback_fn(qc_app, "qc-reads-pre-filtering")
     with ctx_trigger("results-fingerprint"):
-        result = fn("fp1", "All Samples", 0, populated_config,
+        # Round 3: fires from the gate-bumped due Store; the former
+        # Inputs are States now.
+        result = fn({"n": 1}, "fp1", "All Samples", populated_config,
                     {"running": True}, None)
     assert len(result) == 11
     # classification stats should reflect real data, not the all-zero defaults

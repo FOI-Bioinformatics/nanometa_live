@@ -177,7 +177,29 @@ def _run_visualization_mode(args) -> None:
     app = create_app(config, data_dir, backend_manager)
 
     # Start server
-    app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
+    _run_server(app, host=args.host, port=args.port, debug=args.debug)
+
+
+def _run_server(app, *, host: str, port: int, debug: bool) -> None:
+    """Run the Dash server, turning port-in-use into an actionable message.
+
+    A second GUI instance on the same port used to die with a raw OSError
+    traceback (round 3); errno EADDRINUSE now names the port and the fix.
+    Other OSErrors propagate unchanged.
+    """
+    import errno
+    try:
+        app.run(host=host, port=port, debug=debug, threaded=True)
+    except OSError as e:
+        if e.errno != errno.EADDRINUSE:
+            raise
+        print(
+            f"ERROR: port {port} is already in use -- another Nanometa Live "
+            f"(or other server) is listening there.\n"
+            f"Either close the other instance, or start this one on a "
+            f"different port with --port <number>.",
+        )
+        raise SystemExit(1)
 
 
 def main():

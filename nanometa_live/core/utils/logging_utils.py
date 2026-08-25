@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import logging
 import logging.handlers
@@ -43,6 +44,7 @@ def setup_logging(debug=False, log_dir=None, log_to_console=True):
     # File handler
     if log_dir:
         os.makedirs(log_dir, exist_ok=True)
+        _prune_log_families(log_dir)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         log_file = os.path.join(log_dir, f"nanometa_live_{timestamp}.log")
         file_handler = logging.handlers.RotatingFileHandler(
@@ -63,3 +65,39 @@ def setup_logging(debug=False, log_dir=None, log_to_console=True):
 
         return log_file
     return None
+
+#: Timestamped log families kept across launches. Each launch opens a new
+#: nanometa_live_<ts>.log / api_calls_<ts>.log rotation family; nothing
+#: pruned the old ones, so ~/.nanometa/logs grew without limit across
+#: restarts (round-3 audit). The current launch's family is created after
+#: pruning, so it can never prune itself.
+KEEP_LOG_FAMILIES = 10
+
+_LOG_FAMILY_RE = re.compile(
+    r"^(?:nanometa_live|api_calls)_(\d{8}_\d{6})\.log(?:\.\d+)?$"
+)
+
+
+def _prune_log_families(log_dir: str) -> None:
+    """Delete log rotation families beyond the newest KEEP_LOG_FAMILIES."""
+    try:
+        names = os.listdir(log_dir)
+    except OSError:
+        return
+    stamps = set()
+    for name in names:
+        m = _LOG_FAMILY_RE.match(name)
+        if m:
+            stamps.add(m.group(1))
+    doomed = sorted(stamps, reverse=True)[KEEP_LOG_FAMILIES:]
+    if not doomed:
+        return
+    doomed_set = set(doomed)
+    for name in names:
+        m = _LOG_FAMILY_RE.match(name)
+        if m and m.group(1) in doomed_set:
+            try:
+                os.remove(os.path.join(log_dir, name))
+            except OSError:
+                pass
+

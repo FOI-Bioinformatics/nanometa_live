@@ -346,3 +346,139 @@ class TestTheDepthGateIsAggregateScoped:
         d = verdict(dangerous=[{"threat_level": "critical"}], n_watched=116,
                     total_reads=34141)
         assert d.state == "ACTION_REQUIRED"
+
+
+class TestPipelineError:
+    """A dead pipeline must never render as a clean result.
+
+    Round-3 finding: a pipeline killed at 40% of its samples left
+    main_dir_available=True, kraken_has_data=True, dangerous=[] -- a green
+    ALL CLEAR over a run that processed less than half its data. The
+    header pill went red; the banner operators are trained on stayed
+    green. pipeline_error is derived from backend-status
+    (pipeline_status == "error"), which a user-initiated stop clears, so
+    a deliberate Stop can never trip this state.
+    """
+
+    def test_error_beats_all_clear(self):
+        d = verdict(pipeline_error=True)
+        assert d.state == "PIPELINE_ERROR"
+
+    def test_error_banner_is_not_green(self):
+        d = verdict(pipeline_error=True)
+        assert d.bg_color != "#d4edda", "error must not reassure"
+
+    def test_error_subtitle_says_results_are_partial(self):
+        d = verdict(pipeline_error=True)
+        assert "before the failure" in d.subtitle
+
+    def test_error_detail_is_carried(self):
+        d = verdict(pipeline_error=True,
+                    pipeline_error_detail="Nextflow exited with code 137")
+        assert "137" in d.subtitle
+
+    def test_detection_still_wins_over_error(self):
+        # Never suppress a hit: ACTION REQUIRED outranks the error state,
+        # with the failure noted so the operator knows coverage is partial.
+        d = verdict(pipeline_error=True,
+                    dangerous=[{"threat_level": "critical"}])
+        assert d.state == "ACTION_REQUIRED"
+        assert "pipeline error" in d.subtitle.lower()
+
+    def test_subthreshold_still_shows_over_error(self):
+        d = verdict(pipeline_error=True,
+                    subthreshold=[{"name": "X", "threat_level": "high"}])
+        assert d.state == "MONITORING"
+        assert "pipeline error" in d.subtitle.lower()
+
+    def test_error_beats_not_screened(self):
+        d = verdict(pipeline_error=True, n_watched=0)
+        assert d.state == "PIPELINE_ERROR"
+
+    def test_error_beats_insufficient_reads(self):
+        d = verdict(pipeline_error=True, total_reads=1)
+        assert d.state == "PIPELINE_ERROR"
+
+    def test_error_with_no_data_is_not_standby(self):
+        # Crash before any output: the old flow fell to STANDBY, reading
+        # as "never started".
+        d = verdict(pipeline_error=True, main_dir_available=False,
+                    kraken_has_data=False)
+        assert d.state == "PIPELINE_ERROR"
+
+    def test_no_error_leaves_every_state_unchanged(self):
+        assert verdict(pipeline_error=False).state == "ALL_CLEAR"
+        assert verdict().state == "ALL_CLEAR"
+
+
+class TestResultsDirLost:
+    """A results directory that vanishes mid-run is not STANDBY.
+
+    Round-3 finding: unplugging the results volume degraded the dashboard
+    to grey STANDBY with zeroed tiles -- indistinguishable from "no run
+    ever happened". results_dir_lost is set by the callback when the dir
+    was previously fingerprinted non-empty and is now absent.
+    """
+
+    def test_lost_dir_is_not_standby(self):
+        d = verdict(results_dir_lost=True, main_dir_available=False,
+                    kraken_has_data=False)
+        assert d.state == "RESULTS_UNAVAILABLE"
+
+    def test_lost_dir_while_running_is_still_lost(self):
+        d = verdict(results_dir_lost=True, main_dir_available=False,
+                    kraken_has_data=False, pipeline_running=True)
+        assert d.state == "RESULTS_UNAVAILABLE"
+
+    def test_lost_dir_is_not_green_or_grey(self):
+        d = verdict(results_dir_lost=True, main_dir_available=False,
+                    kraken_has_data=False)
+        assert d.bg_color not in ("#d4edda", "#f8f9fa")
+
+    def test_available_dir_ignores_the_flag(self):
+        # The flag only matters when the dir is actually gone; a caller
+        # that raced (flag stale, dir back) must not hide live data.
+        d = verdict(results_dir_lost=True)
+        assert d.state == "ALL_CLEAR"
+
+    def test_absent_flag_keeps_standby(self):
+        d = verdict(main_dir_available=False, kraken_has_data=False)
+        assert d.state == "STANDBY"
+
+
+class TestStaleSamplesClause:
+    """When samples are serving last-good fallback data, the verdict
+    subtitle says so instead of presenting frozen numbers as live."""
+
+    def test_stale_count_appends_clause(self):
+        d = verdict(stale_samples=3)
+        assert d.state == "ALL_CLEAR"
+        assert "3 sample" in d.subtitle and "stale" in d.subtitle
+
+    def test_zero_stale_appends_nothing(self):
+        d = verdict(stale_samples=0)
+        assert "stale" not in d.subtitle
+
+    def test_detection_subtitle_carries_stale_clause_too(self):
+        d = verdict(dangerous=[{"threat_level": "critical"}],
+                    stale_samples=2)
+        assert d.state == "ACTION_REQUIRED"
+        assert "stale" in d.subtitle
+
+
+class TestErrorOutranksStarting:
+    """A crash during the startup phase must not render eternal SCREENING.
+
+    Live drill (2026-08-24 soak): kill -9 during a resumed run's startup
+    left overall_status == "starting" shadowing pipeline_error, so the
+    banner said SCREENING IN PROGRESS for ~2 minutes after the pipeline
+    was dead, then froze on the transitional no-data wording."""
+
+    def test_error_beats_starting(self):
+        d = verdict(pipeline_error=True, overall_status_starting=True,
+                    main_dir_available=False, kraken_has_data=False)
+        assert d.state == "PIPELINE_ERROR"
+
+    def test_starting_without_error_is_still_screening(self):
+        d = verdict(overall_status_starting=True)
+        assert d.state == "SCREENING"

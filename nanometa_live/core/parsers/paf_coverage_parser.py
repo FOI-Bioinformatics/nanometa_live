@@ -269,6 +269,13 @@ def paf_breadth(paf_path, min_mapq: int = 0) -> Optional["PafBreadth"]:
     cached = _breadth_cache.get(key)
     if cached is not None:
         return cached
+    # Round 3: PAFs are rewritten in place every realtime batch, so each
+    # rewrite minted a fresh key and the old ones lived forever -- the
+    # cache grew monotonically with pairs x batches (~135 MB after 200
+    # batches). Evict this file's superseded versions before caching.
+    for stale in [k for k in _breadth_cache
+                  if k[0] == key[0] and k[3] == min_mapq and k != key]:
+        _breadth_cache.pop(stale, None)
 
     intervals: List[tuple] = []
     ref_len = 0

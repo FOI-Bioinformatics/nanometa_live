@@ -53,24 +53,45 @@ SCHEMA = 1
 # cells cannot trip on a couple of extra calls.
 GATE_RATIO = 1.05
 GATE_ABSOLUTE = 8
+# Memory gate band (round 3): looser than the syscall gate because the
+# allocator and pandas versions move real bytes for unrelated reasons.
+MEM_GATE_RATIO = 1.2
+MEM_GATE_ABSOLUTE_KB = 4096
+
+
+# Axis defaults; a cell measured at these keeps the historical short key so
+# the committed baseline's cells remain comparable across rounds.
+DEFAULT_TAXA = 300
+DEFAULT_BATCHES = 20
 
 
 @dataclass
 class Cell:
-    """One measured (layout, scenario, N) point."""
+    """One measured (layout, scenario, N[, taxa, batches, pairs]) point."""
 
     layout: str
     scenario: str
     n_samples: int
+    taxa: int = DEFAULT_TAXA
+    batches: int = DEFAULT_BATCHES
+    pairs: int = 0
     counts: Dict[str, int] = field(default_factory=dict)
     wall_min_ms: float = 0.0
     wall_med_ms: float = 0.0
     kraken_loads: int = 0
     frame_cache_len: int = 0
+    # Round-3 memory columns: tracemalloc peak over the counted poll and
+    # the deep byte size of the parsed-frame caches after it.
+    mem_peak_kb: int = 0
+    frame_cache_kb: int = 0
 
     @property
     def key(self) -> str:
-        return f"{self.layout}/{self.scenario}/n={self.n_samples}"
+        base = f"{self.layout}/{self.scenario}/n={self.n_samples}"
+        if (self.taxa, self.batches, self.pairs) != (
+                DEFAULT_TAXA, DEFAULT_BATCHES, 0):
+            base += f"/t={self.taxa}/b={self.batches}/v={self.pairs}"
+        return base
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -79,6 +100,8 @@ class Cell:
             "wall_med_ms": round(self.wall_med_ms, 2),
             "kraken_loads": self.kraken_loads,
             "frame_cache_len": self.frame_cache_len,
+            "mem_peak_kb": self.mem_peak_kb,
+            "frame_cache_kb": self.frame_cache_kb,
         }
 
 
@@ -112,7 +135,10 @@ def _prepare(scenario: str, root: Path, layout: str,
 def measure(spec: fx.FixtureSpec, scenario: str, base: Path,
             repeat: int, build_figures: bool) -> Cell:
     root = fx.build_fixture(spec, base)
-    cell = Cell(layout=spec.layout, scenario=scenario, n_samples=spec.n_samples)
+    cell = Cell(layout=spec.layout, scenario=scenario,
+                n_samples=spec.n_samples, taxa=spec.taxa_per_report,
+                batches=spec.effective_batches or spec.batches_per_sample,
+                pairs=spec.validation_pairs)
 
     # Timing pass: counting off so the wrappers do not perturb the duration.
     durations: List[float] = []
@@ -124,13 +150,23 @@ def measure(spec: fx.FixtureSpec, scenario: str, base: Path,
     cell.wall_min_ms = min(durations)
     cell.wall_med_ms = _median(durations)
 
-    # Counting pass: deterministic, so once is enough.
+    # Counting pass: deterministic, so once is enough. tracemalloc rides
+    # the same pass -- its overhead perturbs wall time (measured separately
+    # above) but not counts or allocation sizes.
+    import tracemalloc
     _prepare(scenario, root, spec.layout, build_figures)
-    with inst.count_syscalls() as counted:
-        result = simulate_poll(str(root), build_figures=build_figures)
+    tracemalloc.start()
+    try:
+        with inst.count_syscalls() as counted:
+            result = simulate_poll(str(root), build_figures=build_figures)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
     cell.counts = counted.as_dict()
     cell.frame_cache_len = counted.frame_cache_len
     cell.kraken_loads = result.kraken_loads
+    cell.mem_peak_kb = int(peak / 1024)
+    cell.frame_cache_kb = int(inst.report_frame_cache_bytes() / 1024)
 
     if result.samples != spec.n_samples:
         raise AssertionError(
@@ -142,28 +178,36 @@ def measure(spec: fx.FixtureSpec, scenario: str, base: Path,
 
 def run_matrix(ns: Sequence[int], layouts: Sequence[str],
                scenarios: Sequence[str], base: Path, repeat: int,
-               build_figures: bool, taxa: int, batches: int,
+               build_figures: bool, taxa_list: Sequence[int],
+               batches_list: Sequence[int], pairs_per_sample: int,
+               validation_batches: int,
                manifest: bool, verbose: bool) -> Dict[str, Cell]:
     cells: Dict[str, Cell] = {}
-    total = len(ns) * len(layouts) * len(scenarios)
+    total = (len(ns) * len(layouts) * len(scenarios)
+             * len(taxa_list) * len(batches_list))
     done = 0
     for layout in layouts:
-        for n in ns:
-            spec = fx.FixtureSpec(
-                n_samples=n, layout=layout, taxa_per_report=taxa,
-                batches_per_sample=batches, write_manifest=manifest,
-            )
-            for scenario in scenarios:
-                cell = measure(spec, scenario, base, repeat, build_figures)
-                cells[cell.key] = cell
-                done += 1
-                if verbose:
-                    print(
-                        f"  [{done}/{total}] {cell.key:<44} "
-                        f"{cell.wall_min_ms:8.1f} ms  "
-                        f"os.stat={cell.counts.get('os.stat', 0):>7}",
-                        flush=True,
+        for taxa in taxa_list:
+            for batches in batches_list:
+                for n in ns:
+                    spec = fx.FixtureSpec(
+                        n_samples=n, layout=layout, taxa_per_report=taxa,
+                        batches_per_sample=batches, write_manifest=manifest,
+                        validation_pairs=pairs_per_sample * n,
+                        validation_batches=validation_batches,
                     )
+                    for scenario in scenarios:
+                        cell = measure(spec, scenario, base, repeat,
+                                       build_figures)
+                        cells[cell.key] = cell
+                        done += 1
+                        if verbose:
+                            print(
+                                f"  [{done}/{total}] {cell.key:<50} "
+                                f"{cell.wall_min_ms:8.1f} ms  "
+                                f"os.stat={cell.counts.get('os.stat', 0):>7}",
+                                flush=True,
+                            )
     return cells
 
 
@@ -269,6 +313,16 @@ def check_against_baseline(cells: Dict[str, Cell],
                     f"{key}  {metric}: {base_v} -> {head_v} "
                     f"(+{head_v - base_v}, {head_v / base_v:.2f}x)"
                 )
+        # Round-3 memory gate: generous band (allocator noise is real) but
+        # a 20%+ AND 4 MB+ growth in the traced poll peak is a regression.
+        base_mem = int(entry.get("mem_peak_kb", 0))
+        head_mem = int(cell.mem_peak_kb)
+        if base_mem and head_mem > base_mem * MEM_GATE_RATIO \
+                and head_mem - base_mem > MEM_GATE_ABSOLUTE_KB:
+            failures.append(
+                f"{key}  mem_peak_kb: {base_mem} -> {head_mem} "
+                f"(+{head_mem - base_mem} KB, {head_mem / base_mem:.2f}x)"
+            )
     return failures
 
 
@@ -286,8 +340,10 @@ def build_document(cells: Dict[str, Cell], args: argparse.Namespace,
         "schema": SCHEMA,
         "label": label,
         "fixture": {
-            "taxa_per_report": args.taxa,
-            "batches_per_sample": args.batches,
+            "taxa_axis": str(args.taxa),
+            "batches_axis": str(args.batches),
+            "pairs_per_sample": args.pairs_per_sample,
+            "validation_batches": args.validation_batches,
             "seed": 1337,
             "write_manifest": args.manifest,
         },
@@ -327,10 +383,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         help=f"comma-separated, from {SCENARIOS}")
     parser.add_argument("--repeat", type=int, default=5,
                         help="timing repetitions per cell (default 5)")
-    parser.add_argument("--taxa", type=int, default=300,
-                        help="taxa per report (default 300)")
-    parser.add_argument("--batches", type=int, default=20,
-                        help="batches per sample in realtime layouts")
+    parser.add_argument("--taxa", default=str(DEFAULT_TAXA),
+                        help="comma-separated taxa-per-report axis "
+                             f"(default {DEFAULT_TAXA})")
+    parser.add_argument("--batches", default=str(DEFAULT_BATCHES),
+                        help="comma-separated batches-per-sample axis "
+                             "(realtime layouts)")
+    parser.add_argument("--pairs-per-sample", type=int, default=0,
+                        help="validation (sample,taxid) pairs per sample "
+                             "(0 = no validation files; 129 = the "
+                             "Bioshield watchlist size)")
+    parser.add_argument("--validation-batches", type=int, default=0,
+                        help="per-pair batch files under validation/*/batch/")
+    parser.add_argument("--profile", choices=("exercise",), default=None,
+                        help="preset axes: 'exercise' measures the round-3 "
+                             "envelope (24/96 barcodes, 5000-taxa reports, "
+                             "100 batches, 129 validation pairs/sample) on "
+                             "the realtime layout")
     parser.add_argument("--manifest", action="store_true",
                         help="write canonical/_manifest.json (changes the "
                              "sample-detection path)")
@@ -356,6 +425,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     layouts = _parse_str_list(args.layouts)
     scenarios = _parse_str_list(args.scenarios)
     metrics = _parse_str_list(args.metrics)
+    taxa_list = _parse_int_list(str(args.taxa))
+    batches_list = _parse_int_list(str(args.batches))
+    pairs_per_sample = args.pairs_per_sample
+    validation_batches = args.validation_batches
+
+    if args.profile == "exercise":
+        # The round-3 envelope, opt-in because the biggest fixture holds
+        # hundreds of thousands of files. Explicit flags still win where
+        # the operator narrowed them.
+        ns = _parse_int_list(args.n) if args.n != ",".join(
+            str(n) for n in DEFAULT_N) else [24, 96]
+        layouts = ["realtime_incremental"]
+        scenarios = ["quiet", "incremental"]
+        taxa_list = [5000]
+        batches_list = [100]
+        pairs_per_sample = pairs_per_sample or 129
+        validation_batches = validation_batches or 10
 
     args.fixture_base.mkdir(parents=True, exist_ok=True)
 
@@ -364,7 +450,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     cells = run_matrix(
         ns, layouts, scenarios, args.fixture_base, args.repeat,
-        not args.no_figures, args.taxa, args.batches, args.manifest,
+        not args.no_figures, taxa_list, batches_list, pairs_per_sample,
+        validation_batches, args.manifest,
         verbose=not args.quiet,
     )
 

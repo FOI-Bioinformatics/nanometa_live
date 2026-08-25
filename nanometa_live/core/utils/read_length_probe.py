@@ -26,6 +26,7 @@ _FASTQ_PATTERNS = ("*.fastq", "*.fastq.gz", "*.fq", "*.fq.gz")
 
 # (realpath, mtime_ns, size, max_reads) -> sampled lengths
 _length_cache: Dict[tuple, List[int]] = {}
+_LENGTH_CACHE_MAX = 2048
 
 
 def _open_text(path: Path):
@@ -62,6 +63,14 @@ def sample_read_lengths(fastq_path, max_reads: int = _MAX_READS_PER_FILE) -> Lis
         logger.debug("Read-length sampling failed for %s: %s", p, exc)
         return lengths
 
+    # Round 3: evict superseded versions of this file (rewritten FASTQs
+    # minted a new key per rewrite) and cap the cache -- it had no
+    # eviction at all.
+    for stale in [k for k in _length_cache
+                  if k[0] == key[0] and k != key]:
+        _length_cache.pop(stale, None)
+    while len(_length_cache) > _LENGTH_CACHE_MAX:
+        _length_cache.pop(next(iter(_length_cache)))
     _length_cache[key] = lengths
     return lengths
 

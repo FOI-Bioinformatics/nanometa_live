@@ -9,6 +9,8 @@ the detail line.
 """
 
 import json
+import os
+import time
 
 import pytest
 
@@ -45,6 +47,8 @@ def _write_results(tmp_path, *, with_tsv: bool):
             "r2\tNZ_CP009607.1\t95.0\t300\t15\t0\t1\t300\t1\t300\t0.0\t500",
         ]
         (vdir / "blast" / "barcode14_taxid263.blast.tsv").write_text("\n".join(rows) + "\n")
+        _bd = time.time() - 120
+        os.utime(vdir / "blast" / "barcode14_taxid263.blast.tsv", (_bd, _bd))
     return tmp_path
 
 

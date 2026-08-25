@@ -1057,7 +1057,12 @@ class BackendManager:
         # (max_files .take / its realtime timer) that close the watchPath stream;
         # this GUI stop is a last-resort backstop for a GENUINELY stalled run, so
         # we only fire it when no task has completed for timeout_seconds.
-        last_progress_time = start_time
+        # time.monotonic(), not time.time(): the monotonic clock freezes
+        # while the machine sleeps on macOS/Linux, so a laptop lid-close
+        # longer than realtime_timeout_minutes no longer SIGTERMs a
+        # healthy run the moment it wakes (round 3). Wall-clock deltas
+        # jumped by the whole sleep interval.
+        last_progress_monotonic = time.monotonic()
         last_finished_count = -1
         pipeline_has_worked = False
 
@@ -1081,13 +1086,14 @@ class BackendManager:
                 running_now = workflow_status.get("processes_running", 0)
                 if running_now > 0 or finished_count != last_finished_count:
                     last_finished_count = finished_count
-                    last_progress_time = time.time()
+                    last_progress_monotonic = time.monotonic()
                     if running_now > 0 or finished_count > 0:
                         pipeline_has_worked = True
 
                 # Check realtime timeout (inactivity-based, once work has begun)
                 if timeout_seconds is not None and pipeline_has_worked:
-                    idle = time.time() - last_progress_time
+                    idle = self.inactivity_elapsed_s(
+                        last_progress_monotonic, time.monotonic())
                     if idle >= timeout_seconds:
                         logging.warning(
                             f"Realtime inactivity timeout reached after "
@@ -1172,6 +1178,7 @@ class BackendManager:
         workflow_errors = workflow_status.get("errors", [])
         if workflow_errors:
             self._fail_run(workflow_errors)
+            self._record_final_status()
             return False
 
         processes_failed = workflow_status.get("processes_failed", 0)
@@ -1192,24 +1199,57 @@ class BackendManager:
                 "Pipeline completed with %d isolated task failure(s): %s",
                 processes_failed, named,
             )
+            self._record_final_status()
             return True
 
         if processes_failed > 0:
             self._fail_run(
                 [f"Pipeline terminated with {processes_failed} failed process(es)"])
+            self._record_final_status()
             return False
 
         if processes_complete > 0:
             self.status["pipeline_status"] = "completed"
             self.status["running"] = False
             logging.info("Pipeline completed successfully")
+            self._record_final_status()
             return True
 
         # No completed processes and no errors -- likely a crash during
         # startup or configuration.
         self._fail_run(["Pipeline process terminated unexpectedly. "
                         "Check the Nextflow log for details."])
+        self._record_final_status()
         return False
+
+    @staticmethod
+    def inactivity_elapsed_s(last_progress_monotonic: float,
+                             now_monotonic: float) -> float:
+        """Idle seconds for the realtime timeout, on the monotonic clock."""
+        return max(0.0, now_monotonic - last_progress_monotonic)
+
+    def _record_final_status(self) -> None:
+        """Merge the terminal classification into .nanometa.run.json.
+
+        The exported report reads ``final_status``/``final_errors`` from
+        here (the export worker cannot see the live backend singleton), so
+        a report generated over a crashed run refuses the green banner --
+        the round-3 every-surface-says-the-same-thing rule. Best-effort:
+        a missing outdir or a write failure never affects the run
+        classification itself.
+        """
+        try:
+            outdir = (self.config or {}).get("results_output_directory") or ""
+            if not outdir or not os.path.isdir(outdir):
+                return
+            path = os.path.join(outdir, self.RUN_METADATA_FILENAME)
+            meta = self.read_run_metadata(outdir) or {}
+            meta["final_status"] = self.status.get("pipeline_status")
+            meta["final_errors"] = list(self.status.get("errors") or [])
+            from nanometa_live.core.utils.atomic_write import atomic_write_json
+            atomic_write_json(path, meta)
+        except Exception:
+            logging.warning("Could not record final run status", exc_info=True)
 
     def _fail_run(self, errors) -> None:
         """Mark the run failed, appending each error once. Lock held."""

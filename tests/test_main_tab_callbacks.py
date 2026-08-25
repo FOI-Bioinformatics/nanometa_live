@@ -179,12 +179,13 @@ def test_update_main_results_populated_builds_organisms(main_app, populated_conf
     """The populated branch (organism cards/table/counts) is the bulk of the
     callback -- drive it with a real PATHOGEN_DETECTED dataset."""
     fn = get_callback_fn(main_app, "organism-cards-container")
-    with ctx_with("apply-organism-filters"):
-        result = fn(
-            "fp1", 1, None, [], 0,
-            50, 0, ["S"],
-            populated_config, {"running": True}, {}, None,
-        )
+    # Round 3: the worker fires from the gate-bumped due Store; the former
+    # Inputs are States now (due, fp, clicks, sample, watchlist, ...).
+    result = fn(
+        {"n": 1}, "fp1", 1, None, [],
+        50, 0, ["S"],
+        populated_config, {"running": True}, {}, None,
+    )
     assert len(result) == 10
     # total-organisms-count (index 3) must reflect detected species
     total = result[3]

@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 
 from nanometa_live.core.config.threat_levels import threat_legend
+from nanometa_live.core.export.run_status import read_final_run_status
 from nanometa_live.core.export.report_charts import build_charts
 from nanometa_live.core.utils.attribution import is_negative_control
 from nanometa_live.core.utils.classification_loaders import load_kraken_data
@@ -244,6 +245,9 @@ class ReportGenerator:
             "per_sample": per_sample,
             "pipeline_reports": pipeline_reports,
             "raw_skip_reason": raw_skip_reason,
+            # Run health (round 3): every verdict surface says the same
+            # thing -- see core/export/run_status.py.
+            **read_final_run_status(self.results_dir),
         }
 
     def _low_read_floor(self) -> int:

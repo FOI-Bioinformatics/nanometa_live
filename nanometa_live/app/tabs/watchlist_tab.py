@@ -853,6 +853,29 @@ def register_watchlist_callbacks(app: Dash) -> None:
         )
 
     @app.callback(
+        Output("toast-message", "data", allow_duplicate=True),
+        Input("watchlist-tab-state", "data"),
+        prevent_initial_call="initial_duplicate",
+    )
+    def surface_toggle_restore_warning(_tab_state):
+        """One-shot toast when the saved enable/disable state was corrupt.
+
+        ``_restore_toggle_state`` fails toward all-enabled (more screening,
+        not less), but silently reversing an operator's disable decisions
+        must be said on screen, not only in the log (round 3). The manager
+        records the condition; this surfaces it the first time the
+        watchlist state renders after the restore attempt.
+        """
+        msg = get_watchlist_manager().consume_toggle_restore_warning()
+        if not msg:
+            raise PreventUpdate
+        return {
+            "type": "warning",
+            "title": "Watchlist enable/disable state reset",
+            "message": msg,
+        }
+
+    @app.callback(
         [
             Output("watchlist-tab-state", "data", allow_duplicate=True),
             Output("watchlist-table-refresh", "data", allow_duplicate=True),

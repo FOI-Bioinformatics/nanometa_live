@@ -9,6 +9,7 @@ include_raw toggle is honoured, and the sample filter is respected.
 """
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -640,7 +641,21 @@ class TestDecisionBannerCannotClaimAnUnearnedNegative:
         # Render only the banner block, so this test does not depend on the
         # rest of the report's data contract.
         start = src.index("{% if critical_threats or high_threats %}")
-        end = src.index("{% endif %}", start) + len("{% endif %}")
+        # Find the MATCHING endif: the banner divs carry inline
+        # {% if %}...{% endif %} clauses (pipeline-error notes), so the
+        # first endif is no longer the block's own.
+        import re as _re
+        depth = 0
+        end = None
+        for m in _re.finditer(r"{%-?\s*(if|endif)\b.*?%}", src[start:]):
+            if m.group(1) == "if":
+                depth += 1
+            else:
+                depth -= 1
+                if depth == 0:
+                    end = start + m.end()
+                    break
+        assert end is not None
         block = (
             "{% set detected_threats = data.watched_results | selectattr('detected') | list %}"
             "{% set critical_threats = detected_threats | selectattr('threat_level', 'equalto', 'critical') | list %}"
@@ -763,3 +778,59 @@ class TestScreenWatchlistEntryIsolation:
         )
         detected = [r for r in results if r["detected"]]
         assert detected and detected[0]["reads"] == 500
+
+
+class TestPipelineErrorParity:
+    """The exported report must carry the PIPELINE ERROR verdict too.
+
+    Round-3 rule: every verdict surface says the same thing. The dashboard
+    banner gained PIPELINE_ERROR; the report -- the artifact that leaves
+    the building -- reads the run's terminal status from
+    .nanometa.run.json (final_status, written by BackendManager at
+    termination) because the export worker cannot see the live backend.
+    """
+
+    def _write_final_status(self, results_dir, status="error",
+                            errors=("Nextflow exited with code 137",)):
+        import json
+        meta = {
+            "fingerprint": "x", "written_at": "2026-08-24T00:00:00",
+            "final_status": status, "final_errors": list(errors),
+        }
+        (Path(results_dir) / ".nanometa.run.json").write_text(
+            json.dumps(meta))
+
+    def test_error_run_renders_pipeline_error_banner(
+            self, batch_output_dir, tmp_path):
+        self._write_final_status(batch_output_dir)
+        gen = ReportGenerator(str(batch_output_dir),
+                              {"analysis_name": "Test Run"})
+        report = gen.generate(str(tmp_path / "export"), include_raw=False)
+        content = report.read_text()
+        assert "PIPELINE ERROR" in content
+        assert "NO WATCHED ORGANISMS DETECTED" not in content
+
+    def test_error_banner_names_the_failure(
+            self, batch_output_dir, tmp_path):
+        self._write_final_status(batch_output_dir)
+        gen = ReportGenerator(str(batch_output_dir),
+                              {"analysis_name": "Test Run"})
+        content = gen.generate(str(tmp_path / "export"),
+                               include_raw=False).read_text()
+        assert "137" in content
+
+    def test_clean_run_is_unchanged(self, batch_output_dir, tmp_path):
+        self._write_final_status(batch_output_dir, status="completed",
+                                 errors=())
+        gen = ReportGenerator(str(batch_output_dir),
+                              {"analysis_name": "Test Run"})
+        content = gen.generate(str(tmp_path / "export"),
+                               include_raw=False).read_text()
+        assert "PIPELINE ERROR" not in content
+
+    def test_no_metadata_is_unchanged(self, batch_output_dir, tmp_path):
+        gen = ReportGenerator(str(batch_output_dir),
+                              {"analysis_name": "Test Run"})
+        content = gen.generate(str(tmp_path / "export"),
+                               include_raw=False).read_text()
+        assert "PIPELINE ERROR" not in content
