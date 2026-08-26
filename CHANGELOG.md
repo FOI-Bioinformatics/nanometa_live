@@ -4,7 +4,7 @@ All notable changes to Nanometa Live are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.14.0] - 2026-08-26
 
 ### Fixed
 - A Kraken2 report skipped by the 1-second file-stability gate froze out of the aggregate: the reduced union was cached under the directory fingerprint, which never advances again on a completed run, so the last-written barcode stayed missing from the verdict banner until an app restart (found live building the demo-4 dataset: barcode04 absent from ACTION REQUIRED). A stability-gate skip is transient by definition -- healing changes no mtime and therefore no cache key -- so both cache layers (the per-sample accumulation cache and the loader mtime/TTL tiers) now decline to store a result built with such a skip and re-parse on the next poll.
