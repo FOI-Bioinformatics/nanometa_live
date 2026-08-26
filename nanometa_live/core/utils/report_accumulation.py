@@ -31,6 +31,8 @@ import os
 import threading
 from typing import Callable, Dict, List, Optional, Tuple
 
+from nanometa_live.core.utils.loader_utils import _is_file_stable
+
 _lock = threading.Lock()
 # (kraken_dir, sample_key) -> (files_state, agg fragment, ordered taxids)
 _sample_accum: Dict[Tuple[str, str], Tuple[tuple, Dict[int, list], List[int]]] = {}
@@ -113,6 +115,18 @@ def aggregate_with_sample_cache(
             for fp in sample_files:
                 df = parse_fn(fp)
                 if df is None or df.empty:
+                    if df is None and not _is_file_stable(fp):
+                        # Skipped by the file-stability gate: transient by
+                        # definition (the file only has to AGE past the
+                        # window, which changes no mtime and therefore not
+                        # this cache's key). Caching the reduced
+                        # accumulation would freeze the sample out until an
+                        # unrelated write -- on a completed run, forever.
+                        # Bail to the caller's plain loop for this tick.
+                        logging.debug(
+                            "Report %s inside the stability window; "
+                            "aggregate not cacheable this tick.", fp)
+                        return None
                     continue
                 _accumulate(df, s_agg, s_ordered, s_seen)
             with _lock:
