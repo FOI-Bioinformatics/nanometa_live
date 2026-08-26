@@ -26,6 +26,14 @@ from nanometa_live.core.utils.paths import resolve_project_dir
 HOME_DEFAULT = Path.home() / "nanometa-projects"
 
 
+@pytest.fixture(autouse=True)
+def _clear_sandbox_project_dir(monkeypatch):
+    # The suite-wide home sandbox (tests/conftest.py) exports
+    # NANOMETA_PROJECT_DIR, which outranks the data dir these tests set up
+    # themselves. Clear it so the resolution under test is the one asserted.
+    monkeypatch.delenv("NANOMETA_PROJECT_DIR", raising=False)
+
+
 class TestExplicitWins:
     def test_explicit_project_is_used_verbatim(self, tmp_path):
         assert resolve_project_dir(str(tmp_path)) == str(tmp_path.resolve())

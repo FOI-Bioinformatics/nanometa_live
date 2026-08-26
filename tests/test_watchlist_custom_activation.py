@@ -65,6 +65,14 @@ pathogens:
 """
 
 
+@pytest.fixture(autouse=True)
+def _clear_sandbox_project_dir(monkeypatch):
+    # The suite-wide home sandbox (tests/conftest.py) exports
+    # NANOMETA_PROJECT_DIR, which outranks the data dir these tests set up
+    # themselves. Clear it so the resolution under test is the one asserted.
+    monkeypatch.delenv("NANOMETA_PROJECT_DIR", raising=False)
+
+
 def _write(tmp_path: Path, name: str, body: str) -> Path:
     path = tmp_path / name
     path.write_text(body, encoding="utf-8")

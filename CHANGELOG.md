@@ -4,6 +4,19 @@ All notable changes to Nanometa Live are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- The test suite could write into the operator's real `~/.nanometa`: tests
+  constructing `OnDemandValidator` without `cache_dir` fell back to the home
+  data dir and rewrote a 57-byte mock genome over the real
+  `genomes/263.fasta`, which then shadowed validation on real runs (every
+  organism "rejected", an empty Validation tab). The suite now exports
+  `NANOMETA_DATA_DIR`/`NANOMETA_PROJECT_DIR` into a per-session temp sandbox
+  at conftest import (`tests/test_home_isolation.py` is the fence), the
+  leaking constructions pass explicit tmp cache dirs, and the tests that
+  assert the no-env defaults clear the sandbox variables in their own scope.
+
 ## [0.13.0] - 2026-08-25
 
 Round three of the hardening audits (2026-08-24/25): the data-volume axis

@@ -15,6 +15,32 @@ import time
 from pathlib import Path
 from typing import Dict, List, Any
 
+# ---------------------------------------------------------------------------
+# Home-directory sandbox (set at IMPORT time, before any test module import
+# can construct a singleton that reads the env lazily).
+#
+# Anything that resolves a data or project directory without an explicit
+# path falls back to NANOMETA_DATA_DIR / NANOMETA_PROJECT_DIR, and with
+# neither set, to the operator's real ~/.nanometa and ~/nanometa-projects.
+# A test that forgets to isolate itself then WRITES THERE: a 2026-08-25 full
+# suite run rewrote a 57-byte mock 263.fasta into the real
+# ~/.nanometa/genomes/, which shadowed the real genome and made every
+# GUI-launched minimap2 validation map against 20 bp of ACGT ("rejected"
+# across the board, an empty Validation tab on real runs).
+#
+# Tests that exercise the env resolution itself keep working: they set or
+# delete these variables with monkeypatch, which restores the sandbox value
+# afterwards. Pinned by tests/test_home_isolation.py.
+# ---------------------------------------------------------------------------
+import atexit
+import shutil
+import tempfile
+
+_HOME_SANDBOX = tempfile.mkdtemp(prefix="nanometa-test-home-")
+os.environ["NANOMETA_DATA_DIR"] = os.path.join(_HOME_SANDBOX, "data")
+os.environ["NANOMETA_PROJECT_DIR"] = os.path.join(_HOME_SANDBOX, "project")
+atexit.register(shutil.rmtree, _HOME_SANDBOX, True)
+
 
 def pytest_configure(config):
     """Register custom markers used in this suite.

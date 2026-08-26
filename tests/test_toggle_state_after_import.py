@@ -26,6 +26,14 @@ from nanometa_live.core.watchlist.watchlist_manager import WatchlistManager
 
 pytestmark = pytest.mark.unit
 
+@pytest.fixture(autouse=True)
+def _clear_sandbox_project_dir(monkeypatch):
+    # The suite-wide home sandbox (tests/conftest.py) exports
+    # NANOMETA_PROJECT_DIR, which outranks the data dir these tests set up
+    # themselves. Clear it so the resolution under test is the one asserted.
+    monkeypatch.delenv("NANOMETA_PROJECT_DIR", raising=False)
+
+
 WATCHLIST = (
     "metadata:\n  name: Field list\npathogens:\n"
     "  - name: Bacillus anthracis\n    taxid_ncbi: 1392\n    alert_threshold: 5\n"

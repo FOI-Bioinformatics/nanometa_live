@@ -87,7 +87,8 @@ class TestSampleAllFindsResults:
             "data_dir": str(tmp_path / "datadir"),
         }
         validator = OnDemandValidator(
-            results_dir=str(results), input_dir=str(input_dir)
+            results_dir=str(results), input_dir=str(input_dir),
+            cache_dir=str(tmp_path / "cache"),
         )
         validator.genomes_dir.mkdir(parents=True, exist_ok=True)
         (validator.genomes_dir / "4007169.fasta").write_text(
@@ -124,7 +125,8 @@ class TestPathogenGenomesSeededFromMainRun:
         (results / "pipeline_input" / "pathogen_genomes.json").write_text(
             json.dumps({"4007187": str(seed_genome)})
         )
-        validator = OnDemandValidator(results_dir=str(results))
+        validator = OnDemandValidator(
+            results_dir=str(results), cache_dir=str(tmp_path / "cache"))
         new_genome = tmp_path / "genomes" / "4007169.fasta"
         new_genome.write_text(">new\nACGT\n")
 
@@ -148,7 +150,8 @@ class TestPathogenGenomesSeededFromMainRun:
         (results / "pipeline_input" / "pathogen_genomes.json").write_text(
             json.dumps({"4007187": str(tmp_path / "gone.fasta")})
         )
-        validator = OnDemandValidator(results_dir=str(results))
+        validator = OnDemandValidator(
+            results_dir=str(results), cache_dir=str(tmp_path / "cache"))
         new_genome = tmp_path / "4007169.fasta"
         new_genome.write_text(">new\nACGT\n")
 
