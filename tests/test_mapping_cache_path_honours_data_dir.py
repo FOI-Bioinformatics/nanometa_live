@@ -32,6 +32,14 @@ from nanometa_live.core.taxonomy.taxid_mapping import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _clear_sandbox_project_dir(monkeypatch):
+    # The suite-wide home sandbox (tests/conftest.py) exports
+    # NANOMETA_PROJECT_DIR, which outranks the data dir these tests set up
+    # themselves. Clear it so the resolution under test is the one asserted.
+    monkeypatch.delenv("NANOMETA_PROJECT_DIR", raising=False)
+
+
 class TestMappingCacheHonoursDataDir:
     """``get_mapping_cache_path`` must read the configured data_dir, not Path.home()."""
 

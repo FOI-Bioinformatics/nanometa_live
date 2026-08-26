@@ -80,6 +80,7 @@ class TestOnDemandValidationOfflineEnv:
         validator = OnDemandValidator(
             results_dir=str(tmp_path / "results"),
             input_dir=str(input_dir),
+            cache_dir=str(tmp_path / "cache"),
         )
         validator.genomes_dir.mkdir(parents=True, exist_ok=True)
         (validator.genomes_dir / "263.fasta").write_text(

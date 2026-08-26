@@ -1076,6 +1076,7 @@ def _parse_kraken_data_uncached(
             kraken_dir, kreport_files, _report_sample_key,
             _parse_kraken2_report, _accumulate_kraken_df,
         )
+        transient_skip = False
         if cached is not None:
             agg, ordered_taxids = cached
         else:
@@ -1085,12 +1086,23 @@ def _parse_kraken_data_uncached(
             for kreport_file in kreport_files:
                 df = _parse_kraken2_report(kreport_file)
                 if df is None or df.empty:
+                    if df is None and not _is_file_stable(kreport_file):
+                        # Inside the file-stability window: transient by
+                        # definition (the file only has to age past it,
+                        # which changes no mtime and thus no cache key).
+                        # The reduced union must not be cached, or a
+                        # completed run's last-written report stays
+                        # missing from the aggregate forever (live find,
+                        # 2026-08-26: barcode04 absent from the verdict).
+                        transient_skip = True
                     continue
                 _accumulate_kraken_df(df, agg, ordered_taxids, seen_taxids)
 
         if not agg:
             return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
         result_df = _aggregate_to_result_df(agg, ordered_taxids)
+        if transient_skip:
+            return result_df
         return _cache_and_return(result_df, cache_key, mtime_key, kraken_dir, fingerprint_paths)
 
     # Specific sample - may have multiple batch files to combine.
@@ -1117,17 +1129,25 @@ def _parse_kraken_data_uncached(
     # result when file_count == 1, an O(rows) pass wasted on every single-file
     # load (cProfile, 2026-06-05).
     parsed_frames: List[pd.DataFrame] = []
+    transient_skip = False
     for sample_file in sample_files:
         df = _parse_kraken2_report(sample_file)
         if df is None or df.empty:
+            if df is None and not _is_file_stable(sample_file):
+                # Same rule as the aggregate branch above: a stability-gate
+                # skip changes no mtime when it heals, so the reduced
+                # result must not enter the mtime-keyed caches.
+                transient_skip = True
             continue
         parsed_frames.append(df)
 
     if not parsed_frames:
         return pd.DataFrame(columns=KRAKEN2_EXPECTED_COLUMNS)
-    if len(parsed_frames) == 1:
+    if len(parsed_frames) == 1 and not transient_skip:
         # Single file: return its DataFrame directly (no aggregation needed).
         return _cache_and_return(parsed_frames[0], cache_key, mtime_key, kraken_dir, fingerprint_paths)
+    if len(parsed_frames) == 1:
+        return parsed_frames[0]
 
     agg: Dict[int, List] = {}
     ordered_taxids: List[int] = []
@@ -1135,6 +1155,8 @@ def _parse_kraken_data_uncached(
     for df in parsed_frames:
         _accumulate_kraken_df(df, agg, ordered_taxids, seen_taxids)
     result_df = _aggregate_to_result_df(agg, ordered_taxids)
+    if transient_skip:
+        return result_df
     return _cache_and_return(result_df, cache_key, mtime_key, kraken_dir, fingerprint_paths)
 
 

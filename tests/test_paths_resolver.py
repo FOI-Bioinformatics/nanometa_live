@@ -39,6 +39,9 @@ def test_from_config_normalises_tilde(monkeypatch, tmp_path):
 
 def test_from_config_falls_back_to_default_when_data_dir_missing(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
+    # The suite-wide home sandbox (tests/conftest.py) exports
+    # NANOMETA_DATA_DIR; this test asserts the no-env default, so clear it.
+    monkeypatch.delenv("NANOMETA_DATA_DIR", raising=False)
     paths = NanometaPaths.from_config({})
 
     assert paths.data_dir == Path(os.path.expanduser(DEFAULT_DATA_DIR))
