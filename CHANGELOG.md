@@ -4,6 +4,79 @@ All notable changes to Nanometa Live are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.15.0] - 2026-08-27
+
+Offline-deployment overhaul: the 2026-08-27 audit found conda-mode
+bundles dead on arrival even between identical machines, and the
+Deployment tab reporting green over broken bundles. Every finding is
+fixed, and the full chain was verified live -- a real pre-warmed export,
+import into a fresh home, then a complete nanometanf run fully offline
+(`NXF_OFFLINE=true`) on the relocated environments: 18/18 tasks, zero
+env re-creations, classification reports written.
+
+### Fixed
+- Pre-warmed conda environments now survive the move to the field
+  machine. The cache was built under a throwaway tempdir, so every env's
+  embedded prefix (shebangs, conda-meta, NUL-terminated strings inside
+  binaries) pointed at a deleted path -- exit 127 on first use, even when
+  re-imported on the build machine. The cache is built under a padded
+  (>=180 char) prefix recorded in the manifest, and import relocates it:
+  plain rewrite for text, length-preserving NUL-padded rewrite for
+  binaries, symlink retargeting (`core/workflow/conda_cache_utils.py`).
+- Every patched Mach-O binary is ad-hoc re-signed: the byte rewrite
+  invalidates the code signature and Apple Silicon SIGKILLs the binary at
+  exec (exit 137 -- looked exactly like OOM, hit only patched binaries
+  such as python while unpatched C tools ran).
+- Pre-warm scenarios now drive parameters nanometanf actually has, as a
+  typed `-params-file` (the Nextflow 26 strict parser leaves CLI params
+  as strings and nf-schema rejects them). Every scenario gets a stub
+  Kraken2 database, so the classification branch -- and the VALIDATION
+  subworkflow nested inside it -- actually instantiates; validation
+  scenarios set `save_reads_assignment`/`save_output_fastqs` and a
+  `{taxid: genome}` placeholder in the shape nanometanf validates.
+  Previously the realtime and validation envs were never built while
+  every scenario exited 0.
+- A completing sweep materialises an env for every module
+  `environment.yml` (processes downstream of nanometanf's empty-file
+  filters never fire under `-stub`), with a per-env fallback that names
+  unsolvable envs -- on macOS arm64 builds, `porechop` and `miniasm`
+  have no bioconda builds and are reported instead of silently missing.
+- Import preserves symlinks (previously dereferenced: multi-GB
+  expansion, aborts on dangling links, silent file drops), tolerates and
+  explains tar extraction refusals, cross-checks the restored env count
+  against the manifest (`incomplete_conda_cache`), and the launch-time
+  broken-env purge now sweeps the bundle-restored cache too. Offline
+  mode refuses to launch when the configured conda cache is missing
+  instead of attempting a doomed network solve.
+- Export outcomes reach the operator: `export_bundle` returns an
+  `ExportResult`, pre-warm and container-pull warnings fold into
+  `export_warnings` (replayed by verify and import), the GUI renders
+  amber with the warning list, and the CLI prints them.
+- Deployment tab: a docker/singularity (or conda pre-warm) export
+  without a resolvable local pipeline checkout is blocked instead of
+  shipping a green bundle with zero images; the pre-export readiness
+  gate checks the runtime for the selected engine; `finalize_import`
+  pushes the imported config into the live app and reloads watchlists
+  (the running app used to keep the pre-import config until restart);
+  the wizard single-step callback runs in the background (step 7 ran a
+  full export on the request thread); force-export gained a cancel.
+- Readiness enforces the real Nextflow floor (26.04.0, was 23.0) and
+  gains offline checks for the Nextflow plugins directory and the
+  pre-warmed conda cache.
+
+### Added
+- "Verify Bundle (dry run)" button on the Import card (previously
+  CLI-only), a force-import checkbox, an image target-platform selector
+  (linux/amd64 default, linux/arm64) for container engines, and staged
+  progress for the export worker.
+
+### Companion nanometanf fixes (dev)
+- Pointing `--kraken2_db` at a tar.gz archive crashed at workflow wiring
+  (`UNTAR.out.versions` no longer exists on the topic-style module).
+- The iGenomes s3 default blocked every air-gapped run at schema
+  validation (nf-schema needs the nf-amazon plugin to stat s3, which
+  cannot be downloaded offline); iGenomes now defaults off.
+
 ## [0.14.0] - 2026-08-26
 
 ### Fixed
