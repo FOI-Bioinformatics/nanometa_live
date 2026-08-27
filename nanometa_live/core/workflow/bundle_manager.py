@@ -2989,17 +2989,58 @@ class BundleManager:
         from the same environment.yml content the field run will hash,
         so every env lands exactly where the runtime looks.
 
+        A single env-creation failure aborts the whole Nextflow session
+        (CondaCache runs outside task error handling, so errorStrategy
+        cannot contain it -- verified live: porechop has no osx-arm64
+        build and its PackagesNotFoundError killed the batch sweep). On
+        batch failure each env is retried in its OWN run, so one platform
+        hole costs one env, and the failures are named in the message.
+
         Returns ``(ok, message, env_file_count)``.
         """
-        import subprocess
-
         env_files = sorted((pipeline_dir / "modules").rglob("environment.yml"))
         if not env_files:
             return True, "no module environment files", 0
 
-        run_dir = staging / "_pre_warm" / "_env_materialise"
-        run_dir.mkdir(parents=True, exist_ok=True)
+        base_dir = staging / "_pre_warm" / "_env_materialise"
+        ok, msg = BundleManager._run_env_materialise_workflow(
+            env_files, base_dir / "batch", env, timeout=3600
+        )
+        if ok:
+            return True, "ok", len(env_files)
 
+        # Batch aborted -- isolate each env. Already-built envs are cache
+        # hits and return in seconds; the genuinely unsolvable ones fail
+        # alone and get named.
+        failures: List[str] = []
+        for i, env_file in enumerate(env_files):
+            one_ok, one_msg = BundleManager._run_env_materialise_workflow(
+                [env_file], base_dir / f"single_{i}", env, timeout=900
+            )
+            if not one_ok:
+                module = env_file.parent.relative_to(pipeline_dir)
+                failures.append(f"{module} ({one_msg[:120]})")
+        if failures:
+            return (
+                False,
+                f"{len(failures)} of {len(env_files)} module env(s) could "
+                f"not be built: " + "; ".join(failures),
+                len(env_files),
+            )
+        return True, "ok (after per-env fallback)", len(env_files)
+
+    @staticmethod
+    def _run_env_materialise_workflow(
+        env_files: List[Path],
+        run_dir: Path,
+        env: Dict[str, str],
+        timeout: int,
+    ) -> Tuple[bool, str]:
+        """One ``nextflow run -stub`` over generated processes for
+        ``env_files``. Returns ``(ok, message)``."""
+        import subprocess
+
+        run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "main.nf").write_text(
             _env_materialise_workflow_text(env_files)
         )
@@ -3017,15 +3058,21 @@ class BundleManager:
                 env=env,
                 capture_output=True,
                 text=True,
-                timeout=3600,
+                timeout=timeout,
             )
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
-            return False, f"subprocess error: {exc}", len(env_files)
+            return False, f"subprocess error: {exc}"
 
         if result.returncode != 0:
-            tail = (result.stderr or result.stdout or "").splitlines()[-5:]
-            return False, "; ".join(tail) or f"exit {result.returncode}", len(env_files)
-        return True, "ok", len(env_files)
+            output = result.stderr or result.stdout or ""
+            # Prefer the conda diagnosis when present -- it names the
+            # unresolvable package, which is what the operator needs.
+            for line in output.splitlines():
+                if "PackagesNotFoundError" in line or "LibMambaUnsatisfiable" in line:
+                    return False, line.strip()
+            tail = output.splitlines()[-5:]
+            return False, "; ".join(tail) or f"exit {result.returncode}"
+        return True, "ok"
 
     @staticmethod
     def _run_pre_warm_scenario(
