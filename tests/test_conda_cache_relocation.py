@@ -309,3 +309,69 @@ class TestEnvCountCrossCheck:
             "conda" in w.lower() and "env" in w.lower()
             for w in result["warnings"]
         )
+
+
+class TestMachOResigning:
+    """Binary-patching a Mach-O invalidates its code signature, and Apple
+    Silicon SIGKILLs invalidly-signed binaries at exec (observed live:
+    every python process in the field run died exit-137 while unpatched C
+    tools ran). Every patched Mach-O must be ad-hoc re-signed, the way
+    conda-pack does on macOS."""
+
+    # Padded like production: the patch needs the old prefix to be at
+    # least as long as the destination.
+    OLD = "/build/prefix_" + "x" * 200
+
+    def _cache_with(self, tmp_path, name, blob):
+        cache = tmp_path / "cache"
+        env = cache / "env-x" / "bin"
+        env.mkdir(parents=True)
+        (env / name).write_bytes(blob)
+        return cache
+
+    def test_patched_macho_is_resigned(self, tmp_path):
+        from unittest.mock import patch as _patch
+
+        from nanometa_live.core.workflow import conda_cache_utils as ccu
+
+        old = self.OLD
+        blob = b"\xcf\xfa\xed\xfe" + b"\x00" * 4 + old.encode() + b"/lib\x00PAD"
+        cache = self._cache_with(tmp_path, "python3.12", blob)
+        resigned = []
+        with _patch.object(
+            ccu, "_resign_macho", side_effect=lambda p: resigned.append(p) or True
+        ):
+            stats = ccu.relocate_conda_cache(cache, old)
+        assert stats["binary_patched"] == 1
+        assert len(resigned) == 1
+        assert resigned[0].name == "python3.12"
+
+    def test_patched_non_macho_is_not_resigned(self, tmp_path):
+        from unittest.mock import patch as _patch
+
+        from nanometa_live.core.workflow import conda_cache_utils as ccu
+
+        old = self.OLD
+        blob = b"\x7fELF" + b"\x00" * 4 + old.encode() + b"/lib\x00PAD"
+        cache = self._cache_with(tmp_path, "tool", blob)
+        resigned = []
+        with _patch.object(
+            ccu, "_resign_macho", side_effect=lambda p: resigned.append(p) or True
+        ):
+            ccu.relocate_conda_cache(cache, old)
+        assert resigned == []
+
+    def test_resign_failure_is_reported(self, tmp_path):
+        from unittest.mock import patch as _patch
+
+        from nanometa_live.core.workflow import conda_cache_utils as ccu
+
+        old = self.OLD
+        blob = b"\xcf\xfa\xed\xfe" + b"\x00" * 4 + old.encode() + b"/lib\x00PAD"
+        cache = self._cache_with(tmp_path, "python3.12", blob)
+        with _patch.object(ccu, "_resign_macho", return_value=False):
+            stats = ccu.relocate_conda_cache(cache, old)
+        assert stats["failures"], (
+            "an unsigned patched Mach-O will be SIGKILLed at exec; the "
+            "operator must be told"
+        )

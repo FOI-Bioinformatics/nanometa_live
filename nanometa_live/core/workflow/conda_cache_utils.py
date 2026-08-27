@@ -17,8 +17,44 @@ activates fine and then fails exit-127 on first use).
 
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+# Mach-O magic numbers (thin 32/64-bit both byte orders, plus fat/universal).
+_MACHO_MAGICS = (
+    b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xcf", b"\xfe\xed\xfa\xce",
+    b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
+)
+
+
+def _is_macho(data: bytes) -> bool:
+    return data[:4] in _MACHO_MAGICS
+
+
+def _resign_macho(path: Path) -> bool:
+    """Ad-hoc re-sign a patched Mach-O binary.
+
+    Rewriting bytes inside a Mach-O invalidates its code signature, and
+    Apple Silicon SIGKILLs invalidly-signed binaries at exec (observed
+    live 2026-08-27: every python process in the field run died exit-137
+    while unpatched C tools ran). Ad-hoc signing (`codesign -s -`) is what
+    conda-pack does after its own prefix rewrite. No-op off macOS.
+    """
+    if sys.platform != "darwin":
+        return True
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            ["/usr/bin/codesign", "--force", "--sign", "-", str(path)],
+            capture_output=True,
+            timeout=60,
+        )
+        return proc.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +206,17 @@ def relocate_conda_cache(cache_dir: Path, old_prefix: str) -> Dict[str, Any]:
                 continue
             _rewrite_in_place(path, patched)
             stats["binary_patched"] += 1
+            if _is_macho(patched):
+                if _resign_macho(path):
+                    stats["binaries_resigned"] = (
+                        stats.get("binaries_resigned", 0) + 1
+                    )
+                else:
+                    # An unsigned patched Mach-O is SIGKILLed at exec on
+                    # Apple Silicon -- that env is unusable.
+                    stats["failures"].append(
+                        str(path.relative_to(cache_dir)) + " (codesign failed)"
+                    )
         else:
             _rewrite_in_place(path, data.replace(old_b, new_b))
             stats["text_rewritten"] += 1

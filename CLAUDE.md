@@ -1032,8 +1032,12 @@ Three concerns:
      Conda envs embed the build prefix in shebangs/binaries, so without this
      every env fails exit-127 at first use. Absolute symlinks are made
      relative at export (tarfile's `data` filter aborts on absolute link
-     targets); import copies symlinks as symlinks. Pinned in
-     `tests/test_conda_cache_relocation.py`.
+     targets); import copies symlinks as symlinks. **Every patched Mach-O is
+     ad-hoc re-signed** (`_resign_macho`, `/usr/bin/codesign -s -`): the byte
+     rewrite invalidates the code signature and Apple Silicon SIGKILLs the
+     binary at exec (exit 137 — proven live: every python process died while
+     unpatched C tools ran; conda-pack re-signs for the same reason). Pinned
+     in `tests/test_conda_cache_relocation.py`.
    - **Scenarios drive real pipeline params via a typed `-params-file`.**
      Under the NF 26 strict parser CLI `--flag value` params arrive as
      strings and nf-schema rejects them, so booleans/ints must travel as
