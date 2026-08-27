@@ -51,8 +51,8 @@ class TestExportBundleReadinessGate:
              patch.object(prep, "_export_preflight", return_value=None), \
              patch.object(prep, "_run_export", return_value="EXPORTED") as run:
             out = self._fn(app)(
-                1, "/tmp/out", "bundle.tar.gz", False, "conda",
-                {"kraken_db": "/db"}, snapshot,
+                MagicMock(), 1, "/tmp/out", "bundle.tar.gz", False, "conda",
+                "linux/amd64", {"kraken_db": "/db"}, snapshot,
             )
         return out, checker, run
 
@@ -155,7 +155,7 @@ class TestImportBundleWorker:
         with patch("nanometa_live.core.workflow.bundle_manager.BundleManager",
                    return_value=mgr), \
              patch("nanometa_live.app.app._init_offline_mode") as init:
-            out = self._fn(app)(set_progress, 1, str(bundle), "/db")
+            out = self._fn(app)(set_progress, 1, str(bundle), "/db", False, {})
         return out, init, set_progress
 
     def test_success_wraps_manager_result_without_offline_init(self, app, tmp_path):
@@ -169,20 +169,20 @@ class TestImportBundleWorker:
 
     def test_missing_paths_return_early_error(self, app, tmp_path):
         set_progress = MagicMock()
-        out = self._fn(app)(set_progress, 1, "", "/db")
+        out = self._fn(app)(set_progress, 1, "", "/db", False, {})
         assert "bundle path" in out["result"]["early_error"]
         b = tmp_path / "b.tar.gz"; b.write_bytes(b"x")
-        out = self._fn(app)(set_progress, 1, str(b), "")
+        out = self._fn(app)(set_progress, 1, str(b), "", False, {})
         assert "Kraken2 database path" in out["result"]["early_error"]
 
     def test_bundle_not_found_early_error(self, app):
-        out = self._fn(app)(MagicMock(), 1, "/does/not/exist.tar.gz", "/db")
+        out = self._fn(app)(MagicMock(), 1, "/does/not/exist.tar.gz", "/db", False, {})
         assert "not found" in out["result"]["early_error"]
         assert out["result"]["color"] == "danger"
 
     def test_no_clicks_prevents_update(self, app):
         with pytest.raises(PreventUpdate):
-            self._fn(app)(MagicMock(), None, "/b", "/db")
+            self._fn(app)(MagicMock(), None, "/b", "/db", False, {})
 
 
 class TestFinalizeImport:
