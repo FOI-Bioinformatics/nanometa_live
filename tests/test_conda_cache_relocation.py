@@ -36,6 +36,22 @@ from nanometa_live.core.workflow.bundle_manager import (
 
 pytestmark = pytest.mark.unit
 
+@pytest.fixture(autouse=True)
+def _mock_env_materialiser():
+    """The completing env sweep spawns a real nextflow run; export tests
+    mock it (its own coverage lives in test_env_materialiser.py)."""
+    from unittest.mock import patch as _patch
+
+    from nanometa_live.core.workflow.bundle_manager import BundleManager
+
+    with _patch.object(
+        BundleManager,
+        "_materialise_all_module_envs",
+        return_value=(True, "ok", 0),
+    ):
+        yield
+
+
 ENV_NAME = "env-1234abcd5678efgh"
 
 

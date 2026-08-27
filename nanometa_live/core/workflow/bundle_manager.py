@@ -420,6 +420,36 @@ def _prepare_scenario_inputs(
     return scenario_params, []
 
 
+def _env_materialise_workflow_text(env_files: List[Path]) -> str:
+    """One trivial val-input stub process per environment.yml.
+
+    val inputs mean no file can be filtered away, so every process fires
+    and Nextflow builds every env with the hash the runtime will look up.
+    """
+    blocks: List[str] = []
+    calls: List[str] = []
+    for i, env_file in enumerate(env_files):
+        blocks.append(
+            f"process ENV_{i} {{\n"
+            f"  conda '{env_file}'\n"
+            "  input:\n"
+            "  val x\n"
+            "  output:\n"
+            "  stdout\n"
+            "  script:\n"
+            "  \"\"\"\n"
+            "  echo ok\n"
+            "  \"\"\"\n"
+            "  stub:\n"
+            "  \"\"\"\n"
+            "  echo ok\n"
+            "  \"\"\"\n"
+            "}\n"
+        )
+        calls.append(f"    ENV_{i}(channel.of({i}))")
+    return "\n".join(blocks) + "\nworkflow {\n" + "\n".join(calls) + "\n}\n"
+
+
 def _write_stub_kraken2_db(db_dir: Path) -> Path:
     """Write an empty-but-shaped Kraken2 DB directory.
 
@@ -2627,6 +2657,32 @@ class BundleManager:
                 )
                 logger.warning(outcome["warnings"][-1])
 
+        # Completing sweep: guarantee an env for EVERY module, including
+        # processes the scenarios cannot reach (nanometanf filters empty
+        # stub outputs, so e.g. KRAKEN2/NANOPLOT never fire under -stub
+        # and their envs were missing from the cache -- caught live in the
+        # 2026-08-27 field rehearsal).
+        if progress_cb is not None:
+            try:
+                progress_cb(
+                    "Materialising remaining module envs (one stub process "
+                    "per environment.yml)..."
+                )
+            except Exception:
+                logger.debug("progress_cb failed", exc_info=True)
+        mat_ok, mat_msg, mat_count = self._materialise_all_module_envs(
+            pipeline_dir=resolved_pipeline,
+            staging=staging,
+            env=env,
+        )
+        outcome["module_env_files"] = mat_count
+        if not mat_ok:
+            outcome["warnings"].append(
+                f"Module-env materialisation failed: {mat_msg}. Envs the "
+                "scenarios did not reach may be missing from the bundle."
+            )
+            logger.warning(outcome["warnings"][-1])
+
         final_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
         # A scenario runner that ignored NXF_CONDA_CACHEDIR and wrote the
         # canonical directory name directly (older mocks) still yields a
@@ -2912,6 +2968,64 @@ class BundleManager:
             dst_plugins.rmdir()
 
         return meta
+
+    @staticmethod
+    def _materialise_all_module_envs(
+        pipeline_dir: Path,
+        staging: Path,
+        env: Dict[str, str],
+    ) -> Tuple[bool, str, int]:
+        """Build EVERY module env into the cache via a generated stub run.
+
+        The scenario runs cannot guarantee coverage: nanometanf filters
+        empty files between steps, and a stub block's touched outputs are
+        empty -- so a process downstream of such a filter (KRAKEN2 and
+        NANOPLOT in the 2026-08-27 field rehearsal) never fires and its
+        env never lands in the cache; the field machine then attempts a
+        network solve. This generates a workflow with one trivial
+        val-input process per ``modules/**/environment.yml`` (no files,
+        so nothing can be filtered) and runs it ``-stub`` against the
+        same NXF_CONDA_CACHEDIR: Nextflow computes its own cache hash
+        from the same environment.yml content the field run will hash,
+        so every env lands exactly where the runtime looks.
+
+        Returns ``(ok, message, env_file_count)``.
+        """
+        import subprocess
+
+        env_files = sorted((pipeline_dir / "modules").rglob("environment.yml"))
+        if not env_files:
+            return True, "no module environment files", 0
+
+        run_dir = staging / "_pre_warm" / "_env_materialise"
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        (run_dir / "main.nf").write_text(
+            _env_materialise_workflow_text(env_files)
+        )
+        (run_dir / "nextflow.config").write_text("conda.enabled = true\n")
+
+        cmd = [
+            "nextflow", "run", str(run_dir / "main.nf"),
+            "-stub",
+            "-work-dir", str(run_dir / "work"),
+        ]
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=str(run_dir),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=3600,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+            return False, f"subprocess error: {exc}", len(env_files)
+
+        if result.returncode != 0:
+            tail = (result.stderr or result.stdout or "").splitlines()[-5:]
+            return False, "; ".join(tail) or f"exit {result.returncode}", len(env_files)
+        return True, "ok", len(env_files)
 
     @staticmethod
     def _run_pre_warm_scenario(

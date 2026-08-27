@@ -492,6 +492,22 @@ def _make_fake_pipeline_checkout(parent: Path) -> Path:
     return pipeline
 
 
+@pytest.fixture(autouse=True)
+def _mock_env_materialiser():
+    """The completing env sweep spawns a real nextflow run; export tests
+    mock it (its own coverage lives in test_env_materialiser.py)."""
+    from unittest.mock import patch as _patch
+
+    from nanometa_live.core.workflow.bundle_manager import BundleManager
+
+    with _patch.object(
+        BundleManager,
+        "_materialise_all_module_envs",
+        return_value=(True, "ok", 0),
+    ):
+        yield
+
+
 def _make_complete_env(cache_root: Path, name: str) -> Path:
     """Model what Nextflow's CondaCache leaves after a SUCCESSFUL build:
     conda-meta/history (written last on success) plus a non-empty bin/.
