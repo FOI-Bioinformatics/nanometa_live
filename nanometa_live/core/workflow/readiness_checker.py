@@ -235,6 +235,8 @@ class ReadinessChecker:
 
         # === Informational ===
         report.checks.append(self._check_nextflow_version())
+        report.checks.append(self._check_nextflow_plugins(config))
+        report.checks.append(self._check_offline_conda_cache(config))
         report.checks.extend(self._check_network_connectivity(config))
         report.checks.append(self._check_taxonomy_cache(home))
         report.checks.append(self._check_pipeline_cached(config))
@@ -502,6 +504,82 @@ class ReadinessChecker:
         return CheckResult(
             "Container Runtime", True, Severity.CRITICAL,
             f"docker running (profile: {profile})"
+        )
+
+    def _check_nextflow_plugins(self, config: Dict[str, Any]) -> CheckResult:
+        """Offline: the bundled Nextflow plugins must be present.
+
+        An empty or missing plugins dir makes Nextflow fall back to the
+        online plugin registry, which fails air-gapped. Online this is
+        informational -- Nextflow can fetch plugins itself.
+        """
+        if not config.get("offline_mode"):
+            return CheckResult(
+                "Nextflow Plugins", True, Severity.INFO,
+                "Online mode: Nextflow can fetch plugins from the registry",
+            )
+        plugins_dir = str(config.get("nxf_plugins_dir", "") or "")
+        if plugins_dir:
+            p = Path(plugins_dir)
+            if p.is_dir() and any(child.is_dir() for child in p.iterdir()):
+                return CheckResult(
+                    "Nextflow Plugins", True, Severity.CRITICAL,
+                    f"Bundled plugins present at {plugins_dir}",
+                )
+            return CheckResult(
+                "Nextflow Plugins", False, Severity.CRITICAL,
+                f"nxf_plugins_dir '{plugins_dir}' is missing or empty; "
+                "offline, Nextflow will probe the online plugin registry "
+                "and fail. Re-import the bundle or restore the plugins dir.",
+            )
+        return CheckResult(
+            "Nextflow Plugins", False, Severity.CRITICAL,
+            "offline_mode is on but no nxf_plugins_dir is configured; "
+            "Nextflow will probe the online plugin registry and fail. "
+            "Import a deployment bundle (which wires the plugins) or set "
+            "nxf_plugins_dir in config.yaml.",
+        )
+
+    def _check_offline_conda_cache(self, config: Dict[str, Any]) -> CheckResult:
+        """Offline + conda profile: the pre-warmed env cache must exist.
+
+        Without it every pipeline process tries to solve its environment
+        from bioconda over the network -- the run fails cryptically on the
+        air-gapped machine. Mirrors the launch-time hard refusal in
+        ``NextflowManager._build_nextflow_env``.
+        """
+        profile = str(config.get("pipeline_profile", "conda"))
+        engine = profile.split(",", 1)[0].strip()
+        if not config.get("offline_mode") or engine != "conda":
+            return CheckResult(
+                "Conda Cache", True, Severity.INFO,
+                "Not applicable (online mode or non-conda profile)",
+            )
+        cachedir = str(config.get("nxf_conda_cachedir", "") or "")
+        if not cachedir:
+            return CheckResult(
+                "Conda Cache", False, Severity.WARNING,
+                "offline_mode with the conda profile but no pre-warmed env "
+                "cache is configured (nxf_conda_cachedir); the first run "
+                "will need network access to build environments. Import a "
+                "bundle exported with pre-warmed conda envs.",
+            )
+        from nanometa_live.core.workflow.conda_cache_utils import (
+            list_complete_env_dirs,
+        )
+
+        cache = Path(cachedir)
+        envs = list_complete_env_dirs(cache)
+        if envs:
+            return CheckResult(
+                "Conda Cache", True, Severity.CRITICAL,
+                f"{len(envs)} pre-warmed conda env(s) at {cachedir}",
+            )
+        return CheckResult(
+            "Conda Cache", False, Severity.CRITICAL,
+            f"nxf_conda_cachedir '{cachedir}' is missing or holds no "
+            "complete env; offline, every process would try a network "
+            "solve. Re-import the deployment bundle.",
         )
 
     # -- Input/output checks --
@@ -912,7 +990,20 @@ class ReadinessChecker:
     # -- Informational checks --
 
     def _check_nextflow_version(self) -> CheckResult:
-        """Check Nextflow version compatibility (>= 23.0 required)."""
+        """Check Nextflow against the real toolchain floor.
+
+        nanometanf's manifest floors at ``_NEXTFLOW_MIN_VERSION`` (26.04.0,
+        also recorded in every bundle's ``min_versions``). The check used to
+        accept anything >= 23.0, so a field machine on 24.x got a green
+        checklist and failed at Start Analysis (2026-08-27 audit, GUI
+        finding 7).
+        """
+        from nanometa_live.core.workflow.bundle_manager import (
+            _NEXTFLOW_MIN_VERSION,
+        )
+
+        floor = tuple(int(p) for p in _NEXTFLOW_MIN_VERSION.split(".")[:2])
+        floor_str = _NEXTFLOW_MIN_VERSION
         try:
             result = subprocess.run(
                 ["nextflow", "-version"],
@@ -920,21 +1011,23 @@ class ReadinessChecker:
             )
             output = result.stdout + result.stderr
             # Nextflow version output typically contains a line like
-            # "nextflow version 23.10.0.5889"
+            # "nextflow version 26.04.6.6018"
             import re
             match = re.search(r"version\s+(\d+)\.(\d+)", output)
             if match:
                 major = int(match.group(1))
                 minor = int(match.group(2))
                 version_str = f"{major}.{minor}"
-                if major >= 23:
+                if (major, minor) >= floor:
                     return CheckResult(
                         "Nextflow Version", True, Severity.INFO,
-                        f"Nextflow {version_str} (>= 23.0)",
+                        f"Nextflow {version_str} (>= {floor_str})",
                     )
                 return CheckResult(
-                    "Nextflow Version", False, Severity.WARNING,
-                    f"Nextflow {version_str} found, >= 23.0 recommended",
+                    "Nextflow Version", False, Severity.CRITICAL,
+                    f"Nextflow {version_str} found but nanometanf requires "
+                    f">= {floor_str}; the run will refuse to start. Update "
+                    "the nf-core conda environment.",
                 )
             return CheckResult(
                 "Nextflow Version", False, Severity.WARNING,

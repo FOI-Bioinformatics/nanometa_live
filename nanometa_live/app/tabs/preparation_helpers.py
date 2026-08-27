@@ -30,8 +30,15 @@ def _build_export_opts(directory, filename, pre_warm, containerization):
 
 
 def _run_export(config, filename=None, directory=None, pre_warm=True,
-                containerization="conda"):
-    """Perform the actual bundle export. Returns an Alert component."""
+                containerization="conda", target_platform=None,
+                progress_cb=None):
+    """Perform the actual bundle export. Returns an Alert component.
+
+    ``progress_cb`` (a ``str -> None`` callable, usually wrapping a
+    background callback's ``set_progress``) receives stage messages during
+    the multi-minute export; ``target_platform`` is the container platform
+    for docker/singularity pulls (default linux/amd64 in the manager).
+    """
     try:
         from nanometa_live.core.workflow.bundle_manager import BundleManager
         export_dir = Path(directory) if directory else Path.home() / "Downloads"
@@ -43,27 +50,68 @@ def _run_export(config, filename=None, directory=None, pre_warm=True,
         output_path = export_dir / (filename or "mobile_lab_bundle.tar.gz")
 
         manager = BundleManager()
-        pipeline_path = config.get("pipeline_source") if isinstance(
-            config.get("pipeline_source"), str
-        ) and not str(config.get("pipeline_source", "")).startswith("remote:") else None
-        path = manager.export_bundle(
+        pipeline_path = _pipeline_path_from_config(config)
+        result = manager.export_bundle(
             str(output_path),
             config,
             pipeline_path=pipeline_path,
             pre_warm_conda_envs=bool(pre_warm),
             containerization=containerization or "conda",
+            target_platform=target_platform,
+            progress_cb=progress_cb,
         )
+        path = result.path
         size_mb = path.stat().st_size / (1024 * 1024)
+        summary = (
+            f"Bundle exported: {path} ({size_mb:.1f} MB) "
+            f"-- engine: {containerization or 'conda'}"
+        )
+
+        # A produced bundle can still be incomplete (skipped container
+        # pull, failed pre-warm). Green only when the export recorded no
+        # warnings; otherwise amber with the warnings listed, so the
+        # operator learns on the BUILD machine, not offline in the field.
+        if result.warnings:
+            return dbc.Alert(
+                [
+                    html.I(className="bi bi-exclamation-triangle me-2"),
+                    html.Strong(summary),
+                    html.Div(
+                        "The bundle may be incomplete -- review before "
+                        "shipping:",
+                        className="mt-2",
+                    ),
+                    html.Ul(
+                        [html.Li(w, className="small") for w in result.warnings]
+                    ),
+                ],
+                color="warning",
+            )
 
         return dbc.Alert([
             html.I(className="bi bi-check-circle me-2"),
-            f"Bundle exported: {path} ({size_mb:.1f} MB) "
-            f"-- engine: {containerization or 'conda'}",
+            summary,
         ], color="success")
 
     except Exception as e:
         logger.error(f"Export failed: {e}", exc_info=True)
         return dbc.Alert(f"Export failed: {e}", color="danger")
+
+
+def _pipeline_path_from_config(config):
+    """The local pipeline checkout hinted by the config, or None.
+
+    Strips the ``local:`` prefix; ``remote:`` sources carry no local
+    checkout to hand to the exporter.
+    """
+    source = config.get("pipeline_source")
+    if not isinstance(source, str) or not source:
+        return None
+    if source.startswith("remote:"):
+        return None
+    if source.startswith("local:"):
+        source = source.split(":", 1)[1]
+    return source
 
 def _render_import_result(result):
     """Render the import outcome from the worker's result dict into an Alert.
@@ -159,6 +207,56 @@ def _import_success_children(result):
         "confirm everything is green, then click Start Analysis.",
     ], className="small"))
     return children
+
+
+def _render_verify_result(result):
+    """Render a ``BundleManager.verify_bundle`` report into an Alert.
+
+    Pure (no I/O) so the background verify callback and tests share it.
+    Blockers are what would stop an unforced import; warnings ride along
+    either way. A clean report is the green light to run the real import.
+    """
+    result = result or {}
+    blockers = [
+        b.get("message", str(b)) if isinstance(b, dict) else str(b)
+        for b in result.get("blockers", [])
+    ]
+    warnings = list(result.get("warnings", []))
+    if result.get("exception"):
+        return dbc.Alert(
+            f"Verify failed: {result['exception']}", color="danger"
+        )
+    if blockers or not result.get("success", False):
+        detail = blockers or warnings or ["see logs"]
+        return dbc.Alert(
+            [
+                html.I(className="bi bi-x-octagon me-2"),
+                html.Strong("This bundle would NOT import cleanly:"),
+                html.Ul([html.Li(m, className="small") for m in detail]),
+                html.Div(
+                    "Fix the issues (usually: re-transfer or re-export the "
+                    "bundle) before importing.",
+                    className="small",
+                ),
+            ],
+            color="danger",
+        )
+    if warnings:
+        return dbc.Alert(
+            [
+                html.I(className="bi bi-exclamation-triangle me-2"),
+                html.Strong("Bundle is importable, with warnings:"),
+                html.Ul([html.Li(w, className="small") for w in warnings]),
+            ],
+            color="warning",
+        )
+    return dbc.Alert(
+        [
+            html.I(className="bi bi-check-circle me-2"),
+            "Bundle verified: safe to import.",
+        ],
+        color="success",
+    )
 
 
 def _regenerate_mappings(config, watchlist_entries=None):
@@ -322,7 +420,8 @@ def _alert_text(component) -> str:
     return _alert_text(children).strip() if children is not None else ""
 
 
-def _execute_wizard_step(step_idx, config, export_opts=None):
+def _execute_wizard_step(step_idx, config, export_opts=None,
+                         watchlist_entries=None):
     """Execute a wizard step and return result component.
 
     ``export_opts`` (used only by step 7) carries the operator's Export-card
@@ -330,6 +429,11 @@ def _execute_wizard_step(step_idx, config, export_opts=None):
     ``containerization`` -- so the guided wizard exports with the same engine
     and pre-warm choice as the manual Export button instead of silently
     defaulting to conda + ~/Downloads.
+
+    ``watchlist_entries`` is the ``watchlist-entries-snapshot`` payload;
+    background workers pass it because their WatchlistManager singleton is
+    empty (step 0 would otherwise report "no watchlist enabled" for a fully
+    configured deployment).
     """
     from nanometa_live.core.workflow.mobile_lab_preparer import MobileLabPreparer
     from nanometa_live.core.workflow.readiness_checker import ReadinessChecker, Severity
@@ -338,10 +442,17 @@ def _execute_wizard_step(step_idx, config, export_opts=None):
     # Step 0: Watchlist selection (informational)
     if step_idx == 0:
         try:
-            from nanometa_live.core.watchlist.watchlist_manager import get_watchlist_manager
-            wm = get_watchlist_manager()
-            active = wm.get_active_entries()
-            count = len(active) if active else 0
+            if watchlist_entries is not None:
+                count = len([
+                    e for e in watchlist_entries if e.get("enabled", True)
+                ])
+            else:
+                from nanometa_live.core.watchlist.watchlist_manager import (
+                    get_watchlist_manager,
+                )
+                wm = get_watchlist_manager()
+                active = wm.get_active_entries()
+                count = len(active) if active else 0
             if count == 0:
                 return dbc.Alert(
                     [html.I(className="bi bi-exclamation-triangle me-2"),

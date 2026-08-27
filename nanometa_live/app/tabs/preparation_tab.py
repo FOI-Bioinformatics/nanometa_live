@@ -33,6 +33,7 @@ from nanometa_live.app.tabs.preparation_helpers import (
     _regenerate_mappings,
     _render_import_result,
     _render_genome_import_result,
+    _render_verify_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -167,12 +168,15 @@ def _native_path_picker(initial, prompt, *, pick_file=False):
     return None
 
 
-def _export_preflight(directory, config, pre_warm):
+def _export_preflight(directory, config, pre_warm, containerization=None):
     """Validate the export directory and check free space before a long export.
 
     Returns an Alert to display (and abort) on failure, or None when it is safe
     to proceed. Catches the "wrong/full directory" case immediately instead of
-    after a multi-minute export.
+    after a multi-minute export. Also checks the STAGING tempdir: the whole
+    bundle (pre-warm cache and container images included) is assembled under
+    tempfile.gettempdir() before the tar is written, and on Linux /tmp is
+    often a small tmpfs.
     """
     directory = (directory or "").strip()
     if not directory:
@@ -185,13 +189,15 @@ def _export_preflight(directory, config, pre_warm):
                          color="danger")
     try:
         import shutil as _sh
+        import tempfile as _tf
         from nanometa_live.core.utils.paths import NanometaPaths
         from nanometa_live.core.workflow.bundle_manager import (
             estimate_bundle_size, human_size,
         )
         home = str(NanometaPaths.from_config(config or {}).data_dir)
         est = estimate_bundle_size(
-            home, pre_warm=bool(pre_warm), config=config
+            home, pre_warm=bool(pre_warm), config=config,
+            containerization=containerization,
         )
         free = _sh.disk_usage(directory).free
         if est and free < est:
@@ -201,9 +207,153 @@ def _export_preflight(directory, config, pre_warm):
                 "space or choose another directory.",
                 color="danger",
             )
+        staging_free = _sh.disk_usage(_tf.gettempdir()).free
+        if est and staging_free < est:
+            return dbc.Alert(
+                f"Not enough free space in the staging area "
+                f"({_tf.gettempdir()}): assembling the bundle needs about "
+                f"{human_size(est)} but only {human_size(staging_free)} is "
+                "free there. Set TMPDIR to a larger volume and relaunch, or "
+                "free up space.",
+                color="danger",
+            )
     except Exception as e:  # preflight is advisory -- never block on its own bug
         logger.debug(f"Export size preflight skipped: {e}")
     return None
+
+
+def _readiness_issue_view(critical, warnings):
+    """Render the pre-export readiness outcome.
+
+    Returns ``(issues_component, force_area_style)``: critical failures
+    block the export outright; warnings alone reveal the acknowledged
+    force-export controls.
+    """
+    items = []
+    for c in critical:
+        items.append(html.Div([
+            html.I(className="bi bi-x-octagon-fill text-danger me-2"),
+            html.Strong(c.name), html.Span(f": {c.message}"),
+        ], className="mb-1"))
+    for w in warnings:
+        items.append(html.Div([
+            html.I(className="bi bi-exclamation-triangle-fill text-warning me-2"),
+            html.Strong(w.name), html.Span(f": {w.message}"),
+        ], className="mb-1"))
+
+    if critical:
+        issues = html.Div([
+            dbc.Alert([
+                html.I(className="bi bi-x-octagon me-2"),
+                html.Strong("Cannot export. "),
+                "Critical issues must be resolved first:",
+            ], color="danger", className="mb-2"),
+            html.Div(items, className="ms-2"),
+        ])
+        return issues, {"display": "none"}
+
+    issues = html.Div([
+        dbc.Alert([
+            html.I(className="bi bi-exclamation-triangle me-2"),
+            html.Strong("Setup is incomplete. "),
+            "The following items are not fully prepared:",
+        ], color="warning", className="mb-2"),
+        html.Div(items, className="ms-2"),
+    ])
+    return issues, {"display": "block"}
+
+
+def _progress_alert_cb(set_progress):
+    """Wrap a background callback's ``set_progress`` into the plain
+    ``str -> None`` sink ``BundleManager.export_bundle`` expects."""
+    def _cb(message):
+        set_progress((
+            dbc.Alert(
+                [dbc.Spinner(size="sm", spinner_class_name="me-2"), message],
+                color="info", className="mt-2 py-2",
+            ),
+        ))
+    return _cb
+
+
+def _container_export_preflight(containerization, config, pre_warm=False):
+    """Refuse an export that would silently produce an unusable bundle.
+
+    A docker/singularity export with no resolvable local pipeline checkout
+    skips the image pull entirely -- the CLI hard-fails this case, the GUI
+    used to render green over a bundle with zero images (2026-08-27 audit,
+    GUI finding 1). Same for conda pre-warm, which cannot run without the
+    modules/ tree, and for a docker export with the daemon down.
+
+    Returns an Alert to display (and abort), or None when safe.
+    """
+    from nanometa_live.core.workflow import bundle_manager as _bm
+
+    engine = containerization or "conda"
+    needs_checkout = engine in ("docker", "singularity") or (
+        engine == "conda" and bool(pre_warm)
+    )
+    if not needs_checkout:
+        return None
+
+    from nanometa_live.app.tabs.preparation_helpers import (
+        _pipeline_path_from_config,
+    )
+
+    resolved = _bm.BundleManager._resolve_pipeline_checkout(
+        config or {}, override=_pipeline_path_from_config(config or {})
+    )
+    if resolved is None:
+        what = (
+            "pull the pipeline's container images"
+            if engine in ("docker", "singularity")
+            else "pre-warm the conda environments"
+        )
+        return dbc.Alert(
+            [
+                html.I(className="bi bi-x-octagon me-2"),
+                html.Strong("Cannot export: "),
+                f"a local nanometanf checkout is required to {what}, but "
+                "pipeline_source is "
+                f"'{(config or {}).get('pipeline_source', '')}' and no local "
+                "checkout was found. Set pipeline_source to a local checkout "
+                "path on the Configuration tab (or clone nanometanf once "
+                "with network access), then retry.",
+            ],
+            color="danger",
+        )
+    if engine == "docker" and not _bm._docker_daemon_ok():
+        return dbc.Alert(
+            [
+                html.I(className="bi bi-x-octagon me-2"),
+                html.Strong("Cannot export: "),
+                "Docker is installed but its daemon is not responding, so "
+                "no image can be pulled. Start Docker (Desktop/engine) and "
+                "retry.",
+            ],
+            color="danger",
+        )
+    return None
+
+
+def _reload_watchlists_from_config(config):
+    """Reload the LIVE WatchlistManager from an imported config.
+
+    Main-process only: a bundle import restores watchlist YAMLs and the
+    toggle state on disk, but the running app's singleton still holds the
+    pre-import lists until this reload (2026-08-27 audit, GUI finding 5).
+    """
+    try:
+        from nanometa_live.core.watchlist.watchlist_manager import (
+            get_watchlist_manager,
+        )
+
+        get_watchlist_manager().load_config(config or {})
+    except Exception:
+        logger.warning(
+            "Could not reload watchlists from the imported config",
+            exc_info=True,
+        )
 
 
 def _refresh_live_profile(kraken_db: str, db_hash: str, mappings_dir: Path):
@@ -469,6 +619,18 @@ def register_preparation_callbacks(app):
         # meaningless for docker/singularity, so hide it there.
         return {} if (engine or "conda") == "conda" else {"display": "none"}
 
+    @app.callback(
+        Output("target-platform-wrapper", "style"),
+        Input("bundle-containerization-radio", "value"),
+    )
+    def toggle_target_platform_visibility(engine):
+        # The image-platform choice only applies to pulled container
+        # images; conda bundles are locked to the build host's platform.
+        return (
+            {} if (engine or "conda") in ("docker", "singularity")
+            else {"display": "none"}
+        )
+
     # --- Offline notice on the Run Preparation card ---
     @app.callback(
         Output("prep-offline-notice", "children"),
@@ -654,6 +816,7 @@ def register_preparation_callbacks(app):
         State("bundle-export-filename", "value"),
         State("bundle-export-prewarm", "value"),
         State("bundle-containerization-radio", "value"),
+        State("bundle-target-platform", "value"),
         State("app-config", "data"),
         # Watchlist entries hydrated by the main process. This is a
         # background=True callback, so the worker's WatchlistManager singleton
@@ -665,35 +828,53 @@ def register_preparation_callbacks(app):
         prevent_initial_call=True,
         background=True,
         manager=background_callback_manager,
+        progress=[Output("bundle-export-progress", "children")],
         running=[
             (Output("export-bundle-btn", "disabled"), True, False),
         ],
         cancel=[Input("export-bundle-cancel-btn", "n_clicks")],
     )
-    def export_bundle(n_clicks, directory, filename, pre_warm,
-                      containerization, config, watchlist_snapshot):
+    def export_bundle(set_progress, n_clicks, directory, filename, pre_warm,
+                      containerization, target_platform, config,
+                      watchlist_snapshot):
         """Check readiness, then export or show issues.
 
         Runs in a DiskcacheManager worker because pre-warming conda
         environments can take tens of minutes; doing it inline would hold a
         Werkzeug request thread for the whole export. The bundle is written
-        to disk, so no in-process state has to survive the worker."""
+        to disk, so no in-process state has to survive the worker. Stage
+        messages stream to export-progress via set_progress."""
         if not n_clicks:
             raise PreventUpdate
 
         # Validate the destination and free space up front so a wrong/full
         # directory fails immediately, not after a multi-minute export.
-        pre_err = _export_preflight(directory, config, pre_warm)
+        pre_err = _export_preflight(
+            directory, config, pre_warm, containerization
+        )
         if pre_err is not None:
             return pre_err, {"display": "none"}, html.Div(), False
 
-        # Run readiness check
+        # Container/pre-warm prerequisites: a missing pipeline checkout or a
+        # dead docker daemon silently produces a bundle with no images/envs.
+        pre_err = _container_export_preflight(
+            containerization, config, pre_warm
+        )
+        if pre_err is not None:
+            return pre_err, {"display": "none"}, html.Div(), False
+
+        # Run readiness check FOR THE SELECTED ENGINE: the container-runtime
+        # check branches on pipeline_profile, so gating a docker export on
+        # the config's (usually conda) profile checks the wrong runtime.
         try:
             from nanometa_live.core.workflow.readiness_checker import (
                 ReadinessChecker, Severity,
             )
+            cfg_for_check = dict(config or {})
+            if containerization:
+                cfg_for_check["pipeline_profile"] = containerization
             checker = ReadinessChecker()
-            report = checker.check_readiness(config or {}, watchlist_entries=watchlist_snapshot)
+            report = checker.check_readiness(cfg_for_check, watchlist_entries=watchlist_snapshot)
         except Exception as e:
             logger.error(f"Readiness check failed: {e}", exc_info=True)
             return (
@@ -712,44 +893,14 @@ def register_preparation_callbacks(app):
                 config, filename, directory,
                 pre_warm=pre_warm,
                 containerization=containerization,
+                target_platform=target_platform,
+                progress_cb=_progress_alert_cb(set_progress),
             )
+            set_progress(("",))  # clear the stage line under the result
             return html.Div(), {"display": "none"}, result, False
 
-        # Build issue list
-        items = []
-        for c in critical:
-            items.append(html.Div([
-                html.I(className="bi bi-x-octagon-fill text-danger me-2"),
-                html.Strong(c.name), html.Span(f": {c.message}"),
-            ], className="mb-1"))
-        for w in warnings:
-            items.append(html.Div([
-                html.I(className="bi bi-exclamation-triangle-fill text-warning me-2"),
-                html.Strong(w.name), html.Span(f": {w.message}"),
-            ], className="mb-1"))
-
-        if critical:
-            # Critical failures — block export entirely
-            issues = html.Div([
-                dbc.Alert([
-                    html.I(className="bi bi-x-octagon me-2"),
-                    html.Strong("Cannot export. "),
-                    "Critical issues must be resolved first:",
-                ], color="danger", className="mb-2"),
-                html.Div(items, className="ms-2"),
-            ])
-            return issues, {"display": "none"}, html.Div(), False
-
-        # Warnings only — allow force-export after acknowledgement
-        issues = html.Div([
-            dbc.Alert([
-                html.I(className="bi bi-exclamation-triangle me-2"),
-                html.Strong("Setup is incomplete. "),
-                "The following items are not fully prepared:",
-            ], color="warning", className="mb-2"),
-            html.Div(items, className="ms-2"),
-        ])
-        return issues, {"display": "block"}, html.Div(), False
+        issues, force_style = _readiness_issue_view(critical, warnings)
+        return issues, force_style, html.Div(), False
 
     @app.callback(
         Output("export-force-btn", "disabled"),
@@ -807,32 +958,49 @@ def register_preparation_callbacks(app):
         State("bundle-export-filename", "value"),
         State("bundle-export-prewarm", "value"),
         State("bundle-containerization-radio", "value"),
+        State("bundle-target-platform", "value"),
         State("app-config", "data"),
         prevent_initial_call=True,
         background=True,
         manager=background_callback_manager,
+        progress=[Output("bundle-export-progress", "children", allow_duplicate=True)],
         running=[
             # disabled is also driven by toggle_force_export_btn, so the
             # running output must be marked as a duplicate.
             (Output("export-force-btn", "disabled", allow_duplicate=True), True, False),
         ],
+        # Same cancel affordance as the normal export path: a force export
+        # runs just as long and used to be uncancellable.
+        cancel=[Input("export-bundle-cancel-btn", "n_clicks")],
     )
-    def force_export_bundle(n_clicks, directory, filename, pre_warm,
-                            containerization, config):
+    def force_export_bundle(set_progress, n_clicks, directory, filename,
+                            pre_warm, containerization, target_platform,
+                            config):
         """Export bundle after user acknowledged warnings.
 
         Background for the same reason as export_bundle: conda pre-warming
         can run for tens of minutes."""
         if not n_clicks:
             raise PreventUpdate
-        pre_err = _export_preflight(directory, config, pre_warm)
+        pre_err = _export_preflight(
+            directory, config, pre_warm, containerization
+        )
         if pre_err is not None:
             return pre_err
-        return _run_export(
+        pre_err = _container_export_preflight(
+            containerization, config, pre_warm
+        )
+        if pre_err is not None:
+            return pre_err
+        result = _run_export(
             config, filename, directory,
             pre_warm=pre_warm,
             containerization=containerization,
+            target_platform=target_platform,
+            progress_cb=_progress_alert_cb(set_progress),
         )
+        set_progress(("",))
+        return result
     # --- Import Bundle (split: background worker does the I/O, a main-process
     # callback renders + activates offline mode) ---
     #
@@ -848,6 +1016,8 @@ def register_preparation_callbacks(app):
         Input("import-bundle-btn", "n_clicks"),
         State("import-bundle-path", "value"),
         State("import-kraken-db-path", "value"),
+        State("import-force-check", "value"),
+        State("app-config", "data"),
         background=True,
         manager=background_callback_manager,
         progress=[Output("import-result", "children")],
@@ -855,7 +1025,8 @@ def register_preparation_callbacks(app):
         prevent_initial_call=True,
         cancel=[Input("import-bundle-cancel-btn", "n_clicks")],
     )
-    def import_bundle_worker(set_progress, n_clicks, bundle_path, kraken_db_path):
+    def import_bundle_worker(set_progress, n_clicks, bundle_path,
+                             kraken_db_path, force, config):
         if not n_clicks:
             raise PreventUpdate
 
@@ -875,13 +1046,18 @@ def register_preparation_callbacks(app):
                           "early_error": f"Bundle not found: {bundle_path}",
                           "color": "danger"})
 
+        # Resolve the data home the way EXPORT does (from the app config),
+        # not from the env default -- a config loaded after launch with a
+        # different data_dir made export read one tree and import write
+        # another (2026-08-27 audit, GUI finding 13).
+        from nanometa_live.core.utils.paths import NanometaPaths
+        home = str(NanometaPaths.from_config(config or {}).data_dir)
+
         # Free-space preflight: a gzip bundle expands well beyond its file size
         # once extracted and copied. Stop early rather than fail mid-extract.
         try:
             import shutil as _sh
-            from nanometa_live.core.utils.paths import get_data_dir_from_env
             from nanometa_live.core.workflow.bundle_manager import human_size
-            home = get_data_dir_from_env()
             bundle_size = Path(bundle_path).stat().st_size
             free = _sh.disk_usage(home).free
             if free < bundle_size * 3:
@@ -910,7 +1086,16 @@ def register_preparation_callbacks(app):
         try:
             from nanometa_live.core.workflow.bundle_manager import BundleManager
             manager = BundleManager()
-            result = manager.import_bundle(bundle_path, kraken_db_path)
+            result = manager.import_bundle(
+                bundle_path, kraken_db_path,
+                nanometa_home=home,
+                force=bool(force),
+            )
+            if force:
+                result.setdefault("warnings", []).append(
+                    "Import was FORCED past non-fatal problems; review the "
+                    "warnings above before trusting this installation."
+                )
             return _wrap(result)
         except Exception as e:
             logger.error(f"Import failed: {e}", exc_info=True)
@@ -918,24 +1103,78 @@ def register_preparation_callbacks(app):
 
     @app.callback(
         Output("import-result", "children", allow_duplicate=True),
+        Output("app-config", "data", allow_duplicate=True),
         Input("import-bundle-result-store", "data"),
         prevent_initial_call=True,
     )
     def finalize_import(payload):
         """Main-process finalizer for the background import.
 
-        Activates offline mode (re-inits the live singletons -- only possible
-        here, not in the worker) on a successful import, then renders the
-        outcome. Runs in the main process so the singleton switch takes effect
-        for the running app.
+        On a successful import: activates offline mode (re-inits the live
+        singletons -- only possible here, not in the worker), pushes the
+        imported config into the ``app-config`` store, and reloads the live
+        WatchlistManager. Without the store push the running app keeps the
+        PRE-import config: the OFFLINE badge stays hidden, the readiness
+        checklist evaluates stale paths, and the bundle's watchlists are
+        invisible until a restart (2026-08-27 audit, GUI finding 5).
         """
+        from dash import no_update
+
         if not payload:
             raise PreventUpdate
         result = payload.get("result") or {}
+        app_config_out = no_update
         if result.get("success"):
             from nanometa_live.app.app import _init_offline_mode
             _init_offline_mode(True)
-        return _render_import_result(result)
+            imported_cfg = result.get("imported_config")
+            if imported_cfg:
+                _reload_watchlists_from_config(imported_cfg)
+                app_config_out = imported_cfg
+        return _render_import_result(result), app_config_out
+
+    @app.callback(
+        Output("verify-bundle-result", "children"),
+        Input("verify-bundle-btn", "n_clicks"),
+        State("import-bundle-path", "value"),
+        State("import-kraken-db-path", "value"),
+        background=True,
+        manager=background_callback_manager,
+        progress=[Output("verify-bundle-result", "children", allow_duplicate=True)],
+        running=[(Output("verify-bundle-btn", "disabled"), True, False)],
+        prevent_initial_call=True,
+    )
+    def verify_bundle_worker(set_progress, n_clicks, bundle_path, kraken_db_path):
+        """Dry-run bundle check (no install, no side effects).
+
+        Plain background callback -- verify_bundle mutates nothing
+        in-process, so no worker/Store/finalize split is needed. Extracting
+        and checksumming a multi-GB bundle takes minutes, hence background.
+        """
+        if not n_clicks:
+            raise PreventUpdate
+        if not bundle_path:
+            return dbc.Alert("Provide a bundle path first.", color="warning")
+        if not Path(bundle_path).exists():
+            return dbc.Alert(f"Bundle not found: {bundle_path}",
+                             color="danger")
+        set_progress((
+            dbc.Alert(
+                [dbc.Spinner(size="sm", spinner_class_name="me-2"),
+                 "Verifying bundle... (extracting and checksumming; a large "
+                 "bundle takes a few minutes)"],
+                color="info", className="mt-2 py-2",
+            ),
+        ))
+        try:
+            from nanometa_live.core.workflow.bundle_manager import BundleManager
+            report = BundleManager().verify_bundle(
+                bundle_path, kraken_db_path=kraken_db_path or None
+            )
+            return _render_verify_result(report)
+        except Exception as e:
+            logger.error(f"Bundle verify failed: {e}", exc_info=True)
+            return _render_verify_result({"exception": str(e)})
 
     @app.callback(
         Output("regenerate-mappings-result", "children"),
@@ -2513,6 +2752,15 @@ def register_preparation_callbacks(app):
                     color="danger",
                     className="ms-1",
                 ))
+            elif step_status == "warning":
+                # Ran, but with a warning outcome -- must be visually
+                # distinct from a step never run.
+                statuses.append(dbc.Badge(
+                    [html.I(className="bi bi-exclamation-triangle me-1"),
+                     "Warning"],
+                    color="warning",
+                    className="ms-1",
+                ))
             else:
                 statuses.append(html.Span())
 
@@ -2529,11 +2777,28 @@ def register_preparation_callbacks(app):
         State("bundle-export-filename", "value"),
         State("bundle-export-prewarm", "value"),
         State("bundle-containerization-radio", "value"),
+        # Worker singletons are empty; the watchlist-dependent steps read
+        # this snapshot (same bridge as run_all_wizard_steps' preload).
+        State("watchlist-entries-snapshot", "data"),
+        background=True,
+        manager=background_callback_manager,
+        running=[(
+            Output({"type": "wizard-step-run", "index": MATCH}, "disabled"),
+            True, False,
+        )],
+        cancel=[Input("wizard-cancel-btn", "n_clicks")],
         prevent_initial_call=True,
     )
     def run_wizard_step(n_clicks, wizard_state, config, export_dir,
-                        export_filename, export_prewarm, export_engine):
-        """Run a single wizard step."""
+                        export_filename, export_prewarm, export_engine,
+                        watchlist_snapshot):
+        """Run a single wizard step in a background worker.
+
+        Background because several steps are multi-minute (genome download,
+        BLAST build) and step 7 is a full bundle export -- previously it ran
+        on the request thread, freezing the whole UI for up to ~30 minutes
+        with no cancel (2026-08-27 audit, GUI finding 4).
+        """
         if not n_clicks:
             raise PreventUpdate
 
@@ -2551,14 +2816,33 @@ def register_preparation_callbacks(app):
             export_dir, export_filename, export_prewarm, export_engine
         )
 
+        # The WatchlistManager singleton is empty in this worker; steps
+        # 0/3/4 read it. Load it from config, as run_all_wizard_steps does.
+        try:
+            from nanometa_live.core.watchlist.watchlist_manager import (
+                get_watchlist_manager,
+            )
+            wm = get_watchlist_manager()
+            if not wm._loaded:
+                wm.load_config(config)
+        except Exception:
+            logger.debug(
+                "Could not preload watchlist manager in wizard worker",
+                exc_info=True,
+            )
+
         # Mark running
         wizard_state["steps"][str(step_idx)] = "running"
 
         try:
             result_children = _execute_wizard_step(
-                step_idx, config, export_opts=export_opts
+                step_idx, config, export_opts=export_opts,
+                watchlist_entries=watchlist_snapshot,
             )
-            wizard_state["steps"][str(step_idx)] = "done"
+            colour = getattr(result_children, "color", "success")
+            wizard_state["steps"][str(step_idx)] = (
+                "warning" if colour in ("warning", "danger", "info") else "done"
+            )
             set_props("wizard-step-state-relay", {"data": wizard_state})
             return result_children
         except Exception as e:

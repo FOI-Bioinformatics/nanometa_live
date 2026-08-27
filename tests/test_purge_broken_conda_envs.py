@@ -144,3 +144,56 @@ class TestStripAppleDoubleFiles:
         assert count == 2
         assert (env / "gzip-1.13.json").exists()  # real file untouched
         assert not (env / "._gzip-1.13.json").exists()
+
+
+class TestSweepCoversBundledCache:
+    """2026-08-27 audit, conda finding 5: the launch-time sweep only ever
+    looked at <work_dir>/conda, but with NXF_CONDA_CACHEDIR pointing at a
+    restored bundle cache Nextflow never uses work_dir/conda -- so the one
+    cache actually in play was the one never swept."""
+
+    def test_direct_conda_dir_form(self, tmp_path):
+        cache = tmp_path / "bundle_cache"
+        cache.mkdir()
+        good = _make_env(cache, "env-good", complete=True)
+        bad = _make_env(cache, "env-bad", complete=False)
+
+        removed = NextflowManager._purge_broken_conda_envs(conda_dir=str(cache))
+
+        assert removed == [str(bad)]
+        assert good.exists()
+
+    def test_named_env_with_conda_meta_is_swept(self, tmp_path):
+        # Nextflow names an env from environment.yml's `name:` key when one
+        # is declared; four nanometanf local modules do. A broken NAMED env
+        # must be swept even though it lacks the env- prefix. A plain custom
+        # directory (no conda-meta/) stays untouched.
+        cache = tmp_path / "conda"
+        cache.mkdir()
+        named_broken = _make_env(cache, "seqkit_merge_stats-abc123", complete=False)
+        custom = cache / "my_custom_dir"
+        custom.mkdir()
+        (custom / "important").write_text("data")
+
+        removed = NextflowManager._purge_broken_conda_envs(str(tmp_path))
+
+        assert removed == [str(named_broken)]
+        assert (custom / "important").exists()
+
+    def test_sweep_conda_caches_covers_both(self, tmp_path):
+        work = tmp_path / "work"
+        (work / "conda").mkdir(parents=True)
+        work_bad = _make_env(work / "conda", "env-workbad", complete=False)
+        bundle_cache = tmp_path / "conda_cache"
+        bundle_cache.mkdir()
+        bundle_bad = _make_env(bundle_cache, "env-bundlebad", complete=False)
+
+        mgr = NextflowManager.__new__(NextflowManager)
+        mgr.work_dir = str(work)
+        mgr._run_config = {"nxf_conda_cachedir": str(bundle_cache)}
+
+        removed = mgr._sweep_conda_caches()
+
+        assert not work_bad.exists()
+        assert not bundle_bad.exists()
+        assert sorted(removed) == sorted([str(work_bad), str(bundle_bad)])

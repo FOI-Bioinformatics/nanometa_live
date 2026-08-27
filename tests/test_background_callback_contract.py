@@ -83,9 +83,13 @@ CANCEL_NOT_DECLARED = {
     "check_internet_on_startup",
     "download_kraken_database",
     "download_single_genome",
-    "export_bundle",
-    "force_export_bundle",
-    "import_bundle_worker",
+    # export_bundle / force_export_bundle / import_bundle_worker now declare
+    # cancel= (2026-08-27) and are deliberately NOT in this set.
+    #
+    # Dry-run verify: extraction + checksumming of a local file, bounded by
+    # bundle size; running= disables the button and nothing is written, so
+    # an interrupt has no state to strand.
+    "verify_bundle_worker",
     # One NCBI/GTDB lookup, bounded by 5 s HTTP timeouts and the per-host
     # circuit breaker (~20 s worst case); the running= disable prevents
     # stacking clicks and there is no meaningful mid-flight state to save.

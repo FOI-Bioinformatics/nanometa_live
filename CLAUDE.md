@@ -1021,6 +1021,61 @@ Three concerns:
      cross-checks the loaded image count against the manifest's
      `pull_result.image_count` and flags a partial set (`incomplete_image_set`).
 
+   **Conda pre-warm invariants (2026-08-27 audit; do not regress).** The
+   audit found pre-warmed bundles dead-on-arrival even same-OS/same-arch; four
+   guards now make conda mode real:
+   - **Envs are relocatable via a recorded padded build prefix.** Pre-warm
+     builds the cache under a >=180-char prefix (recorded as
+     `manifest.pre_warm_conda_envs.build_prefix`); import rewrites it to the
+     restored path — text replace, NUL-padded in-place for binaries, symlink
+     retarget (`core/workflow/conda_cache_utils.relocate_conda_cache`).
+     Conda envs embed the build prefix in shebangs/binaries, so without this
+     every env fails exit-127 at first use. Absolute symlinks are made
+     relative at export (tarfile's `data` filter aborts on absolute link
+     targets); import copies symlinks as symlinks. **Every patched Mach-O is
+     ad-hoc re-signed** (`_resign_macho`, `/usr/bin/codesign -s -`): the byte
+     rewrite invalidates the code signature and Apple Silicon SIGKILLs the
+     binary at exec (exit 137 — proven live: every python process died while
+     unpatched C tools ran; conda-pack re-signs for the same reason). Pinned
+     in `tests/test_conda_cache_relocation.py`.
+   - **Scenarios drive real pipeline params via a typed `-params-file`.**
+     Under the NF 26 strict parser CLI `--flag value` params arrive as
+     strings and nf-schema rejects them, so booleans/ints must travel as
+     JSON. Every scenario gets a runner-written stub Kraken2 DB (VALIDATION
+     is nested inside the classification gate); validation scenarios set
+     `save_reads_assignment`+`save_output_fastqs`; realtime is one bounded
+     scenario (`max_files: 1`). All 8 verified against the real pipeline via
+     `nextflow -preview`; `-stub` env creation proven live. Pinned in
+     `tests/test_prewarm_scenarios.py`.
+   - **Export outcomes reach the operator.** `export_bundle` returns
+     `ExportResult` (path/warnings/manifest); pre-warm and container-pull
+     warnings fold into `export_warnings` so GUI (amber alert), CLI and
+     verify/import all replay them. Broken envs are pruned pre-tar; import
+     cross-checks env count (`incomplete_conda_cache`, mirror of
+     `incomplete_image_set`).
+   - **The effective cache is guarded at launch.**
+     `NextflowManager._sweep_conda_caches` purges broken envs from BOTH
+     `work_dir/conda` and the configured `nxf_conda_cachedir` (env dirs are
+     `env-*` OR any dir with `conda-meta/` — named envs exist); offline mode
+     with a configured-but-missing cache REFUSES to launch instead of
+     attempting a network solve.
+
+   **Deployment GUI invariants (same audit).** A docker/singularity (or
+   conda+pre-warm) export without a resolvable local pipeline checkout is
+   blocked in the GUI (it silently produced a bundle with zero images); the
+   pre-export readiness gate checks the runtime for the SELECTED engine
+   (`pipeline_profile` override); `finalize_import` pushes
+   `result["imported_config"]` into `app-config` and reloads the live
+   WatchlistManager (the running app used to keep the pre-import config until
+   restart); `verify_bundle` has a GUI button; the wizard single-step callback
+   is `background=True`; readiness enforces the real Nextflow floor
+   (`_NEXTFLOW_MIN_VERSION`) plus offline plugins/conda-cache checks. Pinned
+   in `tests/test_deployment_gui_fixes.py` and
+   `tests/test_readiness_offline_checks.py`. GUI component gotcha: the
+   Deployment tab's export stage line is `bundle-export-progress` —
+   `export-progress` is TAKEN by the Export Results watchdog
+   (`dashboard_layout.py`), and reusing it broke the Dash renderer at load.
+
 3. **Offline-mode propagation** to NCBI/GTDB callers. `GenomeManager` methods and watchlist
    Validate / Add-custom-species callbacks read `offline_mode` and short-circuit network calls.
    Caches (`TaxonomyCache` / `OfflineTaxonomyCache`) are consulted first either way.
@@ -1052,9 +1107,13 @@ The 25.10.x watchPath JVM cleanup hang (the historical reason for the
 ### Cross-platform restriction
 
 Conda envs built by Nextflow embed absolute build-machine paths and per-arch binaries.
-**Build and field machine must share OS and CPU architecture.** Cross-platform deployment
-requires either shipping without pre-warmed envs or a separate `conda-pack` workflow
-(not currently automated).
+The PATH half is handled since 2026-08-27: import relocates the recorded build
+prefix into the restored cache (see the conda pre-warm invariants above), so a
+same-platform machine-to-machine move works regardless of directory layout.
+The ARCHITECTURE half is physics: **build and field machine must share OS and
+CPU architecture** (and, practically, a compatible glibc generation on Linux —
+the platform check cannot see distro drift). Cross-platform deployment means
+docker or singularity mode.
 
 ### What the air-gapped rig proved (2026-08-14)
 

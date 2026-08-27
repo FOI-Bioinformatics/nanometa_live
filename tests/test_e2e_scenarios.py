@@ -360,12 +360,27 @@ class TestOfflineModeEnvInjection:
         assert env.get("NXF_OFFLINE") == "true"
         assert env.get("NXF_CONDA_CACHEDIR") == str(cachedir)
 
-    def test_nxf_conda_cachedir_not_injected_when_missing(self, tmp_path):
-        """A non-existent nxf_conda_cachedir is silently skipped."""
+    def test_nxf_conda_cachedir_missing_offline_refuses(self, tmp_path):
+        """OFFLINE + a configured-but-missing conda cache must refuse to
+        launch: silently proceeding means Nextflow attempts a network
+        solve, which fails cryptically mid-run on the air-gapped machine
+        (2026-08-27 audit, conda finding 9)."""
+        import pytest
+
         from nanometa_live.core.workflow.nextflow_manager import NextflowManager
 
         missing_dir = str(tmp_path / "does_not_exist")
         config = {"offline_mode": True, "nxf_conda_cachedir": missing_dir}
+        with pytest.raises(RuntimeError, match="conda cache"):
+            NextflowManager._build_nextflow_env(config)
+
+    def test_nxf_conda_cachedir_missing_online_still_skips(self, tmp_path):
+        """Without offline_mode the run can legitimately rebuild envs from
+        the network, so a missing cache dir stays a warn-and-skip."""
+        from nanometa_live.core.workflow.nextflow_manager import NextflowManager
+
+        missing_dir = str(tmp_path / "does_not_exist")
+        config = {"offline_mode": False, "nxf_conda_cachedir": missing_dir}
         env = NextflowManager._build_nextflow_env(config)
         assert "NXF_CONDA_CACHEDIR" not in env
 

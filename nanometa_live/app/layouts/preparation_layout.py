@@ -347,6 +347,7 @@ def build_export_bundle_card():
             ),
             _build_containerization_radio(),
             _build_prewarm_toggle(),
+            _build_target_platform_select(),
             _build_platform_banner(),
             _cancelable_action_row(
                 dbc.Button(
@@ -358,9 +359,12 @@ def build_export_bundle_card():
             ),
             html.Div(
                 "Large exports take several minutes; conda pre-warm adds ~30 min. "
-                "The button stays disabled and a spinner shows while it runs.",
+                "Stage progress appears below while it runs.",
                 className="text-muted small mt-1",
             ),
+            # Stage feedback from the background export worker (set_progress
+            # target); cleared when the terminal result renders.
+            html.Div(id="bundle-export-progress", className="mt-2"),
             # Readiness issues area (populated by callback)
             html.Div(id="export-readiness-issues", className="mt-3"),
             _build_export_force_area(),
@@ -394,6 +398,40 @@ def _build_prewarm_toggle():
     )
 
 
+def _build_target_platform_select():
+    """Container platform selector, shown for docker/singularity engines.
+
+    linux/amd64 is the near-universal field default; linux/arm64 covers
+    Jetson/Ampere-class field hardware. Hidden for conda mode (conda
+    bundles are locked to the BUILD host's platform instead). Previously
+    only the CLI could target arm64.
+    """
+    return html.Div(
+        [
+            html.Label(
+                "Image platform (field machine CPU):",
+                className="small mb-1",
+                htmlFor="bundle-target-platform",
+            ),
+            dbc.Select(
+                id="bundle-target-platform",
+                options=[
+                    {"label": "linux/amd64 (Intel/AMD -- most field "
+                              "machines)", "value": "linux/amd64"},
+                    {"label": "linux/arm64 (Jetson, Ampere, Raspberry-class)",
+                     "value": "linux/arm64"},
+                ],
+                value="linux/amd64",
+                size="sm",
+                className="mb-2",
+            ),
+        ],
+        id="target-platform-wrapper",
+        style={"display": "none"},
+        className="ms-3",
+    )
+
+
 def _build_export_force_area():
     """Hidden 'export incomplete bundle' controls, revealed when checks fail."""
     return html.Div(
@@ -419,6 +457,44 @@ def _build_export_force_area():
     )
 
 
+def _build_import_path_inputs():
+    """Bundle-path and Kraken2-DB path input groups with native pickers."""
+    return [
+        dbc.InputGroup([
+            dbc.InputGroupText("Bundle Path"),
+            dbc.Input(
+                id="import-bundle-path",
+                placeholder="/path/to/bundle.tar.gz",
+                type="text",
+            ),
+            dbc.Button(
+                html.I(className="bi bi-folder2-open"),
+                id="import-bundle-browse-btn",
+                color="secondary",
+                outline=True,
+                n_clicks=0,
+                title="Browse for the bundle .tar.gz file",
+            ),
+        ], className="mb-2"),
+        dbc.InputGroup([
+            dbc.InputGroupText("Species DB"),
+            dbc.Input(
+                id="import-kraken-db-path",
+                placeholder="/path/to/kraken2/database",
+                type="text",
+            ),
+            dbc.Button(
+                html.I(className="bi bi-folder2-open"),
+                id="import-kraken-db-browse-btn",
+                color="secondary",
+                outline=True,
+                n_clicks=0,
+                title="Browse for the Kraken2 database folder",
+            ),
+        ], className="mb-1"),
+    ]
+
+
 def build_import_bundle_card():
     """Import-bundle card (Deployment tab)."""
     return dbc.Card([
@@ -433,38 +509,7 @@ def build_import_bundle_card():
                 "Import a bundle built on another machine onto this one.",
                 className="text-muted small"
             ),
-            dbc.InputGroup([
-                dbc.InputGroupText("Bundle Path"),
-                dbc.Input(
-                    id="import-bundle-path",
-                    placeholder="/path/to/bundle.tar.gz",
-                    type="text",
-                ),
-                dbc.Button(
-                    html.I(className="bi bi-folder2-open"),
-                    id="import-bundle-browse-btn",
-                    color="secondary",
-                    outline=True,
-                    n_clicks=0,
-                    title="Browse for the bundle .tar.gz file",
-                ),
-            ], className="mb-2"),
-            dbc.InputGroup([
-                dbc.InputGroupText("Species DB"),
-                dbc.Input(
-                    id="import-kraken-db-path",
-                    placeholder="/path/to/kraken2/database",
-                    type="text",
-                ),
-                dbc.Button(
-                    html.I(className="bi bi-folder2-open"),
-                    id="import-kraken-db-browse-btn",
-                    color="secondary",
-                    outline=True,
-                    n_clicks=0,
-                    title="Browse for the Kraken2 database folder",
-                ),
-            ], className="mb-1"),
+            *_build_import_path_inputs(),
             # The Kraken2 DB is excluded from the bundle (too large), so spell
             # out how to provide it on the target machine.
             html.Div([
@@ -472,7 +517,20 @@ def build_import_bundle_card():
                 "The species (Kraken2) database is not included in the bundle. "
                 "Copy it across from the source machine -- e.g. on the same USB "
                 "drive -- and point here at the folder where you placed it.",
-            ], className="text-muted small mb-3"),
+            ], className="text-muted small mb-2"),
+            # Escape hatch for a bundle the checks refuse (e.g. a checksum
+            # mismatch the operator accepts): previously CLI-only, leaving a
+            # field operator with no recovery path in the GUI.
+            dbc.Checkbox(
+                id="import-force-check",
+                label=(
+                    "Force import past non-fatal problems (accepts an "
+                    "incomplete or modified bundle -- use only when a "
+                    "re-transfer is impossible)"
+                ),
+                value=False,
+                className="mb-3 small",
+            ),
             _cancelable_action_row(
                 dbc.Button(
                     [html.I(className="bi bi-upload me-2"), "Import Bundle"],
@@ -481,6 +539,22 @@ def build_import_bundle_card():
                 ),
                 "import-bundle-cancel-btn",
             ),
+            # Dry-run check: validates checksums, platform, versions and the
+            # export-time warnings WITHOUT installing anything -- lets the
+            # operator validate a USB copy before committing a multi-GB
+            # import. Same engine as `nanometa-prepare verify`.
+            ActionRow([
+                dbc.Button(
+                    [html.I(className="bi bi-clipboard2-check me-2"),
+                     "Verify Bundle (dry run)"],
+                    id="verify-bundle-btn",
+                    color="secondary",
+                    outline=True,
+                    className="mt-2",
+                ),
+            ]),
+            dcc.Loading(html.Div(id="verify-bundle-result", className="mt-2"),
+                        type="default"),
             # Import runs in a background worker; it writes its outcome here and
             # a main-process callback renders it + activates offline mode (the
             # worker cannot re-init the live singletons).

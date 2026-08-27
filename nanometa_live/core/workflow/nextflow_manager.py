@@ -197,40 +197,45 @@ class NextflowManager:
             return False, f"Error checking Conda: {e}"
 
     @staticmethod
-    def _purge_broken_conda_envs(work_dir: str) -> list:
-        """Remove half-built conda env dirs in ``<work_dir>/conda``.
+    def _purge_broken_conda_envs(
+        work_dir: Optional[str] = None, *, conda_dir: Optional[str] = None
+    ) -> list:
+        """Remove half-built conda env dirs.
 
-        Nextflow stores per-recipe conda envs as
-        ``<work_dir>/conda/env-<hash>/``. A successful build leaves a
-        ``conda-meta/history`` file (written last by conda). If a
-        previous nanometa-live run was killed mid-build, the env dir
-        exists but ``conda-meta/history`` does not, and Nextflow's
-        cache treats the directory as already built. Subsequent runs
-        then activate an empty env and fail with "command not found".
+        Sweeps ``<work_dir>/conda`` (Nextflow's default cache) or, with
+        ``conda_dir``, an explicit cache such as a bundle-restored
+        ``NXF_CONDA_CACHEDIR``. A successful build leaves a
+        ``conda-meta/history`` file (written last by conda) AND a
+        non-empty ``bin/``; anything less activates fine and then fails
+        exit-127 ("command not found") on first use.
+
+        A directory counts as an env candidate when its name starts with
+        ``env-`` OR it contains a ``conda-meta/`` directory -- Nextflow
+        names an env from environment.yml's ``name:`` key when declared,
+        so an ``env-`` prefix filter misses those. Directories with
+        neither trait are user data and stay untouched.
 
         Returns the list of paths removed (empty if everything was
         clean or the conda cache directory does not exist yet).
         """
-        conda_cache = os.path.join(work_dir, "conda")
+        from nanometa_live.core.workflow.conda_cache_utils import (
+            is_complete_conda_env,
+        )
+
+        conda_cache = conda_dir or os.path.join(work_dir, "conda")
         if not os.path.isdir(conda_cache):
             return []
         removed = []
-        for name in os.listdir(conda_cache):
-            if not name.startswith("env-"):
-                continue
+        for name in sorted(os.listdir(conda_cache)):
             env_path = os.path.join(conda_cache, name)
             if not os.path.isdir(env_path):
                 continue
-            history_marker = os.path.join(env_path, "conda-meta", "history")
-            bin_dir = os.path.join(env_path, "bin")
-            has_history = os.path.isfile(history_marker)
-            # A history marker normally means "fully built". But a build that
-            # failed midway (e.g. conda aborting on an AppleDouble-corrupted
-            # conda-meta file) can leave the history file with an EMPTY bin/ --
-            # the env then activates but every tool is "command not found"
-            # (exit 127). Treat an env with no executables as broken too.
-            has_binaries = os.path.isdir(bin_dir) and bool(os.listdir(bin_dir))
-            if has_history and has_binaries:
+            is_candidate = name.startswith("env-") or os.path.isdir(
+                os.path.join(env_path, "conda-meta")
+            )
+            if not is_candidate:
+                continue
+            if is_complete_conda_env(Path(env_path)):
                 # Fully-built env; leave it alone.
                 continue
             try:
@@ -243,17 +248,45 @@ class NextflowManager:
                 )
         return removed
 
+    def _sweep_conda_caches(self) -> list:
+        """Purge half-built envs from EVERY cache this run can hit.
+
+        With ``nxf_conda_cachedir`` configured (a bundle-restored cache),
+        Nextflow never touches ``<work_dir>/conda`` -- so the cache
+        actually in play must be swept too, or the purge guards nothing
+        (2026-08-27 audit, conda finding 5).
+        """
+        removed = self._purge_broken_conda_envs(self.work_dir)
+        cachedir = (getattr(self, "_run_config", None) or {}).get(
+            "nxf_conda_cachedir", ""
+        )
+        if cachedir and os.path.isdir(cachedir):
+            removed += self._purge_broken_conda_envs(conda_dir=cachedir)
+            stripped = self._strip_appledouble_files(conda_dir=cachedir)
+            if stripped:
+                logging.warning(
+                    "Stripped %d macOS AppleDouble file(s) from the bundled "
+                    "conda cache %s.",
+                    stripped,
+                    cachedir,
+                )
+        return removed
+
     @staticmethod
-    def _strip_appledouble_files(work_dir: str) -> int:
+    def _strip_appledouble_files(
+        work_dir: Optional[str] = None, *, conda_dir: Optional[str] = None
+    ) -> int:
         """Delete macOS AppleDouble ``._*`` sidecars under ``<work_dir>/conda``.
 
         macOS writes ``._<name>`` files carrying resource-fork/xattr data; when
         they land in a conda env's ``conda-meta/`` (observed from Spotlight or
         cloud-sync activity even on APFS), ``conda env create`` treats the env
         as corrupt (``corrupted file: ._<pkg>.json``) and fails. They are always
-        safe to remove. Returns the count deleted.
+        safe to remove. Returns the count deleted. ``conda_dir`` sweeps an
+        explicit cache (a bundle-restored NXF_CONDA_CACHEDIR) instead of
+        ``<work_dir>/conda``.
         """
-        conda_cache = os.path.join(work_dir, "conda")
+        conda_cache = conda_dir or os.path.join(work_dir, "conda")
         if not os.path.isdir(conda_cache):
             return 0
         removed = 0
@@ -568,7 +601,7 @@ class NextflowManager:
                     # downstream "command not found" failure such as
                     # `multiqc: command not found`. Removing the partial
                     # dir forces a clean rebuild on this run.
-                    purged = self._purge_broken_conda_envs(self.work_dir)
+                    purged = self._sweep_conda_caches()
                     if purged:
                         logging.warning(
                             "Purged %d incomplete conda env(s) from prior "
@@ -744,6 +777,19 @@ class NextflowManager:
             if os.path.isdir(abs_cachedir):
                 env["NXF_CONDA_CACHEDIR"] = abs_cachedir
                 logging.info(f"NXF_CONDA_CACHEDIR set to: {abs_cachedir}")
+            elif config.get("offline_mode"):
+                # Offline, a configured cache that is not there means the
+                # run WILL attempt a network solve and fail cryptically
+                # mid-pipeline. Refuse to launch with the actionable
+                # message instead.
+                raise RuntimeError(
+                    f"Offline mode is on but the pre-warmed conda cache "
+                    f"'{cachedir}' does not exist. Re-import the deployment "
+                    "bundle (or correct nxf_conda_cachedir in config.yaml) "
+                    "before starting analysis; without the cache every "
+                    "pipeline process would try to build its environment "
+                    "from the network."
+                )
             else:
                 logging.warning(
                     f"nxf_conda_cachedir '{cachedir}' is not an existing directory; "
