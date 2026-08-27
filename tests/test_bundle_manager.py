@@ -963,7 +963,14 @@ class TestExtendedPreWarmScenarios:
         placeholder_path = Path(params["pathogen_genomes"])
         assert placeholder_path.exists()
         payload = json.loads(placeholder_path.read_text())
-        assert payload == {"pathogens": []}
+        # nanometanf validates the file maps taxid -> genome path string
+        # (subworkflows/local/validation/main.nf); the earlier
+        # {"pathogens": []} shape aborted the scenario before any task ran
+        # (verified live, 2026-08-27 rehearsal).
+        assert payload, "placeholder must contain at least one taxid entry"
+        for taxid, fasta in payload.items():
+            assert taxid.isdigit()
+            assert Path(fasta).is_file(), "genome path must exist"
 
     def test_fastp_scenario_does_not_write_pathogen_genomes(self, tmp_path):
         """Non-validation scenarios should not gain a pathogen_genomes

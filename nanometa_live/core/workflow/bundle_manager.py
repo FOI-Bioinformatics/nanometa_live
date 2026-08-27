@@ -387,8 +387,15 @@ def _prepare_scenario_inputs(
         bool(scenario_params.get("run_validation"))
         and "pathogen_genomes" not in scenario_params
     ):
+        # nanometanf validates this file maps taxid -> genome path string
+        # (subworkflows/local/validation/main.nf) and aborts otherwise --
+        # BEFORE any task runs, so the wrong shape kills the scenario's env
+        # builds. One stub taxid with a real (tiny) fasta satisfies it;
+        # -stub never aligns against the sequence.
+        stub_fasta = scenario_dir / "stub_genome.fasta"
+        stub_fasta.write_text(">stub\nACGTACGTACGTACGT\n")
         placeholder = scenario_dir / "pathogen_genomes.json"
-        placeholder.write_text(json.dumps({"pathogens": []}))
+        placeholder.write_text(json.dumps({"632": str(stub_fasta)}))
         scenario_params["pathogen_genomes"] = str(placeholder)
 
     if realtime:
