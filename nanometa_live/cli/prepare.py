@@ -17,6 +17,10 @@ import subprocess
 import sys
 import textwrap
 
+# Re-exported so callers (and tests) can keep patching prepare._verify; the
+# implementation moved to verify_bundle_cmd for the file-size ratchet.
+from nanometa_live.cli.verify_bundle_cmd import _verify  # noqa: E402,F401
+
 _RESET = "\033[0m"
 _BOLD = "\033[1m"
 _GREEN = "\033[32m"
@@ -24,6 +28,30 @@ _RED = "\033[31m"
 _YELLOW = "\033[33m"
 _CYAN = "\033[36m"
 _DIM = "\033[2m"
+
+
+def _print_export_outcome(export_result):
+    """Report an export's outcome, surfacing its warnings.
+
+    A bundle can be produced successfully while still being incomplete
+    (skipped container pull, failed pre-warm); unconditional green here
+    is what hid those from the operator (2026-08-27 audit).
+    """
+    path = export_result.path
+    size_mb = path.stat().st_size / (1024 * 1024)
+    if export_result.warnings:
+        print(
+            f"{_YELLOW}Bundle exported WITH WARNINGS: {path} "
+            f"({size_mb:.1f} MB){_RESET}"
+        )
+        for w in export_result.warnings:
+            print(f"{_YELLOW}  - {w}{_RESET}")
+        print(
+            f"{_YELLOW}The bundle may be incomplete -- review the warnings "
+            f"before shipping it to the field.{_RESET}"
+        )
+    else:
+        print(f"{_GREEN}Bundle exported: {path} ({size_mb:.1f} MB){_RESET}")
 
 
 def _progress_bar(pct, width=30):
@@ -146,9 +174,8 @@ def _deploy(args):
         print(f"\n{_CYAN}Exporting bundle to {args.output}...{_RESET}")
         from nanometa_live.core.workflow.bundle_manager import BundleManager
         bm = BundleManager()
-        path = bm.export_bundle(args.output, config, nanometa_home)
-        size_mb = path.stat().st_size / (1024 * 1024)
-        print(f"{_GREEN}Bundle exported: {path} ({size_mb:.1f} MB){_RESET}")
+        export_result = bm.export_bundle(args.output, config, nanometa_home)
+        _print_export_outcome(export_result)
 
     sys.exit(0 if result.success else 1)
 
@@ -295,7 +322,7 @@ def _export(args):
 
     bm = BundleManager()
     nanometa_home = args.home or None
-    path = bm.export_bundle(
+    export_result = bm.export_bundle(
         args.output,
         config,
         nanometa_home=nanometa_home,
@@ -304,76 +331,8 @@ def _export(args):
         containerization=containerization,
         target_platform=target_platform,
     )
-    size_mb = path.stat().st_size / (1024 * 1024)
-    print(f"{_GREEN}Bundle exported: {path} ({size_mb:.1f} MB){_RESET}")
+    _print_export_outcome(export_result)
     sys.exit(0)
-
-
-def _verify(args):
-    """Verify a bundle without installing anything.
-
-    ``import`` is the only other code path that checks a bundle, and it
-    writes as it goes; an operator with a USB copy of a multi-GB bundle
-    could not confirm the transfer before committing the field machine to
-    it. Shares one implementation with the import path
-    (``BundleManager._verify_extracted_bundle``) so the dry run cannot
-    disagree with the real thing.
-    """
-    from nanometa_live.core.workflow.bundle_manager import BundleManager
-
-    if not os.path.exists(args.bundle):
-        print(f"{_RED}Bundle not found: {args.bundle}{_RESET}", file=sys.stderr)
-        sys.exit(1)
-
-    print(f"{_BOLD}Nanometa Live - Verify Bundle{_RESET}")
-    print(f"  Bundle: {args.bundle}")
-    if args.db:
-        print(f"  Kraken2 DB: {args.db}")
-    print(f"{_DIM}  Read-only: nothing on this machine is modified.{_RESET}")
-    print()
-
-    result = BundleManager().verify_bundle(args.bundle, kraken_db_path=args.db)
-
-    manifest = result.get("manifest", {})
-    if manifest:
-        print(f"  Created:        {manifest.get('created', 'unknown')}")
-        print(f"  Built by:       {manifest.get('creator', 'unknown')}")
-        plat = manifest.get("build_platform", {})
-        if plat:
-            print(
-                f"  Build platform: {plat.get('system', '?')}/"
-                f"{plat.get('machine', '?')}"
-            )
-        print(f"  Files:          {len(manifest.get('checksums', {}))}")
-        # The manifest records the engine under "engine" (see export_bundle);
-        # this line previously read a nonexistent "mode" key and never printed.
-        engine = manifest.get("containerization", {}).get("engine")
-        if engine:
-            print(f"  Containerization: {engine}")
-        print()
-
-    mismatches = result.get("checksum_mismatches") or []
-    if mismatches:
-        print(f"{_RED}Checksum failures ({len(mismatches)}):{_RESET}")
-        for m in mismatches[:20]:
-            print(f"  - {m}")
-        if len(mismatches) > 20:
-            print(f"  ... and {len(mismatches) - 20} more")
-        print()
-
-    if result.get("warnings"):
-        print(f"{_YELLOW}Warnings:{_RESET}")
-        for w in result["warnings"]:
-            print(f"  - {w}")
-        print()
-
-    if result["success"]:
-        print(f"{_GREEN}{_BOLD}Bundle verified. Safe to import.{_RESET}")
-    else:
-        print(f"{_RED}{_BOLD}Bundle verification FAILED. Do not import "
-              f"without --force.{_RESET}")
-
-    sys.exit(0 if result["success"] else 1)
 
 
 def _doctor(args):

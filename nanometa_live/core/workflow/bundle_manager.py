@@ -18,9 +18,30 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple
+
+
+@dataclass
+class ExportResult:
+    """Outcome of ``BundleManager.export_bundle``.
+
+    ``warnings`` mirrors the manifest's ``export_warnings`` -- the same
+    list ``verify_bundle``/``import_bundle`` replay on the field machine.
+    Callers MUST surface it: a bundle can be produced successfully while
+    still being incomplete (skipped container pull, failed pre-warm),
+    and a caller that only checks for an exception reports green over
+    exactly the problems the export recorded (2026-08-27 audit).
+    """
+
+    path: Path
+    warnings: List[str] = field(default_factory=list)
+    manifest: Dict[str, Any] = field(default_factory=dict)
+
+    def __fspath__(self) -> str:
+        return str(self.path)
 
 
 logger = logging.getLogger(__name__)
@@ -243,12 +264,20 @@ def _local_pipeline_dir_for_estimate(config, pipeline_path):
     return None
 
 
+# Flat headroom estimates for artefacts that cannot be sized before the
+# export actually builds them. Measured: a full singularity/docker pull is
+# ~1.6-2.5 GB of archives; a full conda pre-warm cache is ~5 GB.
+_PREWARM_SIZE_ESTIMATE = 5 * 1024**3
+_CONTAINER_PULL_SIZE_ESTIMATE = 3 * 1024**3
+
+
 def estimate_bundle_size(
     nanometa_home: str,
     *,
     pre_warm: bool = False,
     config=None,
     pipeline_path=None,
+    containerization=None,
 ) -> int:
     """Rough pre-gzip size estimate (bytes) of the data a bundle would stage.
 
@@ -261,14 +290,21 @@ def estimate_bundle_size(
     over-counts, e.g. the checkout's ``.git``, since under-counting lets an
     export run out of disk mid-write).
 
-    Note: pulled container images (docker/singularity ``pipeline_containers/``)
-    cannot be sized before the pull runs, so they are NOT included; a
-    docker/singularity export needs additional headroom beyond this estimate.
+    Artefacts that only exist after the export builds them get flat
+    headroom estimates: the pre-warm cache is built in STAGING (an existing
+    ``<home>/conda_cache`` exists only on a machine that already imported a
+    bundle, so on a build machine it contributes nothing), and a
+    docker/singularity pull's size is unknown before it runs. Both used to
+    contribute 0, which under-counted exactly the expensive modes
+    (2026-08-27 audit, conda finding 10).
     """
     home = Path(nanometa_home)
     total = sum(_dir_size(home / d) for d in _BUNDLE_SOURCE_DIRS)
     if pre_warm:
-        total += _dir_size(home / _BUNDLED_CONDA_CACHE_DIRNAME)
+        existing_cache = _dir_size(home / _BUNDLED_CONDA_CACHE_DIRNAME)
+        total += max(existing_cache, _PREWARM_SIZE_ESTIMATE)
+    if containerization in ("docker", "singularity"):
+        total += _CONTAINER_PULL_SIZE_ESTIMATE
     pipeline_dir = _local_pipeline_dir_for_estimate(config, pipeline_path)
     if pipeline_dir:
         total += _dir_size(pipeline_dir)
@@ -306,71 +342,155 @@ _PIPELINE_IGNORE_PATTERNS = (
     "__pycache__",
 )
 
+# Sentinel: the runner replaces this with a locally built tar.gz of the
+# stub Kraken2 DB, so the UNTAR env is exercised without any network
+# dependency at export time.
+_LOCAL_STUB_DB_ARCHIVE = "@local_stub_db_archive"
+
+
+def _prepare_scenario_inputs(
+    scenario_dir: Path, scenario_params: Dict[str, Any]
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Materialise a scenario's on-disk inputs and return the completed
+    param dict plus the input CLI args.
+
+    - Every scenario gets a Kraken2 database: nanometanf nests the whole
+      classification block -- and the VALIDATION subworkflow inside it --
+      under ``if (params.kraken2_db && !skip_kraken2)``, so without one
+      those envs are never resolved. A stub directory with the three .k2d
+      files satisfies the existence check; ``-stub`` never reads contents.
+    - The ``_LOCAL_STUB_DB_ARCHIVE`` sentinel becomes a locally built
+      tar.gz of that stub DB (exercises UNTAR without network).
+    - Validation scenarios get a placeholder pathogen_genomes JSON.
+    - Realtime scenarios get a pre-seeded watch dir and NO ``input``;
+      batch scenarios get a one-row samplesheet as ``input``.
+
+    Values keep their Python types: the runner hands them to Nextflow via a
+    ``-params-file`` JSON, because under the strict parser (26.04+) CLI
+    ``--flag value`` params arrive as strings and nf-schema type-validation
+    rejects a string where the schema says boolean/integer (verified live:
+    ``--realtime_mode true`` failed validation as ``[string]``).
+    """
+    realtime = bool(scenario_params.get("realtime_mode"))
+
+    stub_db = scenario_dir / "stub_kraken2_db"
+    if "kraken2_db" not in scenario_params:
+        scenario_params["kraken2_db"] = str(_write_stub_kraken2_db(stub_db))
+    elif scenario_params["kraken2_db"] == _LOCAL_STUB_DB_ARCHIVE:
+        db = _write_stub_kraken2_db(stub_db)
+        archive = scenario_dir / "stub_kraken2_db.tar.gz"
+        with tarfile.open(str(archive), "w:gz") as tar:
+            tar.add(str(db), arcname=db.name)
+        scenario_params["kraken2_db"] = str(archive)
+
+    if (
+        bool(scenario_params.get("run_validation"))
+        and "pathogen_genomes" not in scenario_params
+    ):
+        placeholder = scenario_dir / "pathogen_genomes.json"
+        placeholder.write_text(json.dumps({"pathogens": []}))
+        scenario_params["pathogen_genomes"] = str(placeholder)
+
+    if realtime:
+        # Realtime discovers files from nanopore_output_dir; a samplesheet
+        # contradicts it. Pre-seed the watch dir so the max_files=1 bound
+        # fires immediately instead of watching for the whole timeout.
+        watch_dir = scenario_dir / "watch"
+        watch_dir.mkdir(exist_ok=True)
+        (watch_dir / "stub.fastq.gz").write_bytes(b"")
+        scenario_params.setdefault("nanopore_output_dir", str(watch_dir))
+        scenario_params.setdefault("max_files", 1)
+        return scenario_params, []
+
+    samplesheet = scenario_dir / "samplesheet.csv"
+    fastq_stub = scenario_dir / "stub.fastq.gz"
+    fastq_stub.write_bytes(b"")  # zero-byte placeholder is fine for stub mode
+    samplesheet.write_text(
+        "sample,fastq\n"
+        f"stub_sample,{fastq_stub}\n"
+    )
+    scenario_params["input"] = str(samplesheet)
+    return scenario_params, []
+
+
+def _write_stub_kraken2_db(db_dir: Path) -> Path:
+    """Write an empty-but-shaped Kraken2 DB directory.
+
+    ``-stub`` never reads the database contents; the files only need to
+    exist so nanometanf's ``file(db_path, checkIfExists: true)`` and the
+    classification gate pass.
+    """
+    from nanometa_live.core.utils.kraken_utils import KRAKEN_REQUIRED_FILES
+
+    db_dir.mkdir(parents=True, exist_ok=True)
+    for name in KRAKEN_REQUIRED_FILES:
+        (db_dir / name).write_bytes(b"")
+    return db_dir
+
 # Pipeline scenarios used to drive Nextflow's stub mode during the
-# pre-warm step. Each scenario corresponds to a sample-handling mode
-# the field operator may run; together they cover every per-process
-# environment.yml in nanometanf at the time of writing.
+# pre-warm step. Together they cover every per-process environment.yml in
+# nanometanf at the time of writing.
+#
+# Every key here must be a REAL nanometanf parameter (nextflow_schema.json).
+# nf-schema only WARNS on unknown params, so a config-vocabulary key
+# (processing_mode, sample_handling -- the pre-2026-08-27 registry) makes
+# the scenario silently degenerate to the default path while still
+# exiting 0 and being recorded as covered.
+#
+# The runner supplies, unless the scenario overrides them:
+# - ``--kraken2_db`` pointing at a locally written stub DB directory, so
+#   the classification branch (and the VALIDATION subworkflow nested
+#   inside it) instantiates under -stub;
+# - ``--input <samplesheet>`` for batch scenarios, or a pre-seeded
+#   ``--nanopore_output_dir`` (and NO --input) when ``realtime_mode`` is
+#   set -- realtime discovers files, it does not take a samplesheet.
 _PRE_WARM_SCENARIOS = [
     {
-        "name": "batch_samplesheet",
-        "params": {
-            "processing_mode": "batch",
-            "sample_handling": "single_sample",
-        },
+        "name": "batch_default",
+        "params": {},
         "comment": (
             "Default batch path with chopper QC. Covers chopper, seqkit, "
             "nanoplot, kraken2, taxpasta, multiqc, manifest writers."
         ),
     },
     {
-        "name": "realtime_multiplex",
+        "name": "realtime",
         "params": {
-            "processing_mode": "realtime",
-            "sample_handling": "by_barcode",
+            "realtime_mode": True,
+            "max_files": 1,
         },
         "comment": (
-            "Realtime watchPath barcode mode; same env set as batch "
-            "plus the realtime-only kraken2 incremental classifier."
+            "Realtime watchPath mode, bounded by max_files=1 so the watch "
+            "terminates. Adds the realtime-only envs (kraken2 incremental "
+            "classifier, cumulative stats, realtime report). The barcode/"
+            "per-file/single-sample layouts share this env set, so one "
+            "realtime scenario suffices."
         ),
-    },
-    {
-        "name": "realtime_per_file",
-        "params": {
-            "processing_mode": "realtime",
-            "sample_handling": "per_file",
-        },
-        "comment": "Realtime per-file fan-out; reuses realtime envs.",
-    },
-    {
-        "name": "realtime_single_sample",
-        "params": {
-            "processing_mode": "realtime",
-            "sample_handling": "single_sample",
-        },
-        "comment": "Realtime single-sample aggregation path.",
     },
     {
         "name": "validation_blast",
         "params": {
-            "processing_mode": "batch",
-            "sample_handling": "single_sample",
-            "run_validation": "true",
+            "run_validation": True,
             "validation_method": "blast",
-            "skip_kraken2": "false",
+            # nanometanf refuses validation without read-level Kraken2
+            # output (verified live: the guard aborts before -stub fires).
+            "save_reads_assignment": True,
+            "save_output_fastqs": True,
         },
         "comment": (
             "Triggers BLASTN_VALIDATION, BLAST_MAKEBLASTDB, and "
             "EXTRACT_READS_BY_TAXID envs; required for offline pathogen "
-            "confirmation."
+            "confirmation. Depends on the runner-supplied stub kraken2_db: "
+            "VALIDATION is nested inside the classification branch."
         ),
     },
     {
         "name": "validation_minimap2",
         "params": {
-            "processing_mode": "batch",
-            "sample_handling": "single_sample",
-            "run_validation": "true",
+            "run_validation": True,
             "validation_method": "minimap2",
+            "save_reads_assignment": True,
+            "save_output_fastqs": True,
         },
         "comment": (
             "Triggers MINIMAP2_ALIGNMENT_VALIDATION and the samtools env "
@@ -380,8 +500,6 @@ _PRE_WARM_SCENARIOS = [
     {
         "name": "fastp_qc",
         "params": {
-            "processing_mode": "batch",
-            "sample_handling": "single_sample",
             "qc_tool": "fastp",
         },
         "comment": (
@@ -390,11 +508,22 @@ _PRE_WARM_SCENARIOS = [
         ),
     },
     {
+        "name": "filtlong_qc",
+        "params": {
+            "qc_tool": "filtlong",
+        },
+        "comment": (
+            "Covers the filtlong env. The nf-core filtlong module ships no "
+            "stub block, so under -stub its real script runs on the "
+            "zero-byte input and may fail AFTER the env is built; a "
+            "failure warning from this scenario with the env present in "
+            "the cache is expected."
+        ),
+    },
+    {
         "name": "assembly_flye",
         "params": {
-            "processing_mode": "batch",
-            "sample_handling": "single_sample",
-            "enable_assembly": "true",
+            "enable_assembly": True,
         },
         "comment": (
             "Enables the assembly subworkflow so flye and miniasm conda "
@@ -406,18 +535,12 @@ _PRE_WARM_SCENARIOS = [
     {
         "name": "untar_kraken2_db",
         "params": {
-            "processing_mode": "batch",
-            "sample_handling": "single_sample",
-            "kraken2_db": (
-                "https://raw.githubusercontent.com/nf-core/test-datasets/"
-                "modules/data/genomics/sarscov2/genome/db/kraken2.tar.gz"
-            ),
+            "kraken2_db": _LOCAL_STUB_DB_ARCHIVE,
         },
         "comment": (
             "Triggers UNTAR on a tar.gz Kraken2 DB so the untar conda "
-            "env is cached. Operators handing the field machine a "
-            "tarred DB need this env to avoid a network fetch on first "
-            "launch."
+            "env is cached. The archive is built locally from the stub DB "
+            "at run time -- no network fetch on the build machine."
         ),
     },
 ]
@@ -587,7 +710,8 @@ class BundleManager:
         pipeline_path: Optional[str] = None,
         containerization: Optional[ContainerizationMode] = None,
         target_platform: Optional[str] = None,
-    ) -> Path:
+        progress_cb=None,
+    ) -> "ExportResult":
         """
         Export a portable bundle containing all prepared data.
 
@@ -626,7 +750,8 @@ class BundleManager:
                 machine must be Linux with Apptainer installed.
 
         Returns:
-            Path to the created bundle file.
+            ExportResult with the bundle path, the export warnings the
+            caller must surface, and the manifest.
         """
         # Default to conda when caller did not specify; preserves
         # backward compatibility with the pre-Wave-7 pre_warm_conda_envs
@@ -644,6 +769,19 @@ class BundleManager:
             nanometa_home = str(NanometaPaths.from_config(config or {}).data_dir)
         home = Path(nanometa_home)
         output = Path(output_path)
+
+        def _progress(message: str) -> None:
+            # Stage feedback for the GUI/CLI; never let a progress sink's
+            # own failure break the export.
+            if progress_cb is None:
+                return
+            try:
+                progress_cb(message)
+            except Exception:
+                logger.debug("progress_cb failed", exc_info=True)
+
+        _progress("Staging data directories (genomes, BLAST DBs, mappings, "
+                  "watchlists)...")
 
         with tempfile.TemporaryDirectory() as tmpdir:
             staging = Path(tmpdir) / "bundle"
@@ -820,10 +958,15 @@ class BundleManager:
             # instead, so re-running the conda solver would just waste
             # build time + 5 GB of disk for an unused artefact.
             if containerization == "conda" and pre_warm_conda_envs:
+                _progress(
+                    "Pre-warming conda environments (this is the long part; "
+                    "up to ~30 minutes)..."
+                )
                 pre_warm_result = self._pre_warm_conda_envs(
                     staging=staging,
                     config=config,
                     pipeline_path=pipeline_path,
+                    progress_cb=_progress,
                 )
                 if pre_warm_result["success"]:
                     # Embed the operator activation script next to the
@@ -836,6 +979,21 @@ class BundleManager:
                     )
                     script_path.chmod(0o755)
             manifest["pre_warm_conda_envs"] = pre_warm_result
+            # Fold pre-warm problems into export_warnings: that key is what
+            # verify_bundle/import replay to the operator, so a warning kept
+            # only under pre_warm_conda_envs is one nobody ever sees
+            # (2026-08-27 audit, conda finding 4).
+            for w in pre_warm_result.get("warnings", []):
+                manifest["export_warnings"].append(f"[conda pre-warm] {w}")
+            if pre_warm_result.get("attempted") and not pre_warm_result.get(
+                "success"
+            ):
+                manifest["export_warnings"].append(
+                    "[conda pre-warm] Pre-warm did not produce a usable env "
+                    "cache; the bundle ships WITHOUT per-process conda envs "
+                    "and the field machine will need network access on "
+                    "first run."
+                )
 
             # Docker / Singularity image pull. Both engines walk the
             # pipeline source's ``modules/`` tree, dedupe references,
@@ -851,12 +1009,17 @@ class BundleManager:
             }
             resolved_target_platform = target_platform or _DEFAULT_TARGET_PLATFORM
             if containerization in ("docker", "singularity"):
+                _progress(
+                    f"Pulling pipeline container images ({containerization}, "
+                    f"{resolved_target_platform})..."
+                )
                 container_pull_result = self._pull_pipeline_containers(
                     engine=containerization,
                     staging=staging,
                     config=config,
                     pipeline_path=pipeline_path,
                     target_platform=resolved_target_platform,
+                    progress_cb=_progress,
                 )
             manifest["containerization"] = {
                 "engine": containerization,
@@ -879,6 +1042,13 @@ class BundleManager:
                     "observed_architectures"
                 ),
             }
+            # Same folding for the container pull: a skipped or partial pull
+            # otherwise leaves its warnings buried in
+            # manifest.containerization.pull_result where no surface reads
+            # them (2026-08-27 audit, GUI finding 1).
+            for w in container_pull_result.get("warnings", []):
+                manifest["export_warnings"].append(f"[container pull] {w}")
+
             observed = container_pull_result.get("observed_architectures") or []
             requested_arch = _oci_arch(resolved_target_platform)
             if observed and any(a != requested_arch for a in observed):
@@ -920,6 +1090,14 @@ class BundleManager:
             if scratch.exists():
                 shutil.rmtree(scratch, ignore_errors=True)
 
+            # Normalise symlinks so extraction with tarfile's 'data' filter
+            # cannot abort: an absolute link target raises AbsoluteLinkError
+            # on import regardless of where it points. Links inside the
+            # staging tree become relative; links escaping the tree are
+            # dropped with a warning (they would dangle on the field machine
+            # anyway).
+            self._normalise_staging_symlinks(staging, manifest)
+
             # Checksum EVERY staged file, in one pass, as the last thing
             # before the manifest is written.
             #
@@ -935,6 +1113,7 @@ class BundleManager:
             # A single trailing pass is what makes the coverage a property of
             # the bundle rather than of each copy site, so a future staged
             # directory cannot silently reintroduce the gap.
+            _progress("Checksumming bundle files...")
             _checksum_staging_tree(staging, manifest)
 
             # Save manifest (excluded from its own checksums above).
@@ -950,12 +1129,26 @@ class BundleManager:
                     return None
                 return tarinfo
 
+            _progress("Writing the compressed archive (large bundles take a "
+                      "few minutes)...")
             with tarfile.open(str(output), "w:gz") as tar:
                 for item in staging.iterdir():
                     tar.add(str(item), arcname=item.name, filter=_tar_filter)
 
-        logger.info(f"Bundle exported to {output}")
-        return output
+        if manifest["export_warnings"]:
+            logger.warning(
+                "Bundle exported to %s with %d warning(s); the bundle may "
+                "be incomplete -- review before shipping.",
+                output,
+                len(manifest["export_warnings"]),
+            )
+        else:
+            logger.info(f"Bundle exported to {output}")
+        return ExportResult(
+            path=output,
+            warnings=list(manifest["export_warnings"]),
+            manifest=manifest,
+        )
 
     def verify_bundle(
         self,
@@ -1454,9 +1647,32 @@ class BundleManager:
             return result
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Extract bundle
-            with tarfile.open(bundle_path, "r:gz") as tar:
-                tar.extractall(path=tmpdir, filter='data')
+            # Extract bundle. The 'data' filter rejects absolute or
+            # escaping link targets and special files; exports normalise
+            # symlinks so a compliant bundle never trips it, but a
+            # hand-built or pre-fix bundle can -- turn that into an
+            # actionable refusal instead of an uncaught traceback.
+            try:
+                with tarfile.open(bundle_path, "r:gz") as tar:
+                    tar.extractall(path=tmpdir, filter='data')
+            except tarfile.FilterError as exc:
+                result["success"] = False
+                result["warnings"].append(
+                    "The bundle contains an entry the safe extraction "
+                    f"filter refuses ({exc}). This usually means an "
+                    "absolute symlink inside the archive; re-export the "
+                    "bundle with the current version, which normalises "
+                    "symlinks at export time."
+                )
+                return result
+            except (tarfile.TarError, OSError, EOFError) as exc:
+                result["success"] = False
+                result["warnings"].append(
+                    f"Could not extract the bundle: {exc}. The archive is "
+                    "likely truncated or corrupted in transfer; re-transfer "
+                    "it and retry."
+                )
+                return result
 
             tmp = Path(tmpdir)
 
@@ -1497,11 +1713,27 @@ class BundleManager:
                 if src.exists():
                     dst = home / dirname
                     if dst.exists():
-                        # Merge: copy new files, skip existing
+                        # Merge: copy new files, skip existing. Symlinks are
+                        # recreated as symlinks -- copy2 would dereference
+                        # them (multi-GB expansion in a conda cache) and
+                        # raise on a dangling one.
                         for src_file in src.rglob("*"):
-                            if src_file.is_file():
-                                rel = src_file.relative_to(src)
-                                dst_file = dst / rel
+                            rel = src_file.relative_to(src)
+                            dst_file = dst / rel
+                            if src_file.is_symlink():
+                                dst_file.parent.mkdir(parents=True, exist_ok=True)
+                                target = os.readlink(str(src_file))
+                                if dst_file.is_symlink() or dst_file.exists():
+                                    if (
+                                        dst_file.is_symlink()
+                                        and os.readlink(str(dst_file)) == target
+                                    ):
+                                        continue
+                                    if dst_file.is_dir() and not dst_file.is_symlink():
+                                        continue
+                                    dst_file.unlink()
+                                os.symlink(target, str(dst_file))
+                            elif src_file.is_file():
                                 dst_file.parent.mkdir(parents=True, exist_ok=True)
                                 if not dst_file.exists():
                                     shutil.copy2(src_file, dst_file)
@@ -1510,7 +1742,11 @@ class BundleManager:
                                     if _file_md5(src_file) != _file_md5(dst_file):
                                         shutil.copy2(src_file, dst_file)
                     else:
-                        shutil.copytree(src, dst)
+                        # symlinks=True: preserve links as links. A conda
+                        # cache holds thousands of (possibly dangling)
+                        # symlinks; dereferencing balloons the install and a
+                        # dangling link raises shutil.Error mid-import.
+                        shutil.copytree(src, dst, symlinks=True)
 
             # Re-verify checksums AFTER the copy to home. The tempdir pass
             # above proves the bundle arrived intact; this pass catches a copy
@@ -1552,6 +1788,55 @@ class BundleManager:
                     result["warnings"].append(msg + ". The install is incomplete.")
                     return result
                 result["warnings"].append(msg + ". Continuing anyway (force=True).")
+
+            # Relocate the pre-warmed conda cache: rewrite the recorded
+            # build prefix (embedded in shebangs, conda-meta and binaries)
+            # to the restored location. Must run AFTER the post-copy
+            # checksum pass -- relocation legitimately changes file
+            # contents. Without this every env ships dead-on-arrival, even
+            # re-imported on the build machine (2026-08-27 audit, finding 1).
+            pwc_manifest = manifest.get("pre_warm_conda_envs") or {}
+            restored_cache = home / _BUNDLED_CONDA_CACHE_DIRNAME
+            if pwc_manifest.get("build_prefix") and restored_cache.is_dir():
+                from nanometa_live.core.workflow.conda_cache_utils import (
+                    list_complete_env_dirs,
+                    relocate_conda_cache,
+                )
+
+                stats = relocate_conda_cache(
+                    restored_cache, pwc_manifest["build_prefix"]
+                )
+                result["conda_relocation"] = stats
+                if stats["failures"]:
+                    result["warnings"].append(
+                        f"{len(stats['failures'])} file(s) in the conda cache "
+                        "could not be relocated to this machine (e.g. "
+                        f"{stats['failures'][0]}); the affected env(s) will "
+                        "fail at run time. Re-export the bundle."
+                    )
+                logger.info(
+                    "Relocated conda cache to %s: %d text, %d binary, "
+                    "%d symlink rewrites",
+                    restored_cache,
+                    stats["text_rewritten"],
+                    stats["binary_patched"],
+                    stats["symlinks_retargeted"],
+                )
+
+                # Cross-check the restored env count against what the
+                # export recorded -- mirror of the container-image
+                # incomplete_image_set guard.
+                expected_envs = pwc_manifest.get("env_count") or 0
+                restored_envs = len(list_complete_env_dirs(restored_cache))
+                if expected_envs and restored_envs < expected_envs:
+                    result["incomplete_conda_cache"] = True
+                    result["warnings"].append(
+                        f"Only {restored_envs} of {expected_envs} pre-warmed "
+                        "conda env(s) survived the transfer; missing envs "
+                        "will be re-built at run time, which fails on an "
+                        "air-gapped machine. Re-transfer or re-export the "
+                        "bundle."
+                    )
 
             # Rebase genome_metadata.json
             meta_src = tmp / "genome_metadata.json"
@@ -1854,6 +2139,12 @@ class BundleManager:
                     # outside this branch -- see _check_bundled_plugins.
                     import_loader.save_config(cfg, "config.yaml")
                     logger.info("Set offline_mode=True in config")
+                    # Hand the rebased config back so the GUI's finalize can
+                    # push it into the live app-config store -- without this
+                    # the running app keeps the pre-import config until a
+                    # restart (2026-08-27 audit, GUI finding 5).
+                    result["imported_config"] = dict(cfg)
+                    result["config_path"] = str(config_path)
                 except (ImportError, AttributeError, OSError, ValueError) as e:
                     # Fail the import. Without the rebased config the
                     # installation still carries the export-time placeholders
@@ -1888,6 +2179,7 @@ class BundleManager:
         config: Dict[str, Any],
         pipeline_path: Optional[str],
         target_platform: Optional[str] = None,
+        progress_cb=None,
     ) -> Dict[str, Any]:
         """Pull every unique container image referenced by the pipeline.
 
@@ -1995,11 +2287,18 @@ class BundleManager:
         images_dir = staging / _BUNDLED_PIPELINE_CONTAINERS_DIRNAME
         images_dir.mkdir(parents=True, exist_ok=True)
 
-        for ref in refs:
+        for i, ref in enumerate(refs, start=1):
             # Apply the pipeline's default registry to bare refs (quay.io),
             # mirroring Nextflow's docker.registry; otherwise biocontainers
             # images are pulled from Docker Hub where they do not exist.
             pull_ref = self._apply_default_registry(ref)
+            if progress_cb is not None:
+                try:
+                    progress_cb(
+                        f"Pulling container image {i}/{len(refs)}: {pull_ref}"
+                    )
+                except Exception:
+                    logger.debug("progress_cb failed", exc_info=True)
             try:
                 if engine == "docker":
                     self._pull_one_docker_image(
@@ -2218,6 +2517,7 @@ class BundleManager:
         staging: Path,
         config: Dict[str, Any],
         pipeline_path: Optional[str],
+        progress_cb=None,
     ) -> Dict[str, Any]:
         """
         Populate ``staging/conda_cache`` with every per-process env
@@ -2265,8 +2565,28 @@ class BundleManager:
             logger.warning(outcome["warnings"][-1])
             return outcome
 
-        cache_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
+        # Build the cache under a deliberately PADDED directory name. Conda
+        # envs embed this absolute prefix in shebangs, conda-meta JSON and
+        # NUL-terminated strings inside binaries; import relocates it to the
+        # field machine's cache path with a length-preserving in-place
+        # rewrite, which only works while the destination is SHORTER than
+        # the build prefix. Padding to PREFIX_PAD_TARGET makes that hold for
+        # any realistic destination. The directory is renamed to the
+        # canonical conda_cache/ before checksumming and tarring; the padded
+        # path is recorded as ``build_prefix`` for the import-side rewrite.
+        from nanometa_live.core.workflow.conda_cache_utils import (
+            PREFIX_PAD_TARGET,
+            list_complete_env_dirs,
+            prune_incomplete_env_dirs,
+        )
+
+        pad_name = _BUNDLED_CONDA_CACHE_DIRNAME + "_build"
+        deficit = PREFIX_PAD_TARGET - len(str(staging / pad_name))
+        if deficit > 0:
+            pad_name += "_" * deficit
+        cache_root = staging / pad_name
         cache_root.mkdir(parents=True, exist_ok=True)
+        outcome["build_prefix"] = str(cache_root)
 
         env = os.environ.copy()
         env["NXF_CONDA_CACHEDIR"] = str(cache_root)
@@ -2275,7 +2595,16 @@ class BundleManager:
         # pinned envs we are about to bake into the bundle.
         env.setdefault("NXF_OFFLINE", "false")
 
-        for scenario in _PRE_WARM_SCENARIOS:
+        for scenario_no, scenario in enumerate(_PRE_WARM_SCENARIOS, start=1):
+            if progress_cb is not None:
+                try:
+                    progress_cb(
+                        f"Pre-warm scenario {scenario_no}/"
+                        f"{len(_PRE_WARM_SCENARIOS)}: {scenario['name']} "
+                        "(conda may be solving environments; be patient)"
+                    )
+                except Exception:
+                    logger.debug("progress_cb failed", exc_info=True)
             scenario_ok, scenario_msg = self._run_pre_warm_scenario(
                 scenario=scenario,
                 pipeline_dir=resolved_pipeline,
@@ -2291,10 +2620,31 @@ class BundleManager:
                 )
                 logger.warning(outcome["warnings"][-1])
 
-        env_dirs = [
-            d for d in cache_root.iterdir()
-            if d.is_dir() and d.name.startswith("env-")
-        ]
+        final_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
+        # A scenario runner that ignored NXF_CONDA_CACHEDIR and wrote the
+        # canonical directory name directly (older mocks) still yields a
+        # usable cache; prefer the padded root when it holds anything.
+        effective_root = cache_root
+        if not any(cache_root.iterdir()) and final_root.is_dir():
+            effective_root = final_root
+            outcome["build_prefix"] = str(final_root)
+
+        # Prune envs that did not finish building (a timed-out or killed
+        # scenario leaves a stub directory Nextflow's cache would treat as
+        # ready; shipped, it fails exit-127 on the air-gapped machine).
+        pruned = prune_incomplete_env_dirs(effective_root)
+        for name in pruned:
+            outcome["warnings"].append(
+                f"Pruned incomplete conda env '{name}' from the bundle "
+                "(build did not finish; the owning scenario likely failed "
+                "or timed out)."
+            )
+            logger.warning(outcome["warnings"][-1])
+
+        # Count COMPLETE envs, matching any directory name -- Nextflow
+        # names an env from environment.yml's ``name:`` key when declared,
+        # so an ``env-`` prefix filter under-counts.
+        env_dirs = list_complete_env_dirs(effective_root)
         outcome["env_count"] = len(env_dirs)
         outcome["success"] = bool(outcome["scenarios"]) and outcome["env_count"] > 0
 
@@ -2302,8 +2652,63 @@ class BundleManager:
             # Drop the half-populated cache directory so the bundle
             # does not silently ship a broken cache.
             shutil.rmtree(cache_root, ignore_errors=True)
+            shutil.rmtree(final_root, ignore_errors=True)
+            return outcome
+
+        # Absolute internal symlinks must become relative BEFORE the rename
+        # below invalidates their targets; an absolute link would also make
+        # the import-side tar 'data' filter abort the whole extraction.
+        from nanometa_live.core.workflow.conda_cache_utils import (
+            make_symlinks_relative,
+        )
+
+        link_result = make_symlinks_relative(effective_root)
+        for dropped in link_result["dropped"]:
+            outcome["warnings"].append(
+                f"Dropped symlink '{dropped}' pointing outside the conda "
+                "cache; it would dangle on the field machine."
+            )
+
+        if effective_root is cache_root and cache_root != final_root:
+            cache_root.rename(final_root)
+        elif effective_root is final_root:
+            shutil.rmtree(cache_root, ignore_errors=True)
 
         return outcome
+
+    @staticmethod
+    def _normalise_staging_symlinks(staging: Path, manifest: Dict[str, Any]) -> None:
+        """Backstop pass over the WHOLE staging tree: no absolute symlink
+        may reach the tar. tarfile's 'data' extraction filter raises
+        AbsoluteLinkError for any absolute link target, which would abort
+        the entire import with no actionable message. In-tree targets are
+        rewritten relative; out-of-tree targets are dropped with an
+        export warning (they would dangle on the field machine anyway).
+        The conda cache gets its own earlier pass (before its rename); this
+        one covers every other staged tree, e.g. a pipeline checkout or a
+        plugin cache that happens to carry an absolute link.
+        """
+        staging_str = str(staging)
+        for path in list(staging.rglob("*")):
+            if not path.is_symlink():
+                continue
+            try:
+                target = os.readlink(str(path))
+            except OSError:
+                continue
+            if not os.path.isabs(target):
+                continue
+            if target == staging_str or target.startswith(staging_str + os.sep):
+                rel = os.path.relpath(target, start=str(path.parent))
+                path.unlink()
+                os.symlink(rel, str(path))
+            else:
+                path.unlink()
+                manifest["export_warnings"].append(
+                    f"Dropped symlink '{path.relative_to(staging)}' pointing "
+                    f"outside the bundle ({target}); it would dangle on the "
+                    "field machine."
+                )
 
     @staticmethod
     def _resolve_pipeline_checkout(
@@ -2517,38 +2922,25 @@ class BundleManager:
         scenario_dir = staging / "_pre_warm" / scenario["name"]
         scenario_dir.mkdir(parents=True, exist_ok=True)
 
-        samplesheet = scenario_dir / "samplesheet.csv"
-        fastq_stub = scenario_dir / "stub.fastq.gz"
-        fastq_stub.write_bytes(b"")  # zero-byte placeholder is fine for stub mode
-        samplesheet.write_text(
-            "sample,fastq\n"
-            f"stub_sample,{fastq_stub}\n"
+        scenario_params, _ = _prepare_scenario_inputs(
+            scenario_dir, dict(scenario.get("params", {}))
         )
 
-        scenario_params: Dict[str, Any] = dict(scenario.get("params", {}))
-
-        # Validation scenarios trigger nanometanf's pathogen_genomes check
-        # at pipeline startup. Stub mode still runs that check, so write a
-        # minimal placeholder JSON if the scenario opts into validation
-        # without supplying its own pathogen_genomes path.
-        if (
-            str(scenario_params.get("run_validation", "")).lower() == "true"
-            and "pathogen_genomes" not in scenario_params
-        ):
-            placeholder = scenario_dir / "pathogen_genomes.json"
-            placeholder.write_text(json.dumps({"pathogens": []}))
-            scenario_params["pathogen_genomes"] = str(placeholder)
+        # Params travel as a typed JSON file: under the strict parser
+        # (Nextflow 26.04+) CLI ``--flag value`` params arrive as strings
+        # and nf-schema rejects a string where the schema says
+        # boolean/integer, so ``--realtime_mode true`` fails validation.
+        scenario_params["outdir"] = str(scenario_dir / "results")
+        params_file = scenario_dir / "params.json"
+        params_file.write_text(json.dumps(scenario_params, indent=2))
 
         cmd = [
             "nextflow", "run", str(pipeline_dir / "main.nf"),
             "-stub",
             "-profile", "conda",
             "-work-dir", str(scenario_dir / "work"),
-            "--input", str(samplesheet),
-            "--outdir", str(scenario_dir / "results"),
+            "-params-file", str(params_file),
         ]
-        for key, value in scenario_params.items():
-            cmd += [f"--{key}", str(value)]
 
         try:
             result = subprocess.run(

@@ -303,10 +303,10 @@ class TestBuiltinWatchlistResolution:
             "kraken_db": "",  # skip db_hash branch
             "results_output_directory": str(tmp_path / "results"),
         }
-        result_path = mgr.export_bundle(
+        export_result = mgr.export_bundle(
             str(out), config=config, nanometa_home=str(home)
         )
-        assert result_path == out
+        assert export_result.path == out
         assert out.exists() and out.stat().st_size > 0
         # Confirm the archive contains a watchlists/ entry.
         with tarfile.open(str(out), "r:gz") as tar:
@@ -492,6 +492,19 @@ def _make_fake_pipeline_checkout(parent: Path) -> Path:
     return pipeline
 
 
+def _make_complete_env(cache_root: Path, name: str) -> Path:
+    """Model what Nextflow's CondaCache leaves after a SUCCESSFUL build:
+    conda-meta/history (written last on success) plus a non-empty bin/.
+    Export prunes anything less as a half-built env, so mocks must build
+    the complete shape."""
+    env_dir = cache_root / name
+    (env_dir / "conda-meta").mkdir(parents=True, exist_ok=True)
+    (env_dir / "conda-meta" / "history").write_text("==> done <==\n")
+    (env_dir / "bin").mkdir(exist_ok=True)
+    (env_dir / "bin" / "tool").write_text("#!/bin/sh\nexit 0\n")
+    return env_dir
+
+
 class TestPreWarmCondaEnvs:
     """GAP-1: BundleManager.export_bundle(pre_warm_conda_envs=True) bakes
     the per-process Nextflow conda envs into the bundle so the field
@@ -548,16 +561,12 @@ class TestPreWarmCondaEnvs:
         # Mock the per-scenario stub run so it "creates" two env dirs
         # in the cache the same way Nextflow's CondaCache would.
         def fake_run_scenario(scenario, pipeline_dir, staging, env):
-            cache_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
-            cache_root.mkdir(parents=True, exist_ok=True)
+            cache_root = Path(env["NXF_CONDA_CACHEDIR"])
             for env_md5 in (
                 "env-aaaa1111bbbb2222cccc3333dddd4444",
                 "env-eeee5555ffff6666aaaa7777bbbb8888",
             ):
-                env_dir = cache_root / env_md5
-                env_dir.mkdir(exist_ok=True)
-                (env_dir / "bin" / "fastp").parent.mkdir(parents=True, exist_ok=True)
-                (env_dir / "bin" / "fastp").write_text("#!/bin/sh\nexit 0\n")
+                _make_complete_env(cache_root, env_md5)
             return True, "ok"
 
         mgr = BundleManager()
@@ -589,7 +598,7 @@ class TestPreWarmCondaEnvs:
         assert pwc["attempted"] is True
         assert pwc["success"] is True
         assert pwc["env_count"] >= 1
-        assert "batch_samplesheet" in pwc["scenarios"]
+        assert "batch_default" in pwc["scenarios"]
 
         # Every conda_cache file must have a checksum entry so import
         # validation can detect tarball corruption later.
@@ -691,10 +700,7 @@ class TestPreWarmCondaEnvs:
         pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
 
         def fake_run_scenario(scenario, pipeline_dir, staging, env):
-            cache_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
-            cache_root.mkdir(parents=True, exist_ok=True)
-            (cache_root / "env-deadbeef").mkdir(exist_ok=True)
-            (cache_root / "env-deadbeef" / "marker").write_text("ok")
+            _make_complete_env(Path(env["NXF_CONDA_CACHEDIR"]), "env-deadbeef")
             return True, "ok"
 
         mgr = BundleManager()
@@ -734,11 +740,7 @@ class TestPreWarmCondaEnvs:
         pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
 
         def fake_run_scenario(scenario, pipeline_dir, staging, env):
-            cache_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
-            cache_root.mkdir(parents=True, exist_ok=True)
-            env_dir = cache_root / "env-feedface"
-            env_dir.mkdir(exist_ok=True)
-            (env_dir / "marker").write_text("ok")
+            _make_complete_env(Path(env["NXF_CONDA_CACHEDIR"]), "env-feedface")
             return True, "ok"
 
         mgr = BundleManager()
@@ -764,7 +766,13 @@ class TestPreWarmCondaEnvs:
         )
 
         assert result["success"] is True
-        restored = field / _BUNDLED_CONDA_CACHE_DIRNAME / "env-feedface" / "marker"
+        restored = (
+            field
+            / _BUNDLED_CONDA_CACHE_DIRNAME
+            / "env-feedface"
+            / "conda-meta"
+            / "history"
+        )
         assert restored.exists(), (
             "import_bundle must extract conda_cache/env-* into "
             "<nanometa_home>/conda_cache/"
@@ -796,19 +804,18 @@ class TestExtendedPreWarmScenarios:
     to the chopper/seqkit/kraken2/multiqc set already covered.
     """
 
-    def test_nine_scenarios_registered(self):
-        """The pre-warm scenario list now carries the entries audited
-        across cycles 11 (validation/fastp) and 17 (assembly/untar) in
-        the order the audit recommended."""
+    def test_scenarios_registered(self):
+        """The registry carries the 2026-08-27 rewrite: real pipeline
+        params only, one bounded realtime scenario (the sample-layout
+        variants shared one env set), and filtlong added."""
         names = [s["name"] for s in _PRE_WARM_SCENARIOS]
         assert names == [
-            "batch_samplesheet",
-            "realtime_multiplex",
-            "realtime_per_file",
-            "realtime_single_sample",
+            "batch_default",
+            "realtime",
             "validation_blast",
             "validation_minimap2",
             "fastp_qc",
+            "filtlong_qc",
             "assembly_flye",
             "untar_kraken2_db",
         ]
@@ -821,7 +828,8 @@ class TestExtendedPreWarmScenarios:
             assert "params" in scenario
             assert "comment" in scenario
             assert isinstance(scenario["params"], dict)
-            assert scenario["params"]  # non-empty
+            # params may be empty: the runner supplies the samplesheet and
+            # stub kraken2_db, so the default-path scenario needs nothing.
             assert isinstance(scenario["comment"], str)
             assert scenario["comment"].strip()
 
@@ -829,14 +837,14 @@ class TestExtendedPreWarmScenarios:
         scenario = next(
             s for s in _PRE_WARM_SCENARIOS if s["name"] == "validation_blast"
         )
-        assert scenario["params"].get("run_validation") == "true"
+        assert scenario["params"].get("run_validation") is True
         assert scenario["params"].get("validation_method") == "blast"
 
     def test_validation_minimap2_params_target_minimap2_env(self):
         scenario = next(
             s for s in _PRE_WARM_SCENARIOS if s["name"] == "validation_minimap2"
         )
-        assert scenario["params"].get("run_validation") == "true"
+        assert scenario["params"].get("run_validation") is True
         assert scenario["params"].get("validation_method") == "minimap2"
 
     def test_fastp_qc_params_target_fastp_env(self):
@@ -851,16 +859,20 @@ class TestExtendedPreWarmScenarios:
         scenario = next(
             s for s in _PRE_WARM_SCENARIOS if s["name"] == "assembly_flye"
         )
-        assert scenario["params"].get("enable_assembly") == "true"
+        assert scenario["params"].get("enable_assembly") is True
 
     def test_untar_kraken2_db_params_supply_tarred_db(self):
-        """The untar scenario points kraken2_db at a tar.gz URL so the
-        UNTAR module fires and its conda env lands in the cache."""
+        """The untar scenario asks for a tar.gz Kraken2 DB so the UNTAR
+        module fires; the runner builds the archive locally from the stub
+        DB (no network fetch on the build machine)."""
+        from nanometa_live.core.workflow.bundle_manager import (
+            _LOCAL_STUB_DB_ARCHIVE,
+        )
+
         scenario = next(
             s for s in _PRE_WARM_SCENARIOS if s["name"] == "untar_kraken2_db"
         )
-        db = scenario["params"].get("kraken2_db", "")
-        assert db.endswith(".tar.gz")
+        assert scenario["params"].get("kraken2_db") == _LOCAL_STUB_DB_ARCHIVE
 
     def test_all_scenarios_attempted(self, tmp_path):
         """When pre-warm runs, every scenario in the registry is passed
@@ -876,9 +888,9 @@ class TestExtendedPreWarmScenarios:
 
         def fake_run_scenario(scenario, pipeline_dir, staging, env):
             attempted.append(scenario["name"])
-            cache_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
-            cache_root.mkdir(parents=True, exist_ok=True)
-            (cache_root / f"env-{scenario['name']}").mkdir(exist_ok=True)
+            _make_complete_env(
+                Path(env["NXF_CONDA_CACHEDIR"]), f"env-{scenario['name']}"
+            )
             return True, "ok"
 
         mgr = BundleManager()
@@ -896,17 +908,7 @@ class TestExtendedPreWarmScenarios:
                     pipeline_path=str(pipeline_dir),
                 )
 
-        assert attempted == [
-            "batch_samplesheet",
-            "realtime_multiplex",
-            "realtime_per_file",
-            "realtime_single_sample",
-            "validation_blast",
-            "validation_minimap2",
-            "fastp_qc",
-            "assembly_flye",
-            "untar_kraken2_db",
-        ]
+        assert attempted == [s["name"] for s in _PRE_WARM_SCENARIOS]
 
         with tarfile.open(str(out), "r:gz") as tar:
             with tar.extractfile("manifest.json") as fh:
@@ -935,9 +937,7 @@ class TestExtendedPreWarmScenarios:
         scenario = {
             "name": "validation_blast",
             "params": {
-                "processing_mode": "batch",
-                "sample_handling": "single_sample",
-                "run_validation": "true",
+                "run_validation": True,
                 "validation_method": "blast",
             },
             "comment": "stub",
@@ -957,9 +957,10 @@ class TestExtendedPreWarmScenarios:
         assert ok is True
         assert captured_cmds, "subprocess.run should have been invoked once"
         cmd = captured_cmds[0]
-        assert "--pathogen_genomes" in cmd
-        idx = cmd.index("--pathogen_genomes")
-        placeholder_path = Path(cmd[idx + 1])
+        params = json.loads(
+            Path(cmd[cmd.index("-params-file") + 1]).read_text()
+        )
+        placeholder_path = Path(params["pathogen_genomes"])
         assert placeholder_path.exists()
         payload = json.loads(placeholder_path.read_text())
         assert payload == {"pathogens": []}
@@ -982,8 +983,6 @@ class TestExtendedPreWarmScenarios:
         scenario = {
             "name": "fastp_qc",
             "params": {
-                "processing_mode": "batch",
-                "sample_handling": "single_sample",
                 "qc_tool": "fastp",
             },
             "comment": "stub",
@@ -1002,11 +1001,12 @@ class TestExtendedPreWarmScenarios:
 
         assert ok is True
         cmd = captured_cmds[0]
-        assert "--pathogen_genomes" not in cmd
+        params = json.loads(
+            Path(cmd[cmd.index("-params-file") + 1]).read_text()
+        )
+        assert "pathogen_genomes" not in params
         # The fastp-specific param must still reach the stub call.
-        assert "--qc_tool" in cmd
-        idx = cmd.index("--qc_tool")
-        assert cmd[idx + 1] == "fastp"
+        assert params.get("qc_tool") == "fastp"
 
 
 class TestActivateOfflineEnvsScript:
@@ -1079,10 +1079,7 @@ class TestActivateOfflineEnvsScript:
         pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
 
         def fake_run_scenario(scenario, pipeline_dir, staging, env):
-            cache_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
-            cache_root.mkdir(parents=True, exist_ok=True)
-            (cache_root / "env-deadbeef").mkdir(exist_ok=True)
-            (cache_root / "env-deadbeef" / "marker").write_text("ok")
+            _make_complete_env(Path(env["NXF_CONDA_CACHEDIR"]), "env-deadbeef")
             return True, "ok"
 
         mgr = BundleManager()
@@ -1149,11 +1146,7 @@ class TestActivateOfflineEnvsScript:
         pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
 
         def fake_run_scenario(scenario, pipeline_dir, staging, env):
-            cache_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
-            cache_root.mkdir(parents=True, exist_ok=True)
-            env_dir = cache_root / "env-feedface"
-            env_dir.mkdir(exist_ok=True)
-            (env_dir / "marker").write_text("ok")
+            _make_complete_env(Path(env["NXF_CONDA_CACHEDIR"]), "env-feedface")
             return True, "ok"
 
         mgr = BundleManager()
@@ -1206,10 +1199,7 @@ class TestActivateOfflineEnvsScript:
         pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
 
         def fake_run_scenario(scenario, pipeline_dir, staging, env):
-            cache_root = staging / _BUNDLED_CONDA_CACHE_DIRNAME
-            cache_root.mkdir(parents=True, exist_ok=True)
-            (cache_root / "env-marker").mkdir(exist_ok=True)
-            (cache_root / "env-marker" / "ok").write_text("ok")
+            _make_complete_env(Path(env["NXF_CONDA_CACHEDIR"]), "env-marker")
             return True, "ok"
 
         mgr = BundleManager()
@@ -2201,7 +2191,7 @@ class TestSingularityBundleWiring:
 
         img_name = "quay.io-biocontainers-foo-1.0.img"
 
-        def fake_pull(engine, staging, config, pipeline_path, target_platform=None):
+        def fake_pull(engine, staging, config, pipeline_path, target_platform=None, progress_cb=None):
             images = staging / "pipeline_containers"
             images.mkdir(parents=True, exist_ok=True)
             (images / img_name).write_bytes(b"SIF\x00fake-image")
@@ -2270,7 +2260,7 @@ class TestContainerImageCompleteness:
         (home / "genomes" / "1.fasta").write_text(">x\nA\n")
         pipeline_dir = _make_fake_pipeline_checkout(tmp_path)
 
-        def fake_pull(engine, staging, config, pipeline_path, target_platform=None):
+        def fake_pull(engine, staging, config, pipeline_path, target_platform=None, progress_cb=None):
             # Report two images pulled, but only stage one -- models a
             # single failed `docker save` / `apptainer pull` that was
             # caught and warned about rather than aborting the export.

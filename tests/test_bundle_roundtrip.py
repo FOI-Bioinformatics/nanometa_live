@@ -145,7 +145,7 @@ def test_conda_bundle_wires_conda_cachedir_into_run_env(tmp_path, monkeypatch):
     pipeline = tmp_path / "pipeline"
     _build_pipeline_checkout(pipeline)
 
-    def fake_pre_warm(staging, config, pipeline_path):
+    def fake_pre_warm(staging, config, pipeline_path, progress_cb=None):
         # Stand in for a real `nextflow -profile conda` warm-up: stage the
         # env directory layout Nextflow would have produced.
         cache = Path(staging) / "conda_cache"
@@ -200,7 +200,7 @@ def test_singularity_bundle_wires_singularity_cachedir_into_run_env(
 
     img_name = "quay.io-biocontainers-seqkit-2.9.0--h9ee0642_0.img"
 
-    def fake_pull(engine, staging, config, pipeline_path, target_platform=None):
+    def fake_pull(engine, staging, config, pipeline_path, target_platform=None, progress_cb=None):
         images = Path(staging) / "pipeline_containers"
         images.mkdir(parents=True, exist_ok=True)
         (images / img_name).write_bytes(b"SIF\x00fake")
