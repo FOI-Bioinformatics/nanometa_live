@@ -2165,6 +2165,75 @@ def unmeasured_samples(
     return list(unreadable) if n_readable else []
 
 
+def resolve_below_floor_samples(
+    main_dir: str,
+    available_samples: List[str],
+    taxids: "set",
+    config: Optional[Dict[str, Any]] = None,
+) -> Dict[int, List[Dict[str, Any]]]:
+    """Per-sample rows for named taxids, ignoring the discovery floor.
+
+    ``PER_SAMPLE_DISCOVERY_FLOOR`` is right for the general attribution
+    build, which runs across every taxon in every sample and would otherwise
+    carry thousands of one-read rows. It is wrong for a taxon the aggregate
+    has already called above its alert threshold, because the aggregate
+    reaches that threshold by summing exactly the small per-sample counts the
+    floor discards.
+
+    Measured live on 2026-09-01 (realtime, Bioshield demo): Bacillus
+    anthracis at 3 reads in barcode05, 4 in barcode07 and 3 in barcode08.
+    The sum met the entry's alert threshold of 10 and raised ACTION REQUIRED
+    for a select agent, while every row sat under the floor, so the banner
+    said "Sample attribution unavailable" for the organism where the barcode
+    matters most.
+
+    Called only for detections the floored build resolved nothing for, so it
+    runs rarely and reads frames the loader cache already holds. Returns the
+    same row shape as ``_load_per_sample_organisms``, sorted descending by
+    reads.
+    """
+    if not taxids:
+        return {}
+    real_samples = [s for s in available_samples if s != "All Samples"]
+    if not real_samples:
+        return {}
+
+    wanted = {int(t) for t in taxids}
+    found: Dict[int, List[Dict[str, Any]]] = {}
+
+    for sample in real_samples:
+        is_nc = is_negative_control(sample, config)
+        try:
+            kraken_df = load_kraken_data(main_dir, sample)
+            if kraken_df.empty:
+                continue
+            species_df = kraken_df[species_rank_mask(kraken_df)]
+            if species_df.empty:
+                continue
+            for org in _species_df_to_organisms(species_df):
+                taxid = int(org["taxid"])
+                if taxid not in wanted or org["reads"] <= 0:
+                    continue
+                found.setdefault(taxid, []).append({
+                    "sample": sample,
+                    "reads": org["reads"],
+                    "abundance": org["abundance"],
+                    "is_negative_control": is_nc,
+                    # Marks a row the general build would have filtered out,
+                    # so a consumer can say so rather than presenting it as
+                    # an ordinary per-sample count.
+                    "below_discovery_floor": org["reads"] < PER_SAMPLE_DISCOVERY_FLOOR,
+                })
+        except Exception as exc:
+            logger.debug(
+                "Below-floor lookup failed for %s: %s", sample, exc
+            )
+
+    for taxid in found:
+        found[taxid].sort(key=lambda x: x["reads"], reverse=True)
+    return found
+
+
 def _load_per_sample_organisms(
     main_dir: str,
     available_samples: List[str],

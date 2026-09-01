@@ -67,6 +67,9 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     DEFAULT_LOW_READ_FLOOR,
     _classify_dangerous,
     build_pathogen_attribution,
+    resolve_attribution_taxids,
+    resolve_below_floor_samples,
+    samples_for_detection,
     unmeasured_samples,
     _get_idle_alerts,
     _get_error_alerts,
@@ -426,9 +429,42 @@ def register_dashboard_callbacks(app: Dash):
                 # Keep each pathogen paired with its own samples: two
                 # organisms in two different barcodes must not collapse into
                 # one undifferentiated list.
+                detections = critical + high_risk
                 triggering_attribution = build_pathogen_attribution(
-                    critical + high_risk, taxid_to_samples
+                    detections, taxid_to_samples
                 )
+
+                # Second look for anything that resolved nothing. The
+                # aggregate reaches an alert threshold by summing per-sample
+                # counts that are individually under the discovery floor, so
+                # a spread-thin select agent resolved no samples at all --
+                # B. anthracis at 3/4/3 reads across three barcodes, called
+                # ACTION REQUIRED and attributed to nobody (live realtime run,
+                # 2026-09-01). Runs only when something failed to resolve, and
+                # never mutates the shared per-tick memo.
+                #
+                # Ask the same question build_pathogen_attribution asks, per
+                # detection. Do NOT zip the attributions against the
+                # detections: the builder deduplicates by label and re-sorts
+                # by read count, so position does not survive it and a naive
+                # pairing looks up the wrong organism's taxids.
+                unresolved_taxids = {
+                    t
+                    for detection in detections
+                    if not samples_for_detection(detection, taxid_to_samples)
+                    for t in resolve_attribution_taxids(detection)
+                }
+                if unresolved_taxids:
+                    extra = resolve_below_floor_samples(
+                        main_dir, resolved_samples, unresolved_taxids, config
+                    )
+                    if extra:
+                        merged = dict(taxid_to_samples)
+                        merged.update(extra)
+                        triggering_attribution = build_pathogen_attribution(
+                            detections, merged
+                        )
+
                 attribution_failed = not all(
                     a.resolved for a in triggering_attribution
                 )

@@ -276,3 +276,198 @@ class TestTheBannerReportsUnmeasuredSamples:
         )
 
         assert "not readable this poll" not in rendered
+
+
+class TestADetectionSpreadBelowTheDiscoveryFloor:
+    """A detection whose per-sample rows are all under the floor must resolve.
+
+    PER_SAMPLE_DISCOVERY_FLOOR (5) keeps noise out of the attribution dict,
+    which is right for the general case: it is applied across every taxon in
+    every sample. It is wrong for a taxon the aggregate has already called
+    ACTION REQUIRED, because the aggregate reaches an alert threshold by
+    summing exactly the small per-sample counts the floor discards.
+
+    Measured live on 2026-09-01, realtime run of the Bioshield demo:
+    Bacillus anthracis (db taxid 4005020) sat at 3 reads in barcode05, 4 in
+    barcode07 and 3 in barcode08. The sum, 10, met the entry's alert
+    threshold and raised ACTION REQUIRED for a select agent, while all three
+    rows were below the floor, so the banner reported "Sample attribution
+    unavailable" for the one organism on the panel where knowing the barcode
+    matters most.
+
+    The floor stays on the hot path. Detections that resolve nothing get a
+    second, targeted look without it.
+    """
+
+    def test_rows_under_the_floor_are_found_for_a_named_taxid(self, tmp_path):
+        from nanometa_live.app.tabs.dashboard_helpers import (
+            _load_per_sample_organisms,
+            resolve_below_floor_samples,
+        )
+
+        results = tmp_path / "results"
+        # The measured anthrax case: 3 / 4 / 3 reads, floor is 5.
+        write_realtime_sample(results, "barcode05", 4005020, "Bacillus_A anthracis", 3)
+        write_realtime_sample(results, "barcode07", 4005020, "Bacillus_A anthracis", 4)
+        write_realtime_sample(results, "barcode08", 4005020, "Bacillus_A anthracis", 3)
+        available = ["All Samples", "barcode05", "barcode07", "barcode08"]
+
+        # The floored pass finds nothing, which is the reported symptom.
+        assert _load_per_sample_organisms(str(results), available, {}) == {}
+
+        rows = resolve_below_floor_samples(
+            str(results), available, {4005020}, config={}
+        )
+
+        assert sorted(r["sample"] for r in rows[4005020]) == [
+            "barcode05", "barcode07", "barcode08",
+        ]
+        assert [r["reads"] for r in rows[4005020]] == [4, 3, 3]
+
+    def test_only_the_requested_taxids_come_back(self, tmp_path):
+        """The floor still applies to everything else; this is not a bypass."""
+        from nanometa_live.app.tabs.dashboard_helpers import (
+            resolve_below_floor_samples,
+        )
+
+        results = tmp_path / "results"
+        write_realtime_sample(results, "barcode05", 4005020, "Bacillus_A anthracis", 3)
+        write_realtime_sample(results, "barcode07", 9999, "Irrelevant species", 2)
+
+        rows = resolve_below_floor_samples(
+            str(results),
+            ["All Samples", "barcode05", "barcode07"],
+            {4005020},
+            config={},
+        )
+
+        assert set(rows) == {4005020}
+
+    def test_no_taxids_requested_costs_nothing(self, tmp_path):
+        from nanometa_live.app.tabs.dashboard_helpers import (
+            resolve_below_floor_samples,
+        )
+
+        results = tmp_path / "results"
+        write_realtime_sample(results, "barcode05", 4005020, "Bacillus_A anthracis", 3)
+
+        assert resolve_below_floor_samples(
+            str(results), ["All Samples", "barcode05"], set(), config={}
+        ) == {}
+
+    def test_a_negative_control_row_keeps_its_flag(self, tmp_path):
+        from nanometa_live.app.tabs.dashboard_helpers import (
+            resolve_below_floor_samples,
+        )
+
+        results = tmp_path / "results"
+        write_realtime_sample(results, "barcode05", 4005020, "Bacillus_A anthracis", 4)
+        write_realtime_sample(results, "barcode16", 4005020, "Bacillus_A anthracis", 2)
+
+        rows = resolve_below_floor_samples(
+            str(results),
+            ["All Samples", "barcode05", "barcode16"],
+            {4005020},
+            config={"negative_control_samples": ["barcode16"]},
+        )
+
+        flags = {r["sample"]: r["is_negative_control"] for r in rows[4005020]}
+        assert flags == {"barcode05": False, "barcode16": True}
+
+
+class TestTheBannerAttributesASpreadThinDetection:
+    """End to end: the anthrax case must name its barcodes on the banner."""
+
+    def test_a_below_floor_detection_is_named_on_the_banner(
+        self, tmp_path, monkeypatch
+    ):
+        from tests.test_verdict_banner_callback import _run_verdict_banner
+
+        # The floored build finds nothing, as on the live run.
+        monkeypatch.setattr(
+            "nanometa_live.app.tabs.dashboard_tab.get_per_sample_organisms_cached",
+            lambda *a, **k: {},
+        )
+        monkeypatch.setattr(
+            "nanometa_live.app.tabs.dashboard_tab.unmeasured_samples",
+            lambda *a, **k: [],
+        )
+        monkeypatch.setattr(
+            "nanometa_live.app.tabs.dashboard_tab.resolve_below_floor_samples",
+            lambda *a, **k: {
+                4005020: [
+                    {"sample": "barcode07", "reads": 4, "abundance": 0.11,
+                     "is_negative_control": False, "below_discovery_floor": True},
+                    {"sample": "barcode05", "reads": 3, "abundance": 0.11,
+                     "is_negative_control": False, "below_discovery_floor": True},
+                    {"sample": "barcode08", "reads": 3, "abundance": 0.13,
+                     "is_negative_control": False, "below_discovery_floor": True},
+                ]
+            },
+        )
+        rendered = _run_verdict_banner(
+            tmp_path,
+            detections=[{
+                "taxid": 1392, "detected_taxid": 4005020,
+                "name": "Bacillus anthracis", "threat_level": "critical",
+                "reads": 10, "threshold": 10,
+            }],
+            taxid_to_samples={},
+            available_samples=["barcode05", "barcode07", "barcode08"],
+        )
+
+        assert "barcode07" in rendered
+        assert "Sample attribution unavailable" not in rendered
+
+
+class TestTheSecondLookAsksAboutTheRightOrganism:
+    """build_pathogen_attribution reorders; position must not be trusted.
+
+    The builder deduplicates by label and sorts by read count, so the Nth
+    attribution is not the Nth detection. Pairing them positionally to find
+    what failed to resolve looks up another organism's taxids, and the second
+    look then searches for a taxon that was never missing -- silently leaving
+    the spread-thin select agent unattributed, which is the bug the second
+    look exists to fix.
+    """
+
+    def test_the_unresolved_taxids_belong_to_the_unresolved_detection(
+        self, tmp_path, monkeypatch
+    ):
+        from tests.test_verdict_banner_callback import _run_verdict_banner, _sample
+
+        asked = {}
+
+        def _capture(main_dir, samples, taxids, config):
+            asked["taxids"] = set(taxids)
+            return {}
+
+        monkeypatch.setattr(
+            "nanometa_live.app.tabs.dashboard_tab.resolve_below_floor_samples",
+            _capture,
+        )
+        monkeypatch.setattr(
+            "nanometa_live.app.tabs.dashboard_tab.unmeasured_samples",
+            lambda *a, **k: [],
+        )
+
+        detections = [
+            # Listed first, resolves fine, and sorts LAST on read count.
+            {"taxid": 1280, "detected_taxid": 70001,
+             "name": "Staphylococcus aureus", "threat_level": "high",
+             "reads": 20, "threshold": 10},
+            # Listed second, resolves nothing: the one to ask about.
+            {"taxid": 1392, "detected_taxid": 4005020,
+             "name": "Bacillus anthracis", "threat_level": "critical",
+             "reads": 10, "threshold": 10},
+        ]
+        _run_verdict_banner(
+            tmp_path,
+            detections=detections,
+            taxid_to_samples={70001: [_sample("barcode05", 20)]},
+            available_samples=["barcode05", "barcode07"],
+        )
+
+        assert asked["taxids"] == {4005020, 1392}, (
+            "the second look asked about the resolved organism's taxids"
+        )
