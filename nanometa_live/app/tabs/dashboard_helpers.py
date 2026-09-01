@@ -2324,43 +2324,59 @@ def _load_per_sample_organisms(
     unreadable: List[str] = []
 
     for sample in real_samples:
-        is_nc = is_negative_control(sample, config)
-        try:
-            kraken_df = load_kraken_data(main_dir, sample)
-            if kraken_df.empty:
-                # Ambiguous on purpose: no report on disk yet, or one that was
-                # mid-rewrite when this poll landed. Both mean "not measured",
-                # never "measured and clean", so the sample is recorded as a
-                # gap rather than dropped.
-                unreadable.append(sample)
-                continue
-            # Gate on the same column the organisms are reported with, or the
-            # floor and the displayed count disagree: a real negative control
-            # had 4 direct reads against 6 cumulative and was dropped by a
-            # floor of 5, so its contamination never reached the display.
-            species_df = _species_discovery_df(kraken_df)
-            if species_df.empty:
-                # Parsed, and nothing clears the discovery floor. A genuine
-                # negative for this sample, not a gap.
-                continue
-            for org in _species_df_to_organisms(species_df):
-                taxid = org["taxid"]
-                if taxid not in taxid_to_samples:
-                    taxid_to_samples[taxid] = []
-                taxid_to_samples[taxid].append({
-                    "sample": sample,
-                    "reads": org["reads"],
-                    "abundance": org["abundance"],
-                    "is_negative_control": is_nc,
-                })
-        except Exception as exc:
-            logger.debug(f"Per-sample organism load failed for {sample}: {exc}")
+        organisms = _sample_organisms_above_floor(main_dir, sample)
+        if organisms is None:
             unreadable.append(sample)
+            continue
+        is_nc = is_negative_control(sample, config)
+        for org in organisms:
+            taxid_to_samples.setdefault(org["taxid"], []).append({
+                "sample": sample,
+                "reads": org["reads"],
+                "abundance": org["abundance"],
+                "is_negative_control": is_nc,
+            })
 
     # Sort each sample list descending by reads
     for taxid in taxid_to_samples:
         taxid_to_samples[taxid].sort(key=lambda x: x["reads"], reverse=True)
 
+    _record_unmeasured(main_dir, real_samples, unreadable)
+    return taxid_to_samples
+
+
+def _sample_organisms_above_floor(
+    main_dir: str, sample: str
+) -> Optional[List[Dict[str, Any]]]:
+    """Species rows for one sample above the discovery floor.
+
+    Returns ``None`` when the sample could NOT be measured -- no report on
+    disk yet, a report mid-rewrite when this poll landed, or a load error --
+    and an empty list when it was measured and carries nothing above the
+    floor. Collapsing those two into one value is what made an unscreened
+    barcode look like a clean one (audit 2026-09-01).
+    """
+    try:
+        kraken_df = load_kraken_data(main_dir, sample)
+        if kraken_df.empty:
+            return None
+        # Gate on the same column the organisms are reported with, or the
+        # floor and the displayed count disagree: a real negative control
+        # had 4 direct reads against 6 cumulative and was dropped by a
+        # floor of 5, so its contamination never reached the display.
+        species_df = _species_discovery_df(kraken_df)
+        if species_df.empty:
+            return []
+        return _species_df_to_organisms(species_df)
+    except Exception as exc:
+        logger.debug(f"Per-sample organism load failed for {sample}: {exc}")
+        return None
+
+
+def _record_unmeasured(
+    main_dir: str, real_samples: List[str], unreadable: List[str]
+) -> None:
+    """Store this build's measurement gap for ``unmeasured_samples``."""
     key = (main_dir, tuple(real_samples))
     n_readable = len(real_samples) - len(unreadable)
     with _unmeasured_lock:
@@ -2368,8 +2384,6 @@ def _load_per_sample_organisms(
         _unmeasured.move_to_end(key)
         while len(_unmeasured) > _UNMEASURED_MAX:
             _unmeasured.popitem(last=False)
-
-    return taxid_to_samples
 
 def _get_active_watchlist_entries(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     """

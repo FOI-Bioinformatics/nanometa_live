@@ -134,6 +134,24 @@ def register_dashboard_callbacks(app: Dash):
                 return detect_samples(main_dir)
         return available_samples
 
+    def _panel_attribution(main_dir, available_samples, config,
+                           dangerous, subthreshold):
+        """Per-sample attribution for the alert cards, or {} when nothing hit.
+
+        Applies the same second look the verdict banner does, so a card and
+        the banner above it cannot disagree about which barcodes carry a
+        detection.
+        """
+        if not (dangerous or subthreshold):
+            return {}
+        panel_samples = _resolve_samples(main_dir, available_samples)
+        taxid_to_samples = get_per_sample_organisms_cached(
+            main_dir, panel_samples, config)
+        return augment_attribution_for_unresolved(
+            main_dir, panel_samples, dangerous + subthreshold,
+            taxid_to_samples, config,
+        )
+
     # ================================================================
     # D3-pre: Compute overall status once, cache in dcc.Store
     # ================================================================
@@ -828,18 +846,8 @@ def register_dashboard_callbacks(app: Dash):
             # kraken loads here unconditionally.
             dangerous, subthreshold = _check_pathogens_both(
                 detected_organisms, config)
-            taxid_to_samples = {}
-            if dangerous or subthreshold:
-                panel_samples = _resolve_samples(main_dir, available_samples)
-                taxid_to_samples = get_per_sample_organisms_cached(
-                    main_dir, panel_samples, config)
-                # Same second look the verdict banner applies, so a card and
-                # the banner above it cannot disagree about which barcodes
-                # carry the detection.
-                taxid_to_samples = augment_attribution_for_unresolved(
-                    main_dir, panel_samples, dangerous + subthreshold,
-                    taxid_to_samples, config,
-                )
+            taxid_to_samples = _panel_attribution(
+                main_dir, available_samples, config, dangerous, subthreshold)
 
             # Get only ENABLED watchlist entries for alerting
             watched_species = _get_active_watchlist_entries(config)
