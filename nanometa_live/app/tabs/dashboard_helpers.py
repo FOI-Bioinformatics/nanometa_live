@@ -10,6 +10,7 @@ register_dashboard_callbacks() block.
 
 import os
 import glob
+import threading
 from collections import OrderedDict
 
 import pandas as pd
@@ -106,6 +107,7 @@ def _attribution_children(
     total_sample_count: Optional[int] = None,
     triggering_attribution: Optional[List["PathogenAttribution"]] = None,
     attribution_failed: bool = False,
+    attribution_note: Optional[str] = None,
 ) -> List[Any]:
     """Build the "Triggered by" subhead lines for the verdict banner.
 
@@ -155,6 +157,13 @@ def _attribution_children(
                 {"fontStyle": "italic"},
             )
         )
+
+    # A sample that could not be read is a hole in the screen, not a negative
+    # result for that barcode. Realtime rewrites each sample's report every
+    # batch and lists a sample as soon as its directory appears, so the
+    # silence would otherwise read as "screened and clean".
+    if attribution_note:
+        children.append(_line(attribution_note, {"fontStyle": "italic"}))
     return children
 
 
@@ -175,6 +184,7 @@ def _make_banner_content(
     triggering_pathogens: Optional[List[str]] = None,
     triggering_attribution: Optional[List[PathogenAttribution]] = None,
     attribution_failed: bool = False,
+    attribution_note: Optional[str] = None,
 ) -> dbc.Row:
     """
     Build the inner content for the Zone 1 clinical verdict banner.
@@ -270,6 +280,7 @@ def _make_banner_content(
             total_sample_count=total_sample_count,
             triggering_attribution=triggering_attribution,
             attribution_failed=attribution_failed,
+            attribution_note=attribution_note,
         )
     )
 
@@ -2107,6 +2118,53 @@ def _species_df_to_organisms(species_df: pd.DataFrame) -> List[Dict[str, Any]]:
     })
     return result_df.to_dict('records')
 
+# Samples whose per-sample report could not be read on the most recent
+# attribution build, keyed by (main_dir, sample tuple). Realtime detects a
+# sample as soon as its output directory appears -- before its first report
+# lands -- and rewrites each sample's cumulative report on every batch
+# thereafter. A poll landing in either window gets an empty frame. Dropping
+# the sample silently makes a missing measurement indistinguishable from a
+# negative result, which is the distinction the verdict guards exist to
+# preserve.
+_unmeasured_lock = threading.Lock()
+# key -> (unreadable sample names, number of samples that did parse)
+_unmeasured: "OrderedDict[tuple, Tuple[List[str], int]]" = OrderedDict()
+_UNMEASURED_MAX = 8
+
+
+def unmeasured_samples(
+    main_dir: str,
+    available_samples: List[str],
+    config: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    """Samples that produced no readable report while others did.
+
+    Reports a PARTIAL gap only. When no sample at all was readable there is
+    nothing to be inconsistent about -- the verdict's own no-data states
+    (STANDBY, SCREENING, RESULTS UNAVAILABLE) already say the run has not
+    produced results, and repeating it here would fire the note on every
+    poll of a run that has not started writing yet. The case worth naming is
+    the mixed one: some barcodes screened, one not, and nothing on screen
+    distinguishing the two.
+
+    Runs the build if it has not run for this key, so a caller never has to
+    order itself after the attribution pass. When the build has already run
+    this is a dict lookup and costs no file I/O, which is what keeps the
+    per-tick call count flat.
+    """
+    key = (main_dir, tuple(s for s in available_samples if s != "All Samples"))
+    with _unmeasured_lock:
+        entry = _unmeasured.get(key)
+    if entry is None:
+        _load_per_sample_organisms(main_dir, available_samples, config)
+        with _unmeasured_lock:
+            entry = _unmeasured.get(key)
+    if entry is None:
+        return []
+    unreadable, n_readable = entry
+    return list(unreadable) if n_readable else []
+
+
 def _load_per_sample_organisms(
     main_dir: str,
     available_samples: List[str],
@@ -2140,12 +2198,18 @@ def _load_per_sample_organisms(
         return {}
 
     taxid_to_samples: Dict[int, List[Dict[str, Any]]] = {}
+    unreadable: List[str] = []
 
     for sample in real_samples:
         is_nc = is_negative_control(sample, config)
         try:
             kraken_df = load_kraken_data(main_dir, sample)
             if kraken_df.empty:
+                # Ambiguous on purpose: no report on disk yet, or one that was
+                # mid-rewrite when this poll landed. Both mean "not measured",
+                # never "measured and clean", so the sample is recorded as a
+                # gap rather than dropped.
+                unreadable.append(sample)
                 continue
             # Gate on the same column the organisms are reported with, or the
             # floor and the displayed count disagree: a real negative control
@@ -2153,6 +2217,8 @@ def _load_per_sample_organisms(
             # floor of 5, so its contamination never reached the display.
             species_df = _species_discovery_df(kraken_df)
             if species_df.empty:
+                # Parsed, and nothing clears the discovery floor. A genuine
+                # negative for this sample, not a gap.
                 continue
             for org in _species_df_to_organisms(species_df):
                 taxid = org["taxid"]
@@ -2166,10 +2232,19 @@ def _load_per_sample_organisms(
                 })
         except Exception as exc:
             logger.debug(f"Per-sample organism load failed for {sample}: {exc}")
+            unreadable.append(sample)
 
     # Sort each sample list descending by reads
     for taxid in taxid_to_samples:
         taxid_to_samples[taxid].sort(key=lambda x: x["reads"], reverse=True)
+
+    key = (main_dir, tuple(real_samples))
+    n_readable = len(real_samples) - len(unreadable)
+    with _unmeasured_lock:
+        _unmeasured[key] = (unreadable, n_readable)
+        _unmeasured.move_to_end(key)
+        while len(_unmeasured) > _UNMEASURED_MAX:
+            _unmeasured.popitem(last=False)
 
     return taxid_to_samples
 

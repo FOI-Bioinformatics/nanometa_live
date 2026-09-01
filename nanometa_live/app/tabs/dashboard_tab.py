@@ -67,6 +67,7 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     DEFAULT_LOW_READ_FLOOR,
     _classify_dangerous,
     build_pathogen_attribution,
+    unmeasured_samples,
     _get_idle_alerts,
     _get_error_alerts,
     _calculate_overall_status,
@@ -387,6 +388,7 @@ def register_dashboard_callbacks(app: Dash):
         triggering_pathogens: Optional[List[str]] = None
         triggering_attribution = None
         attribution_failed = False
+        attribution_note: Optional[str] = None
         if descriptor.needs_attribution:
             critical, high_risk = _classify_dangerous(dangerous)
             # Name the pathogens above threshold (critical first), deduped.
@@ -430,6 +432,20 @@ def register_dashboard_callbacks(app: Dash):
                 attribution_failed = not all(
                     a.resolved for a in triggering_attribution
                 )
+                # A sample the loader could not read this poll is a gap in
+                # the screen, not a clean barcode. Realtime detects a sample
+                # as soon as its directory appears and rewrites its report
+                # every batch, so the silence used to read as a negative.
+                unread = unmeasured_samples(main_dir, resolved_samples, config)
+                if unread:
+                    shown = ", ".join(unread[:3])
+                    if len(unread) > 3:
+                        shown += f", +{len(unread) - 3} more"
+                    attribution_note = (
+                        f"{len(unread)} sample"
+                        f"{'s' if len(unread) != 1 else ''} not readable this "
+                        f"poll, so not screened: {shown}."
+                    )
             except Exception as exc:
                 logger.warning(
                     "Verdict-banner attribution unavailable: %s",
@@ -453,6 +469,7 @@ def register_dashboard_callbacks(app: Dash):
                 triggering_pathogens=triggering_pathogens,
                 triggering_attribution=triggering_attribution,
                 attribution_failed=attribution_failed,
+                attribution_note=attribution_note,
             ),
             _verdict_banner_style(descriptor.bg_color, descriptor.border_color),
             time_elapsed, run_state, run_state_color

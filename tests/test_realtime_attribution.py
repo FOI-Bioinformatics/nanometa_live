@@ -161,3 +161,118 @@ class TestCapturedSnapshotResolvesItsSamples:
         assert len(carriers) >= 3, (
             f"expected the detection in at least 3 barcodes, got {carriers}"
         )
+
+
+class TestAnUnreadableSampleIsReported:
+    """A sample whose report could not be read is not a negative result.
+
+    Realtime detects a sample as soon as its output directory appears, which
+    is before its first report lands, and rewrites each sample's cumulative
+    report on every batch thereafter. A poll landing in either window gets an
+    empty frame, and the sample silently disappeared from attribution:
+    identical on screen to a sample that was measured and carries nothing.
+
+    Observed live on 2026-09-01 at 21:14:46, one minute into a realtime run:
+    barcode06 was in the sample list with no readable report while the banner
+    read "Triggered by: F. tularensis (barcode05)", implying barcode06 had
+    been screened and was clean.
+    """
+
+    def test_an_unparseable_sample_is_listed_as_unmeasured(self, tmp_path):
+        from nanometa_live.app.tabs.dashboard_helpers import (
+            _load_per_sample_organisms,
+            unmeasured_samples,
+        )
+
+        results = tmp_path / "results"
+        write_realtime_sample(results, "barcode05", 263, "Francisella tularensis", 900)
+
+        # barcode06 detected as a sample, no readable report yet.
+        (results / "kraken2" / "barcode06" / "batch_reports").mkdir(parents=True)
+
+        available = ["All Samples", "barcode05", "barcode06"]
+        taxid_to_samples = _load_per_sample_organisms(str(results), available, {})
+
+        assert [r["sample"] for r in taxid_to_samples[263]] == ["barcode05"]
+        assert unmeasured_samples(str(results), available, {}) == ["barcode06"]
+
+    def test_a_readable_empty_sample_is_not_unmeasured(self, tmp_path):
+        """A sample that parsed and carries nothing is a negative, not a gap."""
+        from nanometa_live.app.tabs.dashboard_helpers import unmeasured_samples
+
+        results = tmp_path / "results"
+        write_realtime_sample(results, "barcode05", 263, "Francisella tularensis", 900)
+        write_realtime_sample(results, "barcode06", 9999, "Escherichia coli", 900)
+
+        assert unmeasured_samples(str(results), available_samples=[
+            "All Samples", "barcode05", "barcode06"], config={}) == []
+
+    def test_every_sample_readable_means_no_gap(self, realtime_snapshot):
+        """The captured live snapshot has a readable report for each sample."""
+        from nanometa_live.app.tabs.dashboard_helpers import unmeasured_samples
+        from nanometa_live.core.utils.sample_detector import get_available_samples
+
+        available = get_available_samples(str(realtime_snapshot))
+
+        assert unmeasured_samples(str(realtime_snapshot), available, {}) == []
+
+    def test_a_run_with_nothing_readable_is_not_a_partial_gap(self, tmp_path):
+        """No sample readable at all is the verdict's own no-data state.
+
+        Reporting it here would fire the note on every poll of a run that has
+        not started writing yet, which trains the operator to ignore it.
+        """
+        from nanometa_live.app.tabs.dashboard_helpers import unmeasured_samples
+
+        results = tmp_path / "results"
+        (results / "kraken2" / "barcode05" / "batch_reports").mkdir(parents=True)
+        (results / "kraken2" / "barcode06" / "batch_reports").mkdir(parents=True)
+
+        assert unmeasured_samples(str(results), [
+            "All Samples", "barcode05", "barcode06"], config={}) == []
+
+
+class TestTheBannerReportsUnmeasuredSamples:
+    """The verdict banner must say when a barcode was not screened."""
+
+    def test_an_unreadable_barcode_is_named_on_the_banner(self, tmp_path, monkeypatch):
+        from tests.test_verdict_banner_callback import _run_verdict_banner, _sample
+
+        monkeypatch.setattr(
+            "nanometa_live.app.tabs.dashboard_tab.unmeasured_samples",
+            lambda *a, **k: ["barcode06"],
+        )
+        rendered = _run_verdict_banner(
+            tmp_path,
+            detections=[{
+                "taxid": 1392, "detected_taxid": 88888,
+                "name": "Bacillus anthracis", "threat_level": "critical",
+                "reads": 350, "threshold": 10,
+            }],
+            taxid_to_samples={88888: [_sample("barcode05", 350)]},
+            available_samples=["barcode05", "barcode06"],
+        )
+
+        assert "Bacillus anthracis (barcode05)" in rendered
+        assert "barcode06" in rendered
+        assert "not readable this poll" in rendered
+
+    def test_no_note_when_every_sample_was_read(self, tmp_path, monkeypatch):
+        from tests.test_verdict_banner_callback import _run_verdict_banner, _sample
+
+        monkeypatch.setattr(
+            "nanometa_live.app.tabs.dashboard_tab.unmeasured_samples",
+            lambda *a, **k: [],
+        )
+        rendered = _run_verdict_banner(
+            tmp_path,
+            detections=[{
+                "taxid": 1392, "detected_taxid": 88888,
+                "name": "Bacillus anthracis", "threat_level": "critical",
+                "reads": 350, "threshold": 10,
+            }],
+            taxid_to_samples={88888: [_sample("barcode05", 350)]},
+            available_samples=["barcode05"],
+        )
+
+        assert "not readable this poll" not in rendered
