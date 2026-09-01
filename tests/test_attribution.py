@@ -128,13 +128,21 @@ class TestFormatAttributionText:
             "Triggered by: Bacillus anthracis (bc01); Yersinia pestis (bc07)"
         )
 
-    def test_below_threshold_only_reports_the_aggregate(self):
+    def test_below_threshold_names_the_samples_and_keeps_the_qualifier(self):
+        """Ten barcodes at 50 reads against a threshold of 100.
+
+        None is individually positive, and the aggregate qualifier says so.
+        The names are still given: the operator has to know where to look,
+        and refusing to say made a realtime run unactionable for its whole
+        duration (audit 2026-09-01).
+        """
         attributions = build_pathogen_attribution(
             [{"taxid": 1, "name": "X", "threshold": 100}],
             {1: [_sample(f"bc{i:02d}", 50) for i in range(10)]},
         )
         assert format_attribution_text(attributions) == (
-            "Triggered by: X (aggregate across 10 samples)"
+            "Triggered by: X (bc00, bc01, bc02, +7 more; "
+            "aggregate across 10 samples)"
         )
 
     def test_samples_beyond_three_are_summarised(self):
@@ -178,3 +186,105 @@ class TestNegativeControlDetection:
     def test_configured_match_is_case_insensitive(self):
         config = {"negative_control_samples": ["Barcode12 "]}
         assert is_negative_control("barcode12", config) is True
+
+
+class TestBelowThresholdSamplesAreStillNamed:
+    """A detection carried only by sub-threshold samples must still name them.
+
+    The verdict is decided on the aggregate, which crosses a watchlist entry's
+    alert threshold before any single barcode does. In a batch run every
+    barcode is complete when the verdict appears, so the hot one clears its own
+    threshold and gets named. In a realtime run the aggregate leads every
+    individual barcode for most of the run, and for a low-abundance organism
+    for all of it.
+
+    Measured on a live nanorunner-fed realtime run of the Bioshield demo
+    (2026-09-01, five barcodes). With the entry's alert threshold at 500 the
+    completed batch run named barcode06, barcode07 and barcode05 for
+    F. tularensis; the realtime run over the same organism rendered
+    "aggregate across 5 samples" and named nobody, while the per-sample counts
+    (395, 342, 265, 238, 163) sat on disk the whole time.
+
+    The threshold distinction stays: a sub-threshold sample is not promoted to
+    a triggering sample. It is named alongside the aggregate qualifier, because
+    a detection that will not say which barcode carries it cannot be acted on.
+    """
+
+    def test_the_phrase_names_the_top_sub_threshold_samples(self):
+        from nanometa_live.core.utils.attribution import (
+            PathogenAttribution,
+            format_attribution_text,
+        )
+
+        attribution = PathogenAttribution(
+            pathogen="Francisella tularensis",
+            samples=[],
+            below_threshold_samples=["barcode06", "barcode05", "barcode08"],
+            top_reads=395,
+        )
+
+        text = format_attribution_text([attribution])
+
+        assert "barcode06" in text
+        assert "aggregate across 3 samples" in text
+
+    def test_overflow_beyond_three_is_counted(self):
+        from nanometa_live.core.utils.attribution import (
+            PathogenAttribution,
+            format_attribution_text,
+        )
+
+        attribution = PathogenAttribution(
+            pathogen="Francisella tularensis",
+            samples=[],
+            below_threshold_samples=[
+                "barcode06", "barcode05", "barcode08", "unclassified", "barcode07",
+            ],
+            top_reads=395,
+        )
+
+        text = format_attribution_text([attribution])
+
+        assert "barcode06, barcode05, barcode08, +2 more" in text
+        assert "aggregate across 5 samples" in text
+
+    def test_a_sample_above_threshold_still_reads_as_triggering(self):
+        """An above-threshold sample keeps the unqualified phrasing."""
+        from nanometa_live.core.utils.attribution import (
+            PathogenAttribution,
+            format_attribution_text,
+        )
+
+        attribution = PathogenAttribution(
+            pathogen="Bacillus anthracis",
+            samples=["barcode08"],
+            below_threshold_samples=["barcode05"],
+            top_reads=4000,
+        )
+
+        text = format_attribution_text([attribution])
+
+        assert text == "Triggered by: Bacillus anthracis (barcode08)"
+
+    def test_a_negative_control_is_still_excluded_from_the_names(self):
+        """Controls are reported separately, never named as carriers."""
+        from nanometa_live.core.utils.attribution import (
+            PathogenAttribution,
+            format_attribution_text,
+        )
+
+        attribution = PathogenAttribution(
+            pathogen="Francisella tularensis",
+            samples=[],
+            below_threshold_samples=["barcode05", "barcode16"],
+            top_reads=64,
+            negative_control_samples=["barcode16"],
+            negative_control_reads=6,
+            negative_control_fraction=0.02,
+        )
+
+        text = format_attribution_text([attribution])
+
+        assert "barcode05" in text
+        assert "aggregate across 1 sample)" in text
+        assert "also in negative control barcode16" in text

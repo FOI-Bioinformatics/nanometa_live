@@ -299,8 +299,28 @@ def _attribution_phrase(attribution: PathogenAttribution) -> Optional[str]:
     below = [s for s in attribution.below_threshold_samples if s not in nc]
     if below:
         n = len(below)
+        # Name them, and keep the aggregate qualifier. The verdict is decided
+        # on the aggregate, which crosses the entry's alert threshold before
+        # any single barcode does; in a realtime run it leads every individual
+        # barcode for most of the run. Rendering the count alone was true and
+        # unusable -- measured on a live realtime run of the Bioshield demo
+        # (2026-09-01), the same organism that the completed batch run
+        # attributed to barcode06, barcode07 and barcode05 read as "aggregate
+        # across 5 samples" mid-run, with the per-sample counts (395, 342,
+        # 265, 238, 163) sitting on disk throughout.
+        #
+        # These are still not triggering samples: none reached the threshold
+        # on its own, and the qualifier says so. The rows arrive sorted
+        # descending by read count (_load_per_sample_organisms sorts them and
+        # build_pathogen_attribution appends in that order), so the first
+        # three are the ones worth naming.
+        shown = below[:3]
+        names = ", ".join(shown)
+        overflow = n - len(shown)
+        if overflow > 0:
+            names += f", +{overflow} more"
         return (
-            f"{attribution.pathogen} (aggregate across {n} "
+            f"{attribution.pathogen} ({names}; aggregate across {n} "
             f"sample{'s' if n != 1 else ''}){nc_clause}"
         )
 
