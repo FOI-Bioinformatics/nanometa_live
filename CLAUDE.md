@@ -1295,6 +1295,56 @@ cumul=6, which put the run's negative control below a floor of 5 so its
 contamination appeared nowhere at all. Both sites fall back to `reads` when the
 column is absent. Regression-covered in `tests/test_attribution_read_column.py`.
 
+**Real-time attribution fails in ways batch mode does not** (audit
+2026-09-01, `docs/audit/realtime-attribution-2026-09-01.md`). Three guards,
+all pinned in `tests/test_realtime_attribution.py`:
+
+- **A sub-threshold sample is named, not just counted.** The verdict is
+  decided on the aggregate, which crosses a watchlist entry's
+  `alert_threshold` before any single barcode does; a batch run's barcodes
+  are complete when the verdict appears, a realtime run's aggregate leads
+  every barcode for most of the run. `_attribution_phrase` names the top
+  samples alongside the aggregate qualifier rather than rendering a bare
+  count. Measured at threshold 500: the completed batch run named
+  barcode06/07/05 for *F. tularensis*, the realtime run named none.
+  The threshold gate itself must NOT be removed -- ten barcodes at 50 reads
+  each are not each positive for a pathogen with a threshold of 100.
+- **A detection resolving no samples gets a second look without the
+  discovery floor.** `PER_SAMPLE_DISCOVERY_FLOOR` (5) is correct for the
+  general build and wrong for a taxon the aggregate already called above
+  threshold, because the aggregate reaches that threshold by summing exactly
+  the sub-floor counts the filter discards. On a real run *B. anthracis* sat
+  at 4/3/3 reads across three barcodes: ACTION REQUIRED for a select agent,
+  attributed to nobody, while the exported report (which applies no floor)
+  named all three correctly. `augment_attribution_for_unresolved` is the
+  single entry point and is used by the verdict banner, the alert panel AND
+  the modal breakdown -- fixing one surface alone produced a banner naming
+  barcodes above a card showing none. It returns the input unchanged when
+  nothing needs filling in, and a COPY otherwise: the input is the shared
+  per-tick memo. **Never pair built attributions against the detection list
+  by position** to find what failed to resolve: `build_pathogen_attribution`
+  deduplicates by label and re-sorts by read count, so the Nth attribution is
+  not the Nth detection. Ask per detection with `samples_for_detection`.
+- **An unread sample is not a clean sample.** `_load_per_sample_organisms`
+  separates "no report on disk yet" and "report mid-rewrite" from "measured
+  and carries nothing"; realtime lists a sample as soon as its directory
+  appears and rewrites its cumulative report every batch, so both windows
+  recur all run. `unmeasured_samples` exposes the gap and the banner names
+  it. It reports a PARTIAL gap only -- when nothing is readable the
+  verdict's own no-data states already say so.
+
+A multi-sample moderate-tier alert card names its highest-count sample plus a
+"+N more" pill (`_render_sample_attribution`). Chips per barcode stay
+suppressed for the component budget, but a bare count pill told the operator a
+detection spanned barcodes without saying which.
+
+`tests/fixtures/realtime_attribution/` is the only fixture in the suite shaped
+like a realtime results tree (progressive cumulative report, per-batch reports,
+incremental-layout markers); every other attribution test writes a flat
+`<sample>.kraken2.report.txt` and therefore cannot see any of the above. Use
+`scripts/audit_realtime_attribution.py <results_dir> --config <config.yaml>` to
+diagnose a live or captured outdir hop by hop.
+
 **Negative controls.** `is_negative_control` reads the config's
 `negative_control_samples` list first, then falls back to name patterns:
 `NTC` / `neg_ctrl` / `blank`, fused numeric suffixes (`NTC1`, `blank2`,
