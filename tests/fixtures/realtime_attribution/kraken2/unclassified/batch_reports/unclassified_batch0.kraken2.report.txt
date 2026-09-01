@@ -1,0 +1,52 @@
+ 33.68	97	97	U	0	unclassified
+ 66.32	191	0	R	1	root
+ 22.22	64	10	S	4007169	                Francisella tularensis
+ 18.40	53	53	S1	4007187	                  Francisella tularensis holarctica
+  0.35	1	1	S1	4007186	                  Francisella tularensis tularensis
+  1.39	4	4	S	4000549	                Escherichia coli
+  0.35	1	1	S	4000552	                Escherichia marmotae
+  0.35	1	1	S	4000553	                Escherichia coli_F
+  0.35	1	1	S	4000554	                Escherichia ruysiae
+  0.35	1	1	S	4000555	                Escherichia sp005843885
+  0.35	1	1	S	4000556	                Escherichia whittamii
+  0.35	1	1	S	4000557	                Escherichia sp004211955
+  0.35	1	1	S	4000559	                Escherichia sp002965065
+  3.12	9	9	S	4000800	                Salmonella enterica
+  0.35	1	1	S	4000801	                Salmonella diarizonae
+  0.35	1	1	S	4007926	                Serratia proteamaculans_E
+  1.04	3	3	S	4131473	                Bowmanella dokdonensis
+  0.35	1	1	S	4000888	                Pseudomonas pseudonitroreducens
+  0.35	1	1	S	4119522	                Ideonella livida
+  0.69	2	2	S	4107068	              CANBDL01 sp947367345
+  3.12	9	9	S	4005037	                Bacillus_A thuringiensis_K
+  1.04	3	3	S	4005019	                Bacillus_A cereus
+  0.69	2	2	S	4005023	                Bacillus_A thuringiensis_S
+  0.69	2	2	S	4005042	                Bacillus_A cereus_AG
+  0.69	2	2	S	4005031	                Bacillus_A mobilis
+  0.35	1	1	S	4005035	                Bacillus_A sp003400245
+  0.35	1	1	S	4005073	                Bacillus_A sp008923725
+  0.35	1	1	S	4005024	                Bacillus_A thuringiensis
+  0.35	1	1	S	4005058	                Bacillus_A cereus_BD
+  0.35	1	1	S	4005642	                Bacillus subtilis
+  0.35	1	1	S	4136173	                RGIG1752 sp945915275
+  0.35	1	1	S	4002596	                Enterococcus ureasiticus
+  0.35	1	1	S	4000717	                Staphylococcus aureus
+  0.35	1	1	S	4164961	                JADGOP01 sp017882935
+  0.35	1	1	S	4131962	                JAICJR01 sp035572055
+  0.35	1	1	S	4144513	                Nitriliruptor alkaliphilus
+  0.35	1	1	S	4149279	            GCA-2699105 sp002699105
+  0.35	1	1	S	4164436	              DASXUL01 sp036504855
+  0.35	1	1	S	4143492	                JAKSDI01 sp022360175
+  0.35	1	1	S	4164807	                JAUCGE01 sp030377965
+  0.35	1	1	S	4156591	              JABFRZ01 sp009691855
+  0.35	1	1	S	4108715	          GWB1-36-13 sp001829155
+  0.35	1	1	S	4162666	                JABDAE01 sp013289325
+  0.35	1	1	S	4122785	                CR04bin15 sp004357015
+  0.69	2	2	S	5067	                                Aspergillus parasiticus
+  7.99	23	0	S	2843768	                    Claudivirus Goe4
+  7.99	23	23	S1	2315470	                      Bacillus phage vB_BthP-Goe4
+  0.35	1	0	S	3433356	                Wbetavirus z1a
+  0.35	1	1	S1	2767196	                  Bacillus phage z1a
+  0.35	1	0	S	2844125	                Marienburgvirus BP4795
+  0.35	1	1	S1	196242	                  Enterobacteria phage BP-4795
+  0.35	1	1	S	2014434	              Escherichia phage D6

@@ -1,0 +1,37 @@
+ 35.59	121	121	U	0	unclassified
+ 64.41	219	0	R	1	root
+ 20.59	70	7	S	4007169	                Francisella tularensis
+ 18.53	63	63	S1	4007187	                  Francisella tularensis holarctica
+  6.47	22	22	S	4000800	                Salmonella enterica
+  1.76	6	6	S	4000549	                Escherichia coli
+  0.59	2	2	S	4000557	                Escherichia sp004211955
+  0.29	1	1	S	4000550	                Escherichia albertii
+  0.29	1	1	S	4000551	                Escherichia fergusonii
+  0.29	1	1	S	4000553	                Escherichia coli_F
+  0.59	2	2	S	4131473	                Bowmanella dokdonensis
+  0.29	1	1	S	4000888	                Pseudomonas pseudonitroreducens
+  0.29	1	1	S	4103027	                UBA7803 sp002480525
+  0.29	1	1	S	4161540	                Altericroceibacterium_A xinjiangense
+  2.65	9	9	S	4005019	                Bacillus_A cereus
+  1.76	6	6	S	4005037	                Bacillus_A thuringiensis_K
+  1.18	4	4	S	4005060	                Bacillus_A cereus_AQ
+  1.18	4	4	S	4005024	                Bacillus_A thuringiensis
+  0.59	2	2	S	4005042	                Bacillus_A cereus_AG
+  0.59	2	2	S	4005023	                Bacillus_A thuringiensis_S
+  0.29	1	1	S	4005047	                Bacillus_A hominis
+  0.29	1	1	S	4005055	                Bacillus_A sp002571225
+  0.29	1	1	S	4005085	                Bacillus_A dicomae
+  1.76	6	6	S	4005642	                Bacillus subtilis
+  0.29	1	1	S	4011643	                Limosilactobacillus panis
+  0.29	1	1	S	4138399	                Paralactobacillus selangorensis
+  0.29	1	1	S	4133303	                Enterococcus_H canis
+  0.29	1	1	S	4160423	                JAIRQA01 sp031256715
+  0.29	1	1	S	4142296	                JAUYCD01 sp030692375
+  0.29	1	1	S	4148713	            JAHFDS01 sp023248855
+  0.59	2	2	S	9606	                                                              Homo sapiens
+  0.29	1	1	S	4565	                                              Triticum aestivum
+ 12.35	42	0	S	2843768	                    Claudivirus Goe4
+ 12.35	42	42	S1	2315470	                      Bacillus phage vB_BthP-Goe4
+  0.29	1	0	S	3429152	                Haihevirus PP9W2
+  0.29	1	1	S1	2914450	                  Pseudomonas phage PP9W2
+  0.29	1	1	S	1124654	              Escherichia phage TL-2011b

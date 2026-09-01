@@ -1,0 +1,43 @@
+ 33.33	79	79	U	0	unclassified
+ 66.67	158	1	R	1	root
+ 26.58	63	9	S	4007169	                Francisella tularensis
+ 21.94	52	52	S1	4007187	                  Francisella tularensis holarctica
+  0.42	1	1	S1	4007186	                  Francisella tularensis tularensis
+  0.42	1	1	S1	4007189	                  Francisella tularensis novicida
+  1.27	3	3	S	4000553	                Escherichia coli_F
+  0.84	2	2	S	4000555	                Escherichia sp005843885
+  0.42	1	1	S	4000550	                Escherichia albertii
+  0.42	1	1	S	4000559	                Escherichia sp002965065
+  3.38	8	8	S	4000800	                Salmonella enterica
+  0.42	1	1	S	4000803	                Salmonella houtenae
+  0.42	1	1	S	4038113	                Pseudescherichia sp032055545
+  0.42	1	1	S	4131473	                Bowmanella dokdonensis
+  0.42	1	1	S	4035632	                Metapseudomonas furukawaii
+  0.42	1	1	S	4074528	                Pseudomonas_O sp002418465
+  0.42	1	1	S	4160687	                JBGSYN01 sp041750975
+  1.69	4	4	S	4005037	                Bacillus_A thuringiensis_K
+  1.69	4	4	S	4005019	                Bacillus_A cereus
+  0.84	2	2	S	4005042	                Bacillus_A cereus_AG
+  0.42	1	1	S	4005023	                Bacillus_A thuringiensis_S
+  0.42	1	1	S	4005024	                Bacillus_A thuringiensis
+  0.42	1	1	S	4005074	                Bacillus_A sp027694045
+  0.42	1	1	S	4005060	                Bacillus_A cereus_AQ
+  0.42	1	1	S	4005031	                Bacillus_A mobilis
+  0.42	1	1	S	4005032	                Bacillus_A albus
+  0.42	1	1	S	4005046	                Bacillus_A cereus_K
+  0.84	2	2	S	4005642	                Bacillus subtilis
+  0.42	1	1	S	4023089	                Enterococcus_I avicola
+  0.42	1	1	S	4082702	                Secundilactobacillus paracollinoides
+  0.42	1	1	S	4054166	                Schleiferilactobacillus perolens
+  0.42	1	1	S	4082409	                UMGS1271 sp947570175
+  0.42	1	1	S	4000717	                Staphylococcus aureus
+  0.42	1	1	S	4133459	                Paenibacillus_D pinihumi
+  0.42	1	1	S	4165861	                DASSUA01 sp035707525
+  0.42	1	1	S	4146043	                DATDOL01 sp035293265
+  0.42	1	1	S	4140535	                JACRJW01 sp016235605
+  0.42	1	1	S	4118952	                JAHBWV01 sp026647565
+  0.42	1	1	S	3988	                                            Ricinus communis
+  0.42	1	1	S	9606	                                                              Homo sapiens
+  9.70	23	0	S	2843768	                    Claudivirus Goe4
+  9.70	23	23	S1	2315470	                      Bacillus phage vB_BthP-Goe4
+  0.42	1	1	S	2843757	                Beceayunavirus BceA1

@@ -1,0 +1,35 @@
+ 28.36	38	38	U	0	unclassified
+ 71.64	96	0	R	1	root
+ 21.64	29	6	S	4007169	                Francisella tularensis
+ 17.16	23	23	S1	4007187	                  Francisella tularensis holarctica
+  3.73	5	5	S	4000549	                Escherichia coli
+  1.49	2	2	S	4000553	                Escherichia coli_F
+  2.99	4	4	S	4000800	                Salmonella enterica
+  1.49	2	2	S	4131473	                Bowmanella dokdonensis
+  0.75	1	1	S	4000888	                Pseudomonas pseudonitroreducens
+  0.75	1	1	S	4035632	                Metapseudomonas furukawaii
+  0.75	1	1	S	4160461	                CABZZR01 sp902530215
+  2.24	3	3	S	4005037	                Bacillus_A thuringiensis_K
+  2.24	3	3	S	4005024	                Bacillus_A thuringiensis
+  1.49	2	2	S	4005019	                Bacillus_A cereus
+  0.75	1	1	S	4005060	                Bacillus_A cereus_AQ
+  0.75	1	1	S	4005052	                Bacillus_A mycoides_C
+  0.75	1	1	S	4005032	                Bacillus_A albus
+  0.75	1	1	S	4005042	                Bacillus_A cereus_AG
+  0.75	1	1	S	4005040	                Bacillus_A luti
+  1.49	2	2	S	4005642	                Bacillus subtilis
+  0.75	1	1	S	4103042	                Enterococcus_F willemsii
+  0.75	1	1	S	4133303	                Enterococcus_H canis
+  0.75	1	1	S	4145438	                Enterococcus_J sp946409145
+  0.75	1	1	S	4054166	                Schleiferilactobacillus perolens
+  0.75	1	1	S	4017811	                Levilactobacillus fuyuanensis
+  0.75	1	1	S	4109642	                JAHJXP01 sp001830835
+  0.75	1	1	S	4146427	                JAOBWM01 sp025463365
+  0.75	1	1	S	4096825	                BD2-11 sp002238605
+  0.75	1	0	S	5067	                                Aspergillus parasiticus
+  0.75	1	1	S1	1403190	                                  Aspergillus parasiticus SU-1
+  0.75	1	1	S	9606	                                                              Homo sapiens
+ 11.94	16	0	S	2843768	                    Claudivirus Goe4
+ 11.94	16	16	S1	2315470	                      Bacillus phage vB_BthP-Goe4
+  0.75	1	0	S	2843787	                Waukeshavirus waukesha92
+  0.75	1	1	S1	1510440	                  Bacillus phage Waukesha92

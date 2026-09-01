@@ -1,0 +1,46 @@
+ 34.38	110	110	U	0	unclassified
+ 65.62	210	1	R	1	root
+ 19.06	61	10	S	4007169	                Francisella tularensis
+ 15.94	51	51	S1	4007187	                  Francisella tularensis holarctica
+  3.12	10	10	S	4000549	                Escherichia coli
+  0.94	3	3	S	4000553	                Escherichia coli_F
+  0.62	2	2	S	4000557	                Escherichia sp004211955
+  0.31	1	1	S	4000551	                Escherichia fergusonii
+  0.31	1	1	S	4000552	                Escherichia marmotae
+  0.31	1	1	S	4000558	                Escherichia coli_E
+  5.00	16	16	S	4000800	                Salmonella enterica
+  0.31	1	1	S	4038113	                Pseudescherichia sp032055545
+  0.94	3	3	S	4131473	                Bowmanella dokdonensis
+  0.62	2	2	S	4035632	                Metapseudomonas furukawaii
+  0.31	1	1	S	4000888	                Pseudomonas pseudonitroreducens
+  0.31	1	1	S	4149069	                Pseudomonas_T mangiferae
+  0.31	1	1	S	4133913	                CALEAR01 sp027324795
+  0.31	1	1	S	4165856	                DATEZO01 sp035255485
+  0.31	1	1	S	4044001	                Thauera propionica
+  0.31	1	1	S	4066744	                Algiphilus sp023145115
+  3.75	12	12	S	4005037	                Bacillus_A thuringiensis_K
+  0.62	2	2	S	4005042	                Bacillus_A cereus_AG
+  0.62	2	2	S	4005023	                Bacillus_A thuringiensis_S
+  0.62	2	2	S	4005019	                Bacillus_A cereus
+  0.31	1	1	S	4005022	                Bacillus_A toyonensis
+  0.31	1	1	S	4005024	                Bacillus_A thuringiensis
+  0.31	1	1	S	4005062	                Bacillus_A sp900116295
+  0.31	1	1	S	4005031	                Bacillus_A mobilis
+  0.31	1	1	S	4005060	                Bacillus_A cereus_AQ
+  0.31	1	1	S	4005057	                Bacillus_A sp018966865
+  0.31	1	1	S	4005044	                Bacillus_A sp002584985
+  2.19	7	7	S	4005642	                Bacillus subtilis
+  1.25	4	4	S	4000717	                Staphylococcus aureus
+  0.31	1	1	S	4138399	                Paralactobacillus selangorensis
+  0.31	1	1	S	4150657	                Nafulsella sp017948555
+  0.31	1	1	S	4110793	                Oceanihabitans himadriense
+  0.31	1	1	S	4141325	                CAKZQX01 sp937141995
+  0.31	1	1	S	4160309	              JBAWXR01 sp037143955
+  0.31	1	1	S	4154943	                JAUILP01 sp030432875
+  0.31	1	1	S	4163563	              DASQGS01 sp035632455
+  0.31	1	1	S	4124601	              DAONDQ01 sp035402645
+  0.31	1	1	S	9606	                                                              Homo sapiens
+ 12.50	40	0	S	2843768	                    Claudivirus Goe4
+ 12.50	40	40	S1	2315470	                      Bacillus phage vB_BthP-Goe4
+  0.31	1	0	S	2169759	                    Betatectivirus GIL16
+  0.31	1	1	S1	307240	                      Bacillus phage GIL16c
