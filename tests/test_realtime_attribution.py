@@ -393,7 +393,7 @@ class TestTheBannerAttributesASpreadThinDetection:
             lambda *a, **k: [],
         )
         monkeypatch.setattr(
-            "nanometa_live.app.tabs.dashboard_tab.resolve_below_floor_samples",
+            "nanometa_live.app.tabs.dashboard_helpers.resolve_below_floor_samples",
             lambda *a, **k: {
                 4005020: [
                     {"sample": "barcode07", "reads": 4, "abundance": 0.11,
@@ -443,7 +443,7 @@ class TestTheSecondLookAsksAboutTheRightOrganism:
             return {}
 
         monkeypatch.setattr(
-            "nanometa_live.app.tabs.dashboard_tab.resolve_below_floor_samples",
+            "nanometa_live.app.tabs.dashboard_helpers.resolve_below_floor_samples",
             _capture,
         )
         monkeypatch.setattr(
@@ -471,3 +471,70 @@ class TestTheSecondLookAsksAboutTheRightOrganism:
         assert asked["taxids"] == {4005020, 1392}, (
             "the second look asked about the resolved organism's taxids"
         )
+
+
+class TestTheCardAndTheBannerAgree:
+    """One helper feeds banner, cards and modal, so they cannot diverge.
+
+    The first version of the below-floor fix touched only the verdict banner.
+    The banner then named barcode07, barcode05 and barcode08 for anthrax while
+    the anthrax alert card directly beneath it showed no DETECTED IN row at
+    all (observed live, 2026-09-01). Two answers to one question on one
+    screen is worse than one incomplete answer.
+    """
+
+    def test_the_alert_panel_applies_the_same_second_look(self, tmp_path):
+        from nanometa_live.app.tabs.dashboard_helpers import (
+            augment_attribution_for_unresolved,
+        )
+
+        results = tmp_path / "results"
+        write_realtime_sample(results, "barcode05", 4005020, "Bacillus_A anthracis", 3)
+        write_realtime_sample(results, "barcode07", 4005020, "Bacillus_A anthracis", 4)
+        available = ["All Samples", "barcode05", "barcode07"]
+        detection = {"taxid": 1392, "detected_taxid": 4005020,
+                     "name": "Bacillus anthracis", "threshold": 10}
+
+        augmented = augment_attribution_for_unresolved(
+            str(results), available, [detection], {}, config={}
+        )
+
+        assert sorted(r["sample"] for r in augmented[4005020]) == [
+            "barcode05", "barcode07",
+        ]
+
+    def test_the_shared_memo_is_never_mutated(self, tmp_path):
+        """The input is the per-tick memo, shared by every dashboard caller."""
+        from nanometa_live.app.tabs.dashboard_helpers import (
+            augment_attribution_for_unresolved,
+        )
+
+        results = tmp_path / "results"
+        write_realtime_sample(results, "barcode05", 4005020, "Bacillus_A anthracis", 3)
+        memo = {}
+        detection = {"taxid": 1392, "detected_taxid": 4005020,
+                     "name": "Bacillus anthracis", "threshold": 10}
+
+        augmented = augment_attribution_for_unresolved(
+            str(results), ["All Samples", "barcode05"], [detection], memo,
+            config={},
+        )
+
+        assert memo == {}
+        assert augmented is not memo
+
+    def test_a_fully_resolved_run_returns_the_input_untouched(self, tmp_path):
+        """No unresolved detection means no extra file I/O and no copy."""
+        from nanometa_live.app.tabs.dashboard_helpers import (
+            augment_attribution_for_unresolved,
+        )
+
+        memo = {4005020: [{"sample": "barcode05", "reads": 900,
+                           "abundance": 9.0, "is_negative_control": False}]}
+        detection = {"taxid": 1392, "detected_taxid": 4005020,
+                     "name": "Bacillus anthracis", "threshold": 10}
+
+        assert augment_attribution_for_unresolved(
+            str(tmp_path), ["All Samples", "barcode05"], [detection], memo,
+            config={},
+        ) is memo

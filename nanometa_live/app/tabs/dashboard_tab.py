@@ -67,9 +67,7 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     DEFAULT_LOW_READ_FLOOR,
     _classify_dangerous,
     build_pathogen_attribution,
-    resolve_attribution_taxids,
-    resolve_below_floor_samples,
-    samples_for_detection,
+    augment_attribution_for_unresolved,
     unmeasured_samples,
     _get_idle_alerts,
     _get_error_alerts,
@@ -440,30 +438,15 @@ def register_dashboard_callbacks(app: Dash):
                 # a spread-thin select agent resolved no samples at all --
                 # B. anthracis at 3/4/3 reads across three barcodes, called
                 # ACTION REQUIRED and attributed to nobody (live realtime run,
-                # 2026-09-01). Runs only when something failed to resolve, and
-                # never mutates the shared per-tick memo.
-                #
-                # Ask the same question build_pathogen_attribution asks, per
-                # detection. Do NOT zip the attributions against the
-                # detections: the builder deduplicates by label and re-sorts
-                # by read count, so position does not survive it and a naive
-                # pairing looks up the wrong organism's taxids.
-                unresolved_taxids = {
-                    t
-                    for detection in detections
-                    if not samples_for_detection(detection, taxid_to_samples)
-                    for t in resolve_attribution_taxids(detection)
-                }
-                if unresolved_taxids:
-                    extra = resolve_below_floor_samples(
-                        main_dir, resolved_samples, unresolved_taxids, config
+                # 2026-09-01).
+                augmented = augment_attribution_for_unresolved(
+                    main_dir, resolved_samples, detections,
+                    taxid_to_samples, config,
+                )
+                if augmented is not taxid_to_samples:
+                    triggering_attribution = build_pathogen_attribution(
+                        detections, augmented
                     )
-                    if extra:
-                        merged = dict(taxid_to_samples)
-                        merged.update(extra)
-                        triggering_attribution = build_pathogen_attribution(
-                            detections, merged
-                        )
 
                 attribution_failed = not all(
                     a.resolved for a in triggering_attribution
@@ -847,9 +830,16 @@ def register_dashboard_callbacks(app: Dash):
                 detected_organisms, config)
             taxid_to_samples = {}
             if dangerous or subthreshold:
+                panel_samples = _resolve_samples(main_dir, available_samples)
                 taxid_to_samples = get_per_sample_organisms_cached(
-                    main_dir, _resolve_samples(main_dir, available_samples),
-                    config)
+                    main_dir, panel_samples, config)
+                # Same second look the verdict banner applies, so a card and
+                # the banner above it cannot disagree about which barcodes
+                # carry the detection.
+                taxid_to_samples = augment_attribution_for_unresolved(
+                    main_dir, panel_samples, dangerous + subthreshold,
+                    taxid_to_samples, config,
+                )
 
             # Get only ENABLED watchlist entries for alerting
             watched_species = _get_active_watchlist_entries(config)

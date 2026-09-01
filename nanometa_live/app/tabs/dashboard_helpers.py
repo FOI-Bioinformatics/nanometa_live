@@ -636,6 +636,14 @@ def _lookup_sample_breakdown(taxids: Any,
         )
         taxid_to_samples = get_per_sample_organisms_cached(
             main_dir, samples, config)
+        # The modal is where an operator drills into a detection, so it gets
+        # the same second look as the banner and the cards: a taxon spread
+        # below the discovery floor still has to name its barcodes here.
+        taxid_to_samples = augment_attribution_for_unresolved(
+            main_dir, samples,
+            [{"detected_taxid": t} for t in taxids],
+            taxid_to_samples, config,
+        )
         for taxid in taxids:
             found = taxid_to_samples.get(int(taxid), [])
             if found:
@@ -2232,6 +2240,52 @@ def resolve_below_floor_samples(
     for taxid in found:
         found[taxid].sort(key=lambda x: x["reads"], reverse=True)
     return found
+
+
+def augment_attribution_for_unresolved(
+    main_dir: str,
+    available_samples: List[str],
+    detections: List[Dict[str, Any]],
+    taxid_to_samples: Dict[int, List[Dict[str, Any]]],
+    config: Optional[Dict[str, Any]] = None,
+) -> Dict[int, List[Dict[str, Any]]]:
+    """Fill in per-sample rows for detections the floored build missed.
+
+    One shared entry point so the verdict banner, the alert cards and the
+    pathogen modal cannot disagree about which barcodes carry a detection.
+    Before this existed the banner named the barcodes for a spread-thin
+    select agent while its own alert card showed no "DETECTED IN" row at all.
+
+    Returns ``taxid_to_samples`` unchanged when nothing needs filling in.
+    Otherwise returns a COPY with the extra rows merged: the input is the
+    shared per-tick memo and must never be mutated.
+    """
+    if not detections or not main_dir:
+        return taxid_to_samples
+
+    taxid_to_samples = taxid_to_samples or {}
+    unresolved = {
+        t
+        for detection in detections
+        # The same predicate build_pathogen_attribution applies. Do NOT pair
+        # detections against built attributions by position: the builder
+        # deduplicates by label and sorts by read count, so the Nth
+        # attribution is not the Nth detection.
+        if not samples_for_detection(detection, taxid_to_samples)
+        for t in resolve_attribution_taxids(detection)
+    }
+    if not unresolved:
+        return taxid_to_samples
+
+    extra = resolve_below_floor_samples(
+        main_dir, available_samples, unresolved, config
+    )
+    if not extra:
+        return taxid_to_samples
+
+    merged = dict(taxid_to_samples)
+    merged.update(extra)
+    return merged
 
 
 def _load_per_sample_organisms(
