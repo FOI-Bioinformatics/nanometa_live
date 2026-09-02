@@ -659,8 +659,9 @@ def _deduplicate_batch_files(filepaths: List[str]) -> List[str]:
         else:
             # Prefer batch_reports/ over reports/
             existing = seen_batches[batch_key]
+            chosen = existing
             if 'batch_reports' in fp and 'batch_reports' not in existing:
-                seen_batches[batch_key] = fp
+                chosen = fp
             # Prefer sample-prefixed naming over generic batch_ naming.
             # Parenthesised equality on purpose: the bare form chained as
             # `(... in fp) and (fp == 'batch_reports') and ...`, whose middle
@@ -669,7 +670,9 @@ def _deduplicate_batch_files(filepaths: List[str]) -> List[str]:
                   and (('batch_reports' in fp) == ('batch_reports' in existing))):
                 existing_match = batch_id_pattern.search(os.path.basename(existing))
                 if existing_match and not existing_match.group(1):
-                    seen_batches[batch_key] = fp
+                    chosen = fp
+            seen_batches[batch_key] = _readable_duplicate(
+                chosen, fp if chosen is existing else existing)
 
     result = list(seen_batches.values())
     if len(result) < len(filepaths):
@@ -677,6 +680,35 @@ def _deduplicate_batch_files(filepaths: List[str]) -> List[str]:
             f"Deduplicated batch files: {len(filepaths)} -> {len(result)}"
         )
     return result
+
+
+def _report_readable_now(filepath: str) -> bool:
+    """Can this report yield a frame on the current poll?
+
+    Past its stability window, or with a last-good parse standing behind it.
+    Unlike ``_cumulative_readable_now`` this records nothing.
+    """
+    if _is_file_stable(filepath):
+        return True
+    with _report_frame_cache_lock:
+        return os.path.realpath(filepath) in _last_good_frame
+
+
+def _readable_duplicate(winner: str, loser: str) -> str:
+    """Between two copies of one batch report, keep the one readable this poll.
+
+    nanometanf publishes each batch report twice and byte-identical: the
+    merger's ``batch_N`` first, the report generator's ``<sample>_batchN``
+    later, and the later copy tends to land together with the sample's
+    first cumulative report. Chosen by name alone, that fresh copy left the
+    tier fallback with nothing it could parse: replaying run R1 of the
+    round-4 audit at 22:54:35, all five samples read as unmeasured for one
+    poll and the aggregate was None. The name preference still decides
+    whenever both copies (or neither) can be read.
+    """
+    if _report_readable_now(winner) or not _report_readable_now(loser):
+        return winner
+    return loser
 
 
 def _canonical_is_current(main_dir: str, sample: str) -> bool:

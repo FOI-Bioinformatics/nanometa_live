@@ -172,6 +172,19 @@ nanometanf publishes `batch_reports/` only from the incremental flow.
 Regression-covered in `tests/test_classification_loaders.py`
 (`stats_marker=False` fixtures).
 
+**Between two copies of one batch report, keep the one readable this poll.**
+nanometanf publishes each batch report twice and byte-identical (the
+merger's `batch_N`, then the report generator's `<sample>_batchN`, which
+tends to land together with the sample's first cumulative report).
+`_deduplicate_batch_files` prefers the sample-prefixed name, and did so even
+while that copy was inside its 1 s stability window: the tier fallback
+correctly kept the batch tier for the poll on which the cumulative appeared,
+then received files it could not parse, and every sample read as unmeasured
+with an aggregate of None (replay of R1 at 22:54:35, five of five samples).
+`_readable_duplicate` lets the name preference decide only when both copies
+or neither can be read. One `stat` per duplicate pair, on polls that reach
+discovery only.
+
 **Authoritative taxonomy:** `apply_authoritative_taxonomy()` in `app/tabs/kraken2_helpers.py`
 parses `inspect.txt` from the Kraken2 DB to correct parent_taxid for Sankey/Sunburst.
 

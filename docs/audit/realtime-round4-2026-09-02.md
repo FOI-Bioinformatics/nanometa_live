@@ -215,6 +215,16 @@ now treats a report under `<sample>/batch_reports/` as the delta layout in
 its own right; the loader on the same snapshot returns 938 / 608 / 577 and
 an aggregate of 3,129.
 
+**Found by the same replay, fixed the same morning:** on the poll where the
+cumulative reports first appear (22:54:35 in R1), the report generator's
+`<sample>_batchN` copies land in `batch_reports/` at the same time. The tier
+fallback correctly kept the batch tier, but the dedup preferred those fresh
+copies over the merger's byte-identical, already-stable `batch_N` files, and
+nothing parsed: all five samples unmeasured for one poll, aggregate None
+(the sampler's live tick 160 at 22:54:17 shows the same shape, three of five
+samples). `_deduplicate_batch_files` now keeps whichever copy can be read on
+the current poll and lets the name preference decide only when both can.
+
 ### H6b, H7, H15, H19. Continue on a completed outdir (confirmed live, R1c)
 
 - At 23:47:17 `kraken2/barcode05.cumulative...` (rewritten by the continued

@@ -871,3 +871,59 @@ class TestBatchDedupPrefersSamplePrefixedName:
         prefixed = "/r/kraken2/s1/batch_reports/s1_batch0.kraken2.report.txt"
         result = _deduplicate_batch_files([generic, prefixed])
         assert result == [prefixed]
+
+    def test_prefixed_copy_inside_stability_window_yields_to_stable_generic(self, tmp_path):
+        """The copy that can be read this poll wins over the one preferred by name.
+
+        nanometanf publishes each batch report twice, byte-identical: the
+        merger's ``batch_N`` first, the report generator's ``<sample>_batchN``
+        later, and the later copy tends to land together with the sample's
+        first cumulative report. Replaying R1 at 22:54:35 showed every sample
+        unmeasured for one poll: the tier fallback correctly chose the batch
+        tier, then the dedup handed it the fresh copies and nothing parsed.
+        """
+        bdir = tmp_path / "kraken2" / "s1" / "batch_reports"
+        bdir.mkdir(parents=True)
+        generic = bdir / "batch_0.kraken2.report.txt"
+        prefixed = bdir / "s1_batch0.kraken2.report.txt"
+        _write_batch_report(generic, 50, 562, "Escherichia coli")
+        _write_batch_report(prefixed, 50, 562, "Escherichia coli")
+        now = time.time()
+        os.utime(prefixed, (now, now))
+        result = _deduplicate_batch_files([str(generic), str(prefixed)])
+        assert result == [str(generic)]
+
+    def test_prefixed_copy_wins_once_both_are_stable(self, tmp_path):
+        bdir = tmp_path / "kraken2" / "s1" / "batch_reports"
+        bdir.mkdir(parents=True)
+        generic = bdir / "batch_0.kraken2.report.txt"
+        prefixed = bdir / "s1_batch0.kraken2.report.txt"
+        _write_batch_report(generic, 50, 562, "Escherichia coli")
+        _write_batch_report(prefixed, 50, 562, "Escherichia coli")
+        result = _deduplicate_batch_files([str(generic), str(prefixed)])
+        assert result == [str(prefixed)]
+
+    def test_loader_reads_the_batch_tier_while_the_prefixed_copies_are_fresh(self, tmp_path):
+        """Per-sample and aggregate loads stay measured on the arrival poll."""
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+        _build_incremental_layout(
+            kraken_dir, "unclassified", batch_reads=[288, 326, 324], stats_marker=False
+        )
+        bdir = kraken_dir / "unclassified" / "batch_reports"
+        now = time.time()
+        for idx in range(3):
+            copy = bdir / f"unclassified_batch{idx}.kraken2.report.txt"
+            copy.write_bytes((bdir / f"batch_{idx}.kraken2.report.txt").read_bytes())
+            os.utime(copy, (now, now))
+        fresh_cumulative = kraken_dir / "unclassified.cumulative.kraken2.report.txt"
+        _write_batch_report(fresh_cumulative, 938, 562, "Escherichia coli")
+        os.utime(fresh_cumulative, (now, now))
+
+        df = load_kraken_data(str(tmp_path), sample="unclassified")
+        assert df is not None and not df.empty
+        assert int(df[df["taxid"] == 1].iloc[0]["cumul_reads"]) == 938
+
+        agg = load_kraken_data(str(tmp_path), sample="All Samples")
+        assert agg is not None and not agg.empty
+        assert int(agg[agg["taxid"] == 1].iloc[0]["cumul_reads"]) == 938
