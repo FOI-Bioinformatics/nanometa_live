@@ -148,6 +148,7 @@ class ConfigLoader:
             "qc_tool": "chopper",
             "chopper_minlength": 1000,
             "chopper_quality": 10,
+            "chopper_maxlength": None,
             "filtlong_min_length": 1000,
             "skip_nanoplot": False,
             # Assembly (experimental nanometanf step; off by default)

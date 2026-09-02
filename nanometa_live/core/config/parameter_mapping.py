@@ -93,6 +93,22 @@ def _coerce_minimap2_preset(value: Any) -> str:
     return preset
 
 
+def _max_length_params(config: Dict[str, Any]) -> Dict[str, int]:
+    """The optional upper length bound, for chopper and filtlong alike.
+
+    Empty, None, 0 or unparsable means no limit, and the keys are omitted so
+    the pipeline keeps its null default; fastp has no equivalent (its
+    max_len1 trims rather than drops) and is deliberately not given one.
+    """
+    try:
+        max_length = int(config.get("chopper_maxlength") or 0)
+    except (TypeError, ValueError):
+        return {}
+    if max_length < 1:
+        return {}
+    return {"chopper_maxlength": max_length, "filtlong_max_length": max_length}
+
+
 def _coerce_quality(value: Any, key: str, default: int = 10) -> int:
     """Clamp a mean-quality floor to nanometanf's schema range of 0-50.
 
@@ -872,6 +888,7 @@ def _build_base_params(config: Dict[str, Any], main_dir: str, kraken_db: str,
             config.get("chopper_quality"), "chopper_quality"),
         "filtlong_min_length": _coerce_min_length(
             config.get("filtlong_min_length"), "filtlong_min_length"),
+        **_max_length_params(config),
         "kraken2_confidence": config.get("kraken2_confidence", 0.0),
         "kraken2_minimum_hit_groups": config.get(
             "kraken2_minimum_hit_groups", 0

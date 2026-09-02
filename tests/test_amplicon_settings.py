@@ -29,6 +29,7 @@ from nanometa_live.core.config.parameter_mapping import create_nextflow_params
 _AMPLICON_FIELD_IDS: List[str] = [
     "chopper-minlength-input",
     "chopper-quality-input",
+    "chopper-maxlength-input",
     "filtlong-minlength-input",
     "validation-identity-input",
     "kraken2-confidence-input",
@@ -73,6 +74,7 @@ class TestReadFilteringSubCardLayout:
         # who has not touched the new card keeps the long-read behaviour.
         assert widgets["chopper-minlength-input"].value == 1000
         assert widgets["chopper-quality-input"].value == 10
+        assert widgets["chopper-maxlength-input"].value is None  # no limit
         assert widgets["filtlong-minlength-input"].value == 1000
         assert widgets["validation-identity-input"].value == 90
         assert widgets["kraken2-confidence-input"].value == 0.0
@@ -243,6 +245,20 @@ class TestAmpliconParamsRouted:
         assert params["fastp_average_qual"] == 7
         assert params["chopper_minlength"] == 100
 
+    def test_max_length_is_optional_and_reaches_both_tools(self, tmp_path):
+        config = self._amplicon_config(tmp_path)
+        params = create_nextflow_params(config)
+        assert "chopper_maxlength" not in params
+        assert "filtlong_max_length" not in params
+        for empty in ("", None, 0):
+            config["chopper_maxlength"] = empty
+            assert "chopper_maxlength" not in create_nextflow_params(config)
+        config["chopper_maxlength"] = 1500
+        params = create_nextflow_params(config)
+        assert params["chopper_maxlength"] == 1500
+        assert params["filtlong_max_length"] == 1500
+        assert "fastp_max_len1" not in params
+
     def test_quality_is_coerced_to_the_schema_range(self, tmp_path):
         config = self._amplicon_config(tmp_path)
         config["chopper_quality"] = "12"
@@ -264,6 +280,7 @@ class TestAmpliconParamsRouted:
         defaults = ConfigLoader(str(tmp_path)).create_default_config()
         assert defaults["chopper_minlength"] == 1000
         assert defaults["chopper_quality"] == 10
+        assert defaults["chopper_maxlength"] is None
         assert defaults["filtlong_min_length"] == 1000
 
     def test_long_read_defaults_when_keys_absent(self, tmp_path):

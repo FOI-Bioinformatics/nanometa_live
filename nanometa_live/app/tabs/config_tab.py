@@ -658,6 +658,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             # Read filtering and validation overrides
             Output("chopper-minlength-input", "value"),
             Output("chopper-quality-input", "value"),
+            Output("chopper-maxlength-input", "value"),
             Output("filtlong-minlength-input", "value"),
             Output("validation-identity-input", "value"),
             Output("kraken2-confidence-input", "value"),
@@ -786,6 +787,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         # values.
         chopper_minlength = config.get("chopper_minlength", 1000)
         chopper_quality = config.get("chopper_quality", 10)
+        chopper_maxlength = config.get("chopper_maxlength") or None
         filtlong_minlength = config.get("filtlong_min_length", 1000)
         validation_identity = config.get("validation_identity_threshold", 90)
         kraken2_confidence = config.get("kraken2_confidence", 0.0)
@@ -834,6 +836,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             enable_nanopore_stats,
             chopper_minlength,
             chopper_quality,
+            chopper_maxlength,
             filtlong_minlength,
             validation_identity,
             kraken2_confidence,
@@ -1556,6 +1559,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             # Read filtering and validation overrides
             Input("chopper-minlength-input", "value"),
             Input("chopper-quality-input", "value"),
+            Input("chopper-maxlength-input", "value"),
             Input("filtlong-minlength-input", "value"),
             Input("validation-identity-input", "value"),
             Input("kraken2-confidence-input", "value"),
@@ -1589,7 +1593,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         e_value_cutoff, minimap2_preset, minimap2_min_mapq,
         genome_cache_dir, cores, gui_port,
         qc_tool, skip_nanoplot, kraken2_incremental, enable_krona, enable_nanopore_stats,
-        chopper_minlength, chopper_quality, filtlong_minlength,
+        chopper_minlength, chopper_quality, chopper_maxlength, filtlong_minlength,
         validation_identity, kraken2_confidence, kraken2_hitgroups,
         pipeline_profile, pipeline_source_type, pipeline_branch, pipeline_local_path,
         processing_mode, sample_handling, sample_name, negative_controls,
@@ -1644,6 +1648,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "enable_nanopore_stats_mqc": enable_nanopore_stats,
             "chopper_minlength": chopper_minlength,
             "chopper_quality": chopper_quality,
+            "chopper_maxlength": (int(chopper_maxlength)
+                                  if chopper_maxlength not in (None, "") else None),
             "filtlong_min_length": filtlong_minlength,
             "validation_identity_threshold": validation_identity,
             "kraken2_confidence": kraken2_confidence,

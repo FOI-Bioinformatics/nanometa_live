@@ -952,7 +952,7 @@ def _read_filtering_item():
                     "filtering (the pipeline rejects 0).",
                     target="chopper-minlength-info",
                 ),
-            ], md=4),
+            ], md=3),
             dbc.Col([
                 dbc.Label([
                     "Minimum mean read quality (Q) ",
@@ -975,7 +975,7 @@ def _read_filtering_item():
                     "fraction of a short read. Try 7 for amplicons.",
                     target="chopper-quality-info",
                 ),
-            ], md=4),
+            ], md=3),
             dbc.Col([
                 dbc.Label([
                     "Filtlong minimum length (bp) ",
@@ -997,7 +997,31 @@ def _read_filtering_item():
                     "100 for V3-V4, 250-500 for ITS/16S.",
                     target="filtlong-minlength-info",
                 ),
-            ], md=4),
+            ], md=3),
+            dbc.Col([
+                dbc.Label([
+                    "Maximum read length (bp) ",
+                    html.I(className="bi bi-info-circle text-muted ms-1",
+                           id="chopper-maxlength-info"),
+                ], html_for="chopper-maxlength-input"),
+                dbc.Input(
+                    id="chopper-maxlength-input",
+                    type="number",
+                    min=1,
+                    step=100,
+                    value=None,
+                    placeholder="no limit",
+                ),
+                dbc.FormText("Reads longer than this are dropped by chopper and filtlong; empty = no limit"),
+                dbc.Tooltip(
+                    "chopper --maxlength / filtlong --max_length. Leave "
+                    "empty to keep every read. Use it to exclude "
+                    "concatemers or off-size reads in amplicon runs. "
+                    "fastp has no equivalent (it trims rather than "
+                    "drops).",
+                    target="chopper-maxlength-info",
+                ),
+            ], md=3),
         ], className="mb-3"),
 
         # Row 2: kraken2 confidence + minimum hit groups

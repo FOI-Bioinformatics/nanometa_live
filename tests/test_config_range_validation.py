@@ -85,6 +85,14 @@ class TestRangeValidation:
     def test_chopper_quality_above_max_rejected(self):
         assert "quality" in _message(_invoke(chopper_quality=99)).lower()
 
+    def test_chopper_maxlength_below_minimum_rejected(self):
+        assert "maximum read length" in _message(
+            _invoke(chopper_minlength=1000, chopper_maxlength=500)).lower()
+
+    def test_chopper_maxlength_empty_is_no_limit(self):
+        assert "maximum read length" not in _message(
+            _invoke(chopper_minlength=1000, chopper_maxlength=None)).lower()
+
     def test_chopper_minlength_negative_rejected(self):
         assert "minimum length" in _message(_invoke(chopper_minlength=-5)).lower()
 

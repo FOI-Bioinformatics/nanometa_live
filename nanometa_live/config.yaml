@@ -245,6 +245,8 @@ qc_tool: "chopper"
 # filtlong reads filtlong_min_length. 1 disables the length filter.
 chopper_minlength: 1000
 chopper_quality: 10
+# Maximum read length in bp for chopper and filtlong; empty means no limit.
+chopper_maxlength:
 filtlong_min_length: 1000
 
 ## REMOVE TEMP FILES ##
