@@ -177,19 +177,24 @@ def create_header(title="Nanometa Live"):
                         style={"fontSize": "0.75rem", "display": "none"}
                     ),
 
+                    # A native title=, not a dbc.Tooltip: the tooltip's text
+                    # changes at the moment the button flips Start <-> Stop,
+                    # and a dbc.Tooltip renders into a portal on <body> that
+                    # the tooltip library detaches on its own. Rewriting its
+                    # children while it was open made React remove a node it
+                    # no longer owned, which threw NotFoundError
+                    # ("removeChild") twice per flip in the browser console
+                    # (round-4 audit, H35; reproduced 2026-09-02 with a
+                    # removeChild hook naming this node). Organism cards use
+                    # native title= for the same class of reason.
                     dbc.Button(
                         [html.I(className="bi bi-play-fill me-2"), "Start Analysis"],
                         id="start-stop-button",
                         color="primary",
                         size="lg",
-                        className="me-2"
+                        className="me-2",
+                        title="Begin analysing DNA samples for organisms of interest",
                     ),
-                    dbc.Tooltip(
-                        id="start-analysis-tooltip",
-                        children="Begin analysing DNA samples for organisms of interest",
-                        target="start-stop-button",
-                        placement="bottom"
-                    )
                 ], className="d-flex justify-content-end align-items-center")
             ], width=3)
         ], className="py-3 border-bottom"),

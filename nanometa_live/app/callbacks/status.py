@@ -291,12 +291,16 @@ def register_status(app, backend_manager):
         return "Start Analysis", "primary", not is_ready
 
     @app.callback(
-        Output("start-analysis-tooltip", "children"),
+        Output("start-stop-button", "title"),
         Input("app-config", "data"),
         Input("backend-status", "data"),
     )
     def update_start_tooltip(config, status):
-        """Update Start/Stop button tooltip based on mode and state."""
+        """Update the Start/Stop button's hover text for mode and state.
+
+        Writes the button's native ``title``; see the header component for
+        why this is not a ``dbc.Tooltip``.
+        """
         if config and config.get("visualization_only", False):
             return "Not available in visualization mode - displaying existing results only"
         if status and status.get("running", False):

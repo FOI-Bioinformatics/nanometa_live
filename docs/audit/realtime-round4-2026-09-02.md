@@ -301,12 +301,15 @@ the new tier never clears the flag set under the old tier.
   files are counted against a moving inbox.
 - **H35.** The two React `removeChild` console errors fire at the moment the
   Start/Stop button flips (Playwright console, 587 s = first Stop click).
-  Not reproduced on 2026-09-02: a headless Chromium drive of the real app
-  (welcome modal closed, Start, the optimistic flip, 45 s of a real
-  pipeline launch, Stop, confirm, the flip back) logged zero console errors
-  and zero page errors, and a harness of the real header, status and
-  Start/Stop callbacks flipped four times clean. The errors need a
-  populated dashboard, if they recur at all.
+  Reproduced and fixed on 2026-09-02 during a demo rehearsal, after a first
+  attempt on an empty results directory saw nothing. A `removeChild` hook
+  named the node: `DIV#start-analysis-tooltip`, already detached from the
+  document (`actualParent=null`). The header's `dbc.Tooltip` renders into a
+  portal on `<body>`, `update_start_tooltip` rewrites its children at the
+  moment the button flips, and React then removed a node the tooltip
+  library no longer owned. The hover text is now the button's native
+  `title=`, as the organism cards already use. Same drive after the fix:
+  zero console events, from three.
 - **Stop is two clicks.** `stop-confirm-modal` must be confirmed; a click on
   the header button alone stops nothing. Not a defect; a runbook note.
 
@@ -480,6 +483,7 @@ code-side items:
 - ~~H27~~ closed the same morning: the "arithmetic difference" was the
   highest-numbered batch report served alone while the stats marker lagged
   (see the H26/H27 section).
-- **H35** (not reproduced, see above) and the unexercised list above. H4,
+- The unexercised list above. H35 was reproduced and fixed on 2026-09-02
+  (see above), and H4,
   H15/H19 and H20 were closed on the pipeline side the same day (section
   above).
