@@ -591,6 +591,28 @@ def _deduplicate_batch_files(filepaths: List[str]) -> List[str]:
     return result
 
 
+def _canonical_is_current(main_dir: str, sample: str) -> bool:
+    """True when the sample's canonical JSON is no older than its reports.
+
+    A missing JSON is "not current" (the caller falls through to the
+    reports); a JSON with no report beside it is current by definition.
+    """
+    path = os.path.join(main_dir, "canonical", "classification",
+                        f"{sample}.classification.json")
+    try:
+        canonical_mtime = os.stat(path).st_mtime
+    except OSError:
+        return False
+    kraken_dir = os.path.join(main_dir, "kraken2")
+    newest = 0.0
+    for report in _discover_sample_reports(kraken_dir, sample):
+        try:
+            newest = max(newest, os.stat(report).st_mtime)
+        except OSError:
+            continue
+    return canonical_mtime >= newest
+
+
 def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFrame:
     """
     Load Kraken2 classification data for a specific sample or all samples.
@@ -627,12 +649,18 @@ def load_kraken_data(main_dir: str, sample: Optional[str] = None) -> pd.DataFram
     # Auto-resolve to analysis directory if main_dir is base directory
     main_dir = resolve_analysis_directory(main_dir)
 
-    # Try canonical format first (waterfall pattern)
+    # Try canonical format first (waterfall pattern) -- but only when it is
+    # at least as new as the sample's own Kraken2 report. The canonical JSON
+    # is written once, at session end; on a Continue into a populated outdir
+    # the previous run's JSON outranked a cumulative report the new run had
+    # just rewritten (barcode05: 2,627 per sample against 69 in the file,
+    # round-4 audit, H6b, observed live).
     if sample is not None and sample != "All Samples":
-        canonical_df = load_canonical_classification(main_dir, sample)
-        if canonical_df is not None:
-            logging.debug("Using canonical classification for %s", sample)
-            return canonical_df
+        if _canonical_is_current(main_dir, sample):
+            canonical_df = load_canonical_classification(main_dir, sample)
+            if canonical_df is not None:
+                logging.debug("Using canonical classification for %s", sample)
+                return canonical_df
 
     # Check cache first
     cache_key = _get_cache_key(main_dir, sample)

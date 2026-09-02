@@ -467,15 +467,20 @@ def get_available_samples(main_dir: str) -> List[str]:
                 set_cache_capacity(len(stored_result))
                 return stored_result
 
+    # The manifest is UNIONED with disk discovery, never a replacement. It is
+    # written once, at session end, so on a Continue into a populated outdir
+    # it describes the previous run: a barcode whose output first appears in
+    # the continued run was invisible to the selector for the whole run
+    # (round-4 audit, H7, observed live). The manifest still contributes the
+    # samples it names (marked, never hidden, when their files are gone) and
+    # ``failed_samples`` through get_failed_samples.
     manifest_result = _samples_from_manifest(main_dir)
+    discovered = _detect_all_samples(main_dir)
     if manifest_result is not None:
-        with _sample_cache_lock:
-            _sample_cache[main_dir] = (current_mtimes, manifest_result)
-        set_cache_capacity(len(manifest_result))
-        return manifest_result
+        discovered.update(s for s in manifest_result if s != "All Samples")
 
     # Always add "All Samples" as the first option
-    result = ["All Samples"] + sorted(_detect_all_samples(main_dir))
+    result = ["All Samples"] + sorted(discovered)
 
     # Store in mtime cache
     with _sample_cache_lock:
@@ -519,10 +524,15 @@ def _sample_output_files(main_dir: str, sample: str) -> Dict[str, List[str]]:
     # and may be the only top-level report a sample has early in a run.
     # Without it the selector's "produced no output files" marker fired on
     # samples whose cumulative data was rendering at that moment.
+    # The nested incremental layout counts too: between a sample's first
+    # per-batch report and its first cumulative flush only
+    # kraken2/<sample>/batch_reports/ exists, and the flat-only globs marked
+    # a classifying barcode as having produced nothing (round-4 audit, H17).
     for pattern in (
         os.path.join(kraken_dir, f"{sample}.kraken2.report.txt"),
         os.path.join(kraken_dir, f"{sample}.cumulative.kraken2.report.txt"),
         os.path.join(kraken_dir, f"{sample}_*.kraken2.report.txt"),
+        os.path.join(kraken_dir, sample, "batch_reports", "*.kraken2.report.txt"),
     ):
         kraken_files.extend(glob.glob(pattern))
     if kraken_files:
