@@ -298,18 +298,22 @@ def _write_batch_report(path, root_reads: int, species_taxid: int, species_name:
     _backdate_mtime(path)
 
 
-def _build_incremental_layout(kraken_dir, sample: str, batch_reads):
+def _build_incremental_layout(kraken_dir, sample: str, batch_reads, *, stats_marker=True):
     """Create a v1.5 incremental layout for *sample* with the given per-batch read counts.
 
-    Each batch report contains only that batch's reads (a delta), and a
-    matching ``stats/batch_N_report_stats.json`` is created so that
-    ``_is_incremental_layout`` recognises the directory as incremental.
+    Each batch report contains only that batch's reads (a delta). With
+    ``stats_marker=True`` a matching ``stats/batch_N_report_stats.json`` is
+    written as well; ``stats_marker=False`` reproduces the window nanometanf
+    leaves open on a live run, where KRAKEN2_OUTPUT_MERGER has published the
+    batch report but KRAKEN2_REPORT_GENERATOR has not yet published the
+    stats file (round-4 audit, finding H27).
     """
     sample_dir = kraken_dir / sample
     batch_reports = sample_dir / "batch_reports"
     stats_dir = sample_dir / "stats"
     batch_reports.mkdir(parents=True)
-    stats_dir.mkdir(parents=True)
+    if stats_marker:
+        stats_dir.mkdir(parents=True)
 
     species_for_batch = [
         (562, "Escherichia coli"),
@@ -323,6 +327,8 @@ def _build_incremental_layout(kraken_dir, sample: str, batch_reads):
         report = batch_reports / f"batch_{idx}.kraken2.report.txt"
         _write_batch_report(report, reads, species_taxid, species_name)
 
+        if not stats_marker:
+            continue
         stats_file = stats_dir / f"batch_{idx}_report_stats.json"
         stats_file.write_text(
             f'{{"sample_id": "{sample}", "batch_id": {idx}, "total_reads": {reads}}}'
@@ -372,6 +378,28 @@ class TestIsIncrementalLayout:
         # barcode02 has no stats directory
         (kraken_dir / "barcode02").mkdir()
         assert _is_incremental_layout(str(kraken_dir), "barcode02") is False
+
+    def test_batch_reports_without_stats_marker_is_incremental(self, tmp_path):
+        """A report under ``<sample>/batch_reports/`` is a delta by construction.
+
+        nanometanf publishes ``batch_reports/`` only from the incremental
+        flow, and the ``stats/batch_N_report_stats.json`` marker comes from a
+        later process. On run R1 of the round-4 audit every batch-tier tick
+        fell into that window, so the detector must not depend on the marker.
+        """
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+        _build_incremental_layout(
+            kraken_dir, "barcode01", batch_reads=[10, 20], stats_marker=False
+        )
+        assert not (kraken_dir / "barcode01" / "stats").exists()
+        assert _is_incremental_layout(str(kraken_dir), "barcode01") is True
+        assert _is_incremental_layout(str(kraken_dir)) is True
+
+    def test_empty_batch_reports_dir_is_not_evidence(self, tmp_path):
+        kraken_dir = tmp_path / "kraken2"
+        (kraken_dir / "barcode01" / "batch_reports").mkdir(parents=True)
+        assert _is_incremental_layout(str(kraken_dir), "barcode01") is False
 
 
 class TestLoadKrakenDataIncrementalLayout:
@@ -436,6 +464,30 @@ class TestLoadKrakenDataIncrementalLayout:
         root = df[df["taxid"] == 1]
         # Total = 10 + 20 + 5 + 7 = 42
         assert int(root.iloc[0]["cumul_reads"]) == 42
+
+    def test_batch_reports_before_stats_marker_sum_deltas(self, tmp_path):
+        """H27: the dashboard showed one batch's reads while the marker lagged.
+
+        Live measurement (R1, 22:54:13 -> 22:54:15): sample ``unclassified``
+        had batch reports of 288, 326 and 324 reads and no stats marker yet;
+        the loader served exactly 326, then exactly 324, for a sample whose
+        batches total 938. The per-sample and aggregate paths must both sum.
+        """
+        kraken_dir = tmp_path / "kraken2"
+        kraken_dir.mkdir()
+        _build_incremental_layout(
+            kraken_dir, "unclassified", batch_reads=[288, 326, 324],
+            stats_marker=False,
+        )
+        _build_incremental_layout(
+            kraken_dir, "barcode05", batch_reads=[288, 320], stats_marker=False
+        )
+
+        df = load_kraken_data(str(tmp_path), sample="unclassified")
+        assert int(df[df["taxid"] == 1].iloc[0]["cumul_reads"]) == 938
+
+        agg = load_kraken_data(str(tmp_path), sample="All Samples")
+        assert int(agg[agg["taxid"] == 1].iloc[0]["cumul_reads"]) == 938 + 608
 
 
 class TestLoadKrakenLatestBatchSemantics:

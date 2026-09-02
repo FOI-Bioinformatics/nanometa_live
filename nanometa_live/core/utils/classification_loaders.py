@@ -545,19 +545,31 @@ def _is_incremental_layout(kraken_dir: str, sample: Optional[str] = None) -> boo
 
     In incremental mode (``kraken2_enable_incremental: true``) each batch
     report under ``<sample>/batch_reports/`` contains only that batch's
-    reads (a delta), not a running cumulative snapshot. The presence of
-    ``<sample>/stats/batch_N_report_stats.json`` is the canonical marker
-    of this layout, since the older non-incremental flow does not emit
-    those per-batch stats files.
+    reads (a delta), not a running cumulative snapshot. Two signals identify
+    the layout, and either suffices:
+
+    * A report under ``<sample>/batch_reports/``. nanometanf publishes that
+      directory only from the incremental flow (``KRAKEN2_OUTPUT_MERGER``
+      and ``KRAKEN2_REPORT_GENERATOR`` in ``conf/modules.config``); the
+      legacy snapshot layout wrote flat ``kraken2/<sample>_batchN`` files.
+    * ``<sample>/stats/batch_N_report_stats.json``, written by
+      ``KRAKEN2_REPORT_GENERATOR``.
+
+    The stats marker alone was the original test, and it lands one process
+    later than the merger's batch report. On run R1 of the round-4 audit
+    every batch-tier poll fell into that window, so the loader took the
+    legacy branch and served the highest-numbered batch alone: 324 reads
+    for a sample whose three batches totalled 938, and a count that moved
+    326 -> 324 as batches arrived (finding H27).
 
     Args:
         kraken_dir: Path to the ``kraken2/`` output directory
         sample: Optional sample name. When provided, only that sample's
-            subdirectory is inspected; otherwise any sample's stats
-            directory is sufficient evidence.
+            subdirectory is inspected; otherwise any sample's evidence
+            is sufficient.
 
     Returns:
-        True if a per-sample ``stats/batch_*_report_stats.json`` is found.
+        True if either signal is found for a sample under inspection.
     """
     if not os.path.isdir(kraken_dir):
         return False
@@ -575,16 +587,23 @@ def _is_incremental_layout(kraken_dir: str, sample: Optional[str] = None) -> boo
             return False
 
     for sample_name in samples_to_check:
-        stats_dir = os.path.join(kraken_dir, sample_name, "stats")
-        if not os.path.isdir(stats_dir):
-            continue
-        try:
-            for entry in os.listdir(stats_dir):
-                if entry.startswith("batch_") and entry.endswith("_report_stats.json"):
-                    return True
-        except OSError:
-            continue
+        sample_dir = os.path.join(kraken_dir, sample_name)
+        if _dir_has_entry(os.path.join(sample_dir, "batch_reports"),
+                          lambda e: e.endswith(".kraken2.report.txt")):
+            return True
+        if _dir_has_entry(os.path.join(sample_dir, "stats"),
+                          lambda e: e.startswith("batch_")
+                          and e.endswith("_report_stats.json")):
+            return True
     return False
+
+
+def _dir_has_entry(path: str, predicate) -> bool:
+    """True when ``path`` is a directory holding an entry that satisfies ``predicate``."""
+    try:
+        return any(predicate(entry) for entry in os.listdir(path))
+    except OSError:
+        return False
 
 
 def _deduplicate_batch_files(filepaths: List[str]) -> List[str]:

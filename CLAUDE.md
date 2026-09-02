@@ -156,6 +156,22 @@ naming is recognised.
 Per-batch reports `*_batch*.kraken2.report.txt` are excluded — `load_kraken_latest_batch()`
 selects the highest-numbered batch and never sums across them.
 
+**A report under `<sample>/batch_reports/` is a delta, marker or no marker.**
+`_is_incremental_layout` decides whether the batch tier is summed (incremental
+deltas) or reduced to the highest-numbered file (the retired flat
+`kraken2/<sample>_batchN` snapshots). It used to look only for
+`<sample>/stats/batch_N_report_stats.json`, which nanometanf's
+`KRAKEN2_REPORT_GENERATOR` publishes one process after
+`KRAKEN2_OUTPUT_MERGER` has published the batch report itself. Every
+batch-tier poll of the round-4 audit's run R1 fell into that window, so the
+dashboard served one batch's reads for each barcode (324 of 938 for one
+sample) and the count moved 326 -> 324 as batches arrived (finding H27, the
+"batch-vs-cumulative arithmetic" that was in fact a single batch report
+against the cumulative). The directory itself is now sufficient evidence:
+nanometanf publishes `batch_reports/` only from the incremental flow.
+Regression-covered in `tests/test_classification_loaders.py`
+(`stats_marker=False` fixtures).
+
 **Authoritative taxonomy:** `apply_authoritative_taxonomy()` in `app/tabs/kraken2_helpers.py`
 parses `inspect.txt` from the Kraken2 DB to correct parent_taxid for Sankey/Sunburst.
 

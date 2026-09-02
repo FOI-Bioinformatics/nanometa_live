@@ -200,6 +200,21 @@ by a few reads (1,616 to 1,614 total; E. coli 35 to 30). The cumulative
 matches seqkit's QC-passed total (9,697), so the accumulation is the suspect.
 Both need an offline reproduction.
 
+**H27 resolved (2026-09-02, from the 20 s snapshots).** The two counts were
+not an accumulation against a cumulative. At 22:54:13 the sample
+`unclassified` had three batch reports of 288, 326 and 324 reads under
+`batch_reports/` and no `stats/batch_N_report_stats.json` yet; the loader
+took the legacy branch and served the highest-numbered batch alone, 326 and
+then 324, for a sample whose batches total 938. Every one of R1's ten
+batch-tier sample-ticks in the snapshots lacked the marker, so every barcode
+showed one batch's reads until its cumulative report arrived (1,616 for an
+aggregate whose batch files total 3,129). The marker is published by
+`KRAKEN2_REPORT_GENERATOR`, one process after `KRAKEN2_OUTPUT_MERGER` has
+published the batch report (`conf/modules.config`). `_is_incremental_layout`
+now treats a report under `<sample>/batch_reports/` as the delta layout in
+its own right; the loader on the same snapshot returns 938 / 608 / 577 and
+an aggregate of 3,129.
+
 ### H6b, H7, H15, H19. Continue on a completed outdir (confirmed live, R1c)
 
 - At 23:47:17 `kraken2/barcode05.cumulative...` (rewritten by the continued
@@ -366,9 +381,9 @@ hid the bug from the earlier tests.
 
 ## Still open after this session
 
-- **H27** (batch-vs-cumulative arithmetic differs by a few reads at the
-  switch) is the one loader item not yet explained; the replay harness now
-  makes it a short investigation.
+- ~~H27~~ closed the same morning: the "arithmetic difference" was the
+  highest-numbered batch report served alone while the stats marker lagged
+  (see the H26/H27 section).
 - **H15, H19** (Continue reclassifies everything and doubles the batch
   tree). The collision modal's "skip already-completed steps" wording is
   wrong for a real-time run; the pipeline's per-file wall-clock meta stamp
