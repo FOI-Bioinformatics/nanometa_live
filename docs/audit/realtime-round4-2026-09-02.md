@@ -301,6 +301,12 @@ the new tier never clears the flag set under the old tier.
   files are counted against a moving inbox.
 - **H35.** The two React `removeChild` console errors fire at the moment the
   Start/Stop button flips (Playwright console, 587 s = first Stop click).
+  Not reproduced on 2026-09-02: a headless Chromium drive of the real app
+  (welcome modal closed, Start, the optimistic flip, 45 s of a real
+  pipeline launch, Stop, confirm, the flip back) logged zero console errors
+  and zero page errors, and a harness of the real header, status and
+  Start/Stop callbacks flipped four times clean. The errors need a
+  populated dashboard, if they recur at all.
 - **Stop is two clicks.** `stop-confirm-modal` must be confirmed; a click on
   the header button alone stops nothing. Not a defect; a runbook note.
 
@@ -454,11 +460,26 @@ code-side items:
   with the staged input files. Pinned by a real-CHOPPER test in
   `tests/failure_paths.nf.test` (forced usage error, exit 2) and read into the
   report by nanometa_live.
+- **H4, the blind window.** Nextflow starts the `watchPath` listener in a
+  session igniter, after script evaluation, and takes the directory at that
+  moment as its never-reported baseline; the listing of existing files ran at
+  script evaluation. The watcher is now created first, the listing runs from
+  a later igniter and again ten seconds in, and a path is handed on once
+  (`lib/RealtimeIntake.groovy`). The drill (100 files renamed into the watch
+  dir at four per second, starting three seconds before `nextflow run`,
+  stub mode) lost one file to the window on the previous intake and takes
+  all 100 on the new one. The drill also exposed a second loss the audit had
+  not hypothesised: Nextflow's `file()` glob aborts on the first entry that
+  vanishes mid-walk (`No such file or directory: <dir> -- Skipping visit`
+  at DEBUG) and returns the partial listing -- 21 of the 30 files present in
+  one run, scattered. The listing no longer uses `file()`. `fastq_fail/` and
+  `fastq_skip/` are excluded at intake.
 
 ## Still open after this session
 
 - ~~H27~~ closed the same morning: the "arithmetic difference" was the
   highest-numbered batch report served alone while the stats marker lagged
   (see the H26/H27 section).
-- **H4 blind window, H35** and the unexercised list above. H15/H19 and H20
-  were closed on the pipeline side the same day (section above).
+- **H35** (not reproduced, see above) and the unexercised list above. H4,
+  H15/H19 and H20 were closed on the pipeline side the same day (section
+  above).

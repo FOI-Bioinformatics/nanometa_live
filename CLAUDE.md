@@ -1489,6 +1489,16 @@ with nanorunner and found the end of a run to be the least truthful moment:
   The collision modal's Continue text describes exactly that and says an
   older pipeline classifies everything again. Nextflow's task cache can never
   cover a real-time run: batch ids are assigned on arrival.
+- **Real-time intake has no start-up blind window (nanometanf dev,
+  2026-09-02).** Nextflow starts the `watchPath` listener in a session
+  igniter and takes the directory at that moment as its never-reported
+  baseline, so a listing taken at script evaluation left a gap. nanometanf
+  creates the watcher first, lists from a later igniter and again ten
+  seconds in, hands each path on once, and lists with its own vanish-tolerant
+  walk because `file()` returns a partial listing when an entry is renamed
+  away mid-walk (`lib/RealtimeIntake.groovy`). `fastq_fail/` and
+  `fastq_skip/` are excluded at intake, so a MinKNOW run folder is a valid
+  watch directory.
 - **Lost inputs have a marker.** nanometanf's QC and classification processes
   run `bin/nanometanf_lost_input_marker.sh` as their `afterScript` (which
   Nextflow runs after the command with `$nxf_main_ret` in scope); an exit-1/2
