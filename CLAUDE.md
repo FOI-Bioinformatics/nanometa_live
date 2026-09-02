@@ -1480,6 +1480,21 @@ with nanorunner and found the end of a run to be the least truthful moment:
   `nanopore_output_directory` from the live config while
   `backend-status.running`; the toast says pipeline settings apply to the
   next Start (H11).
+- **Continue in real time is the pipeline's job, not Nextflow's cache.**
+  nanometanf (dev, 2026-09-02) keeps `pipeline_info/processed_inputs.tsv`
+  (one line per batch that reached a per-batch report), skips ledgered files
+  at intake under `-resume`, seeds the cumulative accumulator from
+  `kraken2/<sample>/stats/batch_N_taxid_counts.json` and hands the previous
+  run's batch files to the final aggregator (`lib/RealtimeResume.groovy`).
+  The collision modal's Continue text describes exactly that and says an
+  older pipeline classifies everything again. Nextflow's task cache can never
+  cover a real-time run: batch ids are assigned on arrival.
+- **Lost inputs have a marker.** nanometanf's QC and classification processes
+  run `bin/nanometanf_lost_input_marker.sh` as their `afterScript` (which
+  Nextflow runs after the command with `$nxf_main_ret` in scope); an exit-1/2
+  failure writes `pipeline_info/lost_inputs/<STAGE>.<sample>.<hash>.json`
+  naming the staged input files. `run_status.read_lost_inputs` reads them
+  with or without run metadata and the report's `run_clause` lists them.
 - **Isolated task failures are recorded and named after the run.**
   `.nanometa.run.json` carries `processes_failed` and `failed_tasks`
   (trace labels such as `CHOPPER (barcode06_chunk3.fastq.gz)`);

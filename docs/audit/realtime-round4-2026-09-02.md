@@ -438,17 +438,27 @@ code-side items:
   the header's Complete line names up to three. The pipeline-side marker for
   a QC-stage loss remains open.
 
+## Pipeline side, 2026-09-02 (nanometanf dev)
+
+- **H15/H19.** `lib/RealtimeResume.groovy`: a ledger of finished inputs
+  (`pipeline_info/processed_inputs.tsv`, written when a batch reaches its
+  per-batch report), intake skips ledgered files under `-resume`, the
+  progressive cumulative accumulator is seeded from the previous run's
+  `stats/batch_N_taxid_counts.json`, and the final aggregator receives the
+  previous run's batch files. Unit tests in `tests/lib/realtime_resume.nf.test`;
+  a two-run stub drill confirms the second run skips every ledgered file and
+  writes the seeded cumulative report before any new batch.
+- **H20.** The QC and classification processes run
+  `bin/nanometanf_lost_input_marker.sh` as their `afterScript`; an exit-1/2
+  failure leaves `pipeline_info/lost_inputs/<STAGE>.<sample>.<hash>.json`
+  with the staged input files. Pinned by a real-CHOPPER test in
+  `tests/failure_paths.nf.test` (forced usage error, exit 2) and read into the
+  report by nanometa_live.
+
 ## Still open after this session
 
 - ~~H27~~ closed the same morning: the "arithmetic difference" was the
   highest-numbered batch report served alone while the stats marker lagged
   (see the H26/H27 section).
-- **H15, H19, pipeline side** (Continue reclassifies everything and doubles
-  the batch tree): the per-file wall-clock meta stamp in
-  `realtime_monitoring/main.nf` is the reason no task can cache-hit. The
-  modal wording was corrected in the second pass.
-- **H20 pipeline side.** A QC-stage failure is never an expected batch, so
-  `aggregation_stats.json` cannot see it; a per-file loss marker written when
-  the task is ignored would close this. The GUI now records and names the
-  failed tasks from the trace.
-- **H4 blind window, H35** and the unexercised list above.
+- **H4 blind window, H35** and the unexercised list above. H15/H19 and H20
+  were closed on the pipeline side the same day (section above).
