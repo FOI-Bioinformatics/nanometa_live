@@ -286,6 +286,38 @@ def register_start_stop(app, backend_manager):
                 no_update,
             )
 
+        # Resolve the run directory exactly as the first-Start handler does.
+        # The collision path used to take the app-config State as is; a tab
+        # whose Store never carried a results_output_directory (H34) then
+        # launched with an empty one and nanometanf fell back to a fresh
+        # ~/.nanometa/data/analysis_<ts>, while this modal had just promised
+        # to continue in `outdir` (round-4 audit, H33, observed live).
+        from nanometa_live.app.utils.outdir_resolution import resolve_run_outdir
+        resolved = resolve_run_outdir(config) or outdir or ""
+        if not resolved:
+            return (
+                False,
+                {
+                    "title": "Results folder unknown",
+                    "message": (
+                        "Could not determine the results folder for this run. "
+                        "Set the Run name or the Results folder in the "
+                        "Configuration tab and try again."
+                    ),
+                    "color": "danger",
+                },
+                no_update,
+                no_update,
+            )
+        if outdir and os.path.abspath(resolved) != os.path.abspath(outdir):
+            logging.warning(
+                "Collision decision: resolved run dir %s differs from the "
+                "directory the modal described (%s); using the described one",
+                resolved, outdir,
+            )
+            resolved = outdir
+        config = dict(config)
+        config["results_output_directory"] = resolved
         backend_manager.config = config
 
         if triggered == "collision-archive-btn":
