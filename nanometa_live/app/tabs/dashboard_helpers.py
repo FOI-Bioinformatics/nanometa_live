@@ -1092,6 +1092,7 @@ def _data_verdict(
     stale_samples,
     run_stopped=False,
     stop_reason=None,
+    failed_tasks=0,
 ) -> VerdictDescriptor:
     """The data-available branch of select_verdict (extracted, still pure).
 
@@ -1100,7 +1101,7 @@ def _data_verdict(
     suppresses a hit -- but run health outranks every non-detection state.
     """
     health = dict(stale_samples=stale_samples, run_stopped=run_stopped,
-                  stop_reason=stop_reason)
+                  stop_reason=stop_reason, failed_tasks=failed_tasks)
     if dangerous:
         return _with_failure_clauses(
             _detection_descriptor(
@@ -1170,6 +1171,7 @@ def select_verdict(
     stale_samples: int = 0,
     run_stopped: bool = False,
     stop_reason: Optional[str] = None,
+    failed_tasks: int = 0,
 ) -> VerdictDescriptor:
     """Pure decision: pick the verdict banner state from the analysis inputs.
 
@@ -1218,6 +1220,7 @@ def select_verdict(
             stale_samples=stale_samples,
             run_stopped=run_stopped,
             stop_reason=stop_reason,
+            failed_tasks=failed_tasks,
         )
 
     # A directory that held data earlier and is now unreadable is an event

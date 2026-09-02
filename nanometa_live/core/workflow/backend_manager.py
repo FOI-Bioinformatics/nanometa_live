@@ -990,7 +990,15 @@ class BackendManager:
             elapsed = (_dt.now() - start_dt).total_seconds()
         except (TypeError, ValueError):
             return None
-        remaining = int(int(timeout_minutes) * 60 - elapsed)
+        # The pipeline's timer fires at timeout PLUS its grace period from
+        # the start of monitoring (nanometanf realtime_processing_grace_period,
+        # default 5). The chip used to count only the timeout and vanished
+        # five minutes before the run actually ended (round-4 audit, H2).
+        try:
+            grace = int(self.config.get("realtime_processing_grace_period", 5) or 0)
+        except (TypeError, ValueError):
+            grace = 5
+        remaining = int((int(timeout_minutes) + grace) * 60 - elapsed)
         return max(0, remaining)
 
     # TTL for the cached file count below. Each interval tick on the

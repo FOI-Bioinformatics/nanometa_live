@@ -160,6 +160,16 @@ def register_status(app, backend_manager):
             details = [
                 f"Files processed: {files_processed} / {total_files}",
             ]
+            # A failed-and-ignored task is otherwise invisible while the run
+            # is active (round-4 H20): name the count next to the progress.
+            try:
+                n_failed = int(status.get("processes_failed") or 0)
+            except (TypeError, ValueError):
+                n_failed = 0
+            if n_failed:
+                details.append(
+                    f"{n_failed} task{'s' if n_failed != 1 else ''} failed (skipped)"
+                )
 
             if status.get("last_update"):
                 timestamp = time.strftime(

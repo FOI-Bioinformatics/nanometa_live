@@ -98,6 +98,7 @@ def with_failure_clauses(
     stale_samples: int = 0,
     run_stopped: bool = False,
     stop_reason: Optional[str] = None,
+    failed_tasks: int = 0,
 ) -> VerdictDescriptor:
     """Append run-health clauses to a data-state descriptor's subtitle.
 
@@ -121,6 +122,15 @@ def with_failure_clauses(
         if stop_reason:
             clause += f" ({stop_reason})"
         clauses.append(clause + " - counts are partial")
+    if failed_tasks:
+        # nanometanf isolates per-sample failures (errorStrategy ignore) and
+        # the run carries on; the reads of a failed batch are simply absent
+        # from every count. Round-4 audit, H20: a corrupt input chunk failed
+        # in QC and no surface said so while the run was active.
+        clauses.append(
+            f"{failed_tasks} pipeline task{'s' if failed_tasks != 1 else ''} "
+            "failed and were skipped - their reads are not in these counts"
+        )
     if stale_samples:
         clauses.append(
             f"{stale_samples} sample{'s' if stale_samples != 1 else ''} "

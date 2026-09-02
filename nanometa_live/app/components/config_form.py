@@ -772,13 +772,16 @@ def _processing_settings_item():
                     placeholder="Leave empty to run indefinitely"
                 ),
                 dbc.FormText(
-                    "Stop real-time monitoring after this many minutes without new files. "
-                    "Empty = run until manually stopped."
+                    "Stop watching for new files this many minutes after the run starts, "
+                    "plus a 5 minute grace period, whether or not files are still arriving. "
+                    "Empty = watch until manually stopped."
                 ),
                 dbc.Tooltip(
-                    "Only applies in real-time mode. The pipeline watches for new FASTQ files "
-                    "and stops when no new files appear within this window. Maps to nanometanf's "
-                    "--realtime_timeout_minutes. Default 60; clear the field for no timeout.",
+                    "Only applies in real-time mode. nanometanf schedules a single wall-clock "
+                    "timer at --realtime_timeout_minutes plus its grace period from the start of "
+                    "monitoring; files that arrive after it fires are not classified and the run "
+                    "is reported complete. Set it longer than the sequencing run, or clear the "
+                    "field for no timeout. Default 60.",
                     target="realtime-timeout-minutes-info"
                 )
             ], md=6),

@@ -183,3 +183,47 @@ class TestHeaderStatusText:
         assert text.lower().startswith("stopped")
         assert "58" in detail
         assert "Click 'Start Analysis'" not in detail
+
+
+class TestFailedTasksAreNamed:
+    """H20: an isolated (ignored) task failure drops its reads from every
+    count and no surface said so while the run was active."""
+
+    def test_verdict_names_skipped_tasks(self):
+        from nanometa_live.app.tabs.dashboard_helpers import select_verdict
+        d = select_verdict(
+            has_config=True, pipeline_running=True, overall_status_starting=False,
+            main_dir_available=True, kraken_has_data=True, dangerous=[],
+            n_watched=129, validation_has_results=False, total_reads=9697,
+            failed_tasks=1,
+        )
+        assert d.state == "ALL_CLEAR"
+        assert "1 pipeline task failed" in d.subtitle
+        assert "not in these counts" in d.subtitle
+
+    def test_header_names_skipped_tasks_while_running(self):
+        from dash import Dash
+        from nanometa_live.app.callbacks.status import register_status
+        from tests.dash_test_utils import get_callback_fn
+
+        app = Dash(__name__)
+        register_status(app, MagicMock())
+        fn = get_callback_fn(app, "status-indicator", input_contains="backend-status")
+        _color, text, detail = fn(
+            {"running": True, "files_processed": 66, "files_waiting": 63,
+             "processes_failed": 2},
+            {"processing_mode": "realtime"},
+        )
+        assert text == "RUNNING"
+        assert "2 tasks failed" in detail
+
+
+class TestAutoStopCountdownMatchesThePipelineTimer:
+    def test_countdown_includes_the_grace_period(self, tmp_path):
+        from datetime import datetime
+        manager = BackendManager(str(tmp_path))
+        manager.config = {"processing_mode": "realtime", "realtime_timeout_minutes": 3}
+        manager.status["running"] = True
+        manager.status["start_time"] = datetime.now().isoformat()
+        remaining = manager._compute_auto_stop_remaining()
+        assert 7 * 60 < remaining <= 8 * 60, "3 min timeout + 5 min grace"

@@ -293,6 +293,12 @@ def register_dashboard_callbacks(app: Dash):
         # a run that never started.
         run_stopped = bool(status and status.get("stopped_run"))
         stop_reason = (status or {}).get("stop_reason")
+        # Isolated task failures (errorStrategy ignore) drop their reads
+        # from every count without stopping the run; say so (round-4 H20).
+        try:
+            failed_tasks = int((status or {}).get("processes_failed") or 0)
+        except (TypeError, ValueError):
+            failed_tasks = 0
 
         if pipeline_running:
             run_state = "ACTIVE"
@@ -408,6 +414,7 @@ def register_dashboard_callbacks(app: Dash):
             stale_samples=stale_sample_count(main_dir),
             run_stopped=run_stopped,
             stop_reason=stop_reason,
+            failed_tasks=failed_tasks,
         )
 
         # Per-sample attribution for the ACTION REQUIRED subhead (closes
