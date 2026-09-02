@@ -241,13 +241,29 @@
   {% set critical_threats = detected_threats | selectattr("threat_level", "equalto", "critical") | list %}
   {% set high_threats = detected_threats | selectattr("threat_level", "equalto", "high") | list %}
 
+  {#
+    Run state (round-4 audit, H2/H13). A report over a stopped run or an
+    export taken while the pipeline is still active must say so: three live
+    Stop drills and one mid-run export produced reports worded identically to
+    one over a run that drained its input. Detections above still win; the
+    clause qualifies coverage, never the finding.
+  #}
+  {% set run_partial = data.run_state in ("stopped", "active") %}
+  {% if data.run_state == "stopped" %}
+    {% set run_clause = " (run stopped" ~ (" - " ~ data.stop_reason if data.stop_reason else "") ~ " - coverage is partial)" %}
+  {% elif data.run_state == "active" %}
+    {% set run_clause = " (interim snapshot - the run was still active when this report was generated)" %}
+  {% else %}
+    {% set run_clause = "" %}
+  {% endif %}
+
   {% if critical_threats or high_threats %}
   <div class="decision-banner banner-action">
-    ACTION REQUIRED - {{ (critical_threats | length) + (high_threats | length) }} high-priority organism{{ "s" if (critical_threats | length) + (high_threats | length) != 1 else "" }} detected{% if data.pipeline_error %} (pipeline error - coverage is partial){% endif %}
+    ACTION REQUIRED - {{ (critical_threats | length) + (high_threats | length) }} high-priority organism{{ "s" if (critical_threats | length) + (high_threats | length) != 1 else "" }} detected{% if data.pipeline_error %} (pipeline error - coverage is partial){% endif %}{{ run_clause }}
   </div>
   {% elif detected_threats %}
   <div class="decision-banner banner-review">
-    REVIEW RECOMMENDED - {{ detected_threats | length }} watched organism{{ "s" if detected_threats | length != 1 else "" }} detected{% if data.pipeline_error %} (pipeline error - coverage is partial){% endif %}
+    REVIEW RECOMMENDED - {{ detected_threats | length }} watched organism{{ "s" if detected_threats | length != 1 else "" }} detected{% if data.pipeline_error %} (pipeline error - coverage is partial){% endif %}{{ run_clause }}
   </div>
   {% elif data.pipeline_error %}
   {#
@@ -274,7 +290,7 @@
     outlives the session that produced it.
   #}
   <div class="decision-banner banner-review">
-    NOT SCREENED - no watchlist was active, so no organisms were checked
+    NOT SCREENED - no watchlist was active, so no organisms were checked{{ run_clause }}
   </div>
   {% elif data.total_reads is not none and data.low_read_floor
           and data.total_reads < data.low_read_floor %}
@@ -294,11 +310,11 @@
     cannot compute it emit a false INSUFFICIENT READS.
   #}
   <div class="decision-banner banner-review">
-    INSUFFICIENT READS - only {{ "{:,}".format(data.total_reads) }} read{{ "s" if data.total_reads != 1 else "" }} analysed, too few for a reliable negative across {{ data.watched_results | length }} watched organism{{ "s" if data.watched_results | length != 1 else "" }}
+    INSUFFICIENT READS - only {{ "{:,}".format(data.total_reads) }} read{{ "s" if data.total_reads != 1 else "" }} analysed, too few for a reliable negative across {{ data.watched_results | length }} watched organism{{ "s" if data.watched_results | length != 1 else "" }}{{ run_clause }}
   </div>
   {% else %}
   <div class="decision-banner banner-safe">
-    NO WATCHED ORGANISMS DETECTED - {{ data.watched_results | length }} organism{{ "s" if data.watched_results | length != 1 else "" }} screened
+    NO WATCHED ORGANISMS DETECTED - {{ data.watched_results | length }} organism{{ "s" if data.watched_results | length != 1 else "" }} screened{{ run_clause }}
   </div>
   {% endif %}
 

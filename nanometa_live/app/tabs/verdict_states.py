@@ -96,12 +96,19 @@ def with_failure_clauses(
     pipeline_error: bool = False,
     pipeline_error_detail: Optional[str] = None,
     stale_samples: int = 0,
+    run_stopped: bool = False,
+    stop_reason: Optional[str] = None,
 ) -> VerdictDescriptor:
     """Append run-health clauses to a data-state descriptor's subtitle.
 
     Used on the states that outrank the failure states (detections,
     sub-threshold hits, all-clear): the verdict keeps its identity, and the
     subtitle carries what the operator must also know about the run.
+
+    ``run_stopped`` names a run ended by the operator or by the inactivity
+    backstop before its input was exhausted (round-4 audit, H2): an ALL
+    CLEAR over such a run is a partial screen, and the banner must not read
+    like one over a finished run.
     """
     clauses = []
     if pipeline_error:
@@ -109,6 +116,11 @@ def with_failure_clauses(
         if pipeline_error_detail:
             clause += f" ({pipeline_error_detail})"
         clauses.append(clause)
+    if run_stopped:
+        clause = "run stopped before its input was exhausted"
+        if stop_reason:
+            clause += f" ({stop_reason})"
+        clauses.append(clause + " - counts are partial")
     if stale_samples:
         clauses.append(
             f"{stale_samples} sample{'s' if stale_samples != 1 else ''} "

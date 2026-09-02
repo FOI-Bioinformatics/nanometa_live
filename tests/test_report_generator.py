@@ -834,3 +834,41 @@ class TestPipelineErrorParity:
         content = gen.generate(str(tmp_path / "export"),
                                include_raw=False).read_text()
         assert "PIPELINE ERROR" not in content
+
+
+class TestRunStateParity:
+    """A stopped run, or an export taken mid-run, must say so in the report.
+
+    Round-4 audit (H2/H13): three live Stop drills and one mid-run export
+    produced reports worded identically to one over a run that drained its
+    input. The clause qualifies coverage; a detection above still wins.
+    """
+
+    def _write_meta(self, results_dir, **meta):
+        import json
+        base = {"fingerprint": "x", "written_at": "2026-09-01T23:07:22"}
+        base.update(meta)
+        (Path(results_dir) / ".nanometa.run.json").write_text(json.dumps(base))
+
+    def _content(self, batch_output_dir, tmp_path):
+        gen = ReportGenerator(str(batch_output_dir), {"analysis_name": "Test Run"})
+        return gen.generate(str(tmp_path / "export"), include_raw=False).read_text()
+
+    def test_stopped_run_is_marked_partial(self, batch_output_dir, tmp_path):
+        self._write_meta(batch_output_dir, final_status="stopped",
+                         stop_reason="operator", files_processed=58)
+        content = self._content(batch_output_dir, tmp_path)
+        assert "run stopped" in content
+        assert "coverage is partial" in content
+
+    def test_mid_run_export_is_an_interim_snapshot(self, batch_output_dir, tmp_path):
+        self._write_meta(batch_output_dir)
+        (Path(batch_output_dir) / ".nanometa.lock").write_text("pid 1")
+        content = self._content(batch_output_dir, tmp_path)
+        assert "interim snapshot" in content
+
+    def test_completed_run_carries_no_run_clause(self, batch_output_dir, tmp_path):
+        self._write_meta(batch_output_dir, final_status="completed")
+        content = self._content(batch_output_dir, tmp_path)
+        assert "run stopped" not in content
+        assert "interim snapshot" not in content

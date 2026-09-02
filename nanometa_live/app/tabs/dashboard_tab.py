@@ -242,6 +242,7 @@ def register_dashboard_callbacks(app: Dash):
             "ACTIVE" if pipeline_running_now
             else "ERROR" if pipeline_error_now
             else "COMPLETE" if bool(status and status.get("completed"))
+            else "STOPPED" if bool(status and status.get("stopped_run"))
             else "STANDBY"
         )
         state_changed = _VERDICT_LAST_RUN_STATE.get("v") != run_state_now
@@ -287,6 +288,12 @@ def register_dashboard_callbacks(app: Dash):
             str(pipeline_errors[-1]) if pipeline_errors else None
         )
 
+        # A stopped run (operator Stop or the inactivity backstop) is
+        # neither idle nor complete; round-4 H2 found it wearing the badge of
+        # a run that never started.
+        run_stopped = bool(status and status.get("stopped_run"))
+        stop_reason = (status or {}).get("stop_reason")
+
         if pipeline_running:
             run_state = "ACTIVE"
             run_state_color = "success"
@@ -296,6 +303,9 @@ def register_dashboard_callbacks(app: Dash):
         elif pipeline_completed:
             run_state = "COMPLETE"
             run_state_color = "info"
+        elif run_stopped:
+            run_state = "STOPPED"
+            run_state_color = "warning"
         else:
             run_state = "STANDBY"
             run_state_color = "secondary"
@@ -396,6 +406,8 @@ def register_dashboard_callbacks(app: Dash):
             pipeline_error_detail=pipeline_error_detail,
             results_dir_lost=results_dir_lost,
             stale_samples=stale_sample_count(main_dir),
+            run_stopped=run_stopped,
+            stop_reason=stop_reason,
         )
 
         # Per-sample attribution for the ACTION REQUIRED subhead (closes

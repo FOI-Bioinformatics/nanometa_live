@@ -207,6 +207,7 @@ def _make_banner_content(
     run_state_color = (
         "success" if run_state == "ACTIVE"
         else "info" if run_state == "COMPLETE"
+        else "warning" if run_state == "STOPPED"
         else "secondary"
     )
     # Icon visibility: ACTION REQUIRED always shows; others hide on mobile
@@ -1089,6 +1090,8 @@ def _data_verdict(
     pipeline_error,
     pipeline_error_detail,
     stale_samples,
+    run_stopped=False,
+    stop_reason=None,
 ) -> VerdictDescriptor:
     """The data-available branch of select_verdict (extracted, still pure).
 
@@ -1096,6 +1099,8 @@ def _data_verdict(
     sub-threshold > all-clear. A hit outranks run health -- a verdict never
     suppresses a hit -- but run health outranks every non-detection state.
     """
+    health = dict(stale_samples=stale_samples, run_stopped=run_stopped,
+                  stop_reason=stop_reason)
     if dangerous:
         return _with_failure_clauses(
             _detection_descriptor(
@@ -1104,7 +1109,7 @@ def _data_verdict(
             ),
             pipeline_error=pipeline_error,
             pipeline_error_detail=pipeline_error_detail,
-            stale_samples=stale_samples,
+            **health,
         )
     if pipeline_error:
         if subthreshold:
@@ -1112,7 +1117,7 @@ def _data_verdict(
                 _subthreshold_descriptor(subthreshold, n_watched, total_reads),
                 pipeline_error=True,
                 pipeline_error_detail=pipeline_error_detail,
-                stale_samples=stale_samples,
+                **health,
             )
         return _pipeline_error_descriptor(
             pipeline_error_detail, has_partial_data=True)
@@ -1136,12 +1141,12 @@ def _data_verdict(
     if subthreshold:
         return _with_failure_clauses(
             _subthreshold_descriptor(subthreshold, n_watched, total_reads),
-            stale_samples=stale_samples,
+            **health,
         )
 
     return _with_failure_clauses(
         _all_clear_descriptor(n_watched, total_reads),
-        stale_samples=stale_samples,
+        **health,
     )
 
 
@@ -1163,6 +1168,8 @@ def select_verdict(
     pipeline_error_detail: Optional[str] = None,
     results_dir_lost: bool = False,
     stale_samples: int = 0,
+    run_stopped: bool = False,
+    stop_reason: Optional[str] = None,
 ) -> VerdictDescriptor:
     """Pure decision: pick the verdict banner state from the analysis inputs.
 
@@ -1185,7 +1192,8 @@ def select_verdict(
        STANDBY.
 
     ``stale_samples`` appends a clause to the data-state subtitles so
-    frozen numbers cannot present as live ones.
+    frozen numbers cannot present as live ones; ``run_stopped`` does the
+    same for a run ended before its input was exhausted (round-4 H2).
     """
     if not has_config:
         return _screening_descriptor() if pipeline_running else _standby_descriptor()
@@ -1208,6 +1216,8 @@ def select_verdict(
             pipeline_error=pipeline_error,
             pipeline_error_detail=pipeline_error_detail,
             stale_samples=stale_samples,
+            run_stopped=run_stopped,
+            stop_reason=stop_reason,
         )
 
     # A directory that held data earlier and is now unreadable is an event

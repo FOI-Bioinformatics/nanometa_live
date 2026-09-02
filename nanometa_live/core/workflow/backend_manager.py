@@ -48,6 +48,11 @@ class BackendManager:
         self.config = None
         self.status_thread = None
         self._status_lock = threading.Lock()  # Thread safety for status updates
+        # Set BEFORE the Nextflow process is signalled so the monitor thread,
+        # which polls every 5 s and may see the dead process first, records
+        # the run as stopped rather than completed or errored (round-4 audit,
+        # H3). Cleared at the next start().
+        self._stop_intent: Optional[str] = None
         # Note: legacy _prep_status_lock removed along with prepare_data methods
         self._lock_fd: Optional[IO] = None  # File lock descriptor for multi-user safety
         self._lock_file_path: Optional[str] = None  # Path to lock file
@@ -788,6 +793,9 @@ class BackendManager:
             self.status["pipeline_status"] = "running"
             self.status["start_time"] = datetime.now().isoformat()
             self.status["last_update"] = time.time()
+            self.status.pop("stop_reason", None)
+            self.status.pop("ended_at", None)
+            self._stop_intent = None
 
         # Start status monitoring thread
         self.status_thread = threading.Thread(target=self._monitor_status, daemon=True)
@@ -848,6 +856,10 @@ class BackendManager:
         if not self.status.get("running"):
             return False, "Backend is not running"
 
+        # Declare the intent first: workflow_manager.stop() blocks for up to
+        # 30 s, and the monitor thread polls in that window (round-4 H3).
+        self._mark_stop_intent("operator")
+
         # Stop the Nextflow workflow
         success, message = self.workflow_manager.stop()
         if not success:
@@ -858,12 +870,12 @@ class BackendManager:
         # Release exclusive lock on results directory
         self._release_lock()
 
-        # Mark as stopped (thread-safe)
+        # Mark as stopped (thread-safe) and leave the terminal record the
+        # exported report reads (round-4 H2: three live Stop drills left no
+        # final_status, so the report over an aborted run read like one over
+        # a run that drained its input).
         with self._status_lock:
-            self.status["running"] = False
-            self.status["pipeline_status"] = "stopped"
-            self.status["errors"] = []  # Clear errors from user-initiated stop
-            self.status["last_update"] = time.time()
+            self._finish_stopped_locked("operator")
 
         # A realtime run ends via Stop, so this is its natural moment to
         # leave a report behind; best-effort, never fails the stop.
@@ -940,6 +952,12 @@ class BackendManager:
             # written, so a finished run rendered as STANDBY instead of COMPLETE.
             self.status["completed"] = (
                 self.status.get("pipeline_status") == "completed"
+            )
+            # "stopped" doubles as the idle state above, so a real stop is
+            # the one that carries a reason (round-4 H2).
+            self.status["stopped_run"] = bool(
+                self.status.get("pipeline_status") == "stopped"
+                and self.status.get("stop_reason")
             )
 
             # Return a copy to prevent external modification
@@ -1095,24 +1113,7 @@ class BackendManager:
                     idle = self.inactivity_elapsed_s(
                         last_progress_monotonic, time.monotonic())
                     if idle >= timeout_seconds:
-                        logging.warning(
-                            f"Realtime inactivity timeout reached after "
-                            f"{idle / 60:.1f} minutes with no task progress, "
-                            f"stopping pipeline"
-                        )
-                        with self._status_lock:
-                            self.status["running"] = False
-                            self.status["pipeline_status"] = "stopped"
-                            self.status["errors"].append(
-                                f"Pipeline stopped: realtime inactivity timeout "
-                                f"({int(timeout_seconds / 60)} minutes with no "
-                                f"task progress) reached"
-                            )
-                        # Stop the underlying Nextflow process
-                        try:
-                            self.workflow_manager.stop()
-                        except (OSError, RuntimeError, AttributeError) as e:
-                            logging.exception(f"Error stopping pipeline after timeout: {e}")
+                        self._stop_for_inactivity(timeout_seconds, idle)
                         break
 
                 # Thread-safe status update. Report generation is deferred
@@ -1175,6 +1176,12 @@ class BackendManager:
         assemble). The isolated failure is still reported, as a warning naming
         the tasks, so nothing is hidden.
         """
+        if self._stop_intent:
+            # A deliberate stop is in progress; the dead process is what was
+            # asked for. stop() owns the report, so do not signal completion.
+            self._finish_stopped_locked(self._stop_intent)
+            return False
+
         workflow_errors = workflow_status.get("errors", [])
         if workflow_errors:
             self._fail_run(workflow_errors)
@@ -1228,6 +1235,44 @@ class BackendManager:
         """Idle seconds for the realtime timeout, on the monotonic clock."""
         return max(0.0, now_monotonic - last_progress_monotonic)
 
+    def _mark_stop_intent(self, reason: str) -> None:
+        """Record that the run is being stopped on purpose (lock-free flag)."""
+        self._stop_intent = reason
+
+    def _finish_stopped_locked(self, reason: str) -> None:
+        """Classify the run as stopped and leave the terminal record.
+
+        Call with ``self._status_lock`` held. Idempotent: the monitor thread
+        and stop() may both reach it for the same run.
+        """
+        self.status["running"] = False
+        self.status["pipeline_status"] = "stopped"
+        self.status["stop_reason"] = reason
+        self.status["ended_at"] = datetime.now().isoformat(timespec="seconds")
+        # A deliberate stop makes Nextflow exit non-zero; that is not an error.
+        self.status["errors"] = []
+        self.status["last_update"] = time.time()
+        self._record_final_status()
+
+    def _stop_for_inactivity(self, timeout_seconds: int, idle_s: float) -> None:
+        """The GUI's inactivity backstop: stop, record why, leave a report."""
+        reason = (
+            f"inactivity timeout: no task progress for "
+            f"{int(timeout_seconds / 60)} minutes"
+        )
+        logging.warning(
+            f"Realtime inactivity timeout reached after {idle_s / 60:.1f} "
+            f"minutes with no task progress, stopping pipeline"
+        )
+        self._mark_stop_intent(reason)
+        try:
+            self.workflow_manager.stop()
+        except (OSError, RuntimeError, AttributeError) as e:
+            logging.exception(f"Error stopping pipeline after timeout: {e}")
+        with self._status_lock:
+            self._finish_stopped_locked(reason)
+        self._auto_generate_report()
+
     def _record_final_status(self) -> None:
         """Merge the terminal classification into .nanometa.run.json.
 
@@ -1246,6 +1291,13 @@ class BackendManager:
             meta = self.read_run_metadata(outdir) or {}
             meta["final_status"] = self.status.get("pipeline_status")
             meta["final_errors"] = list(self.status.get("errors") or [])
+            # Why and when the run ended, and how far it got: the report
+            # states these so a stopped run cannot read like a finished one.
+            if self.status.get("stop_reason"):
+                meta["stop_reason"] = self.status["stop_reason"]
+            meta["ended_at"] = self.status.get("ended_at") or datetime.now().isoformat(
+                timespec="seconds")
+            meta["files_processed"] = int(self.status.get("files_processed") or 0)
             from nanometa_live.core.utils.atomic_write import atomic_write_json
             atomic_write_json(path, meta)
         except Exception:

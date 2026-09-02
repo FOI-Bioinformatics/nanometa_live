@@ -175,6 +175,19 @@ def register_status(app, backend_manager):
         if status.get("pipeline_status") == "completed":
             return "blue", "Complete", "Pipeline finished successfully"
 
+        # A stopped run is neither idle nor complete (round-4 audit, H2): say
+        # why it ended, when, and how far it got, instead of inviting a Start.
+        if status.get("stopped_run") or status.get("stop_reason"):
+            reason = status.get("stop_reason") or "stopped"
+            details = [f"Run stopped ({reason})"]
+            ended_at = status.get("ended_at")
+            if ended_at:
+                details.append(f"at {str(ended_at)[11:19] or ended_at}")
+            processed = status.get("files_processed")
+            if processed is not None:
+                details.append(f"{processed} files processed")
+            return "orange", "Stopped", ", ".join(details)
+
         return "gray", "STANDBY", "Click 'Start Analysis' to begin processing"
 
     @app.callback(
