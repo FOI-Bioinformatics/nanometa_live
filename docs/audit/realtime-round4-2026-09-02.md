@@ -400,16 +400,55 @@ tier switch no longer drops the aggregate. Pinned by
 clock instead of touching mtimes, because touching an mtime is exactly what
 hid the bug from the earlier tests.
 
+## Second pass, 2026-09-02 morning (replay-driven)
+
+With the loader fixed, the snapshot replay at the sampler's 2 s cadence
+(`scripts/audit_replay_snapshots.py` plus a fine-cadence variant, 56 ticks
+over R1 22:53:35-22:55:35) ran clean: aggregate monotonic, every sample
+measured on every tick, aggregate equal to the per-sample sum, 0 checker
+violations. **H26** (per-sample values lagging the aggregate by one batch
+for up to 15 s) does not reproduce on the current code; its live shape --
+a value served until the file's next rewrite -- is the last-good caching
+defect fixed with H6/H28, and it is closed with them.
+
+The same replay exposed one more gap and the pass closed the remaining
+code-side items:
+
+- **Sample list empty while the aggregate carried reads.** At 22:53:15 the
+  sample directories held only `kraken2/<sample>/reports/` (the
+  incremental classifier publishes there first); `detect_samples_from_kraken`
+  recognised only `batch_reports/` and `batches/`, and because
+  `get_available_samples` caches on the top-level directory mtimes, the
+  merger's `batch_reports/` appearing INSIDE those directories never
+  refreshed the empty list: 1,963 aggregate reads against no samples for a
+  full snapshot. Any of nanometanf's per-sample folders now names the
+  sample. Live, R1 was covered by the QC output naming the samples first.
+- **H36.** `realtime_batch_stats/` was not archived, and a Continue sums the
+  previous run's snapshots with the new ones. The folder is in
+  `RESULT_SUBDIRS`; the parser ignores snapshots older than the launch.
+- **H11.** Apply Settings takes `backend-status`; while a run is active it
+  keeps the live run's input and results folders and says that pipeline
+  settings apply to the next Start.
+- **H15/H19, GUI side.** The Continue option describes what `-resume` does
+  in real time (everything reclassified from zero, batch tree doubled).
+  The pipeline-side cause is unchanged.
+- **H20, after the run.** `failed_tasks` and `processes_failed` are recorded
+  in `.nanometa.run.json` at run end; the report's run clause names the
+  skipped tasks and states that their reads are absent from every count;
+  the header's Complete line names up to three. The pipeline-side marker for
+  a QC-stage loss remains open.
+
 ## Still open after this session
 
 - ~~H27~~ closed the same morning: the "arithmetic difference" was the
   highest-numbered batch report served alone while the stats marker lagged
   (see the H26/H27 section).
-- **H15, H19** (Continue reclassifies everything and doubles the batch
-  tree). The collision modal's "skip already-completed steps" wording is
-  wrong for a real-time run; the pipeline's per-file wall-clock meta stamp
-  is the reason no task can cache-hit.
+- **H15, H19, pipeline side** (Continue reclassifies everything and doubles
+  the batch tree): the per-file wall-clock meta stamp in
+  `realtime_monitoring/main.nf` is the reason no task can cache-hit. The
+  modal wording was corrected in the second pass.
 - **H20 pipeline side.** A QC-stage failure is never an expected batch, so
   `aggregation_stats.json` cannot see it; a per-file loss marker written when
-  the task is ignored would close this.
-- **H4 blind window, H11, H36, H35** and the unexercised list above.
+  the task is ignored would close this. The GUI now records and names the
+  failed tasks from the trace.
+- **H4 blind window, H35** and the unexercised list above.

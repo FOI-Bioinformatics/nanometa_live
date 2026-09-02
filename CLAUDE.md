@@ -1467,6 +1467,26 @@ with nanorunner and found the end of a run to be the least truthful moment:
 - **On-demand validation waits for the run to end.** It shares the live
   run's launch dir, work dir and outdir and adds a bare `-resume`; the
   modal explains instead of arming a launch while `backend-status.running`.
+- **Any kraken2/<sample>/ folder names the sample.** `_NESTED_SAMPLE_SUBDIRS`
+  (`reports`, `batch_reports`, `batches`, `stats`) in `sample_detector`; the
+  incremental classifier publishes `reports/` first, and because
+  `get_available_samples` caches on TOP-LEVEL directory mtimes, a folder
+  appearing inside an existing sample directory never refreshes the list.
+- **"Files processed" is this run's.** `NextflowManager._launched_at` is
+  stamped at launch and `_parse_realtime_stats` ignores older snapshots;
+  `realtime_batch_stats` is in `RESULT_SUBDIRS` so Archive moves it (H36).
+- **Apply Settings pins a running run's folders.** `pin_running_run_paths`
+  (`config_tab_helpers.py`) restores `results_output_directory` and
+  `nanopore_output_directory` from the live config while
+  `backend-status.running`; the toast says pipeline settings apply to the
+  next Start (H11).
+- **Isolated task failures are recorded and named after the run.**
+  `.nanometa.run.json` carries `processes_failed` and `failed_tasks`
+  (trace labels such as `CHOPPER (barcode06_chunk3.fastq.gz)`);
+  `read_final_run_status` exposes them, the report's `run_clause` names
+  them and states their reads are absent from every count, and the header's
+  Complete line names up to three (H20). Neither the manifest nor
+  `aggregation_stats.json` can see a QC-stage loss.
 
 Measurement traps from the same audit: a Chrome MCP tab covered by another
 window is `document.hidden` and stops polling entirely (use the Playwright
