@@ -236,11 +236,6 @@
     </p>
   </header>
 
-  <!-- DECISION BANNER -->
-  {% set detected_threats = data.watched_results | selectattr("detected") | list %}
-  {% set critical_threats = detected_threats | selectattr("threat_level", "equalto", "critical") | list %}
-  {% set high_threats = detected_threats | selectattr("threat_level", "equalto", "high") | list %}
-
   {#
     Run state (round-4 audit, H2/H13). A report over a stopped run or an
     export taken while the pipeline is still active must say so: three live
@@ -259,6 +254,11 @@
   {% if data.unprocessed_input_files %}
     {% set run_clause = run_clause ~ " (" ~ data.unprocessed_input_files ~ " input file" ~ ("s" if data.unprocessed_input_files != 1 else "") ~ " in the watched folder " ~ ("were" if data.unprocessed_input_files != 1 else "was") ~ " never processed)" %}
   {% endif %}
+
+  <!-- DECISION BANNER -->
+  {% set detected_threats = data.watched_results | selectattr("detected") | list %}
+  {% set critical_threats = detected_threats | selectattr("threat_level", "equalto", "critical") | list %}
+  {% set high_threats = detected_threats | selectattr("threat_level", "equalto", "high") | list %}
 
   {% if critical_threats or high_threats %}
   <div class="decision-banner banner-action">

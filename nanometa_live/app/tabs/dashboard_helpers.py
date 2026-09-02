@@ -1223,6 +1223,20 @@ def select_verdict(
             failed_tasks=failed_tasks,
         )
 
+    return _no_data_verdict(
+        results_dir_lost=results_dir_lost,
+        main_dir_available=main_dir_available,
+        pipeline_error=pipeline_error,
+        pipeline_error_detail=pipeline_error_detail,
+        pipeline_running=pipeline_running,
+    )
+
+
+def _no_data_verdict(
+    *, results_dir_lost, main_dir_available, pipeline_error,
+    pipeline_error_detail, pipeline_running,
+) -> VerdictDescriptor:
+    """The no-Kraken-data tail of select_verdict (pure)."""
     # A directory that held data earlier and is now unreadable is an event
     # (unmounted volume, deleted folder), not idleness -- and a crashed run
     # with no output is a failure, not standby.

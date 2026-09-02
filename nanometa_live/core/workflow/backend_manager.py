@@ -789,13 +789,7 @@ class BackendManager:
 
         # Mark as running with start time for elapsed time tracking (thread-safe)
         with self._status_lock:
-            self.status["running"] = True
-            self.status["pipeline_status"] = "running"
-            self.status["start_time"] = datetime.now().isoformat()
-            self.status["last_update"] = time.time()
-            self.status.pop("stop_reason", None)
-            self.status.pop("ended_at", None)
-            self._stop_intent = None
+            self._mark_started_locked()
 
         # Start status monitoring thread
         self.status_thread = threading.Thread(target=self._monitor_status, daemon=True)
@@ -1247,6 +1241,19 @@ class BackendManager:
                              now_monotonic: float) -> float:
         """Idle seconds for the realtime timeout, on the monotonic clock."""
         return max(0.0, now_monotonic - last_progress_monotonic)
+
+    def _mark_started_locked(self) -> None:
+        """Flip the status to running and drop the previous run's stop record.
+
+        Call with ``self._status_lock`` held.
+        """
+        self.status["running"] = True
+        self.status["pipeline_status"] = "running"
+        self.status["start_time"] = datetime.now().isoformat()
+        self.status["last_update"] = time.time()
+        self.status.pop("stop_reason", None)
+        self.status.pop("ended_at", None)
+        self._stop_intent = None
 
     def _mark_stop_intent(self, reason: str) -> None:
         """Record that the run is being stopped on purpose (lock-free flag)."""

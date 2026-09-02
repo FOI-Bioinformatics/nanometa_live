@@ -188,6 +188,26 @@ def _not_detected_card_cols(species_dicts):
     return cols
 
 
+def _validation_unavailable_while_running():
+    """Modal outputs when Validate is clicked during a live run (round-4 H10).
+
+    Opens the modal with an explanation and hides Start: the on-demand launch
+    shares the live run's Nextflow session and results folder.
+    """
+    return (
+        True, None,
+        dbc.Alert([
+            html.Strong("The pipeline is running. "),
+            "On-demand validation shares its Nextflow session and results "
+            "folder, so it can only be started after the run ends. Wait for "
+            "the run to finish, or use Stop Analysis first.",
+        ], color="warning"),
+        0, "Validation is unavailable while the pipeline is running.", [],
+        [], {"display": "none"},
+        {"display": "none"}, {"display": "none"}, {"display": "inline-block"},
+    )
+
+
 def register_main_callbacks(app: Dash):
     """
     Register callbacks for the main results tab.
@@ -1220,19 +1240,7 @@ def register_main_callbacks(app: Dash):
             # the same outdir (round-4 audit, H10). Open the modal to say so
             # rather than launching.
             if backend_status and backend_status.get("running"):
-                return (
-                    True, None,
-                    dbc.Alert([
-                        html.Strong("The pipeline is running. "),
-                        "On-demand validation shares its Nextflow session and "
-                        "results folder, so it can only be started after the "
-                        "run ends. Wait for the run to finish, or use Stop "
-                        "Analysis first.",
-                    ], color="warning"),
-                    0, "Validation is unavailable while the pipeline is running.", [],
-                    [], {"display": "none"},
-                    {"display": "none"}, {"display": "none"}, {"display": "inline-block"}
-                )
+                return _validation_unavailable_while_running()
 
             # Get read count for this organism. cumul_reads is the figure the
             # banner and organism cards show; the per-rank `reads` column made
