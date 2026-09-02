@@ -92,8 +92,14 @@ nanopore_output_directory: "/path/to/input"
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `qc_tool` | string | "chopper" | QC tool for read filtering |
+| `qc_tool` | string | "chopper" | QC tool for read filtering: `chopper`, `fastp` or `filtlong` |
+| `chopper_minlength` | int | 1000 | Minimum read length in bp; reads shorter are discarded by chopper and by fastp (sent as `fastp_length_required`). 1 disables |
+| `chopper_quality` | int | 10 | Minimum mean read quality; applied by chopper and by fastp (sent as `fastp_average_qual`). 0-50 |
+| `filtlong_min_length` | int | 1000 | Minimum read length when `qc_tool` is `filtlong` |
 | `skip_nanoplot` | bool | false | Skip NanoPlot quality reporting |
+
+The read filter is fixed at Start: a value applied while a run is active
+takes effect on the next Start.
 
 ### Real-time Mode
 

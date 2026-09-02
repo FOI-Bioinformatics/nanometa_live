@@ -446,6 +446,20 @@ volume (mmap random access over USB is pathological; the content-derived
   dangerous direction was downward: lowering the slider to catch a divergent
   strain left BLAST filtering at 90 and said nothing.
 
+### One read filter, three QC tools
+
+`chopper_minlength` and `chopper_quality` are the operator's minimum read
+length and mean-quality floor, whichever QC tool runs. The launch sends them
+under chopper's names AND as `fastp_length_required` / `fastp_average_qual`
+(real nanometanf params since 2026-09-02; before that a `qc_tool: fastp` run
+received no filter at all and ran at fastp's 15 bp default, so the Read
+Filtering card changed nothing for it). `filtlong_min_length` is read only
+by filtlong, which the QC-tool select now offers. The readiness check
+"Input Read Length" takes the floor of the selected tool. The three keys
+are written by `create_default_config`, because the form loader falls back
+to 1000/10/1000 and a snapshot lacking them read as modified whenever any
+other field was touched. Values are fixed at Start; the card says so.
+
 ### Path lifecycle
 
 Every path-bearing config key is canonicalised at write time

@@ -931,7 +931,7 @@ def _read_filtering_item():
         dbc.Row([
             dbc.Col([
                 dbc.Label([
-                    "Chopper minimum length (bp) ",
+                    "Minimum read length (bp) ",
                     html.I(className="bi bi-info-circle text-muted ms-1",
                            id="chopper-minlength-info"),
                 ], html_for="chopper-minlength-input"),
@@ -943,9 +943,9 @@ def _read_filtering_item():
                     step=50,
                     value=1000,
                 ),
-                dbc.FormText("Reads shorter than this are dropped (set to 100 for V3-V4 amplicons; 1 disables)"),
+                dbc.FormText("Reads shorter than this are dropped by chopper and fastp (set to 100 for V3-V4 amplicons; 1 disables); applies to the next Start"),
                 dbc.Tooltip(
-                    "Chopper's --minlength filter. Default 1000 is "
+                    "chopper --minlength / fastp --length_required. Default 1000 is "
                     "tuned for whole-genome ONT reads. For V3-V4 "
                     "(~460 bp) set to 100; for ITS/16S amplicons "
                     "use 250-500. Set to 1 to disable length "
@@ -955,7 +955,7 @@ def _read_filtering_item():
             ], md=4),
             dbc.Col([
                 dbc.Label([
-                    "Chopper minimum quality (Q) ",
+                    "Minimum mean read quality (Q) ",
                     html.I(className="bi bi-info-circle text-muted ms-1",
                            id="chopper-quality-info"),
                 ], html_for="chopper-quality-input"),
@@ -963,13 +963,13 @@ def _read_filtering_item():
                     id="chopper-quality-input",
                     type="number",
                     min=0,
-                    max=30,
+                    max=50,
                     step=1,
                     value=10,
                 ),
-                dbc.FormText("Per-read mean Q-score threshold (lower for short ONT reads)"),
+                dbc.FormText("Per-read mean Q-score threshold for chopper and fastp (lower for short ONT reads)"),
                 dbc.Tooltip(
-                    "Chopper's --quality filter. ONT short-read "
+                    "chopper --quality / fastp --average_qual. ONT short-read "
                     "Q-scores trend lower than long-read because "
                     "the Q-score ramp-up region is a larger "
                     "fraction of a short read. Try 7 for amplicons.",
@@ -1067,6 +1067,7 @@ def _analysis_options_item():
                     options=[
                         {"label": "chopper (recommended)", "value": "chopper"},
                         {"label": "fastp", "value": "fastp"},
+                        {"label": "filtlong", "value": "filtlong"},
                     ],
                     # Operator preference + matches
                     # nextflow_schema.json default; closes
@@ -1077,7 +1078,9 @@ def _analysis_options_item():
                 dbc.FormText("Tool used to filter out low-quality DNA sequences"),
                 dbc.Tooltip(
                     "Filters low-quality DNA sequences before species "
-                    "identification. fastp is recommended for most users.",
+                    "identification. chopper is the nanopore-native default; "
+                    "fastp adds an HTML report; filtlong weights by quality "
+                    "and reads its own minimum length below.",
                     target="qc-tool-info"
                 )
             ], md=4),

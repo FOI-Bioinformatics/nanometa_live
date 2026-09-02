@@ -233,6 +233,39 @@ class TestAmpliconParamsRouted:
         assert params["kraken2_confidence"] == 0.05
         assert params["kraken2_minimum_hit_groups"] == 2
 
+    def test_fastp_receives_the_same_filter(self, tmp_path):
+        """qc_tool fastp used to receive no filter at all: the chopper_*
+        keys had no fastp counterpart and fastp ran at its 15 bp default."""
+        config = self._amplicon_config(tmp_path)
+        config["qc_tool"] = "fastp"
+        params = create_nextflow_params(config)
+        assert params["fastp_length_required"] == 100
+        assert params["fastp_average_qual"] == 7
+        assert params["chopper_minlength"] == 100
+
+    def test_quality_is_coerced_to_the_schema_range(self, tmp_path):
+        config = self._amplicon_config(tmp_path)
+        config["chopper_quality"] = "12"
+        params = create_nextflow_params(config)
+        assert params["chopper_quality"] == 12
+        assert params["fastp_average_qual"] == 12
+        config["chopper_quality"] = 99
+        params = create_nextflow_params(config)
+        assert params["chopper_quality"] == 50
+        config["chopper_quality"] = None
+        assert create_nextflow_params(config)["chopper_quality"] == 10
+
+    def test_default_config_carries_the_filter_keys(self, tmp_path):
+        """The form loader falls back to 1000/10/1000 and the dirty-state
+        check compares the form against the saved snapshot, so a default
+        config without these keys read as modified whenever any other field
+        was touched (read-length audit, 2026-09-02)."""
+        from nanometa_live.core.config.config_loader import ConfigLoader
+        defaults = ConfigLoader(str(tmp_path)).create_default_config()
+        assert defaults["chopper_minlength"] == 1000
+        assert defaults["chopper_quality"] == 10
+        assert defaults["filtlong_min_length"] == 1000
+
     def test_long_read_defaults_when_keys_absent(self, tmp_path):
         """When the operator has not set any of the new keys, the
         defaults match the nanometanf pipeline-side defaults so

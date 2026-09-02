@@ -634,25 +634,28 @@ class ReadinessChecker:
         """
         name = "Input Read Length"
         qc_tool = str(config.get("qc_tool") or "chopper").lower()
-        if qc_tool == "fastp":
-            return CheckResult(
-                name, True, Severity.WARNING,
-                "fastp QC applies no long-read length floor",
-            )
 
-        # Effective floor: the lower of the configured chopper/filtlong
-        # values (which of the two runs depends on the pipeline QC profile;
-        # taking the min avoids false alarms at the cost of missing the
-        # mixed case where only the inactive tool was lowered).
+        # Effective floor: the key the selected tool reads. chopper and
+        # fastp both take chopper_minlength (the launch maps it to
+        # fastp_length_required as well); filtlong reads its own. An
+        # unknown tool takes the lower of the two so it cannot raise a
+        # false alarm.
+        keys = {
+            "chopper": ("chopper_minlength",),
+            "fastp": ("chopper_minlength",),
+            "filtlong": ("filtlong_min_length",),
+        }.get(qc_tool, ("chopper_minlength", "filtlong_min_length"))
         floors: Dict[str, int] = {}
-        for key in ("chopper_minlength", "filtlong_min_length"):
+        for key in keys:
             try:
                 floors[key] = int(config.get(key))
             except (TypeError, ValueError):
                 continue
         if not floors:
-            floors = {"chopper_minlength": 1000}
+            floors = {keys[0]: 1000}
         floor_key, floor = min(floors.items(), key=lambda kv: kv[1])
+        if qc_tool == "fastp":
+            floor_key = "minimum read length, applied by fastp"
         if floor <= 1:
             return CheckResult(
                 name, True, Severity.WARNING,

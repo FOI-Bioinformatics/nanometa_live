@@ -165,8 +165,8 @@ def _validate_numeric_ranges(
     if chopper_minlength is not None and chopper_minlength < 1:
         errors.append("Chopper minimum length must be 1 or greater "
                       "(the pipeline rejects 0; 1 disables the filter)")
-    if chopper_quality is not None and not (0 <= chopper_quality <= 30):
-        errors.append("Chopper quality must be between 0-30")
+    if chopper_quality is not None and not (0 <= chopper_quality <= 50):
+        errors.append("Minimum mean read quality must be between 0-50")
     if filtlong_minlength is not None and filtlong_minlength < 1:
         errors.append("Filtlong minimum length must be 1 or greater "
                       "(the pipeline rejects 0; 1 disables the filter)")
