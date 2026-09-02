@@ -184,6 +184,28 @@ class TestCallbackWiring:
         pytest.fail("No initialize_form_from_config callback writes all 6 fields")
 
 
+    def test_saved_fastp_loads_as_chopper(self):
+        """fastp is pipeline-only since 2026-09-02: it is not in the select,
+        and a value with no matching option renders as no selection, which
+        Apply would then save as None. The loader shows chopper instead."""
+        app = self._register()
+        for cb_id, spec in app.callback_map.items():
+            outputs = spec.get("output", [])
+            if not isinstance(outputs, list):
+                outputs = [outputs]
+            output_ids = self._ids_of(outputs)
+            if "qc-tool-input" in output_ids and "chopper-minlength-input" in output_ids:
+                fn = spec["callback"].__wrapped__
+                idx = output_ids.index("qc-tool-input")
+                break
+        else:
+            pytest.fail("No initialize_form_from_config callback writes qc-tool-input")
+        result = fn(1, {"qc_tool": "fastp", "chopper_minlength": 100}, None)
+        assert result[idx] == "chopper"
+        result = fn(1, {"qc_tool": "filtlong"}, None)
+        assert result[idx] == "filtlong"
+
+
 # -- parameter_mapping --------------------------------------------------
 
 

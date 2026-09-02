@@ -92,7 +92,7 @@ nanopore_output_directory: "/path/to/input"
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `qc_tool` | string | "chopper" | QC tool for read filtering: `chopper`, `fastp` or `filtlong` |
+| `qc_tool` | string | "chopper" | QC tool for read filtering. The Configuration tab offers `chopper` and `filtlong`; `fastp` is accepted from a config file only (the form shows chopper for it and Apply saves chopper) |
 | `chopper_minlength` | int | 1000 | Minimum read length in bp; reads shorter are discarded by chopper and by fastp (sent as `fastp_length_required`). 1 disables |
 | `chopper_quality` | int | 10 | Minimum mean read quality; applied by chopper and by fastp (sent as `fastp_average_qual`). 0-50 |
 | `chopper_maxlength` | int | (none) | Maximum read length in bp; reads longer are discarded by chopper and filtlong (sent as `filtlong_max_length` too). Empty = no limit; fastp has no equivalent |

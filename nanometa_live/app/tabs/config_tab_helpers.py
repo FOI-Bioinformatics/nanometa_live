@@ -188,6 +188,11 @@ def _validate_numeric_ranges(
     return errors
 
 
+def optional_int(value):
+    """An optional numeric form field: empty means None, else int."""
+    return int(value) if value not in (None, "") else None
+
+
 def build_config_from_form(
     current_config,
     *,
@@ -429,10 +434,7 @@ def build_config_from_form(
         config["chopper_quality"] = int(chopper_quality)
     # An empty field is "no limit", stored as None so the saved config and
     # the form compare equal (the dirty check) and the launch omits it.
-    config["chopper_maxlength"] = (
-        int(chopper_maxlength)
-        if chopper_maxlength not in (None, "") else None
-    )
+    config["chopper_maxlength"] = optional_int(chopper_maxlength)
     if filtlong_minlength is not None:
         config["filtlong_min_length"] = int(filtlong_minlength)
     if validation_identity is not None:

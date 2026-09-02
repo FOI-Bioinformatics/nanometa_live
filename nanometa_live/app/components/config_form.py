@@ -943,9 +943,9 @@ def _read_filtering_item():
                     step=50,
                     value=1000,
                 ),
-                dbc.FormText("Reads shorter than this are dropped by chopper and fastp (set to 100 for V3-V4 amplicons; 1 disables); applies to the next Start"),
+                dbc.FormText("Reads shorter than this are dropped (set to 100 for V3-V4 amplicons; 1 disables); applies to the next Start"),
                 dbc.Tooltip(
-                    "chopper --minlength / fastp --length_required. Default 1000 is "
+                    "chopper --minlength (fastp --length_required when a config file selects fastp). Default 1000 is "
                     "tuned for whole-genome ONT reads. For V3-V4 "
                     "(~460 bp) set to 100; for ITS/16S amplicons "
                     "use 250-500. Set to 1 to disable length "
@@ -967,9 +967,9 @@ def _read_filtering_item():
                     step=1,
                     value=10,
                 ),
-                dbc.FormText("Per-read mean Q-score threshold for chopper and fastp (lower for short ONT reads)"),
+                dbc.FormText("Per-read mean Q-score threshold (lower for short ONT reads)"),
                 dbc.Tooltip(
-                    "chopper --quality / fastp --average_qual. ONT short-read "
+                    "chopper --quality (fastp --average_qual when a config file selects fastp). ONT short-read "
                     "Q-scores trend lower than long-read because "
                     "the Q-score ramp-up region is a larger "
                     "fraction of a short read. Try 7 for amplicons.",
@@ -1017,8 +1017,8 @@ def _read_filtering_item():
                     "chopper --maxlength / filtlong --max_length. Leave "
                     "empty to keep every read. Use it to exclude "
                     "concatemers or off-size reads in amplicon runs. "
-                    "fastp has no equivalent (it trims rather than "
-                    "drops).",
+                    "Not applied under fastp, which trims rather than "
+                    "drops.",
                     target="chopper-maxlength-info",
                 ),
             ], md=3),
@@ -1090,7 +1090,6 @@ def _analysis_options_item():
                     id="qc-tool-input",
                     options=[
                         {"label": "chopper (recommended)", "value": "chopper"},
-                        {"label": "fastp", "value": "fastp"},
                         {"label": "filtlong", "value": "filtlong"},
                     ],
                     # Operator preference + matches
@@ -1103,8 +1102,9 @@ def _analysis_options_item():
                 dbc.Tooltip(
                     "Filters low-quality DNA sequences before species "
                     "identification. chopper is the nanopore-native default; "
-                    "fastp adds an HTML report; filtlong weights by quality "
-                    "and reads its own minimum length below.",
+                    "filtlong weights by quality and reads its own minimum "
+                    "length below. fastp is no longer offered here; a config "
+                    "file can still set qc_tool: fastp for the pipeline.",
                     target="qc-tool-info"
                 )
             ], md=4),

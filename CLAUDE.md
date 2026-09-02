@@ -454,7 +454,9 @@ under chopper's names AND as `fastp_length_required` / `fastp_average_qual`
 (real nanometanf params since 2026-09-02; before that a `qc_tool: fastp` run
 received no filter at all and ran at fastp's 15 bp default, so the Read
 Filtering card changed nothing for it). `filtlong_min_length` is read only
-by filtlong, which the QC-tool select now offers. `chopper_maxlength` (empty =
+by filtlong, which the QC-tool select now offers; fastp is not offered in the
+GUI (a config file can still select it, and the form loader then shows
+chopper with a logged warning). `chopper_maxlength` (empty =
 no limit, stored as None, omitted from the launch) goes to chopper and
 filtlong; fastp gets no upper bound because its `max_len1` trims rather than
 drops. The readiness check

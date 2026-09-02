@@ -37,6 +37,7 @@ _configs_dir_mtime_lock = threading.Lock()
 # _build_config_list_items extracted to config_tab_helpers.py; re-exported so the
 # callbacks below (and any importers) keep working.
 from nanometa_live.app.tabs.config_tab_helpers import (  # noqa: E402
+    optional_int,
     _build_config_list_items,
     autosave_session_config,
     build_config_from_form,
@@ -774,6 +775,16 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
         # Pipeline options
         qc_tool = config.get("qc_tool", "chopper")
+        # fastp is pipeline-only since 2026-09-02: it is not in the select, so
+        # a saved fastp choice would render as no selection and Apply would
+        # write None. Show chopper and say so; the file keeps its value until
+        # Apply.
+        if qc_tool == "fastp":
+            logging.warning(
+                "qc_tool 'fastp' is no longer offered in the Configuration tab; "
+                "the form shows chopper, and Apply Settings will save chopper. "
+                "Keep fastp by editing the config file instead.")
+            qc_tool = "chopper"
         skip_nanoplot = bool(config.get("skip_nanoplot", False))
         kraken2_incremental = bool(config.get("kraken2_enable_incremental", True))
         enable_krona = bool(config.get("enable_krona_plots", False))
@@ -1648,8 +1659,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "enable_nanopore_stats_mqc": enable_nanopore_stats,
             "chopper_minlength": chopper_minlength,
             "chopper_quality": chopper_quality,
-            "chopper_maxlength": (int(chopper_maxlength)
-                                  if chopper_maxlength not in (None, "") else None),
+            "chopper_maxlength": optional_int(chopper_maxlength),
             "filtlong_min_length": filtlong_minlength,
             "validation_identity_threshold": validation_identity,
             "kraken2_confidence": kraken2_confidence,
