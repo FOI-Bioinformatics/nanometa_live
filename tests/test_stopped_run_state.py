@@ -335,3 +335,38 @@ class TestIsolatedFailuresAreRecordedAfterTheRun:
         )
         assert "failed" not in detail
 
+
+class TestLostInputMarkersAreRead:
+    """H20, pipeline side: nanometanf writes pipeline_info/lost_inputs/*.json
+    from the ignored task's afterScript; the report names the lost files."""
+
+    def _marker(self, tmp_path, name, **fields):
+        d = tmp_path / "pipeline_info" / "lost_inputs"
+        d.mkdir(parents=True, exist_ok=True)
+        base = {"stage": "CHOPPER", "process": "NANOMETANF:QC:CHOPPER", "sample": "barcode06",
+                "batch_id": "", "attempt": 1, "exit_status": 1,
+                "input_files": ["/watch/barcode06/chunk3.fastq.gz"]}
+        base.update(fields)
+        (d / name).write_text(json.dumps(base))
+
+    def test_markers_are_read_with_or_without_run_metadata(self, tmp_path):
+        self._marker(tmp_path, "CHOPPER.barcode06.ab12cd.json")
+        self._marker(tmp_path, "KRAKEN2_INCREMENTAL_CLASSIFIER.barcode07.ef34.json",
+                     stage="KRAKEN2_INCREMENTAL_CLASSIFIER", sample="barcode07",
+                     exit_status=2, input_files=["/watch/barcode07/chunk9.fastq.gz"])
+        (tmp_path / "pipeline_info" / "lost_inputs" / "broken.json").write_text("{not json")
+
+        rs = read_final_run_status(str(tmp_path))          # no .nanometa.run.json
+        assert rs["run_state"] == "unknown"
+        assert [m["sample"] for m in rs["lost_inputs"]] == ["barcode06", "barcode07"]
+        assert rs["lost_inputs"][0]["input_files"] == ["/watch/barcode06/chunk3.fastq.gz"]
+        assert rs["lost_inputs"][1]["exit_status"] == 2
+
+        (tmp_path / ".nanometa.run.json").write_text(json.dumps({"final_status": "completed"}))
+        rs = read_final_run_status(str(tmp_path))
+        assert rs["run_state"] == "completed"
+        assert len(rs["lost_inputs"]) == 2
+
+    def test_no_marker_dir_is_an_empty_list(self, tmp_path):
+        assert read_final_run_status(str(tmp_path))["lost_inputs"] == []
+

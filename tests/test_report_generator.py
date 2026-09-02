@@ -873,6 +873,24 @@ class TestRunStateParity:
         assert "run stopped" not in content
         assert "interim snapshot" not in content
 
+    def test_lost_input_markers_name_the_files(self, batch_output_dir, tmp_path):
+        """H20, pipeline side: the afterScript markers name the lost inputs."""
+        self._write_meta(batch_output_dir, final_status="completed")
+        d = Path(batch_output_dir) / "pipeline_info" / "lost_inputs"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "CHOPPER.barcode06.ab12.json").write_text(json.dumps({
+            "stage": "CHOPPER", "sample": "barcode06", "exit_status": 1,
+            "input_files": ["/watch/barcode06/chunk3.fastq.gz"],
+        }))
+        try:
+            content = self._content(batch_output_dir, tmp_path)
+        finally:
+            for f in d.iterdir():
+                f.unlink()
+            d.rmdir()
+        assert "1 input file lost to failed pipeline tasks" in content
+        assert "chunk3.fastq.gz [CHOPPER, barcode06]" in content
+
     def test_isolated_task_failures_are_named(self, batch_output_dir, tmp_path):
         """H20: a QC-stage loss is invisible to the manifest and to
         aggregation_stats.json; the report names it from the run metadata."""

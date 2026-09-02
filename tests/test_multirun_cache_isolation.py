@@ -355,15 +355,16 @@ class TestWatchlistFingerprint:
         realtime = str(render_collision_body(
             "/out", ["kraken2"], input_match=True, has_metadata=True, realtime=True,
         ))
-        assert "classified again from the start" in realtime
-        assert "doubled batch tree" in realtime
+        assert "finished classifying are skipped" in realtime
+        assert "carried forward" in realtime
+        assert "never finished are classified again" in realtime
         assert "skip already-completed" not in realtime
 
         batch = str(render_collision_body(
             "/out", ["kraken2"], input_match=True, has_metadata=True, realtime=False,
         ))
         assert "skips steps whose inputs are unchanged" in batch
-        assert "classified again" not in batch
+        assert "carried forward" not in batch
 
 
 class TestMissingDirSkipsTtl:

@@ -233,18 +233,23 @@ def render_collision_body(
                             ]
                             + (
                                 [
-                                    # A real-time run cannot cache-hit: every
-                                    # file's task meta carries a wall-clock
-                                    # stamp, the cumulative writer restarts
-                                    # from zero and the per-batch tree is
-                                    # kept alongside the previous run's
-                                    # (round-4 audit, H15/H19, observed live).
-                                    "In real-time mode every input file is "
-                                    "classified again from the start, the "
-                                    "cumulative counts restart from zero, and "
-                                    "the previous run's per-batch files stay "
-                                    "beside the new ones. Expect a longer run "
-                                    "and a doubled batch tree. "
+                                    # Nextflow's task cache cannot help a
+                                    # real-time run, so nanometanf keeps its
+                                    # own ledger of finished inputs
+                                    # (pipeline_info/processed_inputs.tsv) and
+                                    # seeds the cumulative counts from the
+                                    # previous run's per-batch files (round-4
+                                    # audit, H15/H19). A file the previous run
+                                    # never finished is classified again.
+                                    "In real-time mode the input files the "
+                                    "previous run finished classifying are "
+                                    "skipped and its cumulative counts are "
+                                    "carried forward; files it never finished "
+                                    "are classified again. Needs a nanometanf "
+                                    "that writes pipeline_info/"
+                                    "processed_inputs.tsv (2026-09 or later); "
+                                    "an older pipeline classifies every file "
+                                    "again from zero. "
                                 ]
                                 if realtime
                                 else [

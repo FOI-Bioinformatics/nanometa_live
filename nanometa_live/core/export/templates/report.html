@@ -263,6 +263,17 @@
   {% if data.processes_failed %}
     {% set run_clause = run_clause ~ " (" ~ data.processes_failed ~ " pipeline task" ~ ("s" if data.processes_failed != 1 else "") ~ " failed and " ~ ("were" if data.processes_failed != 1 else "was") ~ " skipped" ~ (": " ~ (data.failed_tasks | join(", ")) if data.failed_tasks else "") ~ " - reads from " ~ ("them" if data.processes_failed != 1 else "it") ~ " are absent from every count in this report)" %}
   {% endif %}
+  {#
+    nanometanf's own record of the same losses, by input file: the
+    afterScript markers under pipeline_info/lost_inputs/ (read by
+    run_status.read_lost_inputs). Present even for a tree the GUI did not
+    launch, so it is stated on its own.
+  #}
+  {% if data.lost_inputs %}
+    {% set lost_names = [] %}
+    {% for lost in data.lost_inputs %}{% for f in lost.input_files %}{% set _ = lost_names.append(f.rsplit("/", 1)[-1] ~ " [" ~ lost.stage ~ ", " ~ lost.sample ~ "]") %}{% endfor %}{% endfor %}
+    {% set run_clause = run_clause ~ " (" ~ (lost_names | length) ~ " input file" ~ ("s" if (lost_names | length) != 1 else "") ~ " lost to failed pipeline tasks: " ~ (lost_names | join(", ")) ~ ")" %}
+  {% endif %}
 
   <!-- DECISION BANNER -->
   {% set detected_threats = data.watched_results | selectattr("detected") | list %}

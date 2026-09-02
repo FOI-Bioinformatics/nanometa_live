@@ -12,10 +12,50 @@ banner, and a report over a stopped or still-active run must say so.
 
 import json
 import os
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 RUN_METADATA_FILENAME = ".nanometa.run.json"
 LOCK_FILENAME = ".nanometa.lock"
+
+
+LOST_INPUTS_SUBDIR = os.path.join("pipeline_info", "lost_inputs")
+
+
+def read_lost_inputs(results_dir: str) -> List[Dict[str, Any]]:
+    """Inputs the pipeline lost to error isolation, from nanometanf's markers.
+
+    ``conf/error_isolation.config`` ignores exit 1/2 on the QC and
+    classification processes and runs ``bin/nanometanf_lost_input_marker.sh``
+    as their afterScript, which writes one JSON file per absorbed failure
+    under ``pipeline_info/lost_inputs/``. A file that dies in QC is never an
+    expected batch, so neither the manifest nor ``aggregation_stats.json``
+    can see it (round-4 audit, H20); these markers are the record of which
+    input files are absent from every count. Each entry carries ``stage``,
+    ``sample``, ``exit_status`` and ``input_files``; unreadable markers are
+    skipped, and a tree without the directory yields an empty list.
+    """
+    out: List[Dict[str, Any]] = []
+    marker_dir = os.path.join(results_dir, LOST_INPUTS_SUBDIR)
+    try:
+        names = sorted(n for n in os.listdir(marker_dir) if n.endswith(".json"))
+    except OSError:
+        return out
+    for name in names:
+        try:
+            with open(os.path.join(marker_dir, name)) as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        files = data.get("input_files")
+        out.append({
+            "stage": str(data.get("stage") or data.get("process") or "unknown"),
+            "sample": str(data.get("sample") or "unknown"),
+            "exit_status": data.get("exit_status"),
+            "input_files": [str(x) for x in files] if isinstance(files, list) else [],
+        })
+    return out
 
 
 def read_final_run_status(results_dir: str) -> Dict[str, Any]:
@@ -39,7 +79,11 @@ def read_final_run_status(results_dir: str) -> Dict[str, Any]:
         "files_processed": None,
         "failed_tasks": [],
         "processes_failed": 0,
+        "lost_inputs": [],
     }
+    # Markers do not depend on the run metadata: a tree the CLI produced has
+    # no .nanometa.run.json and can still have lost inputs.
+    result["lost_inputs"] = read_lost_inputs(results_dir)
     try:
         path = os.path.join(results_dir, RUN_METADATA_FILENAME)
         with open(path) as f:
