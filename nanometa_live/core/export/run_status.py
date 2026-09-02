@@ -37,6 +37,8 @@ def read_final_run_status(results_dir: str) -> Dict[str, Any]:
         "stop_reason": None,
         "ended_at": None,
         "files_processed": None,
+        "failed_tasks": [],
+        "processes_failed": 0,
     }
     try:
         path = os.path.join(results_dir, RUN_METADATA_FILENAME)
@@ -61,6 +63,13 @@ def read_final_run_status(results_dir: str) -> Dict[str, Any]:
 
     result["stop_reason"] = meta.get("stop_reason")
     result["ended_at"] = meta.get("ended_at")
+    # Tasks the pipeline failed and skipped under error isolation; their
+    # reads are absent from every count in the report (round-4, H20).
+    failed = meta.get("failed_tasks")
+    result["failed_tasks"] = [str(t) for t in failed] if isinstance(failed, list) else []
+    pf = meta.get("processes_failed")
+    result["processes_failed"] = (
+        int(pf) if isinstance(pf, (int, float)) else len(result["failed_tasks"]))
     fp = meta.get("files_processed")
     result["files_processed"] = int(fp) if isinstance(fp, (int, float)) else None
     inbox = meta.get("input_files_at_end")

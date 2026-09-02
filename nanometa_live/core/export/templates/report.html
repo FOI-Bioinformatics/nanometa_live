@@ -254,6 +254,15 @@
   {% if data.unprocessed_input_files %}
     {% set run_clause = run_clause ~ " (" ~ data.unprocessed_input_files ~ " input file" ~ ("s" if data.unprocessed_input_files != 1 else "") ~ " in the watched folder " ~ ("were" if data.unprocessed_input_files != 1 else "was") ~ " never processed)" %}
   {% endif %}
+  {#
+    Tasks lost to error isolation (round-4 audit, H20). A corrupt input
+    chunk that dies in QC is never an expected batch, so neither the manifest
+    nor aggregation_stats.json can see it; the trace-derived labels recorded
+    at run end are the one place it is named.
+  #}
+  {% if data.processes_failed %}
+    {% set run_clause = run_clause ~ " (" ~ data.processes_failed ~ " pipeline task" ~ ("s" if data.processes_failed != 1 else "") ~ " failed and " ~ ("were" if data.processes_failed != 1 else "was") ~ " skipped" ~ (": " ~ (data.failed_tasks | join(", ")) if data.failed_tasks else "") ~ " - reads from " ~ ("them" if data.processes_failed != 1 else "it") ~ " are absent from every count in this report)" %}
+  {% endif %}
 
   <!-- DECISION BANNER -->
   {% set detected_threats = data.watched_results | selectattr("detected") | list %}

@@ -872,3 +872,14 @@ class TestRunStateParity:
         content = self._content(batch_output_dir, tmp_path)
         assert "run stopped" not in content
         assert "interim snapshot" not in content
+
+    def test_isolated_task_failures_are_named(self, batch_output_dir, tmp_path):
+        """H20: a QC-stage loss is invisible to the manifest and to
+        aggregation_stats.json; the report names it from the run metadata."""
+        self._write_meta(batch_output_dir, final_status="completed",
+                         processes_failed=1,
+                         failed_tasks=["CHOPPER (barcode06_chunk3.fastq.gz)"])
+        content = self._content(batch_output_dir, tmp_path)
+        assert "1 pipeline task failed and was skipped" in content
+        assert "CHOPPER (barcode06_chunk3.fastq.gz)" in content
+        assert "absent from every count" in content

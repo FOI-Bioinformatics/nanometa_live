@@ -274,3 +274,64 @@ class TestUnprocessedInputIsNamed:
         manager.workflow_manager = MagicMock()
         manager.workflow_manager.get_status.return_value = {"running": False, "errors": []}
         assert manager.get_status()["files_waiting"] == 1
+
+
+class TestIsolatedFailuresAreRecordedAfterTheRun:
+    """H20, after-the-run half: a task lost to error isolation is named.
+
+    A corrupt input chunk failed in CHOPPER with "Error is ignored"; the run
+    completed, the manifest listed no failed sample and aggregation_stats.json
+    said batches_complete (batch ids are assigned after QC). The trace is the
+    one record, and it was read only while the run was active.
+    """
+
+    def test_terminal_classifier_persists_the_failed_task_labels(self, bm):
+        completed = bm._apply_terminal_workflow_status({
+            "running": False, "errors": [],
+            "processes_complete": 46, "processes_failed": 1, "exit_code": 0,
+            "failed_tasks": ["CHOPPER (barcode06_chunk3.fastq.gz)"],
+        })
+        assert completed is True
+        assert bm.status["pipeline_status"] == "completed"
+        meta = _meta(bm.config["results_output_directory"])
+        assert meta["final_status"] == "completed"
+        assert meta["processes_failed"] == 1
+        assert meta["failed_tasks"] == ["CHOPPER (barcode06_chunk3.fastq.gz)"]
+
+    def test_report_status_carries_the_failed_tasks(self, tmp_path):
+        (tmp_path / ".nanometa.run.json").write_text(json.dumps({
+            "final_status": "completed", "processes_failed": 2,
+            "failed_tasks": ["CHOPPER (a.fastq.gz)", "CHOPPER (b.fastq.gz)"],
+        }))
+        rs = read_final_run_status(str(tmp_path))
+        assert rs["processes_failed"] == 2
+        assert rs["failed_tasks"] == ["CHOPPER (a.fastq.gz)", "CHOPPER (b.fastq.gz)"]
+
+    def test_run_status_without_the_keys_is_clean(self, tmp_path):
+        (tmp_path / ".nanometa.run.json").write_text(json.dumps({"final_status": "completed"}))
+        rs = read_final_run_status(str(tmp_path))
+        assert rs["processes_failed"] == 0 and rs["failed_tasks"] == []
+
+    def test_header_names_skipped_tasks_after_the_run(self):
+        from dash import Dash
+        from nanometa_live.app.callbacks.status import register_status
+        from tests.dash_test_utils import get_callback_fn
+
+        app = Dash(__name__)
+        register_status(app, MagicMock())
+        fn = get_callback_fn(app, "status-indicator", input_contains="backend-status")
+        _color, text, detail = fn(
+            {"running": False, "pipeline_status": "completed", "processes_failed": 4,
+             "failed_tasks": ["CHOPPER (a)", "CHOPPER (b)", "CHOPPER (c)", "CHOPPER (d)"]},
+            {"processing_mode": "batch"},
+        )
+        assert text == "Complete"
+        assert "4 tasks failed (skipped)" in detail
+        assert "CHOPPER (a), CHOPPER (b), CHOPPER (c) +1 more" in detail
+
+        _color, text, detail = fn(
+            {"running": False, "pipeline_status": "completed", "processes_failed": 0},
+            {"processing_mode": "batch"},
+        )
+        assert "failed" not in detail
+

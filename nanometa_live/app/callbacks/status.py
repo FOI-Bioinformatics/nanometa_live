@@ -49,6 +49,29 @@ def _unprocessed_input_note(status: Dict[str, Any], config: Optional[Dict[str, A
             f"(arrived after the run ended)")
 
 
+def _skipped_tasks_note(status: Dict[str, Any]) -> str:
+    """" -- N tasks failed (skipped): labels" for a finished run.
+
+    While running, the header already names the count (round-4 H20); after
+    the run the isolated failures were absent from every surface although
+    the reads they carried are missing from every count. Up to three task
+    labels are named; the rest are counted.
+    """
+    try:
+        n_failed = int(status.get("processes_failed") or 0)
+    except (TypeError, ValueError):
+        return ""
+    if n_failed <= 0:
+        return ""
+    labels = [str(t) for t in (status.get("failed_tasks") or [])]
+    note = f" -- {n_failed} task{'s' if n_failed != 1 else ''} failed (skipped)"
+    if labels:
+        shown = ", ".join(labels[:3])
+        more = len(labels) - 3
+        note += f": {shown}" + (f" +{more} more" if more > 0 else "")
+    return note
+
+
 def register_status(app, backend_manager):
     @app.callback(
         Output("backend-status", "data"), Input("update-interval", "n_intervals")
@@ -219,7 +242,9 @@ def register_status(app, backend_manager):
         unprocessed_note = _unprocessed_input_note(status, config)
 
         if status.get("pipeline_status") == "completed":
-            return "blue", "Complete", "Pipeline finished successfully" + unprocessed_note
+            return ("blue", "Complete",
+                    "Pipeline finished successfully" + unprocessed_note
+                    + _skipped_tasks_note(status))
 
         # A stopped run is neither idle nor complete (round-4 audit, H2): say
         # why it ended, when, and how far it got, instead of inviting a Start.

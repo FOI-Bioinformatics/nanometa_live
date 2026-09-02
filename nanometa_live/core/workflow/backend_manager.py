@@ -886,6 +886,23 @@ class BackendManager:
         logging.info("Backend stopped successfully")
         return True, "Backend stopped successfully"
 
+    def _mirror_workflow_fields(self, workflow_status: Dict[str, Any]) -> None:
+        """Copy the per-poll process, batch and stage fields into status.
+
+        Lock held by the caller. ``failed_tasks`` carries the labels of the
+        tasks the trace reports FAILED ("CHOPPER (barcode06_chunk3.fastq.gz)"),
+        the one record of an input file lost to error isolation (round-4
+        audit, H20).
+        """
+        for key, default in (
+            ("processes_running", 0), ("processes_complete", 0),
+            ("files_processed", 0), ("current_batch", 0),
+            ("stages", []), ("current_stage", None), ("stage_progress", {}),
+            ("processes_failed", 0), ("total_processes", 0),
+        ):
+            self.status[key] = workflow_status.get(key, default)
+        self.status["failed_tasks"] = list(workflow_status.get("failed_tasks") or [])
+
     def get_status(self) -> Dict[str, Any]:
         """
         Get the current status of the backend.
@@ -921,18 +938,7 @@ class BackendManager:
             else:
                 self.status["pipeline_status"] = "stopped"
 
-            # Update process and batch information from workflow manager
-            self.status["processes_running"] = workflow_status.get("processes_running", 0)
-            self.status["processes_complete"] = workflow_status.get("processes_complete", 0)
-            self.status["files_processed"] = workflow_status.get("files_processed", 0)
-            self.status["current_batch"] = workflow_status.get("current_batch", 0)
-
-            # Update stage-level tracking for dashboard display
-            self.status["stages"] = workflow_status.get("stages", [])
-            self.status["current_stage"] = workflow_status.get("current_stage", None)
-            self.status["stage_progress"] = workflow_status.get("stage_progress", {})
-            self.status["processes_failed"] = workflow_status.get("processes_failed", 0)
-            self.status["total_processes"] = workflow_status.get("total_processes", 0)
+            self._mirror_workflow_fields(workflow_status)
 
             # Keep the input file count current after the run too: in
             # real-time mode files that land after the timer are never
@@ -1221,6 +1227,8 @@ class BackendManager:
             named = ", ".join(failed_tasks) if failed_tasks else (
                 f"{processes_failed} task(s)")
             self.status["pipeline_status"] = "completed"
+            self.status["processes_failed"] = processes_failed
+            self.status["failed_tasks"] = list(failed_tasks)
             self.status.setdefault("warnings", []).append(
                 f"Run completed; {named} did not produce output and was "
                 "isolated. Other samples are unaffected."
@@ -1335,6 +1343,12 @@ class BackendManager:
             meta["ended_at"] = self.status.get("ended_at") or datetime.now().isoformat(
                 timespec="seconds")
             meta["files_processed"] = int(self.status.get("files_processed") or 0)
+            # Tasks lost to error isolation, by label. Neither the manifest
+            # nor aggregation_stats.json can see a QC-stage loss (batch ids
+            # are assigned after QC), so the trace-derived list recorded
+            # here is what the report and the header name (round-4, H20).
+            meta["processes_failed"] = int(self.status.get("processes_failed") or 0)
+            meta["failed_tasks"] = [str(t) for t in (self.status.get("failed_tasks") or [])]
             # The inbox at the end: the report can then state how many input
             # files the run never classified (round-4 audit, H5).
             try:
