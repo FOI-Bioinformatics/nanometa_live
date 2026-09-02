@@ -1345,6 +1345,80 @@ incremental-layout markers); every other attribution test writes a flat
 `scripts/audit_realtime_attribution.py <results_dir> --config <config.yaml>` to
 diagnose a live or captured outdir hop by hop.
 
+**How a real-time run ends is part of the verdict** (round-4 audit,
+`docs/audit/realtime-round4-2026-09-02.md`; do not regress). The audit drove
+three real-time runs, three Stop drills, two Continue drills and a hard kill
+with nanorunner and found the end of a run to be the least truthful moment:
+
+- **A stopped run is recorded and rendered as stopped.** `stop()` and the
+  inactivity backstop call `_mark_stop_intent` BEFORE signalling Nextflow
+  (the monitor thread polls every 5 s and would otherwise classify the dying
+  process as completed or errored), then `_finish_stopped_locked`, which
+  writes `final_status: stopped`, `stop_reason`, `ended_at`,
+  `files_processed` and `input_files_at_end` into `.nanometa.run.json`.
+  `get_status()` exposes `stopped_run`; the header says "Stopped (reason)",
+  the banner badge STOPPED, and `with_failure_clauses` appends "run stopped
+  ... counts are partial". `pipeline_status == "stopped"` alone means idle
+  as well, so a real stop is the one with a `stop_reason`.
+- **The report reads the run state.** `read_final_run_status` returns
+  `run_state` (completed / stopped / error / active / unknown); `active`
+  means the metadata was written at Start, no terminal status exists and
+  `.nanometa.lock` is present, i.e. an export taken mid-run. The template's
+  `run_clause` qualifies every decision banner; it is set ABOVE the
+  `<!-- DECISION BANNER -->` comment because `test_report_read_depth_gate`
+  slices the template from that comment to the banner's first matching
+  `endif`.
+- **The real-time timeout is a wall-clock timer, and the text says so.**
+  nanometanf schedules one timer at `realtime_timeout_minutes` plus the
+  grace period from the start of monitoring; files that land afterwards are
+  never classified and the run is reported complete. The form text
+  describes exactly that, the auto-stop chip counts to timeout plus grace,
+  and `_unprocessed_input_note` states the inbox-minus-processed gap for a
+  finished real-time run (header and report). The GUI backstop remains a
+  genuine inactivity timer on task progress and is a separate mechanism.
+- **Failed-and-ignored tasks are named.** `processes_failed` reaches the
+  header ("N tasks failed (skipped)") and the verdict subtitle; the reads of
+  an isolated failure are absent from every count and nanometanf's own
+  `aggregation_stats.json` cannot see a QC-stage failure because batch ids
+  are assigned after QC.
+- **Every launch path resolves the outdir the same way.** The collision
+  handler (Continue / Archive) used the app-config State as is; a tab whose
+  Store never carried `results_output_directory` launched into a fresh
+  `~/.nanometa/data/analysis_<ts>` while the modal promised the described
+  folder. It now resolves via `resolve_run_outdir` and pins the directory
+  the modal showed. Root cause still open: `app.layout` is static, so a new
+  tab hydrates app-config from the boot-time config, not the session's.
+- **Continue into a populated outdir shows the continued run.**
+  `get_available_samples` unions the manifest with disk discovery (the
+  manifest is written once, at session end, and describes the previous
+  run); `load_kraken_data` takes the canonical JSON for a named sample only
+  when `_canonical_is_current` (no older than the sample's reports); the
+  no-data mapping globs `kraken2/<sample>/batch_reports/` too. nanometanf's
+  `-resume` cannot cache-hit in real time (every file's meta carries a
+  wall-clock stamp), the cumulative writer restarts from zero and the
+  batch tree doubles: the modal's "skip already-completed steps" wording is
+  not true for a real-time run and is still to be fixed.
+- **A watchlist the config names must exist.** `unresolved_watchlist_ids`
+  (`watchlist_manager.py`) is the single question the CRITICAL readiness
+  check "Watchlist Files" and the startup toast both ask. `bioshield_agents`
+  is not a package built-in: a config copied under a new filename gets a new
+  project dir with an empty watchlist folder and used to load zero entries
+  silently.
+- **RESULTS UNAVAILABLE needs `dir_seen`.** The fingerprint string hashes
+  the path and is never empty; the Store carries a sticky `dir_seen` and
+  `_fingerprint_marks_dir_seen` decides. A never-created results directory
+  is STANDBY.
+- **On-demand validation waits for the run to end.** It shares the live
+  run's launch dir, work dir and outdir and adds a bare `-resume`; the
+  modal explains instead of arming a launch while `backend-status.running`.
+
+Measurement traps from the same audit: a Chrome MCP tab covered by another
+window is `document.hidden` and stops polling entirely (use the Playwright
+MCP browser for operator-view readings); the demo launcher's `conda run`
+swallows the app's stdout and stderr; `conda run` does not forward heredoc
+stdin; `unmeasured_samples()` is a cached lookup that only the attribution
+build refreshes.
+
 **Negative controls.** `is_negative_control` reads the config's
 `negative_control_samples` list first, then falls back to name patterns:
 `NTC` / `neg_ctrl` / `blank`, fused numeric suffixes (`NTC1`, `blank2`,
