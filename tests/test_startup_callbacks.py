@@ -61,3 +61,39 @@ def test_relay_internet_check_toast(startup_app):
     assert fn(payload) == payload
     with pytest.raises(PreventUpdate):
         fn(None)
+
+
+class TestNewTabGetsTheLiveRunConfig:
+    """H34 (round-4 audit): app.layout is static, so a new tab hydrated
+    app-config from the boot-time config and a collision Continue from that
+    tab launched with an empty outdir and no negative controls."""
+
+    def _fn(self, backend):
+        from dash import Dash
+        app = Dash(__name__, suppress_callback_exceptions=True)
+        register_startup(app, backend)
+        return get_callback_fn(app, "app-config.data", input_contains="tabs")
+
+    def test_running_app_overrides_the_boot_config(self):
+        backend = MagicMock()
+        backend.config = {"results_output_directory": "/runs/r2",
+                          "negative_control_samples": ["unclassified"]}
+        backend.status = {"start_time": "2026-09-01T23:07:22", "running": True}
+        out = self._fn(backend)(1, "dashboard-tab", {"results_output_directory": "", "kraken_db": "/db"})
+        assert out["results_output_directory"] == "/runs/r2"
+        assert out["negative_control_samples"] == ["unclassified"]
+        assert out["kraken_db"] == "/db", "boot keys the run did not set survive"
+
+    def test_before_any_run_the_boot_config_stands(self):
+        from dash import no_update
+        backend = MagicMock()
+        backend.config = None
+        backend.status = {"start_time": None}
+        assert self._fn(backend)(1, "dashboard-tab", {"kraken_db": "/db"}) is no_update
+
+    def test_identical_config_is_a_noop(self):
+        from dash import no_update
+        backend = MagicMock()
+        backend.config = {"results_output_directory": "/runs/r2"}
+        backend.status = {"start_time": "x"}
+        assert self._fn(backend)(1, "dashboard-tab", {"results_output_directory": "/runs/r2"}) is no_update

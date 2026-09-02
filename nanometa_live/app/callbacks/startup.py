@@ -95,6 +95,37 @@ def register_startup(app, backend_manager):
         return dict(live), True
 
     @app.callback(
+        Output("app-config", "data", allow_duplicate=True),
+        Input("update-interval", "n_intervals"),
+        Input("tabs", "active_tab"),
+        State("app-config", "data"),
+        prevent_initial_call=True,
+    )
+    def hydrate_app_config_from_live_run(_n, _tab, config):
+        """Give a new tab the configuration the running app is actually using.
+
+        ``app.layout`` is built once, so every new tab (or refresh) receives
+        the boot-time config: no computed ``results_output_directory``, none
+        of the settings applied in another tab. On the round-4 audit a fresh
+        tab's collision Continue then launched with an empty outdir and the
+        negative control declared twenty minutes earlier was gone (H34/H33).
+        While a run exists in this app process, its config is the truth for
+        every tab; before any run the boot config stands (boot is fresh by
+        design). Runs on the first interval tick or tab click after load
+        (an allow_duplicate output cannot fire on the initial call); a dict
+        compare per tick, no I/O, and no_update when nothing differs.
+        """
+        live = getattr(backend_manager, "config", None)
+        started = bool((getattr(backend_manager, "status", None) or {}).get("start_time"))
+        if not live or not started or not isinstance(live, dict):
+            return no_update
+        if config and all(config.get(k) == v for k, v in live.items()):
+            return no_update
+        merged = dict(config or {})
+        merged.update(live)
+        return merged
+
+    @app.callback(
         Output("toast-message", "data", allow_duplicate=True),
         Input("app-config", "data"),
         prevent_initial_call="initial_duplicate",
