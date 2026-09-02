@@ -345,6 +345,26 @@ class TestWatchlistFingerprint:
         ))
         assert "Different watchlist" not in clean
 
+    def test_continue_wording_tells_the_truth_for_realtime(self):
+        """H15/H19: -resume cannot cache-hit a real-time run (every task's meta
+        carries a wall-clock stamp); the modal must not promise skipped steps."""
+        from nanometa_live.app.components.collision_modal import (
+            render_collision_body,
+        )
+
+        realtime = str(render_collision_body(
+            "/out", ["kraken2"], input_match=True, has_metadata=True, realtime=True,
+        ))
+        assert "classified again from the start" in realtime
+        assert "doubled batch tree" in realtime
+        assert "skip already-completed" not in realtime
+
+        batch = str(render_collision_body(
+            "/out", ["kraken2"], input_match=True, has_metadata=True, realtime=False,
+        ))
+        assert "skips steps whose inputs are unchanged" in batch
+        assert "classified again" not in batch
+
 
 class TestMissingDirSkipsTtl:
     def test_removed_kraken_dir_is_stale_not_absent(self, tmp_path):

@@ -87,6 +87,7 @@ def render_collision_body(
     input_match: object = None,
     has_metadata: bool = True,
     watchlist_match: object = None,
+    realtime: bool = False,
 ) -> html.Div:
     """Return the body children for the modal given the detection result.
 
@@ -226,11 +227,33 @@ def render_collision_body(
                             [
                                 html.Strong("Continue (resume)"),
                                 " -- ",
-                                "Reuses the existing results and asks "
-                                "Nextflow to skip already-completed steps "
-                                "via ",
+                                "Keeps the existing results and launches with ",
                                 html.Code("-resume"),
-                                ". Only safe when the new input is the same "
+                                ". ",
+                            ]
+                            + (
+                                [
+                                    # A real-time run cannot cache-hit: every
+                                    # file's task meta carries a wall-clock
+                                    # stamp, the cumulative writer restarts
+                                    # from zero and the per-batch tree is
+                                    # kept alongside the previous run's
+                                    # (round-4 audit, H15/H19, observed live).
+                                    "In real-time mode every input file is "
+                                    "classified again from the start, the "
+                                    "cumulative counts restart from zero, and "
+                                    "the previous run's per-batch files stay "
+                                    "beside the new ones. Expect a longer run "
+                                    "and a doubled batch tree. "
+                                ]
+                                if realtime
+                                else [
+                                    "Nextflow skips steps whose inputs are "
+                                    "unchanged. "
+                                ]
+                            )
+                            + [
+                                "Only safe when the new input is the same "
                                 "as the previous run.",
                             ],
                             className="mb-2",

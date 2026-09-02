@@ -117,6 +117,7 @@ def register_start_stop(app, backend_manager):
                     outdir, found, input_match=input_match,
                     has_metadata=has_metadata,
                     watchlist_match=watchlist_match,
+                    realtime=(config or {}).get("processing_mode") == "realtime",
                 ),
                 {
                     "outdir": outdir,
