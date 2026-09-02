@@ -73,12 +73,52 @@ def _files_state(files: List[str]) -> Optional[tuple]:
     return tuple(state)
 
 
+def _build_segment(
+    sample_files: List[str],
+    parse_fn: Callable,
+    is_transient: Optional[Callable[[str], bool]],
+) -> Optional[Tuple[Dict[int, list], List[int]]]:
+    """Accumulate one sample's reports; None when the result is transient."""
+    s_agg: Dict[int, list] = {}
+    s_ordered: List[int] = []
+    s_seen: set = set()
+    for fp in sample_files:
+        df = parse_fn(fp)
+        if df is None or df.empty:
+            if df is None and not _is_file_stable(fp):
+                # Skipped by the file-stability gate: transient by
+                # definition (the file only has to AGE past the
+                # window, which changes no mtime and therefore not
+                # this cache's key). Caching the reduced
+                # accumulation would freeze the sample out until an
+                # unrelated write -- on a completed run, forever.
+                # Bail to the caller's plain loop for this tick.
+                logging.debug(
+                    "Report %s inside the stability window; "
+                    "aggregate not cacheable this tick.", fp)
+                return None
+            continue
+        if is_transient is not None and is_transient(fp):
+            # parse_fn served a last-good stand-in for a file that
+            # is inside the window: caching this segment under the
+            # file's current state would pin the aggregate to the
+            # stand-in until the file changes again (round-4 audit,
+            # H26). Bail to the caller's plain loop for this tick.
+            logging.debug(
+                "Report %s served from last-good; aggregate not "
+                "cacheable this tick.", fp)
+            return None
+        _accumulate(df, s_agg, s_ordered, s_seen)
+    return s_agg, s_ordered
+
+
 def aggregate_with_sample_cache(
     kraken_dir: str,
     files: List[str],
     sample_key_fn: Callable[[str], str],
     parse_fn: Callable,
     accumulate_fn: Callable,
+    is_transient: Optional[Callable[[str], bool]] = None,
 ) -> Optional[Tuple[Dict[int, list], List[int]]]:
     """Aggregate ``files`` into (agg, ordered_taxids), sample-cached.
 
@@ -109,26 +149,10 @@ def aggregate_with_sample_cache(
         with _lock:
             hit = _sample_accum.get(cache_key)
         if hit is None or hit[0] != state:
-            s_agg: Dict[int, list] = {}
-            s_ordered: List[int] = []
-            s_seen: set = set()
-            for fp in sample_files:
-                df = parse_fn(fp)
-                if df is None or df.empty:
-                    if df is None and not _is_file_stable(fp):
-                        # Skipped by the file-stability gate: transient by
-                        # definition (the file only has to AGE past the
-                        # window, which changes no mtime and therefore not
-                        # this cache's key). Caching the reduced
-                        # accumulation would freeze the sample out until an
-                        # unrelated write -- on a completed run, forever.
-                        # Bail to the caller's plain loop for this tick.
-                        logging.debug(
-                            "Report %s inside the stability window; "
-                            "aggregate not cacheable this tick.", fp)
-                        return None
-                    continue
-                _accumulate(df, s_agg, s_ordered, s_seen)
+            built = _build_segment(sample_files, parse_fn, is_transient)
+            if built is None:
+                return None
+            s_agg, s_ordered = built
             with _lock:
                 _sample_accum[cache_key] = (state, s_agg, s_ordered)
         else:

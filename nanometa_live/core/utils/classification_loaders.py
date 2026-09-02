@@ -13,7 +13,7 @@ import threading
 import time
 from collections import OrderedDict
 import pandas as pd
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from nanometa_live.core.utils.canonical_loaders import load_canonical_classification
 from nanometa_live.core.utils.sample_detector import (
@@ -101,6 +101,15 @@ def _evict_to_budget_locked() -> None:
 # report the finder no longer lists is never resurrected -- the fallback
 # only answers for paths a caller still asks about.
 _last_good_frame: "OrderedDict[str, pd.DataFrame]" = OrderedDict()
+# Realpaths whose most recent parse returned the last-good stand-in rather
+# than the file's current content. Not a cache: a transience marker read by
+# the loaders so a stand-in is never stored under the file's new fingerprint.
+_fallback_served_paths: Set[str] = set()
+# Realpaths of cumulative reports report discovery skipped because they had
+# just appeared (inside the stability window, no last-good parse). The tier
+# returned in their place is a stand-in for that poll and must not be cached
+# under a fingerprint that already includes the new file.
+_tier_fallback_paths: Set[str] = set()
 
 
 # Latest-batch path memo (round 3): (main_dir, sample) -> (dir-mtime state,
@@ -123,6 +132,8 @@ def clear_report_frame_cache() -> None:
     with _report_frame_cache_lock:
         _report_frame_cache.clear()
         _last_good_frame.clear()
+        _fallback_served_paths.clear()
+        _tier_fallback_paths.clear()
         _frame_sizes.clear()
         _last_good_sizes.clear()
     with _latest_batch_memo_lock:
@@ -250,6 +261,7 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
         cached = _report_frame_cache.get(key)
         if cached is not None:
             _report_frame_cache.move_to_end(key)  # LRU bump
+            _fallback_served_paths.discard(key[0])
     if cached is not None:
         # A hit proves the CURRENT file state parses, so any stale flag
         # from a transient failure at another mtime clears here. Without
@@ -267,6 +279,13 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
         # inside nanometanf's per-batch rewrite window (see _last_good_frame).
         with _report_frame_cache_lock:
             fallback = _last_good_frame.get(key[0])
+            if fallback is not None:
+                # Mark the path so callers know this frame is a stand-in.
+                # A caller that cached it under the file's new fingerprint
+                # served it until the NEXT rewrite and never reached this
+                # function again to clear the staleness flag (round-4
+                # audit, H26/H28, reproduced by snapshot replay).
+                _fallback_served_paths.add(key[0])
         if fallback is not None:
             logging.debug(
                 "Report transiently unparseable; serving last good parse: %s",
@@ -281,8 +300,58 @@ def _parse_kraken2_report(filepath: str, check_stability: bool = True) -> Option
         return fallback
 
     _store_parsed_frame(key, df)
+    with _report_frame_cache_lock:
+        _fallback_served_paths.discard(key[0])
     _record_staleness(filepath, served_fallback=False)
     return df
+
+
+def _cumulative_readable_now(filepath: str) -> bool:
+    """Can this cumulative report yield a frame on the current poll?
+
+    True when it is past the stability window, or when a last-good parse of
+    it exists to stand in. False only for a report that has just appeared
+    for the first time, which report discovery answers by keeping the
+    previous tier for one poll.
+    """
+    real = os.path.realpath(filepath)
+    if _is_file_stable(filepath):
+        with _report_frame_cache_lock:
+            _tier_fallback_paths.discard(real)
+        return True
+    with _report_frame_cache_lock:
+        if real in _last_good_frame:
+            _tier_fallback_paths.discard(real)
+            return True
+        _tier_fallback_paths.add(real)
+        return False
+
+
+def _has_pending_cumulative(kraken_dir: str, sample: Optional[str] = None) -> bool:
+    """Is a just-appeared cumulative report standing behind a tier fallback?
+
+    Scoped to one sample when given, else to the whole ``kraken_dir``. A
+    load that used the older tier while this is True is transient: the new
+    report only has to age past the window, which changes no mtime and so no
+    cache key (round-4 audit, H6).
+    """
+    prefix = os.path.realpath(kraken_dir) + os.sep
+    with _report_frame_cache_lock:
+        pending = [p for p in _tier_fallback_paths if p.startswith(prefix)]
+    if sample is None:
+        return bool(pending)
+    return any(_report_sample_key(p) == sample for p in pending)
+
+
+def _served_from_fallback(filepath: str) -> bool:
+    """Did the most recent parse of ``filepath`` return a last-good stand-in?
+
+    Callers that build cached results from parsed frames must treat such a
+    result as transient: the file only has to age past the stability window,
+    which changes no mtime and therefore no cache key.
+    """
+    with _report_frame_cache_lock:
+        return os.path.realpath(filepath) in _fallback_served_paths
 
 
 def _store_parsed_frame(key: Tuple[str, int, int], df: pd.DataFrame) -> None:
@@ -866,8 +935,18 @@ def _discover_all_sample_reports(kraken_dir: str) -> List[str]:
         set(cumulative_by_sample) | set(standard_by_sample) | set(batches_by_sample)
     )
     for sample_key in all_samples:
-        if sample_key in cumulative_by_sample:
-            selected.extend(cumulative_by_sample[sample_key])
+        readable_cumulative = [
+            f for f in cumulative_by_sample.get(sample_key, [])
+            if _cumulative_readable_now(f)
+        ]
+        has_older_tier = (sample_key in standard_by_sample
+                          or sample_key in batches_by_sample)
+        if readable_cumulative or (
+                sample_key in cumulative_by_sample and not has_older_tier):
+            # Same rule as _discover_sample_reports: a cumulative report
+            # inside its first stability window yields to the tier it
+            # replaces, so the sample stays in the union this poll.
+            selected.extend(readable_cumulative or cumulative_by_sample[sample_key])
         elif sample_key in standard_by_sample:
             selected.extend(standard_by_sample[sample_key])
         else:
@@ -926,15 +1005,22 @@ def _discover_sample_reports(kraken_dir: str, sample: str) -> List[str]:
     stat first, v1.5 nested subdir as a fallback. Returns a list (possibly
     empty).
     """
-    # 1. Cumulative report (preferred - already aggregated).
+    # 1. Cumulative report (preferred - already aggregated). A cumulative
+    # report that has JUST appeared -- inside the stability window with no
+    # last-good parse behind it -- cannot be read this poll; falling
+    # through to the tier it replaces keeps the sample measured (round-4
+    # audit, H6: three of five samples vanished from the aggregate at their
+    # tier switch, 1,614 -> 619 reads).
     cumul_path = os.path.join(kraken_dir, f"{sample}.cumulative.kraken2.report.txt")
-    if os.path.exists(cumul_path):
-        logging.debug(f"Found cumulative Kraken2 report for {sample}")
-        return [cumul_path]
     nested_cumul = os.path.join(kraken_dir, sample, f"{sample}.cumulative.kraken2.report.txt")
-    if os.path.exists(nested_cumul):
-        logging.debug(f"Found cumulative Kraken2 report for {sample}")
-        return [nested_cumul]
+    fresh_unreadable: List[str] = []
+    for candidate in (cumul_path, nested_cumul):
+        if not os.path.exists(candidate):
+            continue
+        if _cumulative_readable_now(candidate):
+            logging.debug(f"Found cumulative Kraken2 report for {sample}")
+            return [candidate]
+        fresh_unreadable.append(candidate)
 
     # 2. Standard (non-batch) reports: direct path, nested, then flat re-check.
     sample_files: List[str] = []
@@ -960,7 +1046,8 @@ def _discover_sample_reports(kraken_dir: str, sample: str) -> List[str]:
         candidate_batches.extend(glob.glob(os.path.join(batch_dir, "*.kraken2.report.txt")))
     candidate_batches = _deduplicate_batch_files(candidate_batches)
     if not candidate_batches:
-        return []
+        # Nothing older to fall back on: the fresh cumulative is all there is.
+        return fresh_unreadable[:1]
     if _is_incremental_layout(kraken_dir, sample):
         logging.debug(
             "Incremental Kraken2 layout detected for %s: summing %d batch reports",
@@ -1103,8 +1190,11 @@ def _parse_kraken_data_uncached(
         cached = aggregate_with_sample_cache(
             kraken_dir, kreport_files, _report_sample_key,
             _parse_kraken2_report, _accumulate_kraken_df,
+            is_transient=_served_from_fallback,
         )
-        transient_skip = False
+        # A sample held on its older tier because its cumulative report has
+        # just appeared makes this union a stand-in for the poll (H6).
+        transient_skip = _has_pending_cumulative(kraken_dir)
         if cached is not None:
             agg, ordered_taxids = cached
         else:
@@ -1124,6 +1214,10 @@ def _parse_kraken_data_uncached(
                         # 2026-08-26: barcode04 absent from the verdict).
                         transient_skip = True
                     continue
+                if _served_from_fallback(kreport_file):
+                    # Stand-in frame (see the per-sample branch): use it for
+                    # this tick, never cache the union built from it.
+                    transient_skip = True
                 _accumulate_kraken_df(df, agg, ordered_taxids, seen_taxids)
 
         if not agg:
@@ -1157,7 +1251,9 @@ def _parse_kraken_data_uncached(
     # result when file_count == 1, an O(rows) pass wasted on every single-file
     # load (cProfile, 2026-06-05).
     parsed_frames: List[pd.DataFrame] = []
-    transient_skip = False
+    # A tier fallback for a just-appeared cumulative report is a stand-in for
+    # this poll only (round-4 audit, H6).
+    transient_skip = _has_pending_cumulative(kraken_dir, sample)
     for sample_file in sample_files:
         df = _parse_kraken2_report(sample_file)
         if df is None or df.empty:
@@ -1167,6 +1263,11 @@ def _parse_kraken_data_uncached(
                 # result must not enter the mtime-keyed caches.
                 transient_skip = True
             continue
+        if _served_from_fallback(sample_file):
+            # A last-good stand-in is as transient as a skip: cached under
+            # the new fingerprint it would be served until the next rewrite
+            # (round-4 audit, H26/H28).
+            transient_skip = True
         parsed_frames.append(df)
 
     if not parsed_frames:

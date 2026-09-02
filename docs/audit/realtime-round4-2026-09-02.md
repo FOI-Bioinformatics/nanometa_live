@@ -322,18 +322,53 @@ producer; Linux.
 | H20 | `processes_failed` reaches the header and the verdict subtitle | `tests/test_stopped_run_state.py::TestFailedTasksAreNamed` |
 | H5 | Inbox refreshes after the run; header, metadata and report state the unprocessed-input gap for real-time runs | `tests/test_stopped_run_state.py::TestUnprocessedInputIsNamed` |
 | H1 | nanometanf timer resets on every detected file; GUI text and countdown (anchored on the newest input file, timeout plus grace) follow | `tests/test_realtime_timeout_contract.py` |
+| H6, H26, H28 | served last-good frames and tier fallbacks are transient, never cached under the new fingerprint (see the section below) | `tests/test_loader_fallback_transience.py` |
 | H24 | `unresolved_watchlist_ids` feeds a CRITICAL readiness check and the startup toast | `tests/test_unresolved_watchlists.py` |
 | H23 | Results-fingerprint Store carries a sticky `dir_seen`; a never-created directory is STANDBY | `tests/test_verdict_banner_callback.py::TestNeverCreatedDirIsNotLost` |
 | H21, H4 (pattern) | nanometanf per-batch QC filename carries `batch_id`; real-time pattern includes `.fq` | nanometanf `conf/modules.config`, `nextflow.config` |
 
+## H6, H26, H28: one root cause, found by snapshot replay (fixed 2026-09-02)
+
+`scripts/audit_replay_snapshots.py` syncs the 20 s snapshots in order into
+one working results directory, copying changed files with their mtime set to
+now, and takes the sampler's measurement inside and after the stability
+window. On the R2 window 23:12-23:17 it reproduced all three findings in a
+single process: the aggregate stuck at 7,009 reads for five snapshots while
+the cumulative reports of barcode05-08 were rewritten, a staleness entry per
+rewritten sample that never cleared, and the aggregate falling 9,125 to 7,246
+as barcode91 appeared.
+
+The cause is one gap. When a rewritten report is inside the 1 s window,
+`_parse_kraken2_report` serves the last-good frame. The callers could not
+tell that frame from a real parse (`transient_skip` fired only on a None) and
+stored it under the file's NEW fingerprint. The window then closed by time
+passing, which changes no mtime and therefore no cache key, so every later
+poll hit the mtime cache: the stand-in was served until the next rewrite
+(H26) and the parse path that clears the staleness registry was never
+reached again (H28). A cumulative report appearing for the first time has no
+last-good at all, so the sample vanished for that poll (H6), and the batch
+tier returned in its place would have been cached under a fingerprint that
+already included the new file.
+
+Fix: `_parse_kraken2_report` marks the realpaths it served from last-good
+(`_fallback_served_paths`); every loader branch and the per-sample
+accumulation cache treat a load that used such a frame as transient and do
+not cache it. Report discovery keeps the previous tier for one poll when a
+cumulative report is inside its first window with no last-good behind it
+(`_cumulative_readable_now`, `_tier_fallback_paths`), and a load built on
+that fallback is transient too. Replaying the same window after the fix: the
+aggregate advances at every settled step (7,009, 7,600, 7,871, 8,519, 9,125,
+9,362, 10,274), the registry is empty after every settled step, and the
+tier switch no longer drops the aggregate. Pinned by
+`tests/test_loader_fallback_transience.py`, which advances the loaders'
+clock instead of touching mtimes, because touching an mtime is exactly what
+hid the bug from the earlier tests.
+
 ## Still open after this session
 
-- **H6, H26, H27, H28** (loader transients: tier-switch drop, per-sample lag,
-  batch-vs-cumulative arithmetic, the permanent stale flag). Each needs an
-  offline reproduction from `~/nanometa-audit-r4/snapshots/`, replaying
-  successive snapshots through one long-lived loader process with mtimes
-  touched to "now". The sample-key derivation was checked and is not the
-  cause of H28.
+- **H27** (batch-vs-cumulative arithmetic differs by a few reads at the
+  switch) is the one loader item not yet explained; the replay harness now
+  makes it a short investigation.
 - **H15, H19** (Continue reclassifies everything and doubles the batch
   tree). The collision modal's "skip already-completed steps" wording is
   wrong for a real-time run; the pipeline's per-file wall-clock meta stamp

@@ -1408,6 +1408,21 @@ with nanorunner and found the end of a run to be the least truthful moment:
   the path and is never empty; the Store carries a sticky `dir_seen` and
   `_fingerprint_marks_dir_seen` decides. A never-created results directory
   is STANDBY.
+- **A served last-good frame is transient; so is a tier fallback.**
+  `_parse_kraken2_report` marks realpaths it served from `_last_good_frame`
+  in `_fallback_served_paths`; the per-sample branch, the aggregate plain
+  loop and `report_accumulation.aggregate_with_sample_cache` (via
+  `is_transient`) refuse to cache a result built on one. Report discovery
+  keeps the previous tier for one poll when a cumulative report is inside
+  its first stability window with no last-good behind it
+  (`_cumulative_readable_now`, `_tier_fallback_paths`,
+  `_has_pending_cumulative`). The stability window closes by time passing,
+  which changes no mtime and therefore no cache key: caching a stand-in
+  under the new fingerprint served it until the next rewrite (five polls
+  on the replay) and the parse path that clears the staleness registry was
+  never reached again (the "1 sample serving stale data" that sat on a
+  COMPLETE banner). Reproduce with `scripts/audit_replay_snapshots.py`;
+  tests must advance the loaders' clock, never touch the mtime.
 - **On-demand validation waits for the run to end.** It shares the live
   run's launch dir, work dir and outdir and adds a bare `-resume`; the
   modal explains instead of arming a launch while `backend-status.running`.

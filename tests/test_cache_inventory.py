@@ -60,6 +60,8 @@ COVERED_OR_EXEMPT = {
     "_batch_ids_memo",   # validation_tab_helpers (dir-mtime keyed, bounded)
     # exempt: not caches
     "_saturation_warned",   # once-per-path warning dedup, tiny, harmless
+    "_fallback_served_paths",  # classification_loaders: transience marker, cleared with the frame cache
+    "_tier_fallback_paths",    # classification_loaders: transience marker, cleared with the frame cache
     "_debounce_timestamps",  # qc: none
 }
 
