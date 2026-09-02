@@ -118,9 +118,19 @@ def register_status(app, backend_manager):
             logging.debug("first_batch_seen(%s) failed: %s", main_dir, e)
             seen = False
 
-        if fp == (prev or {}).get("fp") and seen == prev_seen:
+        # Sticky "this directory has existed": the fingerprint string is
+        # never empty (it hashes the path), so its presence cannot mean "we
+        # read data here". Without this flag a results directory that had
+        # not been created yet rendered as RESULTS UNAVAILABLE with the
+        # mounted-volume wording, before every Start (round-4 audit, H23).
+        prev_dir_seen = bool((prev or {}).get("dir_seen", False))
+        dir_seen = prev_dir_seen or os.path.isdir(main_dir)
+
+        if (fp == (prev or {}).get("fp") and seen == prev_seen
+                and dir_seen == prev_dir_seen):
             raise PreventUpdate
-        return {"fp": fp, "ts": time.time(), "first_batch_seen": seen}
+        return {"fp": fp, "ts": time.time(), "first_batch_seen": seen,
+                "dir_seen": dir_seen}
 
     @app.callback(
         [

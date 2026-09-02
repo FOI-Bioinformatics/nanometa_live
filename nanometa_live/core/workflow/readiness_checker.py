@@ -230,6 +230,7 @@ class ReadinessChecker:
 
         # === Data completeness (warning) ===
         report.checks.append(self._check_watchlist_active(config, active_watchlist))
+        report.checks.append(self._check_watchlist_names_resolve(config))
         report.checks.append(self._check_watchlist_genomes(config, home, active_watchlist))
         report.checks.append(self._check_blast_dbs(config, home, active_watchlist))
 
@@ -841,6 +842,35 @@ class ReadinessChecker:
             ]
         except (ImportError, AttributeError, OSError):
             return None
+
+    def _check_watchlist_names_resolve(self, config: Dict[str, Any]) -> CheckResult:
+        """Every watchlist the configuration names must exist somewhere.
+
+        A config that enables ``builtin: [bioshield_agents]`` under a project
+        directory that holds no such file loaded zero entries and said
+        nothing; the only trace was "No watchlist enabled", as if the operator
+        had chosen none (round-4 audit, H24, observed live). A named list
+        that cannot be found contradicts the configuration's stated intent
+        and blocks the launch until the file is placed or the name fixed.
+        """
+        from nanometa_live.core.watchlist.watchlist_manager import unresolved_watchlist_ids
+        try:
+            missing = unresolved_watchlist_ids(config)
+        except Exception as exc:
+            logger.debug("watchlist name resolution skipped: %s", exc)
+            missing = {}
+        if not missing:
+            return CheckResult(
+                "Watchlist Files", True, Severity.CRITICAL,
+                "Every watchlist named in the configuration was found",
+            )
+        names = ", ".join(sorted(missing))
+        searched = next(iter(missing.values()), [])
+        return CheckResult(
+            "Watchlist Files", False, Severity.CRITICAL,
+            f"Watchlist(s) named in the configuration were not found: {names}",
+            details="Searched: " + "; ".join(searched) if searched else None,
+        )
 
     def _check_watchlist_active(
         self, config: Dict[str, Any],

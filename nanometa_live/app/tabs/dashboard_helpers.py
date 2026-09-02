@@ -1239,6 +1239,23 @@ def select_verdict(
     return _standby_descriptor()
 
 
+def _fingerprint_marks_dir_seen(fingerprint: Any) -> bool:
+    """Has the results-fingerprint Store ever seen the results directory?
+
+    The RESULTS UNAVAILABLE state is for a directory that held data and is
+    now unreadable. The fingerprint string is never empty (it hashes the
+    path), so a truthiness test rendered a never-created directory as lost
+    before every Start (round-4 audit, H23). The Store now carries a sticky
+    ``dir_seen``; a bare string or a dict without the key keeps the previous
+    meaning so older Stores render as before.
+    """
+    if not fingerprint:
+        return False
+    if isinstance(fingerprint, dict):
+        return bool(fingerprint.get("dir_seen", True))
+    return True
+
+
 def _get_idle_alerts() -> Tuple:
     """Return idle state for the alerts callback (D3d, 3 outputs)."""
     empty_alerts = html.Div([

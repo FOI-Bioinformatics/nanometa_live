@@ -126,17 +126,32 @@ def register_startup(app, backend_manager):
         except Exception:
             return no_update
 
-        if not missing:
+        # A watchlist the config names but no directory provides is the
+        # same class of stale reference, with a worse failure mode: zero
+        # entries load and the run screens nothing (round-4 audit, H24).
+        try:
+            from nanometa_live.core.watchlist.watchlist_manager import (
+                unresolved_watchlist_ids,
+            )
+            missing_lists = unresolved_watchlist_ids(config)
+        except Exception:
+            missing_lists = {}
+
+        if not missing and not missing_lists:
             return no_update
 
-        lines = "\n".join(f"- {key}: {path}" for key, path in missing.items())
+        lines = [f"- {key}: {path}" for key, path in missing.items()]
+        for name, dirs in missing_lists.items():
+            lines.append(
+                f"- watchlist '{name}' not found (searched {', '.join(dirs)})"
+            )
         return {
             "type": "warning",
             "title": "Configured paths not found",
             "message": (
                 "The loaded configuration references paths that do not "
                 "exist on this machine. Review them in the Configuration "
-                "tab before launching:\n" + lines
+                "tab before launching:\n" + "\n".join(lines)
             ),
         }
 

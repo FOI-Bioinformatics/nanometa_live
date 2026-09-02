@@ -18,6 +18,7 @@ from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
 from nanometa_live.core.utils.classification_loaders import load_kraken_data
+from nanometa_live.app.tabs.dashboard_helpers import _fingerprint_marks_dir_seen
 from nanometa_live.core.utils.qc_loaders import (
     get_qc_stats,
     load_nanoplot_stats,
@@ -332,7 +333,8 @@ def register_dashboard_callbacks(app: Dash):
         # volume, deleted folder), not idleness. Without the fingerprint
         # guard a never-created dir would false-positive on every boot.
         results_dir_lost = bool(
-            main_dir and not main_dir_available and _fingerprint
+            main_dir and not main_dir_available
+            and _fingerprint_marks_dir_seen(_fingerprint)
         )
 
         kraken_has_data = False

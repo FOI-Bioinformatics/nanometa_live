@@ -69,6 +69,42 @@ def _get_taxonomy_matcher():
         return _taxonomy_matcher
 
 
+def unresolved_watchlist_ids(config: Optional[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """Watchlist ids a config names that no watchlist directory provides.
+
+    Returns ``{watchlist_id: [directories searched]}``, empty when every id
+    resolves. A config that says ``watchlist: {enabled: true, builtin:
+    [bioshield_agents]}`` under a filename whose project directory holds no
+    such file used to load zero entries and say nothing (round-4 audit,
+    H24): the loader logged a warning nobody reads and readiness demoted
+    the result to "No watchlist enabled", as if the operator had chosen
+    none. This is the single question both the readiness check and the
+    startup toast ask.
+    """
+    wl = (config or {}).get("watchlist") or {}
+    if not isinstance(wl, dict) or not wl.get("enabled", False):
+        return {}
+    wanted = [str(w) for w in (wl.get("builtin") or []) if w]
+    if not wanted:
+        return {}
+    loader = _get_watchlist_loader()
+    try:
+        available = {m.id for m in loader.discover_watchlists()}
+    except Exception as exc:  # discovery must never break a readiness pass
+        logger.warning("Watchlist discovery failed: %s", exc)
+        return {}
+    searched: List[str] = []
+    for d in (
+        getattr(loader, "_project_dir", None),
+        *getattr(loader, "_additional_project_dirs", []),
+        loader.user_watchlist_dir,
+        Path(loader._app_root) / "core" / "config" / "data" / "watchlists",
+    ):
+        if d:
+            searched.append(str(d))
+    return {w: searched for w in wanted if w not in available}
+
+
 def _get_watchlist_loader():
     """Lazy import of WatchlistLoader (thread-safe)."""
     global _watchlist_loader
