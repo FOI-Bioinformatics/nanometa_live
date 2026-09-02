@@ -59,7 +59,14 @@ def _place(src, dst, age=30):
 
 
 @pytest.fixture(autouse=True)
-def _fresh():
+def _fresh(monkeypatch):
+    # Epoch 0 = "check_data_freshness has never run", which keeps the mtime
+    # cache on its unconditional path check. Any other loader test in the
+    # same xdist worker may have bumped the epoch, and the epoch shortcut
+    # then answers the second load from cache without looking at the file
+    # (CI failure on the first push of this file).
+    from nanometa_live.core.utils import loader_utils
+    monkeypatch.setattr(loader_utils, "_freshness_epoch", 0)
     clear_all_loader_caches()
     invalidate_sample_cache()
     staleness.clear()
