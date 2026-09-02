@@ -572,6 +572,18 @@ each now has a guard and a test:
   parses the YAML at most twice (pinned in `tests/test_watchlist_upload.py`).
   The collision confirm keeps only {path, filename} in the pending Store.
 
+**One alert per watchlist ENTRY, and entry identity is (NCBI taxid, db_taxid).**
+`_dedupe_alerts_by_entry` keeps the dominant node per entry so a species row
+and its subspecies rows yield one alert. Its key must be the same pair
+`_identity_key` stores entries under: the Bioshield list carries *E. coli*,
+*E. coli_E* and *E. coli_F* as three entries with distinct database nodes and
+the one NCBI taxid 562, and keyed on the taxid alone the dedup collapsed them.
+On run R1 of the round-4 audit *E. coli_F* at 11 reads (threshold 10) vanished
+from the alarm list behind *E. coli* at 22, and which variant survived flipped
+with the frame's row order (batch-tier accumulation vs cumulative report).
+Every alert now carries `db_taxid`; regression in
+`tests/test_taxid_coordination.py`.
+
 **Scale invariants, round 2 (2026-08-24 audit; do not regress).** Round 2
 added the barcode axis (24-96 samples) with two acceptance criteria: the
 interface never freezes, and the operator always sees progress. The guards:

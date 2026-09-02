@@ -225,6 +225,17 @@ nothing parsed: all five samples unmeasured for one poll, aggregate None
 samples). `_deduplicate_batch_files` now keeps whichever copy can be read on
 the current poll and lets the name preference decide only when both can.
 
+**And a third, in the watchlist matcher:** with the loader fixed, the replay
+still reported *Escherichia coli_F* falling to 0 on each barcode's switch to
+the cumulative tier. The frame had not lost it (11 reads, the sum of 3+3+5);
+`_dedupe_alerts_by_entry` keyed on the NCBI taxid, and the Bioshield list
+holds *E. coli*, *E. coli_E* and *E. coli_F* as three entries with distinct
+`db_taxid` and the one NCBI taxid 562. Above threshold, *E. coli_F* (11,
+threshold 10) was merged into *E. coli* (22) and disappeared from the alarm
+list; in the batch-tier frame it sat below threshold and survived there. The
+dedup now keys on (NCBI taxid, `db_taxid`), the pair `_identity_key` already
+uses for storage. Replay of the window: 0 violations.
+
 ### H6b, H7, H15, H19. Continue on a completed outdir (confirmed live, R1c)
 
 - At 23:47:17 `kraken2/barcode05.cumulative...` (rewritten by the continued

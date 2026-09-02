@@ -1089,11 +1089,21 @@ class WatchlistManager:
         reaudit). The kept row is the one with the most reads: for
         ancestor/descendant matches that is the ancestor, whose count
         contains the others. Distinct entries are never merged.
+
+        Entry identity is the pair (NCBI taxid, ``db_taxid``), the same rule
+        ``_identity_key`` applies when storing entries: the Bioshield list
+        holds *E. coli*, *E. coli_E* and *E. coli_F* as three entries with
+        distinct database nodes and the one NCBI taxid 562. Keyed on the NCBI
+        taxid alone, the dedup collapsed them -- *E. coli_F* at 11 reads
+        (threshold 10) vanished behind *E. coli* at 22 on run R1 of the
+        round-4 audit, and which variant survived flipped with the frame's
+        row order. Alerts without a ``db_taxid`` (legacy callers) still key
+        on the taxid alone.
         """
         best: Dict[Any, Dict[str, Any]] = {}
         order: List[Any] = []
         for alert in alerts:
-            key = alert.get("taxid") or alert.get("name")
+            key = (alert.get("taxid") or alert.get("name"), alert.get("db_taxid"))
             if key not in best:
                 best[key] = alert
                 order.append(key)
@@ -1259,6 +1269,7 @@ class WatchlistManager:
         """
         alert = {
             "taxid": entry.taxid,
+            "db_taxid": entry.db_taxid,
             "detected_taxid": detected_taxid,
             "name": entry.name,
             "common_name": entry.common_name,

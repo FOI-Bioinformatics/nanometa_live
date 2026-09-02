@@ -243,6 +243,51 @@ class TestOneDetectionPerWatchlistEntry:
         assert entry_hits[0]["reads"] == 34103
         assert entry_hits[0]["detected_taxid"] == 263
 
+    def test_distinct_entries_sharing_an_ncbi_taxid_each_keep_their_alert(self):
+        """One detection per ENTRY, where entry identity is (NCBI taxid, db_taxid).
+
+        The Bioshield list carries *Escherichia coli*, *E. coli_E* and
+        *E. coli_F* as three entries with distinct db_taxids and the same
+        NCBI taxid 562 (GTDB splits the polyphyletic species; NCBI has one
+        id). The manager stores them under three keys (``_identity_key``),
+        but the alert dedup keyed on the NCBI taxid alone and collapsed them:
+        replaying run R1 of the round-4 audit, *E. coli_F* at 11 reads
+        (threshold 10) vanished from the alarm list behind *E. coli* at 22,
+        and which variant survived flipped with the frame's row order.
+        """
+        from unittest.mock import patch
+
+        from nanometa_live.core.watchlist.watchlist_manager import (
+            WatchlistManager,
+        )
+
+        with patch.object(WatchlistManager, "_save_toggle_state", lambda self: None):
+            m = WatchlistManager()
+            for name, db_taxid in (("Escherichia coli", 4000549),
+                                   ("Escherichia coli_E", 4000558),
+                                   ("Escherichia coli_F", 4000553)):
+                m.add_custom_entry({
+                    "taxid": 562, "db_taxid": db_taxid, "name": name,
+                    "threat_level": "high", "enabled": True,
+                    "alert_threshold": 10,
+                })
+            m._loaded = True
+            assert len(m.get_active_entries()) == 3
+
+            organisms = [
+                {"taxid": 4000549, "name": "Escherichia coli", "reads": 22, "abundance": 2.4},
+                {"taxid": 4000553, "name": "Escherichia coli_F", "reads": 11, "abundance": 1.2},
+                {"taxid": 4000558, "name": "Escherichia coli_E", "reads": 3, "abundance": 0.3},
+            ]
+            above, below = m.check_organisms_split(organisms)
+
+        assert sorted(a["detected_taxid"] for a in above) == [4000549, 4000553]
+        assert [a["detected_taxid"] for a in below] == [4000558]
+        # And the reverse row order must not change who survives.
+        with patch.object(WatchlistManager, "_save_toggle_state", lambda self: None):
+            above_rev, _ = m.check_organisms_split(list(reversed(organisms)))
+        assert sorted(a["detected_taxid"] for a in above_rev) == [4000549, 4000553]
+
     def test_check_organisms_with_mapping_dedupes_too(self):
         from nanometa_live.core.watchlist.watchlist_manager import (
             WatchlistManager,
