@@ -27,6 +27,14 @@ from nanometa_live.core.config.parameter_mapping import (
 )
 
 
+def _mtime_or_zero(path: str) -> float:
+    """File mtime, or 0.0 when the file vanished between glob and stat."""
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
 class NextflowManager:
     """Manages Nextflow pipeline execution and monitoring for nanometanf."""
 
@@ -65,6 +73,12 @@ class NextflowManager:
         self._run_config: Optional[Dict[str, Any]] = None
 
         self._last_trace_status = {}
+        # Wall-clock time of the most recent launch. GENERATE_SNAPSHOT_STATS
+        # files older than this belong to a previous run in the same outdir
+        # (Continue, or an Archive that left them behind) and must not be
+        # counted as this run's processed files (round-4 audit, H36:
+        # "Files processed: 105 / 63").
+        self._launched_at: Optional[float] = None
         # Trace-parser drift detection: log an unrecognised status value or a
         # missing-column header only once each, not on every poll.
         self._trace_unknown_statuses: set = set()
@@ -663,6 +677,7 @@ class NextflowManager:
 
                 # Update status
                 self.running = True
+                self._launched_at = time.time()
                 self.status["running"] = True
                 self.status["last_updated"] = time.time()
 
@@ -1203,6 +1218,14 @@ class NextflowManager:
 
             # Find all batch snapshot files (format: batch_<timestamp>_snapshot.json)
             batch_files = glob.glob(os.path.join(stats_dir, "*_snapshot.json"))
+            # Only this run's snapshots. A Continue into a populated outdir
+            # re-emits every input file, and before realtime_batch_stats/ was
+            # archived alongside the other result folders an Archive left the
+            # previous run's snapshots in place; either way the header counted
+            # them against the current inbox (round-4 audit, H36).
+            if self._launched_at is not None:
+                cutoff = self._launched_at - 1.0
+                batch_files = [f for f in batch_files if _mtime_or_zero(f) >= cutoff]
 
             if not batch_files:
                 return {}

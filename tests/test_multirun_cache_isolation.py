@@ -76,6 +76,11 @@ class TestResultSubdirsCoverCanonical:
     def test_pipeline_info_in_result_subdirs(self):
         assert "pipeline_info" in BackendManager.RESULT_SUBDIRS
 
+    def test_realtime_batch_stats_is_archived(self):
+        """H36: the header sums realtime_batch_stats/*_snapshot.json; a
+        previous run's snapshots left behind by Archive inflated the count."""
+        assert "realtime_batch_stats" in BackendManager.RESULT_SUBDIRS
+
     def test_collision_fires_on_canonical_only_outdir(self, tmp_path):
         canonical = tmp_path / "canonical" / "classification"
         canonical.mkdir(parents=True)

@@ -428,6 +428,10 @@ class BackendManager:
         "nanoplot",
         "canonical",
         "pipeline_info",
+        # GENERATE_SNAPSHOT_STATS output; the header's "Files processed"
+        # sums it, so a previous run's snapshots left behind inflate the
+        # count (round-4 audit, H36).
+        "realtime_batch_stats",
         # The auto-generated operator report describes the run that wrote
         # it; leaving it behind would show run A's verdict on the Reports
         # tab during run B.
