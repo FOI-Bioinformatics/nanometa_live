@@ -985,14 +985,20 @@ class BackendManager:
             return None
         try:
             from datetime import datetime as _dt
-            start_dt = _dt.fromisoformat(start_iso)
-            elapsed = (_dt.now() - start_dt).total_seconds()
+            anchor = _dt.fromisoformat(start_iso).timestamp()
         except (TypeError, ValueError):
             return None
-        # The pipeline's timer fires at timeout PLUS its grace period from
-        # the start of monitoring (nanometanf realtime_processing_grace_period,
-        # default 5). The chip used to count only the timeout and vanished
-        # five minutes before the run actually ended (round-4 audit, H2).
+        # nanometanf's timer runs from the LAST detected input file (every
+        # file resets it), so the countdown anchors on the newest input
+        # file when one is newer than the start.
+        newest = getattr(self, "_newest_input_mtime", None)
+        if newest and newest > anchor:
+            anchor = newest
+        elapsed = time.time() - anchor
+        # The pipeline's timer fires at timeout PLUS its grace period
+        # (nanometanf realtime_processing_grace_period, default 5). The chip
+        # used to count only the timeout and vanished five minutes before
+        # the run actually ended (round-4 audit, H2).
         try:
             grace = int(self.config.get("realtime_processing_grace_period", 5) or 0)
         except (TypeError, ValueError):
@@ -1027,27 +1033,34 @@ class BackendManager:
             # Count files in nanopore directory (including barcode subdirs)
             waiting_files = 0
             extensions = (".fastq", ".fastq.gz", ".fq", ".fq.gz")
+            newest_mtime = 0.0
             if os.path.exists(nanopore_dir):
-                for f in os.listdir(nanopore_dir):
-                    if f.endswith(extensions):
-                        waiting_files += 1
-                # Also count files in per-sample subdirectories. The
-                # canonical detector accepts conventional barcode<NN>
-                # plus custom-named subdirs (Turex/, Zymo/, ...) so
-                # this counter stays accurate for non-multiplex
-                # layouts that still use by_barcode mode.
+                # Per-sample subdirectories too. The canonical detector
+                # accepts conventional barcode<NN> plus custom-named subdirs
+                # (Turex/, Zymo/, ...) so this counter stays accurate for
+                # non-multiplex layouts that still use by_barcode mode.
                 from nanometa_live.core.utils.auto_detect import find_sample_subdirs
-                for sample_dir in find_sample_subdirs(nanopore_dir):
+                dirs = [nanopore_dir] + [str(d) for d in find_sample_subdirs(nanopore_dir)]
+                for d in dirs:
                     try:
-                        for f in os.listdir(str(sample_dir)):
-                            if f.endswith(extensions):
-                                waiting_files += 1
+                        names = os.listdir(d)
                     except OSError:
                         continue
+                    for f in names:
+                        if not f.endswith(extensions):
+                            continue
+                        waiting_files += 1
+                        try:
+                            newest_mtime = max(newest_mtime, os.stat(os.path.join(d, f)).st_mtime)
+                        except OSError:
+                            continue
 
             # Update status with waiting files
             # Processed files comes from workflow_manager status
             self.status["files_waiting"] = waiting_files
+            # The newest input file anchors the auto-stop countdown: the
+            # pipeline's inactivity timer runs from the last detected file.
+            self._newest_input_mtime = newest_mtime or None
             self._file_count_cached_value = waiting_files
             self._file_count_cached_at = now
 

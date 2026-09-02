@@ -772,16 +772,17 @@ def _processing_settings_item():
                     placeholder="Leave empty to run indefinitely"
                 ),
                 dbc.FormText(
-                    "Stop watching for new files this many minutes after the run starts, "
-                    "plus a 5 minute grace period, whether or not files are still arriving. "
+                    "Stop watching once no new file has arrived for this many minutes "
+                    "(plus a 5 minute grace period). Every detected file resets the clock. "
                     "Empty = watch until manually stopped."
                 ),
                 dbc.Tooltip(
-                    "Only applies in real-time mode. nanometanf schedules a single wall-clock "
-                    "timer at --realtime_timeout_minutes plus its grace period from the start of "
-                    "monitoring; files that arrive after it fires are not classified and the run "
-                    "is reported complete. Set it longer than the sequencing run, or clear the "
-                    "field for no timeout. Default 60.",
+                    "Only applies in real-time mode. nanometanf checks the time since the last "
+                    "detected FASTQ file and stops once it exceeds --realtime_timeout_minutes plus "
+                    "the grace period; a run whose files keep arriving is never cut off. Needs "
+                    "nanometanf with the inactivity timer (2026-09-02 or later); older versions "
+                    "treat the value as a wall-clock cap from the start of monitoring. Default 60; "
+                    "clear the field for no timeout.",
                     target="realtime-timeout-minutes-info"
                 )
             ], md=6),
