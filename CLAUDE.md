@@ -156,6 +156,35 @@ naming is recognised.
 Per-batch reports `*_batch*.kraken2.report.txt` are excluded — `load_kraken_latest_batch()`
 selects the highest-numbered batch and never sums across them.
 
+**A report under `<sample>/batch_reports/` is a delta, marker or no marker.**
+`_is_incremental_layout` decides whether the batch tier is summed (incremental
+deltas) or reduced to the highest-numbered file (the retired flat
+`kraken2/<sample>_batchN` snapshots). It used to look only for
+`<sample>/stats/batch_N_report_stats.json`, which nanometanf's
+`KRAKEN2_REPORT_GENERATOR` publishes one process after
+`KRAKEN2_OUTPUT_MERGER` has published the batch report itself. Every
+batch-tier poll of the round-4 audit's run R1 fell into that window, so the
+dashboard served one batch's reads for each barcode (324 of 938 for one
+sample) and the count moved 326 -> 324 as batches arrived (finding H27, the
+"batch-vs-cumulative arithmetic" that was in fact a single batch report
+against the cumulative). The directory itself is now sufficient evidence:
+nanometanf publishes `batch_reports/` only from the incremental flow.
+Regression-covered in `tests/test_classification_loaders.py`
+(`stats_marker=False` fixtures).
+
+**Between two copies of one batch report, keep the one readable this poll.**
+nanometanf publishes each batch report twice and byte-identical (the
+merger's `batch_N`, then the report generator's `<sample>_batchN`, which
+tends to land together with the sample's first cumulative report).
+`_deduplicate_batch_files` prefers the sample-prefixed name, and did so even
+while that copy was inside its 1 s stability window: the tier fallback
+correctly kept the batch tier for the poll on which the cumulative appeared,
+then received files it could not parse, and every sample read as unmeasured
+with an aggregate of None (replay of R1 at 22:54:35, five of five samples).
+`_readable_duplicate` lets the name preference decide only when both copies
+or neither can be read. One `stat` per duplicate pair, on polls that reach
+discovery only.
+
 **Authoritative taxonomy:** `apply_authoritative_taxonomy()` in `app/tabs/kraken2_helpers.py`
 parses `inspect.txt` from the Kraken2 DB to correct parent_taxid for Sankey/Sunburst.
 
@@ -417,6 +446,25 @@ volume (mmap random access over USB is pathological; the content-derived
   dangerous direction was downward: lowering the slider to catch a divergent
   strain left BLAST filtering at 90 and said nothing.
 
+### One read filter, three QC tools
+
+`chopper_minlength` and `chopper_quality` are the operator's minimum read
+length and mean-quality floor, whichever QC tool runs. The launch sends them
+under chopper's names AND as `fastp_length_required` / `fastp_average_qual`
+(real nanometanf params since 2026-09-02; before that a `qc_tool: fastp` run
+received no filter at all and ran at fastp's 15 bp default, so the Read
+Filtering card changed nothing for it). `filtlong_min_length` is read only
+by filtlong, which the QC-tool select now offers; fastp is not offered in the
+GUI (a config file can still select it, and the form loader then shows
+chopper with a logged warning). `chopper_maxlength` (empty =
+no limit, stored as None, omitted from the launch) goes to chopper and
+filtlong; fastp gets no upper bound because its `max_len1` trims rather than
+drops. The readiness check
+"Input Read Length" takes the floor of the selected tool. The three keys
+are written by `create_default_config`, because the form loader falls back
+to 1000/10/1000 and a snapshot lacking them read as modified whenever any
+other field was touched. Values are fixed at Start; the card says so.
+
 ### Path lifecycle
 
 Every path-bearing config key is canonicalised at write time
@@ -542,6 +590,18 @@ each now has a guard and a test:
   side effects). `validate_and_parse` returns the parsed data; one import
   parses the YAML at most twice (pinned in `tests/test_watchlist_upload.py`).
   The collision confirm keeps only {path, filename} in the pending Store.
+
+**One alert per watchlist ENTRY, and entry identity is (NCBI taxid, db_taxid).**
+`_dedupe_alerts_by_entry` keeps the dominant node per entry so a species row
+and its subspecies rows yield one alert. Its key must be the same pair
+`_identity_key` stores entries under: the Bioshield list carries *E. coli*,
+*E. coli_E* and *E. coli_F* as three entries with distinct database nodes and
+the one NCBI taxid 562, and keyed on the taxid alone the dedup collapsed them.
+On run R1 of the round-4 audit *E. coli_F* at 11 reads (threshold 10) vanished
+from the alarm list behind *E. coli* at 22, and which variant survived flipped
+with the frame's row order (batch-tier accumulation vs cumulative report).
+Every alert now carries `db_taxid`; regression in
+`tests/test_taxid_coordination.py`.
 
 **Scale invariants, round 2 (2026-08-24 audit; do not regress).** Round 2
 added the barcode axis (24-96 samples) with two acceptance criteria: the
@@ -1294,6 +1354,190 @@ detection the Organisms tab reported as 34,096; and `barcode16` reads=4 /
 cumul=6, which put the run's negative control below a floor of 5 so its
 contamination appeared nowhere at all. Both sites fall back to `reads` when the
 column is absent. Regression-covered in `tests/test_attribution_read_column.py`.
+
+**Real-time attribution fails in ways batch mode does not** (audit
+2026-09-01, `docs/audit/realtime-attribution-2026-09-01.md`). Three guards,
+all pinned in `tests/test_realtime_attribution.py`:
+
+- **A sub-threshold sample is named, not just counted.** The verdict is
+  decided on the aggregate, which crosses a watchlist entry's
+  `alert_threshold` before any single barcode does; a batch run's barcodes
+  are complete when the verdict appears, a realtime run's aggregate leads
+  every barcode for most of the run. `_attribution_phrase` names the top
+  samples alongside the aggregate qualifier rather than rendering a bare
+  count. Measured at threshold 500: the completed batch run named
+  barcode06/07/05 for *F. tularensis*, the realtime run named none.
+  The threshold gate itself must NOT be removed -- ten barcodes at 50 reads
+  each are not each positive for a pathogen with a threshold of 100.
+- **A detection resolving no samples gets a second look without the
+  discovery floor.** `PER_SAMPLE_DISCOVERY_FLOOR` (5) is correct for the
+  general build and wrong for a taxon the aggregate already called above
+  threshold, because the aggregate reaches that threshold by summing exactly
+  the sub-floor counts the filter discards. On a real run *B. anthracis* sat
+  at 4/3/3 reads across three barcodes: ACTION REQUIRED for a select agent,
+  attributed to nobody, while the exported report (which applies no floor)
+  named all three correctly. `augment_attribution_for_unresolved` is the
+  single entry point and is used by the verdict banner, the alert panel AND
+  the modal breakdown -- fixing one surface alone produced a banner naming
+  barcodes above a card showing none. It returns the input unchanged when
+  nothing needs filling in, and a COPY otherwise: the input is the shared
+  per-tick memo. **Never pair built attributions against the detection list
+  by position** to find what failed to resolve: `build_pathogen_attribution`
+  deduplicates by label and re-sorts by read count, so the Nth attribution is
+  not the Nth detection. Ask per detection with `samples_for_detection`.
+- **An unread sample is not a clean sample.** `_load_per_sample_organisms`
+  separates "no report on disk yet" and "report mid-rewrite" from "measured
+  and carries nothing"; realtime lists a sample as soon as its directory
+  appears and rewrites its cumulative report every batch, so both windows
+  recur all run. `unmeasured_samples` exposes the gap and the banner names
+  it. It reports a PARTIAL gap only -- when nothing is readable the
+  verdict's own no-data states already say so.
+
+A multi-sample moderate-tier alert card names its highest-count sample plus a
+"+N more" pill (`_render_sample_attribution`). Chips per barcode stay
+suppressed for the component budget, but a bare count pill told the operator a
+detection spanned barcodes without saying which.
+
+`tests/fixtures/realtime_attribution/` is the only fixture in the suite shaped
+like a realtime results tree (progressive cumulative report, per-batch reports,
+incremental-layout markers); every other attribution test writes a flat
+`<sample>.kraken2.report.txt` and therefore cannot see any of the above. Use
+`scripts/audit_realtime_attribution.py <results_dir> --config <config.yaml>` to
+diagnose a live or captured outdir hop by hop.
+
+**How a real-time run ends is part of the verdict** (round-4 audit,
+`docs/audit/realtime-round4-2026-09-02.md`; do not regress). The audit drove
+three real-time runs, three Stop drills, two Continue drills and a hard kill
+with nanorunner and found the end of a run to be the least truthful moment:
+
+- **A stopped run is recorded and rendered as stopped.** `stop()` and the
+  inactivity backstop call `_mark_stop_intent` BEFORE signalling Nextflow
+  (the monitor thread polls every 5 s and would otherwise classify the dying
+  process as completed or errored), then `_finish_stopped_locked`, which
+  writes `final_status: stopped`, `stop_reason`, `ended_at`,
+  `files_processed` and `input_files_at_end` into `.nanometa.run.json`.
+  `get_status()` exposes `stopped_run`; the header says "Stopped (reason)",
+  the banner badge STOPPED, and `with_failure_clauses` appends "run stopped
+  ... counts are partial". `pipeline_status == "stopped"` alone means idle
+  as well, so a real stop is the one with a `stop_reason`.
+- **The report reads the run state.** `read_final_run_status` returns
+  `run_state` (completed / stopped / error / active / unknown); `active`
+  means the metadata was written at Start, no terminal status exists and
+  `.nanometa.lock` is present, i.e. an export taken mid-run. The template's
+  `run_clause` qualifies every decision banner; it is set ABOVE the
+  `<!-- DECISION BANNER -->` comment because `test_report_read_depth_gate`
+  slices the template from that comment to the banner's first matching
+  `endif`.
+- **The real-time timeout is a wall-clock timer, and the text says so.**
+  nanometanf schedules one timer at `realtime_timeout_minutes` plus the
+  grace period from the start of monitoring; files that land afterwards are
+  never classified and the run is reported complete. The form text
+  describes exactly that, the auto-stop chip counts to timeout plus grace,
+  and `_unprocessed_input_note` states the inbox-minus-processed gap for a
+  finished real-time run (header and report). The GUI backstop remains a
+  genuine inactivity timer on task progress and is a separate mechanism.
+- **Failed-and-ignored tasks are named.** `processes_failed` reaches the
+  header ("N tasks failed (skipped)") and the verdict subtitle; the reads of
+  an isolated failure are absent from every count and nanometanf's own
+  `aggregation_stats.json` cannot see a QC-stage failure because batch ids
+  are assigned after QC.
+- **Every launch path resolves the outdir the same way.** The collision
+  handler (Continue / Archive) used the app-config State as is; a tab whose
+  Store never carried `results_output_directory` launched into a fresh
+  `~/.nanometa/data/analysis_<ts>` while the modal promised the described
+  folder. It now resolves via `resolve_run_outdir` and pins the directory
+  the modal showed. Root cause still open: `app.layout` is static, so a new
+  tab hydrates app-config from the boot-time config, not the session's.
+- **Continue into a populated outdir shows the continued run.**
+  `get_available_samples` unions the manifest with disk discovery (the
+  manifest is written once, at session end, and describes the previous
+  run); `load_kraken_data` takes the canonical JSON for a named sample only
+  when `_canonical_is_current` (no older than the sample's reports); the
+  no-data mapping globs `kraken2/<sample>/batch_reports/` too. nanometanf's
+  `-resume` cannot cache-hit in real time (every file's meta carries a
+  wall-clock stamp), the cumulative writer restarts from zero and the
+  batch tree doubles: the modal's "skip already-completed steps" wording is
+  not true for a real-time run and is still to be fixed.
+- **A watchlist the config names must exist.** `unresolved_watchlist_ids`
+  (`watchlist_manager.py`) is the single question the CRITICAL readiness
+  check "Watchlist Files" and the startup toast both ask. `bioshield_agents`
+  is not a package built-in: a config copied under a new filename gets a new
+  project dir with an empty watchlist folder and used to load zero entries
+  silently.
+- **RESULTS UNAVAILABLE needs `dir_seen`.** The fingerprint string hashes
+  the path and is never empty; the Store carries a sticky `dir_seen` and
+  `_fingerprint_marks_dir_seen` decides. A never-created results directory
+  is STANDBY.
+- **A served last-good frame is transient; so is a tier fallback.**
+  `_parse_kraken2_report` marks realpaths it served from `_last_good_frame`
+  in `_fallback_served_paths`; the per-sample branch, the aggregate plain
+  loop and `report_accumulation.aggregate_with_sample_cache` (via
+  `is_transient`) refuse to cache a result built on one. Report discovery
+  keeps the previous tier for one poll when a cumulative report is inside
+  its first stability window with no last-good behind it
+  (`_cumulative_readable_now`, `_tier_fallback_paths`,
+  `_has_pending_cumulative`). The stability window closes by time passing,
+  which changes no mtime and therefore no cache key: caching a stand-in
+  under the new fingerprint served it until the next rewrite (five polls
+  on the replay) and the parse path that clears the staleness registry was
+  never reached again (the "1 sample serving stale data" that sat on a
+  COMPLETE banner). Reproduce with `scripts/audit_replay_snapshots.py`;
+  tests must advance the loaders' clock, never touch the mtime.
+- **On-demand validation waits for the run to end.** It shares the live
+  run's launch dir, work dir and outdir and adds a bare `-resume`; the
+  modal explains instead of arming a launch while `backend-status.running`.
+- **Any kraken2/<sample>/ folder names the sample.** `_NESTED_SAMPLE_SUBDIRS`
+  (`reports`, `batch_reports`, `batches`, `stats`) in `sample_detector`; the
+  incremental classifier publishes `reports/` first, and because
+  `get_available_samples` caches on TOP-LEVEL directory mtimes, a folder
+  appearing inside an existing sample directory never refreshes the list.
+- **"Files processed" is this run's.** `NextflowManager._launched_at` is
+  stamped at launch and `_parse_realtime_stats` ignores older snapshots;
+  `realtime_batch_stats` is in `RESULT_SUBDIRS` so Archive moves it (H36).
+- **Apply Settings pins a running run's folders.** `pin_running_run_paths`
+  (`config_tab_helpers.py`) restores `results_output_directory` and
+  `nanopore_output_directory` from the live config while
+  `backend-status.running`; the toast says pipeline settings apply to the
+  next Start (H11).
+- **Continue in real time is the pipeline's job, not Nextflow's cache.**
+  nanometanf (dev, 2026-09-02) keeps `pipeline_info/processed_inputs.tsv`
+  (one line per batch that reached a per-batch report), skips ledgered files
+  at intake under `-resume`, seeds the cumulative accumulator from
+  `kraken2/<sample>/stats/batch_N_taxid_counts.json` and hands the previous
+  run's batch files to the final aggregator (`lib/RealtimeResume.groovy`).
+  The collision modal's Continue text describes exactly that and says an
+  older pipeline classifies everything again. Nextflow's task cache can never
+  cover a real-time run: batch ids are assigned on arrival.
+- **Real-time intake has no start-up blind window (nanometanf dev,
+  2026-09-02).** Nextflow starts the `watchPath` listener in a session
+  igniter and takes the directory at that moment as its never-reported
+  baseline, so a listing taken at script evaluation left a gap. nanometanf
+  creates the watcher first, lists from a later igniter and again ten
+  seconds in, hands each path on once, and lists with its own vanish-tolerant
+  walk because `file()` returns a partial listing when an entry is renamed
+  away mid-walk (`lib/RealtimeIntake.groovy`). `fastq_fail/` and
+  `fastq_skip/` are excluded at intake, so a MinKNOW run folder is a valid
+  watch directory.
+- **Lost inputs have a marker.** nanometanf's QC and classification processes
+  run `bin/nanometanf_lost_input_marker.sh` as their `afterScript` (which
+  Nextflow runs after the command with `$nxf_main_ret` in scope); an exit-1/2
+  failure writes `pipeline_info/lost_inputs/<STAGE>.<sample>.<hash>.json`
+  naming the staged input files. `run_status.read_lost_inputs` reads them
+  with or without run metadata and the report's `run_clause` lists them.
+- **Isolated task failures are recorded and named after the run.**
+  `.nanometa.run.json` carries `processes_failed` and `failed_tasks`
+  (trace labels such as `CHOPPER (barcode06_chunk3.fastq.gz)`);
+  `read_final_run_status` exposes them, the report's `run_clause` names
+  them and states their reads are absent from every count, and the header's
+  Complete line names up to three (H20). Neither the manifest nor
+  `aggregation_stats.json` can see a QC-stage loss.
+
+Measurement traps from the same audit: a Chrome MCP tab covered by another
+window is `document.hidden` and stops polling entirely (use the Playwright
+MCP browser for operator-view readings); the demo launcher's `conda run`
+swallows the app's stdout and stderr; `conda run` does not forward heredoc
+stdin; `unmeasured_samples()` is a cached lookup that only the attribution
+build refreshes.
 
 **Negative controls.** `is_negative_control` reads the config's
 `negative_control_samples` list first, then falls back to name patterns:

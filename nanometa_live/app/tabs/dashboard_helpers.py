@@ -10,6 +10,7 @@ register_dashboard_callbacks() block.
 
 import os
 import glob
+import threading
 from collections import OrderedDict
 
 import pandas as pd
@@ -106,6 +107,7 @@ def _attribution_children(
     total_sample_count: Optional[int] = None,
     triggering_attribution: Optional[List["PathogenAttribution"]] = None,
     attribution_failed: bool = False,
+    attribution_note: Optional[str] = None,
 ) -> List[Any]:
     """Build the "Triggered by" subhead lines for the verdict banner.
 
@@ -155,6 +157,13 @@ def _attribution_children(
                 {"fontStyle": "italic"},
             )
         )
+
+    # A sample that could not be read is a hole in the screen, not a negative
+    # result for that barcode. Realtime rewrites each sample's report every
+    # batch and lists a sample as soon as its directory appears, so the
+    # silence would otherwise read as "screened and clean".
+    if attribution_note:
+        children.append(_line(attribution_note, {"fontStyle": "italic"}))
     return children
 
 
@@ -175,6 +184,7 @@ def _make_banner_content(
     triggering_pathogens: Optional[List[str]] = None,
     triggering_attribution: Optional[List[PathogenAttribution]] = None,
     attribution_failed: bool = False,
+    attribution_note: Optional[str] = None,
 ) -> dbc.Row:
     """
     Build the inner content for the Zone 1 clinical verdict banner.
@@ -197,6 +207,7 @@ def _make_banner_content(
     run_state_color = (
         "success" if run_state == "ACTIVE"
         else "info" if run_state == "COMPLETE"
+        else "warning" if run_state == "STOPPED"
         else "secondary"
     )
     # Icon visibility: ACTION REQUIRED always shows; others hide on mobile
@@ -270,6 +281,7 @@ def _make_banner_content(
             total_sample_count=total_sample_count,
             triggering_attribution=triggering_attribution,
             attribution_failed=attribution_failed,
+            attribution_note=attribution_note,
         )
     )
 
@@ -625,6 +637,14 @@ def _lookup_sample_breakdown(taxids: Any,
         )
         taxid_to_samples = get_per_sample_organisms_cached(
             main_dir, samples, config)
+        # The modal is where an operator drills into a detection, so it gets
+        # the same second look as the banner and the cards: a taxon spread
+        # below the discovery floor still has to name its barcodes here.
+        taxid_to_samples = augment_attribution_for_unresolved(
+            main_dir, samples,
+            [{"detected_taxid": t} for t in taxids],
+            taxid_to_samples, config,
+        )
         for taxid in taxids:
             found = taxid_to_samples.get(int(taxid), [])
             if found:
@@ -1070,6 +1090,9 @@ def _data_verdict(
     pipeline_error,
     pipeline_error_detail,
     stale_samples,
+    run_stopped=False,
+    stop_reason=None,
+    failed_tasks=0,
 ) -> VerdictDescriptor:
     """The data-available branch of select_verdict (extracted, still pure).
 
@@ -1077,6 +1100,8 @@ def _data_verdict(
     sub-threshold > all-clear. A hit outranks run health -- a verdict never
     suppresses a hit -- but run health outranks every non-detection state.
     """
+    health = dict(stale_samples=stale_samples, run_stopped=run_stopped,
+                  stop_reason=stop_reason, failed_tasks=failed_tasks)
     if dangerous:
         return _with_failure_clauses(
             _detection_descriptor(
@@ -1085,7 +1110,7 @@ def _data_verdict(
             ),
             pipeline_error=pipeline_error,
             pipeline_error_detail=pipeline_error_detail,
-            stale_samples=stale_samples,
+            **health,
         )
     if pipeline_error:
         if subthreshold:
@@ -1093,7 +1118,7 @@ def _data_verdict(
                 _subthreshold_descriptor(subthreshold, n_watched, total_reads),
                 pipeline_error=True,
                 pipeline_error_detail=pipeline_error_detail,
-                stale_samples=stale_samples,
+                **health,
             )
         return _pipeline_error_descriptor(
             pipeline_error_detail, has_partial_data=True)
@@ -1117,12 +1142,12 @@ def _data_verdict(
     if subthreshold:
         return _with_failure_clauses(
             _subthreshold_descriptor(subthreshold, n_watched, total_reads),
-            stale_samples=stale_samples,
+            **health,
         )
 
     return _with_failure_clauses(
         _all_clear_descriptor(n_watched, total_reads),
-        stale_samples=stale_samples,
+        **health,
     )
 
 
@@ -1144,6 +1169,9 @@ def select_verdict(
     pipeline_error_detail: Optional[str] = None,
     results_dir_lost: bool = False,
     stale_samples: int = 0,
+    run_stopped: bool = False,
+    stop_reason: Optional[str] = None,
+    failed_tasks: int = 0,
 ) -> VerdictDescriptor:
     """Pure decision: pick the verdict banner state from the analysis inputs.
 
@@ -1166,7 +1194,8 @@ def select_verdict(
        STANDBY.
 
     ``stale_samples`` appends a clause to the data-state subtitles so
-    frozen numbers cannot present as live ones.
+    frozen numbers cannot present as live ones; ``run_stopped`` does the
+    same for a run ended before its input was exhausted (round-4 H2).
     """
     if not has_config:
         return _screening_descriptor() if pipeline_running else _standby_descriptor()
@@ -1189,8 +1218,25 @@ def select_verdict(
             pipeline_error=pipeline_error,
             pipeline_error_detail=pipeline_error_detail,
             stale_samples=stale_samples,
+            run_stopped=run_stopped,
+            stop_reason=stop_reason,
+            failed_tasks=failed_tasks,
         )
 
+    return _no_data_verdict(
+        results_dir_lost=results_dir_lost,
+        main_dir_available=main_dir_available,
+        pipeline_error=pipeline_error,
+        pipeline_error_detail=pipeline_error_detail,
+        pipeline_running=pipeline_running,
+    )
+
+
+def _no_data_verdict(
+    *, results_dir_lost, main_dir_available, pipeline_error,
+    pipeline_error_detail, pipeline_running,
+) -> VerdictDescriptor:
+    """The no-Kraken-data tail of select_verdict (pure)."""
     # A directory that held data earlier and is now unreadable is an event
     # (unmounted volume, deleted folder), not idleness -- and a crashed run
     # with no output is a failure, not standby.
@@ -1205,6 +1251,23 @@ def select_verdict(
         return _screening_descriptor()
 
     return _standby_descriptor()
+
+
+def _fingerprint_marks_dir_seen(fingerprint: Any) -> bool:
+    """Has the results-fingerprint Store ever seen the results directory?
+
+    The RESULTS UNAVAILABLE state is for a directory that held data and is
+    now unreadable. The fingerprint string is never empty (it hashes the
+    path), so a truthiness test rendered a never-created directory as lost
+    before every Start (round-4 audit, H23). The Store now carries a sticky
+    ``dir_seen``; a bare string or a dict without the key keeps the previous
+    meaning so older Stores render as before.
+    """
+    if not fingerprint:
+        return False
+    if isinstance(fingerprint, dict):
+        return bool(fingerprint.get("dir_seen", True))
+    return True
 
 
 def _get_idle_alerts() -> Tuple:
@@ -2107,6 +2170,168 @@ def _species_df_to_organisms(species_df: pd.DataFrame) -> List[Dict[str, Any]]:
     })
     return result_df.to_dict('records')
 
+# Samples whose per-sample report could not be read on the most recent
+# attribution build, keyed by (main_dir, sample tuple). Realtime detects a
+# sample as soon as its output directory appears -- before its first report
+# lands -- and rewrites each sample's cumulative report on every batch
+# thereafter. A poll landing in either window gets an empty frame. Dropping
+# the sample silently makes a missing measurement indistinguishable from a
+# negative result, which is the distinction the verdict guards exist to
+# preserve.
+_unmeasured_lock = threading.Lock()
+# key -> (unreadable sample names, number of samples that did parse)
+_unmeasured: "OrderedDict[tuple, Tuple[List[str], int]]" = OrderedDict()
+_UNMEASURED_MAX = 8
+
+
+def unmeasured_samples(
+    main_dir: str,
+    available_samples: List[str],
+    config: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    """Samples that produced no readable report while others did.
+
+    Reports a PARTIAL gap only. When no sample at all was readable there is
+    nothing to be inconsistent about -- the verdict's own no-data states
+    (STANDBY, SCREENING, RESULTS UNAVAILABLE) already say the run has not
+    produced results, and repeating it here would fire the note on every
+    poll of a run that has not started writing yet. The case worth naming is
+    the mixed one: some barcodes screened, one not, and nothing on screen
+    distinguishing the two.
+
+    Runs the build if it has not run for this key, so a caller never has to
+    order itself after the attribution pass. When the build has already run
+    this is a dict lookup and costs no file I/O, which is what keeps the
+    per-tick call count flat.
+    """
+    key = (main_dir, tuple(s for s in available_samples if s != "All Samples"))
+    with _unmeasured_lock:
+        entry = _unmeasured.get(key)
+    if entry is None:
+        _load_per_sample_organisms(main_dir, available_samples, config)
+        with _unmeasured_lock:
+            entry = _unmeasured.get(key)
+    if entry is None:
+        return []
+    unreadable, n_readable = entry
+    return list(unreadable) if n_readable else []
+
+
+def resolve_below_floor_samples(
+    main_dir: str,
+    available_samples: List[str],
+    taxids: "set",
+    config: Optional[Dict[str, Any]] = None,
+) -> Dict[int, List[Dict[str, Any]]]:
+    """Per-sample rows for named taxids, ignoring the discovery floor.
+
+    ``PER_SAMPLE_DISCOVERY_FLOOR`` is right for the general attribution
+    build, which runs across every taxon in every sample and would otherwise
+    carry thousands of one-read rows. It is wrong for a taxon the aggregate
+    has already called above its alert threshold, because the aggregate
+    reaches that threshold by summing exactly the small per-sample counts the
+    floor discards.
+
+    Measured live on 2026-09-01 (realtime, Bioshield demo): Bacillus
+    anthracis at 3 reads in barcode05, 4 in barcode07 and 3 in barcode08.
+    The sum met the entry's alert threshold of 10 and raised ACTION REQUIRED
+    for a select agent, while every row sat under the floor, so the banner
+    said "Sample attribution unavailable" for the organism where the barcode
+    matters most.
+
+    Called only for detections the floored build resolved nothing for, so it
+    runs rarely and reads frames the loader cache already holds. Returns the
+    same row shape as ``_load_per_sample_organisms``, sorted descending by
+    reads.
+    """
+    if not taxids:
+        return {}
+    real_samples = [s for s in available_samples if s != "All Samples"]
+    if not real_samples:
+        return {}
+
+    wanted = {int(t) for t in taxids}
+    found: Dict[int, List[Dict[str, Any]]] = {}
+
+    for sample in real_samples:
+        is_nc = is_negative_control(sample, config)
+        try:
+            kraken_df = load_kraken_data(main_dir, sample)
+            if kraken_df.empty:
+                continue
+            species_df = kraken_df[species_rank_mask(kraken_df)]
+            if species_df.empty:
+                continue
+            for org in _species_df_to_organisms(species_df):
+                taxid = int(org["taxid"])
+                if taxid not in wanted or org["reads"] <= 0:
+                    continue
+                found.setdefault(taxid, []).append({
+                    "sample": sample,
+                    "reads": org["reads"],
+                    "abundance": org["abundance"],
+                    "is_negative_control": is_nc,
+                    # Marks a row the general build would have filtered out,
+                    # so a consumer can say so rather than presenting it as
+                    # an ordinary per-sample count.
+                    "below_discovery_floor": org["reads"] < PER_SAMPLE_DISCOVERY_FLOOR,
+                })
+        except Exception as exc:
+            logger.debug(
+                "Below-floor lookup failed for %s: %s", sample, exc
+            )
+
+    for taxid in found:
+        found[taxid].sort(key=lambda x: x["reads"], reverse=True)
+    return found
+
+
+def augment_attribution_for_unresolved(
+    main_dir: str,
+    available_samples: List[str],
+    detections: List[Dict[str, Any]],
+    taxid_to_samples: Dict[int, List[Dict[str, Any]]],
+    config: Optional[Dict[str, Any]] = None,
+) -> Dict[int, List[Dict[str, Any]]]:
+    """Fill in per-sample rows for detections the floored build missed.
+
+    One shared entry point so the verdict banner, the alert cards and the
+    pathogen modal cannot disagree about which barcodes carry a detection.
+    Before this existed the banner named the barcodes for a spread-thin
+    select agent while its own alert card showed no "DETECTED IN" row at all.
+
+    Returns ``taxid_to_samples`` unchanged when nothing needs filling in.
+    Otherwise returns a COPY with the extra rows merged: the input is the
+    shared per-tick memo and must never be mutated.
+    """
+    if not detections or not main_dir:
+        return taxid_to_samples
+
+    taxid_to_samples = taxid_to_samples or {}
+    unresolved = {
+        t
+        for detection in detections
+        # The same predicate build_pathogen_attribution applies. Do NOT pair
+        # detections against built attributions by position: the builder
+        # deduplicates by label and sorts by read count, so the Nth
+        # attribution is not the Nth detection.
+        if not samples_for_detection(detection, taxid_to_samples)
+        for t in resolve_attribution_taxids(detection)
+    }
+    if not unresolved:
+        return taxid_to_samples
+
+    extra = resolve_below_floor_samples(
+        main_dir, available_samples, unresolved, config
+    )
+    if not extra:
+        return taxid_to_samples
+
+    merged = dict(taxid_to_samples)
+    merged.update(extra)
+    return merged
+
+
 def _load_per_sample_organisms(
     main_dir: str,
     available_samples: List[str],
@@ -2140,38 +2365,69 @@ def _load_per_sample_organisms(
         return {}
 
     taxid_to_samples: Dict[int, List[Dict[str, Any]]] = {}
+    unreadable: List[str] = []
 
     for sample in real_samples:
+        organisms = _sample_organisms_above_floor(main_dir, sample)
+        if organisms is None:
+            unreadable.append(sample)
+            continue
         is_nc = is_negative_control(sample, config)
-        try:
-            kraken_df = load_kraken_data(main_dir, sample)
-            if kraken_df.empty:
-                continue
-            # Gate on the same column the organisms are reported with, or the
-            # floor and the displayed count disagree: a real negative control
-            # had 4 direct reads against 6 cumulative and was dropped by a
-            # floor of 5, so its contamination never reached the display.
-            species_df = _species_discovery_df(kraken_df)
-            if species_df.empty:
-                continue
-            for org in _species_df_to_organisms(species_df):
-                taxid = org["taxid"]
-                if taxid not in taxid_to_samples:
-                    taxid_to_samples[taxid] = []
-                taxid_to_samples[taxid].append({
-                    "sample": sample,
-                    "reads": org["reads"],
-                    "abundance": org["abundance"],
-                    "is_negative_control": is_nc,
-                })
-        except Exception as exc:
-            logger.debug(f"Per-sample organism load failed for {sample}: {exc}")
+        for org in organisms:
+            taxid_to_samples.setdefault(org["taxid"], []).append({
+                "sample": sample,
+                "reads": org["reads"],
+                "abundance": org["abundance"],
+                "is_negative_control": is_nc,
+            })
 
     # Sort each sample list descending by reads
     for taxid in taxid_to_samples:
         taxid_to_samples[taxid].sort(key=lambda x: x["reads"], reverse=True)
 
+    _record_unmeasured(main_dir, real_samples, unreadable)
     return taxid_to_samples
+
+
+def _sample_organisms_above_floor(
+    main_dir: str, sample: str
+) -> Optional[List[Dict[str, Any]]]:
+    """Species rows for one sample above the discovery floor.
+
+    Returns ``None`` when the sample could NOT be measured -- no report on
+    disk yet, a report mid-rewrite when this poll landed, or a load error --
+    and an empty list when it was measured and carries nothing above the
+    floor. Collapsing those two into one value is what made an unscreened
+    barcode look like a clean one (audit 2026-09-01).
+    """
+    try:
+        kraken_df = load_kraken_data(main_dir, sample)
+        if kraken_df.empty:
+            return None
+        # Gate on the same column the organisms are reported with, or the
+        # floor and the displayed count disagree: a real negative control
+        # had 4 direct reads against 6 cumulative and was dropped by a
+        # floor of 5, so its contamination never reached the display.
+        species_df = _species_discovery_df(kraken_df)
+        if species_df.empty:
+            return []
+        return _species_df_to_organisms(species_df)
+    except Exception as exc:
+        logger.debug(f"Per-sample organism load failed for {sample}: {exc}")
+        return None
+
+
+def _record_unmeasured(
+    main_dir: str, real_samples: List[str], unreadable: List[str]
+) -> None:
+    """Store this build's measurement gap for ``unmeasured_samples``."""
+    key = (main_dir, tuple(real_samples))
+    n_readable = len(real_samples) - len(unreadable)
+    with _unmeasured_lock:
+        _unmeasured[key] = (unreadable, n_readable)
+        _unmeasured.move_to_end(key)
+        while len(_unmeasured) > _UNMEASURED_MAX:
+            _unmeasured.popitem(last=False)
 
 def _get_active_watchlist_entries(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     """

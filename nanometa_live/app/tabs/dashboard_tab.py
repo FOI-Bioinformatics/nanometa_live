@@ -18,6 +18,7 @@ from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
 from nanometa_live.core.utils.classification_loaders import load_kraken_data
+from nanometa_live.app.tabs.dashboard_helpers import _fingerprint_marks_dir_seen
 from nanometa_live.core.utils.qc_loaders import (
     get_qc_stats,
     load_nanoplot_stats,
@@ -67,6 +68,8 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     DEFAULT_LOW_READ_FLOOR,
     _classify_dangerous,
     build_pathogen_attribution,
+    augment_attribution_for_unresolved,
+    unmeasured_samples,
     _get_idle_alerts,
     _get_error_alerts,
     _calculate_overall_status,
@@ -131,6 +134,24 @@ def register_dashboard_callbacks(app: Dash):
             if main_dir and os.path.isdir(main_dir):
                 return detect_samples(main_dir)
         return available_samples
+
+    def _panel_attribution(main_dir, available_samples, config,
+                           dangerous, subthreshold):
+        """Per-sample attribution for the alert cards, or {} when nothing hit.
+
+        Applies the same second look the verdict banner does, so a card and
+        the banner above it cannot disagree about which barcodes carry a
+        detection.
+        """
+        if not (dangerous or subthreshold):
+            return {}
+        panel_samples = _resolve_samples(main_dir, available_samples)
+        taxid_to_samples = get_per_sample_organisms_cached(
+            main_dir, panel_samples, config)
+        return augment_attribution_for_unresolved(
+            main_dir, panel_samples, dangerous + subthreshold,
+            taxid_to_samples, config,
+        )
 
     # ================================================================
     # D3-pre: Compute overall status once, cache in dcc.Store
@@ -222,6 +243,7 @@ def register_dashboard_callbacks(app: Dash):
             "ACTIVE" if pipeline_running_now
             else "ERROR" if pipeline_error_now
             else "COMPLETE" if bool(status and status.get("completed"))
+            else "STOPPED" if bool(status and status.get("stopped_run"))
             else "STANDBY"
         )
         state_changed = _VERDICT_LAST_RUN_STATE.get("v") != run_state_now
@@ -267,6 +289,18 @@ def register_dashboard_callbacks(app: Dash):
             str(pipeline_errors[-1]) if pipeline_errors else None
         )
 
+        # A stopped run (operator Stop or the inactivity backstop) is
+        # neither idle nor complete; round-4 H2 found it wearing the badge of
+        # a run that never started.
+        run_stopped = bool(status and status.get("stopped_run"))
+        stop_reason = (status or {}).get("stop_reason")
+        # Isolated task failures (errorStrategy ignore) drop their reads
+        # from every count without stopping the run; say so (round-4 H20).
+        try:
+            failed_tasks = int((status or {}).get("processes_failed") or 0)
+        except (TypeError, ValueError):
+            failed_tasks = 0
+
         if pipeline_running:
             run_state = "ACTIVE"
             run_state_color = "success"
@@ -276,6 +310,9 @@ def register_dashboard_callbacks(app: Dash):
         elif pipeline_completed:
             run_state = "COMPLETE"
             run_state_color = "info"
+        elif run_stopped:
+            run_state = "STOPPED"
+            run_state_color = "warning"
         else:
             run_state = "STANDBY"
             run_state_color = "secondary"
@@ -296,7 +333,8 @@ def register_dashboard_callbacks(app: Dash):
         # volume, deleted folder), not idleness. Without the fingerprint
         # guard a never-created dir would false-positive on every boot.
         results_dir_lost = bool(
-            main_dir and not main_dir_available and _fingerprint
+            main_dir and not main_dir_available
+            and _fingerprint_marks_dir_seen(_fingerprint)
         )
 
         kraken_has_data = False
@@ -376,6 +414,9 @@ def register_dashboard_callbacks(app: Dash):
             pipeline_error_detail=pipeline_error_detail,
             results_dir_lost=results_dir_lost,
             stale_samples=stale_sample_count(main_dir),
+            run_stopped=run_stopped,
+            stop_reason=stop_reason,
+            failed_tasks=failed_tasks,
         )
 
         # Per-sample attribution for the ACTION REQUIRED subhead (closes
@@ -387,6 +428,7 @@ def register_dashboard_callbacks(app: Dash):
         triggering_pathogens: Optional[List[str]] = None
         triggering_attribution = None
         attribution_failed = False
+        attribution_note: Optional[str] = None
         if descriptor.needs_attribution:
             critical, high_risk = _classify_dangerous(dangerous)
             # Name the pathogens above threshold (critical first), deduped.
@@ -424,12 +466,44 @@ def register_dashboard_callbacks(app: Dash):
                 # Keep each pathogen paired with its own samples: two
                 # organisms in two different barcodes must not collapse into
                 # one undifferentiated list.
+                detections = critical + high_risk
                 triggering_attribution = build_pathogen_attribution(
-                    critical + high_risk, taxid_to_samples
+                    detections, taxid_to_samples
                 )
+
+                # Second look for anything that resolved nothing. The
+                # aggregate reaches an alert threshold by summing per-sample
+                # counts that are individually under the discovery floor, so
+                # a spread-thin select agent resolved no samples at all --
+                # B. anthracis at 3/4/3 reads across three barcodes, called
+                # ACTION REQUIRED and attributed to nobody (live realtime run,
+                # 2026-09-01).
+                augmented = augment_attribution_for_unresolved(
+                    main_dir, resolved_samples, detections,
+                    taxid_to_samples, config,
+                )
+                if augmented is not taxid_to_samples:
+                    triggering_attribution = build_pathogen_attribution(
+                        detections, augmented
+                    )
+
                 attribution_failed = not all(
                     a.resolved for a in triggering_attribution
                 )
+                # A sample the loader could not read this poll is a gap in
+                # the screen, not a clean barcode. Realtime detects a sample
+                # as soon as its directory appears and rewrites its report
+                # every batch, so the silence used to read as a negative.
+                unread = unmeasured_samples(main_dir, resolved_samples, config)
+                if unread:
+                    shown = ", ".join(unread[:3])
+                    if len(unread) > 3:
+                        shown += f", +{len(unread) - 3} more"
+                    attribution_note = (
+                        f"{len(unread)} sample"
+                        f"{'s' if len(unread) != 1 else ''} not readable this "
+                        f"poll, so not screened: {shown}."
+                    )
             except Exception as exc:
                 logger.warning(
                     "Verdict-banner attribution unavailable: %s",
@@ -453,6 +527,7 @@ def register_dashboard_callbacks(app: Dash):
                 triggering_pathogens=triggering_pathogens,
                 triggering_attribution=triggering_attribution,
                 attribution_failed=attribution_failed,
+                attribution_note=attribution_note,
             ),
             _verdict_banner_style(descriptor.bg_color, descriptor.border_color),
             time_elapsed, run_state, run_state_color
@@ -792,11 +867,8 @@ def register_dashboard_callbacks(app: Dash):
             # kraken loads here unconditionally.
             dangerous, subthreshold = _check_pathogens_both(
                 detected_organisms, config)
-            taxid_to_samples = {}
-            if dangerous or subthreshold:
-                taxid_to_samples = get_per_sample_organisms_cached(
-                    main_dir, _resolve_samples(main_dir, available_samples),
-                    config)
+            taxid_to_samples = _panel_attribution(
+                main_dir, available_samples, config, dangerous, subthreshold)
 
             # Get only ENABLED watchlist entries for alerting
             watched_species = _get_active_watchlist_entries(config)

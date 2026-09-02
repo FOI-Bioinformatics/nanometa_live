@@ -25,6 +25,53 @@ from nanometa_live.app.utils.debounce import (
 from nanometa_live.app.app import background_callback_manager
 
 
+def _unprocessed_input_note(status: Dict[str, Any], config: Optional[Dict[str, Any]]) -> str:
+    """" -- N input files were not processed" for a finished real-time run.
+
+    In real-time mode the pipeline's timer (or a Stop) ends the run while
+    files may still be landing; those files are never classified and the
+    run is reported complete (round-4 audit, H5: 14 of 47 input files
+    unprocessed, nothing on any surface). files_waiting is the inbox as of
+    the last poll, files_processed what the pipeline reported.
+    """
+    if (config or {}).get("processing_mode") != "realtime":
+        return ""
+    try:
+        waiting = int(status.get("files_waiting") or 0)
+        processed = int(status.get("files_processed") or 0)
+    except (TypeError, ValueError):
+        return ""
+    gap = waiting - processed
+    if gap <= 0:
+        return ""
+    return (f" -- {gap} input file{'s' if gap != 1 else ''} in the watched "
+            f"folder {'were' if gap != 1 else 'was'} not processed "
+            f"(arrived after the run ended)")
+
+
+def _skipped_tasks_note(status: Dict[str, Any]) -> str:
+    """" -- N tasks failed (skipped): labels" for a finished run.
+
+    While running, the header already names the count (round-4 H20); after
+    the run the isolated failures were absent from every surface although
+    the reads they carried are missing from every count. Up to three task
+    labels are named; the rest are counted.
+    """
+    try:
+        n_failed = int(status.get("processes_failed") or 0)
+    except (TypeError, ValueError):
+        return ""
+    if n_failed <= 0:
+        return ""
+    labels = [str(t) for t in (status.get("failed_tasks") or [])]
+    note = f" -- {n_failed} task{'s' if n_failed != 1 else ''} failed (skipped)"
+    if labels:
+        shown = ", ".join(labels[:3])
+        more = len(labels) - 3
+        note += f": {shown}" + (f" +{more} more" if more > 0 else "")
+    return note
+
+
 def register_status(app, backend_manager):
     @app.callback(
         Output("backend-status", "data"), Input("update-interval", "n_intervals")
@@ -118,9 +165,19 @@ def register_status(app, backend_manager):
             logging.debug("first_batch_seen(%s) failed: %s", main_dir, e)
             seen = False
 
-        if fp == (prev or {}).get("fp") and seen == prev_seen:
+        # Sticky "this directory has existed": the fingerprint string is
+        # never empty (it hashes the path), so its presence cannot mean "we
+        # read data here". Without this flag a results directory that had
+        # not been created yet rendered as RESULTS UNAVAILABLE with the
+        # mounted-volume wording, before every Start (round-4 audit, H23).
+        prev_dir_seen = bool((prev or {}).get("dir_seen", False))
+        dir_seen = prev_dir_seen or os.path.isdir(main_dir)
+
+        if (fp == (prev or {}).get("fp") and seen == prev_seen
+                and dir_seen == prev_dir_seen):
             raise PreventUpdate
-        return {"fp": fp, "ts": time.time(), "first_batch_seen": seen}
+        return {"fp": fp, "ts": time.time(), "first_batch_seen": seen,
+                "dir_seen": dir_seen}
 
     @app.callback(
         [
@@ -160,6 +217,16 @@ def register_status(app, backend_manager):
             details = [
                 f"Files processed: {files_processed} / {total_files}",
             ]
+            # A failed-and-ignored task is otherwise invisible while the run
+            # is active (round-4 H20): name the count next to the progress.
+            try:
+                n_failed = int(status.get("processes_failed") or 0)
+            except (TypeError, ValueError):
+                n_failed = 0
+            if n_failed:
+                details.append(
+                    f"{n_failed} task{'s' if n_failed != 1 else ''} failed (skipped)"
+                )
 
             if status.get("last_update"):
                 timestamp = time.strftime(
@@ -172,8 +239,25 @@ def register_status(app, backend_manager):
         if status.get("pipeline_status") == "error":
             return "red", "ERROR", ", ".join(status.get("errors", ["Unknown error"]))
 
+        unprocessed_note = _unprocessed_input_note(status, config)
+
         if status.get("pipeline_status") == "completed":
-            return "blue", "Complete", "Pipeline finished successfully"
+            return ("blue", "Complete",
+                    "Pipeline finished successfully" + unprocessed_note
+                    + _skipped_tasks_note(status))
+
+        # A stopped run is neither idle nor complete (round-4 audit, H2): say
+        # why it ended, when, and how far it got, instead of inviting a Start.
+        if status.get("stopped_run") or status.get("stop_reason"):
+            reason = status.get("stop_reason") or "stopped"
+            details = [f"Run stopped ({reason})"]
+            ended_at = status.get("ended_at")
+            if ended_at:
+                details.append(f"at {str(ended_at)[11:19] or ended_at}")
+            processed = status.get("files_processed")
+            if processed is not None:
+                details.append(f"{processed} files processed")
+            return "orange", "Stopped", ", ".join(details) + unprocessed_note
 
         return "gray", "STANDBY", "Click 'Start Analysis' to begin processing"
 
@@ -207,12 +291,16 @@ def register_status(app, backend_manager):
         return "Start Analysis", "primary", not is_ready
 
     @app.callback(
-        Output("start-analysis-tooltip", "children"),
+        Output("start-stop-button", "title"),
         Input("app-config", "data"),
         Input("backend-status", "data"),
     )
     def update_start_tooltip(config, status):
-        """Update Start/Stop button tooltip based on mode and state."""
+        """Update the Start/Stop button's hover text for mode and state.
+
+        Writes the button's native ``title``; see the header component for
+        why this is not a ``dbc.Tooltip``.
+        """
         if config and config.get("visualization_only", False):
             return "Not available in visualization mode - displaying existing results only"
         if status and status.get("running", False):

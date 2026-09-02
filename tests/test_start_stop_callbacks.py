@@ -79,3 +79,42 @@ class TestStartOrPromptStop:
         assert result[PENDING]["found"] == ["kraken2", "fastp"]
         # A collision must NOT start the pipeline.
         backend.start_async.assert_not_called()
+
+
+class TestCollisionDecisionResolvesTheOutdir:
+    """H33 (round-4 audit): Continue/Archive launched with the app-config
+    State as is. A tab whose Store carried no results_output_directory sent
+    an empty one, nanometanf fell back to a fresh ~/.nanometa/data/analysis_<ts>,
+    and the modal had just promised to continue in the described folder."""
+
+    @pytest.fixture
+    def decision(self):
+        from dash_test_utils import ctx_with
+        app = Dash(__name__, suppress_callback_exceptions=True)
+        backend = MagicMock()
+        backend.transition_in_progress.return_value = False
+        backend.start_async.return_value = (True, "started")
+        register_core_callbacks(app, backend)
+        fn = get_callback_fn(app, "collision-modal.is_open",
+                             input_contains="collision-resume-btn")
+        return fn, backend, ctx_with
+
+    def test_resume_uses_the_directory_the_modal_described(self, decision, tmp_path):
+        fn, backend, ctx_with = decision
+        outdir = str(tmp_path / "results" / "r2")
+        pending = {"outdir": outdir, "found": ["kraken2/"], "has_metadata": True}
+        config = {"analysis_name": "R2", "results_dir_override": outdir,
+                  "results_output_directory": ""}
+        with ctx_with("collision-resume-btn"):
+            fn(None, 1, None, pending, config, {"running": False})
+        backend.start_async.assert_called_once_with(resume=True)
+        assert backend.config["results_output_directory"] == outdir
+
+    def test_archive_uses_the_directory_the_modal_described(self, decision, tmp_path):
+        fn, backend, ctx_with = decision
+        outdir = str(tmp_path / "results" / "r2")
+        backend.archive_existing_results.return_value = outdir + "/_archive_x"
+        pending = {"outdir": outdir, "found": ["kraken2/"], "has_metadata": True}
+        with ctx_with("collision-archive-btn"):
+            fn(1, None, None, pending, {"analysis_name": "R2", "results_dir_override": outdir}, {})
+        assert backend.config["results_output_directory"] == outdir

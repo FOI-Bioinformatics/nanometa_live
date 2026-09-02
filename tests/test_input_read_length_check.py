@@ -117,13 +117,34 @@ class TestInputReadLengthCheck:
         assert result.passed is True
         assert "No input FASTQ" in result.message
 
-    def test_fastp_qc_tool_skips(self, tmp_path):
+    def test_fastp_qc_tool_applies_the_same_floor(self, tmp_path):
+        # fastp receives the minimum length as fastp_length_required, so
+        # short amplicons under fastp are warned about exactly as under
+        # chopper (the check used to exempt fastp, back when the pipeline
+        # applied no filter to it).
         _write_fastq(tmp_path / "amplicons.fastq", [300] * 20)
         result = self._run({
             "nanopore_output_directory": str(tmp_path),
             "qc_tool": "fastp",
         })
-        assert result.passed is True
+        assert result.passed is False
+        assert "fastp" in result.message
+        lowered = self._run({
+            "nanopore_output_directory": str(tmp_path),
+            "qc_tool": "fastp",
+            "chopper_minlength": 100,
+        })
+        assert lowered.passed is True
+
+    def test_filtlong_reads_its_own_floor(self, tmp_path):
+        _write_fastq(tmp_path / "amplicons.fastq", [300] * 20)
+        result = self._run({
+            "nanopore_output_directory": str(tmp_path),
+            "qc_tool": "filtlong",
+            "chopper_minlength": 100,
+            "filtlong_min_length": 1000,
+        })
+        assert result.passed is False
 
     def test_filter_disabled_passes(self, tmp_path):
         _write_fastq(tmp_path / "amplicons.fastq", [300] * 20)

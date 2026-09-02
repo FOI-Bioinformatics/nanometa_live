@@ -444,3 +444,29 @@ class TestRunHealthReachesTheBanner:
             status={"running": False, "completed": False, "start_time": None},
         )
         assert "STANDBY" in rendered
+
+
+class TestNeverCreatedDirIsNotLost:
+    """Round-4 audit, H23: the fingerprint string is never empty (it hashes
+    the path), so its presence cannot mean the directory was ever read. The
+    Store carries a sticky ``dir_seen``; a never-created directory stays
+    STANDBY, a directory that existed and vanished is RESULTS UNAVAILABLE."""
+
+    def test_store_that_never_saw_the_dir_stays_standby(self, tmp_path):
+        rendered = _run_verdict_banner(
+            tmp_path, detections=[], taxid_to_samples={},
+            available_samples=["barcode01"], make_results_dir=False,
+            fingerprint={"fp": "abc", "ts": 1.0, "dir_seen": False},
+            status={"running": False, "completed": False, "start_time": None},
+        )
+        assert "STANDBY" in rendered
+        assert "RESULTS UNAVAILABLE" not in rendered
+
+    def test_store_that_saw_the_dir_reports_it_lost(self, tmp_path):
+        rendered = _run_verdict_banner(
+            tmp_path, detections=[], taxid_to_samples={},
+            available_samples=["barcode01"], make_results_dir=False,
+            fingerprint={"fp": "abc", "ts": 1.0, "dir_seen": True},
+            status={"running": True, "completed": False, "start_time": None},
+        )
+        assert "RESULTS UNAVAILABLE" in rendered

@@ -188,6 +188,26 @@ def _not_detected_card_cols(species_dicts):
     return cols
 
 
+def _validation_unavailable_while_running():
+    """Modal outputs when Validate is clicked during a live run (round-4 H10).
+
+    Opens the modal with an explanation and hides Start: the on-demand launch
+    shares the live run's Nextflow session and results folder.
+    """
+    return (
+        True, None,
+        dbc.Alert([
+            html.Strong("The pipeline is running. "),
+            "On-demand validation shares its Nextflow session and results "
+            "folder, so it can only be started after the run ends. Wait for "
+            "the run to finish, or use Stop Analysis first.",
+        ], color="warning"),
+        0, "Validation is unavailable while the pipeline is running.", [],
+        [], {"display": "none"},
+        {"display": "none"}, {"display": "none"}, {"display": "inline-block"},
+    )
+
+
 def register_main_callbacks(app: Dash):
     """
     Register callbacks for the main results tab.
@@ -1176,10 +1196,12 @@ def register_main_callbacks(app: Dash):
             State("on-demand-validation-modal", "is_open"),
             State("selected-sample", "data"),
             State("app-config", "data"),
+            State("backend-status", "data"),
         ],
         prevent_initial_call=True,
     )
-    def open_validation_modal(validate_clicks, cancel_clicks, close_clicks, is_open, selected_sample, config):
+    def open_validation_modal(validate_clicks, cancel_clicks, close_clicks, is_open,
+                              selected_sample, config, backend_status=None):
         """Open the on-demand validation modal when Validate button is clicked."""
         if not ctx.triggered:
             return no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update
@@ -1212,7 +1234,17 @@ def register_main_callbacks(app: Dash):
             if not taxid:
                 return no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update, no_update
 
-            # Get read count for this organism
+            # On-demand validation runs `nextflow -resume` from the SAME launch
+            # and work directory as the live run, so while a pipeline is
+            # active it would contend for the session lock and publish into
+            # the same outdir (round-4 audit, H10). Open the modal to say so
+            # rather than launching.
+            if backend_status and backend_status.get("running"):
+                return _validation_unavailable_while_running()
+
+            # Get read count for this organism. cumul_reads is the figure the
+            # banner and organism cards show; the per-rank `reads` column made
+            # this modal disagree with them (721 against 2,924 live).
             main_dir = resolve_outdir_for_fingerprint(config)
             read_count = 0
             try:
@@ -1220,7 +1252,8 @@ def register_main_callbacks(app: Dash):
                 if not kraken_df.empty:
                     match = kraken_df[kraken_df['taxid'] == taxid]
                     if not match.empty:
-                        read_count = int(match.iloc[0]['reads'])
+                        col = 'cumul_reads' if 'cumul_reads' in match.columns else 'reads'
+                        read_count = int(match.iloc[0][col])
                         name = match.iloc[0]['name'].strip()
             except Exception as e:
                 logging.warning(f"Could not load read count for taxid {taxid}: {e}")

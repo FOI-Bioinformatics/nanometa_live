@@ -102,6 +102,28 @@ class TestDetectSamplesFromKraken:
         samples = detect_samples_from_kraken(str(kraken_dir))
         assert "barcode03" in samples
 
+    def test_nested_reports_dir_alone_names_the_sample(self, tmp_path):
+        """The classifier's per-batch report lands first, under reports/.
+
+        nanometanf's KRAKEN2_INCREMENTAL_CLASSIFIER publishes
+        ``kraken2/<sample>/reports/<sample>_batchN.kraken2.report.txt`` before
+        the merger creates ``batch_reports/``. Replaying run R1 of the round-4
+        audit, the aggregate read 1,963 reads while the sample list was empty:
+        the sample directories existed with only ``reports/`` inside, and the
+        detector's cache (keyed on the top-level directory mtimes) then never
+        noticed ``batch_reports/`` appearing INSIDE them.
+        """
+        kraken_dir = tmp_path / "kraken2"
+        reports = kraken_dir / "barcode05" / "reports"
+        reports.mkdir(parents=True)
+        (reports / "barcode05_batch0.kraken2.report.txt").write_text("data")
+        (kraken_dir / "barcode06" / "stats").mkdir(parents=True)
+        (kraken_dir / "barcode06" / "stats" / "merge_stats.json").write_text("{}")
+        (kraken_dir / "notes").mkdir()
+
+        samples = detect_samples_from_kraken(str(kraken_dir))
+        assert samples == {"barcode05", "barcode06"}
+
 
 # -- detect_samples_from_fastp tests --
 
@@ -122,6 +144,23 @@ class TestDetectSamplesFromFastp:
 
 
 # -- get_available_samples tests --
+
+
+class TestSampleListFollowsNestedArrival:
+    def test_reports_then_batch_reports_keeps_the_sample_listed(self, tmp_path):
+        """Replay of R1 225315 -> 225355: the list must not stay empty."""
+        kraken_dir = tmp_path / "kraken2"
+        reports = kraken_dir / "barcode05" / "reports"
+        reports.mkdir(parents=True)
+        (reports / "barcode05_batch0.kraken2.report.txt").write_text("data")
+        assert get_available_samples(str(tmp_path)) == ["All Samples", "barcode05"]
+
+        # The merger's batch_reports/ appears inside the existing sample dir;
+        # the top-level kraken2/ mtime does not change.
+        batch_reports = kraken_dir / "barcode05" / "batch_reports"
+        batch_reports.mkdir()
+        (batch_reports / "batch_0.kraken2.report.txt").write_text("data")
+        assert get_available_samples(str(tmp_path)) == ["All Samples", "barcode05"]
 
 
 class TestGetAvailableSamples:

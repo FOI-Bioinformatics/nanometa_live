@@ -93,6 +93,42 @@ def _coerce_minimap2_preset(value: Any) -> str:
     return preset
 
 
+def _max_length_params(config: Dict[str, Any]) -> Dict[str, int]:
+    """The optional upper length bound, for chopper and filtlong alike.
+
+    Empty, None, 0 or unparsable means no limit, and the keys are omitted so
+    the pipeline keeps its null default; fastp has no equivalent (its
+    max_len1 trims rather than drops) and is deliberately not given one.
+    """
+    try:
+        max_length = int(config.get("chopper_maxlength") or 0)
+    except (TypeError, ValueError):
+        return {}
+    if max_length < 1:
+        return {}
+    return {"chopper_maxlength": max_length, "filtlong_max_length": max_length}
+
+
+def _coerce_quality(value: Any, key: str, default: int = 10) -> int:
+    """Clamp a mean-quality floor to nanometanf's schema range of 0-50.
+
+    The value used to pass through untouched, so a YAML string or a float
+    reached the params file as-is and nf-schema refused the launch.
+    """
+    try:
+        quality = int(float(value))
+    except (TypeError, ValueError):
+        return default
+    if quality < 0 or quality > 50:
+        clamped = min(50, max(0, quality))
+        logging.warning(
+            "%s=%r is outside nanometanf's schema range 0-50; using %d",
+            key, value, clamped,
+        )
+        return clamped
+    return quality
+
+
 def _coerce_min_length(value: Any, key: str, default: int = 1000) -> int:
     """Clamp a QC minimum-length filter to nanometanf's schema floor of 1.
 
@@ -837,11 +873,22 @@ def _build_base_params(config: Dict[str, Any], main_dir: str, kraken_db: str,
         # Settings -> Read Filtering and Validation card. Defaults match
         # nanometanf's pipeline-side defaults. See
         # docs/audit-2026-04-29-short-amplicons.md for rationale.
+        # One read filter, whichever QC tool runs: the chopper_* keys are
+        # the operator's minimum length and mean quality, and fastp reads
+        # its own parameter names for the same two floors. Until 2026-09-02
+        # a fastp run received no filter at all (fastp's 15 bp default) and
+        # the Read Filtering card changed nothing for it.
         "chopper_minlength": _coerce_min_length(
             config.get("chopper_minlength"), "chopper_minlength"),
-        "chopper_quality": config.get("chopper_quality", 10),
+        "chopper_quality": _coerce_quality(
+            config.get("chopper_quality"), "chopper_quality"),
+        "fastp_length_required": _coerce_min_length(
+            config.get("chopper_minlength"), "chopper_minlength"),
+        "fastp_average_qual": _coerce_quality(
+            config.get("chopper_quality"), "chopper_quality"),
         "filtlong_min_length": _coerce_min_length(
             config.get("filtlong_min_length"), "filtlong_min_length"),
+        **_max_length_params(config),
         "kraken2_confidence": config.get("kraken2_confidence", 0.0),
         "kraken2_minimum_hit_groups": config.get(
             "kraken2_minimum_hit_groups", 0

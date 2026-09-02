@@ -37,10 +37,12 @@ _configs_dir_mtime_lock = threading.Lock()
 # _build_config_list_items extracted to config_tab_helpers.py; re-exported so the
 # callbacks below (and any importers) keep working.
 from nanometa_live.app.tabs.config_tab_helpers import (  # noqa: E402
+    optional_int,
     _build_config_list_items,
     autosave_session_config,
     build_config_from_form,
     config_form_dirty,
+    pin_running_run_paths,
     _pipeline_source_from_form,
 )
 from nanometa_live.app.tabs.config_field_registry import CONFIG_FORM_FIELDS  # noqa: E402
@@ -492,7 +494,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         # Form-field States generated from the single CONFIG_FORM_FIELDS registry
         # (was 40 hand-maintained State() lines that had to stay in lock-step
         # with build_config_from_form's keywords). app-config is appended last.
-        [*_FORM_STATES, State("app-config", "data")],
+        [*_FORM_STATES, State("app-config", "data"), State("backend-status", "data")],
         prevent_initial_call=True,
     )
     def apply_config_changes(n_clicks, *form_values_and_config):
@@ -505,12 +507,13 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
         The form States are generated from CONFIG_FORM_FIELDS, so the values
         arrive positionally; map them to build_config_from_form keywords by the
-        registry order (``_FORM_KWARGS``). app-config is the final State.
+        registry order (``_FORM_KWARGS``). app-config and backend-status are
+        the final two States.
         """
         if not n_clicks:
             return no_update, no_update, no_update, no_update
 
-        *form_values, current_config = form_values_and_config
+        *form_values, current_config, backend_status = form_values_and_config
         form_kwargs = dict(zip(_FORM_KWARGS, form_values))
 
         if not current_config:
@@ -530,8 +533,20 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             }, True
 
         # Auto-save config to last-session.yaml for session persistence
+        pinned = pin_running_run_paths(config, current_config, backend_status)
         autosave_session_config(config)
 
+        if pinned:
+            return config, "Apply Settings", {
+                "title": "Changes Applied (run in progress)",
+                "message": (
+                    "Display and watchlist settings take effect now. The "
+                    "running analysis keeps its input and results folders; "
+                    "pipeline settings apply to the next Start. "
+                    f"Analysis name: {form_kwargs.get('analysis_name')}"
+                ),
+                "color": "warning",
+            }, True
         return config, "Apply Settings", {
             "title": "Changes Applied",
             "message": (
@@ -644,6 +659,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             # Read filtering and validation overrides
             Output("chopper-minlength-input", "value"),
             Output("chopper-quality-input", "value"),
+            Output("chopper-maxlength-input", "value"),
             Output("filtlong-minlength-input", "value"),
             Output("validation-identity-input", "value"),
             Output("kraken2-confidence-input", "value"),
@@ -759,6 +775,16 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
         # Pipeline options
         qc_tool = config.get("qc_tool", "chopper")
+        # fastp is pipeline-only since 2026-09-02: it is not in the select, so
+        # a saved fastp choice would render as no selection and Apply would
+        # write None. Show chopper and say so; the file keeps its value until
+        # Apply.
+        if qc_tool == "fastp":
+            logging.warning(
+                "qc_tool 'fastp' is no longer offered in the Configuration tab; "
+                "the form shows chopper, and Apply Settings will save chopper. "
+                "Keep fastp by editing the config file instead.")
+            qc_tool = "chopper"
         skip_nanoplot = bool(config.get("skip_nanoplot", False))
         kraken2_incremental = bool(config.get("kraken2_enable_incremental", True))
         enable_krona = bool(config.get("enable_krona_plots", False))
@@ -772,6 +798,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         # values.
         chopper_minlength = config.get("chopper_minlength", 1000)
         chopper_quality = config.get("chopper_quality", 10)
+        chopper_maxlength = config.get("chopper_maxlength") or None
         filtlong_minlength = config.get("filtlong_min_length", 1000)
         validation_identity = config.get("validation_identity_threshold", 90)
         kraken2_confidence = config.get("kraken2_confidence", 0.0)
@@ -820,6 +847,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             enable_nanopore_stats,
             chopper_minlength,
             chopper_quality,
+            chopper_maxlength,
             filtlong_minlength,
             validation_identity,
             kraken2_confidence,
@@ -1542,6 +1570,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             # Read filtering and validation overrides
             Input("chopper-minlength-input", "value"),
             Input("chopper-quality-input", "value"),
+            Input("chopper-maxlength-input", "value"),
             Input("filtlong-minlength-input", "value"),
             Input("validation-identity-input", "value"),
             Input("kraken2-confidence-input", "value"),
@@ -1575,7 +1604,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         e_value_cutoff, minimap2_preset, minimap2_min_mapq,
         genome_cache_dir, cores, gui_port,
         qc_tool, skip_nanoplot, kraken2_incremental, enable_krona, enable_nanopore_stats,
-        chopper_minlength, chopper_quality, filtlong_minlength,
+        chopper_minlength, chopper_quality, chopper_maxlength, filtlong_minlength,
         validation_identity, kraken2_confidence, kraken2_hitgroups,
         pipeline_profile, pipeline_source_type, pipeline_branch, pipeline_local_path,
         processing_mode, sample_handling, sample_name, negative_controls,
@@ -1630,6 +1659,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "enable_nanopore_stats_mqc": enable_nanopore_stats,
             "chopper_minlength": chopper_minlength,
             "chopper_quality": chopper_quality,
+            "chopper_maxlength": optional_int(chopper_maxlength),
             "filtlong_min_length": filtlong_minlength,
             "validation_identity_threshold": validation_identity,
             "kraken2_confidence": kraken2_confidence,

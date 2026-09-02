@@ -103,8 +103,9 @@ def test_apply_maps_each_state_value_to_its_keyword(config_app):
     with patch("nanometa_live.app.tabs.config_tab.build_config_from_form",
                side_effect=fake_build), \
          patch("nanometa_live.app.tabs.config_tab.autosave_session_config"):
-        # n_clicks=1, then the 40 form values, then app-config (last State).
-        fn(1, *values, {"existing": "config"})
+        # n_clicks=1, then the form values, then app-config and backend-status
+        # (the last two States).
+        fn(1, *values, {"existing": "config"}, {"running": False})
 
     # Every keyword got exactly its own field's value (no off-by-one shift).
     for _, kw in CONFIG_FORM_FIELDS:

@@ -772,13 +772,17 @@ def _processing_settings_item():
                     placeholder="Leave empty to run indefinitely"
                 ),
                 dbc.FormText(
-                    "Stop real-time monitoring after this many minutes without new files. "
-                    "Empty = run until manually stopped."
+                    "Stop watching once no new file has arrived for this many minutes "
+                    "(plus a 5 minute grace period). Every detected file resets the clock. "
+                    "Empty = watch until manually stopped."
                 ),
                 dbc.Tooltip(
-                    "Only applies in real-time mode. The pipeline watches for new FASTQ files "
-                    "and stops when no new files appear within this window. Maps to nanometanf's "
-                    "--realtime_timeout_minutes. Default 60; clear the field for no timeout.",
+                    "Only applies in real-time mode. nanometanf checks the time since the last "
+                    "detected FASTQ file and stops once it exceeds --realtime_timeout_minutes plus "
+                    "the grace period; a run whose files keep arriving is never cut off. Needs "
+                    "nanometanf with the inactivity timer (2026-09-02 or later); older versions "
+                    "treat the value as a wall-clock cap from the start of monitoring. Default 60; "
+                    "clear the field for no timeout.",
                     target="realtime-timeout-minutes-info"
                 )
             ], md=6),
@@ -927,7 +931,7 @@ def _read_filtering_item():
         dbc.Row([
             dbc.Col([
                 dbc.Label([
-                    "Chopper minimum length (bp) ",
+                    "Minimum read length (bp) ",
                     html.I(className="bi bi-info-circle text-muted ms-1",
                            id="chopper-minlength-info"),
                 ], html_for="chopper-minlength-input"),
@@ -939,19 +943,19 @@ def _read_filtering_item():
                     step=50,
                     value=1000,
                 ),
-                dbc.FormText("Reads shorter than this are dropped (set to 100 for V3-V4 amplicons; 1 disables)"),
+                dbc.FormText("Reads shorter than this are dropped (set to 100 for V3-V4 amplicons; 1 disables); applies to the next Start"),
                 dbc.Tooltip(
-                    "Chopper's --minlength filter. Default 1000 is "
+                    "chopper --minlength (fastp --length_required when a config file selects fastp). Default 1000 is "
                     "tuned for whole-genome ONT reads. For V3-V4 "
                     "(~460 bp) set to 100; for ITS/16S amplicons "
                     "use 250-500. Set to 1 to disable length "
                     "filtering (the pipeline rejects 0).",
                     target="chopper-minlength-info",
                 ),
-            ], md=4),
+            ], md=3),
             dbc.Col([
                 dbc.Label([
-                    "Chopper minimum quality (Q) ",
+                    "Minimum mean read quality (Q) ",
                     html.I(className="bi bi-info-circle text-muted ms-1",
                            id="chopper-quality-info"),
                 ], html_for="chopper-quality-input"),
@@ -959,19 +963,19 @@ def _read_filtering_item():
                     id="chopper-quality-input",
                     type="number",
                     min=0,
-                    max=30,
+                    max=50,
                     step=1,
                     value=10,
                 ),
                 dbc.FormText("Per-read mean Q-score threshold (lower for short ONT reads)"),
                 dbc.Tooltip(
-                    "Chopper's --quality filter. ONT short-read "
+                    "chopper --quality (fastp --average_qual when a config file selects fastp). ONT short-read "
                     "Q-scores trend lower than long-read because "
                     "the Q-score ramp-up region is a larger "
                     "fraction of a short read. Try 7 for amplicons.",
                     target="chopper-quality-info",
                 ),
-            ], md=4),
+            ], md=3),
             dbc.Col([
                 dbc.Label([
                     "Filtlong minimum length (bp) ",
@@ -993,7 +997,31 @@ def _read_filtering_item():
                     "100 for V3-V4, 250-500 for ITS/16S.",
                     target="filtlong-minlength-info",
                 ),
-            ], md=4),
+            ], md=3),
+            dbc.Col([
+                dbc.Label([
+                    "Maximum read length (bp) ",
+                    html.I(className="bi bi-info-circle text-muted ms-1",
+                           id="chopper-maxlength-info"),
+                ], html_for="chopper-maxlength-input"),
+                dbc.Input(
+                    id="chopper-maxlength-input",
+                    type="number",
+                    min=1,
+                    step=100,
+                    value=None,
+                    placeholder="no limit",
+                ),
+                dbc.FormText("Reads longer than this are dropped by chopper and filtlong; empty = no limit"),
+                dbc.Tooltip(
+                    "chopper --maxlength / filtlong --max_length. Leave "
+                    "empty to keep every read. Use it to exclude "
+                    "concatemers or off-size reads in amplicon runs. "
+                    "Not applied under fastp, which trims rather than "
+                    "drops.",
+                    target="chopper-maxlength-info",
+                ),
+            ], md=3),
         ], className="mb-3"),
 
         # Row 2: kraken2 confidence + minimum hit groups
@@ -1062,7 +1090,7 @@ def _analysis_options_item():
                     id="qc-tool-input",
                     options=[
                         {"label": "chopper (recommended)", "value": "chopper"},
-                        {"label": "fastp", "value": "fastp"},
+                        {"label": "filtlong", "value": "filtlong"},
                     ],
                     # Operator preference + matches
                     # nextflow_schema.json default; closes
@@ -1073,7 +1101,10 @@ def _analysis_options_item():
                 dbc.FormText("Tool used to filter out low-quality DNA sequences"),
                 dbc.Tooltip(
                     "Filters low-quality DNA sequences before species "
-                    "identification. fastp is recommended for most users.",
+                    "identification. chopper is the nanopore-native default; "
+                    "filtlong weights by quality and reads its own minimum "
+                    "length below. fastp is no longer offered here; a config "
+                    "file can still set qc_tool: fastp for the pipeline.",
                     target="qc-tool-info"
                 )
             ], md=4),

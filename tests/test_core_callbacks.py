@@ -135,7 +135,10 @@ class TestUpdateControlButton:
 
 class TestUpdateStartTooltip:
     def test_modes(self, core_app):
-        fn = _callback_fn(core_app, "start-analysis-tooltip.children")
+        # The hover text is the button's native title=, not a dbc.Tooltip:
+        # rewriting an open tooltip's children as the button flipped threw
+        # NotFoundError("removeChild") in the console (round-4 audit, H35).
+        fn = _callback_fn(core_app, "start-stop-button.title")
         assert "visualization mode" in fn({"visualization_only": True}, None)
         assert "Stop" in fn({}, {"running": True})
         assert "Begin processing" in fn({}, {"running": False})

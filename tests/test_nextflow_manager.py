@@ -11,6 +11,7 @@ the integration tier -- nothing here spawns a process or hits the network.
 
 import json
 import os
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -322,6 +323,33 @@ class TestParseTraceFile:
 class TestParseRealtimeStats:
     def test_no_params_file_returns_empty(self, manager):
         assert manager._parse_realtime_stats() == {}
+
+    def test_snapshots_from_before_this_launch_are_not_counted(self, manager, tmp_path):
+        """H36: "Files processed: 105 / 63" after Archive + Start, or Continue.
+
+        Snapshots older than the launch belong to the previous run in the
+        same outdir; only this run's files count against this run's inbox.
+        """
+        outdir = tmp_path / "out"
+        stats_dir = outdir / "realtime_batch_stats"
+        stats_dir.mkdir(parents=True)
+        old = stats_dir / "batch_1_snapshot.json"
+        old.write_text(json.dumps({"file_statistics": {"file_count": 63}}))
+        os.utime(old, (time.time() - 600, time.time() - 600))
+        new = stats_dir / "batch_2_snapshot.json"
+        new.write_text(json.dumps({"file_statistics": {"file_count": 4}}))
+        params = os.path.join(manager.log_dir, "params.json")
+        with open(params, "w") as f:
+            json.dump({"outdir": str(outdir)}, f)
+        manager.params_file_path = params
+
+        manager._launched_at = None
+        assert manager._parse_realtime_stats()["files_processed"] == 67
+
+        manager._launched_at = time.time() - 60
+        out = manager._parse_realtime_stats()
+        assert out["files_processed"] == 4
+        assert out["current_batch"] == 1
 
     def test_no_stats_dir_returns_empty(self, manager, tmp_path):
         params = os.path.join(manager.log_dir, "params.json")

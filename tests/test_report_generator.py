@@ -834,3 +834,70 @@ class TestPipelineErrorParity:
         content = gen.generate(str(tmp_path / "export"),
                                include_raw=False).read_text()
         assert "PIPELINE ERROR" not in content
+
+
+class TestRunStateParity:
+    """A stopped run, or an export taken mid-run, must say so in the report.
+
+    Round-4 audit (H2/H13): three live Stop drills and one mid-run export
+    produced reports worded identically to one over a run that drained its
+    input. The clause qualifies coverage; a detection above still wins.
+    """
+
+    def _write_meta(self, results_dir, **meta):
+        import json
+        base = {"fingerprint": "x", "written_at": "2026-09-01T23:07:22"}
+        base.update(meta)
+        (Path(results_dir) / ".nanometa.run.json").write_text(json.dumps(base))
+
+    def _content(self, batch_output_dir, tmp_path):
+        gen = ReportGenerator(str(batch_output_dir), {"analysis_name": "Test Run"})
+        return gen.generate(str(tmp_path / "export"), include_raw=False).read_text()
+
+    def test_stopped_run_is_marked_partial(self, batch_output_dir, tmp_path):
+        self._write_meta(batch_output_dir, final_status="stopped",
+                         stop_reason="operator", files_processed=58)
+        content = self._content(batch_output_dir, tmp_path)
+        assert "run stopped" in content
+        assert "coverage is partial" in content
+
+    def test_mid_run_export_is_an_interim_snapshot(self, batch_output_dir, tmp_path):
+        self._write_meta(batch_output_dir)
+        (Path(batch_output_dir) / ".nanometa.lock").write_text("pid 1")
+        content = self._content(batch_output_dir, tmp_path)
+        assert "interim snapshot" in content
+
+    def test_completed_run_carries_no_run_clause(self, batch_output_dir, tmp_path):
+        self._write_meta(batch_output_dir, final_status="completed")
+        content = self._content(batch_output_dir, tmp_path)
+        assert "run stopped" not in content
+        assert "interim snapshot" not in content
+
+    def test_lost_input_markers_name_the_files(self, batch_output_dir, tmp_path):
+        """H20, pipeline side: the afterScript markers name the lost inputs."""
+        self._write_meta(batch_output_dir, final_status="completed")
+        d = Path(batch_output_dir) / "pipeline_info" / "lost_inputs"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "CHOPPER.barcode06.ab12.json").write_text(json.dumps({
+            "stage": "CHOPPER", "sample": "barcode06", "exit_status": 1,
+            "input_files": ["/watch/barcode06/chunk3.fastq.gz"],
+        }))
+        try:
+            content = self._content(batch_output_dir, tmp_path)
+        finally:
+            for f in d.iterdir():
+                f.unlink()
+            d.rmdir()
+        assert "1 input file lost to failed pipeline tasks" in content
+        assert "chunk3.fastq.gz [CHOPPER, barcode06]" in content
+
+    def test_isolated_task_failures_are_named(self, batch_output_dir, tmp_path):
+        """H20: a QC-stage loss is invisible to the manifest and to
+        aggregation_stats.json; the report names it from the run metadata."""
+        self._write_meta(batch_output_dir, final_status="completed",
+                         processes_failed=1,
+                         failed_tasks=["CHOPPER (barcode06_chunk3.fastq.gz)"])
+        content = self._content(batch_output_dir, tmp_path)
+        assert "1 pipeline task failed and was skipped" in content
+        assert "CHOPPER (barcode06_chunk3.fastq.gz)" in content
+        assert "absent from every count" in content

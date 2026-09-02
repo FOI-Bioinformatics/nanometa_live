@@ -1,0 +1,36 @@
+ 31.25	90	90	U	0	unclassified
+ 68.75	198	0	R	1	root
+ 23.61	68	14	S	4007169	                Francisella tularensis
+ 18.75	54	54	S1	4007187	                  Francisella tularensis holarctica
+  4.17	12	12	S	4000800	                Salmonella enterica
+  1.39	4	4	S	4000549	                Escherichia coli
+  1.04	3	3	S	4000553	                Escherichia coli_F
+  0.69	2	2	S	4000557	                Escherichia sp004211955
+  0.35	1	1	S	4000552	                Escherichia marmotae
+  0.35	1	1	S	4000554	                Escherichia ruysiae
+  0.35	1	1	S	4000556	                Escherichia whittamii
+  0.35	1	1	S	4000558	                Escherichia coli_E
+  0.35	1	1	S	4007510	                Yersinia entomophaga
+  1.74	5	5	S	4131473	                Bowmanella dokdonensis
+  0.69	2	2	S	4000888	                Pseudomonas pseudonitroreducens
+  0.35	1	1	S	4071627	                Azotobacter salinestris
+  0.35	1	1	S	4074528	                Pseudomonas_O sp002418465
+  0.35	1	1	S	4149069	                Pseudomonas_T mangiferae
+  0.35	1	1	S	4156330	                JBEAOO01 sp041164825
+  0.35	1	1	S	4137577	                Solimonas_A sp003428335
+  3.12	9	9	S	4005037	                Bacillus_A thuringiensis_K
+  2.08	6	6	S	4005019	                Bacillus_A cereus
+  0.69	2	2	S	4005052	                Bacillus_A mycoides_C
+  0.69	2	2	S	4005042	                Bacillus_A cereus_AG
+  0.35	1	1	S	4005030	                Bacillus_A nitratireducens
+  0.35	1	1	S	4005020	                Bacillus_A anthracis
+  0.35	1	1	S	4005035	                Bacillus_A sp003400245
+  0.35	1	1	S	4005055	                Bacillus_A sp002571225
+  1.04	3	3	S	4005642	                Bacillus subtilis
+  0.35	1	1	S	4000717	                Staphylococcus aureus
+  0.35	1	1	S	4093107	                DSVR01 sp903925285
+  0.35	1	1	S	4158032	              JALYXH01 sp030947185
+  0.35	1	1	S	4565	                                              Triticum aestivum
+ 14.93	43	0	S	2843768	                    Claudivirus Goe4
+ 14.93	43	43	S1	2315470	                      Bacillus phage vB_BthP-Goe4
+  0.35	1	1	S	2843757	                Beceayunavirus BceA1

@@ -127,6 +127,7 @@ def _validate_numeric_ranges(
     filtlong_minlength,
     max_file_age_minutes,
     min_reads_for_validation,
+    chopper_maxlength=None,
 ):
     """Server-side bounds checks for every numeric form input.
 
@@ -165,11 +166,17 @@ def _validate_numeric_ranges(
     if chopper_minlength is not None and chopper_minlength < 1:
         errors.append("Chopper minimum length must be 1 or greater "
                       "(the pipeline rejects 0; 1 disables the filter)")
-    if chopper_quality is not None and not (0 <= chopper_quality <= 30):
-        errors.append("Chopper quality must be between 0-30")
+    if chopper_quality is not None and not (0 <= chopper_quality <= 50):
+        errors.append("Minimum mean read quality must be between 0-50")
     if filtlong_minlength is not None and filtlong_minlength < 1:
         errors.append("Filtlong minimum length must be 1 or greater "
                       "(the pipeline rejects 0; 1 disables the filter)")
+    if chopper_maxlength is not None and chopper_maxlength != "":
+        floor = chopper_minlength if chopper_minlength is not None else 1
+        if chopper_maxlength < max(1, floor):
+            errors.append("Maximum read length must be at least the "
+                          "minimum read length (leave it empty for no "
+                          "limit)")
     if max_file_age_minutes is not None and max_file_age_minutes != "":
         try:
             if int(max_file_age_minutes) < 0:
@@ -179,6 +186,11 @@ def _validate_numeric_ranges(
     if min_reads_for_validation is not None and min_reads_for_validation < 1:
         errors.append("Minimum reads to offer validation must be at least 1")
     return errors
+
+
+def optional_int(value):
+    """An optional numeric form field: empty means None, else int."""
+    return int(value) if value not in (None, "") else None
 
 
 def build_config_from_form(
@@ -220,6 +232,7 @@ def build_config_from_form(
     validation_identity,
     kraken2_confidence,
     kraken2_hitgroups,
+    chopper_maxlength=None,
     max_file_age_minutes,
     min_reads_for_validation,
     enable_assembly,
@@ -273,6 +286,7 @@ def build_config_from_form(
         filtlong_minlength=filtlong_minlength,
         max_file_age_minutes=max_file_age_minutes,
         min_reads_for_validation=min_reads_for_validation,
+        chopper_maxlength=chopper_maxlength,
     )
 
     # If there are validation errors, return them
@@ -418,6 +432,9 @@ def build_config_from_form(
         config["chopper_minlength"] = int(chopper_minlength)
     if chopper_quality is not None:
         config["chopper_quality"] = int(chopper_quality)
+    # An empty field is "no limit", stored as None so the saved config and
+    # the form compare equal (the dirty check) and the launch omits it.
+    config["chopper_maxlength"] = optional_int(chopper_maxlength)
     if filtlong_minlength is not None:
         config["filtlong_min_length"] = int(filtlong_minlength)
     if validation_identity is not None:
@@ -618,3 +635,30 @@ def _build_config_list_items(configs):
             className="d-flex justify-content-between align-items-center",
         ))
     return items
+
+
+# Keys that name where the RUNNING pipeline reads and writes. Apply must not
+# move them under a live run: the viewer would follow the new
+# results_output_directory to an empty folder while the pipeline kept writing
+# to the old one, and the header would count a different inbox.
+RUNNING_RUN_PATH_KEYS = ("results_output_directory", "nanopore_output_directory")
+
+
+def pin_running_run_paths(config, current_config, backend_status) -> bool:
+    """Keep the live run's input and results folders while it runs.
+
+    ``build_config_from_form`` recomputes ``results_output_directory`` from
+    the analysis name on every Apply, and Apply had no view of the backend
+    (round-4 audit, H11). While ``backend_status.running`` is set, the two
+    path keys are restored from ``current_config`` in place. Returns True
+    when a running run was found (whether or not any value differed), so the
+    caller can word its confirmation accordingly.
+    """
+    if not (backend_status or {}).get("running"):
+        return False
+    for key in RUNNING_RUN_PATH_KEYS:
+        live = (current_config or {}).get(key)
+        if live:
+            config[key] = live
+    return True
+

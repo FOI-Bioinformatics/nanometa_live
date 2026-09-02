@@ -193,3 +193,38 @@ def test_update_main_results_populated_builds_organisms(main_app, populated_conf
     assert str(total) not in ("0", "", None)
     # the detailed-organism-table rowData (index 2) is a non-empty list
     assert isinstance(result[2], list) and len(result[2]) > 0
+
+
+# --------------------------------------------------------------------------- #
+# open_validation_modal: no on-demand validation while the pipeline runs
+# --------------------------------------------------------------------------- #
+
+class TestOnDemandValidationWhileRunning:
+    """Round-4 audit, H10: the on-demand launch shares the live run's
+    Nextflow launch and work directory and adds a bare -resume, so it must
+    not be offered while a run is active."""
+
+    def _fn(self, main_app):
+        return get_callback_fn(main_app, "on-demand-validation-modal",
+                               input_contains="on-demand-validate")
+
+    def test_running_pipeline_opens_an_explanation_not_a_launch(self, main_app, tmp_path):
+        fn = self._fn(main_app)
+        trig = {"type": "on-demand-validate", "taxid": 263, "name": "Francisella tularensis"}
+        with ctx_with(trig):
+            out = fn([1], None, None, False, "All Samples",
+                     {"results_output_directory": str(tmp_path)}, {"running": True})
+        is_open, target, info, _bar, status_text, _log, _res, _res_style, start_style, cancel_style, close_style = out
+        assert is_open is True
+        assert target is None, "no target is armed, so Start Validation has nothing to launch"
+        assert start_style == {"display": "none"}
+        assert "running" in status_text.lower()
+
+    def test_idle_pipeline_arms_the_target(self, main_app, tmp_path):
+        fn = self._fn(main_app)
+        trig = {"type": "on-demand-validate", "taxid": 263, "name": "Francisella tularensis"}
+        with ctx_with(trig):
+            out = fn([1], None, None, False, "All Samples",
+                     {"results_output_directory": str(tmp_path)}, {"running": False})
+        assert out[0] is True
+        assert out[1]["taxid"] == 263

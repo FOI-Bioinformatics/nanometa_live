@@ -4,6 +4,122 @@ All notable changes to Nanometa Live are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.16.0] - 2026-09-02
+
+How a real-time run ends is now part of what the dashboard says, and the
+read filter means one thing whichever QC tool runs. The round-4 real-time
+audit (2026-09-01/02) drove three live runs, three Stop drills, two
+Continue drills, a mid-run export, a corrupt-input injection and a hard
+kill, then replayed captured snapshots through the loaders; the read-length
+audit (2026-09-02) traced the cutoff from the Configuration tab to the
+executed command. Every finding below was fixed and verified on a live run
+or a replay. Pairs with nanometanf v1.8.0, which carries the pipeline side
+(real-time Continue, lost-input markers, the intake blind window, the fastp
+filter, the inactivity timeout).
+
+### Fixed
+- **A stopped run is recorded and rendered as stopped.** Stop and the
+  inactivity backstop declare their intent before signalling Nextflow (the
+  monitor thread otherwise classified the dying process as completed or
+  errored), and `.nanometa.run.json` records `final_status: stopped` with
+  the reason, time, files processed and inbox size. The header says
+  "Stopped (reason)", the banner badge reads STOPPED, and the verdict
+  subtitle says the counts are partial. The exported report reads the same
+  run state (completed / stopped / error / active) and qualifies its
+  decision banner with it.
+- **Isolated task failures are named after the run.** `processes_failed`
+  and `failed_tasks` are recorded at run end; the header's Complete line
+  names up to three, the verdict subtitle counts them, and the report's run
+  clause states that their reads are absent from every count. The report
+  also reads nanometanf's lost-input markers, which name the staged files
+  a QC-stage failure lost.
+- **A finished real-time run states its unprocessed input.** The header,
+  the run metadata and the report give the inbox-minus-processed gap; the
+  timeout field and the auto-stop countdown describe nanometanf's
+  inactivity timer (timeout plus grace since the newest input file) instead
+  of a wall-clock cap.
+- **Continue into a populated results folder shows the continued run.**
+  The sample list unions the manifest (written once, at session end) with
+  disk discovery; a sample's canonical JSON is used only when it is no
+  older than the sample's reports; any `kraken2/<sample>/` folder names the
+  sample (the incremental classifier publishes `reports/` first, and the
+  sample list caches on top-level directory mtimes); `realtime_batch_stats/`
+  is archived with the rest and "Files processed" counts this run's
+  snapshots only. The collision modal's Continue option describes exactly
+  what nanometanf's ledger-based resume does, and says an older pipeline
+  classifies everything again.
+- **Every launch path resolves the results folder the same way.** The
+  collision handler (Continue / Archive) launched into a fresh
+  `analysis_<timestamp>` folder while the modal promised the described one;
+  it now resolves through `resolve_run_outdir` and pins the directory the
+  modal showed. A new browser tab takes the running app's configuration
+  instead of the boot-time one.
+- **A served stand-in frame is transient, never cached.** When a
+  cumulative report was inside its 1 s stability window the loader served
+  the last-good frame and cached it under the file's new fingerprint; the
+  window then closed by time passing, which changes no mtime, so the
+  stand-in was served until the next rewrite and the staleness registry
+  was never cleared. Replay of one captured window reproduced an aggregate
+  stuck for five polls, a "1 sample serving stale data" note that never
+  cleared, and a sample vanishing for a poll. Loads built on a last-good
+  frame or a tier fallback are no longer cached; a report under
+  `batch_reports/` is treated as a delta whether or not its stats marker
+  has landed (one batch's reads were served for a barcode while the
+  marker lagged); between two copies of one batch report the readable one
+  wins.
+- **One alert per watchlist entry, where entry identity is (NCBI taxid,
+  database taxid).** The Bioshield list carries *E. coli*, *E. coli_E* and
+  *E. coli_F* under one NCBI taxid; keyed on the taxid alone the dedup
+  collapsed them, and which survived flipped with the frame's row order.
+- **Per-sample attribution in real time** (2026-09-01 audit): a
+  sub-threshold sample is named beside the aggregate qualifier instead of
+  only counted; a detection the aggregate called above threshold but
+  spread below the per-sample discovery floor gets a second look without
+  the floor (a select agent at 4/3/3 reads across three barcodes was
+  ACTION REQUIRED attributed to nobody); a moderate-tier hit names its
+  top sample; a sample whose report is absent or mid-rewrite is listed as
+  not readable rather than passed off as clean.
+- **Apply Settings while a run is active** keeps the live run's input and
+  results folders and says pipeline settings apply to the next Start.
+  On-demand validation refuses to arm while the pipeline runs (it shares
+  the run's launch and work directories and adds a bare `-resume`).
+- **Readiness**: a watchlist the config names must exist (a config copied
+  under a new filename used to load zero entries silently, CRITICAL check
+  plus startup toast); a never-created results directory is STANDBY, not
+  RESULTS UNAVAILABLE.
+- **The read filter reaches every QC tool.** The Read Filtering card's
+  minimum length and mean quality were sent under chopper's parameter
+  names only, and nanometanf applied no filter to fastp, so a `qc_tool:
+  fastp` run ignored the card and filtered at fastp's 15 bp default. The
+  launch sends the same values as `fastp_length_required` and
+  `fastp_average_qual` (real nanometanf v1.8.0 parameters), the quality is
+  coerced to the schema's 0-50, the readiness "Input Read Length" check
+  takes the floor of the selected tool instead of exempting fastp, and the
+  three filter keys are written by the default config (a fresh config read
+  as Modified whenever any other field was touched, because the form fell
+  back to values the snapshot lacked).
+- **Two `removeChild` console errors at every Start/Stop flip** (round-4
+  H35). The header's tooltip renders into a portal that the tooltip library
+  detaches on its own, and its text was rewritten at the moment the button
+  flipped. The hover text is the button's native title now.
+
+### Added
+- "Maximum read length (bp)" on the Read Filtering card, empty by default
+  (no limit); a value reaches chopper and filtlong. fastp is given no upper
+  bound because its `max_len1` trims rather than drops.
+- filtlong in the QC-tool select, so its minimum-length field is a control
+  something reads.
+- `scripts/audit_realtime_timeline.py` and
+  `scripts/audit_replay_snapshots.py`: sample a live results folder on a
+  cadence, and replay captured snapshots through the loaders with the
+  stability window observed.
+
+### Changed
+- **fastp is no longer offered in the Configuration tab.** chopper is the
+  default and filtlong the alternative. A config file can still set
+  `qc_tool: fastp`; the form then shows chopper, logs that Apply will save
+  chopper, and Apply does so.
+
 ## [0.15.0] - 2026-08-27
 
 Offline-deployment overhaul: the 2026-08-27 audit found conda-mode

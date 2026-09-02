@@ -29,6 +29,7 @@ from nanometa_live.core.config.parameter_mapping import create_nextflow_params
 _AMPLICON_FIELD_IDS: List[str] = [
     "chopper-minlength-input",
     "chopper-quality-input",
+    "chopper-maxlength-input",
     "filtlong-minlength-input",
     "validation-identity-input",
     "kraken2-confidence-input",
@@ -73,6 +74,7 @@ class TestReadFilteringSubCardLayout:
         # who has not touched the new card keeps the long-read behaviour.
         assert widgets["chopper-minlength-input"].value == 1000
         assert widgets["chopper-quality-input"].value == 10
+        assert widgets["chopper-maxlength-input"].value is None  # no limit
         assert widgets["filtlong-minlength-input"].value == 1000
         assert widgets["validation-identity-input"].value == 90
         assert widgets["kraken2-confidence-input"].value == 0.0
@@ -182,6 +184,28 @@ class TestCallbackWiring:
         pytest.fail("No initialize_form_from_config callback writes all 6 fields")
 
 
+    def test_saved_fastp_loads_as_chopper(self):
+        """fastp is pipeline-only since 2026-09-02: it is not in the select,
+        and a value with no matching option renders as no selection, which
+        Apply would then save as None. The loader shows chopper instead."""
+        app = self._register()
+        for cb_id, spec in app.callback_map.items():
+            outputs = spec.get("output", [])
+            if not isinstance(outputs, list):
+                outputs = [outputs]
+            output_ids = self._ids_of(outputs)
+            if "qc-tool-input" in output_ids and "chopper-minlength-input" in output_ids:
+                fn = spec["callback"].__wrapped__
+                idx = output_ids.index("qc-tool-input")
+                break
+        else:
+            pytest.fail("No initialize_form_from_config callback writes qc-tool-input")
+        result = fn(1, {"qc_tool": "fastp", "chopper_minlength": 100}, None)
+        assert result[idx] == "chopper"
+        result = fn(1, {"qc_tool": "filtlong"}, None)
+        assert result[idx] == "filtlong"
+
+
 # -- parameter_mapping --------------------------------------------------
 
 
@@ -232,6 +256,54 @@ class TestAmpliconParamsRouted:
         assert params["validation_identity_threshold"] == 80.0
         assert params["kraken2_confidence"] == 0.05
         assert params["kraken2_minimum_hit_groups"] == 2
+
+    def test_fastp_receives_the_same_filter(self, tmp_path):
+        """qc_tool fastp used to receive no filter at all: the chopper_*
+        keys had no fastp counterpart and fastp ran at its 15 bp default."""
+        config = self._amplicon_config(tmp_path)
+        config["qc_tool"] = "fastp"
+        params = create_nextflow_params(config)
+        assert params["fastp_length_required"] == 100
+        assert params["fastp_average_qual"] == 7
+        assert params["chopper_minlength"] == 100
+
+    def test_max_length_is_optional_and_reaches_both_tools(self, tmp_path):
+        config = self._amplicon_config(tmp_path)
+        params = create_nextflow_params(config)
+        assert "chopper_maxlength" not in params
+        assert "filtlong_max_length" not in params
+        for empty in ("", None, 0):
+            config["chopper_maxlength"] = empty
+            assert "chopper_maxlength" not in create_nextflow_params(config)
+        config["chopper_maxlength"] = 1500
+        params = create_nextflow_params(config)
+        assert params["chopper_maxlength"] == 1500
+        assert params["filtlong_max_length"] == 1500
+        assert "fastp_max_len1" not in params
+
+    def test_quality_is_coerced_to_the_schema_range(self, tmp_path):
+        config = self._amplicon_config(tmp_path)
+        config["chopper_quality"] = "12"
+        params = create_nextflow_params(config)
+        assert params["chopper_quality"] == 12
+        assert params["fastp_average_qual"] == 12
+        config["chopper_quality"] = 99
+        params = create_nextflow_params(config)
+        assert params["chopper_quality"] == 50
+        config["chopper_quality"] = None
+        assert create_nextflow_params(config)["chopper_quality"] == 10
+
+    def test_default_config_carries_the_filter_keys(self, tmp_path):
+        """The form loader falls back to 1000/10/1000 and the dirty-state
+        check compares the form against the saved snapshot, so a default
+        config without these keys read as modified whenever any other field
+        was touched (read-length audit, 2026-09-02)."""
+        from nanometa_live.core.config.config_loader import ConfigLoader
+        defaults = ConfigLoader(str(tmp_path)).create_default_config()
+        assert defaults["chopper_minlength"] == 1000
+        assert defaults["chopper_quality"] == 10
+        assert defaults["chopper_maxlength"] is None
+        assert defaults["filtlong_min_length"] == 1000
 
     def test_long_read_defaults_when_keys_absent(self, tmp_path):
         """When the operator has not set any of the new keys, the

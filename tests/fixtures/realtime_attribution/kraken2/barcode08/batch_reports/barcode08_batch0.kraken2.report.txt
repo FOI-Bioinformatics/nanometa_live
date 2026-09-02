@@ -1,0 +1,52 @@
+ 30.99	75	75	U	0	unclassified
+ 69.01	167	0	R	1	root
+ 19.01	46	4	S	4007169	                Francisella tularensis
+ 17.36	42	42	S1	4007187	                  Francisella tularensis holarctica
+  4.96	12	12	S	4000800	                Salmonella enterica
+  0.83	2	2	S	4000803	                Salmonella houtenae
+  0.41	1	1	S	4000801	                Salmonella diarizonae
+  2.07	5	5	S	4000549	                Escherichia coli
+  1.24	3	3	S	4000553	                Escherichia coli_F
+  0.83	2	2	S	4000557	                Escherichia sp004211955
+  0.41	1	1	S	4038113	                Pseudescherichia sp032055545
+  0.41	1	1	S	4131473	                Bowmanella dokdonensis
+  0.41	1	1	S	4000888	                Pseudomonas pseudonitroreducens
+  0.41	1	1	S	4109362	                Pseudomonas_M indica
+  0.41	1	1	S	4149069	                Pseudomonas_T mangiferae
+  0.41	1	1	S	4155774	            JACDCP01 sp013817465
+  0.83	2	2	S	4107068	              CANBDL01 sp947367345
+  0.41	1	1	S	4080143	                Shinella fusca
+  0.41	1	1	S	4157166	              JAOUPW01 sp029879665
+  2.48	6	6	S	4005037	                Bacillus_A thuringiensis_K
+  1.65	4	4	S	4005019	                Bacillus_A cereus
+  0.41	1	1	S	4005077	                Bacillus_A cereus_BE
+  0.41	1	1	S	4005022	                Bacillus_A toyonensis
+  0.41	1	1	S	4005024	                Bacillus_A thuringiensis
+  0.41	1	1	S	4005068	                Bacillus_A cereus_AK
+  0.41	1	1	S	4005060	                Bacillus_A cereus_AQ
+  0.41	1	1	S	4005031	                Bacillus_A mobilis
+  0.41	1	1	S	4005042	                Bacillus_A cereus_AG
+  0.41	1	1	S	4005038	                Bacillus_A thuringiensis_N
+  0.83	2	2	S	4005642	                Bacillus subtilis
+  0.41	1	1	S	4055569	                Loigolactobacillus zhaoyuanensis
+  0.41	1	1	S	4040597	                Vagococcus_A xieshaowenii
+  0.41	1	1	S	4000717	                Staphylococcus aureus
+  0.41	1	1	S	4144815	                UBA6114 sp030705725
+  0.41	1	1	S	4015702	                Clostridium sp946575275
+  0.41	1	1	S	4164158	              JAISYE01 sp031297485
+  0.41	1	1	S	4066495	                Mesolinea sp002417685
+  0.41	1	1	S	4137089	                Skermania piniformis
+  0.41	1	1	S	4107710	                Cyclobacterium qasimii
+  0.41	1	1	S	4156371	                PNEW01 sp002922725
+  0.41	1	1	S	4160668	              DASPKA01 sp035628335
+  0.41	1	1	S	4152037	                JADGRA01 sp035622755
+  0.41	1	1	S	4089804	              SKZT01 sp011389745
+  0.41	1	0	S	4573	                                              Aegilops speltoides
+  0.41	1	0	S1	58531	                                                Aegilops speltoides subsp. speltoides
+  0.41	1	1	S	4565	                                              Triticum aestivum
+  0.41	1	1	S	3988	                                            Ricinus communis
+  0.41	1	1	S	9606	                                                              Homo sapiens
+ 10.74	26	0	S	2843768	                    Claudivirus Goe4
+ 10.74	26	26	S1	2315470	                      Bacillus phage vB_BthP-Goe4
+  1.24	3	0	S	2843787	                Waukeshavirus waukesha92
+  1.24	3	3	S1	1510440	                  Bacillus phage Waukesha92

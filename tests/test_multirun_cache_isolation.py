@@ -76,6 +76,11 @@ class TestResultSubdirsCoverCanonical:
     def test_pipeline_info_in_result_subdirs(self):
         assert "pipeline_info" in BackendManager.RESULT_SUBDIRS
 
+    def test_realtime_batch_stats_is_archived(self):
+        """H36: the header sums realtime_batch_stats/*_snapshot.json; a
+        previous run's snapshots left behind by Archive inflated the count."""
+        assert "realtime_batch_stats" in BackendManager.RESULT_SUBDIRS
+
     def test_collision_fires_on_canonical_only_outdir(self, tmp_path):
         canonical = tmp_path / "canonical" / "classification"
         canonical.mkdir(parents=True)
@@ -339,6 +344,27 @@ class TestWatchlistFingerprint:
             watchlist_match=True,
         ))
         assert "Different watchlist" not in clean
+
+    def test_continue_wording_tells_the_truth_for_realtime(self):
+        """H15/H19: -resume cannot cache-hit a real-time run (every task's meta
+        carries a wall-clock stamp); the modal must not promise skipped steps."""
+        from nanometa_live.app.components.collision_modal import (
+            render_collision_body,
+        )
+
+        realtime = str(render_collision_body(
+            "/out", ["kraken2"], input_match=True, has_metadata=True, realtime=True,
+        ))
+        assert "finished classifying are skipped" in realtime
+        assert "carried forward" in realtime
+        assert "never finished are classified again" in realtime
+        assert "skip already-completed" not in realtime
+
+        batch = str(render_collision_body(
+            "/out", ["kraken2"], input_match=True, has_metadata=True, realtime=False,
+        ))
+        assert "skips steps whose inputs are unchanged" in batch
+        assert "carried forward" not in batch
 
 
 class TestMissingDirSkipsTtl:

@@ -282,10 +282,14 @@ class TestGenuineStallIsStopped:
         )
         assert manager.status["running"] is False
         assert manager.status["pipeline_status"] == "stopped"
-        assert any("inactivity timeout" in e for e in manager.status["errors"]), (
+        # The reason travels as stop_reason (rendered by the header and the
+        # verdict subtitle, recorded in .nanometa.run.json), not as an error:
+        # a deliberate stop is not a failure (round-4 audit, H2).
+        assert "inactivity timeout" in manager.status.get("stop_reason", ""), (
             "the operator must be told why the run stopped; a bare 'stopped' "
             "status is indistinguishable from a manual stop"
         )
+        assert manager.status["errors"] == []
         # The monitor thread owns the results-directory lock while it lives.
         assert manager._lock_fd is None and manager._lock_file_path is None, (
             "the lock was not released on timeout exit, so the next run is "

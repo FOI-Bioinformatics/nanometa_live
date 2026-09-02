@@ -146,3 +146,63 @@ class TestModifiedBadgeClearsOnApply:
         from dash import no_update
         snapshot, modified = self._fn(cfg_app)(None, {"a": 1})
         assert snapshot is no_update and modified is no_update
+
+
+class TestApplyDuringARun:
+    """Apply Settings must not move a running run's folders (round-4, H11).
+
+    build_config_from_form recomputes results_output_directory from the
+    analysis name on every Apply and the callback had no view of the backend:
+    renaming the analysis mid-run pointed the viewer at an empty folder while
+    the pipeline kept writing to the old one.
+    """
+
+    def _apply(self, cfg_app):
+        from nanometa_live.app.tabs.config_field_registry import CONFIG_FORM_FIELDS
+        fn = _callback_fn(cfg_app, "app-config", input_contains="apply-config-button")
+
+        def invoke(current_config, backend_status, **overrides):
+            by_name = {kw: None for _, kw in CONFIG_FORM_FIELDS}
+            by_name.update(overrides)
+            values = [by_name[kw] for _, kw in CONFIG_FORM_FIELDS]
+            return fn(1, *values, current_config, backend_status)
+        return invoke
+
+    def _live(self, tmp_path):
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        db = tmp_path / "db"
+        db.mkdir()
+        for name in ("hash.k2d", "opts.k2d", "taxo.k2d"):
+            (db / name).write_bytes(b"x")
+        return {
+            "data_dir": str(tmp_path),
+            "analysis_name": "run A",
+            "nanopore_output_directory": str(inbox),
+            "kraken_db": str(db),
+            "results_output_directory": str(tmp_path / "results" / "run_a"),
+        }
+
+    def test_running_run_keeps_its_folders(self, cfg_app, tmp_path):
+        live = self._live(tmp_path)
+        invoke = self._apply(cfg_app)
+        config, _label, toast, _open = invoke(
+            live, {"running": True}, analysis_name="run B",
+            nanopore_dir=live["nanopore_output_directory"], kraken_db=live["kraken_db"],
+        )
+        assert config["results_output_directory"] == live["results_output_directory"]
+        assert config["nanopore_output_directory"] == live["nanopore_output_directory"]
+        assert config["analysis_name"] == "run B"
+        assert toast["color"] == "warning"
+        assert "next Start" in toast["message"]
+
+    def test_idle_apply_recomputes_the_results_folder(self, cfg_app, tmp_path):
+        live = self._live(tmp_path)
+        invoke = self._apply(cfg_app)
+        config, _label, toast, _open = invoke(
+            live, {"running": False}, analysis_name="run B",
+            nanopore_dir=live["nanopore_output_directory"], kraken_db=live["kraken_db"],
+        )
+        assert config["results_output_directory"] != live["results_output_directory"]
+        assert toast["color"] == "success"
+

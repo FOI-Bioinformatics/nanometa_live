@@ -57,6 +57,7 @@ CONFIG_FORM_FIELDS = (
     ("enable-nanopore-stats-input", "enable_nanopore_stats"),
     ("chopper-minlength-input", "chopper_minlength"),
     ("chopper-quality-input", "chopper_quality"),
+    ("chopper-maxlength-input", "chopper_maxlength"),
     ("filtlong-minlength-input", "filtlong_minlength"),
     ("validation-identity-input", "validation_identity"),
     ("kraken2-confidence-input", "kraken2_confidence"),

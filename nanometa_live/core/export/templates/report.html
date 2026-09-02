@@ -236,6 +236,45 @@
     </p>
   </header>
 
+  {#
+    Run state (round-4 audit, H2/H13). A report over a stopped run or an
+    export taken while the pipeline is still active must say so: three live
+    Stop drills and one mid-run export produced reports worded identically to
+    one over a run that drained its input. Detections above still win; the
+    clause qualifies coverage, never the finding.
+  #}
+  {% set run_partial = data.run_state in ("stopped", "active") %}
+  {% if data.run_state == "stopped" %}
+    {% set run_clause = " (run stopped" ~ (" - " ~ data.stop_reason if data.stop_reason else "") ~ " - coverage is partial)" %}
+  {% elif data.run_state == "active" %}
+    {% set run_clause = " (interim snapshot - the run was still active when this report was generated)" %}
+  {% else %}
+    {% set run_clause = "" %}
+  {% endif %}
+  {% if data.unprocessed_input_files %}
+    {% set run_clause = run_clause ~ " (" ~ data.unprocessed_input_files ~ " input file" ~ ("s" if data.unprocessed_input_files != 1 else "") ~ " in the watched folder " ~ ("were" if data.unprocessed_input_files != 1 else "was") ~ " never processed)" %}
+  {% endif %}
+  {#
+    Tasks lost to error isolation (round-4 audit, H20). A corrupt input
+    chunk that dies in QC is never an expected batch, so neither the manifest
+    nor aggregation_stats.json can see it; the trace-derived labels recorded
+    at run end are the one place it is named.
+  #}
+  {% if data.processes_failed %}
+    {% set run_clause = run_clause ~ " (" ~ data.processes_failed ~ " pipeline task" ~ ("s" if data.processes_failed != 1 else "") ~ " failed and " ~ ("were" if data.processes_failed != 1 else "was") ~ " skipped" ~ (": " ~ (data.failed_tasks | join(", ")) if data.failed_tasks else "") ~ " - reads from " ~ ("them" if data.processes_failed != 1 else "it") ~ " are absent from every count in this report)" %}
+  {% endif %}
+  {#
+    nanometanf's own record of the same losses, by input file: the
+    afterScript markers under pipeline_info/lost_inputs/ (read by
+    run_status.read_lost_inputs). Present even for a tree the GUI did not
+    launch, so it is stated on its own.
+  #}
+  {% if data.lost_inputs %}
+    {% set lost_names = [] %}
+    {% for lost in data.lost_inputs %}{% for f in lost.input_files %}{% set _ = lost_names.append(f.rsplit("/", 1)[-1] ~ " [" ~ lost.stage ~ ", " ~ lost.sample ~ "]") %}{% endfor %}{% endfor %}
+    {% set run_clause = run_clause ~ " (" ~ (lost_names | length) ~ " input file" ~ ("s" if (lost_names | length) != 1 else "") ~ " lost to failed pipeline tasks: " ~ (lost_names | join(", ")) ~ ")" %}
+  {% endif %}
+
   <!-- DECISION BANNER -->
   {% set detected_threats = data.watched_results | selectattr("detected") | list %}
   {% set critical_threats = detected_threats | selectattr("threat_level", "equalto", "critical") | list %}
@@ -243,11 +282,11 @@
 
   {% if critical_threats or high_threats %}
   <div class="decision-banner banner-action">
-    ACTION REQUIRED - {{ (critical_threats | length) + (high_threats | length) }} high-priority organism{{ "s" if (critical_threats | length) + (high_threats | length) != 1 else "" }} detected{% if data.pipeline_error %} (pipeline error - coverage is partial){% endif %}
+    ACTION REQUIRED - {{ (critical_threats | length) + (high_threats | length) }} high-priority organism{{ "s" if (critical_threats | length) + (high_threats | length) != 1 else "" }} detected{% if data.pipeline_error %} (pipeline error - coverage is partial){% endif %}{{ run_clause }}
   </div>
   {% elif detected_threats %}
   <div class="decision-banner banner-review">
-    REVIEW RECOMMENDED - {{ detected_threats | length }} watched organism{{ "s" if detected_threats | length != 1 else "" }} detected{% if data.pipeline_error %} (pipeline error - coverage is partial){% endif %}
+    REVIEW RECOMMENDED - {{ detected_threats | length }} watched organism{{ "s" if detected_threats | length != 1 else "" }} detected{% if data.pipeline_error %} (pipeline error - coverage is partial){% endif %}{{ run_clause }}
   </div>
   {% elif data.pipeline_error %}
   {#
@@ -274,7 +313,7 @@
     outlives the session that produced it.
   #}
   <div class="decision-banner banner-review">
-    NOT SCREENED - no watchlist was active, so no organisms were checked
+    NOT SCREENED - no watchlist was active, so no organisms were checked{{ run_clause }}
   </div>
   {% elif data.total_reads is not none and data.low_read_floor
           and data.total_reads < data.low_read_floor %}
@@ -294,11 +333,11 @@
     cannot compute it emit a false INSUFFICIENT READS.
   #}
   <div class="decision-banner banner-review">
-    INSUFFICIENT READS - only {{ "{:,}".format(data.total_reads) }} read{{ "s" if data.total_reads != 1 else "" }} analysed, too few for a reliable negative across {{ data.watched_results | length }} watched organism{{ "s" if data.watched_results | length != 1 else "" }}
+    INSUFFICIENT READS - only {{ "{:,}".format(data.total_reads) }} read{{ "s" if data.total_reads != 1 else "" }} analysed, too few for a reliable negative across {{ data.watched_results | length }} watched organism{{ "s" if data.watched_results | length != 1 else "" }}{{ run_clause }}
   </div>
   {% else %}
   <div class="decision-banner banner-safe">
-    NO WATCHED ORGANISMS DETECTED - {{ data.watched_results | length }} organism{{ "s" if data.watched_results | length != 1 else "" }} screened
+    NO WATCHED ORGANISMS DETECTED - {{ data.watched_results | length }} organism{{ "s" if data.watched_results | length != 1 else "" }} screened{{ run_clause }}
   </div>
   {% endif %}
 

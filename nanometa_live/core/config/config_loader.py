@@ -141,8 +141,15 @@ class ConfigLoader:
             "local_package_management": None,
             "conda_frontend": "mamba",
             "main_dir": "",
-            # QC and analysis tools
+            # QC and analysis tools. The read filter defaults match
+            # nanometanf's (1000 bp, mean Q10); the form loader falls back
+            # to the same values, and the dirty-state check compares the
+            # form against this snapshot, so the keys must be present here.
             "qc_tool": "chopper",
+            "chopper_minlength": 1000,
+            "chopper_quality": 10,
+            "chopper_maxlength": None,
+            "filtlong_min_length": 1000,
             "skip_nanoplot": False,
             # Assembly (experimental nanometanf step; off by default)
             "enable_assembly": False,

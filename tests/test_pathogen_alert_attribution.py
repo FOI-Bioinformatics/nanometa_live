@@ -88,20 +88,26 @@ class TestAttributionPillExpandable:
         popover = _find_first(result, lambda n: isinstance(n, dbc.Popover))
         assert popover is None
 
-    def test_watched_tier_multi_sample_renders_a_count_pill(self):
-        """A moderate hit across several barcodes used to render no
-        attribution at all. It now collapses to a count pill whose popover
-        carries the full list."""
+    def test_watched_tier_multi_sample_names_one_and_summarises_the_rest(self):
+        """A moderate hit across several barcodes names its top sample.
+
+        It rendered no attribution at all originally, then a bare count pill,
+        which said a detection spanned barcodes without saying which. It now
+        names the highest-count sample and keeps the popover for the full
+        list -- one chip per card, not one per barcode.
+        """
         samples = self._build_samples(4)
         result = _render_sample_attribution(samples, "watched")
         assert result is not None, "watched multi-sample attribution suppressed"
         rendered = _render_to_json(result)
-        assert "4 samples" in rendered
         popover = _find_first(result, lambda n: isinstance(n, dbc.Popover))
         assert popover is not None
         assert len(popover.children[1].children) == 4
-        # No per-barcode chips inline -- the pill is the whole row.
-        assert "barcode01" not in rendered.split("Popover")[0]
+        inline = rendered.split("Popover")[0]
+        # Exactly one barcode chip inline, plus the overflow pill.
+        assert "barcode01" in inline
+        assert "barcode02" not in inline
+        assert "+3 more" in inline
 
     def test_watched_tier_single_sample_still_names_it(self):
         result = _render_sample_attribution(self._build_samples(1), "watched")
@@ -178,3 +184,70 @@ class TestVerdictBannerAttribution:
         assert "barcode17" in rendered
         # No "+N more" phrasing when nothing was elided
         assert "more" not in rendered or "more)" not in rendered.split("Triggered by")[1].split("samples)")[0]
+
+
+class TestModerateTierNamesItsTopSample:
+    """A count pill alone hides the one fact the operator needs.
+
+    Chips per sample are suppressed at watched tier for a real reason: at 96
+    barcodes and 129 entries the eager version serialised tens of thousands of
+    components (round-2 scale audit). Naming the highest-count sample costs one
+    chip per card and keeps the popover for the rest.
+
+    Observed live on 2026-09-01: moderate cards read "DETECTED IN: 3 samples"
+    and "4 samples", naming none, on the same screen where the critical cards
+    named their barcodes.
+    """
+
+    def test_the_top_sample_is_named_inline(self):
+        from nanometa_live.app.components.attribution import (
+            _render_sample_attribution,
+        )
+
+        samples = [
+            {"sample": "barcode06", "reads": 900, "abundance": 12.0,
+             "is_negative_control": False},
+            {"sample": "barcode07", "reads": 40, "abundance": 1.0,
+             "is_negative_control": False},
+            {"sample": "barcode05", "reads": 20, "abundance": 0.5,
+             "is_negative_control": False},
+        ]
+
+        rendered = str(
+            _render_sample_attribution(samples, "watched", attribution_taxid=263)
+        )
+
+        assert "barcode06" in rendered
+        assert "2 more" in rendered
+
+    def test_a_single_sample_is_unchanged(self):
+        from nanometa_live.app.components.attribution import (
+            _render_sample_attribution,
+        )
+
+        samples = [{"sample": "barcode05", "reads": 900, "abundance": 12.0,
+                    "is_negative_control": False}]
+
+        assert "barcode05" in str(
+            _render_sample_attribution(samples, "watched", attribution_taxid=263)
+        )
+
+    def test_critical_tier_is_unchanged(self):
+        """Three chips plus overflow, as before."""
+        from nanometa_live.app.components.attribution import (
+            _render_sample_attribution,
+        )
+
+        samples = [
+            {"sample": f"barcode0{i}", "reads": 100 - i, "abundance": 1.0,
+             "is_negative_control": False}
+            for i in range(5)
+        ]
+
+        rendered = str(
+            _render_sample_attribution(samples, "critical", attribution_taxid=263)
+        )
+
+        for name in ("barcode00", "barcode01", "barcode02"):
+            assert name in rendered
+        assert "2 more" in rendered

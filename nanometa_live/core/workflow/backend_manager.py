@@ -48,6 +48,11 @@ class BackendManager:
         self.config = None
         self.status_thread = None
         self._status_lock = threading.Lock()  # Thread safety for status updates
+        # Set BEFORE the Nextflow process is signalled so the monitor thread,
+        # which polls every 5 s and may see the dead process first, records
+        # the run as stopped rather than completed or errored (round-4 audit,
+        # H3). Cleared at the next start().
+        self._stop_intent: Optional[str] = None
         # Note: legacy _prep_status_lock removed along with prepare_data methods
         self._lock_fd: Optional[IO] = None  # File lock descriptor for multi-user safety
         self._lock_file_path: Optional[str] = None  # Path to lock file
@@ -423,6 +428,10 @@ class BackendManager:
         "nanoplot",
         "canonical",
         "pipeline_info",
+        # GENERATE_SNAPSHOT_STATS output; the header's "Files processed"
+        # sums it, so a previous run's snapshots left behind inflate the
+        # count (round-4 audit, H36).
+        "realtime_batch_stats",
         # The auto-generated operator report describes the run that wrote
         # it; leaving it behind would show run A's verdict on the Reports
         # tab during run B.
@@ -784,10 +793,7 @@ class BackendManager:
 
         # Mark as running with start time for elapsed time tracking (thread-safe)
         with self._status_lock:
-            self.status["running"] = True
-            self.status["pipeline_status"] = "running"
-            self.status["start_time"] = datetime.now().isoformat()
-            self.status["last_update"] = time.time()
+            self._mark_started_locked()
 
         # Start status monitoring thread
         self.status_thread = threading.Thread(target=self._monitor_status, daemon=True)
@@ -848,6 +854,10 @@ class BackendManager:
         if not self.status.get("running"):
             return False, "Backend is not running"
 
+        # Declare the intent first: workflow_manager.stop() blocks for up to
+        # 30 s, and the monitor thread polls in that window (round-4 H3).
+        self._mark_stop_intent("operator")
+
         # Stop the Nextflow workflow
         success, message = self.workflow_manager.stop()
         if not success:
@@ -858,12 +868,12 @@ class BackendManager:
         # Release exclusive lock on results directory
         self._release_lock()
 
-        # Mark as stopped (thread-safe)
+        # Mark as stopped (thread-safe) and leave the terminal record the
+        # exported report reads (round-4 H2: three live Stop drills left no
+        # final_status, so the report over an aborted run read like one over
+        # a run that drained its input).
         with self._status_lock:
-            self.status["running"] = False
-            self.status["pipeline_status"] = "stopped"
-            self.status["errors"] = []  # Clear errors from user-initiated stop
-            self.status["last_update"] = time.time()
+            self._finish_stopped_locked("operator")
 
         # A realtime run ends via Stop, so this is its natural moment to
         # leave a report behind; best-effort, never fails the stop.
@@ -875,6 +885,23 @@ class BackendManager:
 
         logging.info("Backend stopped successfully")
         return True, "Backend stopped successfully"
+
+    def _mirror_workflow_fields(self, workflow_status: Dict[str, Any]) -> None:
+        """Copy the per-poll process, batch and stage fields into status.
+
+        Lock held by the caller. ``failed_tasks`` carries the labels of the
+        tasks the trace reports FAILED ("CHOPPER (barcode06_chunk3.fastq.gz)"),
+        the one record of an input file lost to error isolation (round-4
+        audit, H20).
+        """
+        for key, default in (
+            ("processes_running", 0), ("processes_complete", 0),
+            ("files_processed", 0), ("current_batch", 0),
+            ("stages", []), ("current_stage", None), ("stage_progress", {}),
+            ("processes_failed", 0), ("total_processes", 0),
+        ):
+            self.status[key] = workflow_status.get(key, default)
+        self.status["failed_tasks"] = list(workflow_status.get("failed_tasks") or [])
 
     def get_status(self) -> Dict[str, Any]:
         """
@@ -911,21 +938,15 @@ class BackendManager:
             else:
                 self.status["pipeline_status"] = "stopped"
 
-            # Update process and batch information from workflow manager
-            self.status["processes_running"] = workflow_status.get("processes_running", 0)
-            self.status["processes_complete"] = workflow_status.get("processes_complete", 0)
-            self.status["files_processed"] = workflow_status.get("files_processed", 0)
-            self.status["current_batch"] = workflow_status.get("current_batch", 0)
+            self._mirror_workflow_fields(workflow_status)
 
-            # Update stage-level tracking for dashboard display
-            self.status["stages"] = workflow_status.get("stages", [])
-            self.status["current_stage"] = workflow_status.get("current_stage", None)
-            self.status["stage_progress"] = workflow_status.get("stage_progress", {})
-            self.status["processes_failed"] = workflow_status.get("processes_failed", 0)
-            self.status["total_processes"] = workflow_status.get("total_processes", 0)
-
-            # If we're running, update additional file counts
-            if self.status.get("running") and self.config:
+            # Keep the input file count current after the run too: in
+            # real-time mode files that land after the timer are never
+            # classified, and comparing the inbox with files_processed is
+            # the only way to say so (round-4 audit, H5: 14 of 47 files
+            # unprocessed, nothing on any surface). The 5 s TTL keeps it
+            # to one directory listing per poll.
+            if self.config:
                 self._update_file_counts()
 
             # Surface remaining seconds until the realtime timeout fires
@@ -940,6 +961,12 @@ class BackendManager:
             # written, so a finished run rendered as STANDBY instead of COMPLETE.
             self.status["completed"] = (
                 self.status.get("pipeline_status") == "completed"
+            )
+            # "stopped" doubles as the idle state above, so a real stop is
+            # the one that carries a reason (round-4 H2).
+            self.status["stopped_run"] = bool(
+                self.status.get("pipeline_status") == "stopped"
+                and self.status.get("stop_reason")
             )
 
             # Return a copy to prevent external modification
@@ -968,11 +995,25 @@ class BackendManager:
             return None
         try:
             from datetime import datetime as _dt
-            start_dt = _dt.fromisoformat(start_iso)
-            elapsed = (_dt.now() - start_dt).total_seconds()
+            anchor = _dt.fromisoformat(start_iso).timestamp()
         except (TypeError, ValueError):
             return None
-        remaining = int(int(timeout_minutes) * 60 - elapsed)
+        # nanometanf's timer runs from the LAST detected input file (every
+        # file resets it), so the countdown anchors on the newest input
+        # file when one is newer than the start.
+        newest = getattr(self, "_newest_input_mtime", None)
+        if newest and newest > anchor:
+            anchor = newest
+        elapsed = time.time() - anchor
+        # The pipeline's timer fires at timeout PLUS its grace period
+        # (nanometanf realtime_processing_grace_period, default 5). The chip
+        # used to count only the timeout and vanished five minutes before
+        # the run actually ended (round-4 audit, H2).
+        try:
+            grace = int(self.config.get("realtime_processing_grace_period", 5) or 0)
+        except (TypeError, ValueError):
+            grace = 5
+        remaining = int((int(timeout_minutes) + grace) * 60 - elapsed)
         return max(0, remaining)
 
     # TTL for the cached file count below. Each interval tick on the
@@ -1002,27 +1043,34 @@ class BackendManager:
             # Count files in nanopore directory (including barcode subdirs)
             waiting_files = 0
             extensions = (".fastq", ".fastq.gz", ".fq", ".fq.gz")
+            newest_mtime = 0.0
             if os.path.exists(nanopore_dir):
-                for f in os.listdir(nanopore_dir):
-                    if f.endswith(extensions):
-                        waiting_files += 1
-                # Also count files in per-sample subdirectories. The
-                # canonical detector accepts conventional barcode<NN>
-                # plus custom-named subdirs (Turex/, Zymo/, ...) so
-                # this counter stays accurate for non-multiplex
-                # layouts that still use by_barcode mode.
+                # Per-sample subdirectories too. The canonical detector
+                # accepts conventional barcode<NN> plus custom-named subdirs
+                # (Turex/, Zymo/, ...) so this counter stays accurate for
+                # non-multiplex layouts that still use by_barcode mode.
                 from nanometa_live.core.utils.auto_detect import find_sample_subdirs
-                for sample_dir in find_sample_subdirs(nanopore_dir):
+                dirs = [nanopore_dir] + [str(d) for d in find_sample_subdirs(nanopore_dir)]
+                for d in dirs:
                     try:
-                        for f in os.listdir(str(sample_dir)):
-                            if f.endswith(extensions):
-                                waiting_files += 1
+                        names = os.listdir(d)
                     except OSError:
                         continue
+                    for f in names:
+                        if not f.endswith(extensions):
+                            continue
+                        waiting_files += 1
+                        try:
+                            newest_mtime = max(newest_mtime, os.stat(os.path.join(d, f)).st_mtime)
+                        except OSError:
+                            continue
 
             # Update status with waiting files
             # Processed files comes from workflow_manager status
             self.status["files_waiting"] = waiting_files
+            # The newest input file anchors the auto-stop countdown: the
+            # pipeline's inactivity timer runs from the last detected file.
+            self._newest_input_mtime = newest_mtime or None
             self._file_count_cached_value = waiting_files
             self._file_count_cached_at = now
 
@@ -1095,24 +1143,7 @@ class BackendManager:
                     idle = self.inactivity_elapsed_s(
                         last_progress_monotonic, time.monotonic())
                     if idle >= timeout_seconds:
-                        logging.warning(
-                            f"Realtime inactivity timeout reached after "
-                            f"{idle / 60:.1f} minutes with no task progress, "
-                            f"stopping pipeline"
-                        )
-                        with self._status_lock:
-                            self.status["running"] = False
-                            self.status["pipeline_status"] = "stopped"
-                            self.status["errors"].append(
-                                f"Pipeline stopped: realtime inactivity timeout "
-                                f"({int(timeout_seconds / 60)} minutes with no "
-                                f"task progress) reached"
-                            )
-                        # Stop the underlying Nextflow process
-                        try:
-                            self.workflow_manager.stop()
-                        except (OSError, RuntimeError, AttributeError) as e:
-                            logging.exception(f"Error stopping pipeline after timeout: {e}")
+                        self._stop_for_inactivity(timeout_seconds, idle)
                         break
 
                 # Thread-safe status update. Report generation is deferred
@@ -1175,6 +1206,12 @@ class BackendManager:
         assemble). The isolated failure is still reported, as a warning naming
         the tasks, so nothing is hidden.
         """
+        if self._stop_intent:
+            # A deliberate stop is in progress; the dead process is what was
+            # asked for. stop() owns the report, so do not signal completion.
+            self._finish_stopped_locked(self._stop_intent)
+            return False
+
         workflow_errors = workflow_status.get("errors", [])
         if workflow_errors:
             self._fail_run(workflow_errors)
@@ -1190,6 +1227,8 @@ class BackendManager:
             named = ", ".join(failed_tasks) if failed_tasks else (
                 f"{processes_failed} task(s)")
             self.status["pipeline_status"] = "completed"
+            self.status["processes_failed"] = processes_failed
+            self.status["failed_tasks"] = list(failed_tasks)
             self.status.setdefault("warnings", []).append(
                 f"Run completed; {named} did not produce output and was "
                 "isolated. Other samples are unaffected."
@@ -1228,6 +1267,57 @@ class BackendManager:
         """Idle seconds for the realtime timeout, on the monotonic clock."""
         return max(0.0, now_monotonic - last_progress_monotonic)
 
+    def _mark_started_locked(self) -> None:
+        """Flip the status to running and drop the previous run's stop record.
+
+        Call with ``self._status_lock`` held.
+        """
+        self.status["running"] = True
+        self.status["pipeline_status"] = "running"
+        self.status["start_time"] = datetime.now().isoformat()
+        self.status["last_update"] = time.time()
+        self.status.pop("stop_reason", None)
+        self.status.pop("ended_at", None)
+        self._stop_intent = None
+
+    def _mark_stop_intent(self, reason: str) -> None:
+        """Record that the run is being stopped on purpose (lock-free flag)."""
+        self._stop_intent = reason
+
+    def _finish_stopped_locked(self, reason: str) -> None:
+        """Classify the run as stopped and leave the terminal record.
+
+        Call with ``self._status_lock`` held. Idempotent: the monitor thread
+        and stop() may both reach it for the same run.
+        """
+        self.status["running"] = False
+        self.status["pipeline_status"] = "stopped"
+        self.status["stop_reason"] = reason
+        self.status["ended_at"] = datetime.now().isoformat(timespec="seconds")
+        # A deliberate stop makes Nextflow exit non-zero; that is not an error.
+        self.status["errors"] = []
+        self.status["last_update"] = time.time()
+        self._record_final_status()
+
+    def _stop_for_inactivity(self, timeout_seconds: int, idle_s: float) -> None:
+        """The GUI's inactivity backstop: stop, record why, leave a report."""
+        reason = (
+            f"inactivity timeout: no task progress for "
+            f"{int(timeout_seconds / 60)} minutes"
+        )
+        logging.warning(
+            f"Realtime inactivity timeout reached after {idle_s / 60:.1f} "
+            f"minutes with no task progress, stopping pipeline"
+        )
+        self._mark_stop_intent(reason)
+        try:
+            self.workflow_manager.stop()
+        except (OSError, RuntimeError, AttributeError) as e:
+            logging.exception(f"Error stopping pipeline after timeout: {e}")
+        with self._status_lock:
+            self._finish_stopped_locked(reason)
+        self._auto_generate_report()
+
     def _record_final_status(self) -> None:
         """Merge the terminal classification into .nanometa.run.json.
 
@@ -1246,6 +1336,26 @@ class BackendManager:
             meta = self.read_run_metadata(outdir) or {}
             meta["final_status"] = self.status.get("pipeline_status")
             meta["final_errors"] = list(self.status.get("errors") or [])
+            # Why and when the run ended, and how far it got: the report
+            # states these so a stopped run cannot read like a finished one.
+            if self.status.get("stop_reason"):
+                meta["stop_reason"] = self.status["stop_reason"]
+            meta["ended_at"] = self.status.get("ended_at") or datetime.now().isoformat(
+                timespec="seconds")
+            meta["files_processed"] = int(self.status.get("files_processed") or 0)
+            # Tasks lost to error isolation, by label. Neither the manifest
+            # nor aggregation_stats.json can see a QC-stage loss (batch ids
+            # are assigned after QC), so the trace-derived list recorded
+            # here is what the report and the header name (round-4, H20).
+            meta["processes_failed"] = int(self.status.get("processes_failed") or 0)
+            meta["failed_tasks"] = [str(t) for t in (self.status.get("failed_tasks") or [])]
+            # The inbox at the end: the report can then state how many input
+            # files the run never classified (round-4 audit, H5).
+            try:
+                self._update_file_counts()
+                meta["input_files_at_end"] = int(self.status.get("files_waiting") or 0)
+            except Exception:
+                pass
             from nanometa_live.core.utils.atomic_write import atomic_write_json
             atomic_write_json(path, meta)
         except Exception:

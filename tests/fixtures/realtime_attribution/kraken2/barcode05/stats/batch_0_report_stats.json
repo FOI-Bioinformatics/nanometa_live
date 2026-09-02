@@ -1,0 +1,9 @@
+{
+  "sample_id": "barcode05",
+  "batch_id": 0,
+  "total_reads": 288,
+  "classified_reads": 198,
+  "unclassified_reads": 90,
+  "classification_rate": 0.6875,
+  "unique_taxa": 112
+}

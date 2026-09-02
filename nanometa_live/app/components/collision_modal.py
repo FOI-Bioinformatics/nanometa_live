@@ -87,6 +87,7 @@ def render_collision_body(
     input_match: object = None,
     has_metadata: bool = True,
     watchlist_match: object = None,
+    realtime: bool = False,
 ) -> html.Div:
     """Return the body children for the modal given the detection result.
 
@@ -226,11 +227,38 @@ def render_collision_body(
                             [
                                 html.Strong("Continue (resume)"),
                                 " -- ",
-                                "Reuses the existing results and asks "
-                                "Nextflow to skip already-completed steps "
-                                "via ",
+                                "Keeps the existing results and launches with ",
                                 html.Code("-resume"),
-                                ". Only safe when the new input is the same "
+                                ". ",
+                            ]
+                            + (
+                                [
+                                    # Nextflow's task cache cannot help a
+                                    # real-time run, so nanometanf keeps its
+                                    # own ledger of finished inputs
+                                    # (pipeline_info/processed_inputs.tsv) and
+                                    # seeds the cumulative counts from the
+                                    # previous run's per-batch files (round-4
+                                    # audit, H15/H19). A file the previous run
+                                    # never finished is classified again.
+                                    "In real-time mode the input files the "
+                                    "previous run finished classifying are "
+                                    "skipped and its cumulative counts are "
+                                    "carried forward; files it never finished "
+                                    "are classified again. Needs a nanometanf "
+                                    "that writes pipeline_info/"
+                                    "processed_inputs.tsv (2026-09 or later); "
+                                    "an older pipeline classifies every file "
+                                    "again from zero. "
+                                ]
+                                if realtime
+                                else [
+                                    "Nextflow skips steps whose inputs are "
+                                    "unchanged. "
+                                ]
+                            )
+                            + [
+                                "Only safe when the new input is the same "
                                 "as the previous run.",
                             ],
                             className="mb-2",

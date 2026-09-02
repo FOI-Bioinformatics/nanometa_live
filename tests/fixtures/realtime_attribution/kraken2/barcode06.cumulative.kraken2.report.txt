@@ -1,0 +1,62 @@
+65.34	377	1	R	1	root
+23.05	133	16	S	4007169	                Francisella tularensis
+19.93	115	115	S1	4007187	                  Francisella tularensis holarctica
+0.17	1	1	S1	4007186	                  Francisella tularensis tularensis
+0.17	1	1	S1	4007189	                  Francisella tularensis novicida
+5.20	30	30	S	4000800	                Salmonella enterica
+0.17	1	1	S	4000803	                Salmonella houtenae
+1.04	6	6	S	4000549	                Escherichia coli
+0.69	4	4	S	4000553	                Escherichia coli_F
+0.35	2	2	S	4000550	                Escherichia albertii
+0.35	2	2	S	4000555	                Escherichia sp005843885
+0.35	2	2	S	4000557	                Escherichia sp004211955
+0.17	1	1	S	4000551	                Escherichia fergusonii
+0.17	1	1	S	4000559	                Escherichia sp002965065
+0.17	1	1	S	4038113	                Pseudescherichia sp032055545
+0.52	3	3	S	4131473	                Bowmanella dokdonensis
+0.17	1	1	S	4000888	                Pseudomonas pseudonitroreducens
+0.17	1	1	S	4035632	                Metapseudomonas furukawaii
+0.17	1	1	S	4074528	                Pseudomonas_O sp002418465
+0.17	1	1	S	4103027	                UBA7803 sp002480525
+0.17	1	1	S	4161540	                Altericroceibacterium_A xinjiangense
+0.17	1	1	S	4160687	                JBGSYN01 sp041750975
+2.25	13	13	S	4005019	                Bacillus_A cereus
+1.73	10	10	S	4005037	                Bacillus_A thuringiensis_K
+0.87	5	5	S	4005024	                Bacillus_A thuringiensis
+0.87	5	5	S	4005060	                Bacillus_A cereus_AQ
+0.69	4	4	S	4005042	                Bacillus_A cereus_AG
+0.52	3	3	S	4005023	                Bacillus_A thuringiensis_S
+0.17	1	1	S	4005031	                Bacillus_A mobilis
+0.17	1	1	S	4005032	                Bacillus_A albus
+0.17	1	1	S	4005046	                Bacillus_A cereus_K
+0.17	1	1	S	4005047	                Bacillus_A hominis
+0.17	1	1	S	4005055	                Bacillus_A sp002571225
+0.17	1	1	S	4005074	                Bacillus_A sp027694045
+0.17	1	1	S	4005085	                Bacillus_A dicomae
+1.39	8	8	S	4005642	                Bacillus subtilis
+0.17	1	1	S	4011643	                Limosilactobacillus panis
+0.17	1	1	S	4054166	                Schleiferilactobacillus perolens
+0.17	1	1	S	4082702	                Secundilactobacillus paracollinoides
+0.17	1	1	S	4138399	                Paralactobacillus selangorensis
+0.17	1	1	S	4023089	                Enterococcus_I avicola
+0.17	1	1	S	4133303	                Enterococcus_H canis
+0.17	1	1	S	4000717	                Staphylococcus aureus
+0.17	1	1	S	4082409	                UMGS1271 sp947570175
+0.17	1	1	S	4133459	                Paenibacillus_D pinihumi
+0.17	1	1	S	4165861	                DASSUA01 sp035707525
+0.17	1	1	S	4160423	                JAIRQA01 sp031256715
+0.17	1	1	S	4146043	                DATDOL01 sp035293265
+0.17	1	1	S	4140535	                JACRJW01 sp016235605
+0.17	1	1	S	4118952	                JAHBWV01 sp026647565
+0.17	1	1	S	4148713	            JAHFDS01 sp023248855
+0.17	1	1	S	4142296	                JAUYCD01 sp030692375
+0.52	3	3	S	9606	                                                              Homo sapiens
+0.17	1	1	S	4565	                                              Triticum aestivum
+0.17	1	1	S	3988	                                            Ricinus communis
+11.27	65	0	S	2843768	                    Claudivirus Goe4
+11.27	65	65	S1	2315470	                      Bacillus phage vB_BthP-Goe4
+0.17	1	1	S	2843757	                Beceayunavirus BceA1
+0.17	1	0	S	3429152	                Haihevirus PP9W2
+0.17	1	1	S1	2914450	                  Pseudomonas phage PP9W2
+0.17	1	1	S	1124654	              Escherichia phage TL-2011b
+34.66	200	200	U	0	unclassified

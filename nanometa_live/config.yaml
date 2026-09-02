@@ -238,6 +238,17 @@ pipeline_profile: "conda"
 # Default: "chopper"
 qc_tool: "chopper"
 
+## READ FILTER ##
+# Description: Reads shorter than the minimum length, or with a mean quality
+# below the floor, are discarded before classification. chopper and fastp
+# both read these two values (fastp through its own parameter names);
+# filtlong reads filtlong_min_length. 1 disables the length filter.
+chopper_minlength: 1000
+chopper_quality: 10
+# Maximum read length in bp for chopper and filtlong; empty means no limit.
+chopper_maxlength:
+filtlong_min_length: 1000
+
 ## REMOVE TEMP FILES ##
 # Description: Option to remove temporary files created during workflow execution.
 # Note: Keeping temporary files can be useful for debugging but may consume significant disk space.
