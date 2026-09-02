@@ -309,3 +309,36 @@ producer; Linux.
   monotonicity, vanished detections and measured-to-unmeasured flips.
 - `~/nanometa-audit-r4/`: configs, timelines (`timelines/*.jsonl`), 20 s
   results snapshots, events log, feeder and stop-watch logs.
+
+## Fixes shipped with this audit (nanometa_live `dev`, 2026-09-02)
+
+| Finding | Change | Pinned by |
+|---|---|---|
+| H2, H3, H13 | `stop()` and the inactivity backstop declare intent before signalling Nextflow, record `final_status: stopped` with reason, time, files processed and inbox; STOPPED badge and header; report clause for stopped and interim (lock-file) exports | `tests/test_stopped_run_state.py`, `tests/test_report_generator.py::TestRunStateParity` |
+| H33 | Collision Continue/Archive resolves the outdir like the first Start and pins the directory the modal showed | `tests/test_start_stop_callbacks.py::TestCollisionDecisionResolvesTheOutdir` |
+| H34 | A new tab merges the running app's config into its Store on the first tick or tab click | `tests/test_startup_callbacks.py::TestNewTabGetsTheLiveRunConfig` |
+| H7, H6b, H17 | Manifest unioned with disk discovery; canonical JSON wins only when no older than the sample's reports; nested `batch_reports/` counts as output | `tests/test_continue_loader_state.py` |
+| H10 | On-demand validation refuses to arm while the pipeline runs; modal read count uses `cumul_reads` | `tests/test_main_tab_callbacks.py::TestOnDemandValidationWhileRunning` |
+| H20 | `processes_failed` reaches the header and the verdict subtitle | `tests/test_stopped_run_state.py::TestFailedTasksAreNamed` |
+| H5 | Inbox refreshes after the run; header, metadata and report state the unprocessed-input gap for real-time runs | `tests/test_stopped_run_state.py::TestUnprocessedInputIsNamed` |
+| H1 | nanometanf timer resets on every detected file; GUI text and countdown (anchored on the newest input file, timeout plus grace) follow | `tests/test_realtime_timeout_contract.py` |
+| H24 | `unresolved_watchlist_ids` feeds a CRITICAL readiness check and the startup toast | `tests/test_unresolved_watchlists.py` |
+| H23 | Results-fingerprint Store carries a sticky `dir_seen`; a never-created directory is STANDBY | `tests/test_verdict_banner_callback.py::TestNeverCreatedDirIsNotLost` |
+| H21, H4 (pattern) | nanometanf per-batch QC filename carries `batch_id`; real-time pattern includes `.fq` | nanometanf `conf/modules.config`, `nextflow.config` |
+
+## Still open after this session
+
+- **H6, H26, H27, H28** (loader transients: tier-switch drop, per-sample lag,
+  batch-vs-cumulative arithmetic, the permanent stale flag). Each needs an
+  offline reproduction from `~/nanometa-audit-r4/snapshots/`, replaying
+  successive snapshots through one long-lived loader process with mtimes
+  touched to "now". The sample-key derivation was checked and is not the
+  cause of H28.
+- **H15, H19** (Continue reclassifies everything and doubles the batch
+  tree). The collision modal's "skip already-completed steps" wording is
+  wrong for a real-time run; the pipeline's per-file wall-clock meta stamp
+  is the reason no task can cache-hit.
+- **H20 pipeline side.** A QC-stage failure is never an expected batch, so
+  `aggregation_stats.json` cannot see it; a per-file loss marker written when
+  the task is ignored would close this.
+- **H4 blind window, H11, H36, H35** and the unexercised list above.
