@@ -58,7 +58,7 @@ def _invoke(**overrides):
     by_name = {kw: None for _, kw in CONFIG_FORM_FIELDS}
     by_name.update(overrides)
     values = [by_name[kw] for _, kw in CONFIG_FORM_FIELDS]
-    return fn(1, *values, {"data_dir": "/tmp/nanometa_rangetest"})
+    return fn(1, *values, {"data_dir": "/tmp/nanometa_rangetest"}, {"running": False})
 
 
 def _message(result) -> str:

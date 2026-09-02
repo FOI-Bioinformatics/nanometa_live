@@ -618,3 +618,30 @@ def _build_config_list_items(configs):
             className="d-flex justify-content-between align-items-center",
         ))
     return items
+
+
+# Keys that name where the RUNNING pipeline reads and writes. Apply must not
+# move them under a live run: the viewer would follow the new
+# results_output_directory to an empty folder while the pipeline kept writing
+# to the old one, and the header would count a different inbox.
+RUNNING_RUN_PATH_KEYS = ("results_output_directory", "nanopore_output_directory")
+
+
+def pin_running_run_paths(config, current_config, backend_status) -> bool:
+    """Keep the live run's input and results folders while it runs.
+
+    ``build_config_from_form`` recomputes ``results_output_directory`` from
+    the analysis name on every Apply, and Apply had no view of the backend
+    (round-4 audit, H11). While ``backend_status.running`` is set, the two
+    path keys are restored from ``current_config`` in place. Returns True
+    when a running run was found (whether or not any value differed), so the
+    caller can word its confirmation accordingly.
+    """
+    if not (backend_status or {}).get("running"):
+        return False
+    for key in RUNNING_RUN_PATH_KEYS:
+        live = (current_config or {}).get(key)
+        if live:
+            config[key] = live
+    return True
+

@@ -41,6 +41,7 @@ from nanometa_live.app.tabs.config_tab_helpers import (  # noqa: E402
     autosave_session_config,
     build_config_from_form,
     config_form_dirty,
+    pin_running_run_paths,
     _pipeline_source_from_form,
 )
 from nanometa_live.app.tabs.config_field_registry import CONFIG_FORM_FIELDS  # noqa: E402
@@ -492,7 +493,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         # Form-field States generated from the single CONFIG_FORM_FIELDS registry
         # (was 40 hand-maintained State() lines that had to stay in lock-step
         # with build_config_from_form's keywords). app-config is appended last.
-        [*_FORM_STATES, State("app-config", "data")],
+        [*_FORM_STATES, State("app-config", "data"), State("backend-status", "data")],
         prevent_initial_call=True,
     )
     def apply_config_changes(n_clicks, *form_values_and_config):
@@ -505,12 +506,13 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
         The form States are generated from CONFIG_FORM_FIELDS, so the values
         arrive positionally; map them to build_config_from_form keywords by the
-        registry order (``_FORM_KWARGS``). app-config is the final State.
+        registry order (``_FORM_KWARGS``). app-config and backend-status are
+        the final two States.
         """
         if not n_clicks:
             return no_update, no_update, no_update, no_update
 
-        *form_values, current_config = form_values_and_config
+        *form_values, current_config, backend_status = form_values_and_config
         form_kwargs = dict(zip(_FORM_KWARGS, form_values))
 
         if not current_config:
@@ -530,8 +532,20 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             }, True
 
         # Auto-save config to last-session.yaml for session persistence
+        pinned = pin_running_run_paths(config, current_config, backend_status)
         autosave_session_config(config)
 
+        if pinned:
+            return config, "Apply Settings", {
+                "title": "Changes Applied (run in progress)",
+                "message": (
+                    "Display and watchlist settings take effect now. The "
+                    "running analysis keeps its input and results folders; "
+                    "pipeline settings apply to the next Start. "
+                    f"Analysis name: {form_kwargs.get('analysis_name')}"
+                ),
+                "color": "warning",
+            }, True
         return config, "Apply Settings", {
             "title": "Changes Applied",
             "message": (
