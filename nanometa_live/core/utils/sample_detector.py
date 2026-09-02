@@ -40,6 +40,10 @@ _WATCHED_SUBDIRS = (
     "kraken2", "fastp", "seqkit", "nanoplot", "validation", "canonical",
 )
 
+# Per-sample folders nanometanf publishes under kraken2/<sample>/ in the
+# incremental layout, in order of first appearance on a live run.
+_NESTED_SAMPLE_SUBDIRS = ("reports", "batch_reports", "batches", "stats")
+
 
 def get_failed_samples(main_dir: str) -> set:
     """Samples the pipeline recorded as attempted but producing no output.
@@ -259,9 +263,16 @@ def detect_samples_from_kraken(kraken_dir: str) -> Set[str]:
         samples.add(sample_name)
         logging.debug(f"Detected sample from Kraken2: {sample_name}")
 
-    # v1.5 nested structure: detect sample subdirectories that contain a
-    # batch_reports/ or batches/ folder, in case no top-level cumulative
-    # report has been written yet (early in a run).
+    # v1.5 nested structure: detect sample subdirectories that contain any
+    # of nanometanf's per-sample folders, in case no top-level cumulative
+    # report has been written yet (early in a run). ``reports/`` is the
+    # FIRST to appear -- KRAKEN2_INCREMENTAL_CLASSIFIER publishes its
+    # per-batch report there before KRAKEN2_OUTPUT_MERGER creates
+    # batch_reports/ and stats/. Recognising only the later folders left the
+    # sample list empty while the aggregate already carried the sample's
+    # reads, and because get_available_samples caches on the TOP-LEVEL
+    # directory mtimes, a folder appearing inside an existing sample dir
+    # never refreshed that empty list (round-4 replay, R1 22:53:15-22:53:55).
     try:
         kraken_entries = os.listdir(kraken_dir)
     except OSError:
@@ -271,9 +282,9 @@ def detect_samples_from_kraken(kraken_dir: str) -> Set[str]:
         item_path = os.path.join(kraken_dir, item)
         if not os.path.isdir(item_path):
             continue
-        has_batch_subdir = (
-            os.path.isdir(os.path.join(item_path, "batch_reports"))
-            or os.path.isdir(os.path.join(item_path, "batches"))
+        has_batch_subdir = any(
+            os.path.isdir(os.path.join(item_path, sub))
+            for sub in _NESTED_SAMPLE_SUBDIRS
         )
         if has_batch_subdir and item not in samples:
             samples.add(item)
