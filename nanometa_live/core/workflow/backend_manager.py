@@ -936,8 +936,13 @@ class BackendManager:
             self.status["processes_failed"] = workflow_status.get("processes_failed", 0)
             self.status["total_processes"] = workflow_status.get("total_processes", 0)
 
-            # If we're running, update additional file counts
-            if self.status.get("running") and self.config:
+            # Keep the input file count current after the run too: in
+            # real-time mode files that land after the timer are never
+            # classified, and comparing the inbox with files_processed is
+            # the only way to say so (round-4 audit, H5: 14 of 47 files
+            # unprocessed, nothing on any surface). The 5 s TTL keeps it
+            # to one directory listing per poll.
+            if self.config:
                 self._update_file_counts()
 
             # Surface remaining seconds until the realtime timeout fires
@@ -1306,6 +1311,13 @@ class BackendManager:
             meta["ended_at"] = self.status.get("ended_at") or datetime.now().isoformat(
                 timespec="seconds")
             meta["files_processed"] = int(self.status.get("files_processed") or 0)
+            # The inbox at the end: the report can then state how many input
+            # files the run never classified (round-4 audit, H5).
+            try:
+                self._update_file_counts()
+                meta["input_files_at_end"] = int(self.status.get("files_waiting") or 0)
+            except Exception:
+                pass
             from nanometa_live.core.utils.atomic_write import atomic_write_json
             atomic_write_json(path, meta)
         except Exception:

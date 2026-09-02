@@ -256,6 +256,9 @@
   {% else %}
     {% set run_clause = "" %}
   {% endif %}
+  {% if data.unprocessed_input_files %}
+    {% set run_clause = run_clause ~ " (" ~ data.unprocessed_input_files ~ " input file" ~ ("s" if data.unprocessed_input_files != 1 else "") ~ " in the watched folder " ~ ("were" if data.unprocessed_input_files != 1 else "was") ~ " never processed)" %}
+  {% endif %}
 
   {% if critical_threats or high_threats %}
   <div class="decision-banner banner-action">

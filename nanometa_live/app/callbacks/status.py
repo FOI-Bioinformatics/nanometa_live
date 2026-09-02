@@ -25,6 +25,30 @@ from nanometa_live.app.utils.debounce import (
 from nanometa_live.app.app import background_callback_manager
 
 
+def _unprocessed_input_note(status: Dict[str, Any], config: Optional[Dict[str, Any]]) -> str:
+    """" -- N input files were not processed" for a finished real-time run.
+
+    In real-time mode the pipeline's timer (or a Stop) ends the run while
+    files may still be landing; those files are never classified and the
+    run is reported complete (round-4 audit, H5: 14 of 47 input files
+    unprocessed, nothing on any surface). files_waiting is the inbox as of
+    the last poll, files_processed what the pipeline reported.
+    """
+    if (config or {}).get("processing_mode") != "realtime":
+        return ""
+    try:
+        waiting = int(status.get("files_waiting") or 0)
+        processed = int(status.get("files_processed") or 0)
+    except (TypeError, ValueError):
+        return ""
+    gap = waiting - processed
+    if gap <= 0:
+        return ""
+    return (f" -- {gap} input file{'s' if gap != 1 else ''} in the watched "
+            f"folder {'were' if gap != 1 else 'was'} not processed "
+            f"(arrived after the run ended)")
+
+
 def register_status(app, backend_manager):
     @app.callback(
         Output("backend-status", "data"), Input("update-interval", "n_intervals")
@@ -192,8 +216,10 @@ def register_status(app, backend_manager):
         if status.get("pipeline_status") == "error":
             return "red", "ERROR", ", ".join(status.get("errors", ["Unknown error"]))
 
+        unprocessed_note = _unprocessed_input_note(status, config)
+
         if status.get("pipeline_status") == "completed":
-            return "blue", "Complete", "Pipeline finished successfully"
+            return "blue", "Complete", "Pipeline finished successfully" + unprocessed_note
 
         # A stopped run is neither idle nor complete (round-4 audit, H2): say
         # why it ended, when, and how far it got, instead of inviting a Start.
@@ -206,7 +232,7 @@ def register_status(app, backend_manager):
             processed = status.get("files_processed")
             if processed is not None:
                 details.append(f"{processed} files processed")
-            return "orange", "Stopped", ", ".join(details)
+            return "orange", "Stopped", ", ".join(details) + unprocessed_note
 
         return "gray", "STANDBY", "Click 'Start Analysis' to begin processing"
 

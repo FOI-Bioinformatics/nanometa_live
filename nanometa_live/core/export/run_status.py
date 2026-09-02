@@ -63,4 +63,13 @@ def read_final_run_status(results_dir: str) -> Dict[str, Any]:
     result["ended_at"] = meta.get("ended_at")
     fp = meta.get("files_processed")
     result["files_processed"] = int(fp) if isinstance(fp, (int, float)) else None
+    inbox = meta.get("input_files_at_end")
+    result["input_files_at_end"] = int(inbox) if isinstance(inbox, (int, float)) else None
+    # Input the run never classified (real-time: files that landed after the
+    # timer or the Stop). None when either count is unknown.
+    if result["files_processed"] is not None and result["input_files_at_end"] is not None:
+        result["unprocessed_input_files"] = max(
+            0, result["input_files_at_end"] - result["files_processed"])
+    else:
+        result["unprocessed_input_files"] = None
     return result

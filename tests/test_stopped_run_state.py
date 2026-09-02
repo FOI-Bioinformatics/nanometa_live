@@ -227,3 +227,50 @@ class TestAutoStopCountdownMatchesThePipelineTimer:
         manager.status["start_time"] = datetime.now().isoformat()
         remaining = manager._compute_auto_stop_remaining()
         assert 7 * 60 < remaining <= 8 * 60, "3 min timeout + 5 min grace"
+
+
+class TestUnprocessedInputIsNamed:
+    """H5: in real-time mode files that land after the timer are never
+    classified and the run is reported complete; nothing compared the inbox
+    with what the pipeline processed."""
+
+    def _fn(self):
+        from dash import Dash
+        from nanometa_live.app.callbacks.status import register_status
+        from tests.dash_test_utils import get_callback_fn
+        app = Dash(__name__)
+        register_status(app, MagicMock())
+        return get_callback_fn(app, "status-indicator", input_contains="backend-status")
+
+    def test_completed_realtime_run_names_the_gap(self):
+        _c, text, detail = self._fn()(
+            {"running": False, "pipeline_status": "completed", "completed": True,
+             "files_waiting": 47, "files_processed": 33},
+            {"processing_mode": "realtime"},
+        )
+        assert text == "Complete"
+        assert "14 input files" in detail and "not processed" in detail
+
+    def test_batch_mode_is_unchanged(self):
+        _c, _t, detail = self._fn()(
+            {"running": False, "pipeline_status": "completed", "completed": True,
+             "files_waiting": 47, "files_processed": 33},
+            {"processing_mode": "batch"},
+        )
+        assert "not processed" not in detail
+
+    def test_report_status_carries_the_gap(self, tmp_path):
+        (tmp_path / ".nanometa.run.json").write_text(json.dumps({
+            "final_status": "completed", "files_processed": 33, "input_files_at_end": 47,
+        }))
+        assert read_final_run_status(str(tmp_path))["unprocessed_input_files"] == 14
+
+    def test_file_counts_refresh_after_the_run(self, tmp_path):
+        watch = tmp_path / "watch" / "barcode01"
+        watch.mkdir(parents=True)
+        (watch / "a.fastq.gz").write_bytes(b"x")
+        manager = BackendManager(str(tmp_path))
+        manager.config = {"nanopore_output_directory": str(tmp_path / "watch")}
+        manager.workflow_manager = MagicMock()
+        manager.workflow_manager.get_status.return_value = {"running": False, "errors": []}
+        assert manager.get_status()["files_waiting"] == 1
