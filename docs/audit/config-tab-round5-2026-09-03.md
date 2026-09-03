@@ -71,7 +71,7 @@ L = cosmetic or dead code.
 | C10 | Chopper `--quality 7 --minlength 501 --maxlength 20001` per batch; `skip_nanoplot` honoured | - | live, PASS (krona/stats checked at run end) |
 | C11 | Apply during a run pins the running folders and its pipeline settings do reach the next Start, but the collision modal never says the settings changed | M | live (RT4), confirmed |
 | C12 | sample_handling in real time: single_sample, per_file and custom-named folders all group correctly | - | live (RT5), PASS |
-| C13 | Real-time by_barcode on a flat directory passes Apply with no message (batch rejects it with a suggestion) | M | fixed: Apply rejects a populated folder; a runtime check names the mismatch on every poll once files arrive (0.17.2) |
+| C13 | Real-time by_barcode on a flat directory passes Apply with no message (batch rejects it with a suggestion) | M | fixed: Apply rejects a populated folder; a runtime check names the mismatch on every poll once files arrive (dev, after 0.17.1) |
 | C15 | Update interval 5 s gives a ~5 s poll cadence | - | live, PASS |
 | C16 | An empty genome cache folder silently disables validation (log warning only; `blast_validation` sent as false while the switch shows on) | M | live, confirmed; fixed |
 
