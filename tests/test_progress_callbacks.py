@@ -99,3 +99,28 @@ def test_auto_navigate_none_status(prog_app):
     fn = get_callback_fn(prog_app, "previous-running-state")
     assert fn(None, True, "qc-tab", {}, False) == (
         no_update, False, no_update, no_update)
+
+
+def test_failed_preflight_is_not_announced_as_complete(prog_app):
+    """The optimistic Start write must not arm the completion detector.
+
+    Sequence seen live (audit round 5, A16): click writes
+    {running: True, starting: True}; the daemon thread's preflight fails
+    ("Nextflow not found"); the next poll writes running: False. The old
+    detector saw running -> not running and toasted "Analysis Complete.
+    Results are up to date." over a launch that never started a process.
+    """
+    fn = get_callback_fn(prog_app, "previous-running-state")
+    _tab, prev, toast, _flag = fn({"running": True, "starting": True}, False,
+                                  "config-tab", {"analysis_name": "Run1"}, False)
+    assert prev is no_update, "the optimistic status must not arm the detector"
+    _tab, _prev, toast, _flag = fn({"running": False}, False, "config-tab",
+                                   {"analysis_name": "Run1"}, False)
+    assert toast is no_update
+
+
+def test_authoritative_running_status_still_arms_the_detector(prog_app):
+    fn = get_callback_fn(prog_app, "previous-running-state")
+    _tab, prev, _toast, _flag = fn({"running": True, "start_time": "2026-09-03T07:06:48"},
+                                   False, "config-tab", {"analysis_name": "Run1"}, False)
+    assert prev is True

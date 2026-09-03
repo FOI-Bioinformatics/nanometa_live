@@ -45,7 +45,7 @@ def _apply_callback():
 def _invoke(**overrides):
     """Call apply_config_changes with all form fields None except the overrides.
 
-    apply now takes ``(n_clicks, *form_values, current_config)`` with form values
+    apply now takes ``(request, *form_values, current_config)`` with form values
     in CONFIG_FORM_FIELDS order, so build that positional list (overrides applied
     by their build_config_from_form keyword).
 
@@ -58,7 +58,7 @@ def _invoke(**overrides):
     by_name = {kw: None for _, kw in CONFIG_FORM_FIELDS}
     by_name.update(overrides)
     values = [by_name[kw] for _, kw in CONFIG_FORM_FIELDS]
-    return fn(1, *values, {"data_dir": "/tmp/nanometa_rangetest"}, {"running": False})
+    return fn({"n": 1}, *values, {"data_dir": "/tmp/nanometa_rangetest"}, {"running": False})
 
 
 def _message(result) -> str:
@@ -103,6 +103,16 @@ class TestRangeValidation:
     # 2026-08-14: it had no consumer anywhere while its tooltip promised
     # detection-sensitivity control. Alerting uses each watchlist entry's own
     # alert_threshold. Its range test went with it.
+
+    def test_blank_cores_field_is_the_pipeline_default(self):
+        """The blank CPU Cores widget submits ""; the old ``cores < 1`` check
+        raised TypeError and every Apply returned HTTP 500 (round-5 smoke
+        test, 2026-09-03)."""
+        result = _invoke(cores="")
+        assert "CPU Cores" not in _message(result)
+
+    def test_non_numeric_cores_rejected(self):
+        assert "CPU Cores" in _message(_invoke(cores="four"))
 
     def test_max_file_age_negative_rejected(self):
         assert "file age" in _message(_invoke(max_file_age_minutes=-1)).lower()

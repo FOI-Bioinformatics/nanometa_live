@@ -110,42 +110,69 @@ class TestValidatePipelinePath:
 
 
 class TestModifiedBadgeClearsOnApply:
-    """Apply Settings must clear the "Modified" badge.
+    """Apply Settings must clear the "Modified" badge -- but only when it
+    succeeded.
 
     Apply persists the config (autosave_session_config writes
     last-session.yaml), so after it the form matches BOTH the applied state
-    and what is on disk -- there is nothing left for the operator to save.
-    The badge nevertheless stayed lit forever: update_snapshot_on_apply
-    returned no_update for both outputs, on the reasoning (in a comment
-    that outlived the design it described) that Apply was session-only and
-    a separate Save wrote the file. A badge that never clears cannot be
-    read as a signal, and it tells the operator they have unsaved work when
-    they do not (2026-08-19 config audit).
+    and what is on disk. The badge used to stay lit forever (2026-08-19),
+    then a separate click-driven callback cleared it and rebased the
+    snapshot from the PRE-Apply Store even when validation rejected the
+    form (audit round 5, A2/A3). The apply callback now owns both outputs.
     """
 
-    def _fn(self, cfg_app):
-        return _callback_fn(
-            cfg_app, "saved-config-snapshot",
-            input_contains="apply-config-button",
-        )
+    def _apply(self, cfg_app):
+        from nanometa_live.app.tabs.config_field_registry import CONFIG_FORM_FIELDS
+        fn = _callback_fn(cfg_app, "app-config", input_contains="apply-config-request")
 
-    def test_apply_clears_modified_and_updates_snapshot(self, cfg_app):
-        applied = {"analysis_name": "run A", "kraken_db": "/db"}
-        snapshot, modified = self._fn(cfg_app)(1, applied)
+        def invoke(current_config, **overrides):
+            by_name = {kw: None for _, kw in CONFIG_FORM_FIELDS}
+            by_name.update(overrides)
+            values = [by_name[kw] for _, kw in CONFIG_FORM_FIELDS]
+            return fn({"n": 1}, *values, current_config, {"running": False})
+        return invoke
 
-        assert modified is False, (
-            "the Modified badge must clear on Apply: the config has been "
-            "applied AND autosaved, so nothing is pending"
+    def _paths(self, tmp_path):
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        db = tmp_path / "db"
+        db.mkdir()
+        for name in ("hash.k2d", "opts.k2d", "taxo.k2d"):
+            (db / name).write_bytes(b"x")
+        return str(inbox), str(db)
+
+    def test_apply_clears_modified_and_updates_snapshot(self, cfg_app, tmp_path):
+        inbox, db = self._paths(tmp_path)
+        config, _label, toast, alert, snapshot, modified = self._apply(cfg_app)(
+            {"data_dir": str(tmp_path), "analysis_name": "run A"},
+            analysis_name="run B", nanopore_dir=inbox, kraken_db=db,
         )
-        assert snapshot == applied, (
+        assert toast["color"] == "success"
+        assert alert is True
+        assert modified is False, "nothing is pending after a successful Apply"
+        assert snapshot == config, (
             "the dirty-check baseline must become the applied config, else "
             "the next edit is compared against a stale snapshot"
         )
 
+    def test_rejected_apply_keeps_badge_and_snapshot(self, cfg_app, tmp_path):
+        from dash import no_update
+        inbox, db = self._paths(tmp_path)
+        config, _label, toast, alert, snapshot, modified = self._apply(cfg_app)(
+            {"data_dir": str(tmp_path)},
+            nanopore_dir=inbox, kraken_db=db, validation_identity=120,
+        )
+        assert toast["color"] == "danger"
+        assert config is no_update
+        assert alert is False, "a rejected Apply must not open the success alert"
+        assert snapshot is no_update and modified is no_update
+
     def test_no_clicks_is_a_noop(self, cfg_app):
         from dash import no_update
-        snapshot, modified = self._fn(cfg_app)(None, {"a": 1})
-        assert snapshot is no_update and modified is no_update
+        fn = _callback_fn(cfg_app, "app-config", input_contains="apply-config-request")
+        from nanometa_live.app.tabs.config_field_registry import CONFIG_FORM_FIELDS
+        out = fn(None, *([None] * len(CONFIG_FORM_FIELDS)), {"a": 1}, {})
+        assert all(o is no_update for o in out)
 
 
 class TestApplyDuringARun:
@@ -159,13 +186,13 @@ class TestApplyDuringARun:
 
     def _apply(self, cfg_app):
         from nanometa_live.app.tabs.config_field_registry import CONFIG_FORM_FIELDS
-        fn = _callback_fn(cfg_app, "app-config", input_contains="apply-config-button")
+        fn = _callback_fn(cfg_app, "app-config", input_contains="apply-config-request")
 
         def invoke(current_config, backend_status, **overrides):
             by_name = {kw: None for _, kw in CONFIG_FORM_FIELDS}
             by_name.update(overrides)
             values = [by_name[kw] for _, kw in CONFIG_FORM_FIELDS]
-            return fn(1, *values, current_config, backend_status)
+            return fn({"n": 1}, *values, current_config, backend_status)
         return invoke
 
     def _live(self, tmp_path):
@@ -186,7 +213,7 @@ class TestApplyDuringARun:
     def test_running_run_keeps_its_folders(self, cfg_app, tmp_path):
         live = self._live(tmp_path)
         invoke = self._apply(cfg_app)
-        config, _label, toast, _open = invoke(
+        config, _label, toast, _open, _snap, _mod = invoke(
             live, {"running": True}, analysis_name="run B",
             nanopore_dir=live["nanopore_output_directory"], kraken_db=live["kraken_db"],
         )
@@ -199,7 +226,7 @@ class TestApplyDuringARun:
     def test_idle_apply_recomputes_the_results_folder(self, cfg_app, tmp_path):
         live = self._live(tmp_path)
         invoke = self._apply(cfg_app)
-        config, _label, toast, _open = invoke(
+        config, _label, toast, _open, _snap, _mod = invoke(
             live, {"running": False}, analysis_name="run B",
             nanopore_dir=live["nanopore_output_directory"], kraken_db=live["kraken_db"],
         )

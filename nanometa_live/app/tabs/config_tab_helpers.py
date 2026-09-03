@@ -37,12 +37,21 @@ def _validate_nanopore_dir(nanopore_dir, sample_handling, processing_mode):
         find_sample_subdirs,
     )
     detected_mode, detected_reason = detect_sample_handling(nanopore_dir)
-    # Input-content checks apply to batch mode only. In realtime mode the input
-    # directory is watched via Nextflow watchPath and is legitimately empty (or
-    # without barcode subdirs) at config-save time -- files arrive during the
-    # run -- so requiring existing FASTQ/barcode dirs would wrongly block saving.
+    # In realtime mode the watched directory is legitimately empty at
+    # config-save time (files arrive during the run), so an EMPTY directory
+    # passes. A directory that already holds files is checked like batch
+    # input: by_barcode on a flat directory used to pass Apply and the
+    # readiness list in silence, while batch rejected the same pair with a
+    # suggestion (audit round 5, C13).
     if processing_mode != "batch":
-        return errors
+        try:
+            has_content = any(
+                not entry.startswith(".") for entry in os.listdir(nanopore_dir)
+            )
+        except OSError:
+            has_content = False
+        if not has_content:
+            return errors
     if sample_handling == "by_barcode":
         sample_dirs = find_sample_subdirs(nanopore_dir)
         if not sample_dirs:
@@ -63,7 +72,7 @@ def _validate_nanopore_dir(nanopore_dir, sample_handling, processing_mode):
                 "sample' or 'Per file' mode."
                 + suggestion
             )
-    elif sample_handling in ["single_sample", "per_file"] and processing_mode == "batch":
+    elif sample_handling in ["single_sample", "per_file"]:
         # Check for FASTQ files directly in directory.
         fastq_files = glob.glob(os.path.join(nanopore_dir, "*.fastq*"))
         sample_dirs = find_sample_subdirs(nanopore_dir)
@@ -113,7 +122,6 @@ def _validate_kraken_db_path(kraken_db):
 def _validate_numeric_ranges(
     *,
     update_interval,
-    check_interval,
     realtime_timeout_minutes,
     min_reads_per_level,
     e_value_cutoff,
@@ -128,6 +136,7 @@ def _validate_numeric_ranges(
     max_file_age_minutes,
     min_reads_for_validation,
     chopper_maxlength=None,
+    kraken2_hitgroups=None,
 ):
     """Server-side bounds checks for every numeric form input.
 
@@ -136,10 +145,10 @@ def _validate_numeric_ranges(
     would otherwise reach last-session.yaml and Nextflow. Returns error strings.
     """
     errors = []
-    if update_interval is not None and not (1 <= update_interval <= 300):
-        errors.append("Update Interval must be between 1-300 seconds")
-    if check_interval is not None and not (1 <= check_interval <= 300):
-        errors.append("Check Interval must be between 1-300 seconds")
+    # Floor of 5 matches the widget; a 1 s poll of the results tree is
+    # never useful and the two bounds disagreed (audit round 5, A10).
+    if update_interval is not None and not (5 <= update_interval <= 300):
+        errors.append("Update Interval must be between 5-300 seconds")
     if realtime_timeout_minutes is not None and realtime_timeout_minutes != "":
         try:
             if not (1 <= int(realtime_timeout_minutes) <= 10080):
@@ -150,8 +159,13 @@ def _validate_numeric_ranges(
         errors.append("Minimum Reads per Level must be at least 1")
     if e_value_cutoff is not None and not (0 <= e_value_cutoff <= 1):
         errors.append("E-value Cutoff must be between 0-1")
-    if cores is not None and cores < 1:
-        errors.append("CPU Cores must be at least 1")
+    # Empty = pipeline default; the blank widget submits "" (audit round 5).
+    if cores not in (None, ""):
+        try:
+            if int(cores) < 1:
+                errors.append("CPU Cores must be at least 1")
+        except (TypeError, ValueError):
+            errors.append("CPU Cores must be a whole number")
     if gui_port is not None and not (1024 <= int(gui_port) <= 65535):
         errors.append("GUI Port must be between 1024-65535")
     if minimap2_min_mapq is not None and not (0 <= minimap2_min_mapq <= 60):
@@ -160,6 +174,14 @@ def _validate_numeric_ranges(
         errors.append("Validation identity must be between 0-100%")
     if kraken2_confidence is not None and not (0 <= kraken2_confidence <= 1):
         errors.append("Kraken2 confidence must be between 0.0-1.0")
+    # The only numeric field with no server bound; a non-numeric value raised
+    # inside build_config_from_form instead of reporting (audit round 5, A10).
+    if kraken2_hitgroups is not None and kraken2_hitgroups != "":
+        try:
+            if int(kraken2_hitgroups) < 0:
+                errors.append("Kraken2 minimum hit groups must be 0 or greater")
+        except (TypeError, ValueError):
+            errors.append("Kraken2 minimum hit groups must be a whole number")
     # Floor is 1, not 0: nanometanf's schema sets minimum: 1 on both length
     # filters, so a 0 saved here fails nf-schema at launch. 1 disables the
     # filter in practice (no nanopore read is shorter).
@@ -201,7 +223,6 @@ def build_config_from_form(
     kraken_db,
     results_dir,
     update_interval,
-    check_interval,
     realtime_timeout_minutes,
     min_reads_per_level,
     memory_mapping,
@@ -272,7 +293,6 @@ def build_config_from_form(
     errors += _validate_kraken_db_path(kraken_db)
     errors += _validate_numeric_ranges(
         update_interval=update_interval,
-        check_interval=check_interval,
         realtime_timeout_minutes=realtime_timeout_minutes,
         min_reads_per_level=min_reads_per_level,
         e_value_cutoff=e_value_cutoff,
@@ -287,6 +307,7 @@ def build_config_from_form(
         max_file_age_minutes=max_file_age_minutes,
         min_reads_for_validation=min_reads_for_validation,
         chopper_maxlength=chopper_maxlength,
+        kraken2_hitgroups=kraken2_hitgroups,
     )
 
     # If there are validation errors, return them
@@ -318,10 +339,6 @@ def build_config_from_form(
 
     if update_interval is not None:
         config["update_interval_seconds"] = update_interval
-
-
-    if check_interval is not None:
-        config["check_intervals_seconds"] = check_interval
 
     # Empty/None -> null (run indefinitely); numeric -> int
     config["realtime_timeout_minutes"] = (
@@ -361,14 +378,13 @@ def build_config_from_form(
     if genome_cache_dir is not None and genome_cache_dir.strip():
         config["genome_cache_dir"] = genome_cache_dir.strip()
 
-    if cores is not None:
-        # Set the remaining core counts to the same value for simplicity.
-        # kraken_cores is retired: Kraken2 CPU/memory sizing belongs to
-        # nanometanf's modules.config, which the generated -c config no
-        # longer overrides (2026-08-18 audit).
-        config["pipeline_cores"] = cores
-        config["validation_cores"] = cores
-        config["blast_cores"] = cores
+    # The CPU Cores field is nanometanf's --max_cpus, the one CPU knob the
+    # pipeline documents (its Kraken2 directive scales from it). The former
+    # pipeline_cores / validation_cores / blast_cores keys reached nothing:
+    # the first was never read by the launcher and the other two pinned
+    # cpus on process names that do not exist (audit round 5, A9 and A9b).
+    # Empty means the pipeline default and is stored as None.
+    config["max_cpus"] = optional_int(cores)
 
     if gui_port is not None:
         config["gui_port"] = int(gui_port)
@@ -441,12 +457,13 @@ def build_config_from_form(
         config["validation_identity_threshold"] = float(validation_identity)
     if kraken2_confidence is not None:
         config["kraken2_confidence"] = float(kraken2_confidence)
-    if kraken2_hitgroups is not None:
+    if kraken2_hitgroups is not None and kraken2_hitgroups != "":
         config["kraken2_minimum_hit_groups"] = int(kraken2_hitgroups)
 
     # Newly exposed settings (2026-05-31).
-    if max_file_age_minutes is not None and max_file_age_minutes != "":
-        config["max_file_age_minutes"] = int(max_file_age_minutes)
+    # Empty means "process every pre-existing file", stored as None so the
+    # saved config and the form compare equal and the launch omits it.
+    config["max_file_age_minutes"] = optional_int(max_file_age_minutes)
     if min_reads_for_validation is not None:
         config["min_reads_for_validation"] = int(min_reads_for_validation)
 
@@ -515,12 +532,17 @@ def config_form_dirty(snapshot, *, form):
         return False
 
     bool_keys = {
-        "kraken_memory_mapping", "blast_validation", "remove_temp_files",
+        "kraken_memory_mapping", "blast_validation",
         "skip_nanoplot", "kraken2_enable_incremental", "enable_krona_plots",
         "enable_nanopore_stats_mqc", "enable_assembly",
     }
     for key, current_val in form.items():
         snapshot_val = snapshot.get(key)
+        if key == "kraken_memory_mapping" and key not in snapshot:
+            # Deliberately absent from create_default_config (the resolver's
+            # "explicit override wins" rule); the resolver treats absent as
+            # True, so the switch's default must compare equal to it.
+            snapshot_val = True
         if key in bool_keys:
             current_val = bool(current_val)
             if isinstance(snapshot_val, str):

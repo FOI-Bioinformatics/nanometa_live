@@ -206,8 +206,14 @@ def register_progress(app, backend_manager):
 
         is_running = bool(status.get("running", False))
 
-        # Store current state for next comparison
-        new_prev_state = is_running
+        # Store current state for next comparison. The Start click writes an
+        # optimistic ``{running: True, starting: True}`` so the banner flips
+        # at once; a preflight failure then reverts it on the next poll. That
+        # reversal is not a run ending, and treating it as one announced
+        # "Analysis Complete. Results are up to date." over a launch that
+        # never produced a process (audit round 5, A16). Only an
+        # authoritative running status arms the completion detector.
+        new_prev_state = is_running and not bool(status.get("starting"))
 
         # Detect completion: was running, now not running
         # Use explicit bool() to guard against truthy non-boolean values in the store

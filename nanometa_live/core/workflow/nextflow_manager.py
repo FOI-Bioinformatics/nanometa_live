@@ -23,6 +23,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from nanometa_live.core.config.parameter_mapping import (
     create_nextflow_params,
     create_nextflow_config,
+    pop_launch_warnings,
     validate_nanometanf_params
 )
 
@@ -494,6 +495,9 @@ class NextflowManager:
 
             # Convert to nanometanf parameters
             params = create_nextflow_params(config)
+            # Conditions the operator must see at Start (validation silently
+            # off, ...); BackendManager.start folds them into its message.
+            self.launch_warnings = pop_launch_warnings()
             custom_config = create_nextflow_config(config)
 
             # Validate parameters
@@ -526,7 +530,15 @@ class NextflowManager:
                 )
 
                 if result.returncode != 0:
-                    return False, "Nextflow not found. Please install Nextflow."
+                    # A non-zero exit is not "not found": the binary ran and
+                    # failed, most often for want of a Java runtime (audit
+                    # round 5, A17). Say what it said.
+                    detail = (result.stderr or result.stdout or "").strip().splitlines()
+                    tail = detail[-1][:200] if detail else f"exit code {result.returncode}"
+                    return False, (
+                        "Nextflow is installed but 'nextflow -version' failed: "
+                        f"{tail}. Activate the environment that provides its "
+                        "Java runtime, or reinstall Nextflow.")
 
                 version_output = result.stdout
                 logging.info(f"Nextflow version: {version_output.strip()}")
@@ -557,7 +569,6 @@ class NextflowManager:
     def start(
         self,
         profile: str = "docker",
-        cores: int = None,
         resume: bool = False
     ) -> Tuple[bool, str]:
         """
@@ -565,7 +576,6 @@ class NextflowManager:
 
         Args:
             profile: Nextflow profile to use (docker, singularity, conda)
-            cores: Number of CPU cores (None uses config default)
             resume: Whether to resume from previous run
 
         Returns:

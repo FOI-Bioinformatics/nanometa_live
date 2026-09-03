@@ -232,3 +232,29 @@ class TestLockTargetsTheRealOutputDirectory:
             "directory did not collide on the lock"
         )
         m1._release_lock()
+
+
+class TestNewRunStartsWithACleanErrorRecord:
+    """A failed run's errors must not survive into the next Start.
+
+    Audit round 5 (2026-09-03, A19): two starts failed (filtlong, then
+    miniasm), the third completed with 164 tasks and no failure, and its
+    .nanometa.run.json still read final_status "error" with both earlier
+    messages in final_errors, because only an operator Stop ever cleared
+    the two error lists.
+    """
+
+    def test_mark_started_clears_backend_and_workflow_errors(self, tmp_path):
+        from unittest.mock import MagicMock
+        from nanometa_live.core.workflow.backend_manager import BackendManager
+
+        bm = BackendManager(str(tmp_path))
+        bm.workflow_manager = MagicMock()
+        bm.workflow_manager.status = {"errors": ["Nextflow exited with code 1: old run"]}
+        bm.status["errors"] = ["Nextflow exited with code 1: old run"]
+        bm.status["pipeline_status"] = "error"
+        with bm._status_lock:
+            bm._mark_started_locked()
+        assert bm.status["errors"] == []
+        assert bm.workflow_manager.status["errors"] == []
+        assert bm.status["pipeline_status"] == "running"

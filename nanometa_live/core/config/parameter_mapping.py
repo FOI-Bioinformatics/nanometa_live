@@ -489,8 +489,6 @@ def generate_samplesheet(
 _INPUT_SOURCE_KEYS = (
     "input",
     "input_dir",
-    "fastq_input_dir",
-    "barcode_input_dir",
     "nanopore_output_dir",
 )
 
@@ -927,12 +925,30 @@ def _apply_batch_input_params(params: Dict[str, Any], config: Dict[str, Any],
         and not samplesheet_provided
         and sample_handling == "by_barcode"
     ):
-        use_input_dir = True
-        logging.info(
-            "Batch mode + by_barcode with no samplesheet supplied: "
-            "auto-enabling --input_dir so nanometanf INPUT_SCANNER "
-            "can discover the barcode layout."
-        )
+        # A custom-named sample folder (Turex/, Zymo/) is one sample to the
+        # form's validator. nanometanf dev (2026-09-03) groups it the same
+        # way; an older pipeline recognised only barcodeNN and split such a
+        # folder into one sample per file (audit round 5, B4). The generated
+        # samplesheet names each folder explicitly, so it is used whenever a
+        # folder is not conventionally named, whatever the pipeline version.
+        from nanometa_live.core.utils.auto_detect import find_sample_subdirs, is_barcode_named
+        custom_dirs = [
+            d.name for d in find_sample_subdirs(nanopore_dir)
+            if not (is_barcode_named(d.name) or d.name == "unclassified")
+        ]
+        if custom_dirs:
+            logging.info(
+                "Batch mode + by_barcode with custom-named sample folders "
+                f"({', '.join(sorted(custom_dirs))}): generating a samplesheet "
+                "so each folder is one sample."
+            )
+        else:
+            use_input_dir = True
+            logging.info(
+                "Batch mode + by_barcode with no samplesheet supplied: "
+                "auto-enabling --input_dir so nanometanf INPUT_SCANNER "
+                "can discover the barcode layout."
+            )
 
     if samplesheet_provided:
         params["input"] = str(user_input)
@@ -975,7 +991,7 @@ def _apply_batch_input_params(params: Dict[str, Any], config: Dict[str, Any],
 
 def _apply_realtime_input_params(params: Dict[str, Any], config: Dict[str, Any],
                                  nanopore_dir: str, sample_handling: str,
-                                 sample_name: str, check_interval) -> None:
+                                 sample_name: str) -> None:
     """Set realtime-mode input params (watchPath, batching, timeouts) in place."""
     params["realtime_mode"] = True
     params["nanopore_output_dir"] = nanopore_dir
@@ -991,11 +1007,18 @@ def _apply_realtime_input_params(params: Dict[str, Any], config: Dict[str, Any],
     # waiting for files to accumulate.
     params["batch_size"] = config.get("batch_size", 1)
     params["min_batch_size"] = config.get("min_batch_size", 1)
-    params["batch_interval"] = format_duration(check_interval)
+    # No batch_interval: nanometanf only logs that legacy value, and with
+    # batch_size 1 every file is a batch on arrival (audit round 5, C1).
 
-    # File-age filtering: the pipeline requires a minimum of 0.1, so use a very
-    # high value (~1.9 years) to effectively process old demo/archived data.
-    params["max_avg_file_age_minutes"] = config.get("max_file_age_minutes", 1000000)
+    # Pre-existing files older than this are skipped at intake (nanometanf
+    # max_file_age_minutes, dev 2026-09-03). None = process everything. The
+    # former mapping went to max_avg_file_age_minutes, which is only an
+    # alert threshold the GUI never displayed, so the field excluded nothing
+    # (audit round 5, C2).
+    max_file_age = config.get("max_file_age_minutes")
+    if max_file_age not in (None, ""):
+        params["max_file_age_minutes"] = int(max_file_age)
+        logging.info(f"Pre-existing input files older than {max_file_age} min are skipped")
 
     # Incremental Kraken2 for realtime: each batch classified independently
     # (avoids O(n^2) reprocessing), merged via KRAKEN2_OUTPUT_MERGER, cumulative
@@ -1010,13 +1033,41 @@ def _apply_realtime_input_params(params: Dict[str, Any], config: Dict[str, Any],
     # as indefinite and its realtime monitoring handles it explicitly. When
     # the key is absent entirely, the documented default (60) is written out
     # so the params file and the config agree.
+    # A hand-edited 0 is read by the GUI countdown as "no timeout" and
+    # rejected by nanometanf's schema (minimum 1); send it as the null the
+    # GUI already means (audit round 5, C4).
     realtime_timeout = config.get("realtime_timeout_minutes", 60)
-    if realtime_timeout is None:
+    if realtime_timeout is None or int(realtime_timeout) <= 0:
         params["realtime_timeout_minutes"] = None
         logging.info("Realtime timeout disabled: monitoring runs indefinitely")
     else:
         params["realtime_timeout_minutes"] = int(realtime_timeout)
         logging.info(f"Realtime timeout set to {realtime_timeout} minutes")
+
+    # The GUI's auto-stop chip counts timeout plus this grace period, read
+    # from the config; the pipeline applied its own default (5) because the
+    # value was never sent, so chip and timer disagreed by the difference
+    # (audit round 5, C5). nanometanf's schema floors it at 1.
+    grace = config.get("realtime_processing_grace_period")
+    if grace not in (None, ""):
+        try:
+            grace_int = int(grace)
+        except (TypeError, ValueError):
+            grace_int = None
+        if grace_int is not None and grace_int >= 1:
+            params["realtime_processing_grace_period"] = grace_int
+        else:
+            logging.warning(
+                "realtime_processing_grace_period=%r is not a whole number "
+                ">= 1; the pipeline default applies", grace)
+
+    # Assembly is a whole-sample step. In real time it would run on every
+    # small batch and fail each time ("No overlaps found" on 2000-read
+    # batches, counted as failed tasks in the header), so the launch leaves
+    # it off; the form says so (audit round 5, C8).
+    if params.get("enable_assembly"):
+        params["enable_assembly"] = False
+        logging.info("Assembly is not run in real-time mode; switch off for this launch")
 
     max_files = config.get("max_files")
     if max_files:
@@ -1027,6 +1078,23 @@ def _apply_realtime_input_params(params: Dict[str, Any], config: Dict[str, Any],
     logging.info(f"Realtime mode ({barcode_mode}): Monitoring {nanopore_dir}")
     if params["kraken2_enable_incremental"]:
         logging.info("Incremental Kraken2 classification enabled for cumulative reporting")
+
+
+_launch_warnings: List[str] = []
+
+
+def add_launch_warning(message: str) -> None:
+    """Record a condition the operator must see at Start (see pop_launch_warnings)."""
+    if message not in _launch_warnings:
+        _launch_warnings.append(message)
+        logging.warning(message)
+
+
+def pop_launch_warnings() -> List[str]:
+    """Return and clear the warnings recorded since the last create_nextflow_params."""
+    out = list(_launch_warnings)
+    _launch_warnings.clear()
+    return out
 
 
 def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -1059,6 +1127,7 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         ... }
         >>> params = create_nextflow_params(config)
     """
+    _launch_warnings.clear()
     # Extract configuration values with defaults. Normalise paths
     # defensively here as well: most callers go through the
     # ConfigLoader and config_tab save flow which normalise on the way
@@ -1104,7 +1173,6 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
             "No input directory configured. Please set 'Nanopore Sequence Data Folder (input)' in the UI."
         )
 
-    check_interval = config.get("check_intervals_seconds", 15)
     analysis_name = config.get("analysis_name", "Nanometa Live Analysis")
 
     # Get processing mode and sample handling configuration
@@ -1147,6 +1215,22 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
 
     # blast_validation and run_validation must both be false if we can't actually run validation
     can_run_validation = has_species and has_genomes
+    if config.get("blast_validation", False) and not can_run_validation:
+        # The switch is on and the run will not validate. The Start toast
+        # relays this (NextflowManager.setup collects it); a log line alone
+        # left the operator with a switch that showed on while the launch
+        # sent blast_validation=false (audit round 5, C16).
+        if not has_species:
+            add_launch_warning(
+                "Confirmation testing is on but no watchlist organism is "
+                "enabled, so validation is off for this run.")
+        else:
+            add_launch_warning(
+                "Confirmation testing is on but no reference genome is "
+                "available for the watched organisms (genome cache: "
+                f"{config.get('genome_cache_dir') or 'default'}), so "
+                "validation is off for this run. Download genomes on the "
+                "Watchlist tab first.")
     blast_validation_enabled = config.get("blast_validation", False) and can_run_validation
     run_validation_enabled = can_run_validation
 
@@ -1178,6 +1262,13 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     if kraken2_memory_gb is not None:
         params["kraken2_memory_gb"] = kraken2_memory_gb
 
+    # The Configuration tab's CPU Cores field: nanometanf's per-task ceiling.
+    # Omitted when empty so the pipeline default (16) or platform profile
+    # applies (audit round 5, A9).
+    max_cpus = config.get("max_cpus")
+    if max_cpus not in (None, ""):
+        params["max_cpus"] = int(max_cpus)
+
     # Add validation species if configured (from Watchlist or legacy config)
     if has_species and validation_taxids:
         # Convert to comma-separated string for taxids_to_validate (schema type: string)
@@ -1186,8 +1277,11 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         else:
             taxids_str = str(validation_taxids)
 
-        # priority_samples must be a list for Nextflow (.size(), .any{}, .join())
-        params["priority_samples"] = [str(t) for t in validation_taxids]
+        # priority_samples is deliberately NOT sent. nanometanf matches it
+        # against sample ids (a FASTQ stem contains() or matches() the
+        # pattern); the watchlist taxids that used to travel there never
+        # matched a sample and each was evaluated as a regex (audit round
+        # 5, B2 and C6). The GUI has no priority-sample control.
         params["taxids_to_validate"] = taxids_str  # For VALIDATION subworkflow (string)
         logging.info(f"Configured {len(validation_taxids)} species for validation")
 
@@ -1225,7 +1319,7 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         )
     else:
         _apply_realtime_input_params(
-            params, config, nanopore_dir, sample_handling, sample_name, check_interval
+            params, config, nanopore_dir, sample_handling, sample_name
         )
 
     # Add email if provided
@@ -1260,8 +1354,6 @@ def create_nextflow_config(config: Dict[str, Any]) -> str:
     Returns:
         String content suitable for writing to a Nextflow ``-c`` config file.
     """
-    blast_cores = config.get("blast_cores", 2)
-    validation_cores = config.get("validation_cores", 2)
     qc_tool = str(config.get("qc_tool", "chopper")).lower()
 
     # Default to ``conda`` to match the project convention documented in
@@ -1320,26 +1412,21 @@ def create_nextflow_config(config: Dict[str, Any]) -> str:
     # --kraken2_memory_gb, resourceLimits ceiling). The removed pin
     # (cpus = 1 from the retired kraken_cores default, memory = 8.GB) made
     # every GUI-launched classification single-threaded (2026-08-18 audit).
+    # No per-process CPU pins for validation either: the former
+    # BLAST_BLASTN / EXTRACT_VALIDATION_SEQS blocks named processes that do
+    # not exist in nanometanf (BLASTN_VALIDATION, EXTRACT_READS_BY_TAXID),
+    # so they did nothing, and a real pin would repeat the KRAKEN2 mistake.
+    # CPU sizing travels as --max_cpus (audit round 5, A9b).
     withname_blocks = [
-        "    // BLAST validation\n"
-        "    withName: 'BLAST_BLASTN' {\n"
-        f"        cpus = {blast_cores}\n"
-        "        memory = '4.GB'\n"
-        "    }\n",
         "    // NanoPlot QC\n"
         "    withName: 'NANOPLOT' {\n"
         "        cpus = 2\n"
         "        memory = '4.GB'\n"
         "    }\n",
-        "    // Validation sequence extraction\n"
-        "    withName: 'EXTRACT_VALIDATION_SEQS' {\n"
-        f"        cpus = {validation_cores}\n"
-        "        memory = '4.GB'\n"
-        "    }\n",
     ]
     if qc_tool == "fastp":
         withname_blocks.insert(
-            2,
+            1,
             "    // FASTP quality filtering\n"
             "    withName: 'FASTP' {\n"
             "        cpus = 2\n"
@@ -1378,8 +1465,8 @@ def validate_nanometanf_params(params: Dict[str, Any]) -> Tuple[bool, str]:
     Validate that all required nanometanf parameters are present and valid.
 
     Supports three input modes:
-    - batch: requires fastq_input_dir
-    - barcode: requires barcode_input_dir
+    - samplesheet: requires input
+    - scan: requires input_dir
     - realtime: requires nanopore_output_dir
 
     Args:
@@ -1390,7 +1477,7 @@ def validate_nanometanf_params(params: Dict[str, Any]) -> Tuple[bool, str]:
 
     Example:
         >>> params = {
-        ...     "fastq_input_dir": "/data/seq",
+        ...     "input_dir": "/data/seq",
         ...     "kraken2_db": "/data/kraken",
         ...     "outdir": "/data/results"
         ... }
@@ -1411,16 +1498,14 @@ def validate_nanometanf_params(params: Dict[str, Any]) -> Tuple[bool, str]:
     # Determine which input mode is being used
     has_samplesheet_input = "input" in params and params["input"]
     has_input_dir = "input_dir" in params and params["input_dir"]
-    has_fastq_input = "fastq_input_dir" in params and params["fastq_input_dir"]
-    has_barcode_input = "barcode_input_dir" in params and params["barcode_input_dir"]
     has_realtime_input = "nanopore_output_dir" in params and params["nanopore_output_dir"]
 
     # Validate at least one input mode is specified
-    if not (has_samplesheet_input or has_input_dir or has_fastq_input or has_barcode_input or has_realtime_input):
+    if not (has_samplesheet_input or has_input_dir or has_realtime_input):
         return (
             False,
             "Missing input. Must specify one of: "
-            "input (samplesheet), input_dir, fastq_input_dir, barcode_input_dir, or nanopore_output_dir"
+            "input (samplesheet), input_dir, or nanopore_output_dir"
         )
 
     # Validate Kraken2 database. Delegates to the canonical check in
@@ -1457,32 +1542,6 @@ def validate_nanometanf_params(params: Dict[str, Any]) -> Tuple[bool, str]:
             return False, f"input_dir not found: {input_dir}"
         logging.info(f"input_dir mode: nanometanf INPUT_SCANNER will discover layout under {input_dir}")
 
-    elif has_fastq_input:
-        input_dir = params["fastq_input_dir"]
-        if not os.path.isdir(input_dir):
-            return False, f"FASTQ input directory not found: {input_dir}"
-        # Verify FASTQ files exist
-        fastq_files = glob.glob(os.path.join(input_dir, "*.fastq*"))
-        if not fastq_files:
-            return False, f"No FASTQ files found in: {input_dir}"
-        logging.info(f"Batch mode: Found {len(fastq_files)} FASTQ files in {input_dir}")
-
-    elif has_barcode_input:
-        input_dir = params["barcode_input_dir"]
-        if not os.path.isdir(input_dir):
-            return False, f"Barcode input directory not found: {input_dir}"
-        # Use the canonical per-sample-subdir detector so non-conventional
-        # naming (e.g. Turex/, Zymo/) is accepted alongside barcode<NN>.
-        from nanometa_live.core.utils.auto_detect import find_sample_subdirs
-        sample_dirs = find_sample_subdirs(input_dir)
-        if not sample_dirs:
-            return False, f"No per-sample subdirectories found in: {input_dir}"
-        logging.info(
-            "Barcode mode: Found %d per-sample directories in %s",
-            len(sample_dirs),
-            input_dir,
-        )
-
     elif has_realtime_input:
         input_dir = params["nanopore_output_dir"]
         if not os.path.isdir(input_dir):
@@ -1500,19 +1559,6 @@ def validate_nanometanf_params(params: Dict[str, Any]) -> Tuple[bool, str]:
             f"Output directory parent does not exist: {outdir_parent}"
         )
 
-    # Validate batch_interval format only if present (realtime mode)
-    batch_interval = params.get("batch_interval")
-    if batch_interval:
-        if not isinstance(batch_interval, str):
-            return False, f"batch_interval must be a string, got {type(batch_interval)}"
-
-        # Check duration format (e.g., "15s", "1m", "2h")
-        if not re.match(r'^\d+[smhd]$', batch_interval):
-            return (
-                False,
-                f"Invalid batch_interval format: {batch_interval}. "
-                f"Expected format: <number><unit> (e.g., '15s', '1m', '2h')"
-        )
 
     return True, "Validation successful"
 

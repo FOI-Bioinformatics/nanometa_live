@@ -8,6 +8,7 @@ This module manages the backend processes for the application, including:
 """
 
 import os
+import re
 import time
 import json
 import hashlib
@@ -23,6 +24,24 @@ from typing import Dict, Any, Optional, Tuple, IO
 
 from nanometa_live.core.utils.loader_utils import clear_all_loader_caches
 from nanometa_live.core.workflow.nextflow_manager import NextflowManager
+
+
+_PROCESS_ERROR_RE = re.compile(r"Error executing process\s*>\s*'([^']+)'")
+
+
+def _failed_process_names(error_text):
+    """Task labels named in a Nextflow error message.
+
+    ``Error executing process > 'ASSEMBLY:MINIMAP2_ALIGN (barcode05)'``
+    yields ``MINIMAP2_ALIGN (barcode05)``, the same label form the trace
+    parser records.
+    """
+    names = []
+    for full in _PROCESS_ERROR_RE.findall(str(error_text or "")):
+        label = full.split(":")[-1].strip()
+        if label and label not in names:
+            names.append(label)
+    return names
 
 
 def _parse_bool(value):
@@ -332,8 +351,6 @@ class BackendManager:
         if "blast_validation" in self.config:
             self.config["blast_validation"] = _parse_bool(self.config["blast_validation"])
 
-        if "remove_temp_files" in self.config:
-            self.config["remove_temp_files"] = _parse_bool(self.config["remove_temp_files"])
 
         # Create required directories
         main_dir = self.config.get("main_dir")
@@ -769,9 +786,9 @@ class BackendManager:
         if profile is None:
             profile = self.config.get("pipeline_profile", "conda")
 
-        # Start the Nextflow workflow
-        cores = self.config.get("snakemake_cores", None)  # Keep param name for compatibility
-        success, message = self.workflow_manager.start(profile=profile, cores=cores, resume=resume)
+        # Start the Nextflow workflow. CPU sizing travels as --max_cpus in
+        # the params file (see parameter_mapping); start() takes no cores.
+        success, message = self.workflow_manager.start(profile=profile, resume=resume)
         if not success:
             self._release_lock()  # Release lock on failure
             return False, message
@@ -799,8 +816,15 @@ class BackendManager:
         self.status_thread = threading.Thread(target=self._monitor_status, daemon=True)
         self.status_thread.start()
 
+        message = f"Backend started successfully with profile: {profile}"
+        launch_warnings = list(getattr(self.workflow_manager, "launch_warnings", None) or [])
+        if launch_warnings:
+            with self._status_lock:
+                self.status.setdefault("warnings", []).extend(
+                    w for w in launch_warnings if w not in self.status.get("warnings", []))
+            message += " Note: " + " ".join(launch_warnings)
         logging.info(f"Backend started successfully with profile: {profile}")
-        return True, f"Backend started successfully with profile: {profile}"
+        return True, message
 
     def _auto_generate_report(self) -> Optional[str]:
         """Write the operator HTML report into ``<outdir>/report/`` best-effort.
@@ -1214,6 +1238,19 @@ class BackendManager:
 
         workflow_errors = workflow_status.get("errors", [])
         if workflow_errors:
+            # Carry the trace's failed-task record into the run state and
+            # name the process from Nextflow's own error line when the
+            # trace has none: the run file used to say processes_failed 0
+            # with no failed task for a fatal process failure (audit
+            # round 5, P3).
+            failed_tasks = list(workflow_status.get("failed_tasks") or [])
+            for err in workflow_errors:
+                for name in _failed_process_names(err):
+                    if name not in failed_tasks:
+                        failed_tasks.append(name)
+            self.status["failed_tasks"] = failed_tasks
+            self.status["processes_failed"] = max(
+                int(workflow_status.get("processes_failed") or 0), len(failed_tasks))
             self._fail_run(workflow_errors)
             self._record_final_status()
             return False
@@ -1279,6 +1316,16 @@ class BackendManager:
         self.status.pop("stop_reason", None)
         self.status.pop("ended_at", None)
         self._stop_intent = None
+        # A new run starts with a clean error record. The previous run's
+        # errors were only ever cleared by an operator Stop, so a run that
+        # followed a failed one -- with no Stop in between -- inherited them,
+        # was classified as failed by the status monitor and recorded as
+        # final_status "error" although Nextflow reported success (audit
+        # round 5, A19: batch3 after two failed starts).
+        self.status["errors"] = []
+        workflow_status = getattr(self.workflow_manager, "status", None)
+        if isinstance(workflow_status, dict):
+            workflow_status["errors"] = []
 
     def _mark_stop_intent(self, reason: str) -> None:
         """Record that the run is being stopped on purpose (lock-free flag)."""

@@ -50,10 +50,7 @@ nanopore_output_directory: "/path/to/input"
 | `pipeline_source` | string | "remote:master" | Pipeline location (see below) |
 | `nxf_conda_cachedir` | path | null | Field-machine path to a bundle's pre-warmed Nextflow conda cache. Set automatically by bundle import; exported as `NXF_CONDA_CACHEDIR`. |
 | `nxf_plugins_dir` | path | null | Field-machine path to a bundle's Nextflow plugin cache. Set automatically by bundle import; suppresses the online plugin-registry probe in offline mode. |
-| `pipeline_cores` | int | 1 | CPU cores for pipeline |
-| `kraken_cores` | int | 1 | CPU cores for Kraken2 classification |
-| `validation_cores` | int | 1 | CPU cores for validation tasks |
-| `blast_cores` | int | 1 | CPU cores for BLAST searches |
+| `max_cpus` | int | null | Upper bound on the CPUs any single pipeline task may request (nanometanf `--max_cpus`; Kraken2 scales from it). `null` = the pipeline default. Replaces `pipeline_cores`, `validation_cores` and `blast_cores`, none of which reached a running task (round-5 audit, 2026-09-03). |
 | `conda_frontend` | string | "mamba" | Conda package manager (`mamba` or `conda`) |
 
 ### Validation
@@ -74,7 +71,6 @@ nanopore_output_directory: "/path/to/input"
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `update_interval_seconds` | int | 10 | Dashboard refresh interval in seconds. Lowered from 30 in 2026-05; downstream callbacks are gated on a results fingerprint so unchanged ticks are near-zero cost. |
-| `check_intervals_seconds` | int | 15 | Backend file-check interval in seconds |
 | `gui_port` | int | 8050 | Web server port. Used when `--port` is not given; an explicit `--port` wins. Takes effect on the next launch. |
 | `auto_report` | bool | true | Write the self-contained operator HTML report to `<results dir>/report/report.html` when a run completes or is stopped, so the verdict and pathogen screen can be viewed after the dashboard is closed. Best-effort: a report failure never fails the run. The same report can be produced manually via Export Results or the `nanometa-report` CLI, which defaults to the watchlists recorded in the run's `.nanometa.run.json`. |
 
@@ -108,7 +104,7 @@ takes effect on the next Start.
 |-----------|------|---------|-------------|
 | `batch_size` | int | 1 | Files per processing batch (1 = immediate) |
 | `min_batch_size` | int | 1 | Minimum files before triggering a batch |
-| `max_file_age_minutes` | int | 1000000 | Maximum age of files to process |
+| `max_file_age_minutes` | int | null | Real-time only. Files already in the watched folder at Start whose modification time is older than this are not processed; files arriving during the run always are. `null` = process every file. |
 
 ### High-Throughput Tuning (12-24 barcodes)
 

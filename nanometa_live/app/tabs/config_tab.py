@@ -19,7 +19,7 @@ import dash_bootstrap_components as dbc
 from dash import html
 
 from nanometa_live.core.workflow.backend_manager import BackendManager
-from nanometa_live.core.config.config_loader import ConfigLoader
+from nanometa_live.core.config.config_loader import ConfigLoader, default_config
 from nanometa_live.core.config.parameter_mapping import _coerce_minimap2_preset
 from nanometa_live.app.utils.github_branches import fetch_nanometanf_branches
 from nanometa_live.app.app import background_callback_manager
@@ -70,10 +70,12 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         Output("negative-controls-input", "options"),
         Input("available-samples", "data"),
         Input("negative-controls-input", "value"),
+        Input("nanopore-dir-input", "value"),
         prevent_initial_call=False,
     )
-    def populate_negative_control_options(available_samples, selected):
-        """Offer the detected samples, plus whatever is already selected.
+    def populate_negative_control_options(available_samples, selected, nanopore_dir):
+        """Offer the detected samples, the input directory's sample folders,
+        plus whatever is already selected.
 
         Selected values are unioned in on purpose. A control is usually known
         before the run produces anything, so an operator declaring one at
@@ -81,10 +83,20 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         an earlier run must not silently vanish from the control just because
         this run has not produced that barcode. A dcc.Dropdown drops any value
         with no matching option, so omitting them would erase the declaration
-        without saying so.
+        without saying so. The input directory's per-sample folders are
+        offered too, so a control can be declared before the first Start
+        (audit round 5, A13); under by_barcode input the control's name is
+        its folder.
         """
         names: List[str] = []
-        for source in (available_samples or [], selected or []):
+        input_samples: List[str] = []
+        if nanopore_dir and str(nanopore_dir).strip():
+            from nanometa_live.core.utils.auto_detect import find_sample_subdirs
+            from nanometa_live.core.utils.path_utils import normalise_path
+            input_samples = [
+                d.name for d in find_sample_subdirs(normalise_path(str(nanopore_dir)))
+            ]
+        for source in (available_samples or [], input_samples, selected or []):
             if isinstance(source, str):
                 source = [source]
             for name in source:
@@ -455,6 +467,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("notification-trigger", "data", allow_duplicate=True),
             Output("refresh-form-trigger", "data", allow_duplicate=True),
             Output("config-form-draft", "data", allow_duplicate=True),
+            # Reset is authoritative like Apply: the dirty-check baseline
+            # follows it, or the next edit is compared against the pre-reset
+            # config (audit round 5, A7).
+            Output("saved-config-snapshot", "data", allow_duplicate=True),
         ],
         Input("reset-config-confirm", "n_clicks"),
         State("app-data-dir", "data"),
@@ -463,23 +479,26 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     def reset_config(n_clicks, data_dir):
         """Reset the configuration to defaults after user confirms."""
         if not n_clicks:
-            return no_update, no_update, no_update, no_update
+            return (no_update,) * 5
 
         try:
             config_loader = ConfigLoader(os.path.join(data_dir, "configs"))
-            default_config = config_loader.create_default_config()
+            reset_defaults = config_loader.create_default_config()
+            # Apply persists to last-session.yaml; a confirmed Reset does the
+            # same, so the file and the session cannot disagree afterwards.
+            autosave_session_config(reset_defaults)
 
-            return default_config, {
+            return reset_defaults, {
                 "title": "Configuration Reset",
                 "message": "All settings have been restored to defaults",
                 "color": "info",
-            }, True, None  # Trigger form refresh; clear unsaved draft
+            }, True, None, reset_defaults  # form refresh; clear draft; rebase
         except Exception as e:
             return no_update, {
                 "title": "Error",
                 "message": f"Failed to reset configuration: {str(e)}",
                 "color": "danger",
-            }, no_update, no_update
+            }, no_update, no_update, no_update
 
     # Apply Config Changes Callback - THE SINGLE POINT OF CONFIG UPDATE
     # All form values (including species) are read here and committed to app-config
@@ -489,15 +508,28 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("apply-config-button", "children"),
             Output("notification-trigger", "data", allow_duplicate=True),
             Output("config-feedback-alert", "is_open"),
+            # The dirty-check baseline and the Modified badge are written by
+            # THIS callback so they follow the validation outcome. A separate
+            # click-driven callback rebased the snapshot from the pre-Apply
+            # Store and cleared the badge even when Apply was rejected
+            # (audit round 5, A3).
+            Output("saved-config-snapshot", "data", allow_duplicate=True),
+            Output("config-modified", "data", allow_duplicate=True),
         ],
-        Input("apply-config-button", "n_clicks"),
+        # Fired by the browser-side check below, not by the click itself. A
+        # number input holding a value outside its min/max/step never sends
+        # that value to the server (Dash drops it), so a server fired on the
+        # click validated the OLD value, reported "Changes Applied" and kept
+        # the old one while the widget showed the typed one (audit round 5,
+        # A2b/A14). The request carries the invalid fields by name.
+        Input("apply-config-request", "data"),
         # Form-field States generated from the single CONFIG_FORM_FIELDS registry
         # (was 40 hand-maintained State() lines that had to stay in lock-step
         # with build_config_from_form's keywords). app-config is appended last.
         [*_FORM_STATES, State("app-config", "data"), State("backend-status", "data")],
         prevent_initial_call=True,
     )
-    def apply_config_changes(n_clicks, *form_values_and_config):
+    def apply_config_changes(request, *form_values_and_config):
         """Apply configuration changes with validation.
 
         Thin wiring: the validate-and-build logic lives in the pure
@@ -510,8 +542,18 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         registry order (``_FORM_KWARGS``). app-config and backend-status are
         the final two States.
         """
-        if not n_clicks:
-            return no_update, no_update, no_update, no_update
+        if not request or not request.get("n"):
+            return (no_update,) * 6
+
+        invalid_fields = list(request.get("invalid") or [])
+        if invalid_fields:
+            return no_update, "Apply Settings", {
+                "title": "Validation Error",
+                "message": "Nothing was applied. These values are outside "
+                           "the field's allowed range:\n"
+                           + "\n".join(f"- {f}" for f in invalid_fields),
+                "color": "danger",
+            }, False, no_update, no_update
 
         *form_values, current_config, backend_status = form_values_and_config
         form_kwargs = dict(zip(_FORM_KWARGS, form_values))
@@ -521,7 +563,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 "title": "Error",
                 "message": "No configuration to update",
                 "color": "danger",
-            }, False
+            }, False, no_update, no_update
 
         config, errors = build_config_from_form(current_config, **form_kwargs)
 
@@ -530,7 +572,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 "title": "Validation Error",
                 "message": "\n".join(f"- {e}" for e in errors),
                 "color": "danger",
-            }, True
+            }, False, no_update, no_update  # rejected: no success alert, badge stays (A2)
 
         # Auto-save config to last-session.yaml for session persistence
         pinned = pin_running_run_paths(config, current_config, backend_status)
@@ -546,7 +588,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                     f"Analysis name: {form_kwargs.get('analysis_name')}"
                 ),
                 "color": "warning",
-            }, True
+            }, True, config, False
         return config, "Apply Settings", {
             "title": "Changes Applied",
             "message": (
@@ -554,7 +596,32 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
                 f"Analysis name: {form_kwargs.get('analysis_name')}"
             ),
             "color": "success",
-        }, True  # Show the feedback alert
+        }, True, config, False  # feedback alert, snapshot rebased, badge cleared
+
+    # Browser-side check of every number input in the Configuration form on
+    # the Apply click. The browser knows which fields hold a refused value
+    # (min, max or step); the server never sees such a value at all.
+    app.clientside_callback(
+        """
+        function(n_clicks) {
+            if (!n_clicks) { return window.dash_clientside.no_update; }
+            var bad = [];
+            var root = document.getElementById("config-form-root") || document;
+            root.querySelectorAll('input[type="number"]').forEach(function(el) {
+                if (el.checkValidity()) { return; }
+                var label = document.querySelector('label[for="' + el.id + '"]');
+                var name = label ? label.textContent.replace(/\s+/g, ' ').trim() : el.id;
+                var lo = el.min !== '' ? el.min : 'any';
+                var hi = el.max !== '' ? el.max : 'any';
+                bad.push(name + ': "' + el.value + '" (allowed ' + lo + ' to ' + hi + ')');
+            });
+            return {n: n_clicks, invalid: bad};
+        }
+        """,
+        Output("apply-config-request", "data"),
+        Input("apply-config-button", "n_clicks"),
+        prevent_initial_call=True,
+    )
 
     # Reset the Apply button text after a short delay
     app.clientside_callback(
@@ -631,7 +698,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("kraken-db-input", "value"),
             Output("results-dir-input", "value"),
             Output("update-interval-input", "value"),
-            Output("check-interval-input", "value"),
             Output("realtime-timeout-minutes-input", "value"),
             Output("min-reads-per-level-input", "value"),
             Output("memory-mapping-input", "value"),
@@ -688,22 +754,28 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         # operator's in-progress changes survive a tab switch.
         config = {**(config or {}), **(draft or {})}
         if not config:
-            return [no_update] * 41  # must match the Output list length
+            # One value per declared Output: the 41 registry widgets plus
+            # config-form-initialized. A literal 41 here raised in Dash when
+            # app-config and the draft were both empty (audit round 5, A1).
+            return [no_update] * (len(CONFIG_FORM_FIELDS) + 1)
+
+        # Fallbacks come from the one place the defaults are written, so a
+        # config lacking a key shows the value the app will use (A5).
+        defaults = default_config()
 
         # Extract values from config
-        analysis_name = config.get("analysis_name", "")
+        analysis_name = config.get("analysis_name", defaults["analysis_name"])
         nanopore_dir = config.get("nanopore_output_directory", "")
         kraken_db = config.get("kraken_db", "")
         # The results field shows the operator OVERRIDE, not the computed run
         # dir -- so after a run it is empty (derived) rather than the concrete
         # folder, and a changed Run name re-derives on the next Apply.
         results_dir = config.get("results_dir_override", "")
-        update_interval = config.get("update_interval_seconds", 10)
-        check_interval = config.get("check_intervals_seconds", 15)
+        update_interval = config.get("update_interval_seconds", defaults["update_interval_seconds"])
         # None in YAML means "run indefinitely"; show empty string to blank the numeric input
-        realtime_timeout_raw = config.get("realtime_timeout_minutes", 60)
+        realtime_timeout_raw = config.get("realtime_timeout_minutes", defaults["realtime_timeout_minutes"])
         realtime_timeout_minutes = "" if realtime_timeout_raw is None else realtime_timeout_raw
-        min_reads_per_level = config.get("default_reads_per_level", 10)
+        min_reads_per_level = config.get("default_reads_per_level", defaults["default_reads_per_level"])
 
         # Handle boolean values
         memory_mapping = config.get("kraken_memory_mapping", True)
@@ -719,20 +791,22 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             blast_validation = blast_validation.lower() in ["true", "yes", "y", "1"]
         blast_validation = bool(blast_validation)
 
-        validation_method = config.get("validation_method", "minimap2")
+        validation_method = config.get("validation_method", defaults["validation_method"])
         # Normalise presets nanometanf rejects (the GUI briefly offered "sr");
         # an unmatched value would leave the Select blank rather than showing
         # the map-ont the launch will actually use.
         minimap2_preset = _coerce_minimap2_preset(config.get("minimap2_preset", "map-ont"))
-        minimap2_min_mapq = config.get("minimap2_min_mapq", 30)
+        minimap2_min_mapq = config.get("minimap2_min_mapq", defaults["minimap2_min_mapq"])
 
-        e_value_cutoff = config.get("e_val_cutoff", 0.01)
+        e_value_cutoff = config.get("e_val_cutoff", defaults["e_val_cutoff"])
         from nanometa_live.core.utils.paths import NanometaPaths
         genome_cache_dir = config.get("genome_cache_dir") or str(
             NanometaPaths.from_config(config).data_dir
         )
-        cores = config.get("pipeline_cores", config.get("snakemake_cores", 1))  # Backward compatibility
-        gui_port = config.get("gui_port", 8050)
+        # Empty field = pipeline default (stored as None).
+        max_cpus_raw = config.get("max_cpus")
+        cores = "" if max_cpus_raw is None else max_cpus_raw
+        gui_port = config.get("gui_port", defaults["gui_port"])
 
         # Ensure it's a boolean regardless of stored format
 
@@ -740,9 +814,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         pipeline_profile = config.get("pipeline_profile", "conda")
 
         # Parse pipeline_source to extract type, branch, and local path
-        pipeline_source = config.get("pipeline_source", "remote:dev")
+        pipeline_source = config.get("pipeline_source", defaults["pipeline_source"])
         pipeline_source_type = "remote"
-        pipeline_branch = "master"
+        # The parse fallback is the same branch the default source names.
+        pipeline_branch = "dev"
         pipeline_local_path = ""
 
         if pipeline_source.startswith("remote:"):
@@ -766,15 +841,15 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             pipeline_local_path = pipeline_source
 
         # Input mode settings
-        processing_mode = config.get("processing_mode", "batch")
-        sample_handling = config.get("sample_handling", "by_barcode")
+        processing_mode = config.get("processing_mode", defaults["processing_mode"])
+        sample_handling = config.get("sample_handling", defaults["sample_handling"])
         sample_name = config.get("sample_name", "sample")
         negative_controls = config.get("negative_control_samples") or []
         if isinstance(negative_controls, str):
             negative_controls = [negative_controls]
 
         # Pipeline options
-        qc_tool = config.get("qc_tool", "chopper")
+        qc_tool = config.get("qc_tool", defaults["qc_tool"])
         # fastp is pipeline-only since 2026-09-02: it is not in the select, so
         # a saved fastp choice would render as no selection and Apply would
         # write None. Show chopper and say so; the file keeps its value until
@@ -796,21 +871,22 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         # the new GUI fields keeps the current long-read behaviour. See
         # docs/audit-2026-04-29-short-amplicons.md for amplicon-friendly
         # values.
-        chopper_minlength = config.get("chopper_minlength", 1000)
-        chopper_quality = config.get("chopper_quality", 10)
+        chopper_minlength = config.get("chopper_minlength", defaults["chopper_minlength"])
+        chopper_quality = config.get("chopper_quality", defaults["chopper_quality"])
         chopper_maxlength = config.get("chopper_maxlength") or None
-        filtlong_minlength = config.get("filtlong_min_length", 1000)
-        validation_identity = config.get("validation_identity_threshold", 90)
-        kraken2_confidence = config.get("kraken2_confidence", 0.0)
-        kraken2_hitgroups = config.get("kraken2_minimum_hit_groups", 0)
+        filtlong_minlength = config.get("filtlong_min_length", defaults["filtlong_min_length"])
+        validation_identity = config.get("validation_identity_threshold", defaults["validation_identity_threshold"])
+        kraken2_confidence = config.get("kraken2_confidence", defaults["kraken2_confidence"])
+        kraken2_hitgroups = config.get("kraken2_minimum_hit_groups", defaults["kraken2_minimum_hit_groups"])
 
-        # Newly exposed settings (2026-05-31).
-        max_file_age_minutes = config.get("max_file_age_minutes", 1000000)
-        min_reads_for_validation = config.get("min_reads_for_validation", 50)
+        # Empty field = process every pre-existing file (stored as None).
+        max_file_age_raw = config.get("max_file_age_minutes")
+        max_file_age_minutes = "" if max_file_age_raw is None else max_file_age_raw
+        min_reads_for_validation = config.get("min_reads_for_validation", defaults["min_reads_for_validation"])
 
         # Assembly (2026-08-17).
         enable_assembly = bool(config.get("enable_assembly", False))
-        assembler = config.get("assembler", "flye")
+        assembler = config.get("assembler", defaults["assembler"])
         if assembler not in ("flye", "miniasm"):
             assembler = "flye"
 
@@ -820,7 +896,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             kraken_db,
             results_dir,
             update_interval,
-            check_interval,
             realtime_timeout_minutes,
             min_reads_per_level,
             memory_mapping,
@@ -856,7 +931,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             min_reads_for_validation,
             enable_assembly,
             assembler,
-            True,  # Mark form as initialized (suppresses first "Modified" badge)
+            # Mark the form as initialised so the value cascade does not flag
+            # it Modified -- unless a draft was overlaid, in which case the
+            # cascade must run the real comparison: a reload restored unsaved
+            # edits with a clean badge (audit round 5, A6).
+            not bool(draft),
         ]
 
     # Species watchlist management is now handled in the Watchlist & Preparation tab
@@ -1550,7 +1629,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("kraken-db-input", "value"),
             Input("results-dir-input", "value"),
             Input("update-interval-input", "value"),
-            Input("check-interval-input", "value"),
             Input("realtime-timeout-minutes-input", "value"),
             Input("min-reads-per-level-input", "value"),
             Input("memory-mapping-input", "value"),
@@ -1599,7 +1677,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     )
     def detect_form_changes(
         analysis_name, nanopore_dir, kraken_db, results_dir, update_interval,
-        check_interval, realtime_timeout_minutes,
+        realtime_timeout_minutes,
         min_reads_per_level, memory_mapping, blast_validation, validation_method,
         e_value_cutoff, minimap2_preset, minimap2_min_mapq,
         genome_cache_dir, cores, gui_port,
@@ -1629,7 +1707,6 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "kraken_db": kraken_db or "",
             "results_dir_override": (results_dir or "").strip(),
             "update_interval_seconds": update_interval,
-            "check_intervals_seconds": check_interval,
             "realtime_timeout_minutes": (
                 int(realtime_timeout_minutes)
                 if realtime_timeout_minutes not in (None, "") else None
@@ -1642,7 +1719,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "minimap2_min_mapq": minimap2_min_mapq,
             "e_val_cutoff": e_value_cutoff,
             "genome_cache_dir": genome_cache_dir,
-            "pipeline_cores": cores,
+            "max_cpus": optional_int(cores),
             "gui_port": gui_port,
             "pipeline_profile": pipeline_profile,
             "pipeline_source": _pipeline_source_from_form(
@@ -1664,10 +1741,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "validation_identity_threshold": validation_identity,
             "kraken2_confidence": kraken2_confidence,
             "kraken2_minimum_hit_groups": kraken2_hitgroups,
-            "max_file_age_minutes": (
-                int(max_file_age_minutes)
-                if max_file_age_minutes not in (None, "") else max_file_age_minutes
-            ),
+            "max_file_age_minutes": optional_int(max_file_age_minutes),
             "min_reads_for_validation": min_reads_for_validation,
             "enable_assembly": enable_assembly,
             "assembler": assembler if assembler in ("flye", "miniasm") else "flye",
@@ -1678,32 +1752,3 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         # a stale draft cannot resurrect discarded edits on the next tab visit.
         return dirty, no_update, (form if dirty else None)
 
-    # Callback: Mark as not modified after Apply (config matches current form)
-    @app.callback(
-        [
-            Output("saved-config-snapshot", "data", allow_duplicate=True),
-            Output("config-modified", "data", allow_duplicate=True),
-        ],
-        Input("apply-config-button", "n_clicks"),
-        State("app-config", "data"),
-        prevent_initial_call=True,
-    )
-    def update_snapshot_on_apply(n_clicks, config):
-        """Rebase the dirty-check snapshot on Apply and clear the badge.
-
-        Apply both applies AND persists (``apply_config_changes`` calls
-        ``autosave_session_config``, which writes last-session.yaml), so
-        after it the form matches the applied config and the file on disk
-        alike -- nothing is pending. The previous version returned
-        ``no_update`` for both outputs, on the reasoning that Apply was
-        session-only and a separate Save wrote the file; that design is
-        gone, and the leftover behaviour left the "Modified" badge lit for
-        the rest of the session. A badge that never clears is not a signal,
-        and it claims unsaved work that does not exist (2026-08-19 config
-        audit). Rebasing the snapshot also matters for correctness: the
-        next edit must be compared against what was just applied, not
-        against the boot config.
-        """
-        if not n_clicks or not config:
-            return no_update, no_update
-        return config, False

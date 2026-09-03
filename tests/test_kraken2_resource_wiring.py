@@ -53,7 +53,7 @@ class TestCustomConfigNoKrakenPin:
 
     def test_other_blocks_survive(self):
         text = create_nextflow_config({"pipeline_profile": "conda"})
-        assert "BLAST_BLASTN" in text
+        assert "NANOPLOT" in text
         assert "report {" in text
 
 

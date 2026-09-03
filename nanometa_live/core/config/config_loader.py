@@ -55,140 +55,8 @@ class ConfigLoader:
         Returns:
             A dictionary containing the default configuration
         """
-        default_config = {
-            "analysis_name": "Nanometa Live Analysis",
-            "nanopore_output_directory": "",
-            # The *computed* output directory for the active run. Derived as
-            # <project_dir>/results/<run-name slug> at Apply/Start (see
-            # outdir_resolution.resolve_run_outdir) and read by the pipeline +
-            # dashboard. Not edited directly by the operator -- it is recomputed
-            # each Apply/Start so changing the Run name (then restarting) moves
-            # the folder.
-            "results_output_directory": "",
-            # The operator's explicit results-folder OVERRIDE (the editable
-            # field). Empty = derive from the Run name; a path here is used
-            # verbatim. Kept separate from results_output_directory so the
-            # derived run folder is never mistaken for an operator override.
-            "results_dir_override": "",
-            "species_of_interest": [],
-            # Samples to treat as negative controls: a detection in one of
-            # these is contamination or index hopping, not a finding about
-            # the subject. Declared explicitly because the sample NAME often
-            # cannot say so -- under by_barcode input the sample is
-            # "barcode16" even when the FASTQ was "negative_barcode16.fastq.gz".
-            # The name-pattern fallback in core/utils/attribution.py only
-            # covers names that survive with a marker in them.
-            "negative_control_samples": [],
-            "update_interval_seconds": 10,
-            # Slower dashboard poll used when no run is active (complete,
-            # standby, or viewing existing results). The faster
-            # update_interval_seconds applies while a run is running.
-            "idle_update_interval_seconds": 60,
-            "gui_port": 8050,
-            "taxonomic_hierarchy_letters": ["D", "P", "C", "O", "F", "G", "S"],
-            "default_hierarchy_letters": ["D", "C", "G", "S"],
-            "default_reads_per_level": 10,
-            "pipeline_cores": 1,
-            # kraken_cores retired 2026-08-18: the default of 1 flowed into
-            # the generated -c config as `KRAKEN2_KRAKEN2 { cpus = 1 }`,
-            # overriding nanometanf's own CPU scaling for every operator who
-            # never touched the field. Kraken2 sizing now belongs to the
-            # pipeline (see parameter_mapping.create_nextflow_config).
-            "validation_cores": 1,
-            "blast_cores": 1,
-            "check_intervals_seconds": 15,
-            "kraken_db": "",
-            # kraken_memory_mapping deliberately NOT defaulted: a default
-            # here made _resolve_kraken2_memory_mapping's "explicit override
-            # wins" branch unconditional (the min_perc_identity pattern).
-            # The resolver defaults to True; only a deliberate operator
-            # value belongs in the config.
-            # Validation settings
-            # Enabled by default: confirmation testing is cheap and gives operators
-            # an immediate cross-check on detected species. It silently no-ops when
-            # reference genomes have not been downloaded yet (see can_run_validation).
-            "blast_validation": True,
-            # minimap2 is the default: fast, ONT-optimised, and produces coverage-depth
-            # plots plus mapping confidence. 'blast' is more thorough but 5-10x slower
-            # per pair; 'both' is available for highest confidence at 2x compute.
-            "validation_method": "minimap2",  # 'blast', 'minimap2', or 'both'
-            "e_val_cutoff": 0.01,
-            "validation_hit_rate_threshold": 0.5,
-            "validation_identity_threshold": 90.0,
-            "minimap2_preset": "map-ont",
-            "minimap2_min_mapq": 30,
-            # Minimum classified reads before the on-demand Validate action is
-            # offered on the Organisms tab. Consumed in main_tab.py; exposed in
-            # the Configuration tab's Confirmation Testing section.
-            "min_reads_for_validation": 10,
-            # Per-installation directory for app state (configs, cache,
-            # genomes, blast, mappings, logs). The CLI ``--data-dir``
-            # flag overrides this; nanometa_live.py writes the
-            # resolved value back into the config dict so downstream
-            # subsystems can read it via NanometaPaths.from_config.
-            "data_dir": os.path.join(os.path.expanduser("~"), ".nanometa"),
-            # Project directory anchoring per-analysis state under
-            # <project_dir>/.nanometa/ (session config, watchlist
-            # selection + toggle state, taxid mappings). Empty here so a
-            # bare config keeps the legacy single-root layout; the CLI
-            # entry points set it to the current working directory (or
-            # --project) so each analysis folder owns its own state.
-            "project_dir": "",
-            # Genome cache directory for downloaded reference genomes.
-            # When unset, NanometaPaths resolves this to <data_dir>.
-            "genome_cache_dir": os.path.join(os.path.expanduser("~"), ".nanometa"),
-            "external_kraken2_db": "",
-            "local_package_management": None,
-            "conda_frontend": "mamba",
-            "main_dir": "",
-            # QC and analysis tools. The read filter defaults match
-            # nanometanf's (1000 bp, mean Q10); the form loader falls back
-            # to the same values, and the dirty-state check compares the
-            # form against this snapshot, so the keys must be present here.
-            "qc_tool": "chopper",
-            "chopper_minlength": 1000,
-            "chopper_quality": 10,
-            "chopper_maxlength": None,
-            "filtlong_min_length": 1000,
-            "skip_nanoplot": False,
-            # Assembly (experimental nanometanf step; off by default)
-            "enable_assembly": False,
-            "assembler": "flye",
-            # Kraken2 realtime incremental classification
-            "kraken2_enable_incremental": True,
-            # Visualization options
-            "enable_krona_plots": False,
-            "enable_nanopore_stats_mqc": False,
-            # Offline mode: when enabled, skip all network calls and use cached data only
-            "offline_mode": False,
-            # Write the operator HTML report into <outdir>/report/ when a
-            # run completes or is stopped, so the verdict survives closing
-            # the dashboard. Best-effort; disable to skip.
-            "auto_report": True,
-            # Processing mode settings
-            "processing_mode": "batch",
-            "sample_handling": "by_barcode",
-            "sample_name": "sample",
-            # Pipeline execution settings
-            "pipeline_profile": "conda",
-            # Pinned remote default: tracks the main branch of the upstream
-            # nanometanf repository. A fresh install without this pin silently
-            # fell back to an unresolved spec, so the GUI would report
-            # "pipeline not found" after the first run attempt. Override in
-            # config.yaml (e.g. "remote:dev" for active development, or a
-            # local path "local:/path/to/checkout") as needed.
-            "pipeline_source": "remote:dev",
-            # Realtime mode settings
-            "max_file_age_minutes": 1000000,
-            # Stop real-time monitoring after N minutes with no new files (null = run indefinitely)
-            "realtime_timeout_minutes": 60,
-            # Batch settings (for realtime mode, batch_size=1 processes files immediately)
-            "batch_size": 1,
-            "min_batch_size": 1,
-            "timestamp": datetime.datetime.now().isoformat(),
-        }
+        return default_config()
 
-        return default_config
 
     def load_config(self, config_path: str) -> Dict[str, Any]:
         """
@@ -310,15 +178,6 @@ class ConfigLoader:
                     config["generate_consensus"].lower() in ["true", "yes", "y", "1"]
                 )
             config["generate_consensus"] = bool(config["generate_consensus"])
-
-        # Convert remove_temp_files to boolean
-        if "remove_temp_files" in config:
-            if isinstance(config["remove_temp_files"], str):
-                # Handle legacy format (convert "yes" to True)
-                config["remove_temp_files"] = config["remove_temp_files"] == "yes" or \
-                    config["remove_temp_files"].lower() in ["true", "yes", "y", "1"]
-            # Ensure final type is boolean
-            config["remove_temp_files"] = bool(config["remove_temp_files"])
 
         # Convert offline_mode to boolean
         if "offline_mode" in config:
@@ -517,3 +376,154 @@ class ConfigLoader:
         except yaml.YAMLError as e:
             logging.error(f"Malformed Kraken databases file {db_file}: {e}")
             return {}
+
+
+def default_config() -> Dict[str, Any]:
+    """The default configuration, as a fresh dict.
+
+    Module-level so the Configuration form can read its fallbacks from the
+    same place the defaults are written. The form loader used to carry its
+    own literals, and where they diverged (min_reads_for_validation 50
+    against 10 here) the form showed one value while the app used another
+    until Apply (audit round 5, A5).
+    """
+    default_config = {
+        "analysis_name": "Nanometa Live Analysis",
+        "nanopore_output_directory": "",
+        # The *computed* output directory for the active run. Derived as
+        # <project_dir>/results/<run-name slug> at Apply/Start (see
+        # outdir_resolution.resolve_run_outdir) and read by the pipeline +
+        # dashboard. Not edited directly by the operator -- it is recomputed
+        # each Apply/Start so changing the Run name (then restarting) moves
+        # the folder.
+        "results_output_directory": "",
+        # The operator's explicit results-folder OVERRIDE (the editable
+        # field). Empty = derive from the Run name; a path here is used
+        # verbatim. Kept separate from results_output_directory so the
+        # derived run folder is never mistaken for an operator override.
+        "results_dir_override": "",
+        "species_of_interest": [],
+        # Samples to treat as negative controls: a detection in one of
+        # these is contamination or index hopping, not a finding about
+        # the subject. Declared explicitly because the sample NAME often
+        # cannot say so -- under by_barcode input the sample is
+        # "barcode16" even when the FASTQ was "negative_barcode16.fastq.gz".
+        # The name-pattern fallback in core/utils/attribution.py only
+        # covers names that survive with a marker in them.
+        "negative_control_samples": [],
+        "update_interval_seconds": 10,
+        # Slower dashboard poll used when no run is active (complete,
+        # standby, or viewing existing results). The faster
+        # update_interval_seconds applies while a run is running.
+        "idle_update_interval_seconds": 60,
+        "gui_port": 8050,
+        "taxonomic_hierarchy_letters": ["D", "P", "C", "O", "F", "G", "S"],
+        "default_hierarchy_letters": ["D", "C", "G", "S"],
+        "default_reads_per_level": 10,
+        # max_cpus is nanometanf's per-task CPU ceiling (--max_cpus); None
+        # means the pipeline default and the launch omits the key. The
+        # former pipeline_cores / validation_cores / blast_cores reached
+        # nothing (audit round 5, A9).
+        "max_cpus": None,
+        # kraken_cores retired 2026-08-18: the default of 1 flowed into
+        # the generated -c config as `KRAKEN2_KRAKEN2 { cpus = 1 }`,
+        # overriding nanometanf's own CPU scaling for every operator who
+        # never touched the field. Kraken2 sizing now belongs to the
+        # pipeline (see parameter_mapping.create_nextflow_config).
+        "kraken_db": "",
+        # kraken_memory_mapping deliberately NOT defaulted: a default
+        # here made _resolve_kraken2_memory_mapping's "explicit override
+        # wins" branch unconditional (the min_perc_identity pattern).
+        # The resolver defaults to True; only a deliberate operator
+        # value belongs in the config.
+        # Validation settings
+        # Enabled by default: confirmation testing is cheap and gives operators
+        # an immediate cross-check on detected species. It silently no-ops when
+        # reference genomes have not been downloaded yet (see can_run_validation).
+        "blast_validation": True,
+        # minimap2 is the default: fast, ONT-optimised, and produces coverage-depth
+        # plots plus mapping confidence. 'blast' is more thorough but 5-10x slower
+        # per pair; 'both' is available for highest confidence at 2x compute.
+        "validation_method": "minimap2",  # 'blast', 'minimap2', or 'both'
+        "e_val_cutoff": 0.01,
+        "validation_hit_rate_threshold": 0.5,
+        "validation_identity_threshold": 90.0,
+        "minimap2_preset": "map-ont",
+        "minimap2_min_mapq": 30,
+        # Minimum classified reads before the on-demand Validate action is
+        # offered on the Organisms tab. Consumed in main_tab.py; exposed in
+        # the Configuration tab's Confirmation Testing section.
+        "min_reads_for_validation": 10,
+        # Per-installation directory for app state (configs, cache,
+        # genomes, blast, mappings, logs). The CLI ``--data-dir``
+        # flag overrides this; nanometa_live.py writes the
+        # resolved value back into the config dict so downstream
+        # subsystems can read it via NanometaPaths.from_config.
+        "data_dir": os.path.join(os.path.expanduser("~"), ".nanometa"),
+        # Project directory anchoring per-analysis state under
+        # <project_dir>/.nanometa/ (session config, watchlist
+        # selection + toggle state, taxid mappings). Empty here so a
+        # bare config keeps the legacy single-root layout; the CLI
+        # entry points set it to the current working directory (or
+        # --project) so each analysis folder owns its own state.
+        "project_dir": "",
+        # Genome cache directory for downloaded reference genomes.
+        # When unset, NanometaPaths resolves this to <data_dir>.
+        "genome_cache_dir": os.path.join(os.path.expanduser("~"), ".nanometa"),
+        "external_kraken2_db": "",
+        "local_package_management": None,
+        "conda_frontend": "mamba",
+        "main_dir": "",
+        # QC and analysis tools. The read filter defaults match
+        # nanometanf's (1000 bp, mean Q10); the form loader falls back
+        # to the same values, and the dirty-state check compares the
+        # form against this snapshot, so the keys must be present here.
+        "qc_tool": "chopper",
+        "chopper_minlength": 1000,
+        "chopper_quality": 10,
+        "chopper_maxlength": None,
+        "filtlong_min_length": 1000,
+        "skip_nanoplot": False,
+        # Assembly (experimental nanometanf step; off by default)
+        "enable_assembly": False,
+        "assembler": "flye",
+        # Kraken2 realtime incremental classification
+        "kraken2_enable_incremental": True,
+        # Classifier filters; 0 is kraken2's own default for both. Written
+        # here so the form is not dirty before any edit (audit round 5, A4).
+        "kraken2_confidence": 0.0,
+        "kraken2_minimum_hit_groups": 0,
+        # Visualization options
+        "enable_krona_plots": False,
+        "enable_nanopore_stats_mqc": False,
+        # Offline mode: when enabled, skip all network calls and use cached data only
+        "offline_mode": False,
+        # Write the operator HTML report into <outdir>/report/ when a
+        # run completes or is stopped, so the verdict survives closing
+        # the dashboard. Best-effort; disable to skip.
+        "auto_report": True,
+        # Processing mode settings
+        "processing_mode": "batch",
+        "sample_handling": "by_barcode",
+        "sample_name": "sample",
+        # Pipeline execution settings
+        "pipeline_profile": "conda",
+        # Pinned remote default: tracks the main branch of the upstream
+        # nanometanf repository. A fresh install without this pin silently
+        # fell back to an unresolved spec, so the GUI would report
+        # "pipeline not found" after the first run attempt. Override in
+        # config.yaml (e.g. "remote:dev" for active development, or a
+        # local path "local:/path/to/checkout") as needed.
+        "pipeline_source": "remote:dev",
+        # Realtime mode settings
+        # None = process every pre-existing file (see config_form.py).
+        "max_file_age_minutes": None,
+        # Stop real-time monitoring after N minutes with no new files (null = run indefinitely)
+        "realtime_timeout_minutes": 60,
+        # Batch settings (for realtime mode, batch_size=1 processes files immediately)
+        "batch_size": 1,
+        "min_batch_size": 1,
+        "timestamp": datetime.datetime.now().isoformat(),
+    }
+
+    return default_config
