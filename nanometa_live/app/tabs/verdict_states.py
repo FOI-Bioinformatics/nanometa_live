@@ -99,6 +99,7 @@ def with_failure_clauses(
     run_stopped: bool = False,
     stop_reason: Optional[str] = None,
     failed_tasks: int = 0,
+    input_layout_mismatch: Optional[str] = None,
 ) -> VerdictDescriptor:
     """Append run-health clauses to a data-state descriptor's subtitle.
 
@@ -136,6 +137,11 @@ def with_failure_clauses(
             f"{stale_samples} sample{'s' if stale_samples != 1 else ''} "
             "serving stale data"
         )
+    if input_layout_mismatch:
+        # The sample names this verdict attributes to are the pipeline's
+        # grouping of what it found, not the grouping the operator declared
+        # (round-5 drills, C13).
+        clauses.append(input_layout_mismatch)
     if not clauses:
         return descriptor
     return replace(

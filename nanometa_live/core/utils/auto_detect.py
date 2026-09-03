@@ -14,7 +14,7 @@ import re
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Optional, Any, Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,67 @@ def find_sample_subdirs(input_directory: str) -> List[Path]:
             selected.append(d)
 
     return sorted(selected, key=lambda d: d.name)
+
+
+_MODE_LABELS = {
+    "by_barcode": "By barcode",
+    "single_sample": "Single sample",
+    "per_file": "Per file",
+}
+
+
+def describe_layout_mismatch(
+    sample_handling: Optional[str],
+    root_fastq_count: int,
+    sample_dirs_with_reads: int,
+) -> Optional[str]:
+    """One sentence naming how the input layout contradicts the declared
+    sample handling, or None when they agree or nothing has arrived yet.
+
+    Pure: the caller supplies what it saw. The Configuration tab's Apply-time
+    check can only fire when the watched folder already holds files, and in
+    real time it is legitimately empty at Apply; the run then groups reads by
+    what it finds, not by what was selected, with no surface saying so
+    (round-5 drills, C13: by_barcode over a flat folder gave one sample per
+    file, silently). This is the runtime half of that check, evaluated on
+    every poll from the same listing that counts waiting files.
+    """
+    mode = (sample_handling or "").strip()
+    label = _MODE_LABELS.get(mode)
+    if not label:
+        return None
+    if mode == "by_barcode" and root_fastq_count > 0 and sample_dirs_with_reads == 0:
+        return (
+            "the watched folder holds FASTQ files directly but By barcode is "
+            "selected, so each file is being treated as its own sample"
+        )
+    if mode in ("single_sample", "per_file") and sample_dirs_with_reads > 0 and root_fastq_count == 0:
+        return (
+            f"the watched folder holds per-sample subfolders but {label} is "
+            "selected, so reads are grouped by subfolder instead"
+        )
+    return None
+
+
+def layout_mismatch_remedy(sample_handling: Optional[str]) -> str:
+    """The Configuration-tab change that resolves a layout mismatch."""
+    if (sample_handling or "") == "by_barcode":
+        return ("Switch Sample handling to Single sample or Per file, or point "
+                "the input at the folder that holds the barcode subfolders.")
+    return "Switch Sample handling to By barcode, or point the input at one subfolder."
+
+
+def input_layout_mismatch(input_directory: str, sample_handling: Optional[str]) -> Optional[str]:
+    """describe_layout_mismatch over a directory listing (readiness, tests)."""
+    p = Path(input_directory).expanduser() if input_directory else None
+    if p is None or not p.is_dir():
+        return None
+    root_files = list(p.glob("*.fastq*")) + list(p.glob("*.fq*"))
+    dirs_with_reads = [
+        d for d in find_sample_subdirs(str(p))
+        if any(d.glob("*.fastq*")) or any(d.glob("*.fq*"))
+    ]
+    return describe_layout_mismatch(sample_handling, len(root_files), len(dirs_with_reads))
 
 
 def detect_sample_handling(input_directory: str) -> Tuple[str, str]:

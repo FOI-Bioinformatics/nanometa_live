@@ -49,6 +49,13 @@ def _unprocessed_input_note(status: Dict[str, Any], config: Optional[Dict[str, A
             f"(arrived after the run ended)")
 
 
+def _input_layout_note(status: Dict[str, Any]) -> str:
+    """" -- <mismatch>" when the inbox layout contradicts the declared
+    sample handling (round-5 drills, C13). Set per poll by the backend."""
+    text = status.get("input_layout_mismatch")
+    return f" -- {text}" if text else ""
+
+
 def _skipped_tasks_note(status: Dict[str, Any]) -> str:
     """" -- N tasks failed (skipped): labels" for a finished run.
 
@@ -227,6 +234,8 @@ def register_status(app, backend_manager):
                 details.append(
                     f"{n_failed} task{'s' if n_failed != 1 else ''} failed (skipped)"
                 )
+            if status.get("input_layout_mismatch"):
+                details.append(str(status["input_layout_mismatch"]))
 
             if status.get("last_update"):
                 timestamp = time.strftime(
@@ -244,7 +253,7 @@ def register_status(app, backend_manager):
         if status.get("pipeline_status") == "completed":
             return ("blue", "Complete",
                     "Pipeline finished successfully" + unprocessed_note
-                    + _skipped_tasks_note(status))
+                    + _skipped_tasks_note(status) + _input_layout_note(status))
 
         # A stopped run is neither idle nor complete (round-4 audit, H2): say
         # why it ended, when, and how far it got, instead of inviting a Start.

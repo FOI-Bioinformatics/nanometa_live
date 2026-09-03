@@ -417,6 +417,9 @@ def register_dashboard_callbacks(app: Dash):
             run_stopped=run_stopped,
             stop_reason=stop_reason,
             failed_tasks=failed_tasks,
+            # What arrived versus what was declared (round-5 drills, C13):
+            # the verdict's attribution names the pipeline's grouping.
+            input_layout_mismatch=(status or {}).get("input_layout_mismatch"),
         )
 
         # Per-sample attribution for the ACTION REQUIRED subhead (closes
