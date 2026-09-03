@@ -21,11 +21,14 @@ def create_config_layout():
     Returns:
         A dash component representing the configuration tab layout
     """
-    return html.Div([
+    return html.Div(id="config-form-root", children=[
         # Hidden Store for refresh trigger
         dcc.Store(id="refresh-form-trigger", data=False),
         # Track whether form has been initialized (to suppress initial "Modified" badge)
         dcc.Store(id="config-form-initialized", data=False),
+        # Written by the browser on each Apply click after it has checked
+        # the number inputs; the server-side Apply fires from this Store.
+        dcc.Store(id="apply-config-request"),
         # Session-scoped draft of unsaved form edits. Switching to another tab
         # re-runs initialize_form_from_config (via refresh-form-trigger on
         # active_tab change), which would otherwise repopulate from the saved

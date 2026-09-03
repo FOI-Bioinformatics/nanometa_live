@@ -176,8 +176,18 @@ def main():
             config = config_loader.load_config(args.config)
             logging.info(f"Loaded configuration from {args.config}")
         except Exception as e:
+            # Fatal, as in visualization mode. Booting on defaults after a
+            # typo or a relative path resolved from another directory gave
+            # an app that looked configured and was not; the operator saw
+            # two log lines and a form of defaults (audit round 5, A15).
             logging.error(f"Failed to load configuration from {args.config}: {e}")
-            config = config_loader.create_default_config()
+            print(
+                f"ERROR: cannot load configuration {args.config!r}: {e}\n"
+                "Check the path (relative paths resolve from the current "
+                "directory) or start without --config for the defaults.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
     else:
         # Boot is always fresh. We never silently rehydrate
         # ~/.nanometa/configs/last-session.yaml -- a prior configuration

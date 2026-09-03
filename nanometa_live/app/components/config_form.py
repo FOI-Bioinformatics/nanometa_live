@@ -478,7 +478,7 @@ def _confirmation_testing_card():
                         type="number",
                         min=0,
                         max=1,
-                        step=0.001,
+                        step="any",
                         value=0.01
                     ),
                     dbc.FormText("0.01 is recommended"),
@@ -611,8 +611,8 @@ def _confirmation_testing_card():
                         # not per keystroke (round-2 audit, 2026-08-22).
                         debounce=True,
                         type="text",
-                        value="~/.nanometa",
-                        placeholder="Path to genome cache (default: ~/.nanometa)"
+                        value="",
+                        placeholder="Path to genome cache (default: the data directory)"
                     ),
                     dbc.FormText("Where downloaded reference genomes are stored on this computer"),
                     dbc.Tooltip(
@@ -733,29 +733,9 @@ def _processing_settings_item():
     return dbc.AccordionItem([
         # Note: the run name (analysis_name) moved to Essential Settings -- it
         # now names this run's results folder.
-        dbc.Row([
-            dbc.Col([
-                dbc.Label([
-                    "Check Interval (seconds) ",
-                    html.I(className="bi bi-info-circle text-muted ms-1", id="check-interval-info")
-                ], html_for="check-interval-input"),
-                dbc.Input(
-                    id="check-interval-input",
-                    type="number",
-                    min=5,
-                    max=300,
-                    step=5,
-                    value=15
-                ),
-                dbc.FormText("How often the pipeline checks for new input files"),
-                dbc.Tooltip(
-                    "Controls how frequently the Nextflow pipeline scans for new FASTQ files. "
-                    "Lower values detect files faster but use more resources. "
-                    "Different from the dashboard Update Interval which controls GUI refresh.",
-                    target="check-interval-info"
-                )
-            ], md=6)
-        ], className="mb-3"),
+        # The former "Check Interval" field was retired in the round-5 audit
+        # (C1): real-time intake is event-driven (Nextflow watchPath) and the
+        # value reached only a logged legacy parameter, so it changed nothing.
         dbc.Row([
             dbc.Col([
                 dbc.Label([
@@ -773,7 +753,8 @@ def _processing_settings_item():
                 ),
                 dbc.FormText(
                     "Stop watching once no new file has arrived for this many minutes "
-                    "(plus a 5 minute grace period). Every detected file resets the clock. "
+                    "plus a grace period (5 minutes unless realtime_processing_grace_period "
+                    "is set in the config file). Every detected file resets the clock. "
                     "Empty = watch until manually stopped."
                 ),
                 dbc.Tooltip(
@@ -788,25 +769,30 @@ def _processing_settings_item():
             ], md=6),
             dbc.Col([
                 dbc.Label([
-                    "Maximum file age (minutes) ",
+                    "Skip pre-existing files older than (minutes) ",
                     html.I(className="bi bi-info-circle text-muted ms-1", id="max-file-age-info")
                 ], html_for="max-file-age-input"),
                 dbc.Input(
                     id="max-file-age-input",
                     type="number",
                     min=0,
-                    step=60,
-                    value=1000000,
-                    placeholder="Leave high to process all files"
+                    step=1,
+                    value=None,
+                    placeholder="Empty = process every file"
                 ),
-                dbc.FormText("Realtime only: ignore input files older than this"),
+                dbc.FormText(
+                    "Realtime only. Files already in the folder at Start and "
+                    "older than this are not processed; files arriving during "
+                    "the run always are."
+                ),
                 dbc.Tooltip(
-                    "Only applies in real-time mode. Files whose modification "
-                    "time is older than this many minutes are skipped, so a "
-                    "fresh run does not reprocess stale data left in the input "
-                    "folder. The default is intentionally very large so demo "
-                    "and test data are not skipped; lower it (e.g. 10080 = 7 "
-                    "days) for production monitoring.",
+                    "Only applies in real-time mode. At Start the pipeline lists "
+                    "the files already present and skips those whose modification "
+                    "time is older than this many minutes, so a fresh run does "
+                    "not reprocess stale data left in the input folder. Files "
+                    "that arrive while the run is watching are new by definition "
+                    "and are always processed. Leave empty to process everything "
+                    "(demo and archived data); set e.g. 1440 for one day.",
                     target="max-file-age-info"
                 )
             ], md=6)
@@ -868,7 +854,9 @@ def _processing_settings_item():
                               style={"fontSize": "0.65rem"}),
                 ], className="d-flex align-items-center"),
                 dbc.FormText("Adds a metagenome assembly step; results appear "
-                             "on the Reports tab"),
+                             "on the Reports tab. Batch mode only: in real-time "
+                             "mode each small batch would be assembled on its "
+                             "own and fail, so the launch leaves assembly off."),
                 dbc.Tooltip(
                     "Runs the pipeline's experimental assembly step on the "
                     "filtered reads. Flye runs in metagenome mode, so mixed "
@@ -940,7 +928,7 @@ def _read_filtering_item():
                     type="number",
                     min=1,
                     max=50000,
-                    step=50,
+                    step=1,
                     value=1000,
                 ),
                 dbc.FormText("Reads shorter than this are dropped (set to 100 for V3-V4 amplicons; 1 disables); applies to the next Start"),
@@ -987,7 +975,7 @@ def _read_filtering_item():
                     type="number",
                     min=1,
                     max=50000,
-                    step=50,
+                    step=1,
                     value=1000,
                 ),
                 dbc.FormText("Only used when QC tool is filtlong (above)"),
@@ -1008,7 +996,7 @@ def _read_filtering_item():
                     id="chopper-maxlength-input",
                     type="number",
                     min=1,
-                    step=100,
+                    step=1,
                     value=None,
                     placeholder="no limit",
                 ),
@@ -1037,7 +1025,7 @@ def _read_filtering_item():
                     type="number",
                     min=0,
                     max=1,
-                    step=0.05,
+                    step="any",
                     value=0.0,
                 ),
                 dbc.FormText("Per-read classification confidence (0 disables)"),
@@ -1166,7 +1154,7 @@ def _display_settings_item():
                     type="number",
                     min=5,
                     max=300,
-                    step=5,
+                    step=1,
                     value=10
                 ),
                 dbc.FormText("How often the dashboard refreshes (5-300 seconds)"),
@@ -1200,9 +1188,14 @@ def _performance_item():
                     type="number",
                     min=1,
                     step=1,
-                    value=4
+                    value=None,
+                    placeholder="Pipeline default"
                 ),
-                dbc.FormText("Number of processing threads")
+                dbc.FormText(
+                    "Upper bound on the CPUs any single pipeline task may "
+                    "request (nanometanf --max_cpus). Kraken2 scales from it. "
+                    "Empty = the pipeline's own default."
+                )
             ], md=4),
             dbc.Col([
                 dbc.Label("Dashboard Port", html_for="gui-port-input"),

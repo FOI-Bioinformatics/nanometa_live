@@ -107,7 +107,7 @@ kraken_db: "/path/to/kraken2_db"
 main_dir: "/path/to/results"
 kraken_memory_mapping: true
 blast_validation: true
-pipeline_cores: 4
+max_cpus: 8
 update_interval_seconds: 15
 analysis_name: "My Analysis"
 ```

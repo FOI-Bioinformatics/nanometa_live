@@ -98,9 +98,11 @@ class TestTheOptionsAreUsable:
     def options_fn(self):
         app = dash.Dash(__name__, suppress_callback_exceptions=True)
         config_tab.register_config_callbacks(app, backend_manager=None)
-        return get_callback_fn(
+        fn = get_callback_fn(
             app, "negative-controls-input", input_contains="available-samples"
         )
+        # Third Input (the input-directory field) defaults to none here.
+        return lambda samples, selected, nanopore_dir=None: fn(samples, selected, nanopore_dir)
 
     def test_detected_samples_are_offered(self, options_fn):
         opts = options_fn(["All Samples", "barcode11", "barcode16"], [])

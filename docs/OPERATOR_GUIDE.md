@@ -256,7 +256,7 @@ params). Defaults shown apply when the param is omitted.
 | `max_classification_forks` | `2` | `4-8` | `8-16` | `16-32` |
 | `max_concurrent_batches` | `2` | `4` | `4-8` | `4-8` |
 | `update_interval_seconds` | `10` (default) | `10` | `10` | `10` |
-| `pipeline_cores` | `4` | `8` | `16` | `32` |
+| `max_cpus` | `4` | `8` | `16` | `32` |
 
 ### `kraken2_memory_gb` rule of thumb
 

@@ -1539,6 +1539,64 @@ swallows the app's stdout and stderr; `conda run` does not forward heredoc
 stdin; `unmeasured_samples()` is a cached lookup that only the attribution
 build refreshes.
 
+**Configuration tab, round 5 (2026-09-03 audit,
+`docs/audit/config-tab-round5-2026-09-03.md`; do not regress).** The
+question was whether a value set in the form reaches the pipeline and does
+what its label says. The rules that came out of it:
+
+- **A number input is checked in the browser before the server applies.**
+  Dash never sends a value the browser refuses (min, max or step), so a
+  server fired on the click validated the OLD value and reported success.
+  The click now writes `apply-config-request` after a browser-side
+  `checkValidity()` pass over `#config-form-root`; `apply_config_changes`
+  fires from that Store and refuses when the request names invalid fields.
+  Integer fields carry `step=1`; the HTML step is anchored at `min`, so
+  `min=1, step=50` accepted only 1, 51, 101 and the default 1000 could not
+  be typed back.
+- **The dirty baseline follows the validation outcome.** Apply writes the
+  snapshot and clears the badge itself (a rejected Apply leaves both), Reset
+  rebases and persists like Apply, and a form restored from the session draft
+  is not marked initialised, so the badge reflects the restored edits.
+- **Form fallbacks come from `config_loader.default_config()`.** The form
+  loader reads every `.get(key, ...)` fallback from there; a literal that
+  diverges (50 against 10 for `min_reads_for_validation`) shows one value
+  while the app uses another until Apply.
+- **`max_cpus` is the CPU control.** `pipeline_cores` was never read by the
+  launcher, and `validation_cores` / `blast_cores` pinned cpus on process
+  names nanometanf does not have (`BLAST_BLASTN`, `EXTRACT_VALIDATION_SEQS`).
+  The generated `-c` config carries no validation cpu pins; the field sends
+  `--max_cpus`, empty = pipeline default.
+- **Check Interval is gone.** Real-time intake is event-driven (watchPath)
+  and with `batch_size` 1 every file is a batch on arrival; the field reached
+  only nanometanf's logged legacy `batch_interval`.
+- **"Skip pre-existing files older than" does what it says** through
+  nanometanf's `--max_file_age_minutes` (dev, 2026-09-03), applied to the
+  start-up listing only. The old target, `max_avg_file_age_minutes`, is an
+  alert threshold the GUI never displayed.
+- **The launch sends what the header assumes.** `realtime_processing_grace_
+  period` travels when the config carries it (the auto-stop chip counted it,
+  the pipeline used its own default); a timeout of 0 is sent as null (the
+  schema floor is 1, the GUI already reads 0 as "no timeout");
+  `priority_samples` is not sent at all (it is matched against sample ids,
+  and the watchlist taxids that used to travel there matched nothing);
+  `enable_assembly` is dropped in real-time mode (per-batch Flye fails on
+  every 2000-read batch).
+- **Start says what it could not do.** `parameter_mapping.add_launch_warning`
+  records a condition at params time (confirmation testing on with no
+  genome), `NextflowManager.setup` collects it and `BackendManager.start`
+  appends it to the message the "Analysis Started" toast shows. A failed
+  preflight is not a finished run: `announce_completion` arms only on an
+  authoritative running status, never on the optimistic `starting` write.
+  A new Start clears the previous run's errors (a success after a failure
+  was recorded as PIPELINE ERROR), and a fatal process failure names its
+  task in `.nanometa.run.json` (`_failed_process_names`).
+- **A sample folder is any direct subfolder holding reads.** The form's
+  `find_sample_subdirs` and nanometanf's `InputDetector.sampleSubdirs`
+  agree (MinKNOW's `fastq_pass`/`fastq_fail`/`fastq_skip` bins excepted);
+  batch by_barcode with a custom-named folder generates a samplesheet so an
+  older pipeline groups it too, and the real-time intake passes the watched
+  root to `extractSampleId`.
+
 **Negative controls.** `is_negative_control` reads the config's
 `negative_control_samples` list first, then falls back to name patterns:
 `NTC` / `neg_ctrl` / `blank`, fused numeric suffixes (`NTC1`, `blank2`,

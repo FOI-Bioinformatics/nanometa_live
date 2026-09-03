@@ -349,8 +349,6 @@ class TestSingleInputGuard:
     INPUT_KEYS = (
         "input",
         "input_dir",
-        "fastq_input_dir",
-        "barcode_input_dir",
         "nanopore_output_dir",
     )
 
