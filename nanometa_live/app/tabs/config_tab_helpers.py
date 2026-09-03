@@ -119,6 +119,33 @@ def _validate_kraken_db_path(kraken_db):
     return errors
 
 
+def _validate_read_filter_ranges(*, chopper_minlength, chopper_quality,
+                                 chopper_maxlength, filtlong_minlength):
+    """Bounds for the read-filter card: the length floors, the quality floor
+    and the optional upper bound.
+
+    Floors are 1, not 0: nanometanf's schema sets ``minimum: 1`` on both
+    length filters, so a 0 saved here fails nf-schema at launch. 1 disables
+    the filter in practice (no nanopore read is shorter).
+    """
+    errors = []
+    if chopper_minlength is not None and chopper_minlength < 1:
+        errors.append("Chopper minimum length must be 1 or greater "
+                      "(the pipeline rejects 0; 1 disables the filter)")
+    if chopper_quality is not None and not (0 <= chopper_quality <= 50):
+        errors.append("Minimum mean read quality must be between 0-50")
+    if filtlong_minlength is not None and filtlong_minlength < 1:
+        errors.append("Filtlong minimum length must be 1 or greater "
+                      "(the pipeline rejects 0; 1 disables the filter)")
+    if chopper_maxlength is not None and chopper_maxlength != "":
+        floor = chopper_minlength if chopper_minlength is not None else 1
+        if chopper_maxlength < max(1, floor):
+            errors.append("Maximum read length must be at least the "
+                          "minimum read length (leave it empty for no "
+                          "limit)")
+    return errors
+
+
 def _validate_numeric_ranges(
     *,
     update_interval,
@@ -182,23 +209,12 @@ def _validate_numeric_ranges(
                 errors.append("Kraken2 minimum hit groups must be 0 or greater")
         except (TypeError, ValueError):
             errors.append("Kraken2 minimum hit groups must be a whole number")
-    # Floor is 1, not 0: nanometanf's schema sets minimum: 1 on both length
-    # filters, so a 0 saved here fails nf-schema at launch. 1 disables the
-    # filter in practice (no nanopore read is shorter).
-    if chopper_minlength is not None and chopper_minlength < 1:
-        errors.append("Chopper minimum length must be 1 or greater "
-                      "(the pipeline rejects 0; 1 disables the filter)")
-    if chopper_quality is not None and not (0 <= chopper_quality <= 50):
-        errors.append("Minimum mean read quality must be between 0-50")
-    if filtlong_minlength is not None and filtlong_minlength < 1:
-        errors.append("Filtlong minimum length must be 1 or greater "
-                      "(the pipeline rejects 0; 1 disables the filter)")
-    if chopper_maxlength is not None and chopper_maxlength != "":
-        floor = chopper_minlength if chopper_minlength is not None else 1
-        if chopper_maxlength < max(1, floor):
-            errors.append("Maximum read length must be at least the "
-                          "minimum read length (leave it empty for no "
-                          "limit)")
+    errors += _validate_read_filter_ranges(
+        chopper_minlength=chopper_minlength,
+        chopper_quality=chopper_quality,
+        chopper_maxlength=chopper_maxlength,
+        filtlong_minlength=filtlong_minlength,
+    )
     if max_file_age_minutes is not None and max_file_age_minutes != "":
         try:
             if int(max_file_age_minutes) < 0:

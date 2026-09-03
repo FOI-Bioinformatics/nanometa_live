@@ -904,6 +904,48 @@ def _build_base_params(config: Dict[str, Any], main_dir: str, kraken_db: str,
     }
 
 
+def _resolve_batch_input_mode(config: Dict[str, Any], nanopore_dir: str,
+                              sample_handling: str):
+    """Decide how batch mode hands its input to nanometanf.
+
+    Returns ``(samplesheet_provided, use_input_dir)``. Scenario E is the
+    auto ``--input_dir`` for batch + by_barcode with no samplesheet, scoped
+    to by_barcode so single_sample and per_file still generate samplesheets.
+    """
+    user_input = config.get("input")
+    use_input_dir = bool(config.get("use_input_dir_mode", False))
+    samplesheet_provided = bool(user_input) and os.path.isfile(user_input)
+
+    if use_input_dir or samplesheet_provided or sample_handling != "by_barcode":
+        return samplesheet_provided, use_input_dir
+
+    # A custom-named sample folder (Turex/, Zymo/) is one sample to the
+    # form's validator. nanometanf dev (2026-09-03) groups it the same way;
+    # an older pipeline recognised only barcodeNN and split such a folder
+    # into one sample per file (audit round 5, B4). The generated samplesheet
+    # names each folder explicitly, so it is used whenever a folder is not
+    # conventionally named, whatever the pipeline version.
+    from nanometa_live.core.utils.auto_detect import find_sample_subdirs, is_barcode_named
+    custom_dirs = [
+        d.name for d in find_sample_subdirs(nanopore_dir)
+        if not (is_barcode_named(d.name) or d.name == "unclassified")
+    ]
+    if custom_dirs:
+        logging.info(
+            "Batch mode + by_barcode with custom-named sample folders "
+            f"({', '.join(sorted(custom_dirs))}): generating a samplesheet "
+            "so each folder is one sample."
+        )
+        return samplesheet_provided, use_input_dir
+
+    logging.info(
+        "Batch mode + by_barcode with no samplesheet supplied: "
+        "auto-enabling --input_dir so nanometanf INPUT_SCANNER "
+        "can discover the barcode layout."
+    )
+    return samplesheet_provided, True
+
+
 def _apply_batch_input_params(params: Dict[str, Any], config: Dict[str, Any],
                               main_dir: str, nanopore_dir: str,
                               sample_handling: str, sample_name: str) -> None:
@@ -915,40 +957,8 @@ def _apply_batch_input_params(params: Dict[str, Any], config: Dict[str, Any],
     no samplesheet, else auto-generate a samplesheet from nanopore_dir.
     """
     user_input = config.get("input")
-    use_input_dir = bool(config.get("use_input_dir_mode", False))
-
-    # Scenario E auto-trigger: batch + by_barcode + no samplesheet. Scoped to
-    # by_barcode so single_sample and per_file still generate samplesheets.
-    samplesheet_provided = bool(user_input) and os.path.isfile(user_input)
-    if (
-        not use_input_dir
-        and not samplesheet_provided
-        and sample_handling == "by_barcode"
-    ):
-        # A custom-named sample folder (Turex/, Zymo/) is one sample to the
-        # form's validator. nanometanf dev (2026-09-03) groups it the same
-        # way; an older pipeline recognised only barcodeNN and split such a
-        # folder into one sample per file (audit round 5, B4). The generated
-        # samplesheet names each folder explicitly, so it is used whenever a
-        # folder is not conventionally named, whatever the pipeline version.
-        from nanometa_live.core.utils.auto_detect import find_sample_subdirs, is_barcode_named
-        custom_dirs = [
-            d.name for d in find_sample_subdirs(nanopore_dir)
-            if not (is_barcode_named(d.name) or d.name == "unclassified")
-        ]
-        if custom_dirs:
-            logging.info(
-                "Batch mode + by_barcode with custom-named sample folders "
-                f"({', '.join(sorted(custom_dirs))}): generating a samplesheet "
-                "so each folder is one sample."
-            )
-        else:
-            use_input_dir = True
-            logging.info(
-                "Batch mode + by_barcode with no samplesheet supplied: "
-                "auto-enabling --input_dir so nanometanf INPUT_SCANNER "
-                "can discover the barcode layout."
-            )
+    samplesheet_provided, use_input_dir = _resolve_batch_input_mode(
+        config, nanopore_dir, sample_handling)
 
     if samplesheet_provided:
         params["input"] = str(user_input)
@@ -1033,6 +1043,25 @@ def _apply_realtime_input_params(params: Dict[str, Any], config: Dict[str, Any],
     # as indefinite and its realtime monitoring handles it explicitly. When
     # the key is absent entirely, the documented default (60) is written out
     # so the params file and the config agree.
+    _apply_realtime_stop_conditions(params, config)
+
+    max_files = config.get("max_files")
+    if max_files:
+        params["max_files"] = int(max_files)
+        logging.info(f"Max files limit set to {max_files}")
+
+    barcode_mode = "with barcode directories" if sample_handling == "by_barcode" else "single sample"
+    logging.info(f"Realtime mode ({barcode_mode}): Monitoring {nanopore_dir}")
+    if params["kraken2_enable_incremental"]:
+        logging.info("Incremental Kraken2 classification enabled for cumulative reporting")
+
+
+def _apply_realtime_stop_conditions(params: Dict[str, Any], config: Dict[str, Any]) -> None:
+    """Set how and when a real-time run stops watching, in place.
+
+    The GUI's auto-stop chip counts the timeout plus the grace period, so
+    both must reach the pipeline or the chip and the timer disagree.
+    """
     # A hand-edited 0 is read by the GUI countdown as "no timeout" and
     # rejected by nanometanf's schema (minimum 1); send it as the null the
     # GUI already means (audit round 5, C4).
@@ -1068,16 +1097,6 @@ def _apply_realtime_input_params(params: Dict[str, Any], config: Dict[str, Any],
     if params.get("enable_assembly"):
         params["enable_assembly"] = False
         logging.info("Assembly is not run in real-time mode; switch off for this launch")
-
-    max_files = config.get("max_files")
-    if max_files:
-        params["max_files"] = int(max_files)
-        logging.info(f"Max files limit set to {max_files}")
-
-    barcode_mode = "with barcode directories" if sample_handling == "by_barcode" else "single sample"
-    logging.info(f"Realtime mode ({barcode_mode}): Monitoring {nanopore_dir}")
-    if params["kraken2_enable_incremental"]:
-        logging.info("Incremental Kraken2 classification enabled for cumulative reporting")
 
 
 _launch_warnings: List[str] = []
