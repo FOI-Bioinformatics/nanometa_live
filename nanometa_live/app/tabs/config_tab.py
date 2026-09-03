@@ -602,7 +602,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     # the Apply click. The browser knows which fields hold a refused value
     # (min, max or step); the server never sees such a value at all.
     app.clientside_callback(
-        """
+        r"""
         function(n_clicks) {
             if (!n_clicks) { return window.dash_clientside.no_update; }
             var bad = [];
