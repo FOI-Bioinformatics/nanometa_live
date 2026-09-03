@@ -61,17 +61,17 @@ L = cosmetic or dead code.
 | P3 | `.nanometa.run.json` records `processes_failed: 0` and no failed task for a fatal process failure; the banner shows Nextflow's generic text without the process name | M | live, confirmed; fixed |
 | C1 | Check Interval does nothing: `batch_interval` is only logged; with `batch_size` 1 every file is a batch on arrival (classifier tasks 6 to 15 s apart under a 300 s setting) | H | live, confirmed; field retired |
 | C2 | Maximum file age does not exclude anything: nanometanf uses `max_avg_file_age_minutes` only as a "high file age" alert threshold in `UPDATE_CUMULATIVE_STATS`; six files aged 3 h were classified under a 60 min setting | H | live, confirmed (both repos); fixed (both repos) |
-| C3 | Running totals OFF in real time | | pending (RT2) |
-| C4 | Empty timeout sent as JSON null; hand-edited 0 rejected by the schema while the GUI reads it as "no timeout" | H | static confirmed for 0; fixed (0 sent as null); null pending (RT3) |
+| C3 | Running totals OFF in real time changes nothing: the pipeline forces the incremental path whenever `realtime_mode` is set | M | live (RT2), confirmed |
+| C4 | Empty timeout sent as JSON null; hand-edited 0 rejected by the schema while the GUI reads it as "no timeout" | H | fixed (0 sent as null); null path verified live (RT3) |
 | C5 | GUI countdown = timeout + config grace (1); pipeline budget = timeout + its own default grace (5), the config value is never sent | M | live, confirmed (see evidence); fixed |
 | C6 | `priority_samples` = 129 taxids; pipeline logs "Priority routing ENABLED" and matches them against sample ids | M | live, confirmed; fixed |
 | C7 | Adaptive batching on, effective batch size 1 for the GUI's values | L | live, refuted as a defect |
 | C8 | Assembly in real time runs Flye on every 2000-read batch; each fails ("No overlaps found") and is skipped, counted in the header as failed tasks | M | live, confirmed; fixed (not run in real time) |
 | C9 | Validation settings reach the per-batch modules: `-perc_identity 80 -evalue 0.001`, minimap2 `min_mapq=20 identity_threshold=80` | - | live, PASS |
 | C10 | Chopper `--quality 7 --minlength 501 --maxlength 20001` per batch; `skip_nanoplot` honoured | - | live, PASS (krona/stats checked at run end) |
-| C11 | Apply during a run then Continue | | pending (RT4) |
-| C12 | sample_handling in real time | | pending (RT5) |
-| C13 | Real-time by_barcode on a flat directory passes Apply with no message (batch rejects it with a suggestion) | M | static, confirmed; fixed |
+| C11 | Apply during a run pins the running folders and its pipeline settings do reach the next Start, but the collision modal never says the settings changed | M | live (RT4), confirmed |
+| C12 | sample_handling in real time: single_sample, per_file and custom-named folders all group correctly | - | live (RT5), PASS |
+| C13 | Real-time by_barcode on a flat directory passes Apply with no message (batch rejects it with a suggestion) | M | fixed for a populated directory; an EMPTY one still passes and the run silently groups per file (RT5) |
 | C15 | Update interval 5 s gives a ~5 s poll cadence | - | live, PASS |
 | C16 | An empty genome cache folder silently disables validation (log warning only; `blast_validation` sent as false while the switch shows on) | M | live, confirmed; fixed |
 
@@ -260,3 +260,145 @@ server validator, and all nine tabs rendered with zero console errors.
 - A8 wording only; A17 root cause (the env's Java) is a launcher matter.
 - The miniasm path has been verified in stub mode only; a conda run of the
   assembly subworkflow is the remaining check for P2.
+
+## Live drills RT2 to RT5 (2026-09-03, after the fix pass)
+
+Run on the released 0.17.0 / v1.9.0 build against the Bioshield database, fed
+by nanorunner 3.1.0 (and, for custom-named folders, by a direct file feeder --
+nanorunner's multiplex mode recognises only `barcodeNN` sources). Kit
+additions: `rt5.sh`, `feed_dirs.sh`, `read_header.js`, `input/multiplex_small`,
+`input/flat_small`, `input/custom_small`. `run.sh` now absolutises `--config`,
+because the app is launched from the repo checkout and 0.17.0 refuses a
+config path it cannot resolve (A15 confirming itself on the kit).
+
+### RT2 -- C3: running totals OFF. Confirmed, the switch is inert in real time.
+
+The launch carried `kraken2_enable_incremental: false`. The pipeline
+nevertheless produced the complete incremental layout for all five samples --
+`batch_reports/`, `reports/`, `stats/batch_N_taxid_counts.json` and
+`<sample>.cumulative.kraken2.report.txt` -- and the dashboard read 2,056
+reads on the cumulative tier with five watched organisms detected, which is
+what the switch ON produces. `subworkflows/local/taxonomic_classification/
+main.nf:181` branches on
+
+    if (params.kraken2_enable_incremental == true || params.realtime_mode == true)
+
+so real-time always takes the incremental path, and the run log says so:
+"Automatically enabled by realtime mode for cumulative reporting". The
+pipeline's forcing is deliberate and defensible (real-time needs incremental
+for cumulative reporting). The defect is the control: a switch labelled
+"Running totals in live mode", badged Recommended, that cannot be turned off
+in live mode, and that in batch mode -- the mode its label does not name --
+is the only thing deciding. Timeline check clean (244 ticks, 0 violations).
+
+### RT3 -- C4 null timeout and C9 validation. Both pass.
+
+An empty timeout field travels as JSON `null`; nf-schema accepts it, the
+timer block is skipped (`if (params.realtime_timeout_minutes)`), and the run
+log states "Neither --max_files nor --realtime_timeout_minutes is set. The
+pipeline will run indefinitely until manually stopped." The auto-stop chip is
+correctly absent. Stop works and records `final_status: stopped`,
+`stop_reason: operator`, 13 files. C9 re-confirmed under real time: identity
+80 reaches both `blast_perc_identity` and `validation_identity_threshold`,
+e-value 0.001, mapq 20, and `validation_method: both` produced 184 files
+across `validation/blast/` and `validation/minimap2/`. Timeline clean.
+
+### RT4 -- C11: Apply during a run, then Continue. Confirmed.
+
+Mid-run Apply pins the running run's input and results folders and says so:
+"Changes Applied (run in progress) -- Display and watchlist settings take
+effect now. The running analysis keeps its input and results folders;
+pipeline settings apply to the next Start." An attempt to redirect both
+folders mid-run left the run writing where it started (H11 holds).
+
+Its pipeline settings do reach the next Start: launch 1 carried
+`kraken2_confidence 0.05` / `max_cpus 4`, launch 3 (Apply then Continue in
+ONE browser session) carried 0.3 / 2, with `-resume`. Continue resumed for
+real -- "Continue: skipping 14 of 15 existing input files already classified
+by the previous run" -- exactly as the modal describes.
+
+The confirmed defect is what the modal does not say. Its three options
+describe archiving, resuming and cancelling, and nothing states that the
+classification settings differ from those that produced the results already
+in that folder. An operator continues into an outdir whose cumulative reports
+were built at confidence 0.05 while the new batches use 0.3, with no warning.
+
+Two further observations:
+
+- **The mid-run Apply pins `results_output_directory` but not
+  `results_dir_override`.** Changing the results folder mid-run therefore
+  leaves the running run intact and silently redirects the NEXT Start to the
+  new folder -- where, being empty, no collision modal appears at all and
+  Continue is not offered. The toast's "pipeline settings apply to the next
+  Start" is true but does not hint that the next run has moved.
+- **A Start issued from a second browser tab launched with the boot config.**
+  The mid-run Apply's 0.3 / 2 were saved to `last-session.yaml`, yet a Start
+  from a fresh driver session used 0.05 / 4. This is round 4's open root
+  cause (`app.layout` is static, so a new tab hydrates `app-config` from the
+  boot-time config) and C11 is where it bites: the operator's mid-run change
+  is silently discarded by reopening the page.
+
+### RT5 -- C12 and C13: sample handling. Three pass, one gap.
+
+| mode | input | result |
+|---|---|---|
+| `single_sample`, name `fieldA` | 6 flat files | one sample `fieldA` -- PASS |
+| `per_file` | 6 flat files | 6 samples by filename stem -- PASS |
+| `by_barcode` | `Turex/`, `Zymo/` | exactly 2 samples, named after the folders -- PASS (the v1.9.0 fix, live) |
+| `by_barcode` | 6 flat files | 6 samples, one per file, silently |
+
+C13 has two halves. With files already in the directory, Apply is now
+rejected with the same message and auto-detection suggestion batch mode
+gives ("Auto-detection suggests 'single_sample'"), and the green success
+alert stays shut (A2, live). But in real time the watched directory is
+legitimately empty at Apply -- the normal case -- so the guard cannot fire,
+and the run then produces one sample per file under a by_barcode selection
+with no warning at any point. The Apply-time check cannot close this; it
+needs a runtime signal once the intake sees a flat layout.
+
+### New finding: a zero-read placeholder outranks a populated cumulative report
+
+`audit_realtime_timeline.py --check` flagged RT4: `barcode07 total_reads fell
+77 -> 0`. It fell twice, at the Stop and again at the Continue, and stayed
+there 85 s and 88 s before recovering -- while the aggregate held at 817, so
+the dashboard showed a sample at 0 reads inside a run reporting 817.
+
+The report on disk was correct and unchanged throughout (863 bytes, 73
+unclassified + 4 root = 77 reads, verified in every 20 s snapshot across the
+window). Replaying those snapshots reproduces the zero
+(`audit_replay_snapshots.py`, then a direct loader call), so this is not a
+live timing artefact:
+
+    parse cumulative, stability ON  -> None (inside the stability window)
+    parse cumulative, stability OFF -> 20 rows
+    load_kraken_data(...)           -> 1 row: unclassified U reads=0 cumul_reads=0
+
+The mechanism: on a Continue where a sample has no new reads, nanometanf's
+`EMIT_EMPTY_KRAKEN2_REPORT` publishes `<sample>.kraken2.report.txt`
+containing the single row `100.00 0 0 U 0 unclassified` -- by design, so a
+sample with no output is shown rather than omitted. The pipeline meanwhile
+keeps rewriting the sample's cumulative report, so its mtime stays fresh and
+it sits inside the stability window, parsing to None. The loader then falls
+back to the next tier, which is that placeholder, and the sample reads zero.
+
+This is the failure mode the verdict guards exist to prevent, one layer
+lower: a measurement that could not be taken is rendered as a measured zero.
+Falling back to a 0-read report is worse than serving nothing, because
+nothing is reported as unmeasured while zero is reported as counted. The
+round-4 guards (`_last_good_frame`, `_tier_fallback_paths`,
+`_has_pending_cumulative`) cover a tier fallback with no data behind it; they
+do not cover a fallback whose target is an explicit zero.
+
+### Kit and reproduction
+
+    ~/nanometa-audit-r5/run.sh <name> <config> <port>       # app + sampler + 20 s snapshots
+    ~/nanometa-audit-r5/rt5.sh <name> <config> <port> <src> <structure>
+    ~/nanometa-audit-r5/feed_dirs.sh <src> <target> <interval>   # custom-named folders
+    python scripts/audit_realtime_timeline.py --check timelines/<run>.jsonl
+    python scripts/audit_replay_snapshots.py snapshots/rt4 --config configs/r5_rt4.yaml \
+        --from 111600 --to 111900 --out replay.jsonl
+
+Timeline checks: rt2, rt3, rt5_perfile, rt5_flat, rt5_custom clean; rt4 carries
+the placeholder finding above; rt5_single flagged a 1-read watched organism
+dropping out of one poll, the same shape at a scale too small to separate from
+a re-parse.
