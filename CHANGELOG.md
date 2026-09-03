@@ -4,6 +4,90 @@ All notable changes to Nanometa Live are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.17.0] - 2026-09-03
+
+Every control on the Configuration tab now reaches the pipeline, or is gone.
+The round-5 audit (2026-09-03) took the form itself as the object of study:
+33 numbered hypotheses across both processing modes, settled by unit probe,
+headless browser drill or live run, with every launch snapshotted and diffed
+against the form values through the GUI's own key mapping. 30 were confirmed
+defects. Pairs with nanometanf v1.9.0, which carries the pipeline side.
+
+### Fixed
+
+- **A value the browser refuses never reached the server, and Apply said it
+  had.** Dash does not send a number input's value when it violates the
+  widget's `min`, `max` or `step`, so Apply validated the PREVIOUS value,
+  reported "Changes Applied" and saved the old one while the field showed
+  what the operator typed. The click now runs a browser-side validity pass
+  first and the server Apply fires from its result, refusing with the
+  offending fields named. Measured before the fix on the read-length field:
+  500, 1000, 550, 2000 and 1234 were all silently discarded.
+- **The step grid refused ordinary values.** The HTML step is anchored at
+  `min`, so `min=1, step=50` accepted only 1, 51, 101 and the default 1000
+  could not be typed back. Integer fields now step by 1, float fields by
+  any.
+- **A rejected Apply no longer reports success.** The validating callback
+  owns the green feedback alert, the dirty-check baseline and the Modified
+  badge, so a refused Apply changes none of them. Reset rebases and persists
+  like Apply. A form restored from the session draft is not marked
+  initialised, so the badge reflects the restored edits instead of hiding
+  them.
+- **Form fallbacks and config defaults agree.** The form loader reads every
+  fallback from one function, so a config lacking a key shows the value the
+  app will use; `min_reads_for_validation` showed 50 while the app used 10.
+  Three keys absent from the defaults made the form read Modified before any
+  edit.
+- **CPU Cores reached nothing.** It wrote three keys: one the launcher never
+  read, and two that pinned CPUs on process names the pipeline does not have.
+  The field is now the pipeline's per-task CPU ceiling, and the generated
+  config carries no validation CPU pins.
+- **A start that failed before Nextflow launched was announced as "Analysis
+  Complete. Results are up to date."** The completion detector now arms only
+  on an authoritative running status, never on the optimistic write the click
+  makes. A new Start clears the previous run's errors, which a successful run
+  after a failed one used to inherit and be recorded as PIPELINE ERROR. A
+  fatal process failure names its task in the run metadata.
+- **Confirmation testing that cannot run says so.** Validation silently
+  disabled for want of a reference genome now reaches the operator as a
+  launch warning on the Start toast, rather than a log line under a switch
+  still showing on.
+- **A missing `--config` file is fatal in full mode**, as it already was in
+  visualization mode; it used to boot on defaults with two log lines. A
+  failing `nextflow -version` reports what the command said instead of
+  "Nextflow not found", which was wrong whenever the binary ran and failed.
+- **Real-time input checks.** A by-barcode configuration pointing at a
+  directory that already holds flat files is now rejected with the same
+  suggestion batch mode gives; it used to pass Apply and the readiness list
+  in silence. Negative controls can be declared from the input directory's
+  sample folders before the first run has produced output.
+
+### Changed
+
+- **"Check Interval" is retired.** Real-time intake is event-driven and with
+  a batch size of one every file is a batch on arrival; the field reached
+  only a logged legacy pipeline parameter. Classifier tasks ran 6 to 15
+  seconds apart under a 300-second setting.
+- **"Maximum file age" became "Skip pre-existing files older than"** and now
+  drives a real intake filter in nanometanf. It used to map to an alert
+  threshold the dashboard never displayed, so it excluded nothing: six files
+  aged three hours were classified under a 60-minute setting.
+- **The launch sends what the header assumes.** The real-time grace period
+  travels when the config carries it, so the auto-stop countdown and the
+  pipeline timer no longer disagree; a hand-edited timeout of 0 is sent as
+  "no timeout" rather than a value the schema rejects; watchlist taxids are
+  no longer sent as priority samples, which the pipeline matches against
+  sample names; assembly is switched off for real-time launches, where each
+  small batch was assembled alone and failed.
+- **A sample folder is any direct subfolder holding reads.** A batch
+  by-barcode run over custom-named folders generates a samplesheet so each
+  folder is one sample even on an older pipeline.
+
+### Removed
+
+- Dead configuration keys and launch-gate text for input modes the pipeline
+  does not have, and the last remnants of the retired temp-file setting.
+
 ## [0.16.0] - 2026-09-02
 
 How a real-time run ends is now part of what the dashboard says, and the
