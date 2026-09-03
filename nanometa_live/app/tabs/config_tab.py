@@ -688,6 +688,34 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         else:
             return {"display": "none"}
 
+    # The batching switch decides nothing in real-time mode: nanometanf
+    # branches on ``kraken2_enable_incremental || realtime_mode``, so live
+    # runs always classify incrementally and say so in their log
+    # ("Automatically enabled by realtime mode for cumulative reporting").
+    # Leaving the control live there let an operator switch it off and change
+    # nothing (round-5 drills, C3). Disable it and show it on, so the form and
+    # the saved config match what the run will do.
+    @app.callback(
+        [
+            Output("kraken2-incremental-input", "value", allow_duplicate=True),
+            Output("kraken2-incremental-input", "disabled"),
+            Output("kraken2-incremental-help", "children"),
+        ],
+        Input("processing-mode-input", "value"),
+        State("kraken2-incremental-input", "value"),
+        prevent_initial_call="initial_duplicate",
+    )
+    def sync_incremental_switch_to_mode(processing_mode, current):
+        """Force the batching switch on, and disabled, in real-time mode."""
+        batch_help = ("Classifies each batch as it arrives and keeps a "
+                      "running total. Optional in batch mode.")
+        if processing_mode == "realtime":
+            return True, True, (
+                "Always on in real-time mode: the live cumulative counts are "
+                "built from the per-batch results. Optional in batch mode."
+            )
+        return (current if current is not None else True), False, batch_help
+
     # Initialize form from config - ONLY on explicit refresh trigger
     # Changed: app-config is now a State, not an Input, to prevent form resets
     # when other callbacks update the config store

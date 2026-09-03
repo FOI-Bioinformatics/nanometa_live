@@ -1048,6 +1048,42 @@ def _dedup_reports_by_sample_batch(kreport_files: List[str]) -> List[str]:
     return deduplicated_files
 
 
+def _standard_report_paths(kraken_dir: str, sample: str) -> List[str]:
+    """The sample's whole-sample (non-batch) report: direct path, then the
+    v1.5 nested subdir, then a flat re-check. Realpath-deduplicated."""
+    found: List[str] = []
+    for candidate in (
+        os.path.join(kraken_dir, f"{sample}.kraken2.report.txt"),
+        os.path.join(kraken_dir, sample, f"{sample}.kraken2.report.txt"),
+        os.path.join(kraken_dir, f"{sample}.kraken2.report.txt"),
+    ):
+        if found:
+            break
+        if os.path.exists(candidate):
+            found.append(candidate)
+    return list(dict.fromkeys(os.path.realpath(f) for f in found))
+
+
+def _report_has_no_reads(filepath: str) -> bool:
+    """True when *filepath* parses to a report carrying no reads at all.
+
+    Used only on the rare poll where a higher tier exists but is unreadable,
+    so the parse cost is paid at a tier transition rather than every poll --
+    and the file in question is the few-byte empty-sample placeholder, whose
+    parse is memoised on (realpath, mtime, size) like any other.
+
+    An unreadable file returns False: we cannot claim a report is empty when
+    we could not read it, and the caller's existing behaviour is then right.
+    """
+    df = _parse_kraken2_report(filepath)
+    if df is None or df.empty:
+        return False
+    for column in ("cumul_reads", "reads"):
+        if column in df.columns and int(df[column].fillna(0).sum()) > 0:
+            return False
+    return True
+
+
 def _discover_sample_reports(kraken_dir: str, sample: str) -> List[str]:
     """Find Kraken2 report files for a single sample.
 
@@ -1073,21 +1109,26 @@ def _discover_sample_reports(kraken_dir: str, sample: str) -> List[str]:
             return [candidate]
         fresh_unreadable.append(candidate)
 
-    # 2. Standard (non-batch) reports: direct path, nested, then flat re-check.
-    sample_files: List[str] = []
-    p = os.path.join(kraken_dir, f"{sample}.kraken2.report.txt")
-    if os.path.exists(p):
-        sample_files.append(p)
-    if not sample_files:
-        p = os.path.join(kraken_dir, sample, f"{sample}.kraken2.report.txt")
-        if os.path.exists(p):
-            sample_files.append(p)
-    if not sample_files:
-        p = os.path.join(kraken_dir, f"{sample}.kraken2.report.txt")
-        if os.path.exists(p):
-            sample_files.append(p)
-    sample_files = list(dict.fromkeys(os.path.realpath(f) for f in sample_files))
+    # 2. Standard (non-batch) reports.
+    sample_files = _standard_report_paths(kraken_dir, sample)
     if sample_files:
+        # A cumulative report that exists but cannot be read this poll must
+        # not be displaced by an EMPTY standard report. nanometanf publishes
+        # ``<sample>.kraken2.report.txt`` holding one zero-read unclassified
+        # row for a sample that produced no output in this batch
+        # (EMIT_EMPTY_KRAKEN2_REPORT), so the sample is shown rather than
+        # omitted -- and the cumulative is rewritten every batch, so its
+        # mtime is perpetually fresh and it sits inside the stability
+        # window. Falling through then reports a measured ZERO for a sample
+        # that has reads, which is the one thing the tier fallback exists to
+        # prevent: the H6 fallback keeps a sample MEASURED across a tier
+        # switch, and a zero-read stand-in is not a measurement. Returning
+        # the pending cumulative instead serves its last-good frame, or
+        # nothing at all -- both honest. Measured live on a Stop and a
+        # Continue: 85 s and 88 s at 0 reads against 77 on disk (round-5
+        # drills, RT4).
+        if fresh_unreadable and _report_has_no_reads(sample_files[0]):
+            return fresh_unreadable[:1]
         return sample_files
 
     # 3. Batch files, dispatching on the upstream layout.

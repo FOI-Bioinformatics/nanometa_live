@@ -81,6 +81,13 @@ def create_collision_modal() -> dbc.Modal:
     )
 
 
+def _fmt(value: object) -> str:
+    """Render a setting value for the mismatch list; empty means unset."""
+    if value is None or value == "":
+        return "not set"
+    return str(value)
+
+
 def render_collision_body(
     outdir: str,
     found: List[str],
@@ -88,6 +95,7 @@ def render_collision_body(
     has_metadata: bool = True,
     watchlist_match: object = None,
     realtime: bool = False,
+    settings_diff: object = None,
 ) -> html.Div:
     """Return the body children for the modal given the detection result.
 
@@ -110,6 +118,13 @@ def render_collision_body(
     data would be screened against a different organism set (finding C10);
     True or None (no record) adds nothing. It never blocks -- the data is
     still the same data.
+
+    ``settings_diff`` is the list of ``(label, prior, current)`` analysis
+    settings that changed since the run that wrote this folder. A non-empty
+    list adds an amber caution naming them: continuing would append batches
+    classified under settings the existing reports were not, and nothing in
+    the resulting cumulative report records which rows came from which
+    (round-5 drills, C11). Empty or None adds nothing.
     """
     if not found:
         # Should not normally render; defensive fallback.
@@ -166,6 +181,33 @@ def render_collision_body(
             className="mb-3",
         )
 
+    settings_banner = None
+    if has_metadata and settings_diff:
+        rows = [
+            html.Li(
+                [html.Strong(label), f": {_fmt(prior)} \u2192 {_fmt(current)}"],
+                className="small",
+            )
+            for label, prior, current in settings_diff[:6]
+        ]
+        if len(settings_diff) > 6:
+            rows.append(html.Li(f"...and {len(settings_diff) - 6} more",
+                                className="small text-muted"))
+        settings_banner = dbc.Alert(
+            [
+                html.I(className="bi bi-sliders me-2"),
+                html.Strong("Analysis settings differ from the previous run."),
+                " ",
+                "Continuing adds batches classified under these settings to "
+                "results produced under the previous ones, and the combined "
+                "report does not record which is which. Archive first for a "
+                "clean run, or continue knowingly.",
+                html.Ul(rows, className="mb-0 mt-2"),
+            ],
+            color="warning",
+            className="mb-3",
+        )
+
     subdir_chips = [
         dbc.Badge(
             name + "/",
@@ -181,6 +223,8 @@ def render_collision_body(
         body_children.append(mismatch_banner)
     if watchlist_banner is not None:
         body_children.append(watchlist_banner)
+    if settings_banner is not None:
+        body_children.append(settings_banner)
     body_children.extend([
             html.P(
                 [

@@ -4,6 +4,55 @@ All notable changes to Nanometa Live are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.17.1] - 2026-09-03
+
+Three defects found by driving the four real-time drills the round-5 audit
+had left unexercised, against the 0.17.0 build: running totals off, a null
+timeout, Apply during a run followed by Continue, and the three
+sample-handling modes. The drills also confirmed what already worked --
+the null timeout path end to end, validation method "both" under real time,
+and single-sample, per-file and custom-named folder grouping, the last of
+these exercising the nanometanf v1.9.0 fix on live data. Requires no
+pipeline change; nanometanf v1.9.0 is still the companion release.
+
+### Fixed
+
+- **A sample with reads could display as zero for over a minute.** When a
+  sample produces nothing in a batch, the pipeline publishes a placeholder
+  report holding a single zero-read row so the sample is shown rather than
+  omitted. Its cumulative report is meanwhile rewritten every batch, so it is
+  perpetually inside the stability window that guards against reading a file
+  mid-write. Report discovery fell through to the placeholder, and the sample
+  read as a measured zero. Measured on a live run: one barcode read 0 for 85
+  seconds and again for 88 seconds, at a Stop and at a Continue, while its
+  report on disk held 77 reads and the run's aggregate held 817. Discovery
+  now keeps the cumulative report when the report it would fall back to
+  carries no reads, so the sample serves its last known good data or reports
+  itself unmeasured. Both are honest; a measured zero is not. The fallback is
+  unchanged for a report that does carry reads, which is what it exists for.
+- **"Running totals in live mode" did nothing in live mode.** The pipeline
+  classifies incrementally whenever real-time mode is set, whatever the
+  switch says, because the live cumulative counts are built from the
+  per-batch results; it even records this in its own log. Turning the switch
+  off changed nothing: the run produced the same output tree and the
+  dashboard the same reads. The switch decided only in batch mode, which its
+  label did not name. It is now labelled for what it does, disabled and shown
+  on in real time, and left to the operator in batch mode.
+- **Continuing a run said nothing about changed analysis settings.** Each run
+  now records the classifier, read-filter and validation settings it used,
+  and the output-collision dialog lists every one that differs from the run
+  that wrote the folder, with its previous and current value. Continuing
+  otherwise appended batches classified under one set of settings to
+  cumulative reports built under another, with nothing in the result
+  recording which rows came from which. A folder written before this release
+  records no settings, and the dialog stays silent rather than guessing.
+- **Applying settings during a run could move the next run.** The running
+  analysis kept its own folders, as the confirmation said, but the results
+  folder override was not held with them, so the next Start went somewhere
+  else. The operator then got no collision dialog and no offer to continue,
+  because the new folder was empty. The override is now held for the duration
+  of the run like the folders it derives.
+
 ## [0.17.0] - 2026-09-03
 
 Every control on the Configuration tab now reaches the pipeline, or is gone.

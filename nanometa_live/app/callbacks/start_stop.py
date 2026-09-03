@@ -108,6 +108,10 @@ def register_start_stop(app, backend_manager):
             # Resuming over it is meaningless and risks clobbering it, so the
             # modal hides Resume and shows a distinct foreign-data warning.
             has_metadata = backend_manager.read_run_metadata(outdir) is not None
+            # Same input, same watchlist, different knobs: a Continue would
+            # add batches classified under settings the existing reports were
+            # not (round-5 drills, C11).
+            settings_diff = backend_manager.analysis_settings_diff(outdir, config)
             return (
                 no_update,
                 no_update,
@@ -118,6 +122,7 @@ def register_start_stop(app, backend_manager):
                     has_metadata=has_metadata,
                     watchlist_match=watchlist_match,
                     realtime=(config or {}).get("processing_mode") == "realtime",
+                    settings_diff=settings_diff,
                 ),
                 {
                     "outdir": outdir,
