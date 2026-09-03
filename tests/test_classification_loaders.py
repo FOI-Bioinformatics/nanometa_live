@@ -927,3 +927,84 @@ class TestBatchDedupPrefersSamplePrefixedName:
         agg = load_kraken_data(str(tmp_path), sample="All Samples")
         assert agg is not None and not agg.empty
         assert int(agg[agg["taxid"] == 1].iloc[0]["cumul_reads"]) == 938
+
+
+class TestEmptyPlaceholderNeverDisplacesCumulative:
+    """A sample whose cumulative report is mid-rewrite must not read as zero.
+
+    nanometanf publishes ``<sample>.kraken2.report.txt`` holding the single
+    row ``100.00 0 0 U 0 unclassified`` for a sample that produced no output
+    in this batch (EMIT_EMPTY_KRAKEN2_REPORT), so the sample is shown rather
+    than omitted. The cumulative report is rewritten every batch, so its
+    mtime is perpetually fresh and it parses to None inside the stability
+    window. Falling through to the placeholder then reports a measured zero
+    for a sample that has reads -- the "missing measurement rendered as a
+    negative result" failure, one layer below the verdict guards.
+
+    Measured live (round-5 drills, RT4): barcode07 read 0 for 85 s and again
+    for 88 s at a Stop and a Continue while its cumulative report on disk
+    held 77 reads.
+    """
+
+    POPULATED = (
+        "94.81\t73\t73\tU\t0\tunclassified\n"
+        "5.19\t4\t0\tR\t1\troot\n"
+        "3.90\t3\t0\tS\t4007169\t  Francisella tularensis\n"
+    )
+    PLACEHOLDER = "100.00\t0\t0\tU\t0\tunclassified\n"
+
+    def _tree(self, tmp_path, with_cumulative=True):
+        """The live shape: the placeholder was written once and has settled,
+        while the cumulative is rewritten every batch and so is always fresh.
+        """
+        import os
+        import time
+        kd = tmp_path / "kraken2"
+        kd.mkdir(parents=True, exist_ok=True)
+        placeholder = kd / "s1.kraken2.report.txt"
+        placeholder.write_text(self.PLACEHOLDER)
+        settled = time.time() - 30
+        os.utime(placeholder, (settled, settled))
+        if with_cumulative:
+            (kd / "s1.cumulative.kraken2.report.txt").write_text(self.POPULATED)
+        return kd
+
+    def test_fresh_cumulative_is_preferred_over_the_placeholder(self, tmp_path):
+        from nanometa_live.core.utils.classification_loaders import (
+            _discover_sample_reports,
+        )
+        kd = self._tree(tmp_path)
+        # Freshly written: the cumulative is inside its stability window.
+        picked = _discover_sample_reports(str(kd), "s1")
+        assert picked, "discovery returned nothing"
+        assert picked[0].endswith("cumulative.kraken2.report.txt"), (
+            "a zero-read placeholder displaced a cumulative report that "
+            "exists and is merely mid-rewrite; the sample reads as a "
+            "measured zero instead of transiently unmeasured"
+        )
+
+    def test_placeholder_is_used_when_there_is_no_cumulative(self, tmp_path):
+        """A sample that genuinely produced nothing still reports zero."""
+        from nanometa_live.core.utils.classification_loaders import (
+            _discover_sample_reports,
+        )
+        kd = self._tree(tmp_path, with_cumulative=False)
+        picked = _discover_sample_reports(str(kd), "s1")
+        assert picked and picked[0].endswith("s1.kraken2.report.txt")
+
+    def test_populated_standard_report_still_wins_the_fallback(self, tmp_path):
+        """The H6 fallback is unchanged for a standard report with reads."""
+        from nanometa_live.core.utils.classification_loaders import (
+            _discover_sample_reports,
+        )
+        import os
+        import time
+        kd = tmp_path / "kraken2"
+        kd.mkdir(parents=True)
+        std = kd / "s1.kraken2.report.txt"
+        std.write_text(self.POPULATED)
+        settled = time.time() - 30
+        os.utime(std, (settled, settled))
+        (kd / "s1.cumulative.kraken2.report.txt").write_text(self.POPULATED)
+        picked = _discover_sample_reports(str(kd), "s1")
+        assert picked and picked[0].endswith("s1.kraken2.report.txt")

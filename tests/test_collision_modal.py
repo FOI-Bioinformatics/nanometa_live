@@ -127,3 +127,93 @@ class TestRenderCollisionBody:
         text = _flatten_text(body).lower()
         assert "input differs" in text
         assert "mix" in text
+
+
+class TestSettingsMismatchBanner:
+    """Continuing into a folder whose results were produced under different
+    analysis settings must say so.
+
+    Measured live: a mid-run Apply raised the Kraken2 confidence from 0.05 to
+    0.3, the next Start offered Continue, and the modal's three options
+    described archiving, resuming and cancelling without a word about the
+    change. The batches then appended to cumulative reports built at the old
+    threshold, with nothing recording which rows came from which (round-5
+    drills, C11).
+    """
+
+    DIFF = [("Kraken2 confidence", 0.05, 0.3), ("Minimum read length", 1000, 500)]
+
+    def test_changed_settings_are_named(self):
+        body = render_collision_body(
+            "/tmp/results", ["kraken2"], input_match=True, settings_diff=self.DIFF
+        )
+        text = _flatten_text(body).lower()
+        assert "analysis settings differ" in text
+        assert "kraken2 confidence" in text
+        assert "0.05" in text and "0.3" in text
+
+    def test_no_banner_when_settings_agree(self):
+        body = render_collision_body(
+            "/tmp/results", ["kraken2"], input_match=True, settings_diff=[]
+        )
+        assert "analysis settings differ" not in _flatten_text(body).lower()
+
+    def test_no_banner_when_the_prior_run_recorded_none(self):
+        body = render_collision_body(
+            "/tmp/results", ["kraken2"], input_match=True, settings_diff=None
+        )
+        assert "analysis settings differ" not in _flatten_text(body).lower()
+
+    def test_silent_for_foreign_data(self):
+        """No run record means no settings to compare against."""
+        body = render_collision_body(
+            "/tmp/results", ["kraken2"], has_metadata=False, settings_diff=self.DIFF
+        )
+        assert "analysis settings differ" not in _flatten_text(body).lower()
+
+
+class TestAnalysisSettingsDiff:
+    def _outdir(self, tmp_path, settings):
+        import json
+        from nanometa_live.core.workflow.backend_manager import BackendManager
+        d = tmp_path / "out"
+        d.mkdir()
+        (d / BackendManager.RUN_METADATA_FILENAME).write_text(
+            json.dumps({"analysis_settings": settings})
+        )
+        return str(d)
+
+    def test_changed_keys_are_reported_with_both_values(self, tmp_path):
+        from nanometa_live.core.workflow.backend_manager import BackendManager
+        out = self._outdir(tmp_path, {"kraken2_confidence": 0.05, "qc_tool": "chopper"})
+        diff = BackendManager.analysis_settings_diff(
+            out, {"kraken2_confidence": 0.3, "qc_tool": "chopper"}
+        )
+        assert diff == [("Kraken2 confidence", 0.05, 0.3)]
+
+    def test_identical_settings_report_nothing(self, tmp_path):
+        from nanometa_live.core.workflow.backend_manager import BackendManager
+        out = self._outdir(tmp_path, {"kraken2_confidence": 0.05})
+        assert BackendManager.analysis_settings_diff(out, {"kraken2_confidence": 0.05}) == []
+
+    def test_a_run_that_recorded_nothing_returns_none(self, tmp_path):
+        from nanometa_live.core.workflow.backend_manager import BackendManager
+        out = self._outdir(tmp_path, {})
+        assert BackendManager.analysis_settings_diff(out, {"kraken2_confidence": 0.3}) is None
+
+    def test_a_key_added_since_that_run_is_not_a_change(self, tmp_path):
+        from nanometa_live.core.workflow.backend_manager import BackendManager
+        out = self._outdir(tmp_path, {"kraken2_confidence": 0.05})
+        diff = BackendManager.analysis_settings_diff(
+            out, {"kraken2_confidence": 0.05, "minimap2_min_mapq": 30}
+        )
+        assert diff == []
+
+    def test_write_run_metadata_records_the_settings(self, tmp_path):
+        import json
+        from nanometa_live.core.workflow.backend_manager import BackendManager
+        d = tmp_path / "out"; d.mkdir()
+        BackendManager.write_run_metadata(str(d), {"kraken2_confidence": 0.2, "qc_tool": "chopper"})
+        meta = json.loads((d / BackendManager.RUN_METADATA_FILENAME).read_text())
+        assert meta["analysis_settings"]["kraken2_confidence"] == 0.2
+        assert meta["analysis_settings"]["qc_tool"] == "chopper"

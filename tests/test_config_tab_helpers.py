@@ -189,3 +189,48 @@ class TestBuildConfigListItems:
         ])
         assert '"index": 0' in str(items[0]) or "'index': 0" in str(items[0])
         assert '"index": 1' in str(items[1]) or "'index': 1" in str(items[1])
+
+
+class TestPinRunningRunPaths:
+    """A mid-run Apply keeps the live run's folders (round-4 H11) -- and the
+    results-folder OVERRIDE with them.
+
+    The override was not pinned, so changing the results folder mid-run left
+    the running run intact and silently redirected the NEXT Start to the new
+    folder, where no collision modal appears and Continue is not offered.
+    The toast promises the run keeps its folders; the operator has no way to
+    see that the next one has moved (round-5 drills, RT4).
+    """
+
+    LIVE = {
+        "results_output_directory": "/runs/live",
+        "results_dir_override": "/runs/live",
+        "nanopore_output_directory": "/inbox/live",
+    }
+
+    def _apply(self, new, running=True):
+        from nanometa_live.app.tabs.config_tab_helpers import pin_running_run_paths
+        cfg = dict(new)
+        pinned = pin_running_run_paths(cfg, dict(self.LIVE), {"running": running})
+        return cfg, pinned
+
+    def test_running_run_keeps_every_folder_key(self):
+        cfg, pinned = self._apply({
+            "results_output_directory": "/runs/elsewhere",
+            "results_dir_override": "/runs/elsewhere",
+            "nanopore_output_directory": "/inbox/elsewhere",
+        })
+        assert pinned is True
+        assert cfg["results_output_directory"] == "/runs/live"
+        assert cfg["nanopore_output_directory"] == "/inbox/live"
+        assert cfg["results_dir_override"] == "/runs/live", (
+            "the results-folder override was not pinned, so the next Start "
+            "silently moves away from the folder being continued"
+        )
+
+    def test_nothing_is_pinned_when_no_run_is_active(self):
+        cfg, pinned = self._apply({
+            "results_dir_override": "/runs/elsewhere",
+        }, running=False)
+        assert pinned is False
+        assert cfg["results_dir_override"] == "/runs/elsewhere"

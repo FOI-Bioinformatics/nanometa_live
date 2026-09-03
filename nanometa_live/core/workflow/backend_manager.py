@@ -505,6 +505,56 @@ class BackendManager:
         "kraken_db",
     )
 
+    # Settings that change what a read is called or whether it survives QC.
+    # Recorded per run so a Continue can say the results already in the
+    # folder were produced under different ones: mixing two confidence
+    # thresholds in one cumulative report is invisible afterwards
+    # (round-5 drills, C11). Deliberately NOT the input keys above (those are
+    # the fingerprint) and not display-only settings.
+    _ANALYSIS_SETTING_KEYS = (
+        ("kraken2_confidence", "Kraken2 confidence"),
+        ("kraken2_minimum_hit_groups", "Kraken2 minimum hit groups"),
+        ("qc_tool", "QC tool"),
+        ("chopper_minlength", "Minimum read length"),
+        ("chopper_maxlength", "Maximum read length"),
+        ("chopper_quality", "Minimum read quality"),
+        ("filtlong_min_length", "Filtlong minimum length"),
+        ("validation_identity_threshold", "Validation identity"),
+        ("e_val_cutoff", "BLAST e-value"),
+        ("minimap2_min_mapq", "Alignment confidence (MAPQ)"),
+        ("validation_method", "Validation method"),
+    )
+
+    @staticmethod
+    def _analysis_settings(config: Dict[str, Any]) -> Dict[str, Any]:
+        """The analysis-affecting settings of *config*, as recorded per run."""
+        return {
+            key: config.get(key)
+            for key, _label in BackendManager._ANALYSIS_SETTING_KEYS
+        }
+
+    @staticmethod
+    def analysis_settings_diff(outdir: str, config: Dict[str, Any]):
+        """Settings that differ from the run that wrote *outdir*.
+
+        Returns a list of ``(label, prior, current)`` triples, empty when
+        they agree, or None when the prior run recorded none (an older run
+        directory, where staying silent is the honest answer).
+        """
+        prior = BackendManager.read_run_metadata(outdir) or {}
+        recorded = prior.get("analysis_settings")
+        if not isinstance(recorded, dict) or not recorded:
+            return None
+        current = BackendManager._analysis_settings(config)
+        changed = []
+        for key, label in BackendManager._ANALYSIS_SETTING_KEYS:
+            if key not in recorded:
+                continue          # key added since that run; not a change
+            before, after = recorded.get(key), current.get(key)
+            if before != after:
+                changed.append((label, before, after))
+        return changed
+
     @staticmethod
     def compute_input_fingerprint(config: Dict[str, Any]) -> str:
         """Return a stable hash of the input-identifying config keys.
@@ -620,6 +670,7 @@ class BackendManager:
                 key: config.get(key, "")
                 for key in BackendManager._FINGERPRINT_KEYS
             },
+            "analysis_settings": BackendManager._analysis_settings(config),
         }
         path = os.path.join(outdir, BackendManager.RUN_METADATA_FILENAME)
         try:

@@ -679,7 +679,15 @@ def _build_config_list_items(configs):
 # move them under a live run: the viewer would follow the new
 # results_output_directory to an empty folder while the pipeline kept writing
 # to the old one, and the header would count a different inbox.
-RUNNING_RUN_PATH_KEYS = ("results_output_directory", "nanopore_output_directory")
+# results_dir_override rides along with the computed directory: pinning only
+# the latter left a mid-run Apply free to move where the NEXT run writes, so
+# the operator who changed the folder mid-run got no collision modal and no
+# Continue on the folder they were watching (round-5 drills, RT4).
+RUNNING_RUN_PATH_KEYS = (
+    "results_output_directory",
+    "results_dir_override",
+    "nanopore_output_directory",
+)
 
 
 def pin_running_run_paths(config, current_config, backend_status) -> bool:

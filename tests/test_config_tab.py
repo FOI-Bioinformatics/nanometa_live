@@ -233,3 +233,41 @@ class TestApplyDuringARun:
         assert config["results_output_directory"] != live["results_output_directory"]
         assert toast["color"] == "success"
 
+
+class TestBatchingSwitchIsModeAware:
+    """The batching switch decides nothing in real-time mode.
+
+    nanometanf branches on ``kraken2_enable_incremental || realtime_mode``,
+    so a live run always classifies incrementally and logs "Automatically
+    enabled by realtime mode for cumulative reporting". Measured on a live
+    run with the switch OFF: the full incremental layout was produced and the
+    dashboard read 2,056 reads on the cumulative tier, identical to ON
+    (round-5 drills, C3). The control must therefore show what the run will
+    do rather than offer a choice it does not have.
+    """
+
+    def _fn(self, cfg_app):
+        from tests.dash_test_utils import get_callback_fn
+        return get_callback_fn(
+            cfg_app, "kraken2-incremental-input", input_contains="processing-mode-input"
+        )
+
+    def test_realtime_forces_it_on_and_disables_it(self, cfg_app):
+        value, disabled, help_text = self._fn(cfg_app)("realtime", False)
+        assert value is True, "the switch must show the state the run will use"
+        assert disabled is True, "a control that cannot decide must not invite a choice"
+        assert "always on in real-time" in help_text.lower()
+
+    def test_batch_mode_leaves_the_operator_in_control(self, cfg_app):
+        value, disabled, help_text = self._fn(cfg_app)("batch", False)
+        assert value is False
+        assert disabled is False
+        assert "optional in batch mode" in help_text.lower()
+
+    def test_the_label_no_longer_names_live_mode_alone(self):
+        from pathlib import Path
+        src = Path(__file__).resolve().parents[1] / "nanometa_live" / "app" / "components" / "config_form.py"
+        text = src.read_text()
+        assert "Running totals in live mode" not in text, (
+            "the label names live mode, the one mode where the switch has no effect"
+        )

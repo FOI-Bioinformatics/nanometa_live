@@ -1108,15 +1108,31 @@ def _analysis_options_item():
             dbc.Col([
                 dbc.Switch(
                     id="kraken2-incremental-input",
-                    label="Running totals in live mode",
+                    label="Classify in batches (running totals)",
                     value=True,
                     className="mt-3"
                 ),
-                dbc.FormText("Show cumulative species counts during live sequencing"),
-                dbc.Badge("Recommended", color="success",
-                          style={"fontSize": "0.6rem", "verticalAlign": "middle"}),
+                # The old label named live mode, the one mode where this
+                # switch has no effect: the pipeline classifies incrementally
+                # whenever real-time mode is set, whatever this says, because
+                # cumulative reporting depends on it. It decides only in batch
+                # mode (round-5 drills, C3). The callback below disables and
+                # forces it on in real time so the form cannot claim
+                # otherwise.
+                dbc.FormText(
+                    id="kraken2-incremental-help",
+                    children="Classifies each batch as it arrives and keeps a "
+                             "running total. Optional in batch mode.",
+                ),
             ], md=4),
         ], className="mb-3"),
+        _analysis_output_rows(),
+    ], title="Analysis Options")
+
+
+def _analysis_output_rows():
+    """The optional-output toggles of the Analysis Options card."""
+    return html.Div([
         dbc.Row([
             dbc.Col([
                 dbc.Switch(
@@ -1137,7 +1153,7 @@ def _analysis_options_item():
                 dbc.FormText("Adds sequencer-specific metrics to the combined report")
             ], md=4),
         ]),
-    ], title="Analysis Options")
+    ])
 
 
 def _display_settings_item():

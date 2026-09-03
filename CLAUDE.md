@@ -1597,6 +1597,46 @@ what its label says. The rules that came out of it:
   older pipeline groups it too, and the real-time intake passes the watched
   root to `extractSampleId`.
 
+**Round-5 live drills (2026-09-03; do not regress).** Four real-time runs
+against the released build settled the questions the round-5 static pass left
+open, and produced three fixes:
+
+- **A zero-read report must never displace a populated one.** nanometanf
+  publishes `<sample>.kraken2.report.txt` holding one `100.00 0 0 U 0
+  unclassified` row for a sample that produced nothing this batch
+  (`EMIT_EMPTY_KRAKEN2_REPORT`), while the cumulative report is rewritten
+  every batch and so is perpetually inside its stability window. Discovery
+  fell through to the placeholder and the sample read as a measured ZERO --
+  85 s and 88 s at a Stop and a Continue, against 77 reads on disk.
+  `_discover_sample_reports` now returns the pending cumulative instead when
+  the standard tier `_report_has_no_reads`, so the sample serves its
+  last-good frame or reads unmeasured. The H6 fallback is unchanged for a
+  standard report that carries reads: the point of that fallback is to keep a
+  sample MEASURED, and a zero-read stand-in is not a measurement.
+- **The batching switch is mode-aware.** nanometanf branches on
+  `kraken2_enable_incremental || realtime_mode`, so a live run always
+  classifies incrementally whatever the switch says. It is disabled and
+  forced on in real time (`sync_incremental_switch_to_mode`) and decides only
+  in batch mode. Its old label, "Running totals in live mode", named the one
+  mode where it had no effect.
+- **Continue names the settings that changed.** `write_run_metadata` records
+  `analysis_settings` (`_ANALYSIS_SETTING_KEYS`: the classifier, read-filter
+  and validation knobs); `analysis_settings_diff` compares them and the
+  collision modal renders an amber caution listing each `label: before ->
+  after`. Continuing otherwise appended batches classified at one confidence
+  to cumulative reports built at another, with nothing recording which rows
+  came from which. A run that recorded no settings returns None and the modal
+  stays silent.
+- **A mid-run Apply pins `results_dir_override` too.** Pinning only the
+  computed directory let a mid-run folder change silently move the NEXT run,
+  where -- the folder being empty -- no collision modal appears and Continue
+  is not offered.
+
+Still open from those drills: real-time `by_barcode` on a flat directory
+still groups one sample per file silently, because the Apply-time guard can
+only fire when the watched directory already holds files, and in real time it
+is legitimately empty at Apply.
+
 **Negative controls.** `is_negative_control` reads the config's
 `negative_control_samples` list first, then falls back to name patterns:
 `NTC` / `neg_ctrl` / `blank`, fused numeric suffixes (`NTC1`, `blank2`,
