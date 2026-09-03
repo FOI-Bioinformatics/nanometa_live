@@ -71,7 +71,7 @@ L = cosmetic or dead code.
 | C10 | Chopper `--quality 7 --minlength 501 --maxlength 20001` per batch; `skip_nanoplot` honoured | - | live, PASS (krona/stats checked at run end) |
 | C11 | Apply during a run pins the running folders and its pipeline settings do reach the next Start, but the collision modal never says the settings changed | M | live (RT4), confirmed |
 | C12 | sample_handling in real time: single_sample, per_file and custom-named folders all group correctly | - | live (RT5), PASS |
-| C13 | Real-time by_barcode on a flat directory passes Apply with no message (batch rejects it with a suggestion) | M | fixed for a populated directory; an EMPTY one still passes and the run silently groups per file (RT5) |
+| C13 | Real-time by_barcode on a flat directory passes Apply with no message (batch rejects it with a suggestion) | M | fixed: Apply rejects a populated folder; a runtime check names the mismatch on every poll once files arrive (0.17.2) |
 | C15 | Update interval 5 s gives a ~5 s poll cadence | - | live, PASS |
 | C16 | An empty genome cache folder silently disables validation (log warning only; `blast_validation` sent as false while the switch shows on) | M | live, confirmed; fixed |
 
@@ -352,9 +352,18 @@ rejected with the same message and auto-detection suggestion batch mode
 gives ("Auto-detection suggests 'single_sample'"), and the green success
 alert stays shut (A2, live). But in real time the watched directory is
 legitimately empty at Apply -- the normal case -- so the guard cannot fire,
-and the run then produces one sample per file under a by_barcode selection
-with no warning at any point. The Apply-time check cannot close this; it
-needs a runtime signal once the intake sees a flat layout.
+and the run then produced one sample per file under a by_barcode selection
+with no warning at any point.
+
+Closed after the drills by a runtime check: the backend evaluates the
+layout against the declared mode from the same per-poll listing that
+counts waiting files, and the verdict subtitle, the header and the
+readiness check carry the result. Re-run of the same drill on the fixed
+build: the banner read "ACTION REQUIRED ... -- the watched folder holds
+FASTQ files directly but By barcode is selected, so each file is being
+treated as its own sample" beside the per-file sample names it explains,
+and the header carried the same sentence next to "Files processed: 6 / 6"
+(`screenshots/c13_layout_mismatch.png`).
 
 ### New finding: a zero-read placeholder outranks a populated cumulative report
 

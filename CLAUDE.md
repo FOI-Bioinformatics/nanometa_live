@@ -1632,10 +1632,19 @@ open, and produced three fixes:
   where -- the folder being empty -- no collision modal appears and Continue
   is not offered.
 
-Still open from those drills: real-time `by_barcode` on a flat directory
-still groups one sample per file silently, because the Apply-time guard can
-only fire when the watched directory already holds files, and in real time it
-is legitimately empty at Apply.
+- **The input layout is checked against the declared mode on every poll.**
+  The Apply-time guard can only fire when the watched folder already holds
+  files, and in real time it is legitimately empty at Apply, so by_barcode
+  over a flat folder ran with one sample per file and no surface said so.
+  `describe_layout_mismatch` (`core/utils/auto_detect.py`) is the one
+  definition; `BackendManager._update_file_counts` evaluates it from the
+  same listing that counts waiting files and publishes
+  `status["input_layout_mismatch"]`; the verdict subtitle
+  (`with_failure_clauses`), the header (running and finished) and the
+  readiness "Input Directory" check all carry it. Mixed layouts and an
+  undeclared mode are not called a mismatch. Pinned in
+  `tests/test_input_layout_mismatch.py`; verified live on the flat-folder
+  drill.
 
 **Negative controls.** `is_negative_control` reads the config's
 `negative_control_samples` list first, then falls back to name patterns:

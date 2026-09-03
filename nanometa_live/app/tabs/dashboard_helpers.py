@@ -1093,6 +1093,7 @@ def _data_verdict(
     run_stopped=False,
     stop_reason=None,
     failed_tasks=0,
+    input_layout_mismatch=None,
 ) -> VerdictDescriptor:
     """The data-available branch of select_verdict (extracted, still pure).
 
@@ -1101,7 +1102,8 @@ def _data_verdict(
     suppresses a hit -- but run health outranks every non-detection state.
     """
     health = dict(stale_samples=stale_samples, run_stopped=run_stopped,
-                  stop_reason=stop_reason, failed_tasks=failed_tasks)
+                  stop_reason=stop_reason, failed_tasks=failed_tasks,
+                  input_layout_mismatch=input_layout_mismatch)
     if dangerous:
         return _with_failure_clauses(
             _detection_descriptor(
@@ -1151,6 +1153,14 @@ def _data_verdict(
     )
 
 
+def _run_health(stale_samples, run_stopped, stop_reason, failed_tasks,
+                input_layout_mismatch):
+    """The run-health inputs a data-state verdict carries into its subtitle."""
+    return dict(stale_samples=stale_samples, run_stopped=run_stopped,
+                stop_reason=stop_reason, failed_tasks=failed_tasks,
+                input_layout_mismatch=input_layout_mismatch)
+
+
 def select_verdict(
     *,
     has_config: bool,
@@ -1172,6 +1182,7 @@ def select_verdict(
     run_stopped: bool = False,
     stop_reason: Optional[str] = None,
     failed_tasks: int = 0,
+    input_layout_mismatch: Optional[str] = None,
 ) -> VerdictDescriptor:
     """Pure decision: pick the verdict banner state from the analysis inputs.
 
@@ -1217,10 +1228,8 @@ def select_verdict(
             highest_alert_threshold=highest_alert_threshold,
             pipeline_error=pipeline_error,
             pipeline_error_detail=pipeline_error_detail,
-            stale_samples=stale_samples,
-            run_stopped=run_stopped,
-            stop_reason=stop_reason,
-            failed_tasks=failed_tasks,
+            **_run_health(stale_samples, run_stopped, stop_reason,
+                          failed_tasks, input_layout_mismatch),
         )
 
     return _no_data_verdict(

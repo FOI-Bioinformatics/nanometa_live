@@ -4,6 +4,33 @@ All notable changes to Nanometa Live are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.17.2] - 2026-09-03
+
+One fix, closing the last item the round-5 real-time drills left open.
+Requires no pipeline change; nanometanf v1.9.0 remains the companion
+release.
+
+### Fixed
+
+- **A real-time run whose input layout contradicts the selected sample
+  handling now says so.** The Configuration tab rejects "By barcode" over a
+  folder that already holds loose FASTQ files, but in real time the watched
+  folder is legitimately empty when settings are applied, so that check
+  could never fire. The run then grouped reads by what it found -- one
+  sample per file under a by-barcode selection -- and nothing on any surface
+  said so; the verdict attributed detections to filename stems as if they
+  were samples. The layout is now compared with the selected mode on every
+  poll, from the same directory listing that counts waiting files, and a
+  mismatch is named in three places: the verdict banner's subtitle, the
+  header while the run is active and after it ends, and the readiness
+  "Input Directory" check, which fails with the change that resolves it. The
+  converse case is named too, when per-sample subfolders arrive under
+  "Single sample" or "Per file". A mixed layout, an unselected mode, or an
+  empty folder is never called a mismatch. Verified on a live run: the
+  banner read "the watched folder holds FASTQ files directly but By barcode
+  is selected, so each file is being treated as its own sample" directly
+  above the per-file names it explains.
+
 ## [0.17.1] - 2026-09-03
 
 Three defects found by driving the four real-time drills the round-5 audit

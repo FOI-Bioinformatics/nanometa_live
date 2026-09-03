@@ -604,9 +604,30 @@ class ReadinessChecker:
         # canonical detector lives in core.utils.auto_detect; using it
         # here keeps the readiness panel in sync with the validation
         # error messages and the samplesheet generator.
-        from nanometa_live.core.utils.auto_detect import find_sample_subdirs
+        from nanometa_live.core.utils.auto_detect import (
+            describe_layout_mismatch,
+            find_sample_subdirs,
+            layout_mismatch_remedy,
+        )
         fastq_files = list(p.glob("*.fastq*"))
         sample_dirs = find_sample_subdirs(str(p))
+        dirs_with_reads = [
+            d for d in sample_dirs if any(d.glob("*.fastq*")) or any(d.glob("*.fq*"))
+        ]
+        # Content that contradicts the declared sample handling is a
+        # failed check, not a pass with a count: in real time the folder is
+        # empty at Apply, so this periodic probe is the first surface that
+        # can say the run is grouping reads differently than selected
+        # (round-5 drills, C13).
+        mismatch = describe_layout_mismatch(
+            config.get("sample_handling"), len(fastq_files), len(dirs_with_reads),
+        )
+        if mismatch:
+            return CheckResult(
+                "Input Directory", False, Severity.WARNING,
+                f"Layout does not match Sample handling: {mismatch}",
+                details=layout_mismatch_remedy(config.get("sample_handling")),
+            )
         if fastq_files or sample_dirs:
             content = []
             if sample_dirs:

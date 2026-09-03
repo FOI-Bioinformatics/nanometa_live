@@ -89,6 +89,9 @@ class BackendManager:
             "pipeline_status": "idle",
             "files_processed": 0,
             "files_waiting": 0,
+            # Set on every poll from the inbox listing: how the layout on
+            # disk contradicts the declared sample handling, or None.
+            "input_layout_mismatch": None,
             "current_batch": 0,
             "processes_running": 0,
             "processes_complete": 0,
@@ -1127,6 +1130,8 @@ class BackendManager:
 
             # Count files in nanopore directory (including barcode subdirs)
             waiting_files = 0
+            root_files = 0
+            dirs_with_reads = 0
             extensions = (".fastq", ".fastq.gz", ".fq", ".fq.gz")
             newest_mtime = 0.0
             if os.path.exists(nanopore_dir):
@@ -1134,21 +1139,37 @@ class BackendManager:
                 # accepts conventional barcode<NN> plus custom-named subdirs
                 # (Turex/, Zymo/, ...) so this counter stays accurate for
                 # non-multiplex layouts that still use by_barcode mode.
-                from nanometa_live.core.utils.auto_detect import find_sample_subdirs
+                from nanometa_live.core.utils.auto_detect import (
+                    describe_layout_mismatch,
+                    find_sample_subdirs,
+                )
                 dirs = [nanopore_dir] + [str(d) for d in find_sample_subdirs(nanopore_dir)]
                 for d in dirs:
                     try:
                         names = os.listdir(d)
                     except OSError:
                         continue
+                    here = 0
                     for f in names:
                         if not f.endswith(extensions):
                             continue
-                        waiting_files += 1
+                        here += 1
                         try:
                             newest_mtime = max(newest_mtime, os.stat(os.path.join(d, f)).st_mtime)
                         except OSError:
                             continue
+                    waiting_files += here
+                    if d == nanopore_dir:
+                        root_files = here
+                    elif here:
+                        dirs_with_reads += 1
+                # The same listing says whether what arrived matches the
+                # declared sample handling; the Apply-time check cannot,
+                # because in real time the folder is empty at Apply
+                # (round-5 drills, C13).
+                self.status["input_layout_mismatch"] = describe_layout_mismatch(
+                    self.config.get("sample_handling"), root_files, dirs_with_reads,
+                )
 
             # Update status with waiting files
             # Processed files comes from workflow_manager status
