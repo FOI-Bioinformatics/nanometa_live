@@ -1682,6 +1682,17 @@ the requested taxid, so an absent or unreadable report degrades to exact-node
 behaviour rather than to nothing. This is the same rule
 `core/taxonomy/ranks.py` established on this side; the two had disagreed.
 
+**Assembly in real time (Stage 3, 2026-09-04).** Assembly is no longer dropped
+in a live run. `AssemblyReadAccumulator` holds each sample's read files and
+answers when an attempt is due -- every `assembly_batch_interval` files,
+provided the pool grew by `assembly_min_growth`, plus a final attempt at
+session end -- and `ASSEMBLY_READ_POOL` concatenates the set so the assembler
+sees the sample rather than one arriving file. The attempt number rides in
+`meta`, so an attempt cannot overwrite an earlier one; before this, a 28-file
+run left four artifacts, each a single batch. Batch mode emits each sample
+once, so its first emission is also its final attempt and one code path serves
+both modes: do not add a `realtime_mode` branch here.
+
 **Assembly, Stage 2 (2026-09-04; do not regress).** The feature now measures
 before it assembles, and records the answer either way.
 

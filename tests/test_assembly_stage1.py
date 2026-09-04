@@ -111,8 +111,14 @@ class TestDepthIsShown:
         assert 0 < LOW_COVERAGE_ASSEMBLY < 30
 
 
-class TestRealtimeOverrideReachesTheOperator:
-    """Dropping assembly in real time used to be a log line only."""
+class TestRealtimeAssemblyRuns:
+    """Assembly is no longer dropped in real time.
+
+    It used to run on every arriving file and publish each result over the
+    last, so the launch switched it off (round-5 C8, assembly audit A3). The
+    pipeline now accumulates a sample's reads and re-assembles on a cadence,
+    so the operator's switch is honoured.
+    """
 
     def _params(self, tmp_path, **over):
         from nanometa_live.core.config.parameter_mapping import (
@@ -132,10 +138,17 @@ class TestRealtimeOverrideReachesTheOperator:
         params = create_nextflow_params(cfg)
         return params, pop_launch_warnings()
 
-    def test_the_drop_is_announced(self, tmp_path):
-        params, warnings = self._params(tmp_path)
-        assert params.get("enable_assembly") is False
-        assert any("assembly is switched off" in w.lower() for w in warnings), warnings
+    def test_the_switch_is_honoured(self, tmp_path):
+        params, _warnings = self._params(tmp_path)
+        assert params.get("enable_assembly") is True
+
+    def test_the_cadence_reaches_the_launch(self, tmp_path):
+        params, _w = self._params(tmp_path, assembly_batch_interval=25)
+        assert params.get("assembly_batch_interval") == 25
+
+    def test_it_is_no_longer_overridden(self, tmp_path):
+        _params, warnings = self._params(tmp_path)
+        assert not [w for w in warnings if "switched off" in w.lower()], warnings
 
     def test_no_warning_when_assembly_was_not_asked_for(self, tmp_path):
         _params, warnings = self._params(tmp_path, enable_assembly=False)

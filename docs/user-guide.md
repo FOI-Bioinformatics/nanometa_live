@@ -295,9 +295,14 @@ Use when each file is a separate sample:
 
 ## Assembly
 
-Assembly is optional, off by default, and runs in batch mode. Switch it on in
-Configuration under Processing Settings, and choose what to assemble: the
-whole sample, a detected watchlist organism, or both.
+Assembly is optional and off by default. Switch it on in Configuration under
+Processing Settings, and choose what to assemble: the whole sample, a detected
+watchlist organism, or both.
+
+In a live run you do not have to pick a moment to assemble. The sample's reads
+accumulate and the assembly is re-attempted as they grow, with a final attempt
+when the session ends, so it happens once there is enough sequence to be worth
+it.
 
 **What you will usually see is a decline, and that is the feature working.**
 Assembling a genome needs deep sequencing of that organism — roughly 30 times

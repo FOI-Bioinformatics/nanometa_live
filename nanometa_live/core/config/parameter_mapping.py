@@ -872,6 +872,7 @@ def _build_base_params(config: Dict[str, Any], main_dir: str, kraken_db: str,
                            else "metagenome"),
         "assembly_min_depth": float(config.get("assembly_min_depth") or 30),
         "assembly_allow_low_depth": bool(config.get("assembly_allow_low_depth", False)),
+        "assembly_batch_interval": int(config.get("assembly_batch_interval") or 10),
 
         # Read-filter overrides surfaced by the Configuration tab's Advanced
         # Settings -> Read Filtering and Validation card. Defaults match
@@ -1096,18 +1097,11 @@ def _apply_realtime_stop_conditions(params: Dict[str, Any], config: Dict[str, An
                 "realtime_processing_grace_period=%r is not a whole number "
                 ">= 1; the pipeline default applies", grace)
 
-    # Assembly is a whole-sample step. In real time it would run on every
-    # small batch and fail each time ("No overlaps found" on 2000-read
-    # batches, counted as failed tasks in the header), so the launch leaves
-    # it off; the form says so (audit round 5, C8).
-    if params.get("enable_assembly"):
-        params["enable_assembly"] = False
-        # A launch warning, not a log line: this silently overrode the
-        # operator's switch and the Start toast never said so (assembly
-        # audit, 2026-09-03).
-        add_launch_warning(
-            "Assembly is switched off for this run: in real-time mode each "
-            "batch would be assembled on its own. Run assembly in batch mode.")
+    # Assembly is no longer dropped in real time. It used to run on every
+    # arriving file and publish each result over the last (round-5 C8, and
+    # the assembly audit's A3), so the launch switched it off. The pipeline
+    # now accumulates a sample's reads and re-assembles on a cadence, so the
+    # operator's switch is honoured; assembly_batch_interval sets the pace.
 
 
 _launch_warnings: List[str] = []

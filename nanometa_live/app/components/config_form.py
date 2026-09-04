@@ -853,10 +853,10 @@ def _processing_settings_item():
                     dbc.Badge("Experimental", color="warning", className="ms-2",
                               style={"fontSize": "0.65rem"}),
                 ], className="d-flex align-items-center"),
-                dbc.FormText("Adds a metagenome assembly step; results appear "
-                             "on the Reports tab. Batch mode only: in real-time "
-                             "mode each small batch would be assembled on its "
-                             "own and fail, so the launch leaves assembly off."),
+                dbc.FormText("Adds a metagenome assembly step. The Reports tab "
+                             "shows the assembly, or why there is none. In a "
+                             "live run the reads accumulate and it re-assembles "
+                             "as depth grows."),
                 dbc.Tooltip(
                     "Runs the pipeline's experimental assembly step on the "
                     "filtered reads. Flye runs in metagenome mode, so mixed "
@@ -920,7 +920,7 @@ def _processing_settings_item():
                     "sample assembles everything for exploration.",
                     target="assembly-scope-info"
                 )
-            ], md=4),
+            ], md=3),
             dbc.Col([
                 dbc.Label([
                     "Minimum depth to assemble ",
@@ -942,7 +942,28 @@ def _processing_settings_item():
                     "input declining is the normal answer, not an error.",
                     target="assembly-min-depth-info"
                 )
-            ], md=4),
+            ], md=3),
+            dbc.Col([
+                dbc.Label([
+                    "Re-assemble every (files) ",
+                    html.I(className="bi bi-info-circle text-muted ms-1",
+                           id="assembly-batch-interval-info")
+                ], html_for="assembly-batch-interval-input"),
+                dbc.Input(
+                    id="assembly-batch-interval-input",
+                    type="number", min=0, max=1000, step=1, value=10
+                ),
+                dbc.FormText("Real-time only. 0 assembles once, at the end"),
+                dbc.Tooltip(
+                    "In a live run the sample's reads accumulate and the "
+                    "assembly is re-attempted every this many files, so it "
+                    "happens when the depth allows rather than at a moment "
+                    "you have to pick. An attempt is skipped if the reads "
+                    "have not grown much since the last one, and a final "
+                    "attempt always runs when the session ends.",
+                    target="assembly-batch-interval-info"
+                )
+            ], md=3),
             dbc.Col([
                 html.Div([
                     dbc.Switch(
@@ -963,7 +984,7 @@ def _processing_settings_item():
                     "report a result.",
                     target="assembly-allow-low-depth-info"
                 )
-            ], md=4),
+            ], md=3),
         ], className="mt-3")
     ], title="Processing Settings")
 

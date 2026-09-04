@@ -67,6 +67,7 @@ CONFIG_FORM_FIELDS = (
     ("assembler-input", "assembler"),
     ("assembly-scope-input", "assembly_scope"),
     ("assembly-min-depth-input", "assembly_min_depth"),
+    ("assembly-batch-interval-input", "assembly_batch_interval"),
     ("assembly-allow-low-depth-input", "assembly_allow_low_depth"),
 )
 

@@ -495,6 +495,7 @@ def default_config() -> Dict[str, Any]:
         # stated reason is the normal answer (assembly audit, 2026-09-03).
         "assembly_scope": "metagenome",
         "assembly_min_depth": 30,
+        "assembly_batch_interval": 10,
         "assembly_allow_low_depth": False,
         # Kraken2 realtime incremental classification
         "kraken2_enable_incremental": True,
