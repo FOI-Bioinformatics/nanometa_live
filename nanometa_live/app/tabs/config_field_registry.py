@@ -65,6 +65,9 @@ CONFIG_FORM_FIELDS = (
     ("min-reads-for-validation-input", "min_reads_for_validation"),
     ("enable-assembly-input", "enable_assembly"),
     ("assembler-input", "assembler"),
+    ("assembly-scope-input", "assembly_scope"),
+    ("assembly-min-depth-input", "assembly_min_depth"),
+    ("assembly-allow-low-depth-input", "assembly_allow_low_depth"),
 )
 
 #: Component ids of all Configuration-form widgets (order-independent set).

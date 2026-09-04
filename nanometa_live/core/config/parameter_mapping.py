@@ -866,6 +866,12 @@ def _build_base_params(config: Dict[str, Any], main_dir: str, kraken_db: str,
         "assembler": (config.get("assembler")
                       if config.get("assembler") in ("flye", "miniasm")
                       else "flye"),
+        "assembly_scope": (config.get("assembly_scope")
+                           if config.get("assembly_scope") in
+                           ("metagenome", "targeted", "both")
+                           else "metagenome"),
+        "assembly_min_depth": float(config.get("assembly_min_depth") or 30),
+        "assembly_allow_low_depth": bool(config.get("assembly_allow_low_depth", False)),
 
         # Read-filter overrides surfaced by the Configuration tab's Advanced
         # Settings -> Read Filtering and Validation card. Defaults match
@@ -1257,6 +1263,25 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
                 "Watchlist tab first.")
     blast_validation_enabled = config.get("blast_validation", False) and can_run_validation
     run_validation_enabled = can_run_validation
+
+    # Targeted assembly reuses the per-organism reads confirmation testing
+    # extracts, so without validation there is nothing to assemble for it. The
+    # form says so; this is what an operator sees at Start when the two
+    # settings disagree (assembly audit Stage 2).
+    if (config.get("enable_assembly", False)
+            and str(config.get("assembly_scope", "metagenome")) in ("targeted", "both")
+            and not can_run_validation):
+        scope = str(config.get("assembly_scope"))
+        add_launch_warning(
+            "Targeted assembly needs confirmation testing to select the "
+            "organism's reads, and it is not running, so "
+            + ("no assembly will be produced."
+               if scope == "targeted"
+               else "only the whole-sample assembly will run."))
+    if config.get("enable_assembly", False) and config.get("assembly_allow_low_depth"):
+        add_launch_warning(
+            "Low-depth assembly is allowed: contigs may be fragments rather "
+            "than genomes, and every result is labelled as such.")
 
     if config.get("blast_validation", False) and not can_run_validation:
         if not has_species:

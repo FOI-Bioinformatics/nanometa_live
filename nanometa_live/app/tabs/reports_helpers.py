@@ -186,10 +186,64 @@ def _assembly_absent_card(body: Any) -> Any:
     ], className="mb-4")
 
 
+def _decision_target(d: Dict[str, Any]) -> str:
+    sample = d.get("sample") or d.get("sample_id") or "?"
+    taxid = d.get("taxid")
+    return f"{sample}, taxid {taxid}" if taxid else str(sample)
+
+
+def _declined_rows(declined: List[Dict[str, Any]]) -> Any:
+    """One row per declined candidate: the reason and how far short it fell.
+
+    The depth bar is the point. A bare "declined" is not actionable; "1.9x of
+    the 30x needed" tells an operator to keep sequencing, and the shortfall in
+    megabases tells them how much longer.
+    """
+    rows = []
+    for d in declined:
+        depth = d.get("estimated_depth")
+        required = d.get("required_depth")
+        bar = None
+        if isinstance(depth, (int, float)) and isinstance(required, (int, float)) and required:
+            pct = max(0.0, min(100.0, 100.0 * depth / required))
+            bar = dbc.Progress(value=pct, style={"height": "6px"},
+                               color="warning" if pct < 100 else "success",
+                               className="mb-1")
+        shortfall = d.get("shortfall_bases")
+        detail = d.get("reason_text") or d.get("reason") or ""
+        # The pipeline's own text usually states the shortfall; only add it
+        # when the record does not, so the panel never says it twice.
+        if (isinstance(shortfall, (int, float)) and shortfall > 0
+                and "more" not in detail.lower()):
+            detail += f" About {shortfall / 1e6:.0f} Mb more sequence is needed."
+        rows.append(html.Div([
+            html.Div([
+                html.Strong(_decision_target(d)),
+                dbc.Badge(str(d.get("reason", "declined")).replace("_", " "),
+                          color="light", text_color="muted",
+                          className="border ms-2"),
+            ], className="d-flex align-items-center mb-1"),
+        ] + ([bar] if bar is not None else []) + [
+            html.Small(detail, className="text-muted"),
+        ], className="mb-3"))
+    return rows
+
+
 def _assembly_absent_panel(enabled: Optional[bool],
-                           failed_samples: Optional[List[str]]) -> Any:
+                           failed_samples: Optional[List[str]],
+                           decisions: Optional[List[Dict[str, Any]]] = None) -> Any:
     """Why there is no assembly, as a card rather than a blank space."""
     failed = [str(s) for s in (failed_samples or [])]
+    declined = [d for d in (decisions or []) if d.get("decision") == "declined"]
+    if declined and not failed:
+        # The pipeline measured and said no. That is a result, not an absence.
+        return _assembly_absent_card([
+            dbc.Badge("Not enough sequence to assemble", color="warning",
+                      className="mb-2"),
+            html.P("The pipeline measured the reads available for each target "
+                   "and declined rather than publishing contigs that would "
+                   "read as a genome.", className="small text-muted mb-3"),
+        ] + _declined_rows(declined))
     if enabled is False:
         return _assembly_absent_card(
             dbc.Badge("Assembly not enabled", color="light",
@@ -216,7 +270,8 @@ def _assembly_absent_panel(enabled: Optional[bool],
 
 def build_assembly_panel(assemblies: List[Dict[str, Any]],
                          enabled: Optional[bool] = None,
-                         failed_samples: Optional[List[str]] = None) -> Any:
+                         failed_samples: Optional[List[str]] = None,
+                         decisions: Optional[List[Dict[str, Any]]] = None) -> Any:
     """Per-sample assembly summary and contigs, or why there are none.
 
     ``assemblies`` is the output of ``assembly_loader.load_assembly_stats``.
@@ -230,7 +285,7 @@ def build_assembly_panel(assemblies: List[Dict[str, Any]],
     that nothing was produced.
     """
     if not assemblies:
-        return _assembly_absent_panel(enabled, failed_samples)
+        return _assembly_absent_panel(enabled, failed_samples, decisions)
     blocks = []
     for a in assemblies:
         s = a.get("summary", {})

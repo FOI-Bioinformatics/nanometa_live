@@ -171,3 +171,137 @@ class TestMiniasmWithdrawnFromTheGui:
         cfg = dict(default_config()); cfg["assembler"] = "miniasm"
         values = dict(zip(out_ids, fn(1, cfg, None)))
         assert values["assembler-input"] == "flye"
+
+
+# --- Stage 2: the decision record reaches the operator ----------------------
+
+
+class TestDeclinedIsAResultNotAnAbsence:
+    """The pipeline measures and may say no. That is a measurement.
+
+    On a real field corpus nothing reached 2x of its reference where a draft
+    needs 30x, so declining is the normal answer and the operator needs the
+    arithmetic, not an empty panel (assembly audit, Stage 2).
+    """
+
+    DECLINED = [{
+        "sample": "barcode06", "taxid": 4007169, "scope": "targeted",
+        "decision": "declined", "reason": "insufficient_depth",
+        "reason_text": "0.43 Mb assigned; 0.23x of a 1.87 Mb reference. "
+                       "30x is needed for a usable draft.",
+        "estimated_depth": 0.228, "required_depth": 30.0,
+        "shortfall_bases": 55679797,
+    }]
+
+    def test_the_reason_and_the_shortfall_are_shown(self):
+        out = _text(build_assembly_panel([], enabled=True, decisions=self.DECLINED))
+        assert "not enough sequence" in out.lower()
+        assert "barcode06" in out and "4007169" in out
+        # The shortfall is what makes "keep sequencing" actionable -- and it
+        # is stated once, not twice: the pipeline's own reason_text carries it.
+        assert "56 Mb more" in out
+        assert out.count("Mb more") == 1
+
+    def test_a_progress_bar_shows_how_far_short(self):
+        out = _text(build_assembly_panel([], enabled=True, decisions=self.DECLINED))
+        assert "Progress" in out
+
+    def test_declined_differs_from_disabled_and_from_failed(self):
+        declined = _text(build_assembly_panel([], enabled=True, decisions=self.DECLINED))
+        disabled = _text(build_assembly_panel([], enabled=False))
+        failed = _text(build_assembly_panel([], enabled=True, failed_samples=["b1"]))
+        assert len({declined, disabled, failed}) == 3
+
+    def test_a_failure_outranks_a_decline(self):
+        """A task that died is not the same as one that was never attempted."""
+        out = _text(build_assembly_panel([], enabled=True, decisions=self.DECLINED,
+                                         failed_samples=["barcode06"]))
+        assert "failed" in out.lower()
+
+    def test_an_attempt_decision_does_not_render_as_declined(self):
+        out = _text(build_assembly_panel(
+            [], enabled=True,
+            decisions=[{"sample": "b1", "decision": "attempt", "reason": "attempt"}]))
+        assert "not enough sequence" not in out.lower()
+
+
+class TestDecisionLoader:
+    def test_missing_and_unreadable_are_empty(self, tmp_path):
+        from nanometa_live.core.utils.assembly_loader import load_assembly_decisions
+        assert load_assembly_decisions(None) == []
+        assert load_assembly_decisions(str(tmp_path)) == []
+        d = tmp_path / "canonical" / "assembly"
+        d.mkdir(parents=True)
+        (d / "bad.assembly_decision.json").write_text("{not json")
+        assert load_assembly_decisions(str(tmp_path)) == []
+
+    def test_a_record_is_returned_with_its_sample(self, tmp_path):
+        import json
+        from nanometa_live.core.utils.assembly_loader import load_assembly_decisions
+        d = tmp_path / "canonical" / "assembly"
+        d.mkdir(parents=True)
+        (d / "barcode05.taxid263.assembly_decision.json").write_text(json.dumps({
+            "sample_id": "barcode05", "taxid": 263, "decision": "declined",
+            "reason": "insufficient_depth"}))
+        got = load_assembly_decisions(str(tmp_path))
+        assert len(got) == 1
+        assert got[0]["sample"] == "barcode05" and got[0]["taxid"] == 263
+
+    def test_stats_and_decisions_do_not_collide(self, tmp_path):
+        """Both live in canonical/assembly/; each loader takes only its own."""
+        import json
+        from nanometa_live.core.utils.assembly_loader import (
+            load_assembly_decisions, load_assembly_stats,
+        )
+        d = tmp_path / "canonical" / "assembly"
+        d.mkdir(parents=True)
+        (d / "b1.assembly_stats.json").write_text(json.dumps(
+            {"sample_id": "b1", "summary": {"total_contigs": 2}, "contigs": []}))
+        (d / "b1.assembly_decision.json").write_text(json.dumps(
+            {"sample_id": "b1", "decision": "attempt"}))
+        assert len(load_assembly_stats(str(tmp_path))) == 1
+        assert len(load_assembly_decisions(str(tmp_path))) == 1
+
+
+class TestScopeReachesTheLaunch:
+    def _params(self, tmp_path, **over):
+        from nanometa_live.core.config.parameter_mapping import (
+            create_nextflow_params, pop_launch_warnings,
+        )
+        pop_launch_warnings()
+        inbox = tmp_path / "in"; inbox.mkdir(exist_ok=True)
+        (inbox / "s.fastq.gz").write_bytes(b"@r\nACGT\n+\n!!!!\n")
+        res = tmp_path / "out"; res.mkdir(exist_ok=True)
+        cfg = {"nanopore_output_directory": str(inbox),
+               "results_output_directory": str(res),
+               "kraken_db": str(tmp_path / "db"),
+               "processing_mode": "batch", "sample_handling": "per_file",
+               "analysis_name": "t", "blast_validation": False,
+               "enable_assembly": True}
+        cfg.update(over)
+        return create_nextflow_params(cfg), pop_launch_warnings()
+
+    def test_scope_and_depth_are_sent(self, tmp_path):
+        params, _w = self._params(tmp_path, assembly_scope="targeted",
+                                  assembly_min_depth=25)
+        assert params["assembly_scope"] == "targeted"
+        assert params["assembly_min_depth"] == 25
+        assert params["assembly_allow_low_depth"] is False
+
+    def test_an_unknown_scope_is_coerced(self, tmp_path):
+        params, _w = self._params(tmp_path, assembly_scope="nonsense")
+        assert params["assembly_scope"] == "metagenome"
+
+    def test_targeted_without_confirmation_testing_warns(self, tmp_path):
+        _p, warnings = self._params(tmp_path, assembly_scope="targeted")
+        assert any("targeted assembly needs confirmation testing" in w.lower()
+                   for w in warnings), warnings
+
+    def test_low_depth_override_warns(self, tmp_path):
+        _p, warnings = self._params(tmp_path, assembly_allow_low_depth=True)
+        assert any("fragments" in w.lower() for w in warnings), warnings
+
+    def test_no_assembly_warnings_when_it_is_off(self, tmp_path):
+        _p, warnings = self._params(tmp_path, enable_assembly=False,
+                                    assembly_scope="targeted")
+        assert not [w for w in warnings if "assembly" in w.lower()]

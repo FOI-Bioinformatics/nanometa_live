@@ -18,7 +18,10 @@ from dash.exceptions import PreventUpdate
 from nanometa_live.app.utils.debounce import interval_tick_is_redundant, mark_rendered
 from nanometa_live.core.utils.reports_loader import set_reports_dir, detect_reports
 from nanometa_live.core.utils.realtime_stats_loader import load_realtime_stats
-from nanometa_live.core.utils.assembly_loader import load_assembly_stats
+from nanometa_live.core.utils.assembly_loader import (
+    load_assembly_decisions,
+    load_assembly_stats,
+)
 from nanometa_live.core.utils.taxpasta_loader import load_taxpasta_long
 from nanometa_live.app.tabs.reports_helpers import (
     build_pipeline_reports_card,
@@ -100,13 +103,15 @@ def register_reports_callbacks(app, backend_manager=None):
         # Off, failed and produced must not render alike (assembly audit, A4).
         assembly_enabled = bool((config or {}).get("enable_assembly")) if config else None
         assembly_failed = _assembly_failed_tasks(results_dir)
+        assembly_decisions = load_assembly_decisions(results_dir)
         taxpasta_rows = load_taxpasta_long(results_dir)
         taxpasta_names = _name_by_taxid(results_dir) if taxpasta_rows else {}
         return html.Div([
             build_realtime_performance_panel(realtime),
             build_taxpasta_panel(taxpasta_rows, taxpasta_names),
             build_assembly_panel(assemblies, enabled=assembly_enabled,
-                                 failed_samples=assembly_failed),
+                                 failed_samples=assembly_failed,
+                                 decisions=assembly_decisions),
             build_pipeline_reports_card(reports),
             build_multiqc_embed(reports),
         ])

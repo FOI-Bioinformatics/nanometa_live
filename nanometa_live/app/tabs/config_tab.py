@@ -764,6 +764,9 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             # Assembly (2026-08-17)
             Output("enable-assembly-input", "value"),
             Output("assembler-input", "value"),
+            Output("assembly-scope-input", "value"),
+            Output("assembly-min-depth-input", "value"),
+            Output("assembly-allow-low-depth-input", "value"),
             Output("config-form-initialized", "data"),
         ],
         Input("refresh-form-trigger", "data"),
@@ -914,6 +917,11 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
         # Assembly (2026-08-17).
         enable_assembly = bool(config.get("enable_assembly", False))
+        assembly_scope = config.get("assembly_scope", defaults["assembly_scope"])
+        if assembly_scope not in ("metagenome", "targeted", "both"):
+            assembly_scope = defaults["assembly_scope"]
+        assembly_min_depth = config.get("assembly_min_depth", defaults["assembly_min_depth"])
+        assembly_allow_low_depth = bool(config.get("assembly_allow_low_depth", False))
         # Miniasm is no longer offered in the select (assembly audit): a saved
         # choice of it would render as no selection and Apply would write None.
         # Show flye and say so, as the qc_tool fastp path above does; the file
@@ -969,6 +977,9 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             min_reads_for_validation,
             enable_assembly,
             assembler,
+            assembly_scope,
+            assembly_min_depth,
+            assembly_allow_low_depth,
             # Mark the form as initialised so the value cascade does not flag
             # it Modified -- unless a draft was overlaid, in which case the
             # cascade must run the real comparison: a reload restored unsaved
@@ -1705,6 +1716,9 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("min-reads-for-validation-input", "value"),
             Input("enable-assembly-input", "value"),
             Input("assembler-input", "value"),
+            Input("assembly-scope-input", "value"),
+            Input("assembly-min-depth-input", "value"),
+            Input("assembly-allow-low-depth-input", "value"),
         ],
         [
             State("saved-config-snapshot", "data"),
@@ -1726,6 +1740,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         processing_mode, sample_handling, sample_name, negative_controls,
         max_file_age_minutes, min_reads_for_validation,
         enable_assembly, assembler,
+        assembly_scope, assembly_min_depth, assembly_allow_low_depth,
         saved_snapshot, currently_modified, form_initialized
     ):
         """Flag the form as modified when any saved field differs from the
@@ -1783,6 +1798,9 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "min_reads_for_validation": min_reads_for_validation,
             "enable_assembly": enable_assembly,
             "assembler": assembler if assembler in ("flye", "miniasm") else "flye",
+            "assembly_scope": assembly_scope,
+            "assembly_min_depth": assembly_min_depth,
+            "assembly_allow_low_depth": assembly_allow_low_depth,
         }
         dirty = config_form_dirty(saved_snapshot, form=form)
         # Persist the in-progress edits as a session draft when the form differs

@@ -1672,6 +1672,37 @@ repair claims nothing untrue:
 - `canonical_loaders.load_canonical_assembly` is gone: no callers, and a
   different JSON shape from `assembly_loader`, which is what the tab reads.
 
+**Assembly, Stage 2 (2026-09-04; do not regress).** The feature now measures
+before it assembles, and records the answer either way.
+
+- **The decision record is the contract.** nanometanf's `ASSEMBLY_DEPTH_GATE`
+  writes `<sample>[.taxid<N>].assembly_decision.json` into
+  `canonical/assembly/` on EVERY path, attempt or decline, and only cleared
+  read sets reach an assembler. `reason` is a closed vocabulary the GUI
+  branches on (`attempt`, `insufficient_depth`, `insufficient_bases`,
+  `no_reads`, `no_reference`, `low_depth_override`); `reason_text` is what it
+  renders. Adding a value is a cross-repo contract change.
+- **A decline is a result, not an absence.** `load_assembly_decisions` reads
+  the records and the Reports panel renders each declined target with its
+  depth bar and shortfall. On a real corpus nothing reached 2x of its
+  reference where a draft needs 30x, so declining is the normal answer for
+  shallow input; an empty panel would say nothing at all.
+- **`assembly_scope` selects what is assembled** (`metagenome`, `targeted`,
+  `both`). Targeted reuses the per-organism reads confirmation testing already
+  extracts, so there is one extraction path, and `ASSEMBLY` is therefore
+  invoked after `VALIDATION` in `workflows/nanometanf.nf` -- Nextflow orders by
+  data dependency, so this changes no execution order. Asking for targeted
+  without confirmation testing is a launch warning, not a silent downgrade.
+- **`assembly_allow_low_depth` is the escape hatch** and every artifact it
+  produces carries `low_depth_override` with "fragments" in its reason text.
+  If any surface drops that flag the hatch becomes the defect the gate exists
+  to remove.
+- **Field hardware is capped, not refused**: 4 CPUs, a 4 hour ceiling and
+  `maxForks 1`, with a targeted default. Set the ceilings in
+  `conf/modules.config` resolved from a param, never only in
+  `conf/field.config` -- modules.config is included after the profiles and
+  wins for any directive it sets.
+
 Pipeline side (nanometanf): all three assembly processes carry the same
 `errorStrategy` and write lost-input markers -- FLYE alone was isolated, so a
 miniasm exit ended a run whose five samples had already been classified. The
