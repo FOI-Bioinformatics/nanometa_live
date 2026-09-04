@@ -1687,9 +1687,13 @@ in a live run. `AssemblyReadAccumulator` holds each sample's read files and
 answers when an attempt is due -- every `assembly_batch_interval` files,
 provided the pool grew by `assembly_min_growth`, plus a final attempt at
 session end -- and `ASSEMBLY_READ_POOL` concatenates the set so the assembler
-sees the sample rather than one arriving file. The attempt number rides in
-`meta`, so an attempt cannot overwrite an earlier one; before this, a 28-file
-run left four artifacts, each a single batch. Batch mode emits each sample
+sees the sample rather than one arriving file. Each attempt is built from a
+superset of the last, so a newer result supersedes the previous one instead of
+competing with it; before this, each BATCH overwrote the last and a 28-file run
+left four artifacts, each a single batch's assembly. The accumulated files are
+staged one per directory (`stageAs`), because every batch of a sample carries
+the same QC output name and staging them flat fails with an input file name
+collision. Batch mode emits each sample
 once, so its first emission is also its final attempt and one code path serves
 both modes: do not add a `realtime_mode` branch here.
 
