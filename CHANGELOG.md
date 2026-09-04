@@ -4,6 +4,70 @@ All notable changes to Nanometa Live are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.18.0] - 2026-09-04
+
+Assembly stops being a step that can run, succeed and publish a number that is
+not a result. **Requires nanometanf v1.10.0**: this release sends assembly
+parameters the earlier pipeline does not declare, and its schema rejects them.
+
+The 2026-09-03 audit drove real runs of both assemblers and measured what depth
+the data could actually reach. On the demo corpus **no organism reached 2x of
+its reference, where a usable draft needs about 30x** — yet a full-corpus run
+published 63 contigs with an N50 of 12,368, built at a median coverage of 4,
+and reported itself healthy. Assembly had also never appeared in any operator
+documentation.
+
+### Added
+
+- **A declined assembly is a result you can act on.** Before assembling, the
+  pipeline measures the sequence available for each target and divides it by
+  the expected genome size. Where it falls short, the Reports tab shows what
+  was measured rather than contigs:
+
+  > barcode06, taxid 4007169 — insufficient depth
+  > 0.43 Mb assigned; 0.23x of a 1.87 Mb reference. 30x is needed for a usable
+  > draft, about 56 Mb more.
+
+  A bar beside each target shows how far along the run is, so "keep
+  sequencing" carries a number.
+- **Depth is shown beside the shape.** The assembly panel gains a median-depth
+  figure, and below 10x says outright that the contigs are fragments rather
+  than a genome. The assembler states this in its own log and the pipeline
+  records it per contig, but the summary the panel read never carried it, so
+  an operator saw a contig count and an N50 and nothing to judge them by.
+- **Assembly settings.** What to assemble (the whole sample, a detected
+  watchlist organism, or both), the depth below which the run declines, how
+  often to re-assemble during a live run, and whether to assemble below the
+  floor anyway. Results produced that way are labelled as fragments everywhere
+  they appear.
+- **Assembly in the exported report**, both what was produced and what was
+  declined. An exported run said nothing about it at all.
+- **A readiness check** naming, before the run starts, the conditions that make
+  it certain no assembly will be produced.
+- **Documentation.** Assembly appears in the user guide and the configuration
+  reference for the first time, including why a decline is normal.
+
+### Changed
+
+- **Assembly runs during a live sequencing run again.** It was switched off at
+  launch because it assembled every arriving file separately and published each
+  result over the last. Reads now accumulate per sample and the assembly
+  re-attempts as they grow, with a final attempt when the session ends.
+- **Miniasm is no longer offered.** It produces no assembly statistics, so
+  choosing it left the Reports tab the form pointed at blank, and it has no
+  build for Apple Silicon. A configuration file may still request it.
+
+### Fixed
+
+- **Off, declined, running, failed and produced are five distinguishable
+  states.** The assembly panel rendered nothing at all for an empty result, so
+  a run with assembly switched off and a run whose assemblies all failed looked
+  identical.
+- A failed assembly is named, drawing on the pipeline's own record of tasks it
+  isolated.
+- The launch no longer overrides an assembly setting without saying so on the
+  Start toast.
+
 ## [0.17.2] - 2026-09-03
 
 One fix, closing the last item the round-5 real-time drills left open.
