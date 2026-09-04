@@ -293,6 +293,45 @@ Use when each file is a separate sample:
 - Each file processed independently
 - Useful for plate-based experiments
 
+## Assembly
+
+Assembly is optional, off by default, and runs in batch mode. Switch it on in
+Configuration under Processing Settings, and choose what to assemble: the
+whole sample, a detected watchlist organism, or both.
+
+**What you will usually see is a decline, and that is the feature working.**
+Assembling a genome needs deep sequencing of that organism — roughly 30 times
+its length. A metagenomic sample spreads its reads across everything present,
+so a single organism often reaches a small fraction of that. Rather than
+publish contigs that would look like a genome, the run measures what is
+available and reports it:
+
+> barcode06, taxid 4007169 — insufficient depth
+> 0.43 Mb assigned; 0.23x of a 1.87 Mb reference. 30x is needed for a usable
+> draft, about 56 Mb more.
+
+The bar beside each target shows how far along you are. If the organism
+matters, keep sequencing: the figure tells you how much more is needed.
+
+The Reports tab distinguishes five states, so an empty panel never means
+"something went wrong silently":
+
+| What you see | What it means |
+|---|---|
+| Assembly not enabled | The switch is off |
+| Not enough sequence to assemble | Measured and declined, with the reason per target |
+| Assembly is enabled; no results yet | Running |
+| Assembly failed | A task died; the run continued without it |
+| Contig statistics | An assembly was produced |
+
+When contigs are produced, read the **median depth** tile first. Below about
+10x the panel says outright that the contigs are fragments rather than a
+genome, whatever the contig count and N50 suggest.
+
+If you want the fragments anyway — to see what is there rather than to report
+a result — switch on "Assemble below the floor anyway". Everything produced
+that way is labelled as a low-depth draft.
+
 ## Status indicators
 
 ### Header status
