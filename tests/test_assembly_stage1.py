@@ -305,3 +305,108 @@ class TestScopeReachesTheLaunch:
         _p, warnings = self._params(tmp_path, enable_assembly=False,
                                     assembly_scope="targeted")
         assert not [w for w in warnings if "assembly" in w.lower()]
+
+
+class TestExportedReportCarriesAssembly:
+    """An exported run said nothing about assembly at all, including that it
+    declined -- which is the usual outcome (assembly audit, Stage 2)."""
+
+    def _results(self, tmp_path, stats=None, decisions=None):
+        import json
+        d = tmp_path / "canonical" / "assembly"
+        d.mkdir(parents=True, exist_ok=True)
+        for entry in (stats or []):
+            (d / f"{entry['sample_id']}.assembly_stats.json").write_text(json.dumps(entry))
+        for entry in (decisions or []):
+            name = entry["sample_id"] + (f".taxid{entry['taxid']}" if entry.get("taxid") else "")
+            (d / f"{name}.assembly_decision.json").write_text(json.dumps(entry))
+        return tmp_path
+
+    def _html(self, results_dir):
+        from nanometa_live.core.export.report_generator import ReportGenerator
+        g = ReportGenerator(str(results_dir), {"analysis_name": "T"})
+        g.results_dir = str(results_dir)
+        data = g._collect_data([None], include_raw=False)
+        return g._build_html_report(data), data
+
+    def test_collect_data_carries_both_keys(self, tmp_path):
+        rd = self._results(tmp_path, decisions=[{
+            "sample_id": "barcode06", "taxid": 4007169, "decision": "declined",
+            "reason": "insufficient_depth", "reason_text": "0.23x of a 1.87 Mb reference."}])
+        _html, data = self._html(rd)
+        assert data["assembly"] == []
+        assert len(data["assembly_decisions"]) == 1
+
+    def test_a_declined_run_says_so(self, tmp_path):
+        rd = self._results(tmp_path, decisions=[{
+            "sample_id": "barcode06", "taxid": 4007169, "decision": "declined",
+            "reason": "insufficient_depth",
+            "reason_text": "0.43 Mb assigned; 0.23x of a 1.87 Mb reference."}])
+        html, _d = self._html(rd)
+        assert "<h2>Assembly</h2>" in html
+        assert "declined" in html.lower()
+        assert "barcode06" in html and "0.23x" in html
+
+    def test_a_produced_assembly_shows_its_depth(self, tmp_path):
+        rd = self._results(tmp_path, stats=[{
+            "sample_id": "barcode05",
+            "summary": {"total_contigs": 29, "total_length": 227821, "n50": 10041},
+            "contigs": [{"coverage": 4.0}, {"coverage": 4.0}, {"coverage": 6.0}]}])
+        html, _d = self._html(rd)
+        assert "barcode05" in html and "10,041" in html
+        # The depth is the number that says whether the rest mean anything.
+        assert "4x" in html
+        assert "fragments rather than" in html
+
+    def test_a_deep_assembly_gets_no_fragments_warning(self, tmp_path):
+        rd = self._results(tmp_path, stats=[{
+            "sample_id": "barcode05",
+            "summary": {"total_contigs": 3, "total_length": 4000000, "n50": 2000000},
+            "contigs": [{"coverage": 45.0}, {"coverage": 50.0}]}])
+        html, _d = self._html(rd)
+        assert "fragments rather than" not in html
+
+    def test_no_assembly_section_when_nothing_ran(self, tmp_path):
+        html, _d = self._html(tmp_path)
+        assert "<h2>Assembly</h2>" not in html
+
+
+class TestAssemblyReadiness:
+    """Two conditions make it certain no assembly will be produced, and both
+    are knowable before the run starts."""
+
+    @pytest.fixture
+    def checker(self):
+        from nanometa_live.core.workflow.readiness_checker import ReadinessChecker
+        return ReadinessChecker()
+
+    def test_realtime_says_assembly_will_not_run(self, checker):
+        r = checker._check_assembly_preconditions(
+            {"enable_assembly": True, "processing_mode": "realtime"})
+        assert r.passed is False and "real-time" in r.message
+
+    def test_targeted_without_confirmation_testing(self, checker):
+        r = checker._check_assembly_preconditions(
+            {"enable_assembly": True, "assembly_scope": "targeted",
+             "blast_validation": False})
+        assert r.passed is False
+        assert "confirmation testing" in r.message
+        assert "no assembly" in r.message
+
+    def test_both_scope_still_gets_the_whole_sample(self, checker):
+        r = checker._check_assembly_preconditions(
+            {"enable_assembly": True, "assembly_scope": "both",
+             "blast_validation": False})
+        assert r.passed is False and "only the whole-sample" in r.message
+
+    def test_a_workable_configuration_passes_and_states_the_floor(self, checker):
+        r = checker._check_assembly_preconditions(
+            {"enable_assembly": True, "assembly_scope": "metagenome",
+             "processing_mode": "batch", "assembly_min_depth": 30})
+        assert r.passed is True and "30x" in (r.details or "")
+
+    def test_the_check_is_absent_when_assembly_is_off(self, checker, tmp_path):
+        report = checker.check_readiness(
+            {"enable_assembly": False, "processing_mode": "batch",
+             "results_output_directory": str(tmp_path)})
+        assert not [c for c in report.checks if c.name == "Assembly"]

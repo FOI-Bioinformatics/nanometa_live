@@ -17,6 +17,8 @@ import pandas as pd
 
 from nanometa_live.core.config.threat_levels import threat_legend
 from nanometa_live.core.export.run_status import read_final_run_status
+from nanometa_live.core.utils.assembly_loader import (
+    load_assembly_decisions, load_assembly_stats)
 from nanometa_live.core.export.report_charts import build_charts
 from nanometa_live.core.utils.attribution import is_negative_control
 from nanometa_live.core.utils.classification_loaders import load_kraken_data
@@ -245,9 +247,21 @@ class ReportGenerator:
             "per_sample": per_sample,
             "pipeline_reports": pipeline_reports,
             "raw_skip_reason": raw_skip_reason,
+            **self._assembly_data(),
             # Run health (round 3): every verdict surface says the same
             # thing -- see core/export/run_status.py.
             **read_final_run_status(self.results_dir),
+        }
+
+    def _assembly_data(self) -> Dict[str, Any]:
+        """What assembly produced, and what it declined and why.
+
+        Absent from this report entirely until the 2026-09-03 assembly audit,
+        so an exported run said nothing about a step the operator switched on.
+        """
+        return {
+            "assembly": load_assembly_stats(self.results_dir),
+            "assembly_decisions": load_assembly_decisions(self.results_dir),
         }
 
     def _low_read_floor(self) -> int:

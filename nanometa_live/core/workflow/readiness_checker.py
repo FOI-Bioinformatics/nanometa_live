@@ -227,6 +227,8 @@ class ReadinessChecker:
         report.checks.append(self._check_output_directory(config))
         report.checks.append(self._check_disk_space(config))
         report.checks.append(self._check_cache_disk_space(config))
+        if config.get("enable_assembly"):
+            report.checks.append(self._check_assembly_preconditions(config))
 
         # === Data completeness (warning) ===
         report.checks.append(self._check_watchlist_active(config, active_watchlist))
@@ -642,6 +644,52 @@ class ReadinessChecker:
             "Input Directory", False, Severity.WARNING,
             f"No FASTQ files or per-sample directories found in {p.name}",
             details="This is expected if the sequencing run has not started yet"
+        )
+
+    def _check_assembly_preconditions(self, config: Dict[str, Any]) -> CheckResult:
+        """Say before the run whether assembly can deliver what was asked for.
+
+        Only evaluated when assembly is switched on. Two conditions make it
+        certain that no assembly will be produced, and both are knowable now:
+
+        * targeted scope with confirmation testing off, because targeted
+          assembly reuses the per-organism reads that confirmation extracts;
+        * a real-time run, where assembly is dropped at launch.
+
+        There is no check on achievable depth here: that needs the reads,
+        which do not exist yet. The pipeline measures it per target once they
+        do, and records the answer either way (assembly audit, 2026-09-03).
+        """
+        name = "Assembly"
+        scope = str(config.get("assembly_scope") or "metagenome")
+        if str(config.get("processing_mode") or "batch") == "realtime":
+            return CheckResult(
+                name, False, Severity.WARNING,
+                "Assembly is on but this is a real-time run, so it will not run",
+                details="Assembly is a batch-mode step. Switch the run to batch "
+                        "mode, or expect no assembly from this run.",
+            )
+        if scope in ("targeted", "both") and not config.get("blast_validation", False):
+            only = "no assembly" if scope == "targeted" else "only the whole-sample assembly"
+            return CheckResult(
+                name, False, Severity.WARNING,
+                f"Targeted assembly needs confirmation testing, which is off, "
+                f"so this run will produce {only}",
+                details="Targeted assembly reuses the reads that confirmation "
+                        "testing extracts for each detected organism. Switch "
+                        "confirmation testing on, or set the assembly scope to "
+                        "the whole sample.",
+            )
+        detail = ("A usable draft needs roughly "
+                  f"{config.get('assembly_min_depth') or 30:g}x coverage of the "
+                  "target. Where the reads fall short the run records the "
+                  "shortfall instead of publishing fragments.")
+        if config.get("assembly_allow_low_depth"):
+            detail += (" Low-depth assembly is allowed, so contigs may be "
+                       "fragments; every result is labelled as such.")
+        return CheckResult(
+            name, True, Severity.WARNING,
+            f"Assembly is on, scope: {scope}", details=detail,
         )
 
     def _check_input_read_length(self, config: Dict[str, Any]) -> CheckResult:
