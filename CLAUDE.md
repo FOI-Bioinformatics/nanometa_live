@@ -1672,6 +1672,16 @@ repair claims nothing untrue:
 - `canonical_loaders.load_canonical_assembly` is gone: no callers, and a
   different JSON shape from `assembly_loader`, which is what the tab reads.
 
+**An organism is its clade, on the pipeline side too (2026-09-04).**
+`EXTRACT_READS_BY_TAXID` matched the taxid exactly, so confirmatory BLAST and
+minimap2 aligned 279 of the 1,051 reads of *F. tularensis* in one real sample
+— 27% of the organism — and the assembly depth gate read 0.23x where the clade
+gives 1.95x. Extraction now selects the clade, resolved by
+`KreportTree.cladeOf` from the sample's own report. The clade always contains
+the requested taxid, so an absent or unreadable report degrades to exact-node
+behaviour rather than to nothing. This is the same rule
+`core/taxonomy/ranks.py` established on this side; the two had disagreed.
+
 **Assembly, Stage 2 (2026-09-04; do not regress).** The feature now measures
 before it assembles, and records the answer either way.
 
