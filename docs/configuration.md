@@ -98,6 +98,45 @@ nanopore_output_directory: "/path/to/input"
 The read filter is fixed at Start: a value applied while a run is active
 takes effect on the next Start.
 
+### Assembly
+
+Assembly is off by default. It runs in both batch and real-time mode; in a
+real-time run it re-assembles as the reads accumulate.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `enable_assembly` | bool | false | Assemble reads into contigs |
+| `assembler` | string | "flye" | The Configuration tab offers Flye only. `miniasm` is accepted from a config file, but it produces no assembly statistics, so nothing appears on the Reports tab, and it has no build for Apple Silicon |
+| `assembly_scope` | string | "metagenome" | `metagenome` assembles the whole sample; `targeted` assembles the reads of a detected watchlist organism; `both` does each independently |
+| `assembly_min_depth` | number | 30 | Targeted scope: coverage of the organism's reference below which the run declines and records why |
+| `assembly_min_bases` | int | 100000000 | Whole-sample scope: total bases below which the run declines |
+| `assembly_batch_interval` | int | 10 | Real-time only: input files between re-assemblies. 0 assembles once, at the end of the session |
+| `assembly_allow_low_depth` | bool | false | Assemble below the floor anyway. Results are labelled as fragments |
+
+**In a real-time run the reads accumulate and assembly repeats as depth
+grows.** Each attempt uses everything the sample has produced so far, and an
+attempt is skipped unless the reads have grown materially since the last one.
+A final attempt always runs when the session ends. Attempts do not overwrite
+each other.
+
+**A declined assembly is a normal result.** Before assembling, the pipeline
+measures the sequence available for each target and divides it by the expected
+genome size. A usable draft of a bacterial genome needs roughly 30x coverage.
+Below the floor it writes what it measured — the depth reached, the reference
+size and how much more sequence is needed — and the Reports tab shows that
+instead of contigs.
+
+This matters because shallow metagenomic input rarely reaches the floor. On a
+representative field corpus no organism exceeded 2x, so contigs produced from
+it would be fragments of a genome presented with an N50, which reads as a
+draft assembly. Declining is the honest answer; the panel tells you how much
+further to sequence.
+
+**Targeted assembly needs confirmation testing.** It reuses the per-organism
+reads that BLAST and minimap2 confirmation already extracts, so with
+confirmation testing off there is nothing to assemble and the Start toast
+says so.
+
 ### Real-time Mode
 
 | Parameter | Type | Default | Description |

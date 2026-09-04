@@ -557,6 +557,62 @@
   </div>
   {% endif %}
 
+  {#
+    Assembly. Rendered whenever the run produced an assembly OR recorded a
+    decision, because a decline is a result: the pipeline measured the
+    sequence available and said it was not enough. An exported run used to say
+    nothing about assembly at all (assembly audit, 2026-09-03).
+  #}
+  {% if data.assembly or data.assembly_decisions %}
+  <h2>Assembly</h2>
+  <div class="card">
+    <div class="card-body">
+      {% set declined = data.assembly_decisions | selectattr("decision", "equalto", "declined") | list %}
+      {% if data.assembly %}
+      <table>
+        <thead>
+          <tr><th>Sample</th><th>Contigs</th><th>Total bp</th><th>N50</th><th>Median depth</th></tr>
+        </thead>
+        <tbody>
+          {% for a in data.assembly %}
+          {% set covs = a.contigs | map(attribute="coverage") | reject("none") | list | sort %}
+          {% set med = covs[covs | length // 2] if covs else None %}
+          <tr>
+            <td>{{ a.sample }}</td>
+            <td>{{ a.summary.total_contigs if a.summary.total_contigs is not none else "--" }}</td>
+            <td>{{ "{:,}".format(a.summary.total_length) if a.summary.total_length else "--" }}</td>
+            <td>{{ "{:,}".format(a.summary.n50) if a.summary.n50 else "--" }}</td>
+            <td>{{ ("%.0fx" % med) if med is not none else "--" }}</td>
+          </tr>
+          {% if med is not none and med < 10 %}
+          <tr><td colspan="5" style="color:#856404;background:#fff3cd;">
+            Median contig depth {{ "%.0f" % med }}x. A usable draft of a bacterial
+            genome needs roughly 30x, so these contigs are fragments rather than
+            a genome.
+          </td></tr>
+          {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      {% if declined %}
+      <p style="color:#6c757d;{% if data.assembly %}margin-top:1em;{% else %}margin-top:0;{% endif %}">
+        The pipeline measured the reads available for these targets and declined
+        to assemble them, rather than publishing contigs that would read as a genome.
+      </p>
+      <ul>
+        {% for d in declined %}
+        <li>
+          <strong>{{ d.sample }}{% if d.taxid %}, taxid {{ d.taxid }}{% endif %}</strong>
+          &mdash; {{ d.reason_text or d.reason }}
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
   <!-- PER-SAMPLE DETAILS -->
   {% if data.per_sample %}
   <h2 class="page-break">Sample Details</h2>

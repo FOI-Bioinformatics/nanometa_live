@@ -85,7 +85,9 @@ class TestAssembly:
         assert out[0]["summary"]["n50"] == 1800000
 
     def test_panel_empty_and_populated(self, tmp_path):
-        assert build_assembly_panel([]) == ""
+        # An empty list is no longer silence: off, failed and awaiting are
+        # distinguishable states, pinned in tests/test_assembly_stage1.py.
+        assert build_assembly_panel([]) != ""
         panel = build_assembly_panel([{
             "sample": "barcode14",
             "summary": {"total_contigs": 2, "total_length": 1900000, "n50": 1800000,

@@ -866,6 +866,13 @@ def _build_base_params(config: Dict[str, Any], main_dir: str, kraken_db: str,
         "assembler": (config.get("assembler")
                       if config.get("assembler") in ("flye", "miniasm")
                       else "flye"),
+        "assembly_scope": (config.get("assembly_scope")
+                           if config.get("assembly_scope") in
+                           ("metagenome", "targeted", "both")
+                           else "metagenome"),
+        "assembly_min_depth": float(config.get("assembly_min_depth") or 30),
+        "assembly_allow_low_depth": bool(config.get("assembly_allow_low_depth", False)),
+        "assembly_batch_interval": int(config.get("assembly_batch_interval") or 10),
 
         # Read-filter overrides surfaced by the Configuration tab's Advanced
         # Settings -> Read Filtering and Validation card. Defaults match
@@ -1090,13 +1097,11 @@ def _apply_realtime_stop_conditions(params: Dict[str, Any], config: Dict[str, An
                 "realtime_processing_grace_period=%r is not a whole number "
                 ">= 1; the pipeline default applies", grace)
 
-    # Assembly is a whole-sample step. In real time it would run on every
-    # small batch and fail each time ("No overlaps found" on 2000-read
-    # batches, counted as failed tasks in the header), so the launch leaves
-    # it off; the form says so (audit round 5, C8).
-    if params.get("enable_assembly"):
-        params["enable_assembly"] = False
-        logging.info("Assembly is not run in real-time mode; switch off for this launch")
+    # Assembly is no longer dropped in real time. It used to run on every
+    # arriving file and publish each result over the last (round-5 C8, and
+    # the assembly audit's A3), so the launch switched it off. The pipeline
+    # now accumulates a sample's reads and re-assembles on a cadence, so the
+    # operator's switch is honoured; assembly_batch_interval sets the pace.
 
 
 _launch_warnings: List[str] = []
@@ -1252,6 +1257,25 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
                 "Watchlist tab first.")
     blast_validation_enabled = config.get("blast_validation", False) and can_run_validation
     run_validation_enabled = can_run_validation
+
+    # Targeted assembly reuses the per-organism reads confirmation testing
+    # extracts, so without validation there is nothing to assemble for it. The
+    # form says so; this is what an operator sees at Start when the two
+    # settings disagree (assembly audit Stage 2).
+    if (config.get("enable_assembly", False)
+            and str(config.get("assembly_scope", "metagenome")) in ("targeted", "both")
+            and not can_run_validation):
+        scope = str(config.get("assembly_scope"))
+        add_launch_warning(
+            "Targeted assembly needs confirmation testing to select the "
+            "organism's reads, and it is not running, so "
+            + ("no assembly will be produced."
+               if scope == "targeted"
+               else "only the whole-sample assembly will run."))
+    if config.get("enable_assembly", False) and config.get("assembly_allow_low_depth"):
+        add_launch_warning(
+            "Low-depth assembly is allowed: contigs may be fragments rather "
+            "than genomes, and every result is labelled as such.")
 
     if config.get("blast_validation", False) and not can_run_validation:
         if not has_species:

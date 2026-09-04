@@ -487,6 +487,16 @@ def default_config() -> Dict[str, Any]:
         # Assembly (experimental nanometanf step; off by default)
         "enable_assembly": False,
         "assembler": "flye",
+        # What assembly does when it is switched on. Targeted assembles a
+        # detected organism's reads as contig-level evidence beside the
+        # BLAST/minimap2 confirmation; metagenome assembles the whole sample.
+        # The depth floor keeps the feature honest: on a real field corpus
+        # nothing reached 2x where a draft needs 30x, so declining with a
+        # stated reason is the normal answer (assembly audit, 2026-09-03).
+        "assembly_scope": "metagenome",
+        "assembly_min_depth": 30,
+        "assembly_batch_interval": 10,
+        "assembly_allow_low_depth": False,
         # Kraken2 realtime incremental classification
         "kraken2_enable_incremental": True,
         # Classifier filters; 0 is kraken2's own default for both. Written

@@ -57,6 +57,24 @@ _FORM_STATES = [State(cid, "value") for cid, _ in CONFIG_FORM_FIELDS]
 _FORM_KWARGS = [kw for _, kw in CONFIG_FORM_FIELDS]
 
 
+def _assembly_form_fields(enable_assembly, assembler, scope, min_depth,
+                          batch_interval, allow_low_depth):
+    """The assembly half of the dirty-check form dict.
+
+    Keyed exactly as ``build_config_from_form`` writes them: a key missing
+    here means edits to that field never flag the form modified, so the
+    operator can forget to Apply and launch with stale config.
+    """
+    return {
+        "enable_assembly": enable_assembly,
+        "assembler": assembler if assembler in ("flye", "miniasm") else "flye",
+        "assembly_scope": scope,
+        "assembly_min_depth": min_depth,
+        "assembly_batch_interval": batch_interval,
+        "assembly_allow_low_depth": allow_low_depth,
+    }
+
+
 def register_config_callbacks(app: Dash, backend_manager: BackendManager):
     """
     Register callbacks for the configuration tab.
@@ -764,6 +782,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             # Assembly (2026-08-17)
             Output("enable-assembly-input", "value"),
             Output("assembler-input", "value"),
+            Output("assembly-scope-input", "value"),
+            Output("assembly-min-depth-input", "value"),
+            Output("assembly-batch-interval-input", "value"),
+            Output("assembly-allow-low-depth-input", "value"),
             Output("config-form-initialized", "data"),
         ],
         Input("refresh-form-trigger", "data"),
@@ -914,8 +936,25 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
         # Assembly (2026-08-17).
         enable_assembly = bool(config.get("enable_assembly", False))
+        assembly_scope = config.get("assembly_scope", defaults["assembly_scope"])
+        if assembly_scope not in ("metagenome", "targeted", "both"):
+            assembly_scope = defaults["assembly_scope"]
+        assembly_min_depth = config.get("assembly_min_depth", defaults["assembly_min_depth"])
+        assembly_batch_interval = config.get(
+            "assembly_batch_interval", defaults["assembly_batch_interval"])
+        assembly_allow_low_depth = bool(config.get("assembly_allow_low_depth", False))
+        # Miniasm is no longer offered in the select (assembly audit): a saved
+        # choice of it would render as no selection and Apply would write None.
+        # Show flye and say so, as the qc_tool fastp path above does; the file
+        # keeps its value until Apply.
         assembler = config.get("assembler", defaults["assembler"])
-        if assembler not in ("flye", "miniasm"):
+        if assembler == "miniasm":
+            logging.warning(
+                "assembler 'miniasm' is no longer offered in the Configuration "
+                "tab: it writes no assembly statistics and has no build for "
+                "this platform. The form shows flye, and Apply Settings will "
+                "save flye. Keep miniasm by editing the config file instead.")
+        if assembler != "flye":
             assembler = "flye"
 
         return [
@@ -959,6 +998,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             min_reads_for_validation,
             enable_assembly,
             assembler,
+            assembly_scope,
+            assembly_min_depth,
+            assembly_batch_interval,
+            assembly_allow_low_depth,
             # Mark the form as initialised so the value cascade does not flag
             # it Modified -- unless a draft was overlaid, in which case the
             # cascade must run the real comparison: a reload restored unsaved
@@ -1695,6 +1738,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("min-reads-for-validation-input", "value"),
             Input("enable-assembly-input", "value"),
             Input("assembler-input", "value"),
+            Input("assembly-scope-input", "value"),
+            Input("assembly-min-depth-input", "value"),
+            Input("assembly-batch-interval-input", "value"),
+            Input("assembly-allow-low-depth-input", "value"),
         ],
         [
             State("saved-config-snapshot", "data"),
@@ -1716,6 +1763,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         processing_mode, sample_handling, sample_name, negative_controls,
         max_file_age_minutes, min_reads_for_validation,
         enable_assembly, assembler,
+        assembly_scope, assembly_min_depth, assembly_batch_interval,
+        assembly_allow_low_depth,
         saved_snapshot, currently_modified, form_initialized
     ):
         """Flag the form as modified when any saved field differs from the
@@ -1771,8 +1820,9 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "kraken2_minimum_hit_groups": kraken2_hitgroups,
             "max_file_age_minutes": optional_int(max_file_age_minutes),
             "min_reads_for_validation": min_reads_for_validation,
-            "enable_assembly": enable_assembly,
-            "assembler": assembler if assembler in ("flye", "miniasm") else "flye",
+            **_assembly_form_fields(
+                enable_assembly, assembler, assembly_scope, assembly_min_depth,
+                assembly_batch_interval, assembly_allow_low_depth),
         }
         dirty = config_form_dirty(saved_snapshot, form=form)
         # Persist the in-progress edits as a session draft when the form differs

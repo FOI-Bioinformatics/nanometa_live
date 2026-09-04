@@ -274,6 +274,10 @@ def build_config_from_form(
     min_reads_for_validation,
     enable_assembly,
     assembler,
+    assembly_scope,
+    assembly_min_depth,
+    assembly_batch_interval,
+    assembly_allow_low_depth,
 ):
     """Validate Configuration-form inputs and build the updated config dict.
 
@@ -488,6 +492,16 @@ def build_config_from_form(
         config["enable_assembly"] = bool(enable_assembly)
     if assembler is not None:
         config["assembler"] = assembler if assembler in ("flye", "miniasm") else "flye"
+    if assembly_scope is not None:
+        config["assembly_scope"] = (
+            assembly_scope if assembly_scope in ("metagenome", "targeted", "both")
+            else "metagenome")
+    if assembly_min_depth not in (None, ""):
+        config["assembly_min_depth"] = float(assembly_min_depth)
+    if assembly_batch_interval not in (None, ""):
+        config["assembly_batch_interval"] = int(assembly_batch_interval)
+    if assembly_allow_low_depth is not None:
+        config["assembly_allow_low_depth"] = bool(assembly_allow_low_depth)
 
     # Note: Species watchlist is now managed via the Watchlist & Preparation tab
     # and WatchlistManager, not through this config form
@@ -551,6 +565,7 @@ def config_form_dirty(snapshot, *, form):
         "kraken_memory_mapping", "blast_validation",
         "skip_nanoplot", "kraken2_enable_incremental", "enable_krona_plots",
         "enable_nanopore_stats_mqc", "enable_assembly",
+        "assembly_allow_low_depth",
     }
     for key, current_val in form.items():
         snapshot_val = snapshot.get(key)

@@ -124,7 +124,11 @@ class TestAssemblyExposure:
         select = _find_by_id(form, "assembler-input")
         assert switch is not None and switch.value is False
         assert select is not None and select.value == "flye"
-        assert {o["value"] for o in select.options} == {"flye", "miniasm"}
+        # Miniasm was withdrawn from the select on 2026-09-04: it writes no
+        # canonical output, so choosing it left the Reports tab the form
+        # named blank, and it has no bioconda build for Apple Silicon
+        # (assembly audit). A config file may still request it.
+        assert {o["value"] for o in select.options} == {"flye"}
 
     @staticmethod
     def _base_config(tmp_path):

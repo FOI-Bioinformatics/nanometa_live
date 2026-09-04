@@ -853,10 +853,10 @@ def _processing_settings_item():
                     dbc.Badge("Experimental", color="warning", className="ms-2",
                               style={"fontSize": "0.65rem"}),
                 ], className="d-flex align-items-center"),
-                dbc.FormText("Adds a metagenome assembly step; results appear "
-                             "on the Reports tab. Batch mode only: in real-time "
-                             "mode each small batch would be assembled on its "
-                             "own and fail, so the launch leaves assembly off."),
+                dbc.FormText("Adds a metagenome assembly step. The Reports tab "
+                             "shows the assembly, or why there is none. In a "
+                             "live run the reads accumulate and it re-assembles "
+                             "as depth grows."),
                 dbc.Tooltip(
                     "Runs the pipeline's experimental assembly step on the "
                     "filtered reads. Flye runs in metagenome mode, so mixed "
@@ -872,23 +872,120 @@ def _processing_settings_item():
                     html.I(className="bi bi-info-circle text-muted ms-1",
                            id="assembler-info"),
                 ], html_for="assembler-input"),
+                # Miniasm was withdrawn on 2026-09-04, as fastp was from the
+                # QC select. It writes no canonical output, so choosing it
+                # produced nothing on the Reports tab the form named; and it
+                # has no bioconda build for Apple Silicon, so on this hardware
+                # its conda environment cannot even be created (assembly
+                # audit, 2026-09-03). A config file may still request it.
                 dbc.Select(
                     id="assembler-input",
                     options=[
                         {"label": "Flye (metagenome mode, with statistics)", "value": "flye"},
-                        {"label": "Miniasm (fast draft, no statistics)", "value": "miniasm"},
                     ],
                     value="flye"
                 ),
                 dbc.FormText("Only used when assembly is enabled"),
                 dbc.Tooltip(
                     "Flye produces polished contigs and the assembly "
-                    "statistics the Reports tab displays. Miniasm is faster "
-                    "but emits draft contigs without statistics.",
+                    "statistics the Reports tab displays. It runs in "
+                    "metagenome mode.",
                     target="assembler-info"
                 )
             ], md=6)
-        ])
+        ]),
+        dbc.Row([
+            dbc.Col([
+                dbc.Label([
+                    "Assemble ",
+                    html.I(className="bi bi-info-circle text-muted ms-1",
+                           id="assembly-scope-info")
+                ], html_for="assembly-scope-input"),
+                dbc.Select(
+                    id="assembly-scope-input",
+                    options=[
+                        {"label": "The whole sample", "value": "metagenome"},
+                        {"label": "A detected watchlist organism", "value": "targeted"},
+                        {"label": "Both", "value": "both"},
+                    ],
+                    value="metagenome"
+                ),
+                dbc.FormText("Targeted assembly needs confirmation testing on, "
+                             "to select the organism's reads"),
+                dbc.Tooltip(
+                    "Targeted assembles the reads assigned to an organism the "
+                    "run detected, as contig-level evidence beside the "
+                    "confirmation results. It reuses the reads confirmation "
+                    "testing extracts, so it needs that switched on. Whole "
+                    "sample assembles everything for exploration.",
+                    target="assembly-scope-info"
+                )
+            ], md=3),
+            dbc.Col([
+                dbc.Label([
+                    "Minimum depth to assemble ",
+                    html.I(className="bi bi-info-circle text-muted ms-1",
+                           id="assembly-min-depth-info")
+                ], html_for="assembly-min-depth-input"),
+                dbc.Input(
+                    id="assembly-min-depth-input",
+                    type="number", min=0, max=1000, step=1, value=30
+                ),
+                dbc.FormText("Below this the run records why it declined, "
+                             "rather than producing fragments"),
+                dbc.Tooltip(
+                    "A usable draft of a bacterial genome needs roughly 30x "
+                    "coverage. Below the floor the pipeline writes what it "
+                    "measured -- the depth reached, the reference size and "
+                    "how much more sequence is needed -- and the Reports tab "
+                    "shows that instead of contigs. On shallow metagenomic "
+                    "input declining is the normal answer, not an error.",
+                    target="assembly-min-depth-info"
+                )
+            ], md=3),
+            dbc.Col([
+                dbc.Label([
+                    "Re-assemble every (files) ",
+                    html.I(className="bi bi-info-circle text-muted ms-1",
+                           id="assembly-batch-interval-info")
+                ], html_for="assembly-batch-interval-input"),
+                dbc.Input(
+                    id="assembly-batch-interval-input",
+                    type="number", min=0, max=1000, step=1, value=10
+                ),
+                dbc.FormText("Real-time only. 0 assembles once, at the end"),
+                dbc.Tooltip(
+                    "In a live run the sample's reads accumulate and the "
+                    "assembly is re-attempted every this many files, so it "
+                    "happens when the depth allows rather than at a moment "
+                    "you have to pick. An attempt is skipped if the reads "
+                    "have not grown much since the last one, and a final "
+                    "attempt always runs when the session ends.",
+                    target="assembly-batch-interval-info"
+                )
+            ], md=3),
+            dbc.Col([
+                html.Div([
+                    dbc.Switch(
+                        id="assembly-allow-low-depth-input",
+                        label="Assemble below the floor anyway",
+                        value=False,
+                        className="mt-3"
+                    ),
+                    html.I(className="bi bi-info-circle text-muted ms-1",
+                           id="assembly-allow-low-depth-info"),
+                ], className="d-flex align-items-center"),
+                dbc.FormText("Results are labelled as fragments, not genomes"),
+                dbc.Tooltip(
+                    "Produces contigs even when coverage is too low for a "
+                    "genome. Everything it writes is marked as a low-depth "
+                    "draft so no report can present it as an assembled "
+                    "organism. Use it to inspect what is there, not to "
+                    "report a result.",
+                    target="assembly-allow-low-depth-info"
+                )
+            ], md=3),
+        ], className="mt-3")
     ], title="Processing Settings")
 
 

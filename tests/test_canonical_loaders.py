@@ -8,7 +8,6 @@ import pandas as pd
 import pytest
 
 from nanometa_live.core.utils.canonical_loaders import (
-    load_canonical_assembly,
     load_canonical_classification,
     load_canonical_qc_stats,
     load_canonical_validation,
@@ -292,34 +291,12 @@ class TestLoadCanonicalValidation:
         assert result["aggregate"] is True
 
 
-# -- load_canonical_assembly tests --
+def test_canonical_loaders_exposes_no_assembly_reader():
+    """The duplicate assembly reader must not come back.
 
-
-class TestLoadCanonicalAssembly:
-    def test_valid_assembly(self, results_dir):
-        data = {"n50": 15000, "total_length": 4800000, "num_contigs": 320}
-        path = os.path.join(
-            results_dir, "canonical", "assembly",
-            "barcode01.assembly_stats.json",
-        )
-        with open(path, "w") as f:
-            json.dump(data, f)
-
-        result = load_canonical_assembly(results_dir, "barcode01")
-        assert result is not None
-        assert result["n50"] == 15000
-
-    def test_missing_file_returns_none(self, results_dir):
-        result = load_canonical_assembly(results_dir, "nonexistent")
-        assert result is None
-
-    def test_corrupt_json_returns_none(self, results_dir):
-        path = os.path.join(
-            results_dir, "canonical", "assembly",
-            "barcode01.assembly_stats.json",
-        )
-        with open(path, "w") as f:
-            f.write("{{bad")
-
-        result = load_canonical_assembly(results_dir, "barcode01")
-        assert result is None
+    It had no application callers and a different JSON shape from
+    core/utils/assembly_loader.py, which the Reports tab reads (assembly
+    audit, 2026-09-03).
+    """
+    import nanometa_live.core.utils.canonical_loaders as cl
+    assert not [n for n in dir(cl) if "assembly" in n.lower()]

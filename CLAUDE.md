@@ -1646,6 +1646,95 @@ open, and produced three fixes:
   `tests/test_input_layout_mismatch.py`; verified live on the flat-folder
   drill.
 
+**Assembly, Stage 1 (2026-09-04; do not regress).** The audit
+(`docs/audit/assembly-2026-09-03.md`) found the one feature that could run,
+succeed, report no failures and publish a number that was not a result. The
+repair claims nothing untrue:
+
+- **Depth is shown beside the shape.** `_assembly_coverage` takes the median
+  per-contig coverage and the Reports panel renders it as a KPI; below
+  `LOW_COVERAGE_ASSEMBLY` (10x) it says the contigs are fragments rather than a
+  genome, against the `USABLE_ASSEMBLY_DEPTH` of 30x. Flye states its coverage
+  in its own log and the canonical writer keeps it per contig, but the summary
+  block never carried it, so the KPI row -- which renders exactly the summary --
+  showed 63 contigs at an N50 of 12,368 built at a median coverage of 4.
+- **`build_assembly_panel` never returns `""`.** Off, failed, awaiting and
+  produced are four distinguishable cards; the failed state is derived from
+  nanometanf's lost-input markers via `_assembly_failed_tasks`. Returning the
+  empty string made a failed assembly and a disabled one the same blank space.
+- **Miniasm is withdrawn from the GUI**, as fastp was from the QC select: it
+  writes no canonical output, so choosing it left the Reports tab the form
+  named blank, and it has no bioconda build for Apple Silicon. The form loader
+  shows flye for a saved miniasm and logs why; a config file may still request
+  it, and the pipeline path is repaired rather than removed.
+- **The real-time drop is a launch warning**, not a log line, so the Start
+  toast says the switch was overridden.
+- `canonical_loaders.load_canonical_assembly` is gone: no callers, and a
+  different JSON shape from `assembly_loader`, which is what the tab reads.
+
+**An organism is its clade, on the pipeline side too (2026-09-04).**
+`EXTRACT_READS_BY_TAXID` matched the taxid exactly, so confirmatory BLAST and
+minimap2 aligned 279 of the 1,051 reads of *F. tularensis* in one real sample
+— 27% of the organism — and the assembly depth gate read 0.23x where the clade
+gives 1.95x. Extraction now selects the clade, resolved by
+`KreportTree.cladeOf` from the sample's own report. The clade always contains
+the requested taxid, so an absent or unreadable report degrades to exact-node
+behaviour rather than to nothing. This is the same rule
+`core/taxonomy/ranks.py` established on this side; the two had disagreed.
+
+**Assembly in real time (Stage 3, 2026-09-04).** Assembly is no longer dropped
+in a live run. `AssemblyReadAccumulator` holds each sample's read files and
+answers when an attempt is due -- every `assembly_batch_interval` files,
+provided the pool grew by `assembly_min_growth`, plus a final attempt at
+session end -- and `ASSEMBLY_READ_POOL` concatenates the set so the assembler
+sees the sample rather than one arriving file. Each attempt is built from a
+superset of the last, so a newer result supersedes the previous one instead of
+competing with it; before this, each BATCH overwrote the last and a 28-file run
+left four artifacts, each a single batch's assembly. The accumulated files are
+staged one per directory (`stageAs`), because every batch of a sample carries
+the same QC output name and staging them flat fails with an input file name
+collision. Batch mode emits each sample
+once, so its first emission is also its final attempt and one code path serves
+both modes: do not add a `realtime_mode` branch here.
+
+**Assembly, Stage 2 (2026-09-04; do not regress).** The feature now measures
+before it assembles, and records the answer either way.
+
+- **The decision record is the contract.** nanometanf's `ASSEMBLY_DEPTH_GATE`
+  writes `<sample>[.taxid<N>].assembly_decision.json` into
+  `canonical/assembly/` on EVERY path, attempt or decline, and only cleared
+  read sets reach an assembler. `reason` is a closed vocabulary the GUI
+  branches on (`attempt`, `insufficient_depth`, `insufficient_bases`,
+  `no_reads`, `no_reference`, `low_depth_override`); `reason_text` is what it
+  renders. Adding a value is a cross-repo contract change.
+- **A decline is a result, not an absence.** `load_assembly_decisions` reads
+  the records and the Reports panel renders each declined target with its
+  depth bar and shortfall. On a real corpus nothing reached 2x of its
+  reference where a draft needs 30x, so declining is the normal answer for
+  shallow input; an empty panel would say nothing at all.
+- **`assembly_scope` selects what is assembled** (`metagenome`, `targeted`,
+  `both`). Targeted reuses the per-organism reads confirmation testing already
+  extracts, so there is one extraction path, and `ASSEMBLY` is therefore
+  invoked after `VALIDATION` in `workflows/nanometanf.nf` -- Nextflow orders by
+  data dependency, so this changes no execution order. Asking for targeted
+  without confirmation testing is a launch warning, not a silent downgrade.
+- **`assembly_allow_low_depth` is the escape hatch** and every artifact it
+  produces carries `low_depth_override` with "fragments" in its reason text.
+  If any surface drops that flag the hatch becomes the defect the gate exists
+  to remove.
+- **Field hardware is capped, not refused**: 4 CPUs, a 4 hour ceiling and
+  `maxForks 1`, with a targeted default. Set the ceilings in
+  `conf/modules.config` resolved from a param, never only in
+  `conf/field.config` -- modules.config is included after the profiles and
+  wins for any directive it sets.
+
+Pipeline side (nanometanf): all three assembly processes carry the same
+`errorStrategy` and write lost-input markers -- FLYE alone was isolated, so a
+miniasm exit ended a run whose five samples had already been classified. The
+manifest reports the assembly files that exist rather than deriving one name
+per sample. Assembly is capped at `maxForks 1`, and the all-vs-all PAF stays
+in the work directory.
+
 **Negative controls.** `is_negative_control` reads the config's
 `negative_control_samples` list first, then falls back to name patterns:
 `NTC` / `neg_ctrl` / `blank`, fused numeric suffixes (`NTC1`, `blank2`,
