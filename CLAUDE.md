@@ -1646,6 +1646,39 @@ open, and produced three fixes:
   `tests/test_input_layout_mismatch.py`; verified live on the flat-folder
   drill.
 
+**Assembly, Stage 1 (2026-09-04; do not regress).** The audit
+(`docs/audit/assembly-2026-09-03.md`) found the one feature that could run,
+succeed, report no failures and publish a number that was not a result. The
+repair claims nothing untrue:
+
+- **Depth is shown beside the shape.** `_assembly_coverage` takes the median
+  per-contig coverage and the Reports panel renders it as a KPI; below
+  `LOW_COVERAGE_ASSEMBLY` (10x) it says the contigs are fragments rather than a
+  genome, against the `USABLE_ASSEMBLY_DEPTH` of 30x. Flye states its coverage
+  in its own log and the canonical writer keeps it per contig, but the summary
+  block never carried it, so the KPI row -- which renders exactly the summary --
+  showed 63 contigs at an N50 of 12,368 built at a median coverage of 4.
+- **`build_assembly_panel` never returns `""`.** Off, failed, awaiting and
+  produced are four distinguishable cards; the failed state is derived from
+  nanometanf's lost-input markers via `_assembly_failed_tasks`. Returning the
+  empty string made a failed assembly and a disabled one the same blank space.
+- **Miniasm is withdrawn from the GUI**, as fastp was from the QC select: it
+  writes no canonical output, so choosing it left the Reports tab the form
+  named blank, and it has no bioconda build for Apple Silicon. The form loader
+  shows flye for a saved miniasm and logs why; a config file may still request
+  it, and the pipeline path is repaired rather than removed.
+- **The real-time drop is a launch warning**, not a log line, so the Start
+  toast says the switch was overridden.
+- `canonical_loaders.load_canonical_assembly` is gone: no callers, and a
+  different JSON shape from `assembly_loader`, which is what the tab reads.
+
+Pipeline side (nanometanf): all three assembly processes carry the same
+`errorStrategy` and write lost-input markers -- FLYE alone was isolated, so a
+miniasm exit ended a run whose five samples had already been classified. The
+manifest reports the assembly files that exist rather than deriving one name
+per sample. Assembly is capped at `maxForks 1`, and the all-vs-all PAF stays
+in the work directory.
+
 **Negative controls.** `is_negative_control` reads the config's
 `negative_control_samples` list first, then falls back to name patterns:
 `NTC` / `neg_ctrl` / `blank`, fused numeric suffixes (`NTC1`, `blank2`,

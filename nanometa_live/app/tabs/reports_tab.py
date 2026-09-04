@@ -46,6 +46,28 @@ def _name_by_taxid(results_dir):
 logger = logging.getLogger(__name__)
 
 
+def _assembly_failed_tasks(results_dir):
+    """Assembly tasks the pipeline isolated, from nanometanf's lost-input markers.
+
+    nanometanf runs bin/nanometanf_lost_input_marker.sh as the afterScript of
+    every isolated process, so an ignored FLYE or MINIASM exit leaves a marker
+    under pipeline_info/lost_inputs/. Without this the Reports tab could not
+    tell a failed assembly from one that was never enabled.
+    """
+    if not results_dir:
+        return []
+    try:
+        from nanometa_live.core.export.run_status import read_lost_inputs
+        return sorted({
+            str(m.get("sample") or "?")
+            for m in (read_lost_inputs(results_dir) or [])
+            if any(t in str(m.get("process", "")).upper()
+                   for t in ("FLYE", "MINIASM", "MINIMAP2_AVA"))
+        })
+    except Exception:
+        return []
+
+
 def register_reports_callbacks(app, backend_manager=None):
     @app.callback(
         Output("reports-content", "children"),
@@ -75,12 +97,16 @@ def register_reports_callbacks(app, backend_manager=None):
         reports = detect_reports(results_dir)
         realtime = load_realtime_stats(results_dir)
         assemblies = load_assembly_stats(results_dir)
+        # Off, failed and produced must not render alike (assembly audit, A4).
+        assembly_enabled = bool((config or {}).get("enable_assembly")) if config else None
+        assembly_failed = _assembly_failed_tasks(results_dir)
         taxpasta_rows = load_taxpasta_long(results_dir)
         taxpasta_names = _name_by_taxid(results_dir) if taxpasta_rows else {}
         return html.Div([
             build_realtime_performance_panel(realtime),
             build_taxpasta_panel(taxpasta_rows, taxpasta_names),
-            build_assembly_panel(assemblies),
+            build_assembly_panel(assemblies, enabled=assembly_enabled,
+                                 failed_samples=assembly_failed),
             build_pipeline_reports_card(reports),
             build_multiqc_embed(reports),
         ])

@@ -1096,7 +1096,12 @@ def _apply_realtime_stop_conditions(params: Dict[str, Any], config: Dict[str, An
     # it off; the form says so (audit round 5, C8).
     if params.get("enable_assembly"):
         params["enable_assembly"] = False
-        logging.info("Assembly is not run in real-time mode; switch off for this launch")
+        # A launch warning, not a log line: this silently overrode the
+        # operator's switch and the Start toast never said so (assembly
+        # audit, 2026-09-03).
+        add_launch_warning(
+            "Assembly is switched off for this run: in real-time mode each "
+            "batch would be assembled on its own. Run assembly in batch mode.")
 
 
 _launch_warnings: List[str] = []

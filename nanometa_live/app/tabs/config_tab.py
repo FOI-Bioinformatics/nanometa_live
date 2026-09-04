@@ -914,8 +914,18 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
 
         # Assembly (2026-08-17).
         enable_assembly = bool(config.get("enable_assembly", False))
+        # Miniasm is no longer offered in the select (assembly audit): a saved
+        # choice of it would render as no selection and Apply would write None.
+        # Show flye and say so, as the qc_tool fastp path above does; the file
+        # keeps its value until Apply.
         assembler = config.get("assembler", defaults["assembler"])
-        if assembler not in ("flye", "miniasm"):
+        if assembler == "miniasm":
+            logging.warning(
+                "assembler 'miniasm' is no longer offered in the Configuration "
+                "tab: it writes no assembly statistics and has no build for "
+                "this platform. The form shows flye, and Apply Settings will "
+                "save flye. Keep miniasm by editing the config file instead.")
+        if assembler != "flye":
             assembler = "flye"
 
         return [

@@ -146,23 +146,103 @@ def build_realtime_performance_panel(stats: Optional[Dict[str, Any]]) -> Any:
     ], className="mb-4")
 
 
-def build_assembly_panel(assemblies: List[Dict[str, Any]]) -> Any:
-    """Per-sample assembly summary + contigs, or empty when none produced.
+# A usable draft assembly of a bacterial genome needs roughly this depth;
+# below LOW_COVERAGE_ASSEMBLY the contigs are fragments and the panel says so.
+# Measured on the demo corpus: nothing in it reaches 2x (assembly audit,
+# 2026-09-03), so this threshold is what makes the output honest rather than
+# a tuning knob.
+USABLE_ASSEMBLY_DEPTH = 30.0
+LOW_COVERAGE_ASSEMBLY = 10.0
 
-    ``assemblies`` is the output of ``assembly_loader.load_assembly_stats``
-    ([] => assembly not run, render nothing).
+
+def _assembly_coverage(a: Dict[str, Any]) -> Optional[float]:
+    """Median per-contig coverage, the number that says whether the rest mean
+    anything.
+
+    Flye states its mean coverage plainly in its own log and
+    ``assembly_to_canonical.py`` keeps it per contig, but the summary block
+    carries only contigs/length/N50/L50/circular/GC -- so the KPI row, which
+    renders exactly the summary, never showed it. Measured on a real run: 63
+    contigs at an N50 of 12,368 looked like a draft genome and was built at a
+    median coverage of 4 (assembly audit, 2026-09-03).
+    """
+    values = [c.get("coverage") for c in (a.get("contigs") or [])
+              if isinstance(c.get("coverage"), (int, float))]
+    if not values:
+        return None
+    values.sort()
+    mid = len(values) // 2
+    return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2.0
+
+
+def _assembly_absent_card(body: Any) -> Any:
+    """The Assembly card with an explanation instead of statistics."""
+    return dbc.Card([
+        dbc.CardHeader([
+            html.I(className="bi bi-diagram-3 me-2"),
+            html.Strong("Assembly"),
+        ]),
+        dbc.CardBody(body),
+    ], className="mb-4")
+
+
+def _assembly_absent_panel(enabled: Optional[bool],
+                           failed_samples: Optional[List[str]]) -> Any:
+    """Why there is no assembly, as a card rather than a blank space."""
+    failed = [str(s) for s in (failed_samples or [])]
+    if enabled is False:
+        return _assembly_absent_card(
+            dbc.Badge("Assembly not enabled", color="light",
+                      text_color="muted", className="border"))
+    if failed:
+        more = f" +{len(failed) - 3} more" if len(failed) > 3 else ""
+        return _assembly_absent_card([
+            dbc.Badge("Assembly failed", color="danger", className="me-2"),
+            html.Span(
+                f"No assembly was produced. The pipeline isolated "
+                f"{len(failed)} assembly task{'s' if len(failed) != 1 else ''} "
+                f"({', '.join(failed[:3])}{more}), so the run continued "
+                "without it. See the run log.",
+                className="small"),
+        ])
+    if enabled:
+        return _assembly_absent_card(
+            html.Span("Assembly is enabled; no results yet.",
+                      className="small text-muted"))
+    return _assembly_absent_card(
+        dbc.Badge("Not produced", color="light", text_color="muted",
+                  className="border"))
+
+
+def build_assembly_panel(assemblies: List[Dict[str, Any]],
+                         enabled: Optional[bool] = None,
+                         failed_samples: Optional[List[str]] = None) -> Any:
+    """Per-sample assembly summary and contigs, or why there are none.
+
+    ``assemblies`` is the output of ``assembly_loader.load_assembly_stats``.
+
+    This used to return the empty string for an empty list, with the docstring
+    "assembly not run, render nothing" -- so a run with assembly off, a run
+    whose assemblies all failed, and a run still assembling were the same
+    blank space. A failed assembly reached no surface at all (assembly audit,
+    2026-09-03, A4). ``enabled`` and ``failed_samples`` separate those cases;
+    ``enabled=None`` means the caller could not tell, and the panel says only
+    that nothing was produced.
     """
     if not assemblies:
-        return ""
+        return _assembly_absent_panel(enabled, failed_samples)
     blocks = []
     for a in assemblies:
         s = a.get("summary", {})
+        coverage = _assembly_coverage(a)
         kpis = dbc.Row([
             _kpi_tile(_fmt(s.get("total_contigs"), nd=0), "Contigs", "bi-diagram-2"),
             _kpi_tile(_fmt(s.get("total_length"), nd=0), "Total bp", "bi-rulers"),
             _kpi_tile(_fmt(s.get("largest_contig"), nd=0), "Largest bp", "bi-arrows-expand"),
             _kpi_tile(_fmt(s.get("n50"), nd=0), "N50", "bi-bullseye"),
             _kpi_tile(_fmt(s.get("circular_contigs"), nd=0), "Circular", "bi-arrow-repeat"),
+            _kpi_tile(f"{coverage:.0f}x" if coverage is not None else "--",
+                      "Median depth", "bi-layers"),
         ], className="g-2 mb-2")
         # Top contigs by length.
         contigs = sorted(a.get("contigs", []), key=lambda c: c.get("length", 0), reverse=True)[:10]
@@ -182,10 +262,20 @@ def build_assembly_panel(assemblies: List[Dict[str, Any]]) -> Any:
             ], size="sm", striped=True, className="mb-0")
             if rows else html.Small("No contig detail.", className="text-muted")
         )
+        # An assembly built at low coverage is a set of fragments, not a
+        # genome, and the contig count and N50 read as though it were one.
+        depth_note = None
+        if coverage is not None and coverage < LOW_COVERAGE_ASSEMBLY:
+            depth_note = dbc.Alert(
+                f"Median contig depth {coverage:.0f}x. A usable draft of a "
+                f"bacterial genome needs roughly "
+                f"{USABLE_ASSEMBLY_DEPTH:.0f}x, so these contigs are "
+                "fragments rather than a genome.",
+                color="warning", className="py-2 px-3 small mb-2")
         blocks.append(html.Div([
             html.Strong(a.get("sample", ""), className="d-block mb-2"),
-            kpis, table,
-        ], className="mb-3"))
+            kpis,
+        ] + ([depth_note] if depth_note else []) + [table], className="mb-3"))
 
     return dbc.Card([
         dbc.CardHeader([

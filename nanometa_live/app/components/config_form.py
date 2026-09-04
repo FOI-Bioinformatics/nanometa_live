@@ -872,19 +872,24 @@ def _processing_settings_item():
                     html.I(className="bi bi-info-circle text-muted ms-1",
                            id="assembler-info"),
                 ], html_for="assembler-input"),
+                # Miniasm was withdrawn on 2026-09-04, as fastp was from the
+                # QC select. It writes no canonical output, so choosing it
+                # produced nothing on the Reports tab the form named; and it
+                # has no bioconda build for Apple Silicon, so on this hardware
+                # its conda environment cannot even be created (assembly
+                # audit, 2026-09-03). A config file may still request it.
                 dbc.Select(
                     id="assembler-input",
                     options=[
                         {"label": "Flye (metagenome mode, with statistics)", "value": "flye"},
-                        {"label": "Miniasm (fast draft, no statistics)", "value": "miniasm"},
                     ],
                     value="flye"
                 ),
                 dbc.FormText("Only used when assembly is enabled"),
                 dbc.Tooltip(
                     "Flye produces polished contigs and the assembly "
-                    "statistics the Reports tab displays. Miniasm is faster "
-                    "but emits draft contigs without statistics.",
+                    "statistics the Reports tab displays. It runs in "
+                    "metagenome mode.",
                     target="assembler-info"
                 )
             ], md=6)

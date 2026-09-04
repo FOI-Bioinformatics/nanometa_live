@@ -200,31 +200,7 @@ def load_canonical_validation(
         return None
 
 
-def load_canonical_assembly(
-    results_dir: str, sample_id: str
-) -> Optional[Dict[str, Any]]:
-    """
-    Load assembly statistics from canonical JSON format.
-
-    Args:
-        results_dir: Path to the pipeline results directory.
-        sample_id: Sample identifier (e.g. "barcode01").
-
-    Returns:
-        Dictionary with assembly statistics, or None if not available.
-    """
-    path = os.path.join(
-        results_dir, "canonical", "assembly",
-        f"{sample_id}.assembly_stats.json",
-    )
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError) as exc:
-        logging.warning(
-            "Failed to load canonical assembly stats for %s: %s",
-            sample_id, exc,
-        )
-        return None
+# load_canonical_assembly was removed here. It had no application callers and
+# a different expected JSON shape from core/utils/assembly_loader.py, which is
+# what the Reports tab actually reads; two readers with divergent contracts is
+# how a schema change ships broken (assembly audit, 2026-09-03).
