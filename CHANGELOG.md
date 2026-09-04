@@ -4,6 +4,13 @@ All notable changes to Nanometa Live are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Start Analysis refuses a nanometanf checkout below 1.10.0 by name, and the
+  readiness checklist reports the pipeline version.
+
 ## [0.18.0] - 2026-09-04
 
 Assembly stops being a step that can run, succeed and publish a number that is

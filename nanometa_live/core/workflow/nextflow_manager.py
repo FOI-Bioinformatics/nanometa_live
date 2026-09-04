@@ -21,11 +21,13 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 
 from nanometa_live.core.config.parameter_mapping import (
+    add_launch_warning,
     create_nextflow_params,
     create_nextflow_config,
     pop_launch_warnings,
     validate_nanometanf_params
 )
+from nanometa_live.core.workflow.pipeline_compat import check_pipeline_compatibility
 
 
 def _mtime_or_zero(path: str) -> float:
@@ -492,6 +494,16 @@ class NextflowManager:
 
             # Store a copy of the run config for env injection in _run_workflow()
             self._run_config = dict(config)
+
+            # The pipeline must declare every parameter this release sends;
+            # an older checkout fails at Start with an nf-schema message that
+            # names a parameter rather than a version. Refuse by name here.
+            verdict = check_pipeline_compatibility(self.pipeline_source)
+            if verdict.status == "too_old":
+                logging.error(verdict.message)
+                return False, verdict.message
+            if verdict.status == "unknown":
+                add_launch_warning(verdict.message)
 
             # Convert to nanometanf parameters
             params = create_nextflow_params(config)

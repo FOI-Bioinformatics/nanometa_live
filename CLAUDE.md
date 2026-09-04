@@ -1164,6 +1164,16 @@ pipelines run normally under 4.0.2.
 The 25.10.x watchPath JVM cleanup hang (the historical reason for the
 `NXF_VER=25.04.7` workaround) was resolved upstream in 26.04.0.
 
+**nanometanf floor.** `core/workflow/pipeline_compat.py` owns
+`NANOMETANF_MIN_VERSION` (1.10.0 as of 0.18.0). `NextflowManager.setup`
+refuses a checkout below it by name, the readiness checklist carries a
+"Pipeline Version" row, and the README compatibility matrix names the same
+floor (fence: `tests/test_compatibility_matrix.py`). A `remote:` source runs
+`~/.nextflow/assets/foi-bioinformatics/nanometanf`, which the run command
+never refreshes (no `-latest`), so the check reads that checkout: the fix it
+names is `nextflow pull foi-bioinformatics/nanometanf -r <branch>`. Bump the
+floor in the same commit that first sends a parameter the older schema lacks.
+
 ### Cross-platform restriction
 
 Conda envs built by Nextflow embed absolute build-machine paths and per-arch binaries.

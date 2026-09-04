@@ -243,6 +243,8 @@ class ReadinessChecker:
         report.checks.extend(self._check_network_connectivity(config))
         report.checks.append(self._check_taxonomy_cache(home))
         report.checks.append(self._check_pipeline_cached(config))
+        if config.get("pipeline_source"):
+            report.checks.append(self._check_pipeline_version(config))
 
         return report
 
@@ -1277,3 +1279,23 @@ class ReadinessChecker:
             f"Pipeline source is remote ({source}); requires network "
             f"access on first run.",
         )
+
+    def _check_pipeline_version(self, config: Dict[str, Any]) -> CheckResult:
+        """Compare the pipeline checkout the launch would use with the floor.
+
+        The GUI sends parameters that only nanometanf >= NANOMETANF_MIN_VERSION
+        declares; an older checkout fails at Start with an nf-schema message
+        that names a parameter, not a version. A version that cannot be read
+        (no checkout pulled yet) is a warning, since the first remote launch
+        pulls one.
+        """
+        from nanometa_live.core.workflow.pipeline_compat import (
+            check_pipeline_compatibility,
+        )
+
+        verdict = check_pipeline_compatibility(str(config.get("pipeline_source") or ""))
+        if verdict.status == "ok":
+            return CheckResult("Pipeline Version", True, Severity.INFO, verdict.message)
+        if verdict.status == "too_old":
+            return CheckResult("Pipeline Version", False, Severity.CRITICAL, verdict.message)
+        return CheckResult("Pipeline Version", False, Severity.WARNING, verdict.message)

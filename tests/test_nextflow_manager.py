@@ -476,3 +476,57 @@ class TestStopWithoutLiveProcess:
         ok, message = m.stop()
         assert ok is False
         assert "not running" in message.lower()
+
+
+class TestSetupPipelineFloor:
+    """setup() refuses a checkout below NANOMETANF_MIN_VERSION before it
+    builds parameters, and records a launch warning when the version cannot
+    be read."""
+
+    def _checkout(self, tmp_path, version):
+        pipe = tmp_path / "pipe"
+        pipe.mkdir()
+        (pipe / "main.nf").write_text("workflow { }\n")
+        (pipe / "nextflow.config").write_text(
+            f"manifest {{\n    name = 'nanometanf'\n    version = '{version}'\n}}\n"
+        )
+        return pipe
+
+    def _config(self, tmp_path):
+        cfg = tmp_path / "config.yaml"
+        cfg.write_text("analysis_name: test\n")
+        return str(cfg)
+
+    def test_too_old_checkout_is_refused_by_name(self, tmp_path):
+        pipe = self._checkout(tmp_path, "1.4.1dev")
+        m = NextflowManager(str(tmp_path), pipeline_source=f"local:{pipe}")
+        ok, message = m.setup(self._config(tmp_path))
+        assert ok is False
+        assert "1.4.1dev" in message and "1.10.0" in message
+
+    def test_refusal_happens_before_parameters_are_built(self, tmp_path):
+        pipe = self._checkout(tmp_path, "1.4.1dev")
+        m = NextflowManager(str(tmp_path), pipeline_source=f"local:{pipe}")
+        # setup() has no blanket except, so an AssertionError from the patch
+        # would propagate; the refusal must come before the call.
+        with patch(
+            "nanometa_live.core.workflow.nextflow_manager.create_nextflow_params",
+            side_effect=AssertionError("parameters must not be built"),
+        ):
+            ok, message = m.setup(self._config(tmp_path))
+        assert ok is False
+        assert "1.4.1dev" in message
+
+    def test_unreadable_version_becomes_a_launch_warning(self, tmp_path):
+        pipe = tmp_path / "pipe"
+        pipe.mkdir()  # no nextflow.config
+        m = NextflowManager(str(tmp_path), pipeline_source=f"local:{pipe}")
+        with patch(
+            "nanometa_live.core.workflow.nextflow_manager.create_nextflow_params",
+            side_effect=RuntimeError("stop after the compatibility check"),
+        ):
+            with pytest.raises(RuntimeError):
+                m.setup(self._config(tmp_path))
+        from nanometa_live.core.config.parameter_mapping import pop_launch_warnings
+        warnings = pop_launch_warnings()
+        assert any("1.10.0" in w for w in warnings), warnings
