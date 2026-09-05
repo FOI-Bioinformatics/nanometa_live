@@ -2,8 +2,11 @@
 
 0.18.0 sends parameters that nanometanf < 1.10.0 does not declare; nf-schema
 then fails the run with a message naming a parameter, not a version. The
-checkout a remote source runs is ~/.nextflow/assets/..., which is only as new
-as the last pull, so the check reads the version from that checkout.
+checkout a remote source runs is under the launch's own Nextflow assets
+root -- NXF_ASSETS, else NXF_HOME/assets, else
+<results_output_directory>/.nextflow/assets for a GUI Start, else the
+Nextflow default ~/.nextflow/assets -- which is only as new as the last
+pull, so the check reads the version from that checkout.
 """
 
 from pathlib import Path
@@ -57,8 +60,42 @@ class TestVersionKey:
         assert pc.version_key("v1.10") == pc.version_key("1.10.0")
 
 
+class TestNextflowAssetsRoot:
+    """The four branches, in precedence order: NXF_ASSETS, NXF_HOME,
+    config['results_output_directory'], then the Nextflow default."""
+
+    def test_nxf_assets_env_wins(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("NXF_ASSETS", str(tmp_path))
+        monkeypatch.setenv("NXF_HOME", str(tmp_path / "other"))
+        assert pc.nextflow_assets_root({"results_output_directory": str(tmp_path / "results")}) == tmp_path
+
+    def test_nxf_home_env_used_when_no_nxf_assets(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("NXF_ASSETS", raising=False)
+        monkeypatch.setenv("NXF_HOME", str(tmp_path))
+        assert pc.nextflow_assets_root() == tmp_path / "assets"
+
+    def test_results_output_directory_used_when_no_env(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("NXF_ASSETS", raising=False)
+        monkeypatch.delenv("NXF_HOME", raising=False)
+        results = tmp_path / "results"
+        config = {"results_output_directory": str(results)}
+        assert pc.nextflow_assets_root(config) == results / ".nextflow" / "assets"
+
+    def test_default_when_no_env_and_no_config(self, monkeypatch):
+        monkeypatch.delenv("NXF_ASSETS", raising=False)
+        monkeypatch.delenv("NXF_HOME", raising=False)
+        assert pc.nextflow_assets_root() == Path("~/.nextflow/assets").expanduser()
+        assert pc.nextflow_assets_root({}) == Path("~/.nextflow/assets").expanduser()
+        assert (
+            pc.nextflow_assets_root({"results_output_directory": ""})
+            == Path("~/.nextflow/assets").expanduser()
+        )
+
+
 class TestResolvePipelineCheckout:
-    def test_remote_resolves_to_nextflow_assets(self):
+    def test_remote_resolves_to_nextflow_assets(self, monkeypatch):
+        monkeypatch.delenv("NXF_ASSETS", raising=False)
+        monkeypatch.delenv("NXF_HOME", raising=False)
         p = pc.resolve_pipeline_checkout("remote:dev")
         assert p == Path("~/.nextflow/assets/foi-bioinformatics/nanometanf").expanduser()
 
@@ -97,11 +134,35 @@ class TestCheckPipelineCompatibility:
         assert pc.NANOMETANF_MIN_VERSION in v.message
         assert str(tmp_path) in v.message
 
-    def test_too_old_remote_names_the_pull_command(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(pc, "NEXTFLOW_ASSETS_CHECKOUT", _checkout(tmp_path, "1.4.1dev"))
-        v = pc.check_pipeline_compatibility("remote:dev")
+    def test_remote_reads_the_checkout_under_the_launch_results_dir(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("NXF_ASSETS", raising=False)
+        monkeypatch.delenv("NXF_HOME", raising=False)
+        results = tmp_path / "results"
+        checkout = results / ".nextflow" / "assets" / "foi-bioinformatics" / "nanometanf"
+        checkout.mkdir(parents=True)
+        _checkout(checkout, "1.10.1dev")
+        config = {"results_output_directory": str(results)}
+
+        v = pc.check_pipeline_compatibility("remote:dev", config=config)
+
+        assert v.status == "ok"
+        assert v.found_version == "1.10.1dev"
+        assert str(checkout) in v.message
+
+    def test_too_old_remote_remedy_names_nxf_home_for_non_default_root(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("NXF_ASSETS", raising=False)
+        monkeypatch.delenv("NXF_HOME", raising=False)
+        results = tmp_path / "results"
+        checkout = results / ".nextflow" / "assets" / "foi-bioinformatics" / "nanometanf"
+        checkout.mkdir(parents=True)
+        _checkout(checkout, "1.4.1dev")
+        config = {"results_output_directory": str(results)}
+
+        v = pc.check_pipeline_compatibility("remote:dev", config=config)
+
         assert v.status == "too_old"
-        assert "nextflow pull foi-bioinformatics/nanometanf -r dev" in v.message
+        expected_home = results / ".nextflow"
+        assert f"NXF_HOME={expected_home} nextflow pull foi-bioinformatics/nanometanf -r dev" in v.message
 
     def test_unknown_when_no_config(self, tmp_path):
         v = pc.check_pipeline_compatibility(str(tmp_path))

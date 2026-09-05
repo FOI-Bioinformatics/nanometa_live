@@ -11,7 +11,7 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-The suite has about 4,100 tests and runs in parallel by default. Tests
+The suite has about 4,600 tests and runs in parallel by default. Tests
 marked `slow` need Nextflow and conda and are skipped unless selected with
 `-m slow`. The coverage gate (`pytest --cov=nanometa_live`) enforces the
 floor in `pytest.ini`; do not lower it.

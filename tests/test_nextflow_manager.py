@@ -15,7 +15,9 @@ import time
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
+from nanometa_live.core.utils.kraken_utils import KRAKEN_REQUIRED_FILES
 from nanometa_live.core.workflow.nextflow_manager import NextflowManager
 
 pytestmark = pytest.mark.unit
@@ -497,6 +499,36 @@ class TestSetupPipelineFloor:
         cfg.write_text("analysis_name: test\n")
         return str(cfg)
 
+    def _working_config_path(self, tmp_path):
+        """A config that reaches the end of setup(): create_nextflow_params,
+        validate_nanometanf_params and create_nextflow_config all succeed."""
+        nanopore_dir = tmp_path / "input"
+        nanopore_dir.mkdir()
+        (nanopore_dir / "sample1.fastq.gz").write_bytes(b"@seq\nACGT\n+\n!!!!\n")
+
+        results_dir = tmp_path / "results"
+        results_dir.mkdir()
+
+        kraken_db = tmp_path / "kraken2_db"
+        kraken_db.mkdir()
+        for name in KRAKEN_REQUIRED_FILES:
+            (kraken_db / name).write_bytes(b"x")
+
+        config = {
+            "nanopore_output_directory": str(nanopore_dir),
+            "results_output_directory": str(results_dir),
+            "kraken_db": str(kraken_db),
+            "processing_mode": "batch",
+            "sample_handling": "single_sample",
+            "sample_name": "test_sample",
+            "analysis_name": "TestRun",
+            "check_intervals_seconds": 15,
+            "blast_validation": False,
+        }
+        cfg_path = tmp_path / "full_config.yaml"
+        cfg_path.write_text(yaml.safe_dump(config))
+        return str(cfg_path)
+
     def test_too_old_checkout_is_refused_by_name(self, tmp_path):
         pipe = self._checkout(tmp_path, "1.4.1dev")
         m = NextflowManager(str(tmp_path), pipeline_source=f"local:{pipe}")
@@ -518,15 +550,22 @@ class TestSetupPipelineFloor:
         assert "1.4.1dev" in message
 
     def test_unreadable_version_becomes_a_launch_warning(self, tmp_path):
+        """The version-unknown warning must survive the REAL
+        create_nextflow_params() call, which clears the shared launch-warning
+        list as its first statement. A test that patches that call away
+        cannot catch a warning cleared by it -- this one lets it run for
+        real, and setup() must still return success with the warning
+        collected on the instance."""
         pipe = tmp_path / "pipe"
-        pipe.mkdir()  # no nextflow.config
+        pipe.mkdir()  # no nextflow.config -> compatibility status "unknown"
         m = NextflowManager(str(tmp_path), pipeline_source=f"local:{pipe}")
+
+        config_path = self._working_config_path(tmp_path)
         with patch(
-            "nanometa_live.core.workflow.nextflow_manager.create_nextflow_params",
-            side_effect=RuntimeError("stop after the compatibility check"),
+            "nanometa_live.core.workflow.nextflow_manager.subprocess.run",
+            return_value=_completed(0, stdout="nextflow version 26.04.6.6018"),
         ):
-            with pytest.raises(RuntimeError):
-                m.setup(self._config(tmp_path))
-        from nanometa_live.core.config.parameter_mapping import pop_launch_warnings
-        warnings = pop_launch_warnings()
-        assert any("1.10.0" in w for w in warnings), warnings
+            ok, message = m.setup(config_path)
+
+        assert ok is True, message
+        assert any("1.10.0" in w for w in m.launch_warnings), m.launch_warnings

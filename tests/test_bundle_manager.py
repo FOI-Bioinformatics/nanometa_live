@@ -2829,3 +2829,15 @@ class TestImportRebasesInstallationRoot:
         assert "nanometa_home" not in cfg
         assert cfg["data_dir"] == str(home)
         assert cfg["genome_cache_dir"] == str(home)
+
+    def test_results_dir_override_is_cleared(self, tmp_path):
+        """A results-folder override names a build-machine path that is in
+        neither PATH_CONFIG_KEYS nor the readiness checks, so nothing would
+        warn about it, and the launcher creates the directory verbatim --
+        the same silent class the other root keys were fixed for."""
+        home, cfg = self._import(
+            tmp_path,
+            "results_dir_override: /home/builder/results\n"
+            "kraken_db: ''\n",
+        )
+        assert cfg["results_dir_override"] == ""

@@ -26,7 +26,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - A bundle import rebases `data_dir`, `genome_cache_dir` and `nanometa_home`
   onto the field installation, so the imported configuration no longer
-  points at the build machine's directories.
+  points at the build machine's directories, and clears `results_dir_override`,
+  which named a build-machine folder the launcher would have recreated.
 
 ## [0.18.0] - 2026-09-04
 

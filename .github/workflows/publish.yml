@@ -78,9 +78,13 @@ jobs:
           resp="$(curl -fsSL -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pypi")"
           oidc_token="$(printf '%s' "$resp" | python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])')"
-          minted="$(curl -fsSL -X POST https://pypi.org/_/oidc/mint-token \
+          if ! minted="$(curl -sSL --fail-with-body -X POST https://pypi.org/_/oidc/mint-token \
             -H "Content-Type: application/json" \
-            -d "{\"token\": \"${oidc_token}\"}")"
+            -d "{\"token\": \"${oidc_token}\"}")"; then
+            echo "PyPI refused to mint a token (is the trusted publisher registered for this workflow and environment?):"
+            echo "$minted"
+            exit 1
+          fi
           api_token="$(printf '%s' "$minted" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
           echo "::add-mask::${api_token}"
           TWINE_USERNAME=__token__ TWINE_PASSWORD="${api_token}" \

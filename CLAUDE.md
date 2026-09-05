@@ -1033,7 +1033,10 @@ Three concerns:
      import home beside `offline_mode`. `NanometaPaths` prefers the config's
      `data_dir` over the environment, so without this an imported
      installation ran against the build machine's root (first run of the
-     cross-machine CI job, 2026-09-05).
+     cross-machine CI job, 2026-09-05). `results_dir_override` is cleared in
+     the same block: it is in neither `PATH_CONFIG_KEYS` nor the readiness
+     checks, so nothing else would warn about it, and `resolve_run_outdir`
+     returns it verbatim for the launcher to create.
 
    **Note the config-rebase block is skipped entirely when the bundle carries
    no `config.yaml`**, including the `offline_mode` assignment, without
@@ -1175,10 +1178,19 @@ The 25.10.x watchPath JVM cleanup hang (the historical reason for the
 refuses a checkout below it by name, the readiness checklist carries a
 "Pipeline Version" row, and the README compatibility matrix names the same
 floor (fence: `tests/test_compatibility_matrix.py`). A `remote:` source runs
-`~/.nextflow/assets/foi-bioinformatics/nanometanf`, which the run command
-never refreshes (no `-latest`), so the check reads that checkout: the fix it
-names is `nextflow pull foi-bioinformatics/nanometanf -r <branch>`. Bump the
-floor in the same commit that first sends a parameter the older schema lacks.
+the checkout under the launch's own Nextflow assets root, resolved by
+`nextflow_assets_root(config)`: `NXF_ASSETS`, else `NXF_HOME/assets`, else
+`<results_output_directory>/.nextflow/assets` (what a GUI Start injects as
+`NXF_HOME`, `nextflow_manager.py:876-900`), else the Nextflow default
+`~/.nextflow/assets`. The run command never refreshes the checkout (no
+`-latest`), so the check reads exactly that directory. The `too_old` remedy
+names the home the checkout resolved under when it is not the default
+(`NXF_HOME=<home> nextflow pull foi-bioinformatics/nanometanf -r <branch>`),
+otherwise the plain `nextflow pull ...`. Both `NextflowManager.setup` and
+`ReadinessChecker._check_pipeline_version` pass the loaded config through so
+the check reads the checkout the launch will actually use, not the CLI's
+default home. Bump the floor in the same commit that first sends a
+parameter the older schema lacks.
 
 ### Cross-platform restriction
 
@@ -1872,9 +1884,9 @@ The `nanometa` conda env has Dash but neither `pytest-xdist` nor `pytest-cov`,
 so run the plain suite there with `-o addopts=""` and the coverage gate from
 the `nf-core` env, which has both.
 
-4284 tests as of 2026-08-25 (~128 skipped by default; measured coverage ~76%).
+4650 tests as of 2026-09-05 (120 skipped by default; measured coverage ~77%).
 `pytest.ini` enforces a
-`fail_under = 74` floor on coverage runs only (the default `pytest` dev loop
+`fail_under = 76` floor on coverage runs only (the default `pytest` dev loop
 does not load coverage); the floor ratchets up as coverage rises — keep it ~1
 point below the measured total, never lower it. Also
 `filterwarnings = error::DeprecationWarning:nanometa_live` (our own deprecations

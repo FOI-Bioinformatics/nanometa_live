@@ -90,9 +90,10 @@ floors at). Container engines are not required; nanometanf runs under the
 
 Nanometa Live and nanometanf are released together. A GUI release sends
 parameters that only its companion pipeline declares, and Start Analysis
-refuses an older checkout by version. `remote:dev` runs whatever was last
-pulled into `~/.nextflow/assets/foi-bioinformatics/nanometanf`; update it
-with `nextflow pull foi-bioinformatics/nanometanf -r dev`.
+refuses an older checkout by version. `remote:dev` runs the checkout under
+the launch's Nextflow home (`<results directory>/.nextflow` for a GUI Start
+unless `NXF_HOME` is set); the refusal message names the `nextflow pull`
+command for that home.
 
 | Nanometa Live | nanometanf | Nextflow |
 |---------------|------------|----------|

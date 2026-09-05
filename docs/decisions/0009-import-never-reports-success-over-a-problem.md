@@ -19,7 +19,10 @@ Messages state the condition, not the consequence. Singularity images are
 named by Nextflow's own cache convention (`_singularity_cache_name`) and
 `NXF_SINGULARITY_CACHEDIR` is injected at launch; conda caches are
 relocated by rewriting the recorded build prefix and re-signing patched
-Mach-O binaries.
+Mach-O binaries. The rebased config names the field machine's root:
+`data_dir`, `genome_cache_dir` and, when present, `nanometa_home` are set to
+the import home, and `results_dir_override` is cleared (first run of the
+cross-machine CI job, 2026-09-05).
 
 ## Consequences
 

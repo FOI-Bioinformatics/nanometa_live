@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 
 from nanometa_live.core.config.parameter_mapping import (
-    add_launch_warning,
     create_nextflow_params,
     create_nextflow_config,
     pop_launch_warnings,
@@ -498,18 +497,21 @@ class NextflowManager:
             # The pipeline must declare every parameter this release sends;
             # an older checkout fails at Start with an nf-schema message that
             # names a parameter rather than a version. Refuse by name here.
-            verdict = check_pipeline_compatibility(self.pipeline_source)
+            verdict = check_pipeline_compatibility(self.pipeline_source, config=config)
             if verdict.status == "too_old":
                 logging.error(verdict.message)
                 return False, verdict.message
-            if verdict.status == "unknown":
-                add_launch_warning(verdict.message)
 
             # Convert to nanometanf parameters
             params = create_nextflow_params(config)
             # Conditions the operator must see at Start (validation silently
             # off, ...); BackendManager.start folds them into its message.
+            # create_nextflow_params() clears the shared launch-warning list
+            # as its first statement, so the compatibility verdict above is
+            # appended AFTER that clear rather than added to it beforehand.
             self.launch_warnings = pop_launch_warnings()
+            if verdict.status == "unknown" and verdict.message not in self.launch_warnings:
+                self.launch_warnings.append(verdict.message)
             custom_config = create_nextflow_config(config)
 
             # Validate parameters

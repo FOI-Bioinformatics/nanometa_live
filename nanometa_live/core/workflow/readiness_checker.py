@@ -1293,7 +1293,9 @@ class ReadinessChecker:
             check_pipeline_compatibility,
         )
 
-        verdict = check_pipeline_compatibility(str(config.get("pipeline_source") or ""))
+        verdict = check_pipeline_compatibility(
+            str(config.get("pipeline_source") or ""), config=config
+        )
         if verdict.status == "ok":
             return CheckResult("Pipeline Version", True, Severity.INFO, verdict.message)
         if verdict.status == "too_old":

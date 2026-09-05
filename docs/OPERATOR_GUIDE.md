@@ -206,9 +206,9 @@ tab, run the **Readiness** checklist until everything is green, then click
 3. Hover for help: most elements have a tooltip.
 4. Red rows need immediate attention.
 5. Screenshot important findings for records and reports.
-- Leave the dashboard on its default address. It has no login; if it must
-  be reached from another computer, ask your IT contact for an
-  authenticating proxy rather than starting it with `--host 0.0.0.0`.
+6. Leave the dashboard on its default address. It has no login; if it must
+   be reached from another computer, ask your IT contact for an
+   authenticating proxy rather than starting it with `--host 0.0.0.0`.
 
 ### Quality
 1. Data quality score above 75: proceed with confidence.

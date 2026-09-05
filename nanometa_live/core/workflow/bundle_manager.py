@@ -2099,6 +2099,13 @@ class BundleManager:
                     cfg["genome_cache_dir"] = str(home)
                     if "nanometa_home" in cfg:
                         cfg["nanometa_home"] = str(home)
+                    # A results-folder override names a build-machine path
+                    # nothing warns about (it is in neither PATH_CONFIG_KEYS
+                    # nor the readiness checks) and the launcher would create
+                    # it verbatim. Unset, the outdir derives from the project
+                    # directory, which always exists on this machine.
+                    if cfg.get("results_dir_override"):
+                        cfg["results_dir_override"] = ""
                     if kraken_db_path:
                         cfg["kraken_db"] = kraken_db_path
                     # No DB path supplied: config still carries the export-time
