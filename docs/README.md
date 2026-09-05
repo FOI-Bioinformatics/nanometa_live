@@ -21,6 +21,8 @@ for a hands-on end-to-end demo, or with the
 | [Developer guide](developer-guide.md)                       | Architecture and contribution notes |
 | [API reference](api-reference.md)                           | Loader and parser APIs |
 | [Migration guide](MIGRATION_GUIDE_V2.md)                    | Upgrading from v1.x to v2.0 |
+| [Decision records](decisions/README.md)                     | The decisions the code depends on, each with its pinning test |
+| [Contributing](../CONTRIBUTING.md)                          | Set-up, layout, fences, releasing, becoming a maintainer |
 
 ## Quality assurance
 

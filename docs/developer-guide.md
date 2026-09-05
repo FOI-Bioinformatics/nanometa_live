@@ -418,6 +418,9 @@ cannot share envs).
 
 ## Contributing
 
+See `CONTRIBUTING.md` for set-up and the release process, and
+`docs/decisions/` for the decisions the code depends on.
+
 1. Fork the repository
 2. Create a feature branch
 3. Make changes with tests

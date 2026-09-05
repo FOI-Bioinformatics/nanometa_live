@@ -1923,6 +1923,7 @@ Kraken2 DB: /Users/andreassjodin/Desktop/ONT/demodata_ONT/database/kraken2.gtdb_
 | `docs/api-reference.md` | Parser and loader APIs |
 | `docs/MIGRATION_GUIDE_V2.md` | v1 to v2 migration |
 | `docs/archive/` | Audits, plans, migration notes (not maintained) |
+| `docs/decisions/` | Decision records; fence in tests/test_decision_records.py |
 
 ## Links
 
