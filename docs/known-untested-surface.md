@@ -136,7 +136,13 @@ path too -- see the pre-existing defect noted in the Task 2 report.
 **The known blocker.** Conda environments embed absolute build-machine paths.
 The cross-machine bundle CI job (`.github/workflows/bundle-deploy.yml`)
 deliberately passes `--no-pre-warm`, so it proves the bundle transfers and
-imports, and proves nothing about pre-warmed environments.
+imports, and proves nothing about pre-warmed environments. Its first
+recorded run was 2026-09-05 (it had been gated on pull requests touching
+files that no pull request changed), and that run failed its own
+assertion: the imported config still named the build machine's `data_dir`,
+`genome_cache_dir` and `nanometa_home`. The import now rebases those keys
+onto the field installation's root; the job is green from the fix commit
+onward.
 
 An operator who exports with pre-warmed environments and imports on a field
 machine at a different path is in untested territory. A CI variant that

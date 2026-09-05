@@ -2268,6 +2268,193 @@ These are outside the repository and are listed here so none is lost:
 
 ---
 
+### Task 8: The imported config names the field machine's installation root
+
+**Why.** The first recorded run of the cross-machine bundle workflow (run
+33947378546, 2026-09-05; the job had never run before) failed its import
+assertion with:
+
+```
+Imported installation is not usable:
+  - config.yaml: nanometa_home points at /home/runner/work/_temp/nanometa_home, which does not exist on this machine
+  - config.yaml: data_dir points at /home/runner/.nanometa, which does not exist on this machine
+  - config.yaml: genome_cache_dir points at /home/runner/.nanometa, which does not exist on this machine
+```
+
+`import_bundle` rebases `kraken_db`, `pipeline_source`, `nxf_plugins_dir` and
+the conda and singularity cache dirs, but not the installation root keys.
+`NanometaPaths.from_config` (`core/utils/paths.py:85`) prefers
+`config["data_dir"]` over the environment, and `get_genome_manager` reads
+`genome_cache_dir`, so a field installation started from the imported config
+runs against the build machine's root, which does not exist there. The
+`--data-dir` re-pointing in `nanometa_live/nanometa_live.py:228-246` shows the
+same rule applied at the CLI; the import must apply it too.
+
+**Files:**
+- Modify: `nanometa_live/core/workflow/bundle_manager.py`, the config-rebase
+  block in `import_bundle` that begins `cfg["offline_mode"] = True` (around
+  line 2088). The block already writes `cfg` back to `home / "config.yaml"`
+  at its end; add the new assignments beside the `offline_mode` one so the
+  existing write persists them.
+- Test: `tests/test_bundle_manager.py` (new class, appended)
+- Modify: `docs/known-untested-surface.md` (the paragraph at line 137 that
+  begins "The cross-machine bundle CI job"), `CLAUDE.md` (the "An import
+  must not report success over a problem it found" list under Offline
+  Deployment), `CHANGELOG.md` (`## [Unreleased]`, a `### Fixed` entry).
+- Modify: `docs/superpowers/plans/2026-09-04-swot-followup.md`: append this
+  task's text (this brief, from its heading down to the end of Step 6) after
+  Task 7 so the plan on record matches what was executed.
+
+**Interfaces:** none new. `import_bundle(bundle_path, kraken_db_path, nanometa_home=None, force=False)` is unchanged.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `tests/test_bundle_manager.py` (it already imports `BundleManager`
+and defines `_make_minimal_bundle`; construct the manager as the existing
+tests do, `BundleManager()`):
+
+```python
+class TestImportRebasesInstallationRoot:
+    """The imported config must name THIS machine's root, not the build machine's.
+
+    Observed on the first run of the cross-machine CI job (run 33947378546):
+    after import, data_dir and genome_cache_dir still pointed at
+    /home/runner/.nanometa and nanometa_home at the exporter's temp dir.
+    NanometaPaths prefers config["data_dir"] over the environment, so the
+    field installation would have run against a directory that does not
+    exist there.
+    """
+
+    def _import(self, tmp_path, config_text):
+        bundle_path, _ = _make_minimal_bundle(
+            tmp_path, extra_files={"config.yaml": config_text}
+        )
+        home = tmp_path / "field_home"
+        result = BundleManager().import_bundle(
+            str(bundle_path), kraken_db_path="", nanometa_home=str(home)
+        )
+        assert result["success"], result
+        import yaml
+        return home, yaml.safe_load((home / "config.yaml").read_text())
+
+    def test_root_keys_are_rebased_onto_the_import_home(self, tmp_path):
+        foreign = "/home/builder/.nanometa"
+        home, cfg = self._import(
+            tmp_path,
+            f"nanometa_home: {foreign}\n"
+            f"data_dir: {foreign}\n"
+            f"genome_cache_dir: {foreign}\n"
+            "kraken_db: ''\n",
+        )
+        for key in ("nanometa_home", "data_dir", "genome_cache_dir"):
+            assert cfg[key] == str(home), (key, cfg[key])
+
+    def test_absent_nanometa_home_is_not_invented(self, tmp_path):
+        home, cfg = self._import(tmp_path, "kraken_db: ''\n")
+        assert "nanometa_home" not in cfg
+        assert cfg["data_dir"] == str(home)
+        assert cfg["genome_cache_dir"] == str(home)
+```
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `conda run -n nf-core python -m pytest tests/test_bundle_manager.py -k RebasesInstallationRoot -q`
+Expected: both FAIL on the `data_dir` (and `nanometa_home`) equality: the values are the build machine's paths.
+
+- [ ] **Step 3: Rebase the root keys**
+
+Directly after `cfg["offline_mode"] = True` in the rebase block, add:
+
+```python
+                    # The bundle's config was written on the build machine
+                    # and names that machine's installation root.
+                    # NanometaPaths prefers config["data_dir"] over the
+                    # environment and the genome manager reads
+                    # genome_cache_dir, so an imported config that still
+                    # carries the build root points the field installation
+                    # at a directory that does not exist there (first run of
+                    # the cross-machine CI job, 33947378546). The restored
+                    # genomes/ and watchlists/ live under this home.
+                    cfg["data_dir"] = str(home)
+                    cfg["genome_cache_dir"] = str(home)
+                    if "nanometa_home" in cfg:
+                        cfg["nanometa_home"] = str(home)
+```
+
+- [ ] **Step 4: Run the tests**
+
+Run: `conda run -n nf-core python -m pytest tests/test_bundle_manager.py -q`
+Expected: all pass, including the two new ones. Then the full suite once:
+`conda run -n nf-core python -m pytest -q`.
+
+- [ ] **Step 5: Documents**
+
+In `docs/known-untested-surface.md`, replace the paragraph beginning "The
+cross-machine bundle CI job (`.github/workflows/bundle-deploy.yml`)" so it
+reads:
+
+```
+The cross-machine bundle CI job (`.github/workflows/bundle-deploy.yml`)
+deliberately passes `--no-pre-warm`, so it proves the bundle transfers and
+imports, and proves nothing about pre-warmed environments. Its first
+recorded run was 2026-09-05 (it had been gated on pull requests touching
+files that no pull request changed), and that run failed its own
+assertion: the imported config still named the build machine's `data_dir`,
+`genome_cache_dir` and `nanometa_home`. The import now rebases those keys
+onto the field installation's root; the job is green from the fix commit
+onward.
+```
+
+In `CLAUDE.md`, under "An import must not report success over a problem it
+found", add a fourth bullet:
+
+```
+   - The rebased config names the field machine's root: `data_dir`,
+     `genome_cache_dir` and (when present) `nanometa_home` are set to the
+     import home beside `offline_mode`. `NanometaPaths` prefers the config's
+     `data_dir` over the environment, so without this an imported
+     installation ran against the build machine's root (first run of the
+     cross-machine CI job, 2026-09-05).
+```
+
+In `CHANGELOG.md` under `## [Unreleased]`, add:
+
+```
+### Fixed
+
+- A bundle import rebases `data_dir`, `genome_cache_dir` and `nanometa_home`
+  onto the field installation, so the imported configuration no longer
+  points at the build machine's directories.
+```
+
+Append this task's text to the plan file as described under Files.
+
+- [ ] **Step 6: Commit, push the feature branch, confirm all four CI jobs green**
+
+```bash
+git add nanometa_live/core/workflow/bundle_manager.py tests/test_bundle_manager.py \
+        docs/known-untested-surface.md CLAUDE.md CHANGELOG.md \
+        docs/superpowers/plans/2026-09-04-swot-followup.md
+git commit -m "fix(bundle): the imported config names the field machine's root
+
+The first run of the cross-machine CI job showed the imported config still
+carrying the build machine's data_dir, genome_cache_dir and nanometa_home.
+NanometaPaths prefers the config's data_dir over the environment, so a field
+installation would have run against a directory that does not exist there.
+The import now sets those keys to the import home beside offline_mode.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RP2QKAewMS3LgFLh6ynjBW"
+git push origin swot-followup
+gh workflow run bundle-deploy.yml --ref swot-followup
+```
+
+Then `gh run watch <id> --exit-status` on the new run. Expected: export,
+import, export-singularity and run-singularity all green. Record the run id
+in the report.
+
+---
+
 ## Self-review
 
 **Spec coverage.** SWOT moves 1 through 7 map to Tasks 1, 2, 3, 4, 5, and

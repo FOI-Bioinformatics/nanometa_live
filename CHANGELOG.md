@@ -11,6 +11,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Start Analysis refuses a nanometanf checkout below 1.10.0 by name, and the
   readiness checklist reports the pipeline version.
 
+### Fixed
+
+- A bundle import rebases `data_dir`, `genome_cache_dir` and `nanometa_home`
+  onto the field installation, so the imported configuration no longer
+  points at the build machine's directories.
+
 ## [0.18.0] - 2026-09-04
 
 Assembly stops being a step that can run, succeed and publish a number that is

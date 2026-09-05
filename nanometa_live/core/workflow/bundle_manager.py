@@ -2086,6 +2086,19 @@ class BundleManager:
                     import_loader = ConfigLoader(str(home))
                     cfg = import_loader.load_config(str(config_path))
                     cfg["offline_mode"] = True
+                    # The bundle's config was written on the build machine
+                    # and names that machine's installation root.
+                    # NanometaPaths prefers config["data_dir"] over the
+                    # environment and the genome manager reads
+                    # genome_cache_dir, so an imported config that still
+                    # carries the build root points the field installation
+                    # at a directory that does not exist there (first run of
+                    # the cross-machine CI job, 33947378546). The restored
+                    # genomes/ and watchlists/ live under this home.
+                    cfg["data_dir"] = str(home)
+                    cfg["genome_cache_dir"] = str(home)
+                    if "nanometa_home" in cfg:
+                        cfg["nanometa_home"] = str(home)
                     if kraken_db_path:
                         cfg["kraken_db"] = kraken_db_path
                     # No DB path supplied: config still carries the export-time

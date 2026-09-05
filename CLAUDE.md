@@ -1010,7 +1010,7 @@ Three concerns:
    machine has no working Docker" (field machine) — the two need opposite
    remedies and the old single message named the wrong one.
 
-   **An import must not report success over a problem it found.** Three rules,
+   **An import must not report success over a problem it found.** Four rules,
    all added 2026-08-14 after an air-gapped rig run:
    - A supplied `--db` that is not a usable database sets `kraken_db_invalid`
      and warns, naming the missing files. The pre-existing `kraken_db_unset`
@@ -1028,6 +1028,12 @@ Three concerns:
    - Blocker messages state the condition, not the consequence. They opened
      with "Import aborted:", which is false in `verify_bundle` (a dry run) and
      in a forced import that completes — both observed in the rig.
+   - The rebased config names the field machine's root: `data_dir`,
+     `genome_cache_dir` and (when present) `nanometa_home` are set to the
+     import home beside `offline_mode`. `NanometaPaths` prefers the config's
+     `data_dir` over the environment, so without this an imported
+     installation ran against the build machine's root (first run of the
+     cross-machine CI job, 2026-09-05).
 
    **Note the config-rebase block is skipped entirely when the bundle carries
    no `config.yaml`**, including the `offline_mode` assignment, without

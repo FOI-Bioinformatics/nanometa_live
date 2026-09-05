@@ -2787,3 +2787,45 @@ class TestVerifyBundleDryRun:
                 str(bundle_path), kraken_db_path=str(db))
         assert result["success"] is True
         assert result["db_hash_mismatch"] is True
+
+
+class TestImportRebasesInstallationRoot:
+    """The imported config must name THIS machine's root, not the build machine's.
+
+    Observed on the first run of the cross-machine CI job (run 33947378546):
+    after import, data_dir and genome_cache_dir still pointed at
+    /home/runner/.nanometa and nanometa_home at the exporter's temp dir.
+    NanometaPaths prefers config["data_dir"] over the environment, so the
+    field installation would have run against a directory that does not
+    exist there.
+    """
+
+    def _import(self, tmp_path, config_text):
+        bundle_path, _ = _make_minimal_bundle(
+            tmp_path, extra_files={"config.yaml": config_text}
+        )
+        home = tmp_path / "field_home"
+        result = BundleManager().import_bundle(
+            str(bundle_path), kraken_db_path="", nanometa_home=str(home)
+        )
+        assert result["success"], result
+        import yaml
+        return home, yaml.safe_load((home / "config.yaml").read_text())
+
+    def test_root_keys_are_rebased_onto_the_import_home(self, tmp_path):
+        foreign = "/home/builder/.nanometa"
+        home, cfg = self._import(
+            tmp_path,
+            f"nanometa_home: {foreign}\n"
+            f"data_dir: {foreign}\n"
+            f"genome_cache_dir: {foreign}\n"
+            "kraken_db: ''\n",
+        )
+        for key in ("nanometa_home", "data_dir", "genome_cache_dir"):
+            assert cfg[key] == str(home), (key, cfg[key])
+
+    def test_absent_nanometa_home_is_not_invented(self, tmp_path):
+        home, cfg = self._import(tmp_path, "kraken_db: ''\n")
+        assert "nanometa_home" not in cfg
+        assert cfg["data_dir"] == str(home)
+        assert cfg["genome_cache_dir"] == str(home)
