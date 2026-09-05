@@ -1,0 +1,87 @@
+name: Publish to PyPI
+
+# Builds the sdist and wheel for every published GitHub release and uploads
+# them through PyPI trusted publishing (no API token in the repository).
+# The owner must once register a pending publisher on PyPI for the project
+# name "nanometa-live" with: owner FOI-Bioinformatics, repository
+# nanometa_live, workflow publish.yml, environment pypi -- and create the
+# "pypi" environment under the repository settings. Until then the publish
+# job fails at the token exchange and the build job still proves the
+# distribution builds.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build sdist and wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          python -m twine check dist/*
+
+      - name: The wheel carries the release tag
+        if: github.event_name == 'release'
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          ls dist/
+          ls dist/ | grep -q "^nanometa_live-${TAG}-" || { echo "wheel version does not match tag ${TAG}"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Upload to PyPI
+    needs: build
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Mint a short-lived PyPI token from the GitHub OIDC token and upload
+        # Trusted publishing without the pypa action, which this repository's
+        # Actions policy refuses (third-party actions are not allowed). This
+        # is the exchange that action performs: GitHub issues an OIDC token
+        # for audience "pypi", PyPI's mint-token endpoint trades it for a
+        # short-lived API token, and twine uploads with it. The token never
+        # leaves this step. If the policy is ever relaxed,
+        # `pypa/gh-action-pypi-publish@release/v1` replaces this step.
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip twine
+          resp="$(curl -fsSL -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pypi")"
+          oidc_token="$(printf '%s' "$resp" | python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])')"
+          minted="$(curl -fsSL -X POST https://pypi.org/_/oidc/mint-token \
+            -H "Content-Type: application/json" \
+            -d "{\"token\": \"${oidc_token}\"}")"
+          api_token="$(printf '%s' "$minted" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+          echo "::add-mask::${api_token}"
+          TWINE_USERNAME=__token__ TWINE_PASSWORD="${api_token}" \
+            python -m twine upload --non-interactive dist/*

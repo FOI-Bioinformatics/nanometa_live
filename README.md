@@ -86,6 +86,22 @@ For pipeline execution: Nextflow 26.04.0 or later (the version nanometanf
 floors at). Container engines are not required; nanometanf runs under the
 `conda` profile by default.
 
+## Compatibility
+
+Nanometa Live and nanometanf are released together. A GUI release sends
+parameters that only its companion pipeline declares, and Start Analysis
+refuses an older checkout by version. `remote:dev` runs whatever was last
+pulled into `~/.nextflow/assets/foi-bioinformatics/nanometanf`; update it
+with `nextflow pull foi-bioinformatics/nanometanf -r dev`.
+
+| Nanometa Live | nanometanf | Nextflow |
+|---------------|------------|----------|
+| 0.18.x | 1.10.0 | >= 26.04.0 |
+| 0.17.x | 1.9.0 | >= 26.04.0 |
+| 0.16.x | 1.8.0 | >= 26.04.0 |
+
+Earlier pairings are recorded in [`CHANGELOG.md`](CHANGELOG.md).
+
 ## Development
 
 The test suite needs the runtime dependencies (Dash, Plotly, pandas), so

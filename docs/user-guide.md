@@ -8,10 +8,11 @@ Nanometa Live is a real-time visualisation dashboard for Oxford Nanopore metagen
 
 ### Prerequisites
 
-- Python 3.9 or higher
+- Python 3.11 or higher
 - Conda or Mamba (the canonical and supported pipeline profile)
-- Nextflow 25.10 or newer (for running analysis pipelines)
+- Nextflow 26.04.0 or newer (the version nanometanf floors at)
 - A Kraken2 database
+- The nanometanf release named in the README compatibility table
 
 ### Install with pip
 
