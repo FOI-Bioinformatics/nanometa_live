@@ -46,7 +46,11 @@ def parse_arguments():
     parser.add_argument(
         "--host",
         default="127.0.0.1",
-        help="Host to bind the server to (default: 127.0.0.1, use 0.0.0.0 for network access)",
+        help=(
+            "Host to bind the server to (default: 127.0.0.1). 0.0.0.0 makes "
+            "the dashboard reachable from the network with no authentication; "
+            "a warning is printed when a non-loopback host is chosen."
+        ),
     )
 
     parser.add_argument(

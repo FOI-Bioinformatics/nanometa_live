@@ -5,8 +5,6 @@ posture the design assumes; on 0.0.0.0 it is an unauthenticated control
 surface, and the operator must be told so at the moment they choose it.
 """
 
-from unittest.mock import patch
-
 import pytest
 
 from nanometa_live.app.utils.network_posture import LOOPBACK_HOSTS, exposure_warning

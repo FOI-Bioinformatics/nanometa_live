@@ -10,6 +10,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Start Analysis refuses a nanometanf checkout below 1.10.0 by name, and the
   readiness checklist reports the pipeline version.
+- A README compatibility table pairing each GUI release with its nanometanf
+  and Nextflow floor, fenced by a test against the code's own floor.
+- Releases build and upload to PyPI through trusted publishing.
+- `docs/decisions/`: ten decision records, and `CONTRIBUTING.md`.
+- The server prints what is exposed when bound to a non-loopback host.
+
+### Changed
+
+- CI executes an imported singularity bundle on an amd64 runner, so amd64
+  execution of a bundled image is observed rather than assumed.
+- The user guide's prerequisites name Python 3.11 and Nextflow 26.04.0.
 
 ### Fixed
 
