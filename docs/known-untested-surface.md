@@ -125,7 +125,11 @@ bundle-deploy workflow exports a singularity bundle on an amd64 runner,
 imports it on a second and runs the bundled image with `NXF_OFFLINE=true`;
 the Nextflow log shows the local-library hit and no pull, and the process
 reports x86_64. Limits: one stand-in module and one image, not the full
-nanometanf set, and the runner is not air-gapped.
+nanometanf set, and the runner is not air-gapped. The sibling conda-mode
+`import` job in the same workflow run (33947378546) failed on stale
+build-machine paths (`nanometa_home`, `data_dir`, `genome_cache_dir`) in its
+rebased config, so the record above should not be over-read as covering that
+path too -- see the pre-existing defect noted in the Task 2 report.
 
 ### Conda environment relocation across machines
 
