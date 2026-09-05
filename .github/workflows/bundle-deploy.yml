@@ -330,7 +330,7 @@ jobs:
           expected = "depot.galaxyproject.org-singularity-seqtk-1.4--he4a0461_2.img"
           with tarfile.open(path) as tar:
               names = tar.getnames()
-          images = [n for n in names if "/pipeline_containers/" in n and n.endswith((".img", ".sif"))]
+          images = [n for n in names if "pipeline_containers/" in n and n.endswith((".img", ".sif"))]
           print("images in bundle:", images)
           if len(images) != 1 or not images[0].endswith("/" + expected):
               print(f"expected one image named {expected}")
