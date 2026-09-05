@@ -120,6 +120,13 @@ which confirms the documented cross-platform restriction rather than testing
 around it. Real x86_64 execution, setuid-mode apptainer, and a field kernel and
 distro are still unknown.
 
+**amd64 execution of a bundled image, verified 2026-09-05 in CI.** The
+bundle-deploy workflow exports a singularity bundle on an amd64 runner,
+imports it on a second and runs the bundled image with `NXF_OFFLINE=true`;
+the Nextflow log shows the local-library hit and no pull, and the process
+reports x86_64. Limits: one stand-in module and one image, not the full
+nanometanf set, and the runner is not air-gapped.
+
 ### Conda environment relocation across machines
 
 **The known blocker.** Conda environments embed absolute build-machine paths.
