@@ -188,6 +188,15 @@ def _run_server(app, *, host: str, port: int, debug: bool) -> None:
     Other OSErrors propagate unchanged.
     """
     import errno
+    import logging
+    import sys
+
+    from nanometa_live.app.utils.network_posture import exposure_warning
+
+    warning = exposure_warning(host)
+    if warning:
+        logging.warning(warning)
+        print(f"WARNING: {warning}", file=sys.stderr)
     try:
         app.run(host=host, port=port, debug=debug, threaded=True)
     except OSError as e:

@@ -41,6 +41,17 @@ cd nanometa_live
 pip install -e .
 ```
 
+### Network exposure
+
+The dashboard listens on `127.0.0.1` and is reachable only from the machine
+it runs on. It has no user accounts or authentication. Starting it with
+`--host 0.0.0.0` makes it reachable from the network, and anyone who can
+reach the port can start and stop runs, change the configuration and read
+results; the application prints a warning when a non-loopback host is
+chosen. For a shared laboratory server, place an authenticating reverse
+proxy (for example nginx with client certificates or basic authentication)
+in front of it and keep the application itself on loopback.
+
 ## Quick start
 
 ### View existing results
