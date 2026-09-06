@@ -10,11 +10,12 @@ corpus by `scripts/ttfr_backlog.py`, launched with the GUI's own parameter
 builder (`create_nextflow_params` / `create_nextflow_config`), sampled every
 2 s by `scripts/audit_realtime_timeline.py`, analysed by
 `scripts/ttfr_analyse.py`. Runs and artifacts live under `/tmp/ttfr/`
-(`batch_baseline`, `realtime_baseline`, `batch_mem4`); each run's Nextflow
-work directory was deleted after analysis to keep the system volume above its
-required free-space floor. nanometanf `5ea4db6` (dev), nanometa_live
-`45fb557` (branch `time-to-first-result`, which includes the harness fix
-below).
+(`batch_baseline`, `realtime_baseline`, `batch_mem4`, `batch_heavy_baseline`);
+each run's Nextflow work directory was deleted after analysis to keep the
+system volume above its required free-space floor. nanometanf `5ea4db6`
+(dev), nanometa_live `a02c569` (branch `time-to-first-result`, which includes
+the harness fix below and the `--concat` heavy-corpus builder used for the
+last row of the results table).
 
 **Harness fix applied before these runs.** The first batch-baseline attempt
 was launched with `--out` on an external exFAT volume and failed in under 8 s:
@@ -35,12 +36,25 @@ external volume entirely and onto the internal disk (`/tmp/ttfr/...`).
 | batch baseline | 114.5 | 154.7 | 40.2 | 169.8 | 12 | 1 | 0.87 |
 | realtime baseline | 148.6 | 413.6 | 265.0 | 2159.9 | 231 | 1 | 0.51 |
 | batch, memory 4 GB probe | 113.8 | 159.8 | 46.0 | 191.8 | 12 | 2 | 6.4 |
+| Heavy corpus (4000-read files, 80k reads per barcode) | 122.4 | 208.6 | 86.2 | 224.1 | 12 | 1 | 0.99 |
 
 Peak RSS is not recorded on macOS (the pipeline trace has no `/proc` to read
 it from); every run's `peak_rss_gb` is `None`. The realtime run's classifier
 task count (231) excludes 9 files that took the `EMIT_EMPTY_KRAKEN2_REPORT`
 placeholder path instead (231 + 9 = 240, one per input file); no other run
 produced that path. See H9 for what those 9 files were and why.
+
+**Heavy corpus.** The 500-read demo files used everywhere else in this audit
+make per-task overhead (pipeline start-up, per-file scheduling) dominate the
+measurements, which does not transfer to a real MinKNOW run (~4000 reads per
+file). No heavier corpus exists on this machine, so one was synthesised:
+`scripts/ttfr_backlog.py build --concat 8` (commit `a02c569`) makes each
+target file a real concatenation of 8 consecutive demo files (a valid
+multi-member gzip stream), giving 12 barcodes x 20 files x 4000 reads = 80,000
+reads per barcode, built from the same 165-file demo corpus reused across
+target barcodes (`/tmp/ttfr/input_heavy`, 852 MB). It was run in batch mode
+only (`/tmp/ttfr/batch_heavy_baseline`), same database and pipeline as every
+other run here.
 
 **Correction to "What the code does today."** The plan describes batch mode
 reaching the classifier through a samplesheet and the incremental switch.
@@ -92,6 +106,48 @@ real-time (all twelve showing a first partial result only by 413.6 s); the
 one caveat is that batch's "something" is a finished answer with no earlier
 preview, which is the gap Task 4 is meant to close for the barcodes and
 corpus sizes where batch's whole-sample wait is much longer than it was here.
+
+**At MinKNOW-sized files, QC dominates even more, classification barely
+moves.** Per-process medians, 500-read files versus the 4000-read heavy
+corpus (both batch mode, same 12 barcodes): `CHOPPER` 1.0 s -> 6.4 s (6.4x for
+8x the reads — sublinear, but a real, large increase); `FASTQC` 2.5 s ->
+3.5 s (1.4x); `KRAKEN2_KRAKEN2` 0.87 s -> 0.99 s (1.14x — classification was
+already fast and stayed fast); `NANOPLOT` 15.9 s -> 15.9 s, unchanged to the
+first decimal in both runs. That last figure is worth flagging rather than
+explaining away: at these two corpus sizes NANOPLOT's cost tracked neither
+read count nor file size, which suggests it is dominated by fixed
+report-generation overhead in this range — untested above 80,000 reads per
+barcode, so it may not stay flat at MinKNOW scale. The practical shift: on
+the 500-read corpus, classification (0.87 s) was negligible beside the QC
+chain; on the 4000-read corpus it is still negligible (0.99 s) beside a QC
+chain that itself grew 3-6x. Classification was never the bottleneck in this
+audit; it is even less of one as file size grows. Consistent with this,
+batch mode's first classifier task started at essentially the same absolute
+time in both runs (107.0 s light, 106.8 s heavy) — the extra per-barcode QC
+cost delayed each barcode's OWN completion (spread grew from 40.2 s to
+86.2 s) more than it delayed the pipeline's first classify slot opening.
+
+**Projection for a 24-barcode, 200,000-reads-per-barcode MinKNOW backlog**
+(2x the barcodes, 2.5x the reads per barcode versus the heavy corpus tested
+here; not measured, extrapolated): pipeline start-up plus DB preload looks
+corpus-size-independent in both baselines (~103-107 s to the first classify
+task in every batch run so far), so that portion should hold. Per-barcode QC
+cost scaling from the two measured points gives `CHOPPER` roughly 14-16 s
+(sublinear extrapolation) and `FASTQC` roughly 4 s; `NANOPLOT` is assumed
+flat at ~16 s per the caveat above, and `KRAKEN2_KRAKEN2` stays under 2 s.
+Summed, one barcode's own QC-to-classify chain is roughly 35-40 s. With 24
+barcodes sharing this machine's 11 CPUs (versus 12 barcodes here), each
+barcode queues behind roughly one extra "wave" of other barcodes' QC tasks,
+which is where the audit's own spread numbers (40.2 s at 12 barcodes/10k
+reads, 86.2 s at 12 barcodes/80k reads) suggest most of the growth would
+come from doubling barcode count on the same core count. Order-of-magnitude
+estimate: **all 24 barcodes' first (and, in today's unchunked batch mode,
+only) report within roughly 4-7 minutes (250-420 s) of Start**, dominated by
+QC queueing rather than classification, with classifier concurrency staying
+at 1 throughout (H5) regardless of corpus size. This is a projection, not a
+measurement; the two biggest sources of error are NANOPLOT's untested
+scaling above 80,000 reads and queueing behaviour at 24 barcodes, which
+was not run.
 
 ## Repairs argued from these numbers
 
