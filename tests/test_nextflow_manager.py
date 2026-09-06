@@ -534,7 +534,7 @@ class TestSetupPipelineFloor:
         m = NextflowManager(str(tmp_path), pipeline_source=f"local:{pipe}")
         ok, message = m.setup(self._config(tmp_path))
         assert ok is False
-        assert "1.4.1dev" in message and "1.10.0" in message
+        assert "1.4.1dev" in message and "1.11.0" in message
 
     def test_refusal_happens_before_parameters_are_built(self, tmp_path):
         pipe = self._checkout(tmp_path, "1.4.1dev")
@@ -568,4 +568,4 @@ class TestSetupPipelineFloor:
             ok, message = m.setup(config_path)
 
         assert ok is True, message
-        assert any("1.10.0" in w for w in m.launch_warnings), m.launch_warnings
+        assert any("1.11.0" in w for w in m.launch_warnings), m.launch_warnings

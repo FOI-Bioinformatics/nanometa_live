@@ -33,11 +33,11 @@ class TestPipelineVersionCheck:
         assert result.name == "Pipeline Version"
         assert result.passed is False
         assert result.severity == Severity.CRITICAL
-        assert "1.4.1dev" in result.message and "1.10.0" in result.message
+        assert "1.4.1dev" in result.message and "1.11.0" in result.message
 
     def test_at_floor_is_info_pass(self, tmp_path):
         result = ReadinessChecker()._check_pipeline_version(
-            {"pipeline_source": _checkout(tmp_path, "1.10.0")}
+            {"pipeline_source": _checkout(tmp_path, "1.11.0")}
         )
         assert result.passed is True
         assert result.severity == Severity.INFO
@@ -54,7 +54,7 @@ class TestPipelineVersionCheck:
     # tests/test_readiness_offline_checks.py::TestChecksAreWired).
     def test_report_carries_the_check_when_a_source_is_set(self, tmp_path):
         config = {
-            "pipeline_source": _checkout(tmp_path, "1.10.0"),
+            "pipeline_source": _checkout(tmp_path, "1.11.0"),
             "kraken_db": "",
             "offline_mode": True,
             "pipeline_profile": "conda",

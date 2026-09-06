@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional, Tuple
 
 #: The oldest nanometanf whose schema declares every parameter this GUI sends.
-NANOMETANF_MIN_VERSION = "1.10.0"
+NANOMETANF_MIN_VERSION = "1.11.0"
 
 #: Where a resolved Nextflow assets root keeps the default remote
 #: repository's checkout (NextflowManager.DEFAULT_REMOTE_REPO).
@@ -197,6 +197,15 @@ def check_pipeline_compatibility(
     if version_key(found) >= version_key(floor):
         return CompatVerdict(
             "ok", found, checkout, f"nanometanf {found} at {checkout} (>= {floor})",
+        )
+    # A development pre-release of exactly the floor version (e.g.
+    # "1.11.0dev" against floor "1.11.0") is the checkout the floor names,
+    # just not yet tagged -- refusing it would block the floor's own
+    # development checkout from ever passing.
+    if found.strip().endswith("dev") and version_key(found)[:3] == version_key(floor)[:3]:
+        return CompatVerdict(
+            "ok", found, checkout,
+            f"nanometanf {found} at {checkout} (development checkout of the required {floor})",
         )
     return CompatVerdict(
         "too_old", found, checkout,

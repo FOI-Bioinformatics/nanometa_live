@@ -499,6 +499,17 @@ def default_config() -> Dict[str, Any]:
         "assembly_allow_low_depth": False,
         # Kraken2 realtime incremental classification
         "kraken2_enable_incremental": True,
+        # Chunked batch mode: the first chunk of every sample classifies
+        # before the second of any, so every barcode has a preliminary
+        # report after one round (forces kraken2_enable_incremental on when
+        # it is set; see parameter_mapping.create_nextflow_params).
+        "batch_chunking": True,
+        "batch_first_chunk_files": 1,
+        "batch_chunk_growth": 2.0,
+        # Per-task Kraken2 memory reservation under memory mapping. None =
+        # let parameter_mapping size it from the measured database (see
+        # _resolve_kraken2_task_memory_gb).
+        "kraken2_task_memory_gb": None,
         # Classifier filters; 0 is kraken2's own default for both. Written
         # here so the form is not dirty before any edit (audit round 5, A4).
         "kraken2_confidence": 0.0,

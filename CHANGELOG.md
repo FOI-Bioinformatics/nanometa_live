@@ -6,8 +6,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+**Requires nanometanf v1.11.0**
+
 ### Added
 
+- Batch mode splits each sample into growing chunks instead of classifying a
+  whole sample at once, so every barcode gets a preliminary result after the
+  first, smallest chunk of every barcode has classified, rather than waiting
+  for one barcode's full read set.
+- Kraken2 classification runs several samples in parallel where the database
+  fits comfortably in the host's page cache, instead of one task at a time.
+- The dashboard header, sample selector and verdict subtitle distinguish a
+  preliminary batch-mode result from a complete one.
 - Start Analysis refuses a nanometanf checkout below 1.10.0 by name, and the
   readiness checklist reports the pipeline version.
 - A README compatibility table pairing each GUI release with its nanometanf

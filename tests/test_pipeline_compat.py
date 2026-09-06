@@ -122,10 +122,10 @@ def _checkout(tmp_path, version):
 
 class TestCheckPipelineCompatibility:
     def test_ok_at_or_above_floor(self, tmp_path):
-        v = pc.check_pipeline_compatibility(str(_checkout(tmp_path, "1.10.0")))
+        v = pc.check_pipeline_compatibility(str(_checkout(tmp_path, "1.11.0")))
         assert v.status == "ok"
-        assert v.found_version == "1.10.0"
-        assert "1.10.0" in v.message
+        assert v.found_version == "1.11.0"
+        assert "1.11.0" in v.message
 
     def test_too_old_names_both_versions_and_the_fix(self, tmp_path):
         v = pc.check_pipeline_compatibility(str(_checkout(tmp_path, "1.4.1dev")))
@@ -140,13 +140,13 @@ class TestCheckPipelineCompatibility:
         results = tmp_path / "results"
         checkout = results / ".nextflow" / "assets" / "foi-bioinformatics" / "nanometanf"
         checkout.mkdir(parents=True)
-        _checkout(checkout, "1.10.1dev")
+        _checkout(checkout, "1.11.1dev")
         config = {"results_output_directory": str(results)}
 
         v = pc.check_pipeline_compatibility("remote:dev", config=config)
 
         assert v.status == "ok"
-        assert v.found_version == "1.10.1dev"
+        assert v.found_version == "1.11.1dev"
         assert str(checkout) in v.message
 
     def test_too_old_remote_remedy_names_nxf_home_for_non_default_root(self, tmp_path, monkeypatch):
@@ -178,3 +178,28 @@ class TestCheckPipelineCompatibility:
     def test_custom_floor(self, tmp_path):
         v = pc.check_pipeline_compatibility(str(_checkout(tmp_path, "1.10.0")), floor="1.11.0")
         assert v.status == "too_old"
+
+
+class TestDevelopmentCheckoutOfTheFloor:
+    """A pre-release of exactly the floor version is the checkout the floor
+    names, just not yet tagged, so it must not be refused as too_old."""
+
+    def test_dev_of_the_floor_is_ok_and_names_it_as_a_development_checkout(self, tmp_path):
+        v = pc.check_pipeline_compatibility(
+            str(_checkout(tmp_path, "1.11.0dev")), floor="1.11.0",
+        )
+        assert v.status == "ok"
+        assert "development checkout" in v.message
+
+    def test_dev_of_an_older_minor_stays_too_old(self, tmp_path):
+        v = pc.check_pipeline_compatibility(
+            str(_checkout(tmp_path, "1.10.1dev")), floor="1.11.0",
+        )
+        assert v.status == "too_old"
+
+    def test_exact_floor_release_has_no_development_wording(self, tmp_path):
+        v = pc.check_pipeline_compatibility(
+            str(_checkout(tmp_path, "1.11.0")), floor="1.11.0",
+        )
+        assert v.status == "ok"
+        assert "development" not in v.message

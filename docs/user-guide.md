@@ -271,6 +271,17 @@ Processes all existing FASTQ files once:
 
 Best for: Completed sequencing runs, re-analysis
 
+#### What you see, and when
+
+A batch run over existing reads splits every sample into growing chunks
+rather than classifying one barcode's full read set before starting the
+next. Every barcode gets a preliminary result once the first, smallest
+chunk of every barcode has classified — by default that is one file per
+barcode. The header counts how many barcodes are preliminary and how many
+are complete, a preliminary barcode is marked in the sample selector, and
+the verdict subtitle says so. The final result, once every chunk of every
+barcode has classified, is the same as an unchunked run.
+
 ### Real-time mode
 
 Continuously monitors for new files:
@@ -281,6 +292,10 @@ Continuously monitors for new files:
 4. Results update as new data arrives
 
 Best for: Active sequencing runs, live monitoring
+
+Pre-existing files are interleaved across barcodes and classified per file,
+so the same "spread the first look across every barcode" behavior applies
+here without a separate setting.
 
 ## Sample handling
 
