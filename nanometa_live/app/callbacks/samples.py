@@ -129,18 +129,28 @@ def _freshness_bucket(age_seconds):
     return "stale"
 
 
-def _selector_signature(available_samples, freshness, dataless):
+def _selector_signature(available_samples, freshness, dataless, progress=None):
     """What the selector's options actually depend on.
 
     Two renders with the same signature would produce interchangeable
     options, so the callback can short-circuit and let the component settle.
+
+    ``progress`` (a ``BatchProgress`` or None) folds in each sample's
+    done/planned chunk counts. Without this a preliminary sample's badge
+    could advance ("2 of 4" -> "3 of 4") or a sample could complete while
+    its freshness bucket stayed in the same band across polls, and the
+    unchanged signature raised PreventUpdate before the render caught up.
     """
     freshness = freshness or {}
+    done = getattr(progress, "done", None) or {}
+    planned = getattr(progress, "planned", None) or {}
     return tuple(
         (
             sample,
             _freshness_bucket(freshness.get(sample)),
             sample in (dataless or set()),
+            done.get(sample),
+            planned.get(sample),
         )
         for sample in (available_samples or [])
     )
@@ -263,7 +273,7 @@ def register_samples(app, backend_manager):
         # -- and Dash defers every callback keyed on a pending component, so
         # the selected-sample store and the dashboard metric tiles were
         # starved for whole runs (2026-08-19).
-        signature = _selector_signature(available_samples, freshness, dataless)
+        signature = _selector_signature(available_samples, freshness, dataless, progress)
         if signature == _last_selector_signature.get("v"):
             raise PreventUpdate
         _last_selector_signature["v"] = signature

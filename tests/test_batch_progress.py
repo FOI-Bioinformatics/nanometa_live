@@ -8,9 +8,11 @@ reads both so the header, the sample selector and the verdict subtitle can say
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
+from dash import Dash
 
 from nanometa_live.app.utils.batch_progress import batch_progress, read_chunk_plan
 
@@ -114,6 +116,44 @@ class TestSelectorNamesProgress:
         )
         assert "preliminary 2 of 4" in str(options)
 
+    def test_re_renders_when_progress_advances_under_unchanged_freshness(self, tmp_path):
+        """The signature gate must not freeze a preliminary badge stale.
+
+        ``_selector_signature`` used to hash only (sample, freshness bucket,
+        dataless); a barcode's freshness bucket can stay in the same band
+        across polls while a new chunk lands, so the unchanged signature
+        raised PreventUpdate before "preliminary 2 of 4" ever advanced to
+        "3 of 4" (or disappeared on completion). Same freshness/config/value
+        on both calls -- only the batch_reports/ directory changes between
+        them.
+        """
+        from tests.dash_test_utils import get_callback_fn, make_callback_app
+        from nanometa_live.app.callbacks.samples import register_samples
+
+        root = _progress_tree(tmp_path)  # barcode01: 2 of 4 chunks done
+        app = make_callback_app(lambda a: register_samples(a, MagicMock()))
+        fn = get_callback_fn(app, "sample-selector", input_contains="available-samples")
+
+        samples = ["All Samples", "barcode01", "barcode02"]
+        mapping = {"barcode01": {"kraken2": ["x"]}, "barcode02": {"kraken2": ["y"]}}
+        config = {"results_output_directory": root}
+        freshness: dict = {}
+        current_value = "All Samples"
+
+        options, _value = fn(samples, freshness, current_value, mapping, config)
+        assert "preliminary 2 of 4" in str(options)
+
+        # A third batch lands for barcode01 (now 3 of 4 chunks); nothing else
+        # about the inputs changes.
+        d = Path(root) / "kraken2" / "barcode01" / "batch_reports"
+        (d / "batch_2.kraken2.report.txt").write_text(
+            "100.00\t1\t1\tU\t0\tunclassified\n")
+        (d / "barcode01_batch2.kraken2.report.txt").write_text(
+            "100.00\t1\t1\tU\t0\tunclassified\n")
+
+        options2, _value2 = fn(samples, freshness, current_value, mapping, config)
+        assert "preliminary 3 of 4" in str(options2)
+
 
 class TestVerdictSubtitleNamesProgress:
     def test_clause_appended_when_set(self):
@@ -154,3 +194,83 @@ class TestVerdictSubtitleNamesProgress:
         )
         assert d.state == "ACTION_REQUIRED"
         assert "still classifying" in d.subtitle
+
+    def test_real_callback_names_it_in_the_rendered_subtitle(self, tmp_path):
+        """Drives update_verdict_banner end to end, not just select_verdict().
+
+        A hand-supplied ``batch_progress_clause`` above would pass even if
+        ``_batch_progress_verdict_clause`` (dashboard_tab.py) resolved the
+        wrong directory, was never called, or ``main_dir`` at the
+        ``select_verdict(`` call site were wrong. This drives the real
+        registered callback against a results tree with one preliminary and
+        one pending sample (mirrors the fixture in
+        tests/test_verdict_banner_callback.py), so the whole chain --
+        resolve_outdir_for_fingerprint -> batch_progress -> select_verdict ->
+        with_failure_clauses -- is exercised.
+        """
+        from nanometa_live.app.tabs.dashboard_tab import register_dashboard_callbacks
+
+        results_dir = tmp_path / "results"
+        (results_dir / "kraken2").mkdir(parents=True, exist_ok=True)
+        # barcode01: preliminary (2 of 4); barcode02: pending (0 of 2).
+        root = _tree(results_dir, {"barcode01": 4, "barcode02": 2},
+                     {"barcode01": [0, 1]})
+        assert root == str(results_dir)
+
+        app = Dash(__name__, suppress_callback_exceptions=True)
+        register_dashboard_callbacks(app)
+        callback_fn = None
+        for cb_id, spec in app.callback_map.items():
+            if "dashboard-verdict-banner" in cb_id:
+                callback_fn = getattr(spec["callback"], "__wrapped__", spec["callback"])
+                break
+        assert callback_fn is not None, "Verdict-banner callback was not registered"
+
+        config = {
+            "results_output_directory": str(results_dir),
+            "main_dir": str(results_dir),
+        }
+        status = {"running": True, "completed": False, "start_time": None}
+
+        # No watchlist hits -- reaches the all-clear/subthreshold branch of
+        # _data_verdict, where the batch-progress clause is appended. root /
+        # unclassified rows give get_classification_stats() a depth above
+        # the low-read floor, so the branch is ALL CLEAR rather than
+        # INSUFFICIENT READS (which skips the failure-clause wrapper
+        # entirely).
+        kraken_df = pd.DataFrame([
+            {
+                "perc": 100.0, "cumul_reads": 1000, "reads": 0,
+                "rank": "R", "taxid": 1, "name": "root", "parent_taxid": 0,
+            },
+            {
+                "perc": 0.0, "cumul_reads": 0, "reads": 0,
+                "rank": "U", "taxid": 0, "name": "unclassified", "parent_taxid": 0,
+            },
+        ])
+
+        with patch(
+            "nanometa_live.app.tabs.dashboard_tab.load_kraken_data",
+            return_value=kraken_df,
+        ), patch(
+            "nanometa_live.app.tabs.dashboard_tab._species_df_to_organisms",
+            return_value=[],
+        ), patch(
+            "nanometa_live.app.tabs.dashboard_tab._get_active_watchlist_entries",
+            return_value=[{"taxid": 1392, "name": "Bacillus anthracis"}],
+        ), patch(
+            "nanometa_live.app.tabs.dashboard_tab._check_pathogens_both",
+            return_value=([], []),
+        ), patch(
+            "nanometa_live.app.tabs.dashboard_tab.interval_tick_is_redundant",
+            return_value=False,
+        ):
+            outputs = callback_fn(
+                "fp1", None, 0,
+                config, status, {"status": "ok"}, {"results": []},
+                ["All Samples", "barcode01", "barcode02"],
+            )
+
+        assert outputs is not None
+        rendered = json.dumps(outputs, default=str)
+        assert "still classifying" in rendered
