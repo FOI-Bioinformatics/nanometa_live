@@ -18,6 +18,7 @@ from nanometa_live.core.utils.sample_detector import get_available_samples, get_
 from nanometa_live.core.utils.loader_utils import check_data_freshness
 from nanometa_live.app.utils.callback_helpers import log_callback_error
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+from nanometa_live.app.utils.batch_progress import batch_progress
 from nanometa_live.app.utils.debounce import (
     should_skip_update, get_trigger_type,
     interval_render_is_redundant, mark_rendered,
@@ -245,6 +246,17 @@ def register_samples(app, backend_manager):
 
         dataless = _dataless_samples(available_samples, file_mapping, config)
 
+        # Chunked batch mode (Task 4) classifies a sample's chunks
+        # incrementally; a preliminary sample's counts will still grow, so it
+        # is badged distinctly from one whose chunks are all in. Computed
+        # once per callback invocation -- one listdir per planned sample, not
+        # per option (tests/test_tick_call_counts.py budget).
+        try:
+            results_dir = resolve_outdir_for_fingerprint(config)
+            progress = batch_progress(results_dir) if results_dir else None
+        except Exception:
+            progress = None
+
         # Rebuild the options only when they would actually differ. The
         # freshness age ticks every second, so without this the dropdown was
         # rewritten on every poll, leaving the component permanently pending
@@ -278,6 +290,17 @@ def register_samples(app, backend_manager):
                                      f"was written -- most often its reads failed "
                                      f"QC. An empty view of it is not a negative "
                                      f"result."))
+                )
+            if progress and sample in progress.preliminary:
+                parts.append(
+                    dbc.Badge(
+                        f"preliminary {progress.done[sample]} of {progress.planned[sample]}",
+                        color="info", className="ms-2",
+                        title=(
+                            "More chunks of this barcode are still "
+                            "classifying; the counts will grow."
+                        ),
+                    )
                 )
             label = html.Span(
                 parts, className="d-inline-flex align-items-center",

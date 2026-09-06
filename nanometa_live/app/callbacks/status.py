@@ -18,6 +18,7 @@ from nanometa_live.core.utils.sample_detector import get_available_samples, get_
 from nanometa_live.core.utils.loader_utils import check_data_freshness
 from nanometa_live.app.utils.callback_helpers import log_callback_error
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+from nanometa_live.app.utils.batch_progress import batch_progress
 from nanometa_live.app.utils.debounce import (
     should_skip_update, get_trigger_type,
     interval_render_is_redundant, mark_rendered,
@@ -234,6 +235,16 @@ def register_status(app, backend_manager):
                 details.append(
                     f"{n_failed} task{'s' if n_failed != 1 else ''} failed (skipped)"
                 )
+            # Chunked batch mode classifies a sample's chunks incrementally
+            # (Task 4); name which barcodes still have chunks outstanding so
+            # the operator does not read a preliminary count as final.
+            try:
+                results_dir = resolve_outdir_for_fingerprint(config)
+                summary = batch_progress(results_dir).summary_line() if results_dir else None
+                if summary:
+                    details.append(summary)
+            except Exception:
+                pass
             if status.get("input_layout_mismatch"):
                 details.append(str(status["input_layout_mismatch"]))
 
