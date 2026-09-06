@@ -38,18 +38,21 @@ single barcode." Acceptance criteria are stated in Global Constraints.
 These are the facts the hypotheses below are built on. The audit confirms or
 refutes each with a number; the repairs assume them.
 
-- **Batch mode classifies each barcode's whole read set in one task.** The
-  GUI writes one samplesheet row per FASTQ file
-  (`nanometa_live/core/config/parameter_mapping.py:397-420`,
-  `generate_samplesheet`), but nanometanf's `PIPELINE_INITIALISATION`
-  regroups rows with `.groupTuple()` and emits `[meta, fastqs.flatten()]`
-  (`subworkflows/local/utils_nfcore_nanometanf_pipeline/main.nf:84-107`), so
-  DEMULTIPLEXING (`subworkflows/local/demultiplexing/main.nf`, a pass-through)
-  hands QC one item per sample carrying every file. CHOPPER runs once on the
-  concatenation, and the classifier (the incremental path, because the GUI
-  sends `kraken2_enable_incremental: true` by default,
-  `config_loader.py:501`) runs once as that sample's batch 0. The first
-  report a barcode can show is its complete result.
+- **Batch mode classifies each barcode's whole read set in one task.** For a
+  conventional barcode layout the GUI's batch launch sends `--input_dir`
+  (`parameter_mapping.py`, `_resolve_batch_input_mode`, "Scenario E"), and
+  nanometanf's INPUT_SCANNER groups the files with `groupTuple(by: 0)`
+  (`subworkflows/local/input_scanner/main.nf:79`) into one item per sample;
+  the samplesheet route (custom folder names, single_sample, per_file) ends
+  the same way through `PIPELINE_INITIALISATION`'s `.groupTuple()`
+  (`subworkflows/local/utils_nfcore_nanometanf_pipeline/main.nf:84-107`).
+  DEMULTIPLEXING (`subworkflows/local/demultiplexing/main.nf`) is a
+  pass-through, so QC gets one item per sample carrying every file. CHOPPER
+  runs once on the concatenation and the standard `KRAKEN2_KRAKEN2` module
+  runs once per sample: the GUI sends `kraken2_enable_incremental` only in
+  its real-time branch (`parameter_mapping.py:1043` sits inside it), so the
+  incremental path is not used in batch mode today (measured 2026-09-06,
+  Task 3). The first report a barcode can show is its complete result.
 - **Batch mode orders barcodes by samplesheet order.** `groupTuple` on a
   finite channel emits groups in first-seen order, which is
   `find_sample_subdirs` order (barcode01, barcode02, ...). Nothing interleaves.
@@ -1265,23 +1268,29 @@ In `nextflow_schema.json`, in the same definition group as
 }
 ```
 
-- [ ] **Step 6: Wire the planner into the samplesheet branch**
+- [ ] **Step 6: Wire the planner after the input-routing block**
 
-In `workflows/nanometanf.nf`, replace the `else` branch that reads
-`// Standard samplesheet input - FASTQ only` / `ch_processed_samples = ch_samplesheet` with:
+Both batch input routes end as one item per sample: INPUT_SCANNER
+(`--input_dir`, the GUI's route for conventional barcode folders) and the
+samplesheet (custom folder names, single_sample, per_file). The planner
+therefore applies ONCE, to `ch_processed_samples`, after the whole
+`if (params.input_dir || is_barcode_discovery) { ... } else { ... }` block in
+`workflows/nanometanf.nf` and before `DEMULTIPLEXING (ch_processed_samples)`,
+guarded on batch mode. Insert:
 
 ```nextflow
-        } else if (params.batch_chunking) {
-            // Batch mode with chunking. The samplesheet channel is one item
-            // per sample carrying every file (PIPELINE_INITIALISATION groups
-            // the rows). Split each sample into growing chunks and order the
-            // chunks so the first chunk of every sample is classified before
-            // the second of any; each chunk is a batch downstream, exactly
-            // as in real-time mode. The channel is finite, so toList()
-            // completes at once and the plan is written before any task runs.
+        if (!params.realtime_mode && params.batch_chunking) {
+            // Batch mode with chunking. Both batch routes above deliver one
+            // item per sample carrying every file (INPUT_SCANNER's
+            // groupTuple, or PIPELINE_INITIALISATION's for a samplesheet).
+            // Split each sample into growing chunks and order the chunks so
+            // the first chunk of every sample is classified before the
+            // second of any; each chunk is a batch downstream, exactly as in
+            // real-time mode. The channel is finite, so toList() completes
+            // at once and the plan is written before any task runs.
             def first_files = (params.batch_first_chunk_files ?: 1) as int
             def growth = (params.batch_chunk_growth ?: 2.0) as double
-            ch_processed_samples = ch_samplesheet
+            ch_processed_samples = ch_processed_samples
                 .toList()
                 .flatMap { rows ->
                     def by_sample = [:]
@@ -1303,11 +1312,11 @@ In `workflows/nanometanf.nf`, replace the `else` branch that reads
                         tuple(meta, files)
                     }
                 }
-        } else {
-            // Standard samplesheet input - FASTQ only
-            ch_processed_samples = ch_samplesheet
         }
 ```
+
+Leave the samplesheet `else` branch (`ch_processed_samples = ch_samplesheet`)
+as it is.
 
 - [ ] **Step 7: Route chunked batch mode down the incremental path**
 
@@ -1830,7 +1839,9 @@ def test_chunking_params_are_sent_and_incremental_is_forced_on(tmp_path):
 def test_chunking_off_leaves_incremental_alone(tmp_path):
     params = pm.create_nextflow_params(_config(tmp_path, batch_chunking=False))
     assert params["batch_chunking"] is False
-    assert params["kraken2_enable_incremental"] is False
+    # Batch mode sends no incremental switch today (the key is set in the
+    # real-time branch only), so "left alone" means absent or False.
+    assert params.get("kraken2_enable_incremental") in (None, False)
 
 
 def test_chunking_is_not_sent_in_realtime_mode(tmp_path):
