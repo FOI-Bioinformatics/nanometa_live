@@ -13,9 +13,10 @@ builder (`create_nextflow_params` / `create_nextflow_config`), sampled every
 (`batch_baseline`, `realtime_baseline`, `batch_mem4`, `batch_heavy_baseline`);
 each run's Nextflow work directory was deleted after analysis to keep the
 system volume above its required free-space floor. nanometanf `5ea4db6`
-(dev), nanometa_live `a02c569` (branch `time-to-first-result`, which includes
-the harness fix below and the `--concat` heavy-corpus builder used for the
-last row of the results table).
+(dev), nanometa_live `a02c569` (the harness commit; the document's own commit
+cannot cite itself) (branch `time-to-first-result`, which includes the
+harness fix below and the `--concat` heavy-corpus builder used for the last
+row of the results table).
 
 **Harness fix applied before these runs.** The first batch-baseline attempt
 was launched with `--out` on an external exFAT volume and failed in under 8 s:
@@ -78,9 +79,9 @@ defect — it is what the GUI does for this input shape today.
 | H2 | partially confirmed | Concurrency confirmed: classifier `max_concurrency = 1` in the batch baseline (18 GB machine, 12 GB reservation), matching `floor(18/12) = 1` regardless of `max_classification_forks`. Order refuted: completion order was barcode05, 08, 10, 06, 04, 07, 02, 03, 11, 12, 01, 09 — not samplesheet order (01..12). `groupTuple` emits the channel in first-seen order, but the parallel per-sample QC chain (CHOPPER/FASTQC/NANOPLOT, up to 11 concurrent) finishes samples in whatever order their QC lands, and the serialized classifier then reports each sample as soon as its own classify task completes, so completion order tracks QC scheduling, not the samplesheet. |
 | H3 | refuted | Real-time first-report spread was 265.0 s (barcode05 at 148.6 s to barcode10 at 413.6 s), not "small." The cross-batch round-robin interleaves fairly on the intake side, but the single-lane classifier (`max_concurrency = 1`) and the per-file QC chain across 240 files mean a barcode near the end of the interleave order waits for many single-file tasks ahead of it before its own first file is classified. |
 | H4 | confirmed | Real-time's actual data completion (last `complete_s` across barcodes) was 891.6 s, 5.8x the batch baseline's all-barcode completion of 154.7 s. Task counts confirm "many more tasks": 240 CHOPPER / 240 SEQKIT_STATS / 231 KRAKEN2_INCREMENTAL_CLASSIFIER (+9 empty-report placeholders) in real-time versus 12 of each in batch. The reported wall time (2159.9 s) is larger still, but that gap is explained separately below (H4 is about processing throughput, not the timeout wait). |
-| H5 | confirmed (direction), not to the naive value | Lowering `kraken2_memory_gb` from 12 to 4 raised achieved concurrency from 1 to 2, confirming memory (not CPU) gates admission — but the naive prediction `floor(18/4) = 4` was not reached; 2 is the measured ceiling on this host, most likely because the concurrent per-sample QC chain (CHOPPER/FASTQC/NANOPLOT for all 12 barcodes) competes for the same CPU/memory pool the local executor is tracking. No task exited 137 or 139; all 12 classifier tasks in the probe completed with exit code 0. Per-task median wall time rose sharply alongside concurrency (0.87 s at 12 GB -> 6.4 s at 4 GB, a 7.4x increase), so overall wall time did not improve (169.8 s -> 191.8 s, slightly worse) even though more tasks ran at once — the two concurrent classifier tasks appear to contend with each other and with the QC chain rather than running for free. Peak RSS could not be measured (macOS trace has no `/proc`). |
+| H5 | confirmed, with a second limiter the hypothesis did not name | Lowering `kraken2_memory_gb` from 12 to 4 raised achieved concurrency from 1 to 2. At 12 GB the memory reservation alone explains it: `floor(18/12) = 1`. At 4 GB memory would admit `floor(18/4) = 4`, but the classifier's CPU request caps it first: `conf/modules.config:218` (and `:316` for the incremental module) sets `cpus = max(4, max_cpus / max_classification_forks)`, which with this run's defaults (`max_cpus` 16, `max_classification_forks` 4) is 4 CPUs per classifier task; on this 11-CPU host that admits `floor(11/4) = 2`. The trace confirms exactly two classifier tasks overlap and never three: `barcode01` 18:52:34.393-36.871 alongside `barcode05` 18:52:34.288-36.976 in the probe's trace, no third task inside that window or any other. So the observed concurrency of 2 is the CPU cap taking over once memory no longer binds, not contention with the QC chain (which was this document's earlier, wrong attribution). No task exited 137 or 139; all 12 classifier tasks in the probe completed with exit code 0. Per-task median wall time still rose alongside concurrency (0.87 s at 12 GB -> 6.4 s at 4 GB), so overall wall time did not improve (169.8 s -> 191.8 s, slightly worse) even with more tasks admitted — some contention is real, it is just not what set the concurrency ceiling. Peak RSS could not be measured (macOS trace has no `/proc`). |
 | H6 | confirmed in batch mode, not reproduced in real-time | Batch: first classifier task 4.8 s versus a 0.87 s median (5.5x), a real page-in premium. Real-time: first classifier task 0.388 s versus a 0.51 s median (no premium — the first task was if anything faster). Both modes ran the same one-off `KRAKEN2_DB_PRELOAD` step (2.1-2.4 s) immediately before their first classify task, so the preload step is not what explains the difference. The most likely reading: batch's first classify task handles a full barcode (~10,000 reads) while real-time's handles one file (~500 reads), so any residual warm-up cost is proportionally larger, and more visible, in batch. |
-| H7 | confirmed | barcode01's standard report (`barcode01.kraken2.report.txt` — batch mode produced no cumulative report, see the correction above) had mtime 150.09 s after `t0`; the sampler's first tick with `barcode01.total_reads > 0` was at 152.7 s. Gap: 2.62 s, well under the hypothesised 15 s ceiling. |
+| H7 | confirmed | barcode01's standard report (`barcode01.kraken2.report.txt` — batch mode produced no cumulative report, see the correction above) had mtime 150.093 s after `t0`; the sampler's first tick with `barcode01.total_reads > 0` was at 152.7 s. Gap: 2.61 s, well under the hypothesised 15 s ceiling. |
 | H8 | refuted | barcode01 appeared in the sample list at 36.3 s after `t0`, well before its report existed (150.09 s / first-measured-reads 152.7 s). All 12 barcodes appeared in the list between 36.3 s and 100.5 s (under two minutes), each far ahead of its own report. The premise that a sample is "absent from the sample list until its first report exists" does not hold: the list populates as soon as `kraken2/<sample>/` appears on disk, and every barcode here was listed (as unmeasured) inside the first 101 s, not "a minute or more" of nothing. |
 | H9 (new) | confirmed | A pre-existing file whose reads QC removes entirely is dropped silently in real-time mode: no classification, no lost-input marker, no line on any surface; 9 of 240 files (3.75%) in this run. `pipeline_info/processed_inputs.tsv` lists 231 of 240 files; the missing 9 are exactly the same 3 source-file indices (`..._0`, `..._2`, `..._13` of the demo corpus's `barcode07` directory) repeated across the 3 backlog barcodes built from that source by round-robin (`barcode03`, `barcode07`, `barcode11`). All three files' reads are shorter than the run's `chopper_minlength` (1000 bp: max read lengths measured at 442, 489 and 474 bp respectively, versus a normal file's max of 11,274 bp), so CHOPPER (which completed with exit 0 — this is not a task failure) filters every read, leaving nothing to classify. nanometanf's `EMIT_EMPTY_KRAKEN2_REPORT` path absorbs this (it ran exactly 9 times, matching), so classification is not literally skipped without record in the trace — but because CHOPPER did not fail, `bin/nanometanf_lost_input_marker.sh`'s `afterScript` never fires (it is failure-triggered only) and `pipeline_info/lost_inputs/` holds nothing for these 9 files. The GUI's own "files processed" counter (`NextflowManager._parse_realtime_stats`, `nextflow_manager.py:1290`) sums `GENERATE_SNAPSHOT_STATS` batch-file counts, and that process ran once per input file including the three empty ones — so the header would show **240** files processed while `processed_inputs.tsv` and the classifier both show **231**, with nothing in the GUI naming the gap or the reason for it. |
 
@@ -159,13 +160,18 @@ was not run.
   longer. Geometric chunking gives every barcode a report after its first
   (small) chunk, independent of its total size.
 - **Task 5 (classifier memory reservation under memory mapping).** H5 shows
-  the current reservation serialises the classifier (concurrency 1 at 12 GB)
-  and that even a probe reservation only reached concurrency 2, with a 7.4x
-  per-task slowdown once two tasks shared the host — evidence that a single
-  memory knob is currently doing two incompatible jobs (bounding the rare
-  cold/retry cost and gating the common warm-cache cost). A separate
-  task-level memory value lets the common case admit more concurrency without
-  starving what is actually contended.
+  the memory reservation is what serialises the classifier on this laptop
+  today (concurrency 1 at 12 GB, `floor(18/12)`); a single memory knob is
+  currently doing two incompatible jobs (bounding the rare cold/retry cost and
+  gating the common warm-cache cost). But H5 also shows that fixing the
+  memory knob alone will not give this host full concurrency: once memory no
+  longer binds, the classifier's own CPU request (`max(4, max_cpus /
+  max_classification_forks)` = 4 CPUs per task by design) caps concurrency at
+  `floor(11/4) = 2` here, which the 4 GB probe already demonstrates
+  (exactly two tasks overlap, never three). A separate task-level memory
+  value removes the memory ceiling; the CPU request then decides, and on a
+  16-CPU field machine that projects to `floor(16/4) = 4` (a projection, not
+  measured here).
 - **Task 6 (GUI: preliminary and complete barcodes are named).** H8 shows the
   sample list already renders a barcode 36.3-100.5 s before its report exists,
   and H3/H4 show a real-time run keeps updating for hundreds of seconds after
