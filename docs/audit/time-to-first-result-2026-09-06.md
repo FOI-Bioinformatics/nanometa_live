@@ -40,7 +40,7 @@ Peak RSS is not recorded on macOS (the pipeline trace has no `/proc` to read
 it from); every run's `peak_rss_gb` is `None`. The realtime run's classifier
 task count (231) excludes 9 files that took the `EMIT_EMPTY_KRAKEN2_REPORT`
 placeholder path instead (231 + 9 = 240, one per input file); no other run
-produced that path.
+produced that path. See H9 for what those 9 files were and why.
 
 **Correction to "What the code does today."** The plan describes batch mode
 reaching the classifier through a samplesheet and the incremental switch.
@@ -68,6 +68,7 @@ defect — it is what the GUI does for this input shape today.
 | H6 | confirmed in batch mode, not reproduced in real-time | Batch: first classifier task 4.8 s versus a 0.87 s median (5.5x), a real page-in premium. Real-time: first classifier task 0.388 s versus a 0.51 s median (no premium — the first task was if anything faster). Both modes ran the same one-off `KRAKEN2_DB_PRELOAD` step (2.1-2.4 s) immediately before their first classify task, so the preload step is not what explains the difference. The most likely reading: batch's first classify task handles a full barcode (~10,000 reads) while real-time's handles one file (~500 reads), so any residual warm-up cost is proportionally larger, and more visible, in batch. |
 | H7 | confirmed | barcode01's standard report (`barcode01.kraken2.report.txt` — batch mode produced no cumulative report, see the correction above) had mtime 150.09 s after `t0`; the sampler's first tick with `barcode01.total_reads > 0` was at 152.7 s. Gap: 2.62 s, well under the hypothesised 15 s ceiling. |
 | H8 | refuted | barcode01 appeared in the sample list at 36.3 s after `t0`, well before its report existed (150.09 s / first-measured-reads 152.7 s). All 12 barcodes appeared in the list between 36.3 s and 100.5 s (under two minutes), each far ahead of its own report. The premise that a sample is "absent from the sample list until its first report exists" does not hold: the list populates as soon as `kraken2/<sample>/` appears on disk, and every barcode here was listed (as unmeasured) inside the first 101 s, not "a minute or more" of nothing. |
+| H9 (new) | confirmed | A pre-existing file whose reads QC removes entirely is dropped silently in real-time mode: no classification, no lost-input marker, no line on any surface; 9 of 240 files (3.75%) in this run. `pipeline_info/processed_inputs.tsv` lists 231 of 240 files; the missing 9 are exactly the same 3 source-file indices (`..._0`, `..._2`, `..._13` of the demo corpus's `barcode07` directory) repeated across the 3 backlog barcodes built from that source by round-robin (`barcode03`, `barcode07`, `barcode11`). All three files' reads are shorter than the run's `chopper_minlength` (1000 bp: max read lengths measured at 442, 489 and 474 bp respectively, versus a normal file's max of 11,274 bp), so CHOPPER (which completed with exit 0 — this is not a task failure) filters every read, leaving nothing to classify. nanometanf's `EMIT_EMPTY_KRAKEN2_REPORT` path absorbs this (it ran exactly 9 times, matching), so classification is not literally skipped without record in the trace — but because CHOPPER did not fail, `bin/nanometanf_lost_input_marker.sh`'s `afterScript` never fires (it is failure-triggered only) and `pipeline_info/lost_inputs/` holds nothing for these 9 files. The GUI's own "files processed" counter (`NextflowManager._parse_realtime_stats`, `nextflow_manager.py:1290`) sums `GENERATE_SNAPSHOT_STATS` batch-file counts, and that process ran once per input file including the three empty ones — so the header would show **240** files processed while `processed_inputs.tsv` and the classifier both show **231**, with nothing in the GUI naming the gap or the reason for it. |
 
 ## What this means for the operator
 
@@ -116,3 +117,11 @@ corpus sizes where batch's whole-sample wait is much longer than it was here.
   "listed, unmeasured", "measured, preliminary" (mid-chunk-plan, once Task 4
   lands) and "measured, complete" — an operator reading the current sample
   list cannot tell which state a given barcode is in, in either mode.
+- **H9 (QC-emptied files dropped without a marker) is not scoped to any task
+  in this plan** and is left for a later one. It is a correctness gap, not a
+  latency one: an operator cannot currently learn, from any GUI surface or
+  exported report, that a real-time run silently classified fewer files than
+  it took in. A fix needs either a lost-input marker on the QC->empty path
+  (today's marker only fires on task failure) or a header/report line
+  comparing intake count against classified count, in the spirit of Task 6's
+  naming work but for files, not barcodes.
