@@ -21,8 +21,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Dict, List
@@ -147,14 +149,29 @@ def run(args: argparse.Namespace) -> int:
         "--input-dir", str(Path(args.input).expanduser().resolve()),
         "--out", str(out / "timeline.jsonl"), "--interval", str(args.interval), "--quiet",
     ]
+    # Nextflow's own launch directory holds `.nextflow/cache/*/db`, a LevelDB
+    # store opened with an OS file lock. When `--out` sits on a non-POSIX-lock
+    # filesystem (observed: exFAT over the macOS FSKit driver on an external
+    # drive) opening that DB fails immediately with "Can't open cache DB" --
+    # even though plain flock() from Python succeeds there, so the failure is
+    # specific to Nextflow/JVM's locking path, not a generic flock probe.
+    # Nextflow's own error message names the fix: launch from a local
+    # (lock-capable) directory and keep the shared `-work-dir` wherever it
+    # needs to be for disk space. The launch dir holds only cache metadata and
+    # `.nextflow.log`, so a system-temp location is fine even when the boot
+    # volume is otherwise near full.
+    launch_dir = Path(tempfile.mkdtemp(prefix=f"ttfr_nf_launch_{out.name}_"))
     t0 = time.time()
     with open(out / "nextflow.stdout", "w") as nf_out, open(out / "sampler.stdout", "w") as s_out:
-        pipeline = subprocess.Popen(cmd, cwd=str(out), env=env, stdout=nf_out, stderr=subprocess.STDOUT)
+        pipeline = subprocess.Popen(cmd, cwd=str(launch_dir), env=env, stdout=nf_out, stderr=subprocess.STDOUT)
         sampler_proc = subprocess.Popen(sampler, stdout=s_out, stderr=subprocess.STDOUT)
         rc = pipeline.wait()
         time.sleep(2 * args.interval + 1)  # one more tick after the last write
         sampler_proc.terminate()
         sampler_proc.wait(timeout=30)
+    nf_log = launch_dir / ".nextflow.log"
+    if nf_log.is_file():
+        shutil.copy2(nf_log, out / ".nextflow.log")
     traces = sorted((results / "pipeline_info").glob("execution_trace_*.txt"))
     (out / "run.json").write_text(json.dumps({
         "t0": t0, "t_end": time.time(), "mode": args.mode, "results_dir": str(results),
@@ -162,6 +179,7 @@ def run(args: argparse.Namespace) -> int:
         "input_dir": str(Path(args.input).expanduser().resolve()), "command": cmd,
         "returncode": rc, "overrides": overrides,
         "host": {"cpus": os.cpu_count()},
+        "launch_dir": str(launch_dir),
     }, indent=2))
     print(f"pipeline exit {rc}; artifacts in {out}")
     return rc
