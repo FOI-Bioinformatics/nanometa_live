@@ -38,10 +38,35 @@ def _fastqs(directory: Path) -> List[Path]:
     return sorted(p for p in directory.iterdir() if p.name.endswith(FASTQ_SUFFIXES))
 
 
+def _concat_files(sources: List[Path], dest: Path) -> None:
+    """Write ``dest`` as the byte-for-byte concatenation of ``sources``, each
+    copied in turn. For gzip members this is a valid gzip stream (a decoder
+    reads each member in sequence, i.e. concatenated), so the result is a real
+    multi-member FASTQ.gz, not a symlink."""
+    with open(dest, "wb") as out_fh:
+        for src in sources:
+            with open(src, "rb") as in_fh:
+                shutil.copyfileobj(in_fh, out_fh)
+
+
 def build_backlog(source: Path, out: Path, barcodes: int, files_per_barcode: int,
-                  include_unclassified: bool) -> Dict[str, List[Path]]:
+                  include_unclassified: bool, concat: int = 1) -> Dict[str, List[Path]]:
     """Create ``out/barcodeNN/`` for NN in 1..barcodes, each holding
-    ``files_per_barcode`` symlinks into the source corpus. Returns the layout."""
+    ``files_per_barcode`` entries from the source corpus. Returns the layout.
+
+    With ``concat == 1`` (the default) each entry is a symlink into the
+    source corpus, round-robin over the source barcode directories, one
+    source file per target file -- unchanged from before ``--concat``
+    existed. With ``concat == K > 1`` each entry is instead a REAL file made
+    by concatenating K consecutive source files (a heavier per-file corpus,
+    e.g. to approximate MinKNOW's ~4000-read files from 500-read demo
+    files). Source files are drawn from one pool spanning every source
+    barcode directory, sorted by directory then by filename, so running out
+    of one source barcode continues into the next. The pool is re-walked
+    from its start for each TARGET barcode (the same source files serve
+    every target barcode), but never reused within one target barcode's own
+    ``files_per_barcode * concat`` files.
+    """
     source = Path(source).expanduser().resolve()
     out = Path(out).expanduser().resolve()
     sources = sorted(d for d in source.iterdir() if d.is_dir() and d.name.startswith("barcode"))
@@ -49,25 +74,52 @@ def build_backlog(source: Path, out: Path, barcodes: int, files_per_barcode: int
         raise ValueError(f"no barcode directories under {source}")
     out.mkdir(parents=True, exist_ok=True)
     layout: Dict[str, List[Path]] = {}
-    for i in range(barcodes):
-        origin = sources[i % len(sources)]
-        origin_files = _fastqs(origin)
-        if len(origin_files) < files_per_barcode:
+
+    if concat > 1:
+        pool: List[Path] = []
+        for d in sources:
+            pool.extend(_fastqs(d))
+        needed = files_per_barcode * concat
+        if needed > len(pool):
             raise ValueError(
-                f"{origin.name} holds only {len(origin_files)} FASTQ files; "
-                f"{files_per_barcode} requested per barcode"
+                f"source pool holds only {len(pool)} FASTQ files across {len(sources)} "
+                f"barcode dirs; {needed} required per target barcode "
+                f"({files_per_barcode} files x concat {concat})"
             )
-        name = f"barcode{i + 1:02d}"
-        target = out / name
-        target.mkdir(exist_ok=True)
-        links = []
-        for f in origin_files[:files_per_barcode]:
-            link = target / f.name
-            if link.is_symlink() or link.exists():
-                link.unlink()
-            link.symlink_to(f)
-            links.append(link)
-        layout[name] = links
+        for i in range(barcodes):
+            name = f"barcode{i + 1:02d}"
+            target = out / name
+            target.mkdir(exist_ok=True)
+            entries = []
+            cursor = 0
+            for j in range(files_per_barcode):
+                chunk = pool[cursor:cursor + concat]
+                cursor += concat
+                dest = target / f"concat{concat}_{j:03d}.fastq.gz"
+                _concat_files(chunk, dest)
+                entries.append(dest)
+            layout[name] = entries
+    else:
+        for i in range(barcodes):
+            origin = sources[i % len(sources)]
+            origin_files = _fastqs(origin)
+            if len(origin_files) < files_per_barcode:
+                raise ValueError(
+                    f"{origin.name} holds only {len(origin_files)} FASTQ files; "
+                    f"{files_per_barcode} requested per barcode"
+                )
+            name = f"barcode{i + 1:02d}"
+            target = out / name
+            target.mkdir(exist_ok=True)
+            links = []
+            for f in origin_files[:files_per_barcode]:
+                link = target / f.name
+                if link.is_symlink() or link.exists():
+                    link.unlink()
+                link.symlink_to(f)
+                links.append(link)
+            layout[name] = links
+
     if include_unclassified and (source / "unclassified").is_dir():
         target = out / "unclassified"
         target.mkdir(exist_ok=True)
@@ -83,6 +135,7 @@ def build_backlog(source: Path, out: Path, barcodes: int, files_per_barcode: int
         "source": str(source),
         "barcodes": barcodes,
         "files_per_barcode": files_per_barcode,
+        "concat": concat,
         "samples": {k: [str(p) for p in v] for k, v in layout.items()},
     }, indent=2))
     return layout
@@ -194,6 +247,9 @@ def main(argv=None) -> int:
     b.add_argument("--barcodes", type=int, default=12)
     b.add_argument("--files-per-barcode", type=int, default=20)
     b.add_argument("--include-unclassified", action="store_true")
+    b.add_argument("--concat", type=int, default=1,
+                   help="concatenate K consecutive source files into each target file "
+                        "(real files, not symlinks) instead of one source file per target file")
     r = sub.add_parser("run")
     r.add_argument("--input", required=True)
     r.add_argument("--mode", choices=["batch", "realtime"], required=True)
@@ -205,7 +261,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if args.cmd == "build":
         layout = build_backlog(Path(args.source), Path(args.out), args.barcodes,
-                               args.files_per_barcode, args.include_unclassified)
+                               args.files_per_barcode, args.include_unclassified, args.concat)
         print(f"{len(layout)} samples, {sum(len(v) for v in layout.values())} files under {args.out}")
         return 0
     return run(args)

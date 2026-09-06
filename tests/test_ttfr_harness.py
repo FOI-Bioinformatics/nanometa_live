@@ -63,6 +63,42 @@ class TestBuildBacklog:
         manifest = json.loads((out / "backlog_layout.json").read_text())
         assert manifest["barcodes"] == 2 and manifest["files_per_barcode"] == 2
         assert set(manifest["samples"]) == {"barcode01", "barcode02"}
+        assert manifest["concat"] == 1
+
+    def test_concat_makes_real_concatenated_files(self, tmp_path):
+        from scripts.ttfr_backlog import build_backlog
+
+        src = _source_corpus(tmp_path, barcodes=("barcode05", "barcode06"), files=3)
+        # Overwrite with distinct one-byte contents so concatenated sizes are checkable.
+        one_byte_sizes = {}
+        for bc in ("barcode05", "barcode06"):
+            for k in range(3):
+                p = src / bc / f"reads_{bc}_{k}.fastq.gz"
+                p.write_bytes(bytes([k]))
+                one_byte_sizes[p] = 1
+
+        out = tmp_path / "input"
+        layout = build_backlog(src, out, barcodes=1, files_per_barcode=2,
+                               include_unclassified=False, concat=2)
+
+        assert sorted(layout) == ["barcode01"]
+        files = layout["barcode01"]
+        assert len(files) == 2
+        for f in files:
+            assert f.is_file() and not f.is_symlink()
+            assert f.name.startswith("concat2_")
+            assert f.stat().st_size == 2  # sum of its two one-byte sources
+
+        manifest = json.loads((out / "backlog_layout.json").read_text())
+        assert manifest["concat"] == 2
+
+    def test_concat_refuses_when_pool_too_small(self, tmp_path):
+        from scripts.ttfr_backlog import build_backlog
+
+        src = _source_corpus(tmp_path, barcodes=("barcode05",), files=2)
+        with pytest.raises(ValueError, match="pool holds only 2"):
+            build_backlog(src, tmp_path / "input", barcodes=1, files_per_barcode=2,
+                          include_unclassified=False, concat=2)
 
 
 def _write_run(tmp_path, ticks, trace_rows, t0=1000.0):
