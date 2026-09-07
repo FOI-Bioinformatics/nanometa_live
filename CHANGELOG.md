@@ -13,7 +13,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Batch mode splits each sample into growing chunks instead of classifying a
   whole sample at once, so every barcode gets a preliminary result after the
   first, smallest chunk of every barcode has classified, rather than waiting
-  for one barcode's full read set.
+  for one barcode's full read set. Measured on 12 barcodes x 20 files (11-CPU,
+  18 GB machine): the heavy corpus (4000 reads/file) went from 208.6 s to
+  461.7 s to reach every barcode's first report, spread 86.2 s to 407.4 s --
+  chunking's own mechanism works (one barcode's first chunk reported in
+  54.3 s), but a proliferation of per-chunk QC tasks now dominates the
+  critical path; see `docs/audit/time-to-first-result-2026-09-06.md` for the
+  full measurement and the open finding.
 - Kraken2 classification runs several samples in parallel where the database
   fits comfortably in the host's page cache, instead of one task at a time.
 - The dashboard header, sample selector and verdict subtitle distinguish a
