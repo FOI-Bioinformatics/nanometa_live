@@ -141,7 +141,7 @@ says so.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `batch_chunking` | bool | true | Split each sample's existing reads into growing chunks instead of classifying them whole. Every barcode gets a preliminary report after the first chunk of all barcodes classifies, rather than waiting for one barcode's full read set. |
+| `batch_chunking` | bool | true | Split each sample's existing reads into growing chunks instead of classifying them whole. Every barcode gets a preliminary report after the first chunk of all barcodes classifies, rather than waiting for one barcode's full read set. Set from the Configuration tab ("Chunked batch classification"); it reaches the pipeline in batch mode only. Right for MinKNOW-sized files; on very small files it widens the spread between barcodes without shortening the wait. |
 | `batch_first_chunk_files` | int | 1 | Files in the first chunk of each sample. Smaller means an earlier but noisier preliminary result. |
 | `batch_chunk_growth` | float | 2.0 | Multiplier applied to the chunk size after each round (1st chunk N files, 2nd `N * growth`, and so on) until the sample is exhausted. |
 

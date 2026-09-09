@@ -1223,6 +1223,30 @@ def _analysis_options_item():
                 ),
             ], md=4),
         ], className="mb-3"),
+        dbc.Row([
+            dbc.Col([
+                dbc.Switch(
+                    id="batch-chunking-input",
+                    label="Chunked batch classification",
+                    value=True,
+                    className="mt-1"
+                ),
+                # The measured trade-off, so an operator can decide rather
+                # than hand-edit config.yaml: a win on MinKNOW-sized files
+                # and a loss on very small ones (audit
+                # docs/audit/time-to-first-result-2026-09-06.md, criterion A).
+                dbc.FormText(
+                    id="batch-chunking-help",
+                    children="Classifies each barcode in growing chunks, the "
+                             "first chunk of every barcode first, so every "
+                             "barcode shows a preliminary result early. Right "
+                             "for MinKNOW-sized files (about 4000 reads each); "
+                             "on very small files it widens the spread between "
+                             "barcodes without shortening the wait. Applies to "
+                             "batch mode only.",
+                ),
+            ], md=8),
+        ], className="mb-3"),
         _analysis_output_rows(),
     ], title="Analysis Options")
 

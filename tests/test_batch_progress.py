@@ -2,8 +2,9 @@
 
 A chunked batch run writes pipeline_info/batch_chunk_plan.json (planned chunks
 per sample) and one per-batch report per finished chunk. The progress helper
-reads both so the header, the sample selector and the verdict subtitle can say
-"preliminary" while a barcode has more chunks to come.
+reads both so the header can count complete, in-progress and pending barcodes,
+and the sample selector and the verdict subtitle can say "preliminary" while a
+barcode has more chunks to come.
 """
 
 import json
@@ -50,7 +51,26 @@ def test_states_and_summary(tmp_path):
     assert p.preliminary == ["barcode01"]
     assert p.complete == ["barcode02"]
     assert p.pending == ["barcode03"]
-    assert p.summary_line() == "Preliminary: 2 of 3 barcodes; complete: 1 of 3"
+    assert p.summary_line() == "Barcodes: 1 complete, 1 in progress, 1 pending of 3"
+
+
+def test_summary_omits_the_zero_counts(tmp_path):
+    """A zero is left out rather than printed, so the line stays readable."""
+    root = _tree(tmp_path, {"barcode01": 4, "barcode02": 1},
+                 {"barcode01": [0, 1], "barcode02": [0]})
+    assert batch_progress(root).summary_line() == (
+        "Barcodes: 1 complete, 1 in progress of 2")
+
+    (tmp_path / "b").mkdir()
+    root2 = _tree(tmp_path / "b", {"barcode01": 4}, {})
+    assert batch_progress(root2).summary_line() == "Barcodes: 0 complete, 1 pending of 1"
+
+
+def test_summary_when_every_barcode_is_complete(tmp_path):
+    """A finished run says so once, not "12 of 12" twice under one word."""
+    root = _tree(tmp_path, {"barcode01": 2, "barcode02": 1},
+                 {"barcode01": [0, 1], "barcode02": [0]})
+    assert batch_progress(root).summary_line() == "Barcodes: 2 of 2 complete"
 
 
 def test_duplicate_copies_count_once(tmp_path):
@@ -66,9 +86,9 @@ def test_malformed_plan_is_ignored(tmp_path):
 
 # -- Surface tests --------------------------------------------------------
 #
-# One preliminary sample (barcode01: 2 of 4 chunks) and one complete sample
+# One in-progress sample (barcode01: 2 of 4 chunks) and one complete sample
 # (barcode02: 1 of 1 chunk) -- summary_line() is
-# "Preliminary: 2 of 2 barcodes; complete: 1 of 2".
+# "Barcodes: 1 complete, 1 in progress of 2".
 
 
 def _progress_tree(tmp_path):
@@ -95,7 +115,10 @@ class TestHeaderNamesProgress:
             {"processing_mode": "batch", "results_output_directory": root},
         )
         assert text == "RUNNING"
-        assert "Preliminary: 2 of 2 barcodes; complete: 1 of 2" in detail
+        assert "Barcodes: 1 complete, 1 in progress of 2" in detail
+        # The header must not reuse the verdict clause's word for a different
+        # count: "preliminary" belongs to the per-barcode badge and the clause.
+        assert "Preliminary" not in detail
 
 
 class TestSelectorNamesProgress:
@@ -274,3 +297,49 @@ class TestVerdictSubtitleNamesProgress:
         assert outputs is not None
         rendered = json.dumps(outputs, default=str)
         assert "still classifying" in rendered
+
+
+class TestProgressMemo:
+    """Three callbacks ask for the same progress per tick; one read serves all.
+
+    The memo re-checks the chunk plan and each planned sample's
+    ``batch_reports/`` directory with one ``stat`` apiece, and returns the
+    previous result when none has moved. Wired into
+    ``clear_all_loader_caches`` so a new run into the same output directory
+    cannot be answered from the previous run's counts.
+    """
+
+    def test_unchanged_mtimes_cost_no_listdir(self, tmp_path):
+        from nanometa_live.app.utils import batch_progress as bp
+
+        bp.clear_batch_progress_memo()
+        root = _progress_tree(tmp_path)
+        first = bp.batch_progress(root)
+        assert first.summary_line() == "Barcodes: 1 complete, 1 in progress of 2"
+
+        with patch("os.listdir") as listdir:
+            second = bp.batch_progress(root)
+        listdir.assert_not_called()
+        assert second is first
+
+    def test_a_new_batch_report_invalidates_the_memo(self, tmp_path):
+        from nanometa_live.app.utils import batch_progress as bp
+
+        bp.clear_batch_progress_memo()
+        root = _progress_tree(tmp_path)
+        assert bp.batch_progress(root).done["barcode01"] == 2
+
+        d = Path(root) / "kraken2" / "barcode01" / "batch_reports"
+        (d / "batch_2.kraken2.report.txt").write_text(
+            "100.00\t1\t1\tU\t0\tunclassified\n")
+        assert bp.batch_progress(root).done["barcode01"] == 3
+
+    def test_run_boundary_reset_clears_it(self, tmp_path):
+        from nanometa_live.core.utils.loader_utils import clear_all_loader_caches
+        from nanometa_live.app.utils import batch_progress as bp
+
+        root = _progress_tree(tmp_path)
+        bp.batch_progress(root)
+        assert bp._progress_memo
+        clear_all_loader_caches()
+        assert not bp._progress_memo

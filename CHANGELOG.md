@@ -25,9 +25,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Kraken2 classification runs several samples in parallel where the database
   fits comfortably in the host's page cache, instead of one task at a time.
 - The dashboard header, sample selector and verdict subtitle distinguish a
-  preliminary batch-mode result from a complete one.
-- Start Analysis refuses a nanometanf checkout below 1.10.0 by name, and the
-  readiness checklist reports the pipeline version.
+  preliminary batch-mode result from a complete one. The header counts
+  complete, in-progress and pending barcodes; "preliminary" is reserved for
+  the per-barcode badge and the verdict clause, which count different things.
+- A "Chunked batch classification" switch in the Configuration tab, since
+  chunking is a win on MinKNOW-sized files and a loss on very small ones.
+  Disabled in real-time mode, where the setting does not reach the pipeline.
+- Start Analysis refuses a nanometanf checkout below the required version
+  (1.11.0 for this release) by name, and the readiness checklist reports the
+  pipeline version.
 - A README compatibility table pairing each GUI release with its nanometanf
   and Nextflow floor, fenced by a test against the code's own floor.
 - Releases build and upload to PyPI through trusted publishing.

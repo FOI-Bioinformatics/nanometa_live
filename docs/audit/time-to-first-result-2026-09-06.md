@@ -6,7 +6,15 @@ the pipeline analyse a whole sample before presenting anything?
 
 **Setup.** MacBook (11 CPUs, 18 GB), Bioshield database 7.5 GB
 (`bioshield26.1_8G`), 12 barcodes x 20 files x 500 reads built from the demo
-corpus by `scripts/ttfr_backlog.py`, launched with the GUI's own parameter
+corpus by `scripts/ttfr_backlog.py`. **The 12 barcodes are byte-identical
+copies of one file set**: the builder re-walks the same source pool from its
+start for each target barcode, so every barcode carries the same reads in the
+same order. The consequence matters for how the results below are read. Where
+a per-barcode first-report time differs from another's, the difference
+measures scheduling order and contention on this host and nothing else,
+because the work per barcode is identical. A real run's barcodes differ in
+read count and QC yield, so its spread will be this scheduling component plus
+a workload component this corpus cannot show. Launched with the GUI's own parameter
 builder (`create_nextflow_params` / `create_nextflow_config`), sampled every
 2 s by `scripts/audit_realtime_timeline.py`, analysed by
 `scripts/ttfr_analyse.py`. Runs and artifacts live under `/tmp/ttfr/`
@@ -196,6 +204,15 @@ taken at 06:39:04) shows, in that one frame:
 
 - Header: `Files processed: 0 / 240, Preliminary: 11 of 12 barcodes; complete:
   0 of 12, Last update: 06:39:04`
+  (**the screenshot predates the header's wording change.** The whole-branch
+  review found "preliminary" carrying two different counts in one frame — 11
+  here for barcodes that HAVE a preliminary result, 12 in the verdict clause
+  below for barcodes NOT yet complete. The header now reports three disjoint
+  counts and drops the word: the same state renders as
+  `Barcodes: 0 complete, 11 in progress, 1 pending of 12`, and a finished run
+  as `Barcodes: 12 of 12 complete`. The verdict clause and the per-barcode
+  selector badge are unchanged, so what Criterion B was judged on still
+  holds; only the header's phrasing differs from the image.)
 - Verdict subtitle: `ACTION REQUIRED` — "3 of 17 watched pathogens above
   alert threshold — pending confirmatory validation -- preliminary: 12 of 12
   barcodes still classifying"
@@ -301,6 +318,16 @@ the 180 s ceiling; 42.2 s is 47% of the 90 s ceiling) — margin the document
 returns to below, next to a measurement-noise caveat that bears on exactly
 how much that margin is worth. The heavy corpus (MinKNOW-sized files) is the
 corpus Criterion A is judged on and the representative case for this fix.
+
+**What the spread number measures.** Every barcode in both corpora holds the
+same reads (see Setup), so the spread between the first and the last barcode
+to report is a scheduling-fairness measure: it says how evenly the executor
+admitted 12 equal workloads, not how a run with uneven barcodes will behave.
+The criterion's 90 s target is kept as such a measure, which is what the fix
+it tests is about — chunk ordering decides admission order, not per-barcode
+cost. A field run whose barcodes differ in read count will spread further
+than these numbers by whatever that difference costs, and this corpus offers
+no basis for estimating it.
 
 **On the light corpus (500-read files, reference only, no target set),
 chunking does not help and widens the spread.** All-first-report moved

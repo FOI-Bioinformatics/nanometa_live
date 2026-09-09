@@ -277,10 +277,20 @@ A batch run over existing reads splits every sample into growing chunks
 rather than classifying one barcode's full read set before starting the
 next. Every barcode gets a preliminary result once the first, smallest
 chunk of every barcode has classified — by default that is one file per
-barcode. The header counts how many barcodes are preliminary and how many
-are complete, a preliminary barcode is marked in the sample selector, and
-the verdict subtitle says so. The final result, once every chunk of every
-barcode has classified, is the same as an unchunked run.
+barcode. The header counts the barcodes in each state, for example
+`Barcodes: 3 complete, 8 in progress, 1 pending of 12`, and
+`Barcodes: 12 of 12 complete` once the run has finished. A barcode with more
+chunks to come is marked "preliminary" in the sample selector, and the verdict
+subtitle names how many are still classifying. The final result, once every
+chunk of every barcode has classified, is the same as an unchunked run.
+
+Chunking is on by default and is switched off by "Chunked batch
+classification" in the Configuration tab's Analysis Options (config key
+`batch_chunking`). Leave it on for MinKNOW-sized files, roughly 4000 reads
+each. On very small files the extra tasks cost more than the whole-sample
+wait they avoid, so chunking widens the spread between barcodes without
+shortening the wait for the first result. The switch applies to batch mode
+only; a real-time run classifies each arriving file as its own batch.
 
 ### Real-time mode
 

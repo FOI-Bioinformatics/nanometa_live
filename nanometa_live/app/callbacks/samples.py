@@ -259,8 +259,9 @@ def register_samples(app, backend_manager):
         # Chunked batch mode (Task 4) classifies a sample's chunks
         # incrementally; a preliminary sample's counts will still grow, so it
         # is badged distinctly from one whose chunks are all in. Computed
-        # once per callback invocation -- one listdir per planned sample, not
-        # per option (tests/test_tick_call_counts.py budget).
+        # once per callback invocation, not per option, and memoised on
+        # directory mtimes inside batch_progress so the three per-tick callers
+        # share one read (tests/test_tick_call_counts.py budget).
         try:
             results_dir = resolve_outdir_for_fingerprint(config)
             progress = batch_progress(results_dir) if results_dir else None

@@ -236,8 +236,10 @@ def register_status(app, backend_manager):
                     f"{n_failed} task{'s' if n_failed != 1 else ''} failed (skipped)"
                 )
             # Chunked batch mode classifies a sample's chunks incrementally
-            # (Task 4); name which barcodes still have chunks outstanding so
-            # the operator does not read a preliminary count as final.
+            # (Task 4); count how many barcodes are complete, still running
+            # and not started so the operator does not read a partial result
+            # as final. The line avoids the word "preliminary", which the
+            # verdict clause uses for a different count.
             try:
                 results_dir = resolve_outdir_for_fingerprint(config)
                 summary = batch_progress(results_dir).summary_line() if results_dir else None

@@ -45,7 +45,13 @@ index across samples (`lib/BatchChunkPlanner.groovy`), so every barcode has a
 preliminary report after one round; each chunk is a batch downstream (per-batch
 report, cumulative report, `meta.batch_id`), the same tree a real-time run
 writes. `pipeline_info/batch_chunk_plan.json` is the contract the dashboard
-reads (`app/utils/batch_progress.py`) to say which barcodes are preliminary.
+reads (`app/utils/batch_progress.py`) to say which barcodes are preliminary;
+three callbacks ask per tick, so the helper memoises on the plan's and each
+sample's `batch_reports/` directory mtime (`clear_batch_progress_memo`, wired
+into both reset paths). The header counts complete, in-progress and pending
+barcodes and does NOT use the word "preliminary" -- the verdict clause counts
+barcodes not yet complete and the selector badge counts one barcode's chunks,
+so a shared word there put two different numbers on one screen.
 The final cumulative report equals the unchunked result (verified read for
 read with `scripts/ttfr_analyse.py compare` on the 2026-09-06, 2026-09-07 and
 2026-09-09 harness runs, `"equal": true` across all 12 samples every time;
@@ -60,7 +66,8 @@ corpus (500 reads/file) all-first-report 154.7 s -> 440.4 s -> 160.6 s, spread
 40.2 s -> 40.2 s -> 92.3 s; heavy corpus (4000 reads/file, the MinKNOW-scale
 proxy) all-first-report 208.6 s -> 461.7 s -> 86.9 s, spread 86.2 s ->
 407.4 s -> 42.2 s -- acceptance criterion A (heavy corpus, <180 s / <90 s) is
-now MET. Classifier concurrency holds at 2 exactly as Task 5's CPU-cap math
+now MET (synthetic barcodes are identical; the spread measures scheduling
+only). Classifier concurrency holds at 2 exactly as Task 5's CPU-cap math
 predicts (`floor(11/4)` on this host) throughout; chunk order works at the
 single-barcode level in every round (a heavy-corpus barcode's first chunk
 reported at 44.7 s in the 2026-09-09 run). The 2026-09-07 regression was

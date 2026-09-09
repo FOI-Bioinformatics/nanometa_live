@@ -253,16 +253,48 @@ class TestBatchingSwitchIsModeAware:
         )
 
     def test_realtime_forces_it_on_and_disables_it(self, cfg_app):
-        value, disabled, help_text = self._fn(cfg_app)("realtime", False)
+        (value, disabled, help_text,
+         chunk_disabled, chunk_help) = self._fn(cfg_app)("realtime", False)
         assert value is True, "the switch must show the state the run will use"
         assert disabled is True, "a control that cannot decide must not invite a choice"
         assert "always on in real-time" in help_text.lower()
+        del chunk_disabled, chunk_help
 
     def test_batch_mode_leaves_the_operator_in_control(self, cfg_app):
-        value, disabled, help_text = self._fn(cfg_app)("batch", False)
+        (value, disabled, help_text,
+         chunk_disabled, chunk_help) = self._fn(cfg_app)("batch", False)
         assert value is False
         assert disabled is False
         assert "optional in batch mode" in help_text.lower()
+        del chunk_disabled, chunk_help
+
+
+class TestChunkingSwitchIsModeAware:
+    """Chunked batch classification is a batch-mode decision, and only that.
+
+    ``create_nextflow_params`` sends ``batch_chunking`` only in batch mode,
+    so in real time the switch would decide nothing -- the same reason the
+    incremental switch is disabled there, arrived at from the other side.
+    The switch exists at all because the audit measured chunking as a win on
+    MinKNOW-sized files and a loss on very small ones, so the choice belongs
+    to the operator rather than to a hand edit of config.yaml.
+    """
+
+    def _fn(self, cfg_app):
+        from tests.dash_test_utils import get_callback_fn
+        return get_callback_fn(
+            cfg_app, "batch-chunking-input", input_contains="processing-mode-input"
+        )
+
+    def test_realtime_disables_it(self, cfg_app):
+        *_incremental, disabled, help_text = self._fn(cfg_app)("realtime", True)
+        assert disabled is True
+        assert "batch mode only" in help_text.lower()
+
+    def test_batch_mode_leaves_it_live(self, cfg_app):
+        *_incremental, disabled, help_text = self._fn(cfg_app)("batch", True)
+        assert disabled is False
+        assert "minknow" in help_text.lower()
 
     def test_the_label_no_longer_names_live_mode_alone(self):
         from pathlib import Path
