@@ -108,14 +108,18 @@ this audit; `conda clean --tarballs --packages --index-cache` (removes only
 redownloadable package tarballs and index cache, never installed envs)
 recovered enough headroom to pass it.
 
-### After results table
+### After results table (Tasks 4-5-7, per-chunk QC)
 
 | Run | first report, first barcode (s) | all barcodes (s) | spread (s) | wall (s) | classifier tasks | max concurrency | median task (s) |
 |---|---|---|---|---|---|---|---|
-| batch, light corpus (chunked) | 400.2 | 440.4 | 40.2 | 516.7 | 57 | 2 | 0.36 |
-| batch, heavy corpus (chunked) | 54.3 | 461.7 | 407.4 | 688.7 | 60 | 2 | 3.95 |
+| batch, light corpus (chunked, per-chunk QC) | 400.2 | 440.4 | 40.2 | 516.7 | 57 | 2 | 0.36 |
+| batch, heavy corpus (chunked, per-chunk QC) | 54.3 | 461.7 | 407.4 | 688.7 | 60 | 2 | 3.95 |
 | realtime, light corpus | 80.4 | 158.7 | 78.3 | 860.3 (ended by operator SIGINT) | 231 | 2 | 0.41 |
 | batch, heavy corpus, single-task control (`batch_chunking: false`) | 104.5 | 172.7 | 68.2 | 208.9 | 12 | 2 | 4.1 |
+
+These four rows are the per-chunk-QC state measured on 2026-09-07 (Criterion A
+NOT MET below); Task 9 replaced per-chunk QC with per-sample QC and the
+re-measured rows are in "After Task 9" further down.
 
 The realtime run was ended deliberately, not by its configured 20-minute
 timeout: `pkill -INT` was sent once every sample's `total_reads` had been
@@ -207,6 +211,102 @@ and the heavy single-task control's standard reports: `"equal": true`, exit
 0, all 12 barcodes, 1509 taxa each, zero differences. Chunked and unchunked
 batch mode produce byte-identical final classification for every sample.
 
+## After Task 9: per-sample QC (2026-09-09)
+
+**Why this round exists.** The 2026-09-07 round above found chunked batch
+mode NOT MET on the heavy corpus because `NANOPLOT` and `FASTQC` ran once per
+CHUNK (57-60 tasks, each reserving 4 CPUs) instead of once per sample,
+starving the classifier's own tiny first-chunk tasks of CPU on an 11-CPU
+host. Task 9 (nanometanf `8a6286c`, branch `dev`) groups every chunk's reads
+back to one NanoPlot/FastQC invocation per sample in chunked batch mode, and
+drops NanoPlot's reservation from 4 to 2 CPUs. This round re-measures both
+corpora against that fix.
+
+**Setup.** Same machine (11 CPUs, 18 GB), same database (`bioshield26.1_8G`),
+nanometanf `8a6286c` (`1.11.0dev`), nanometa_live `88a0d79` (branch
+`time-to-first-result`; the launch side is unchanged since the 2026-09-07
+round). `/tmp/ttfr/input` (12x20x500 reads) was reused as-is; `/tmp/ttfr/
+input_heavy` (12x20x4000 reads) had been cleared from the system temp volume
+between sessions and was rebuilt fresh with `ttfr_backlog.py build --concat
+8`, identical to the prior rebuild. Every run's `params.json` was checked
+before analysis and carried `batch_chunking: true`, `batch_first_chunk_files:
+1`, `batch_chunk_growth: 2.0`, `kraken2_task_memory_gb: 4`,
+`kraken2_enable_incremental: true` (`false`/`null` for the chunking keys in
+the single-task control). Each run's `work/` directory was deleted
+immediately after analysis; the system volume held 3.2-5.2 GB free throughout
+(floor: 1.5 GB). Real-time mode was not re-run — Task 9 touches only the
+batch-mode QC subworkflow branch, and the real-time row in the table above is
+carried forward unchanged.
+
+**Watchdog.** The Task 8 report describes a `nanoplot_watchdog.sh` script
+that killed a hung NanoPlot/kaleido-Chromium task during that round's first
+attempt; the script itself could not be found on disk this round (not under
+the repository, `/tmp`, or the previous session's paths — `/tmp` is cleared
+between sessions on this machine and the script was apparently never
+committed). It was recreated from the report's own description (poll every
+15 s, kill a NanoPlot task wrapper whose CPU time has not advanced for 45 s
+past a 90 s grace period) and run beside all three launches below. It never
+fired in any of the three runs (empty or start-line-only logs) — consistent
+with Task 9's fix removing the CPU-starved scheduling conditions that made
+the earlier hang costly to notice, though the underlying kaleido/Chromium
+flake is unrelated to Task 9 and could still recur.
+
+### After Task 9 results table
+
+| Run | first report, first barcode (s) | all barcodes (s) | spread (s) | wall (s) | classifier tasks | max concurrency | median task (s) | NanoPlot tasks | FastQC tasks |
+|---|---|---|---|---|---|---|---|---|---|
+| batch, light corpus (chunked, per-sample QC) | 68.3 | 160.6 | 92.3 | 281.2 | 57 | 2 | 0.78 | 12 | 12 |
+| batch, heavy corpus (chunked, per-sample QC) | 44.7 | 86.9 | 42.2 | 275.1 | 60 | 2 | 0.31 | 12 | 12 |
+| batch, heavy corpus, single-task control (`batch_chunking: false`) | 140.6 | 156.6 | 16.0 | 179.3 | 12 | 2 | 0.67 | 12 | 12 |
+
+Directories: `/tmp/ttfr/batch_after2`, `/tmp/ttfr/batch_heavy_after2`,
+`/tmp/ttfr/batch_heavy_single2` respectively; each has its own
+`params.json`/`summary.json`. NanoPlot and FastQC task counts, before and
+after Task 9, on the identical two corpora:
+
+| Run | NanoPlot before (2026-09-07) | NanoPlot after (2026-09-09) | FastQC before | FastQC after |
+|---|---|---|---|---|
+| light corpus, chunked | 57 | 12 | 60 | 12 |
+| heavy corpus, chunked | 60 | 12 | 60 | 12 |
+
+Both dropped to one task per sample, in both corpora, exactly as Task 9's
+design intends; each invocation's own cost is essentially unchanged (NanoPlot
+median 14.1-17.9 s across every run in both tables above, FastQC median
+2.5-5.2 s) — the fix removed the multiplication, not the per-task cost.
+
+### Criterion A, re-measured — MET
+
+All-first-report 86.9 s (target <180 s) and spread 42.2 s (target <90 s) on
+the heavy corpus: both targets are met, with room to spare (86.9 s is 48% of
+the 180 s ceiling; 42.2 s is 47% of the 90 s ceiling). The light corpus,
+reported for reference (no target set), was 160.6 s / 92.3 s — close to the
+unchunked batch baseline's own 154.7 s all-first-report, and, unusually,
+worse on spread than the heavy corpus's 42.2 s. That inversion is read as
+scheduling noise rather than a corpus-size effect: with QC now flat at one
+invocation per sample regardless of corpus, the residual spread is set by
+which of 12 samples' tiny chunks the Nextflow local executor happens to
+admit first among many similarly-sized ready tasks, and 12 samples is a small
+enough population that this can go either way between two independent runs.
+It is not the QC-proliferation mechanism the 2026-09-07 round identified,
+because that mechanism (NanoPlot task count scaling with corpus size) no
+longer exists.
+
+Chunk order and task memory, already shown to work in the 2026-09-07 round,
+still hold: max classifier concurrency measured at exactly 2 in every run in
+the after-Task-9 table (matching `floor(11/4)` on this 11-CPU host, per H5),
+and chunked batch mode's all-first-report is now FASTER than the unchunked
+single-task control on the heavy corpus (86.9 s versus 156.6 s) — chunking is
+delivering its intended early-preview benefit now that QC is no longer
+competing with the classifier for the same CPU pool.
+
+### Criterion C, re-measured — MET
+
+`ttfr_analyse.py compare` between `/tmp/ttfr/batch_heavy_after2/results` and
+`/tmp/ttfr/batch_heavy_single2/results`: `"equal": true`, exit 0, all 12
+barcodes, 1509 taxa each, zero differences. Chunked and unchunked batch mode
+still produce byte-identical final classification for every sample after
+Task 9's QC-grouping change.
+
 ## Hypotheses
 
 | Id | Verdict | Evidence | After (2026-09-07) |
@@ -286,6 +386,25 @@ measurement; the two biggest sources of error are NANOPLOT's untested
 scaling above 80,000 reads and queueing behaviour at 24 barcodes, which
 was not run.
 
+**Update after Task 9 (2026-09-09): the recommendation above is reversed for
+chunked batch mode.** The paragraphs above describe unchunked batch mode
+(no early preview, wait for the whole barcode) and the interim,
+per-chunk-QC build of chunked batch mode (worse than unchunked on this
+corpus, per Criterion A's 2026-09-07 verdict). With Task 9's per-sample QC
+grouping, chunked batch mode on the heavy corpus now reaches every barcode's
+first (small, genuinely partial) result in 86.9 s — faster than the
+unchunked baseline's 208.6 s to a barcode's *only* (and final) result, and
+faster than the interim build's 461.7 s. An operator running a backlog
+shaped like the heavy corpus here is now better served by chunked batch mode
+on both counts that used to trade off against each other: an earlier first
+look, and (per Criterion C) an identical final answer. The light-corpus
+comparison is less clean (chunked: 160.6 s / 92.3 s spread versus unchunked
+baseline 154.7 s / 40.2 s) — chunking's benefit scales with how much a
+barcode's full read set would otherwise cost to wait for, so on a corpus
+small enough that the unchunked wait was already short, chunking's overhead
+(more, smaller tasks) can show up as comparable or slightly worse spread
+without changing the practical recommendation for larger backlogs.
+
 ## Repairs argued from these numbers
 
 - **Task 4 (chunked, round-robin batch mode).** H1 shows batch mode has no
@@ -324,42 +443,52 @@ was not run.
   comparing intake count against classified count, in the spirit of Task 6's
   naming work but for files, not barcodes.
 
-## Still open (2026-09-07)
+## Still open (2026-09-09)
 
+- **Resolved this round: `NANOPLOT`/`FASTQC` running once per chunk.** The
+  2026-09-07 finding (chunking re-ran whole-sample QC visualisation once per
+  chunk, 57-60 tasks instead of 12, starving the classifier) is fixed by
+  nanometanf `8a6286c` (Task 9): both now run once per sample on every
+  chunk's grouped reads, confirmed at 12 tasks each in both re-measured
+  corpora, and Criterion A now passes on the heavy corpus (86.9 s / 42.2 s
+  against targets of <180 s / <90 s). Left open by this fix, not because it
+  is untested but because the underlying number is now favourable rather
+  than a defect: the light corpus's spread (92.3 s) is somewhat higher than
+  the heavy corpus's (42.2 s), read above as scheduling noise across 12
+  samples rather than a mechanism — worth a repeat run or two if it recurs
+  in a future round, to see whether it is noise or a real, smaller effect.
 - **H9** (QC-emptied files dropped silently in real-time mode) remains
-  unaddressed; not scoped to Tasks 4/5/6/7.
+  unaddressed; not scoped to Tasks 4/5/6/7/9.
 - **Stale `batch_N` files.** A repartitioned second batch run (e.g. Continue
   into a populated outdir with a different chunk plan) can leave earlier
   `batch_N`-numbered files behind that no longer correspond to the current
   plan; nothing in the chunking or continue path was observed to clean these
-  up. Not exercised directly in this round — flagged from reading the
-  chunking mechanism against the existing Continue-in-realtime invariant
-  (`docs/audit/realtime-round4-2026-09-02.md`) — and worth a dedicated drill.
+  up. Not exercised directly in this or the prior round — flagged from
+  reading the chunking mechanism against the existing Continue-in-realtime
+  invariant (`docs/audit/realtime-round4-2026-09-02.md`) — and worth a
+  dedicated drill.
 - **The classifier's four-thread floor decides concurrency on small hosts.**
   `max(4, max_cpus / max_classification_forks)` puts a hard floor of 4 CPUs
   per classifier task regardless of how small the machine is; on this 11-CPU
   laptop that caps concurrency at 2 no matter how low
-  `kraken2_task_memory_gb` goes (confirmed again this round: 2 in all four
-  after-runs). A field laptop with 8 CPUs would see concurrency 2 collapse to
-  a de facto ceiling of `floor(8/4) = 2` still, and a 4-CPU field unit would
-  see exactly 1 — the memory fix Task 5 shipped cannot rescue a host this
-  small, and the floor itself becomes the binding constraint there.
+  `kraken2_task_memory_gb` goes (confirmed again this round: 2 in every one
+  of the three after-Task-9 runs, and every one of the four 2026-09-07
+  runs). A field laptop with 8 CPUs would see concurrency 2 collapse to a de
+  facto ceiling of `floor(8/4) = 2` still, and a 4-CPU field unit would see
+  exactly 1 — the memory fix Task 5 shipped cannot rescue a host this small,
+  and the floor itself becomes the binding constraint there.
 - **Per-file task overhead in real time is unchanged and still costly.** Real
   time's 231-240 single-file classifier/QC tasks are the same shape measured
-  in the baseline; this round's concurrency improvement (1 -> 2) helped
-  (spread 265.0 s -> 78.3 s) but did not touch the per-file overhead itself.
-  A later plan may apply Task 4's chunk planner to real time's start-up
-  backlog (grouping the existing pre-Start files into growing chunks the same
-  way, per the original plan's own note), which this round's numbers argue
-  for concretely: real time's remaining 78.3 s spread and 158.7 s
-  all-first-report, on the identical light corpus that chunked batch mode
-  took 440.4 s to clear, show real time's per-file granularity is still
-  cheaper in aggregate than chunked batch's current per-chunk QC overhead —
-  a fix to the QC\_ANALYSIS-per-chunk problem above would very likely invert
-  that comparison again.
-- **`NANOPLOT` running once per chunk (new this round).** Not one of the
-  original four "still open" items, but the clearest actionable finding from
-  this measurement: chunking must not re-run whole-sample QC visualisation
-  once per chunk. Recorded above under Criterion A; repeated here because it
-  is the direct explanation for Criterion A's miss and the most concrete lead
-  for the next round.
+  in the baseline; the 2026-09-07 round's concurrency improvement (1 -> 2)
+  helped (spread 265.0 s -> 78.3 s) but did not touch the per-file overhead
+  itself, and real time was not re-run this round (Task 9 touches only the
+  chunked-batch QC branch). With the per-chunk-QC regression now fixed, the
+  comparison this section previously drew (real time's per-file granularity
+  being cheaper in aggregate than chunked batch's QC overhead) no longer
+  holds in the direction stated: chunked batch mode on the light corpus now
+  reaches all-first-report in 160.6 s, close to real time's own 158.7 s on
+  the identical corpus, rather than the 440.4 s that made real time look
+  clearly cheaper. A dedicated real-time re-measurement is still warranted
+  before concluding which mode wins on this corpus shape, and applying
+  Task 4's chunk planner to real time's start-up backlog remains a candidate
+  for a later plan regardless of that outcome.

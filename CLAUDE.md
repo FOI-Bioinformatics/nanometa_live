@@ -47,37 +47,35 @@ report, cumulative report, `meta.batch_id`), the same tree a real-time run
 writes. `pipeline_info/batch_chunk_plan.json` is the contract the dashboard
 reads (`app/utils/batch_progress.py`) to say which barcodes are preliminary.
 The final cumulative report equals the unchunked result (verified read for
-read with `scripts/ttfr_analyse.py compare` on the 2026-09-06 harness runs and
-reconfirmed on the 2026-09-07 re-measurement, `"equal": true` across all 12
-samples both times; `tests/batch_chunking_structure.nf.test` pins the
-plan-file contract). A classifier task reserves `kraken2_task_memory_gb`
-(GUI-sized: 4 GB when the database is under 60% of RAM and memory mapping is
-on) on its first attempt, so forks run in parallel on laptop RAM; the preload
-and the no-mmap retry keep the full size. Measured 2026-09-06 (baseline) ->
-2026-09-07 (after) on 12 barcodes x 20 files, this machine (11 CPUs, 18 GB):
-light corpus (500 reads/file) all-first-report 154.7 s -> 440.4 s, spread
-40.2 s -> 40.2 s; heavy corpus (4000 reads/file, the MinKNOW-scale proxy)
-all-first-report 208.6 s -> 461.7 s, spread 86.2 s -> 407.4 s -- WORSE on
-both, and acceptance criterion A (heavy corpus, <180 s / <90 s) was NOT met.
-Classifier concurrency rose from 1 to 2 exactly as Task 5's CPU-cap math
-predicts (`floor(11/4)` on this host), confirming that lever; chunk order
-also works at the single-barcode level (one heavy-corpus barcode's first
-chunk reported at 54.3 s). The regression is QC\_ANALYSIS: chunking re-runs
-`NANOPLOT`/`FASTQC`/`CHOPPER` once per CHUNK instead of once per sample, so
-`NANOPLOT` invocations rose 12 -> 57-60 at an unchanged ~14-16 s each, and
-each reserves 4 CPUs (`conf/modules.config`), so the QC backlog now delays
-even a barcode's cheap first-chunk classify task behind unrelated NanoPlot
-tasks queued for the same CPU pool. See
-`docs/audit/time-to-first-result-2026-09-06.md` ("After" section) for the
-full evidence; the fix is not scoped here -- QC\_ANALYSIS needs to run on the
-final accumulated reads per sample, not per chunk, or `NANOPLOT` specifically
-needs to come off the per-chunk critical path. `batch_chunking` reaches the
-pipeline only in batch mode; real-time's per-file chunking is unchanged (each
-arriving file is still its own batch, not grouped into growing chunks -- a
-candidate for a later plan, argued from this round's real-time numbers in the
-audit doc). Do not reintroduce a per-sample `.collect()` before
-the classifier, and do not send `max_concurrent_batches` (advisory only,
-retired).
+read with `scripts/ttfr_analyse.py compare` on the 2026-09-06, 2026-09-07 and
+2026-09-09 harness runs, `"equal": true` across all 12 samples every time;
+`tests/batch_chunking_structure.nf.test` pins the plan-file contract). A
+classifier task reserves `kraken2_task_memory_gb` (GUI-sized: 4 GB when the
+database is under 60% of RAM and memory mapping is on) on its first attempt,
+so forks run in parallel on laptop RAM; the preload and the no-mmap retry keep
+the full size. Measured 2026-09-06 (baseline) -> 2026-09-07 (chunked,
+per-chunk QC) -> 2026-09-09 (chunked, per-sample QC after nanometanf
+`8a6286c`) on 12 barcodes x 20 files, this machine (11 CPUs, 18 GB): light
+corpus (500 reads/file) all-first-report 154.7 s -> 440.4 s -> 160.6 s, spread
+40.2 s -> 40.2 s -> 92.3 s; heavy corpus (4000 reads/file, the MinKNOW-scale
+proxy) all-first-report 208.6 s -> 461.7 s -> 86.9 s, spread 86.2 s ->
+407.4 s -> 42.2 s -- acceptance criterion A (heavy corpus, <180 s / <90 s) is
+now MET. Classifier concurrency holds at 2 exactly as Task 5's CPU-cap math
+predicts (`floor(11/4)` on this host) throughout; chunk order works at the
+single-barcode level in every round (a heavy-corpus barcode's first chunk
+reported at 44.7 s in the 2026-09-09 run). The 2026-09-07 regression was
+QC\_ANALYSIS running `NANOPLOT`/`FASTQC` once per CHUNK instead of once per
+sample (invocations rose 12 -> 57-60 at an unchanged ~14-16 s each, each
+reserving 4 CPUs); nanometanf `8a6286c` fixed it by grouping every chunk's
+reads back to one NanoPlot/FastQC invocation per sample (12 -> 12, confirmed
+in both re-measured corpora) and dropping NanoPlot's CPU reservation to 2. See
+`docs/audit/time-to-first-result-2026-09-06.md` ("After Task 9" section) for
+the full evidence. `batch_chunking` reaches the pipeline only in batch mode;
+real-time's per-file chunking is unchanged (each arriving file is still its
+own batch, not grouped into growing chunks -- a candidate for a later plan,
+argued from this round's real-time numbers in the audit doc). Do not
+reintroduce a per-sample `.collect()` before the classifier, and do not send
+`max_concurrent_batches` (advisory only, retired).
 
 ### Sample Handling
 
