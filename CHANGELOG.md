@@ -4,9 +4,19 @@ All notable changes to Nanometa Live are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.19.0] - 2026-09-09
 
-**Requires nanometanf v1.11.0**
+Every barcode gets a preliminary result before any barcode gets its final
+one. **Requires nanometanf v1.11.0**: this release sends batch-chunking and
+classifier-memory parameters the earlier pipeline does not declare, and Start
+Analysis refuses an older checkout by name.
+
+The 2026-09-06 audit measured how long a backlog of existing reads takes to
+show a result for every barcode, in both processing modes, and found that
+batch mode classified a whole barcode before showing anything and ran one
+classifier task at a time on laptop RAM. The repairs below were measured
+before and after; the full record is in
+`docs/audit/time-to-first-result-2026-09-06.md`.
 
 ### Added
 
