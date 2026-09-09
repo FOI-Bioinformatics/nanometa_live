@@ -338,19 +338,23 @@ CPU pool. Worth noting for scale: the unchunked single-task control itself
 beating even that control) is doing real work, not just beating a slow
 baseline.
 
-**A measurement-noise caveat on the margin above.** The single-task control
-run's own spread moved from 68.2 s (Task 8's original `batch_heavy_single`,
-before it was deleted from disk) to 16.0 s (this round's re-run,
-`batch_heavy_single2`, identical `batch_chunking: false` configuration) — a
-more than 4x swing between two back-to-back sessions on the same machine for
-a nominally deterministic 12-task run. That is measurement uncertainty on
-this host of at least a few tens of seconds on spread, which the "met, with
-room to spare" framing above should be read alongside: the heavy corpus's
-42.2 s measured spread sits well clear of the 90 s ceiling (a margin larger
-than the observed control-run swing), so Criterion A's spread verdict is not
-put in doubt by this noise, but a hypothetical result closer to the ceiling
-would need a second run before trusting the margin. See "Still open" for the
-same point recorded as an open item.
+**A measurement-noise caveat that narrows the margin above.** The
+single-task control run's own spread moved from 68.2 s (Task 8's original
+`batch_heavy_single`, before it was deleted from disk) to 16.0 s (this
+round's re-run, `batch_heavy_single2`, identical `batch_chunking: false`
+configuration) — a swing of 52.2 s between two back-to-back sessions on the
+same machine for a nominally deterministic 12-task run. Set against that:
+the spread criterion's margin is 90 s - 42.2 s = 47.8 s, which is SMALLER
+than the 52.2 s swing observed on the control. A single run therefore cannot
+establish that the spread criterion is met with room to spare — the 42.2 s
+measurement clears 90 s on the day it was taken, but this host's own
+run-to-run noise is large enough that a repeat of the heavy chunked run
+could plausibly land above 90 s. The all-first-report criterion is on firmer
+ground: its margin is 180 s - 86.9 s = 93.1 s, which exceeds the 52.2 s
+swing, so that criterion is not put in doubt by this noise. A repeat of the
+heavy chunked run is needed to bound the spread's true variance before
+trusting Criterion A's spread verdict beyond this single measurement. See
+"Still open" for the same point recorded as an open item.
 
 ### Criterion C, re-measured — MET
 
@@ -519,16 +523,18 @@ general.
   files generally. Worth a repeat run or two on the light corpus to see how
   much of the 130% is the small-population scheduling noise this section
   suspects versus a smaller, real, corpus-size-dependent effect.
-- **Run-to-run scheduling variance on this host is large enough to narrow
-  Criterion A's stated margin.** The single-task control's spread swung more
-  than 4x between two nominally identical, deterministic runs a session
-  apart (68.2 s in Task 8's original `batch_heavy_single`; 16.0 s in this
-  round's `batch_heavy_single2`) — tens of seconds of run-to-run noise on
-  this machine, for a 12-task run with no chunking involved. The heavy
-  corpus's measured 42.2 s spread still clears the 90 s ceiling by a margin
-  larger than that observed swing, so Criterion A's verdict is not in doubt,
-  but a result landing closer to the ceiling in a future round should be
-  re-run before trusting a single measurement's margin.
+- **Run-to-run scheduling variance on this host is large enough that a
+  single run cannot bound the spread criterion's margin.** The single-task
+  control's spread swung by 52.2 s between two nominally identical,
+  deterministic runs a session apart (68.2 s in Task 8's original
+  `batch_heavy_single`; 16.0 s in this round's `batch_heavy_single2`) — tens
+  of seconds of run-to-run noise on this machine, for a 12-task run with no
+  chunking involved. The spread criterion's margin (90 s - 42.2 s = 47.8 s)
+  is SMALLER than that 52.2 s swing, so this single measurement cannot
+  establish that Criterion A's spread verdict has room to spare; a repeat of
+  the heavy chunked run is needed to bound the spread's true variance. The
+  all-first-report criterion's margin (180 s - 86.9 s = 93.1 s) does exceed
+  the observed swing and is not put in doubt by it.
 - **H9** (QC-emptied files dropped silently in real-time mode) remains
   unaddressed; not scoped to Tasks 4/5/6/7/9.
 - **Stale `batch_N` files.** A repartitioned second batch run (e.g. Continue
