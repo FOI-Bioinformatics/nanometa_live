@@ -57,6 +57,23 @@ _FORM_STATES = [State(cid, "value") for cid, _ in CONFIG_FORM_FIELDS]
 _FORM_KWARGS = [kw for _, kw in CONFIG_FORM_FIELDS]
 
 
+def _classification_form_fields(qc_tool, skip_nanoplot, kraken2_incremental,
+                                batch_chunking, enable_krona, enable_nanopore_stats):
+    """The QC-tool and classification switches of the dirty-check form dict.
+
+    Keyed exactly as ``build_config_from_form`` writes them (the same rule as
+    ``_assembly_form_fields`` below).
+    """
+    return {
+        "qc_tool": qc_tool,
+        "skip_nanoplot": skip_nanoplot,
+        "kraken2_enable_incremental": kraken2_incremental,
+        "batch_chunking": batch_chunking,
+        "enable_krona_plots": enable_krona,
+        "enable_nanopore_stats_mqc": enable_nanopore_stats,
+    }
+
+
 def _assembly_form_fields(enable_assembly, assembler, scope, min_depth,
                           batch_interval, allow_low_depth):
     """The assembly half of the dirty-check form dict.
@@ -1835,12 +1852,9 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "sample_handling": sample_handling,
             "sample_name": sample_name if (sample_name or "").strip() else "sample",
             "negative_control_samples": list(negative_controls or []),
-            "qc_tool": qc_tool,
-            "skip_nanoplot": skip_nanoplot,
-            "kraken2_enable_incremental": kraken2_incremental,
-            "batch_chunking": batch_chunking,
-            "enable_krona_plots": enable_krona,
-            "enable_nanopore_stats_mqc": enable_nanopore_stats,
+            **_classification_form_fields(
+                qc_tool, skip_nanoplot, kraken2_incremental, batch_chunking,
+                enable_krona, enable_nanopore_stats),
             "chopper_minlength": chopper_minlength,
             "chopper_quality": chopper_quality,
             "chopper_maxlength": optional_int(chopper_maxlength),

@@ -57,6 +57,32 @@ def _input_layout_note(status: Dict[str, Any]) -> str:
     return f" -- {text}" if text else ""
 
 
+def _running_progress_notes(status: Dict[str, Any], config: Optional[Dict[str, Any]]) -> list:
+    """Header notes for an active run beyond the file count.
+
+    A failed-and-ignored task is otherwise invisible while the run is active
+    (round-4 H20), so its count is named. Chunked batch mode classifies a
+    sample's chunks incrementally (Task 4), so the barcodes complete, in
+    progress and pending are counted, in words that avoid "preliminary",
+    which the verdict clause uses for a different count.
+    """
+    notes = []
+    try:
+        n_failed = int(status.get("processes_failed") or 0)
+    except (TypeError, ValueError):
+        n_failed = 0
+    if n_failed:
+        notes.append(f"{n_failed} task{'s' if n_failed != 1 else ''} failed (skipped)")
+    try:
+        results_dir = resolve_outdir_for_fingerprint(config)
+        summary = batch_progress(results_dir).summary_line() if results_dir else None
+        if summary:
+            notes.append(summary)
+    except Exception:
+        pass
+    return notes
+
+
 def _skipped_tasks_note(status: Dict[str, Any]) -> str:
     """" -- N tasks failed (skipped): labels" for a finished run.
 
@@ -225,28 +251,7 @@ def register_status(app, backend_manager):
             details = [
                 f"Files processed: {files_processed} / {total_files}",
             ]
-            # A failed-and-ignored task is otherwise invisible while the run
-            # is active (round-4 H20): name the count next to the progress.
-            try:
-                n_failed = int(status.get("processes_failed") or 0)
-            except (TypeError, ValueError):
-                n_failed = 0
-            if n_failed:
-                details.append(
-                    f"{n_failed} task{'s' if n_failed != 1 else ''} failed (skipped)"
-                )
-            # Chunked batch mode classifies a sample's chunks incrementally
-            # (Task 4); count how many barcodes are complete, still running
-            # and not started so the operator does not read a partial result
-            # as final. The line avoids the word "preliminary", which the
-            # verdict clause uses for a different count.
-            try:
-                results_dir = resolve_outdir_for_fingerprint(config)
-                summary = batch_progress(results_dir).summary_line() if results_dir else None
-                if summary:
-                    details.append(summary)
-            except Exception:
-                pass
+            details.extend(_running_progress_notes(status, config))
             if status.get("input_layout_mismatch"):
                 details.append(str(status["input_layout_mismatch"]))
 

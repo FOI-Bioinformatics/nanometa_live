@@ -129,6 +129,38 @@ def _freshness_bucket(age_seconds):
     return "stale"
 
 
+def _sample_state_badges(sample, dataless, progress):
+    """The badges that qualify one selector entry: no data, or preliminary.
+
+    "no data" is distinct from the freshness pill's muted "--", which means
+    "age unknown" and is also shown for samples that do have data. The
+    preliminary badge marks a chunked-batch sample whose counts will still
+    grow (Task 4); ``progress`` is the per-tick ``BatchProgress`` or None.
+    """
+    badges = []
+    if sample in dataless:
+        badges.append(
+            dbc.Badge("no data", color="warning", className="ms-2",
+                      title=(f"{sample} produced no output files. It was "
+                             f"listed by the pipeline manifest but nothing "
+                             f"was written -- most often its reads failed "
+                             f"QC. An empty view of it is not a negative "
+                             f"result."))
+        )
+    if progress and sample in progress.preliminary:
+        badges.append(
+            dbc.Badge(
+                f"preliminary {progress.done[sample]} of {progress.planned[sample]}",
+                color="info", className="ms-2",
+                title=(
+                    "More chunks of this barcode are still "
+                    "classifying; the counts will grow."
+                ),
+            )
+        )
+    return badges
+
+
 def _selector_signature(available_samples, freshness, dataless, progress=None):
     """What the selector's options actually depend on.
 
@@ -291,28 +323,7 @@ def register_samples(app, backend_manager):
             parts = [html.Span(sample, className="text-truncate"),
                      freshness_pill(sample, age, class_name="ms-2",
                                     label_override=_freshness_bucket(age))]
-            if sample in dataless:
-                # Distinct from the freshness pill's muted "--", which means
-                # "age unknown" and is also shown for samples that do have data.
-                parts.append(
-                    dbc.Badge("no data", color="warning", className="ms-2",
-                              title=(f"{sample} produced no output files. It was "
-                                     f"listed by the pipeline manifest but nothing "
-                                     f"was written -- most often its reads failed "
-                                     f"QC. An empty view of it is not a negative "
-                                     f"result."))
-                )
-            if progress and sample in progress.preliminary:
-                parts.append(
-                    dbc.Badge(
-                        f"preliminary {progress.done[sample]} of {progress.planned[sample]}",
-                        color="info", className="ms-2",
-                        title=(
-                            "More chunks of this barcode are still "
-                            "classifying; the counts will grow."
-                        ),
-                    )
-                )
+            parts.extend(_sample_state_badges(sample, dataless, progress))
             label = html.Span(
                 parts, className="d-inline-flex align-items-center",
             )
