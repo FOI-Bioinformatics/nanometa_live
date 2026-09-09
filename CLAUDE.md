@@ -64,13 +64,14 @@ now MET. Classifier concurrency holds at 2 exactly as Task 5's CPU-cap math
 predicts (`floor(11/4)` on this host) throughout; chunk order works at the
 single-barcode level in every round (a heavy-corpus barcode's first chunk
 reported at 44.7 s in the 2026-09-09 run). The 2026-09-07 regression was
-QC\_ANALYSIS running `NANOPLOT`/`FASTQC` once per CHUNK instead of once per
+`QC_ANALYSIS` running `NANOPLOT`/`FASTQC` once per CHUNK instead of once per
 sample (invocations rose 12 -> 57-60 at an unchanged ~14-16 s each, each
 reserving 4 CPUs); nanometanf `8a6286c` fixed it by grouping every chunk's
 reads back to one NanoPlot/FastQC invocation per sample (12 -> 12, confirmed
-in both re-measured corpora) and dropping NanoPlot's CPU reservation to 2. See
+in both re-measured corpora) and dropping NanoPlot's CPU reservation from 4
+to 2 (`conf/modules.config`, `withName: 'NANOPLOT'`, `cpus`). See
 `docs/audit/time-to-first-result-2026-09-06.md` ("After Task 9" section) for
-the full evidence. `batch_chunking` reaches the pipeline only in batch mode;
+the harness evidence. `batch_chunking` reaches the pipeline only in batch mode;
 real-time's per-file chunking is unchanged (each arriving file is still its
 own batch, not grouped into growing chunks -- a candidate for a later plan,
 argued from this round's real-time numbers in the audit doc). Do not
