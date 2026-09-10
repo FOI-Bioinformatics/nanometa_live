@@ -22,7 +22,7 @@ python -m venv nanometa_env
 source nanometa_env/bin/activate
 
 # Install
-pip install nanometa-live
+pip install "nanometa-live @ git+https://github.com/FOI-Bioinformatics/nanometa_live@0.19.0"
 ```
 
 ### Install with conda
@@ -30,7 +30,7 @@ pip install nanometa-live
 ```bash
 conda create -n nanometa "python>=3.11"
 conda activate nanometa
-pip install nanometa-live
+pip install "nanometa-live @ git+https://github.com/FOI-Bioinformatics/nanometa_live@0.19.0"
 ```
 
 ### Install from source

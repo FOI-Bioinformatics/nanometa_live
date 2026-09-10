@@ -4,6 +4,15 @@ All notable changes to Nanometa Live are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- The PyPI upload is off by default: the publish workflow builds the
+  distribution on every release and uploads only when the repository
+  variable `PUBLISH_TO_PYPI` is `true`. The user guide installs from the
+  GitHub release tag until the package is on PyPI.
+
 ## [0.19.0] - 2026-09-09
 
 Every barcode gets a preliminary result before any barcode gets its final
