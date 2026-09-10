@@ -206,6 +206,9 @@ tab, run the **Readiness** checklist until everything is green, then click
 3. Hover for help: most elements have a tooltip.
 4. Red rows need immediate attention.
 5. Screenshot important findings for records and reports.
+6. Leave the dashboard on its default address. It has no login; if it must
+   be reached from another computer, ask your IT contact for an
+   authenticating proxy rather than starting it with `--host 0.0.0.0`.
 
 ### Quality
 1. Data quality score above 75: proceed with confidence.
@@ -254,7 +257,6 @@ params). Defaults shown apply when the param is omitted.
 | `kraken2_memory_mapping` | `true` | `true` | `true` | `true` |
 | `kraken2_memory_gb` | `12` | `12-32` (DB-dependent) | `32-90` (DB-dependent) | `32-90` |
 | `max_classification_forks` | `2` | `4-8` | `8-16` | `16-32` |
-| `max_concurrent_batches` | `2` | `4` | `4-8` | `4-8` |
 | `update_interval_seconds` | `10` (default) | `10` | `10` | `10` |
 | `max_cpus` | `4` | `8` | `16` | `32` |
 
@@ -273,24 +275,27 @@ With memory-mapping enabled (default), all parallel Kraken2 forks
 share the OS page cache rather than each loading their own copy --
 so this is per-process headroom, not per-instance RAM.
 
-### `max_classification_forks` and `max_concurrent_batches`
+### `max_classification_forks`
 
-These two together set the total in-flight Kraken2 work:
-
-```
-total_in_flight = N_samples × max_concurrent_batches
-                  capped by max_classification_forks
-```
-
-For 24 barcodes with `max_concurrent_batches = 4` and
-`max_classification_forks = 8` on a 16-core / 64 GB host:
-- total in-flight = min(24 × 4, 8) = 8 concurrent Kraken2 jobs
-- with mmap'd DB shared across 8 forks, ~84 GB total RAM
-  request fits in 64 GB if Linux releases unused page cache
+A classifier task's own CPU request is
+`max(4, max_cpus / max_classification_forks)`, so raising
+`max_classification_forks` only helps once `max_cpus` is large enough that
+the request stays above the 4-CPU floor. Achieved concurrency is then the
+smaller of two ceilings: the CPU one (`host CPUs / cpus-per-task`) and the
+memory one (`available RAM / kraken2_task_memory_gb`, or the full database
+size on a retry). Measured on an 11-CPU / 18 GB laptop with
+`kraken2_task_memory_gb: 4`: concurrency 2, matching `floor(11 / 4)` --
+raising `max_classification_forks` further did not raise it past 2 on that
+host, because the CPU floor was already the binding constraint (see
+`docs/audit/time-to-first-result-2026-09-06.md`, H5). On a small field host
+(4-8 CPUs) the 4-CPU-per-task floor alone limits concurrency to 1-2
+regardless of this setting.
 
 If your host OOMs or the dashboard shows long stalls between
 Kraken2 batches, lower `max_classification_forks` first; raise it
 only when pipeline progress is clearly bottlenecked on Kraken2.
+(`max_concurrent_batches` is not a real tuning knob: it is not read by the
+launcher and the GUI no longer sends it.)
 
 ### When to adjust `update_interval_seconds`
 

@@ -100,6 +100,7 @@ def with_failure_clauses(
     stop_reason: Optional[str] = None,
     failed_tasks: int = 0,
     input_layout_mismatch: Optional[str] = None,
+    batch_progress_clause: Optional[str] = None,
 ) -> VerdictDescriptor:
     """Append run-health clauses to a data-state descriptor's subtitle.
 
@@ -142,6 +143,11 @@ def with_failure_clauses(
         # grouping of what it found, not the grouping the operator declared
         # (round-5 drills, C13).
         clauses.append(input_layout_mismatch)
+    if batch_progress_clause:
+        # A clause, not a state: chunked batch mode (Task 4) classifies a
+        # sample's chunks incrementally, and a detection must still render
+        # ACTION REQUIRED while some barcodes have more chunks to come.
+        clauses.append(batch_progress_clause)
     if not clauses:
         return descriptor
     return replace(

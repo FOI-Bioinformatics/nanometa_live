@@ -52,6 +52,7 @@ CONFIG_FORM_FIELDS = (
     ("qc-tool-input", "qc_tool"),
     ("skip-nanoplot-input", "skip_nanoplot"),
     ("kraken2-incremental-input", "kraken2_incremental"),
+    ("batch-chunking-input", "batch_chunking"),
     ("enable-krona-input", "enable_krona"),
     ("enable-nanopore-stats-input", "enable_nanopore_stats"),
     ("chopper-minlength-input", "chopper_minlength"),

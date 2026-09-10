@@ -120,12 +120,29 @@ which confirms the documented cross-platform restriction rather than testing
 around it. Real x86_64 execution, setuid-mode apptainer, and a field kernel and
 distro are still unknown.
 
+**amd64 execution of a bundled image, verified 2026-09-05 in CI.** The
+bundle-deploy workflow exports a singularity bundle on an amd64 runner,
+imports it on a second and runs the bundled image with `NXF_OFFLINE=true`;
+the Nextflow log shows the local-library hit and no pull, and the process
+reports x86_64. Limits: one stand-in module and one image, not the full
+nanometanf set, and the runner is not air-gapped. The sibling conda-mode
+`import` job in the same workflow run (33947378546) failed on stale
+build-machine paths (`nanometa_home`, `data_dir`, `genome_cache_dir`) in its
+rebased config, so the record above should not be over-read as covering that
+path too -- see the pre-existing defect noted in the Task 2 report.
+
 ### Conda environment relocation across machines
 
 **The known blocker.** Conda environments embed absolute build-machine paths.
 The cross-machine bundle CI job (`.github/workflows/bundle-deploy.yml`)
 deliberately passes `--no-pre-warm`, so it proves the bundle transfers and
-imports, and proves nothing about pre-warmed environments.
+imports, and proves nothing about pre-warmed environments. Its first
+recorded run was 2026-09-05 (it had been gated on pull requests touching
+files that no pull request changed), and that run failed its own
+assertion: the imported config still named the build machine's `data_dir`,
+`genome_cache_dir` and `nanometa_home`. The import now rebases those keys
+onto the field installation's root; the job is green from the fix commit
+onward.
 
 An operator who exports with pre-warmed environments and imports on a field
 machine at a different path is in untested territory. A CI variant that

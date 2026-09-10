@@ -8,10 +8,11 @@ Nanometa Live is a real-time visualisation dashboard for Oxford Nanopore metagen
 
 ### Prerequisites
 
-- Python 3.9 or higher
+- Python 3.11 or higher
 - Conda or Mamba (the canonical and supported pipeline profile)
-- Nextflow 25.10 or newer (for running analysis pipelines)
+- Nextflow 26.04.0 or newer (the version nanometanf floors at)
 - A Kraken2 database
+- The nanometanf release named in the README compatibility table
 
 ### Install with pip
 
@@ -39,6 +40,17 @@ git clone https://github.com/FOI-Bioinformatics/nanometa_live.git
 cd nanometa_live
 pip install -e .
 ```
+
+### Network exposure
+
+The dashboard listens on `127.0.0.1` and is reachable only from the machine
+it runs on. It has no user accounts or authentication. Starting it with
+`--host 0.0.0.0` makes it reachable from the network, and anyone who can
+reach the port can start and stop runs, change the configuration and read
+results; the application prints a warning when a non-loopback host is
+chosen. For a shared laboratory server, place an authenticating reverse
+proxy (for example nginx with client certificates or basic authentication)
+in front of it and keep the application itself on loopback.
 
 ## Quick start
 
@@ -259,6 +271,27 @@ Processes all existing FASTQ files once:
 
 Best for: Completed sequencing runs, re-analysis
 
+#### What you see, and when
+
+A batch run over existing reads splits every sample into growing chunks
+rather than classifying one barcode's full read set before starting the
+next. Every barcode gets a preliminary result once the first, smallest
+chunk of every barcode has classified — by default that is one file per
+barcode. The header counts the barcodes in each state, for example
+`Barcodes: 3 complete, 8 in progress, 1 pending of 12`, and
+`Barcodes: 12 of 12 complete` once the run has finished. A barcode with more
+chunks to come is marked "preliminary" in the sample selector, and the verdict
+subtitle names how many are still classifying. The final result, once every
+chunk of every barcode has classified, is the same as an unchunked run.
+
+Chunking is on by default and is switched off by "Chunked batch
+classification" in the Configuration tab's Analysis Options (config key
+`batch_chunking`). Leave it on for MinKNOW-sized files, roughly 4000 reads
+each. On very small files the extra tasks cost more than the whole-sample
+wait they avoid, so chunking widens the spread between barcodes without
+shortening the wait for the first result. The switch applies to batch mode
+only; a real-time run classifies each arriving file as its own batch.
+
 ### Real-time mode
 
 Continuously monitors for new files:
@@ -269,6 +302,10 @@ Continuously monitors for new files:
 4. Results update as new data arrives
 
 Best for: Active sequencing runs, live monitoring
+
+Pre-existing files are interleaved across barcodes and classified per file,
+so the same "spread the first look across every barcode" behavior applies
+here without a separate setting.
 
 ## Sample handling
 

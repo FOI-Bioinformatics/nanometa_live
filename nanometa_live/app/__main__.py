@@ -46,7 +46,11 @@ def parse_arguments():
     parser.add_argument(
         "--host",
         default="127.0.0.1",
-        help="Host to bind the server to (default: 127.0.0.1, use 0.0.0.0 for network access)",
+        help=(
+            "Host to bind the server to (default: 127.0.0.1). 0.0.0.0 makes "
+            "the dashboard reachable from the network with no authentication; "
+            "a warning is printed when a non-loopback host is chosen."
+        ),
     )
 
     parser.add_argument(
@@ -188,6 +192,15 @@ def _run_server(app, *, host: str, port: int, debug: bool) -> None:
     Other OSErrors propagate unchanged.
     """
     import errno
+    import logging
+    import sys
+
+    from nanometa_live.app.utils.network_posture import exposure_warning
+
+    warning = exposure_warning(host)
+    if warning:
+        logging.warning(warning)
+        print(f"WARNING: {warning}", file=sys.stderr)
     try:
         app.run(host=host, port=port, debug=debug, threaded=True)
     except OSError as e:

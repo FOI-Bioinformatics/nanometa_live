@@ -18,6 +18,7 @@ from nanometa_live.core.utils.sample_detector import get_available_samples, get_
 from nanometa_live.core.utils.loader_utils import check_data_freshness
 from nanometa_live.app.utils.callback_helpers import log_callback_error
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+from nanometa_live.app.utils.batch_progress import batch_progress
 from nanometa_live.app.utils.debounce import (
     should_skip_update, get_trigger_type,
     interval_render_is_redundant, mark_rendered,
@@ -128,18 +129,60 @@ def _freshness_bucket(age_seconds):
     return "stale"
 
 
-def _selector_signature(available_samples, freshness, dataless):
+def _sample_state_badges(sample, dataless, progress):
+    """The badges that qualify one selector entry: no data, or preliminary.
+
+    "no data" is distinct from the freshness pill's muted "--", which means
+    "age unknown" and is also shown for samples that do have data. The
+    preliminary badge marks a chunked-batch sample whose counts will still
+    grow (Task 4); ``progress`` is the per-tick ``BatchProgress`` or None.
+    """
+    badges = []
+    if sample in dataless:
+        badges.append(
+            dbc.Badge("no data", color="warning", className="ms-2",
+                      title=(f"{sample} produced no output files. It was "
+                             f"listed by the pipeline manifest but nothing "
+                             f"was written -- most often its reads failed "
+                             f"QC. An empty view of it is not a negative "
+                             f"result."))
+        )
+    if progress and sample in progress.preliminary:
+        badges.append(
+            dbc.Badge(
+                f"preliminary {progress.done[sample]} of {progress.planned[sample]}",
+                color="info", className="ms-2",
+                title=(
+                    "More chunks of this barcode are still "
+                    "classifying; the counts will grow."
+                ),
+            )
+        )
+    return badges
+
+
+def _selector_signature(available_samples, freshness, dataless, progress=None):
     """What the selector's options actually depend on.
 
     Two renders with the same signature would produce interchangeable
     options, so the callback can short-circuit and let the component settle.
+
+    ``progress`` (a ``BatchProgress`` or None) folds in each sample's
+    done/planned chunk counts. Without this a preliminary sample's badge
+    could advance ("2 of 4" -> "3 of 4") or a sample could complete while
+    its freshness bucket stayed in the same band across polls, and the
+    unchanged signature raised PreventUpdate before the render caught up.
     """
     freshness = freshness or {}
+    done = getattr(progress, "done", None) or {}
+    planned = getattr(progress, "planned", None) or {}
     return tuple(
         (
             sample,
             _freshness_bucket(freshness.get(sample)),
             sample in (dataless or set()),
+            done.get(sample),
+            planned.get(sample),
         )
         for sample in (available_samples or [])
     )
@@ -245,13 +288,25 @@ def register_samples(app, backend_manager):
 
         dataless = _dataless_samples(available_samples, file_mapping, config)
 
+        # Chunked batch mode (Task 4) classifies a sample's chunks
+        # incrementally; a preliminary sample's counts will still grow, so it
+        # is badged distinctly from one whose chunks are all in. Computed
+        # once per callback invocation, not per option, and memoised on
+        # directory mtimes inside batch_progress so the three per-tick callers
+        # share one read (tests/test_tick_call_counts.py budget).
+        try:
+            results_dir = resolve_outdir_for_fingerprint(config)
+            progress = batch_progress(results_dir) if results_dir else None
+        except Exception:
+            progress = None
+
         # Rebuild the options only when they would actually differ. The
         # freshness age ticks every second, so without this the dropdown was
         # rewritten on every poll, leaving the component permanently pending
         # -- and Dash defers every callback keyed on a pending component, so
         # the selected-sample store and the dashboard metric tiles were
         # starved for whole runs (2026-08-19).
-        signature = _selector_signature(available_samples, freshness, dataless)
+        signature = _selector_signature(available_samples, freshness, dataless, progress)
         if signature == _last_selector_signature.get("v"):
             raise PreventUpdate
         _last_selector_signature["v"] = signature
@@ -268,17 +323,7 @@ def register_samples(app, backend_manager):
             parts = [html.Span(sample, className="text-truncate"),
                      freshness_pill(sample, age, class_name="ms-2",
                                     label_override=_freshness_bucket(age))]
-            if sample in dataless:
-                # Distinct from the freshness pill's muted "--", which means
-                # "age unknown" and is also shown for samples that do have data.
-                parts.append(
-                    dbc.Badge("no data", color="warning", className="ms-2",
-                              title=(f"{sample} produced no output files. It was "
-                                     f"listed by the pipeline manifest but nothing "
-                                     f"was written -- most often its reads failed "
-                                     f"QC. An empty view of it is not a negative "
-                                     f"result."))
-                )
+            parts.extend(_sample_state_badges(sample, dataless, progress))
             label = html.Span(
                 parts, className="d-inline-flex align-items-center",
             )

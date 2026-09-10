@@ -38,6 +38,53 @@ Loader package: import directly from the leaf module that owns the symbol
 | Batch | One-time processing of existing FASTQ; samplesheet generated, runs to completion |
 | Real-time | Continuous monitoring via Nextflow `watchPath`; incremental Kraken2, cumulative reports refreshed on interval |
 
+**A backlog is classified first-chunk-first, across all barcodes.** In batch
+mode nanometanf splits each sample into geometrically growing chunks
+(`batch_first_chunk_files`, `batch_chunk_growth`) and orders the chunks by
+index across samples (`lib/BatchChunkPlanner.groovy`), so every barcode has a
+preliminary report after one round; each chunk is a batch downstream (per-batch
+report, cumulative report, `meta.batch_id`), the same tree a real-time run
+writes. `pipeline_info/batch_chunk_plan.json` is the contract the dashboard
+reads (`app/utils/batch_progress.py`) to say which barcodes are preliminary;
+three callbacks ask per tick, so the helper memoises on the plan's and each
+sample's `batch_reports/` directory mtime (`clear_batch_progress_memo`, wired
+into both reset paths). The header counts complete, in-progress and pending
+barcodes and does NOT use the word "preliminary" -- the verdict clause counts
+barcodes not yet complete and the selector badge counts one barcode's chunks,
+so a shared word there put two different numbers on one screen.
+The final cumulative report equals the unchunked result (verified read for
+read with `scripts/ttfr_analyse.py compare` on the 2026-09-06, 2026-09-07 and
+2026-09-09 harness runs, `"equal": true` across all 12 samples every time;
+`tests/batch_chunking_structure.nf.test` pins the plan-file contract). A
+classifier task reserves `kraken2_task_memory_gb` (GUI-sized: 4 GB when the
+database is under 60% of RAM and memory mapping is on) on its first attempt,
+so forks run in parallel on laptop RAM; the preload and the no-mmap retry keep
+the full size. Measured 2026-09-06 (baseline) -> 2026-09-07 (chunked,
+per-chunk QC) -> 2026-09-09 (chunked, per-sample QC after nanometanf
+`8a6286c`) on 12 barcodes x 20 files, this machine (11 CPUs, 18 GB): light
+corpus (500 reads/file) all-first-report 154.7 s -> 440.4 s -> 160.6 s, spread
+40.2 s -> 40.2 s -> 92.3 s; heavy corpus (4000 reads/file, the MinKNOW-scale
+proxy) all-first-report 208.6 s -> 461.7 s -> 86.9 s, spread 86.2 s ->
+407.4 s -> 42.2 s -- acceptance criterion A (heavy corpus, <180 s / <90 s) is
+now MET (synthetic barcodes are identical; the spread measures scheduling
+only). Classifier concurrency holds at 2 exactly as Task 5's CPU-cap math
+predicts (`floor(11/4)` on this host) throughout; chunk order works at the
+single-barcode level in every round (a heavy-corpus barcode's first chunk
+reported at 44.7 s in the 2026-09-09 run). The 2026-09-07 regression was
+`QC_ANALYSIS` running `NANOPLOT`/`FASTQC` once per CHUNK instead of once per
+sample (invocations rose 12 -> 57-60 at an unchanged ~14-16 s each, each
+reserving 4 CPUs); nanometanf `8a6286c` fixed it by grouping every chunk's
+reads back to one NanoPlot/FastQC invocation per sample (12 -> 12, confirmed
+in both re-measured corpora) and dropping NanoPlot's CPU reservation from 4
+to 2 (`conf/modules.config`, `withName: 'NANOPLOT'`, `cpus`). See
+`docs/audit/time-to-first-result-2026-09-06.md` ("After Task 9" section) for
+the harness evidence. `batch_chunking` reaches the pipeline only in batch mode;
+real-time's per-file chunking is unchanged (each arriving file is still its
+own batch, not grouped into growing chunks -- a candidate for a later plan,
+argued from this round's real-time numbers in the audit doc). Do not
+reintroduce a per-sample `.collect()` before the classifier, and do not send
+`max_concurrent_batches` (advisory only, retired).
+
 ### Sample Handling
 
 | Mode | Input Structure |
@@ -1010,7 +1057,7 @@ Three concerns:
    machine has no working Docker" (field machine) — the two need opposite
    remedies and the old single message named the wrong one.
 
-   **An import must not report success over a problem it found.** Three rules,
+   **An import must not report success over a problem it found.** Four rules,
    all added 2026-08-14 after an air-gapped rig run:
    - A supplied `--db` that is not a usable database sets `kraken_db_invalid`
      and warns, naming the missing files. The pre-existing `kraken_db_unset`
@@ -1028,6 +1075,15 @@ Three concerns:
    - Blocker messages state the condition, not the consequence. They opened
      with "Import aborted:", which is false in `verify_bundle` (a dry run) and
      in a forced import that completes — both observed in the rig.
+   - The rebased config names the field machine's root: `data_dir`,
+     `genome_cache_dir` and (when present) `nanometa_home` are set to the
+     import home beside `offline_mode`. `NanometaPaths` prefers the config's
+     `data_dir` over the environment, so without this an imported
+     installation ran against the build machine's root (first run of the
+     cross-machine CI job, 2026-09-05). `results_dir_override` is cleared in
+     the same block: it is in neither `PATH_CONFIG_KEYS` nor the readiness
+     checks, so nothing else would warn about it, and `resolve_run_outdir`
+     returns it verbatim for the launcher to create.
 
    **Note the config-rebase block is skipped entirely when the bundle carries
    no `config.yaml`**, including the `offline_mode` assignment, without
@@ -1163,6 +1219,25 @@ pipelines run normally under 4.0.2.
 
 The 25.10.x watchPath JVM cleanup hang (the historical reason for the
 `NXF_VER=25.04.7` workaround) was resolved upstream in 26.04.0.
+
+**nanometanf floor.** `core/workflow/pipeline_compat.py` owns
+`NANOMETANF_MIN_VERSION` (1.10.0 as of 0.18.0). `NextflowManager.setup`
+refuses a checkout below it by name, the readiness checklist carries a
+"Pipeline Version" row, and the README compatibility matrix names the same
+floor (fence: `tests/test_compatibility_matrix.py`). A `remote:` source runs
+the checkout under the launch's own Nextflow assets root, resolved by
+`nextflow_assets_root(config)`: `NXF_ASSETS`, else `NXF_HOME/assets`, else
+`<results_output_directory>/.nextflow/assets` (what a GUI Start injects as
+`NXF_HOME`, `nextflow_manager.py:876-900`), else the Nextflow default
+`~/.nextflow/assets`. The run command never refreshes the checkout (no
+`-latest`), so the check reads exactly that directory. The `too_old` remedy
+names the home the checkout resolved under when it is not the default
+(`NXF_HOME=<home> nextflow pull foi-bioinformatics/nanometanf -r <branch>`),
+otherwise the plain `nextflow pull ...`. Both `NextflowManager.setup` and
+`ReadinessChecker._check_pipeline_version` pass the loaded config through so
+the check reads the checkout the launch will actually use, not the CLI's
+default home. Bump the floor in the same commit that first sends a
+parameter the older schema lacks.
 
 ### Cross-platform restriction
 
@@ -1856,9 +1931,9 @@ The `nanometa` conda env has Dash but neither `pytest-xdist` nor `pytest-cov`,
 so run the plain suite there with `-o addopts=""` and the coverage gate from
 the `nf-core` env, which has both.
 
-4284 tests as of 2026-08-25 (~128 skipped by default; measured coverage ~76%).
+4650 tests as of 2026-09-05 (120 skipped by default; measured coverage ~77%).
 `pytest.ini` enforces a
-`fail_under = 74` floor on coverage runs only (the default `pytest` dev loop
+`fail_under = 76` floor on coverage runs only (the default `pytest` dev loop
 does not load coverage); the floor ratchets up as coverage rises — keep it ~1
 point below the measured total, never lower it. Also
 `filterwarnings = error::DeprecationWarning:nanometa_live` (our own deprecations
@@ -1913,6 +1988,7 @@ Kraken2 DB: /Users/andreassjodin/Desktop/ONT/demodata_ONT/database/kraken2.gtdb_
 | `docs/api-reference.md` | Parser and loader APIs |
 | `docs/MIGRATION_GUIDE_V2.md` | v1 to v2 migration |
 | `docs/archive/` | Audits, plans, migration notes (not maintained) |
+| `docs/decisions/` | Decision records; fence in tests/test_decision_records.py |
 
 ## Links
 

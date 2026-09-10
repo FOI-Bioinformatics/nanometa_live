@@ -137,6 +137,14 @@ reads that BLAST and minimap2 confirmation already extracts, so with
 confirmation testing off there is nothing to assemble and the Start toast
 says so.
 
+### Batch Mode
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `batch_chunking` | bool | true | Split each sample's existing reads into growing chunks instead of classifying them whole. Every barcode gets a preliminary report after the first chunk of all barcodes classifies, rather than waiting for one barcode's full read set. Set from the Configuration tab ("Chunked batch classification"); it reaches the pipeline in batch mode only. Right for MinKNOW-sized files; on very small files it widens the spread between barcodes without shortening the wait. |
+| `batch_first_chunk_files` | int | 1 | Files in the first chunk of each sample. Smaller means an earlier but noisier preliminary result. |
+| `batch_chunk_growth` | float | 2.0 | Multiplier applied to the chunk size after each round (1st chunk N files, 2nd `N * growth`, and so on) until the sample is exhausted. |
+
 ### Real-time Mode
 
 | Parameter | Type | Default | Description |
@@ -151,8 +159,8 @@ says so.
 |-----------|------|---------|-------------|
 | `kraken2_memory_gb` | int | 12 | RAM headroom (GB) per Kraken2 fork. Set to on-disk DB size + 4 GB. |
 | `kraken2_memory_mapping` | bool | true | Share the Kraken2 DB across forks via OS page cache. |
+| `kraken2_task_memory_gb` | int | null | Per-task memory reservation for a Kraken2 fork under memory mapping, letting several forks run at once instead of serialising. `null` lets the GUI size it from the measured database: a floor of 4 GB when the database fits comfortably in the host's page cache, otherwise the full `kraken2_memory_gb` reservation (which serialises forks) is kept as the safer default. |
 | `max_classification_forks` | int | 4 | Max parallel Kraken2 jobs. Raise for high-RAM hosts; lower if OOM. |
-| `max_concurrent_batches` | int | 4 | Per-sample backpressure cap. Total in-flight = N_samples * this. |
 | `report_write_interval` | int | 5 | Write progressive cumulative report every N batches (0 = every batch). |
 
 See the [Operator Guide section "Tuning for High-Throughput Runs"](OPERATOR_GUIDE.md#-tuning-for-high-throughput-runs-12-24-barcodes)

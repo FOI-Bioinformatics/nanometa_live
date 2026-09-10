@@ -786,6 +786,53 @@ def _resolve_kraken2_memory_gb(config: Dict[str, Any]) -> Optional[int]:
     return max(12, math.ceil(gib) + 4)
 
 
+def _host_memory_bytes() -> Optional[int]:
+    try:
+        import psutil
+        return int(psutil.virtual_memory().total)
+    except Exception:  # psutil is a hard dependency, but never let sizing crash a launch
+        return None
+
+
+def _hash_bytes(db_path: str) -> Optional[int]:
+    try:
+        return (Path(db_path) / "hash.k2d").stat().st_size
+    except OSError:
+        return None
+
+
+KRAKEN2_TASK_MEMORY_FLOOR_GB = 4
+_PAGE_CACHE_SHARE = 0.6
+
+
+def _resolve_kraken2_task_memory_gb(config: Dict[str, Any]) -> Optional[int]:
+    """Per-task reservation under memory mapping, or None to keep the full size.
+
+    With memory mapping the database lives in the shared page cache and a
+    classifier task's own memory is small, so reserving the database size per
+    task makes the local executor run one task at a time on laptop RAM. The
+    floor is sent only when the database fits comfortably in the cache
+    (under _PAGE_CACHE_SHARE of RAM): forks over a database larger than that
+    thrash the cache, and the full reservation, which serialises them, is the
+    safer default. An explicit kraken2_task_memory_gb wins.
+    """
+    explicit = config.get("kraken2_task_memory_gb")
+    if explicit:
+        try:
+            return int(explicit)
+        except (TypeError, ValueError):
+            logging.warning("Ignoring non-numeric kraken2_task_memory_gb: %r", explicit)
+    if not _resolve_kraken2_memory_mapping(config):
+        return None
+    hash_bytes = _hash_bytes(config.get("kraken_db") or "")
+    host = _host_memory_bytes()
+    if hash_bytes is None or not host:
+        return None
+    if hash_bytes > _PAGE_CACHE_SHARE * host:
+        return None
+    return KRAKEN2_TASK_MEMORY_FLOOR_GB
+
+
 def _validation_params(config: Dict[str, Any], run_validation_enabled: bool,
                        blast_validation_enabled: bool) -> Dict[str, Any]:
     """Validation-subworkflow parameters, with launch-time coercions.
@@ -1305,6 +1352,12 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     if kraken2_memory_gb is not None:
         params["kraken2_memory_gb"] = kraken2_memory_gb
 
+    # Per-task memory reservation under memory mapping, sized from the same
+    # measured database. See _resolve_kraken2_task_memory_gb.
+    task_memory_gb = _resolve_kraken2_task_memory_gb(config)
+    if task_memory_gb is not None:
+        params["kraken2_task_memory_gb"] = task_memory_gb
+
     # The Configuration tab's CPU Cores field: nanometanf's per-task ceiling.
     # Omitted when empty so the pipeline default (16) or platform profile
     # applies (audit round 5, A9).
@@ -1364,6 +1417,18 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
         _apply_realtime_input_params(
             params, config, nanopore_dir, sample_handling, sample_name
         )
+
+    # Chunked batch mode: the first chunk of every sample is classified before
+    # the second of any, so every barcode has a preliminary report after one
+    # round. It runs on the incremental path, so that switch is forced on with
+    # it. Real-time mode chunks per file already and ignores the parameter.
+    if processing_mode != "realtime":
+        chunking = bool(config.get("batch_chunking", True))
+        params["batch_chunking"] = chunking
+        params["batch_first_chunk_files"] = max(1, int(config.get("batch_first_chunk_files") or 1))
+        params["batch_chunk_growth"] = max(1.0, float(config.get("batch_chunk_growth") or 2.0))
+        if chunking:
+            params["kraken2_enable_incremental"] = True
 
     # Add email if provided
     if "email" in config and config["email"]:

@@ -4,6 +4,65 @@ All notable changes to Nanometa Live are documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.0] - 2026-09-09
+
+Every barcode gets a preliminary result before any barcode gets its final
+one. **Requires nanometanf v1.11.0**: this release sends batch-chunking and
+classifier-memory parameters the earlier pipeline does not declare, and Start
+Analysis refuses an older checkout by name.
+
+The 2026-09-06 audit measured how long a backlog of existing reads takes to
+show a result for every barcode, in both processing modes, and found that
+batch mode classified a whole barcode before showing anything and ran one
+classifier task at a time on laptop RAM. The repairs below were measured
+before and after; the full record is in
+`docs/audit/time-to-first-result-2026-09-06.md`.
+
+### Added
+
+- Batch mode splits each sample into growing chunks instead of classifying a
+  whole sample at once, so every barcode gets a preliminary result after the
+  first, smallest chunk of every barcode has classified, rather than waiting
+  for one barcode's full read set. The per-sample QC reports (NanoPlot,
+  FastQC) run once per sample on every chunk's reads, not once per chunk
+  (nanometanf `8a6286c`; an earlier build ran them per chunk and the QC
+  backlog dominated the critical path). Measured on 12 barcodes x 20 files
+  (11-CPU, 18 GB machine): the heavy corpus (4000 reads/file) reaches every
+  barcode's first report in 86.9 s (spread 42.2 s), against an unchunked
+  baseline of 208.6 s (spread 86.2 s) and an interim per-chunk-QC build that
+  regressed to 461.7 s (spread 407.4 s); see
+  `docs/audit/time-to-first-result-2026-09-06.md` for the full measurement.
+- Kraken2 classification runs several samples in parallel where the database
+  fits comfortably in the host's page cache, instead of one task at a time.
+- The dashboard header, sample selector and verdict subtitle distinguish a
+  preliminary batch-mode result from a complete one. The header counts
+  complete, in-progress and pending barcodes; "preliminary" is reserved for
+  the per-barcode badge and the verdict clause, which count different things.
+- A "Chunked batch classification" switch in the Configuration tab, since
+  chunking is a win on MinKNOW-sized files and a loss on very small ones.
+  Disabled in real-time mode, where the setting does not reach the pipeline.
+- Start Analysis refuses a nanometanf checkout below the required version
+  (1.11.0 for this release) by name, and the readiness checklist reports the
+  pipeline version.
+- A README compatibility table pairing each GUI release with its nanometanf
+  and Nextflow floor, fenced by a test against the code's own floor.
+- Releases build and upload to PyPI through trusted publishing.
+- `docs/decisions/`: ten decision records, and `CONTRIBUTING.md`.
+- The server prints what is exposed when bound to a non-loopback host.
+
+### Changed
+
+- CI executes an imported singularity bundle on an amd64 runner, so amd64
+  execution of a bundled image is observed rather than assumed.
+- The user guide's prerequisites name Python 3.11 and Nextflow 26.04.0.
+
+### Fixed
+
+- A bundle import rebases `data_dir`, `genome_cache_dir` and `nanometa_home`
+  onto the field installation, so the imported configuration no longer
+  points at the build machine's directories, and clears `results_dir_override`,
+  which named a build-machine folder the launcher would have recreated.
+
 ## [0.18.0] - 2026-09-04
 
 Assembly stops being a step that can run, succeed and publish a number that is

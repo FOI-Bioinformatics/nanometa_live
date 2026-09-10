@@ -261,6 +261,7 @@ def build_config_from_form(
     qc_tool,
     skip_nanoplot,
     kraken2_incremental,
+    batch_chunking,
     enable_krona,
     enable_nanopore_stats,
     chopper_minlength,
@@ -456,6 +457,9 @@ def build_config_from_form(
         config["skip_nanoplot"] = bool(skip_nanoplot)
     if kraken2_incremental is not None:
         config["kraken2_enable_incremental"] = bool(kraken2_incremental)
+    # Batch mode only; create_nextflow_params drops it in real-time mode.
+    if batch_chunking is not None:
+        config["batch_chunking"] = bool(batch_chunking)
     if enable_krona is not None:
         config["enable_krona_plots"] = bool(enable_krona)
     if enable_nanopore_stats is not None:
@@ -563,7 +567,8 @@ def config_form_dirty(snapshot, *, form):
 
     bool_keys = {
         "kraken_memory_mapping", "blast_validation",
-        "skip_nanoplot", "kraken2_enable_incremental", "enable_krona_plots",
+        "skip_nanoplot", "kraken2_enable_incremental", "batch_chunking",
+        "enable_krona_plots",
         "enable_nanopore_stats_mqc", "enable_assembly",
         "assembly_allow_low_depth",
     }

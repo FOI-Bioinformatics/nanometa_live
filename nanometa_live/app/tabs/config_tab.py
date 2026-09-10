@@ -57,6 +57,23 @@ _FORM_STATES = [State(cid, "value") for cid, _ in CONFIG_FORM_FIELDS]
 _FORM_KWARGS = [kw for _, kw in CONFIG_FORM_FIELDS]
 
 
+def _classification_form_fields(qc_tool, skip_nanoplot, kraken2_incremental,
+                                batch_chunking, enable_krona, enable_nanopore_stats):
+    """The QC-tool and classification switches of the dirty-check form dict.
+
+    Keyed exactly as ``build_config_from_form`` writes them (the same rule as
+    ``_assembly_form_fields`` below).
+    """
+    return {
+        "qc_tool": qc_tool,
+        "skip_nanoplot": skip_nanoplot,
+        "kraken2_enable_incremental": kraken2_incremental,
+        "batch_chunking": batch_chunking,
+        "enable_krona_plots": enable_krona,
+        "enable_nanopore_stats_mqc": enable_nanopore_stats,
+    }
+
+
 def _assembly_form_fields(enable_assembly, assembler, scope, min_depth,
                           batch_interval, allow_low_depth):
     """The assembly half of the dirty-check form dict.
@@ -718,21 +735,44 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("kraken2-incremental-input", "value", allow_duplicate=True),
             Output("kraken2-incremental-input", "disabled"),
             Output("kraken2-incremental-help", "children"),
+            Output("batch-chunking-input", "disabled"),
+            Output("batch-chunking-help", "children"),
         ],
         Input("processing-mode-input", "value"),
         State("kraken2-incremental-input", "value"),
         prevent_initial_call="initial_duplicate",
     )
     def sync_incremental_switch_to_mode(processing_mode, current):
-        """Force the batching switch on, and disabled, in real-time mode."""
+        """Force the batching switch on, and disabled, in real-time mode.
+
+        Chunked batch classification is disabled there too, for the opposite
+        reason: ``create_nextflow_params`` does not send ``batch_chunking``
+        outside batch mode, so the switch would decide nothing. A real-time
+        run already spreads the first look across every barcode, one arriving
+        file per batch.
+        """
         batch_help = ("Classifies each batch as it arrives and keeps a "
                       "running total. Optional in batch mode.")
+        chunking_help = (
+            "Classifies each barcode in growing chunks, the first chunk of "
+            "every barcode first, so every barcode shows a preliminary result "
+            "early. Right for MinKNOW-sized files (about 4000 reads each); on "
+            "very small files it widens the spread between barcodes without "
+            "shortening the wait. Applies to batch mode only."
+        )
         if processing_mode == "realtime":
             return True, True, (
                 "Always on in real-time mode: the live cumulative counts are "
                 "built from the per-batch results. Optional in batch mode."
+            ), True, (
+                "Batch mode only. A real-time run classifies each arriving "
+                "file as its own batch, so the first look is already spread "
+                "across every barcode."
             )
-        return (current if current is not None else True), False, batch_help
+        return (
+            (current if current is not None else True), False, batch_help,
+            False, chunking_help,
+        )
 
     # Initialize form from config - ONLY on explicit refresh trigger
     # Changed: app-config is now a State, not an Input, to prevent form resets
@@ -766,6 +806,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Output("qc-tool-input", "value"),
             Output("skip-nanoplot-input", "value"),
             Output("kraken2-incremental-input", "value"),
+            Output("batch-chunking-input", "value"),
             Output("enable-krona-input", "value"),
             Output("enable-nanopore-stats-input", "value"),
             # Read filtering and validation overrides
@@ -804,9 +845,10 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         # operator's in-progress changes survive a tab switch.
         config = {**(config or {}), **(draft or {})}
         if not config:
-            # One value per declared Output: the 41 registry widgets plus
-            # config-form-initialized. A literal 41 here raised in Dash when
-            # app-config and the draft were both empty (audit round 5, A1).
+            # One value per declared Output: every registry widget plus
+            # config-form-initialized. A literal count here raised in Dash
+            # when app-config and the draft were both empty (audit round 5,
+            # A1), and went stale again as fields were added.
             return [no_update] * (len(CONFIG_FORM_FIELDS) + 1)
 
         # Fallbacks come from the one place the defaults are written, so a
@@ -912,6 +954,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             qc_tool = "chopper"
         skip_nanoplot = bool(config.get("skip_nanoplot", False))
         kraken2_incremental = bool(config.get("kraken2_enable_incremental", True))
+        batch_chunking = bool(config.get("batch_chunking", defaults["batch_chunking"]))
         enable_krona = bool(config.get("enable_krona_plots", False))
         enable_nanopore_stats = bool(config.get("enable_nanopore_stats_mqc", False))
 
@@ -985,6 +1028,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             qc_tool,
             skip_nanoplot,
             kraken2_incremental,
+            batch_chunking,
             enable_krona,
             enable_nanopore_stats,
             chopper_minlength,
@@ -1714,6 +1758,7 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             Input("qc-tool-input", "value"),
             Input("skip-nanoplot-input", "value"),
             Input("kraken2-incremental-input", "value"),
+            Input("batch-chunking-input", "value"),
             Input("enable-krona-input", "value"),
             Input("enable-nanopore-stats-input", "value"),
             # Read filtering and validation overrides
@@ -1756,7 +1801,8 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
         min_reads_per_level, memory_mapping, blast_validation, validation_method,
         e_value_cutoff, minimap2_preset, minimap2_min_mapq,
         genome_cache_dir, cores, gui_port,
-        qc_tool, skip_nanoplot, kraken2_incremental, enable_krona, enable_nanopore_stats,
+        qc_tool, skip_nanoplot, kraken2_incremental, batch_chunking,
+        enable_krona, enable_nanopore_stats,
         chopper_minlength, chopper_quality, chopper_maxlength, filtlong_minlength,
         validation_identity, kraken2_confidence, kraken2_hitgroups,
         pipeline_profile, pipeline_source_type, pipeline_branch, pipeline_local_path,
@@ -1806,11 +1852,9 @@ def register_config_callbacks(app: Dash, backend_manager: BackendManager):
             "sample_handling": sample_handling,
             "sample_name": sample_name if (sample_name or "").strip() else "sample",
             "negative_control_samples": list(negative_controls or []),
-            "qc_tool": qc_tool,
-            "skip_nanoplot": skip_nanoplot,
-            "kraken2_enable_incremental": kraken2_incremental,
-            "enable_krona_plots": enable_krona,
-            "enable_nanopore_stats_mqc": enable_nanopore_stats,
+            **_classification_form_fields(
+                qc_tool, skip_nanoplot, kraken2_incremental, batch_chunking,
+                enable_krona, enable_nanopore_stats),
             "chopper_minlength": chopper_minlength,
             "chopper_quality": chopper_quality,
             "chopper_maxlength": optional_int(chopper_maxlength),

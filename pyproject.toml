@@ -33,6 +33,7 @@ dev = [
     "pytest-xdist>=3.5.0",
     "pytest-cov>=4.1.0",
     "filelock>=3.10.0",
+    "build>=1.2.0",
 ]
 
 [project.scripts]

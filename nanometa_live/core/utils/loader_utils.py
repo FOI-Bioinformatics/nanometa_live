@@ -289,6 +289,13 @@ def clear_all_loader_caches():
 
     staleness.clear()
     clear_seqkit_batch_cache()
+    # The batch-progress memo is keyed on the chunk plan and the per-batch
+    # report directories of the run that wrote them; a new run into the same
+    # output directory replaces both. Imported here (app from core) because
+    # the memo lives beside its only consumers, the three per-tick callbacks.
+    from nanometa_live.app.utils.batch_progress import clear_batch_progress_memo
+
+    clear_batch_progress_memo()
     # Parser singletons carry per-run result caches; a run switch must not
     # let the previous run's validation answer the new one's first tick.
     reset_validation_parsers()

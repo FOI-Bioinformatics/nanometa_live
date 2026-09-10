@@ -89,6 +89,7 @@ from nanometa_live.app.tabs.dashboard_helpers import (
     build_report_payload,
 )
 from nanometa_live.app.utils.outdir_resolution import resolve_outdir_for_fingerprint
+from nanometa_live.app.utils.batch_progress import batch_progress
 from nanometa_live.core.utils.staleness import stale_sample_count
 from nanometa_live.app.utils.organisms_memo import get_per_sample_organisms_cached
 from nanometa_live.app.app import background_callback_manager
@@ -101,6 +102,29 @@ from nanometa_live.app.app import background_callback_manager
 _VERDICT_LAST_RUN_STATE: dict = {}
 
 logger = logging.getLogger(__name__)
+
+
+def _batch_progress_verdict_clause(results_dir: Optional[str]) -> Optional[str]:
+    """The verdict subtitle's own words for chunked batch progress, or None.
+
+    A clause, not a state: a detection still renders ACTION REQUIRED while
+    some barcodes have more chunks to come. Wrapped so a transient read
+    never breaks the safety-critical banner (matches the header's guard).
+    """
+    if not results_dir:
+        return None
+    try:
+        p = batch_progress(results_dir)
+        if p.preliminary or p.pending:
+            return (
+                f"preliminary: {len(p.preliminary) + len(p.pending)} of "
+                f"{len(p.planned)} barcodes still classifying"
+            )
+    except Exception:
+        pass
+    return None
+
+
 def register_dashboard_callbacks(app: Dash):
     """
     Register callbacks for the dashboard tab.
@@ -420,6 +444,7 @@ def register_dashboard_callbacks(app: Dash):
             # What arrived versus what was declared (round-5 drills, C13):
             # the verdict's attribution names the pipeline's grouping.
             input_layout_mismatch=(status or {}).get("input_layout_mismatch"),
+            batch_progress_clause=_batch_progress_verdict_clause(main_dir),
         )
 
         # Per-sample attribution for the ACTION REQUIRED subhead (closes
