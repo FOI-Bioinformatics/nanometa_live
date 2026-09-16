@@ -116,9 +116,13 @@ def _batch_progress_verdict_clause(results_dir: Optional[str]) -> Optional[str]:
     try:
         p = batch_progress(results_dir)
         if p.preliminary or p.pending:
+            n = len(p.preliminary) + len(p.pending)
+            if p.ended_early:
+                # The run is over; nothing is classifying any more. The
+                # stopped/error clause beside this one says why.
+                return f"{n} of {len(p.planned)} barcodes not fully classified"
             return (
-                f"preliminary: {len(p.preliminary) + len(p.pending)} of "
-                f"{len(p.planned)} barcodes still classifying"
+                f"preliminary: {n} of {len(p.planned)} barcodes still classifying"
             )
     except Exception:
         pass
