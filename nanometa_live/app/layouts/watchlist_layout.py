@@ -532,6 +532,13 @@ def _create_collapsible_watchlist_files() -> dbc.Accordion:
                     # (main process) applies the session side effects.
                     dcc.Store(id="watchlist-import-request", data=None),
                     dcc.Store(id="watchlist-import-result", data=None),
+                    # Same split for API validation: request_validation
+                    # (main process) admits only a genuine click, so the
+                    # background worker -- whose running= clause opens the
+                    # progress modal the moment it is dispatched -- never
+                    # spawns for the component-add fire that a freshly
+                    # rendered table sends its ALL-pattern row buttons.
+                    dcc.Store(id="watchlist-validate-request", data=None),
                     # Help text for custom watchlists
                     html.Details([
                         html.Summary(

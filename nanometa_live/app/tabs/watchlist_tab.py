@@ -1124,14 +1124,46 @@ def register_watchlist_callbacks(app: Dash) -> None:
     # ---------------------------------------------------------------------
 
     @app.callback(
-        Output("watchlist-validation-results", "data"),
+        Output("watchlist-validate-request", "data"),
         [
             Input("watchlist-validate-all-btn", "n_clicks"),
             Input({"type": "watchlist-row-validate", "index": ALL}, "n_clicks"),
         ],
+        prevent_initial_call=True,
+    )
+    def request_validation(validate_all: int, validate_row_clicks: List[int]):
+        """Main-process gate in front of the background validation.
+
+        The per-row ``watchlist-row-validate`` buttons are pattern-matching
+        inputs (index=ALL); rendering the table ADDS them, and Dash fires
+        their callbacks on that addition even with prevent_initial_call.
+        When the background worker took the buttons as its own Inputs, its
+        ``running=`` clause opened the "Validating Entries" modal the moment
+        the worker was dispatched, and the modal stayed up for the seconds the
+        DiskcacheManager spawn took before the body's own guard raised
+        PreventUpdate -- on every page load, since the table renders at
+        start. A real click carries a positive n_clicks as the triggered
+        value; a component-add render carries None (or 0). Only a genuine
+        click writes the request the worker fires from.
+        """
+        if not ctx.triggered_id:
+            raise PreventUpdate
+        triggered_value = ctx.triggered[0].get("value") if ctx.triggered else None
+        if not triggered_value:
+            raise PreventUpdate
+        if (
+            isinstance(ctx.triggered_id, dict)
+            and ctx.triggered_id.get("type") == "watchlist-row-validate"
+        ):
+            return {"scope": "row", "taxid": ctx.triggered_id.get("index"),
+                    "requested_at": datetime.now().isoformat()}
+        return {"scope": "all", "requested_at": datetime.now().isoformat()}
+
+    @app.callback(
+        Output("watchlist-validation-results", "data"),
+        Input("watchlist-validate-request", "data"),
         [
             State("watchlist-api-options", "value"),
-            State({"type": "watchlist-row-validate", "index": ALL}, "id"),
             State("app-config", "data"),
         ],
         background=True,
@@ -1149,10 +1181,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
     )
     def validate_entries(
         set_progress,
-        validate_all: int,
-        validate_row_clicks: List[int],
+        request: Optional[Dict],
         api_options: List[str],
-        row_ids: List[Dict],
         config: Optional[Dict],
     ):
         """Validate watchlist entries against NCBI/GTDB in a background worker.
@@ -1165,24 +1195,13 @@ def register_watchlist_callbacks(app: Dash) -> None:
         store, and apply_background_validation_results (main process) copies
         them onto the singleton the table reads. set_progress drives the
         modal progress bar; the modal open/close and button-disable are
-        handled by the running= clause.
+        handled by the running= clause. Fires only from the request Store that
+        request_validation writes for a genuine click (see there for why the
+        buttons are not this callback's Inputs).
         """
-        if not ctx.triggered_id:
+        if not request or not isinstance(request, dict):
             raise PreventUpdate
 
-        # Guard against a spurious trigger. The per-row ``watchlist-row-validate``
-        # buttons are pattern-matching inputs (index=ALL); selecting a watchlist
-        # re-renders the table, ADDING those buttons, which fires this callback
-        # even with prevent_initial_call=True -- and ctx.triggered_id points at a
-        # freshly-added (never-clicked) button, so the guard above passed and one
-        # entry validated, surfacing a bogus "Validating 1/1". A real click
-        # carries a positive n_clicks as the triggered value; a component-add
-        # render carries None (or 0). Bail unless it was a genuine click.
-        triggered_value = ctx.triggered[0].get("value") if ctx.triggered else None
-        if not triggered_value:
-            raise PreventUpdate
-
-        trigger = str(ctx.triggered_id)
         use_ncbi = "ncbi" in (api_options or [])
         use_gtdb = "gtdb" in (api_options or [])
         offline_mode = bool((config or {}).get("offline_mode", False))
@@ -1206,7 +1225,7 @@ def register_watchlist_callbacks(app: Dash) -> None:
         if not manager._loaded:
             manager.load_config(config or {})
 
-        if "validate-all" in trigger:
+        if request.get("scope") == "all":
             entries = manager.get_entries_with_toggle_state()
             # manager_key, not the dict taxid: a fork pair shares the NCBI
             # taxid, so validating by "taxid" hit one entry twice and the
@@ -1215,11 +1234,8 @@ def register_watchlist_callbacks(app: Dash) -> None:
             taxids_to_validate = [
                 e.get("manager_key") or e.get("taxid") for e in entries
             ]
-        elif (
-            isinstance(ctx.triggered_id, dict)
-            and ctx.triggered_id.get("type") == "watchlist-row-validate"
-        ):
-            taxid = ctx.triggered_id.get("index")
+        elif request.get("scope") == "row":
+            taxid = request.get("taxid")
             taxids_to_validate = [taxid] if taxid else []
         else:
             taxids_to_validate = []

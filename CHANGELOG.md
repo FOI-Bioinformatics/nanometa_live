@@ -6,6 +6,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A finished batch run is no longer described as "still classifying". A
+  chunk whose reads the quality filter removes entirely never reaches the
+  classifier and gets no per-batch report, so the chunk plan was never
+  matched on disk and the verdict subtitle read "preliminary: 1 of 5
+  barcodes still classifying" under a COMPLETE badge, permanently. The
+  progress helper now reads the run's final status: a completed run counts
+  every planned barcode as complete, and a stopped or errored run says "not
+  fully classified" instead.
+- The "Validating Entries" modal no longer flashes on every page load. The
+  background validation worker took the per-row Validate buttons as its own
+  Inputs; rendering the table adds those buttons, which fires the callback,
+  and the worker's running clause opened the modal for the seconds the
+  worker process took to start before the body's guard could decline. A
+  main-process gate now admits only a genuine click and writes a request
+  Store the worker fires from.
+
 ### Changed
 
 - The PyPI upload is off by default: the publish workflow builds the

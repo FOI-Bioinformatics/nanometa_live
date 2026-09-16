@@ -34,12 +34,12 @@ def validate_fn():
     return get_callback_fn(app, "watchlist-validation-results.data")
 
 
-def _call(fn, api_options, config, triggered_id="watchlist-validate-all-btn"):
-    # Background callback signature: (set_progress, validate_all,
-    # validate_row_clicks, api_options, row_ids, config).
+def _call(fn, api_options, config, request=None):
+    # Background callback signature: (set_progress, request, api_options,
+    # config). The request Store is what request_validation writes for a
+    # genuine click; the worker no longer reads ctx.
     set_progress = MagicMock()
-    with patch.object(wt, "ctx", MagicMock(triggered_id=triggered_id)):
-        return fn(set_progress, 1, [], api_options, [], config)
+    return fn(set_progress, request or {"scope": "all"}, api_options, config)
 
 
 def _with_nomenclature(nomenclature):
@@ -135,39 +135,82 @@ class TestApiSelectionHonoursTheOperator:
         assert kwargs["use_gtdb"] is True
 
 
+@pytest.fixture
+def request_fn():
+    app = Dash(__name__, suppress_callback_exceptions=True)
+    register_watchlist_callbacks(app)
+    return get_callback_fn(app, "watchlist-validate-request.data")
+
+
 class TestGuards:
-    def test_no_trigger_prevents_update(self, validate_fn):
+    """The click guard lives in the main-process gate, not the worker.
+
+    When the worker took the buttons as its own Inputs, its running= clause
+    opened the "Validating Entries" modal the moment it was dispatched, so
+    the component-add fire of a freshly rendered table showed the modal for
+    the seconds the DiskcacheManager spawn took -- on every page load
+    (observed on the 2026-09-16 demo rehearsal). The gate raises before any
+    spawn; the worker fires only from the request Store.
+    """
+
+    def test_no_trigger_prevents_update(self, request_fn):
         with patch.object(wt, "ctx", MagicMock(triggered_id=None)):
             with pytest.raises(PreventUpdate):
-                validate_fn(MagicMock(), 1, [], ["ncbi"], [], {})
+                request_fn(1, [])
 
-    def test_spurious_row_button_render_prevents_update(self, validate_fn):
+    def test_spurious_row_button_render_prevents_update(self, request_fn):
         # Operator feedback #6: selecting a watchlist re-renders the table,
         # ADDING the per-row validate buttons. That fires this pattern-matching
         # callback with a freshly-added (never-clicked) button whose triggered
-        # value is None -> it must NOT kick off a bogus "Validating 1/1".
+        # value is None -> it must NOT write a request (no worker, no modal).
         spurious = MagicMock(
             triggered_id={"type": "watchlist-row-validate", "index": 263},
             triggered=[{"prop_id": "{...}.n_clicks", "value": None}],
         )
         with patch.object(wt, "ctx", spurious):
             with pytest.raises(PreventUpdate):
-                validate_fn(MagicMock(), None, [None], ["ncbi"],
-                            [{"type": "watchlist-row-validate", "index": 263}], {})
+                request_fn(None, [None])
 
-    def test_real_row_click_proceeds(self, validate_fn):
+    def test_real_row_click_writes_a_row_request(self, request_fn):
         # A genuine click carries a positive n_clicks as the triggered value.
-        manager = MagicMock()
-        manager.bulk_validate_entries.return_value = {"validated": 1, "failed": 0}
-        manager._entries = {}
         real = MagicMock(
             triggered_id={"type": "watchlist-row-validate", "index": 263},
             triggered=[{"prop_id": "{...}.n_clicks", "value": 1}],
         )
-        with patch.object(wt, "ctx", real), \
-                patch.object(wt, "get_watchlist_manager", return_value=manager):
-            validate_fn(MagicMock(), None, [1], ["ncbi"], [], {"kraken_taxonomy": "ncbi"})
-        assert manager.bulk_validate_entries.called
+        with patch.object(wt, "ctx", real):
+            req = request_fn(None, [1])
+        assert req["scope"] == "row" and req["taxid"] == 263
+
+    def test_validate_all_click_writes_an_all_request(self, request_fn):
+        real = MagicMock(
+            triggered_id="watchlist-validate-all-btn",
+            triggered=[{"prop_id": "watchlist-validate-all-btn.n_clicks", "value": 2}],
+        )
+        with patch.object(wt, "ctx", real):
+            assert request_fn(2, [])["scope"] == "all"
+
+    def test_worker_validates_the_requested_row(self, validate_fn):
+        manager = MagicMock()
+        manager.bulk_validate_entries.return_value = {"validated": 1, "failed": 0}
+        manager._entries = {}
+        with patch.object(wt, "get_watchlist_manager", return_value=manager):
+            _call(validate_fn, ["ncbi"], {"kraken_taxonomy": "ncbi"},
+                  request={"scope": "row", "taxid": 263})
+        assert manager.bulk_validate_entries.call_args.kwargs["taxids"] == [263]
+
+    @pytest.mark.parametrize("payload", [None, {}])
+    def test_worker_ignores_an_empty_request(self, validate_fn, payload):
+        with pytest.raises(PreventUpdate):
+            validate_fn(MagicMock(), payload, ["ncbi"], {})
+
+    def test_worker_takes_no_button_input(self):
+        """The fence: the background callback's only Input is the request Store."""
+        app = Dash(__name__, suppress_callback_exceptions=True)
+        register_watchlist_callbacks(app)
+        spec = next(v for k, v in app.callback_map.items()
+                    if k.startswith("watchlist-validation-results.data"))
+        inputs = [i["id"] for i in spec["inputs"]]
+        assert inputs == ["watchlist-validate-request"]
 
     def test_offline_mode_passed_through(self, validate_fn):
         manager = MagicMock()
