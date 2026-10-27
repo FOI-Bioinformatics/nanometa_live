@@ -1216,28 +1216,34 @@ parses cleanly under the strict v2 grammar (default in 26+) — no
 `NXF_SYNTAX_PARSER` opt-in needed. Verification is in
 `docs/audit/realtime-2026-05-09.md` sections 13 and 14.
 
-One upstream wrinkle, **status unresolved as of 2026-10-27**:
-`nf-core/tools 4.0.2 pipelines lint` crashes with `LiveError` from
-`rocrate.parse_manifest_contributors`. nanometanf's lint job pinned
-`nf-core==3.5.2` for that reason and now installs `nf-core>=4.2.1`
-instead (`.github/workflows/linting.yml`), so its next CI run is the
-first real test of whether 4.2.1 clears the crash.
+One upstream wrinkle, **settled on 2026-10-27**:
+`nf-core/tools 4.0.2 pipelines lint` crashed with `LiveError` from
+`rocrate.parse_manifest_contributors`, which is why nanometanf's lint
+job was pinned to `nf-core==3.5.2`. It now installs `nf-core>=4.2.1`
+(`.github/workflows/linting.yml`), and 4.2.1 does clear the crash:
+lint ran to completion on a GitHub runner and passes. Confirming it
+needed a runner, because `nf-core pipelines lint` fetches
+`https://nf-co.re/pipelines.json` and resolves the nf-schema plugin
+through `https://registry.nextflow.io`, and where the environment's
+network policy denies those hosts the traceback is a proxy 403 well
+before any lint rule runs.
 
-Treat that as untested rather than fixed. An attempt to confirm it from
-a cloud session could not reach the question: `nf-core pipelines lint`
-fetches `https://nf-co.re/pipelines.json` and resolves the nf-schema
-plugin through `https://registry.nextflow.io`, and where the
-environment's network policy denies those hosts the traceback is a
-proxy 403 well before any lint rule runs. That held under both
-Python 3.13 and 3.15, so it is the network and not the Python version.
-If the lint job comes back red in `rocrate.py`, the bug is still
-present and the remedy is to pin the last known-good version, not to
-disable the job.
+Two things that move came out of the same run. 4.2.1 shells out to
+`nextflow config -o json`, which Nextflow 26.04.0 does not accept
+(`Cannot invoke method endsWith() on null object`), so the lint job's
+own `NXF_VER` pin had to go — it runs the current release, and the
+26.04.0 floor is asserted by nanometanf's manifest rather than by that
+job. And 4.2.1 brought five findings that 3.5.2 did not apply, among
+them a real one: its container-config generator writes a conda-lock
+file to `conda =` where 3.5.2 wrote `container =`. The regenerated
+`conf/containers_conda_lock_files_*.config` carry the corrected
+directive; nothing in that repository includes either file, so no run
+was affected.
 
-Either way this is unrelated to the runtime path — pipelines run
-normally under 4.0.2 and 4.2.1. `nf_core_version` in nanometanf's
-`.nf-core.yml` stays at 3.5.2 on purpose: it records the template
-version that pipeline was last synced to, not which tool to run.
+None of this touches the runtime path — pipelines run normally under
+4.0.2 and 4.2.1. `nf_core_version` in nanometanf's `.nf-core.yml`
+stays at 3.5.2 on purpose: it records the template version that
+pipeline was last synced to, not which tool to run.
 
 The 25.10.x watchPath JVM cleanup hang (the historical reason for the
 `NXF_VER=25.04.7` workaround) was resolved upstream in 26.04.0.
