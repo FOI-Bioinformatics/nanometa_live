@@ -1206,16 +1206,38 @@ Three concerns:
 
 `nanometanf` floors at `nextflowVersion = '>=26.04.0'` (manifest in
 `nanometanf/nextflow.config`). The matching `nf-core` conda env ships
-Nextflow 26.04.0 / nf-core/tools 4.0.2 / nf-test 0.9.5. The pipeline
+Nextflow 26.04.0 / nf-core/tools 4.0.2 / nf-test 0.9.5. All three are
+on conda-forge plus bioconda, so an environment without the shipped
+env can reproduce the toolchain with
+`micromamba create -c conda-forge -c bioconda nextflow=26.04.0 nf-test=0.9.5 nf-core`
+(verified 2026-10-27; `nextflow`, `nf-test` and `nf-core` all resolve
+from those two channels). The pipeline
 parses cleanly under the strict v2 grammar (default in 26+) — no
 `NXF_SYNTAX_PARSER` opt-in needed. Verification is in
 `docs/audit/realtime-2026-05-09.md` sections 13 and 14.
 
-One known upstream wrinkle: **`nf-core/tools 4.0.2 pipelines lint`
-crashes** with `LiveError` from `rocrate.parse_manifest_contributors`.
-Pin `nf-core==3.5.2` for local lint runs until the rich progress-bar
-nesting is fixed upstream. This is unrelated to the runtime path —
-pipelines run normally under 4.0.2.
+One upstream wrinkle, **status unresolved as of 2026-10-27**:
+`nf-core/tools 4.0.2 pipelines lint` crashes with `LiveError` from
+`rocrate.parse_manifest_contributors`. nanometanf's lint job pinned
+`nf-core==3.5.2` for that reason and now installs `nf-core>=4.2.1`
+instead (`.github/workflows/linting.yml`), so its next CI run is the
+first real test of whether 4.2.1 clears the crash.
+
+Treat that as untested rather than fixed. An attempt to confirm it from
+a cloud session could not reach the question: `nf-core pipelines lint`
+fetches `https://nf-co.re/pipelines.json` and resolves the nf-schema
+plugin through `https://registry.nextflow.io`, and where the
+environment's network policy denies those hosts the traceback is a
+proxy 403 well before any lint rule runs. That held under both
+Python 3.13 and 3.15, so it is the network and not the Python version.
+If the lint job comes back red in `rocrate.py`, the bug is still
+present and the remedy is to pin the last known-good version, not to
+disable the job.
+
+Either way this is unrelated to the runtime path — pipelines run
+normally under 4.0.2 and 4.2.1. `nf_core_version` in nanometanf's
+`.nf-core.yml` stays at 3.5.2 on purpose: it records the template
+version that pipeline was last synced to, not which tool to run.
 
 The 25.10.x watchPath JVM cleanup hang (the historical reason for the
 `NXF_VER=25.04.7` workaround) was resolved upstream in 26.04.0.
