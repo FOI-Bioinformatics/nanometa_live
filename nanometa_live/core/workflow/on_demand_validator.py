@@ -360,11 +360,17 @@ class OnDemandValidator:
                 pipeline_source = config.get("pipeline_local_path", "")
             else:
                 branch = config.get("pipeline_branch", "master")
-                pipeline_source = f"FOI-Bioinformatics/nanometanf -r {branch}"
+                pipeline_source = f"remote:{branch}"
 
         if not pipeline_source:
             logger.warning("No pipeline source configured for nanometanf delegation")
             return None
+
+        # The same translation the main launch uses: "remote:dev" is a
+        # config value, not a project name, and placed verbatim in argv it
+        # failed every on-demand validation on a default install.
+        from nanometa_live.core.workflow.nextflow_manager import parse_pipeline_source
+        pipeline_project, pipeline_revision = parse_pipeline_source(pipeline_source)
 
         # Validation reads the ORIGINAL FASTQ files; the results directory is
         # not a substitute. The command below used to fall back to it when
@@ -437,8 +443,10 @@ class OnDemandValidator:
         launch_dir, work_dir = launch_context
 
         outdir = self.results_dir
-        cmd = [
-            "nextflow", "run", pipeline_source,
+        cmd = ["nextflow", "run", pipeline_project]
+        if pipeline_revision:
+            cmd.extend(["-r", pipeline_revision])
+        cmd += [
             "-resume",
             "-work-dir", str(work_dir),
             "--validation_only",

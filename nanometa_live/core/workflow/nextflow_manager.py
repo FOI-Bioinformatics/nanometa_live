@@ -37,6 +37,52 @@ def _mtime_or_zero(path: str) -> float:
         return 0.0
 
 
+def parse_pipeline_source(
+    source: str, default_repo: str = "foi-bioinformatics/nanometanf",
+) -> Tuple[str, Optional[str]]:
+    """Translate a ``pipeline_source`` config value into what ``nextflow run``
+    takes: ``(project, revision)``.
+
+    ``remote:<branch>`` and the bare ``master`` / ``dev`` forms name the
+    upstream repository plus a ``-r`` revision; ``local:<path>`` and bare
+    paths are the project with no revision. Every launcher must go through
+    this: the on-demand validator placed the config value in argv verbatim,
+    so a default install ran ``nextflow run remote:dev``, which is not a
+    project name, and on-demand validation failed on every default install
+    (field audit 2026-10-28, H4).
+    """
+    source = (source or "").strip()
+
+    if source.startswith("remote:"):
+        # Remote repository with branch specification
+        branch = source.split(":", 1)[1] if ":" in source else "master"
+        return default_repo, branch or "master"
+
+    if source.startswith("local:"):
+        # Local filesystem path with explicit prefix - strip the prefix
+        local_path = source.split(":", 1)[1]
+        if not os.path.isdir(local_path):
+            logging.warning(
+                f"Local pipeline path '{local_path}' not found. "
+                f"Attempting to use anyway."
+            )
+        return local_path, None
+
+    if os.path.isdir(source):
+        # Local filesystem path (no prefix)
+        return source, None
+
+    if source in ("master", "dev"):
+        return default_repo, source
+
+    # Assume it's a local path (may not exist yet)
+    logging.warning(
+        f"Pipeline source '{source}' not found as directory. "
+        f"Treating as local path."
+    )
+    return source, None
+
+
 class NextflowManager:
     """Manages Nextflow pipeline execution and monitoring for nanometanf."""
 
@@ -325,39 +371,7 @@ class NextflowManager:
             - pipeline_path: GitHub repo name or local filesystem path
             - revision: Git branch/tag (e.g., 'master', 'dev') or None for local
         """
-        source = self.pipeline_source
-
-        if source.startswith("remote:"):
-            # Remote repository with branch specification
-            branch = source.split(":", 1)[1] if ":" in source else "master"
-            return self.DEFAULT_REMOTE_REPO, branch
-
-        elif source.startswith("local:"):
-            # Local filesystem path with explicit prefix - strip the prefix
-            local_path = source.split(":", 1)[1]
-            if os.path.isdir(local_path):
-                return local_path, None
-            else:
-                logging.warning(
-                    f"Local pipeline path '{local_path}' not found. "
-                    f"Attempting to use anyway."
-                )
-                return local_path, None
-
-        elif os.path.isdir(source):
-            # Local filesystem path (no prefix)
-            return source, None
-
-        elif source in ("master", "dev"):
-            return self.DEFAULT_REMOTE_REPO, source
-
-        else:
-            # Assume it's a local path (may not exist yet)
-            logging.warning(
-                f"Pipeline source '{source}' not found as directory. "
-                f"Treating as local path."
-            )
-            return source, None
+        return parse_pipeline_source(self.pipeline_source, self.DEFAULT_REMOTE_REPO)
 
     def set_pipeline_source(self, source: str) -> None:
         """

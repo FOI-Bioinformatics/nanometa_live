@@ -8,6 +8,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- On-demand validation launches on a default install. The launcher placed
+  the configured `pipeline_source` in the command verbatim, so the default
+  `remote:dev` became `nextflow run remote:dev`, not a project name, and
+  every on-demand validation ended with "did not return a result". The
+  launch now goes through the same translation as Start Analysis
+  (`parse_pipeline_source`: repository plus `-r` revision, or a local
+  checkout); the test asserts the command line.
 - Start Analysis now refuses a run that fails a CRITICAL readiness check,
   and names the rows. The checklist looked like a gate and was not one: the
   header button's disabled attribute was the only barrier, the Preparation
