@@ -161,6 +161,7 @@ says so.
 | `kraken2_memory_mapping` | bool | true | Share the Kraken2 DB across forks via OS page cache. |
 | `kraken2_task_memory_gb` | int | null | Per-task memory reservation for a Kraken2 fork under memory mapping, letting several forks run at once instead of serialising. `null` lets the GUI size it from the measured database: a floor of 4 GB when the database fits comfortably in the host's page cache, otherwise the full `kraken2_memory_gb` reservation (which serialises forks) is kept as the safer default. |
 | `max_classification_forks` | int | 4 | Max parallel Kraken2 jobs. Raise for high-RAM hosts; lower if OOM. |
+| `max_memory` | int or string | derived | Per-task memory ceiling sent to the pipeline. Left unset, the launch sends this machine's total memory minus 2 GB (floor 4 GB), so a Kraken2 request sized from a database larger than the machine is clamped rather than aborting the run. An integer is GB; a Nextflow memory string such as `48.GB` travels verbatim. |
 | `report_write_interval` | int | 5 | Write progressive cumulative report every N batches (0 = every batch). |
 
 See the [Operator Guide section "Tuning for High-Throughput Runs"](OPERATOR_GUIDE.md#-tuning-for-high-throughput-runs-12-24-barcodes)

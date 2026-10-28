@@ -88,3 +88,41 @@ class TestTaskMemory:
         with patch.object(pm, "_host_memory_bytes", return_value=18 * 1024 ** 3):
             params = pm.create_nextflow_params(_config(tmp_path))
         assert params["kraken2_task_memory_gb"] == 4
+
+
+class TestMaxMemory:
+    """The launch sends the host's memory ceiling (field audit 2026-10-28, H1).
+
+    nanometanf raises its resourceLimits ceiling to the Kraken2 request, so a
+    request sized from a database larger than the laptop rose above RAM and
+    the local executor aborted the run. A host-sized max_memory makes the
+    pipeline clamp instead.
+    """
+
+    def test_derived_from_host_memory_with_headroom(self, tmp_path):
+        with patch.object(pm, "_host_memory_bytes", return_value=16 * 1024 ** 3):
+            assert pm._resolve_max_memory_gb(_config(tmp_path)) == 14
+
+    def test_floor_on_a_tiny_host(self, tmp_path):
+        with patch.object(pm, "_host_memory_bytes", return_value=5 * 1024 ** 3):
+            assert pm._resolve_max_memory_gb(_config(tmp_path)) == pm.MAX_MEMORY_FLOOR_GB
+
+    def test_unknown_host_memory_sends_nothing(self, tmp_path):
+        with patch.object(pm, "_host_memory_bytes", return_value=None):
+            params = pm.create_nextflow_params(_config(tmp_path))
+        assert "max_memory" not in params
+
+    def test_explicit_integer_wins(self, tmp_path):
+        with patch.object(pm, "_host_memory_bytes", return_value=16 * 1024 ** 3):
+            params = pm.create_nextflow_params(_config(tmp_path, max_memory=24))
+        assert params["max_memory"] == "24.GB"
+
+    def test_explicit_memory_string_travels_verbatim(self, tmp_path):
+        with patch.object(pm, "_host_memory_bytes", return_value=16 * 1024 ** 3):
+            params = pm.create_nextflow_params(_config(tmp_path, max_memory="48.GB"))
+        assert params["max_memory"] == "48.GB"
+
+    def test_sent_as_a_nextflow_memory_string(self, tmp_path):
+        with patch.object(pm, "_host_memory_bytes", return_value=18 * 1024 ** 3):
+            params = pm.create_nextflow_params(_config(tmp_path))
+        assert params["max_memory"] == "16.GB"

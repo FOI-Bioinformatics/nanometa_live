@@ -8,6 +8,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A Kraken2 database larger than the laptop no longer aborts the run at its
+  first classifier task. The launch sized the request from `hash.k2d` and
+  nothing compared it to the machine; nanometanf raised its memory ceiling
+  to the request, and Nextflow's local executor refuses a request above
+  physical memory with a message the header did not recognise. The launch
+  now sends this machine's memory ceiling (`max_memory`, total minus 2 GB),
+  which nanometanf clamps to; the readiness checklist gained a "Database
+  Memory" row that is CRITICAL when the database cannot fit in memory and
+  WARNING when it fits only through the page cache; and the header names
+  the executor's refusal when it does happen.
 - A pre-warmed conda bundle no longer arrives with every byte-compiled
   Python module corrupted. Import relocates the recorded build prefix with
   a NUL-padded rewrite meant for C string tables, and a `.pyc` is marshal

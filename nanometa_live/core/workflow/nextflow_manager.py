@@ -1339,6 +1339,13 @@ class NextflowManager:
                 (r"singularity.*not found", "Singularity not found"),
                 (r"Cannot pull container", "Failed to pull container image"),
                 (r"Unable to pull", "Failed to pull container image"),
+                # The local executor refuses a task whose memory request is
+                # above physical RAM and aborts the run; a Kraken2 request
+                # sized from a database larger than the laptop produced
+                # exactly this, and the header showed the last log line
+                # instead (field audit 2026-10-28, H1).
+                (r"exceeds available memory", "Task needs more memory than this machine has"),
+                (r"exceeds available CPUs", "Task needs more CPUs than this machine has"),
                 # Process errors
                 (r"Error executing process", "Process execution failed"),
                 (r"Command exit status", "Command failed"),

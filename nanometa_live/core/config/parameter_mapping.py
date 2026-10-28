@@ -756,6 +756,12 @@ def _resolve_kraken2_memory_mapping(config: Dict[str, Any]) -> bool:
     return True
 
 
+# Headroom above hash.k2d in the Kraken2 memory request ("DB size + 4 GB",
+# nanometanf's own rule of thumb). The readiness checker uses the same
+# figure for the no-mmap case, where this is the private allocation.
+KRAKEN2_REQUEST_HEADROOM_GB = 4
+
+
 def _resolve_kraken2_memory_gb(config: Dict[str, Any]) -> Optional[int]:
     """Size the Kraken2 memory request from the actual database.
 
@@ -783,7 +789,7 @@ def _resolve_kraken2_memory_gb(config: Dict[str, Any]) -> Optional[int]:
     except OSError:
         return None
     gib = hash_bytes / (1024 ** 3)
-    return max(12, math.ceil(gib) + 4)
+    return max(12, math.ceil(gib) + KRAKEN2_REQUEST_HEADROOM_GB)
 
 
 def _host_memory_bytes() -> Optional[int]:
@@ -803,6 +809,44 @@ def _hash_bytes(db_path: str) -> Optional[int]:
 
 KRAKEN2_TASK_MEMORY_FLOOR_GB = 4
 _PAGE_CACHE_SHARE = 0.6
+# What the pipeline may request for one task on this machine: total RAM
+# less what the OS, the Nextflow JVM and the dashboard need. Below the
+# floor the headroom is not taken -- a 6 GB machine gets 4 GB, not 3.
+HOST_MEMORY_HEADROOM_GB = 2
+MAX_MEMORY_FLOOR_GB = 4
+
+
+def _resolve_max_memory_gb(config: Dict[str, Any]) -> Optional[int]:
+    """The per-task memory ceiling for this host, or None to leave it to
+    the pipeline.
+
+    nanometanf caps every request at ``resourceLimits.memory``, which its
+    base config raises to the Kraken2 request so a PlusPFP operator's
+    explicit size is honoured -- and which therefore also rises above the
+    laptop's RAM when the GUI sizes that request from a database larger
+    than the machine. Nextflow's local executor refuses a task whose
+    request exceeds physical memory and aborts the run with "Process
+    requirement exceeds available memory", a message the dashboard's log
+    scanner did not recognise (field audit 2026-10-28, H1). Sending the
+    host's own ceiling makes the pipeline clamp to it instead: with memory
+    mapping the classifier then runs from the page cache, and the no-mmap
+    retry -- which doubles its request -- is clamped rather than aborted.
+    An explicit ``max_memory`` in the config wins (an integer is GB, a
+    Nextflow memory string such as ``'24.GB'`` travels verbatim).
+    """
+    explicit = config.get("max_memory")
+    if explicit not in (None, ""):
+        try:
+            return int(explicit)
+        except (TypeError, ValueError):
+            if isinstance(explicit, str) and explicit.strip():
+                return explicit.strip()  # type: ignore[return-value]
+            logging.warning("Ignoring non-numeric max_memory: %r", explicit)
+    host = _host_memory_bytes()
+    if not host:
+        return None
+    total_gb = host / (1024 ** 3)
+    return max(MAX_MEMORY_FLOOR_GB, math.floor(total_gb) - HOST_MEMORY_HEADROOM_GB)
 
 
 def _resolve_kraken2_task_memory_gb(config: Dict[str, Any]) -> Optional[int]:
@@ -1364,6 +1408,15 @@ def create_nextflow_params(config: Dict[str, Any]) -> Dict[str, Any]:
     max_cpus = config.get("max_cpus")
     if max_cpus not in (None, ""):
         params["max_cpus"] = int(max_cpus)
+
+    # The host's own memory ceiling, so a Kraken2 request sized from a
+    # database larger than the laptop is clamped by the pipeline instead
+    # of aborting the run. See _resolve_max_memory_gb.
+    max_memory = _resolve_max_memory_gb(config)
+    if max_memory is not None:
+        params["max_memory"] = (
+            max_memory if isinstance(max_memory, str) else f"{int(max_memory)}.GB"
+        )
 
     # Add validation species if configured (from Watchlist or legacy config)
     if has_species and validation_taxids:

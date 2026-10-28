@@ -476,6 +476,27 @@ The readiness checklist warns when `kraken_db` sits on a removable/network
 volume (mmap random access over USB is pathological; the content-derived
 `db_hash` makes a local copy free of re-preparation).
 
+**The request is compared to the machine, and the machine's ceiling travels
+with it** (field audit 2026-10-28, H1). nanometanf raises its
+`resourceLimits.memory` to the Kraken2 request so an explicit PlusPFP size is
+honoured, which also raised it above a laptop's RAM whenever the GUI sized
+the request from a database larger than the machine; Nextflow's local
+executor refuses a request above physical memory and aborts the run with
+"Process requirement exceeds available memory", which the header's log
+scanner did not recognise. Three guards: `_resolve_max_memory_gb` sends
+`--max_memory` as total RAM minus `HOST_MEMORY_HEADROOM_GB` (explicit config
+value wins), nanometanf clamps both its base ceiling and the classifier's
+no-mmap retry (`full * attempt`) to that param, and the readiness row
+"Database Memory" (`_check_kraken_db_memory`) is CRITICAL when `hash.k2d`
+cannot fit in RAM at all (or memory mapping is off and the private load
+cannot), WARNING above `KRAKEN_DB_MEMORY_WARN_SHARE` of RAM (fits only
+through the page cache; the retry will not). `KRAKEN2_REQUEST_HEADROOM_GB`
+(4) is the one definition of the "+4 GB" both sites use. nanometanf's `field`
+profile is deliberately NOT selected by the GUI: its `params` block forces
+`realtime_mode = true` and `skip_nanoplot`, and profile params outrank
+nothing the GUI omits, so a batch run would have been hijacked; the GUI sends
+the laptop budget itself instead.
+
 ### Parameter mapping (non-obvious renames)
 
 `core/config/parameter_mapping.py` translates config keys to Nextflow params:
